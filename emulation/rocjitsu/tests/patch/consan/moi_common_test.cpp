@@ -3,6 +3,7 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_cfg.h"
+#include "rocjitsu/code/patch/consan/consan_moi_access_apply.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -18,6 +19,36 @@
 
 namespace rocjitsu {
 namespace {
+
+TEST(ConSanMoi, AppendedBodyVgprBankTransitionsConsumeTargetCapabilities) {
+  using namespace consan_moi_impl;
+  EXPECT_TRUE(moi_appended_body_vgpr_bank_mode_is_valid(ROCJITSU_CODE_ARCH_CDNA5, 4u));
+  EXPECT_FALSE(moi_appended_body_vgpr_bank_mode_is_valid(ROCJITSU_CODE_ARCH_CDNA4, 4u));
+  EXPECT_EQ(moi_appended_body_vgpr_bank_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5,
+                                                              std::nullopt, false, false),
+            0u);
+  EXPECT_EQ(
+      moi_appended_body_vgpr_bank_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5, 4u, false, false),
+      2u);
+  EXPECT_EQ(
+      moi_appended_body_vgpr_bank_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5, 4u, false, true),
+      4u);
+  EXPECT_EQ(
+      moi_appended_body_vgpr_bank_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5, 4u, true, false),
+      4u);
+  EXPECT_EQ(
+      moi_appended_body_vgpr_bank_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5, 4u, true, true),
+      6u);
+  EXPECT_EQ(
+      moi_appended_body_vgpr_bank_transition_word_count(ROCJITSU_CODE_ARCH_CDNA4, 4u, true, true),
+      0u);
+
+  EXPECT_TRUE(moi_embedded_guest_vgpr_bank_plan_is_valid(false, false, false, 1u));
+  EXPECT_TRUE(moi_embedded_guest_vgpr_bank_plan_is_valid(true, true, true, 0u));
+  EXPECT_FALSE(moi_embedded_guest_vgpr_bank_plan_is_valid(true, false, true, 0u));
+  EXPECT_FALSE(moi_embedded_guest_vgpr_bank_plan_is_valid(true, true, false, 0u));
+  EXPECT_FALSE(moi_embedded_guest_vgpr_bank_plan_is_valid(true, true, true, 1u));
+}
 
 TEST(ConSanMoi, ResidentWaveOwnerTargetOperationLowersEverySupportedProfile) {
   constexpr uint16_t destination_sgpr = 20u;

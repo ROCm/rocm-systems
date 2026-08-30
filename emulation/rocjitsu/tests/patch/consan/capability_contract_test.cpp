@@ -4,6 +4,7 @@
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 #include <gtest/gtest.h>
@@ -619,6 +620,7 @@ TEST(ConSanCapabilityContract, KernelTargetProfileValidatesWaveSelectionAndAlloc
 }
 
 TEST(ConSanCapabilityContract, ReservedSgprOverlapUsesHalfOpenRanges) {
+  using namespace consan_moi_impl;
   const ConSanTargetProfile *gfx1250 = consan_target_profile(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(gfx1250, nullptr);
   ASSERT_EQ(gfx1250->reserved_ordinary_sgpr_base, 102u);
@@ -635,11 +637,22 @@ TEST(ConSanCapabilityContract, ReservedSgprOverlapUsesHalfOpenRanges) {
   EXPECT_FALSE(consan_profile_reserved_sgpr_range_overlaps(*gfx1250, 106u, 1u));
   EXPECT_FALSE(consan_profile_reserved_sgpr_range_overlaps(
       *gfx1250, std::numeric_limits<uint16_t>::max(), std::numeric_limits<uint16_t>::max()));
+  EXPECT_TRUE(
+      persistent_sgpr_range_overlaps_reserved_ordinary_range(102u, 2u, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_TRUE(
+      persistent_sgpr_range_overlaps_reserved_ordinary_range(104u, 2u, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_FALSE(
+      persistent_sgpr_range_overlaps_reserved_ordinary_range(106u, 2u, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_EQ(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5), 106u);
 
   const ConSanTargetProfile *gfx950 = consan_target_profile(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(gfx950, nullptr);
   EXPECT_FALSE(consan_profile_reserved_sgpr_range_overlaps(*gfx950, 0u, 106u));
   EXPECT_FALSE(consan_profile_reserved_sgpr_range_overlaps(*gfx950, 102u, 4u));
+  EXPECT_FALSE(
+      persistent_sgpr_range_overlaps_reserved_ordinary_range(102u, 2u, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA4), 102u);
+  EXPECT_EQ(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA3), 102u);
 }
 
 TEST(ConSanCapabilityContract, PrivateSizeNormalizationCoversGranularityLimitAndOverflow) {

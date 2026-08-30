@@ -1921,7 +1921,7 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
   }
 
   if (order_plan != nullptr) {
-    const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+    const uint32_t nop = build_s_nop(0, consan_arch_for_target(code_object.target_id()));
     for (uint32_t offset = 0; offset < target->cache->size; offset += sizeof(uint32_t))
       std::memcpy(candidate.data() + target->cache->file_offset + offset, &nop, sizeof(nop));
     patches.push_back(make_info(ConSanPatchKind::InlineOrdinaryOrderRewrite,

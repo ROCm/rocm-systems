@@ -370,26 +370,6 @@ moi_embedded_guest_vgpr_bank_plan_is_valid(bool wraps_embedded_guest, bool selec
          (selects_low_vgpr_bank && has_guest_instruction && trailing_guest_word_count == 0u);
 }
 
-static_assert(moi_appended_body_vgpr_bank_mode_is_valid(ROCJITSU_CODE_ARCH_CDNA5, uint16_t{4u}));
-static_assert(!moi_appended_body_vgpr_bank_mode_is_valid(ROCJITSU_CODE_ARCH_CDNA4, uint16_t{4u}));
-static_assert(moi_appended_body_vgpr_bank_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5,
-                                                                std::nullopt, false, false) == 0u);
-static_assert(moi_appended_body_vgpr_bank_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5,
-                                                                uint16_t{4u}, false, false) == 2u);
-static_assert(moi_appended_body_vgpr_bank_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5,
-                                                                uint16_t{4u}, false, true) == 4u);
-static_assert(moi_appended_body_vgpr_bank_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5,
-                                                                uint16_t{4u}, true, false) == 4u);
-static_assert(moi_appended_body_vgpr_bank_transition_word_count(ROCJITSU_CODE_ARCH_CDNA5,
-                                                                uint16_t{4u}, true, true) == 6u);
-static_assert(moi_appended_body_vgpr_bank_transition_word_count(ROCJITSU_CODE_ARCH_CDNA4,
-                                                                uint16_t{4u}, true, true) == 0u);
-static_assert(moi_embedded_guest_vgpr_bank_plan_is_valid(false, false, false, 1u));
-static_assert(moi_embedded_guest_vgpr_bank_plan_is_valid(true, true, true, 0u));
-static_assert(!moi_embedded_guest_vgpr_bank_plan_is_valid(true, false, true, 0u));
-static_assert(!moi_embedded_guest_vgpr_bank_plan_is_valid(true, true, false, 0u));
-static_assert(!moi_embedded_guest_vgpr_bank_plan_is_valid(true, true, true, 1u));
-
 struct MoiAppendedBodyPatchPlan {
   const VgprSpillSequence *spill = nullptr;
   std::span<const uint32_t> displaced_tail_words;

@@ -3160,18 +3160,6 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
              : resolve_moi_scratch_plan(*plan, operating_point, operating_point, expected_count);
 }
 
-static_assert(!persistent_sgpr_range_overlaps_reserved_ordinary_range(102u, 2u,
-                                                                      ROCJITSU_CODE_ARCH_CDNA4));
-static_assert(persistent_sgpr_range_overlaps_reserved_ordinary_range(102u, 2u,
-                                                                     ROCJITSU_CODE_ARCH_CDNA5));
-static_assert(persistent_sgpr_range_overlaps_reserved_ordinary_range(104u, 2u,
-                                                                     ROCJITSU_CODE_ARCH_CDNA5));
-static_assert(!persistent_sgpr_range_overlaps_reserved_ordinary_range(106u, 2u,
-                                                                      ROCJITSU_CODE_ARCH_CDNA5));
-static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA3) == 102u);
-static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA4) == 102u);
-static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
-
 [[nodiscard]] bool moi_sgpr_range_overlaps_transient_state(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &point, const ConSanMoiOperatingPoint &allocation, uint16_t base,

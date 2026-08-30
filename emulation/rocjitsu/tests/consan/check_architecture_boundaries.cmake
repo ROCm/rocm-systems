@@ -96,6 +96,21 @@ _consan_assert_no_match(
     "atomic-address materialization must consume typed target capabilities"
 )
 _consan_assert_no_match(
+    "${_consan_dir}/consan_fault_injection.inc"
+    "ROCJITSU_CODE_ARCH_"
+    "common fault mutation must derive encoding from its code-object target"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_access_apply.h"
+    "ROCJITSU_CODE_ARCH_"
+    "common access application must consume typed target facts"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_placement.inc"
+    "ROCJITSU_CODE_ARCH_"
+    "common placement must consume typed target facts"
+)
+_consan_assert_no_match(
     "${_consan_dir}/consan_program_analysis_target_ops.cpp"
     "consan_program_analysis_target_detail::"
     "common program-analysis dispatch must consume the target-owned operations product"
