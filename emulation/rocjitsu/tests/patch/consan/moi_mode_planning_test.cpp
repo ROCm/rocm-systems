@@ -7,6 +7,7 @@
 namespace rocjitsu {
 namespace {
 
+using consan_moi_impl::find_moi_mode_operations;
 using consan_moi_impl::moi_mode_operations;
 using consan_moi_impl::MoiCdnaPersistentOverflowStrategy;
 using consan_moi_impl::MoiObjectFacts;
@@ -17,6 +18,33 @@ using consan_moi_impl::plan_moi_object_mode;
 using consan_moi_impl::plan_moi_operand_overlap_spill;
 using consan_moi_impl::plan_moi_persistent_state_demand;
 using consan_moi_impl::plan_moi_scalar_abi;
+
+consan_moi_impl::MoiObjectModePlan
+plan_hypothetical_mode(const ConSanRequest &, const ConSanMoiOperatingPoint &,
+                       const consan_moi_impl::MoiObjectFacts &facts,
+                       const ConSanObservationPlan &) {
+  consan_moi_impl::MoiObjectModePlan plan;
+  plan.track_atomics = facts.has_admitted_atomic;
+  plan.inline_access_present = facts.has_access_candidate;
+  return plan;
+}
+
+TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChanges) {
+  enum class HypotheticalModeKey : uint8_t { FifthMode };
+  consan_moi_impl::MoiModeOperations operations{};
+  operations.plan = plan_hypothetical_mode;
+  const std::array registrations{
+      consan_moi_impl::MoiModeRegistrationFor<HypotheticalModeKey>{HypotheticalModeKey::FifthMode,
+                                                                   &operations},
+  };
+
+  const auto *selected =
+      find_moi_mode_operations<HypotheticalModeKey>(registrations, HypotheticalModeKey::FifthMode);
+  ASSERT_EQ(selected, &operations);
+  const auto plan = selected->plan({}, {}, {.has_access_candidate = true}, {});
+  EXPECT_TRUE(plan.inline_access_present);
+  EXPECT_FALSE(plan.track_atomics);
+}
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsAutomaticOwnerDefault) {
   ConSanRequest request;

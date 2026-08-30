@@ -116,6 +116,11 @@ foreach(_file IN LISTS _target_component_sources)
         "#include.*consan_(sync_analysis|fault_injection|moi_pipeline|supercollider|final_validation|validation_inventory|composition|pipeline)[.]h"
         "target normalization may not depend on analysis, transformation, validation, or orchestration"
     )
+    _consan_assert_no_match(
+        "${_file}"
+        "ConSanMoiEngine|ConSanFlavor::(Moi|SuperCollider)|RecordReplay|InlineShadow|Sampled"
+        "target providers may not decide mode policy"
+    )
 endforeach()
 
 foreach(_source IN ITEMS consan_fault_selection.cpp consan_program_analysis.cpp consan_sync_analysis.cpp)
@@ -154,6 +159,37 @@ foreach(_source IN ITEMS consan_final_validation.cpp consan_validation_inventory
         "validation may not depend on orchestration"
     )
 endforeach()
+
+file(
+    GLOB _extension_mode_sources
+    "${_consan_dir}/consan_moi_record*.cpp"
+    "${_consan_dir}/consan_moi_record*.inc"
+    "${_consan_dir}/consan_moi_sampled*.cpp"
+    "${_consan_dir}/consan_moi_sampled*.inc"
+    "${_consan_dir}/consan_moi_inline*.cpp"
+    "${_consan_dir}/consan_moi_inline*.inc"
+    "${_consan_dir}/consan_supercollider.cpp"
+    "${_consan_dir}/consan_supercollider.inc"
+)
+foreach(_file IN LISTS _extension_mode_sources)
+    _consan_assert_no_match(
+        "${_file}"
+        "ROCJITSU_CODE_ARCH_|isa/arch/amdgpu/generated/"
+        "mode providers may not name concrete target architectures"
+    )
+endforeach()
+file(READ "${ROCJITSU_SOURCE_DIR}/tests/patch/consan/analysis_test.cpp" _target_extension_test)
+file(
+    READ
+    "${ROCJITSU_SOURCE_DIR}/tests/patch/consan/moi_mode_planning_test.cpp"
+    _mode_extension_test
+)
+if(NOT _target_extension_test MATCHES
+       "HypotheticalTargetRegistersNormalizedAnalysisWithoutModeChanges" OR
+   NOT _mode_extension_test MATCHES
+       "HypotheticalModeRegistersWithoutConcreteTargetChanges")
+    message(FATAL_ERROR "ConSan extension-axis exercises are missing")
+endif()
 
 # Semantic policy owns meaning, never an ISA recipe or product identity.
 set(

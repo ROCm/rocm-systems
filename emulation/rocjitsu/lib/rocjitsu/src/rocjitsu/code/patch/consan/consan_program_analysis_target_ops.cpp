@@ -6,24 +6,26 @@
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops_internal.h"
 
+#include <array>
+
 namespace rocjitsu {
 
 namespace {
 
 [[nodiscard]] const ConSanProgramAnalysisTargetOperations *operations(rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    return &kConSanGfx9CdnaProgramAnalysisOperations;
-  case ROCJITSU_CODE_ARCH_RDNA3:
-    return &kConSanGfx1100ProgramAnalysisOperations;
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    return &kConSanGfx1201ProgramAnalysisOperations;
-  case ROCJITSU_CODE_ARCH_CDNA5:
-    return &kConSanGfx1250ProgramAnalysisOperations;
-  default:
-    return nullptr;
-  }
+  static constexpr std::array registrations{
+      ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_CDNA3,
+                                              &kConSanGfx9CdnaProgramAnalysisOperations},
+      ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_CDNA4,
+                                              &kConSanGfx9CdnaProgramAnalysisOperations},
+      ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_RDNA3,
+                                              &kConSanGfx1100ProgramAnalysisOperations},
+      ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_RDNA4,
+                                              &kConSanGfx1201ProgramAnalysisOperations},
+      ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_CDNA5,
+                                              &kConSanGfx1250ProgramAnalysisOperations},
+  };
+  return find_consan_program_analysis_target_operations<rj_code_arch_t>(registrations, arch);
 }
 
 template <typename Result, typename... Parameters, typename... Arguments>

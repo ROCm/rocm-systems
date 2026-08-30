@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -10,6 +11,33 @@
 
 namespace rocjitsu {
 namespace {
+
+ConSanVectorMemoryDecode decode_hypothetical_target_flat(std::span<const uint8_t>) {
+  ConSanVectorMemoryDecode decoded;
+  decoded.status = ConSanTargetDecodeStatus::Decoded;
+  decoded.encoding.raw_op = 0x5aU;
+  return decoded;
+}
+
+TEST(ConSan, HypotheticalTargetRegistersNormalizedAnalysisWithoutModeChanges) {
+  enum class HypotheticalTargetKey : uint8_t { GfxFuture };
+  const ConSanProgramAnalysisTargetOperations operations{
+      .decode_flat_memory = decode_hypothetical_target_flat,
+  };
+  const std::array registrations{
+      ConSanProgramAnalysisTargetRegistrationFor<HypotheticalTargetKey>{
+          HypotheticalTargetKey::GfxFuture, &operations},
+  };
+
+  const ConSanProgramAnalysisTargetOperations *selected =
+      find_consan_program_analysis_target_operations<HypotheticalTargetKey>(
+          registrations, HypotheticalTargetKey::GfxFuture);
+  ASSERT_EQ(selected, &operations);
+  ASSERT_NE(selected->decode_flat_memory, nullptr);
+  const ConSanVectorMemoryDecode decoded = selected->decode_flat_memory({});
+  EXPECT_EQ(decoded.status, ConSanTargetDecodeStatus::Decoded);
+  EXPECT_EQ(decoded.encoding.raw_op, 0x5aU);
+}
 
 TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite) {
   constexpr auto async_b8 = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB8Vglobal,

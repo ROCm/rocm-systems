@@ -8,7 +8,9 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -260,6 +262,22 @@ struct MoiModeOperations {
   std::optional<ConSanMoiAutoReportInventory> (*reconstruct_report_inventory)(
       const ConSanMoiReportBufferLayout &);
 };
+
+template <typename ModeKey> struct MoiModeRegistrationFor {
+  ModeKey mode;
+  const MoiModeOperations *operations = nullptr;
+};
+
+using MoiModeRegistration = MoiModeRegistrationFor<ConSanMoiEngine>;
+
+template <typename ModeKey>
+[[nodiscard]] const MoiModeOperations *
+find_moi_mode_operations(std::span<const MoiModeRegistrationFor<ModeKey>> registrations,
+                         ModeKey mode) {
+  const auto registration =
+      std::ranges::find(registrations, mode, &MoiModeRegistrationFor<ModeKey>::mode);
+  return registration == registrations.end() ? nullptr : registration->operations;
+}
 
 extern const MoiModeOperations kRecordReplayModeOperations;
 extern const MoiModeOperations kSampledModeOperations;

@@ -5,6 +5,8 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 
+#include <array>
+
 namespace rocjitsu::consan_moi_impl {
 
 MoiPersistentStateDemand make_exact_workgroup_capture_demand(const ConSanRequest &request,
@@ -36,14 +38,12 @@ MoiObjectModePlan make_moi_object_mode_plan(const ConSanRequest &request,
 }
 
 const MoiModeOperations &moi_mode_operations(ConSanMoiEngine engine) {
-  switch (engine) {
-  case ConSanMoiEngine::RecordReplay:
-    return kRecordReplayModeOperations;
-  case ConSanMoiEngine::Sampled:
-    return kSampledModeOperations;
-  case ConSanMoiEngine::InlineShadow:
-    return kInlineShadowModeOperations;
-  }
+  static constexpr std::array registrations{
+      MoiModeRegistration{ConSanMoiEngine::RecordReplay, &kRecordReplayModeOperations},
+      MoiModeRegistration{ConSanMoiEngine::Sampled, &kSampledModeOperations},
+      MoiModeRegistration{ConSanMoiEngine::InlineShadow, &kInlineShadowModeOperations},
+  };
+  return *find_moi_mode_operations<ConSanMoiEngine>(registrations, engine);
 }
 
 MoiObjectModePlan plan_moi_object_mode(const ConSanRequest &request,

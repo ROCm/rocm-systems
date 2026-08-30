@@ -8,6 +8,7 @@
 
 #include "rocjitsu/code/rj_code.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -128,6 +129,26 @@ struct ConSanProgramAnalysisTargetOperations {
   bool (*decode_atomic_site)(ConSanAtomicSite &, std::string_view,
                              std::span<const uint8_t>) = nullptr;
 };
+
+/// One additive target registration. Concrete packages supply an operations
+/// facet; the common registry supplies only the architecture key.
+template <typename TargetKey> struct ConSanProgramAnalysisTargetRegistrationFor {
+  TargetKey target;
+  const ConSanProgramAnalysisTargetOperations *operations = nullptr;
+};
+
+using ConSanProgramAnalysisTargetRegistration =
+    ConSanProgramAnalysisTargetRegistrationFor<rj_code_arch_t>;
+
+template <typename TargetKey>
+[[nodiscard]] const ConSanProgramAnalysisTargetOperations *
+find_consan_program_analysis_target_operations(
+    std::span<const ConSanProgramAnalysisTargetRegistrationFor<TargetKey>> registrations,
+    TargetKey target) {
+  const auto registration = std::ranges::find(
+      registrations, target, &ConSanProgramAnalysisTargetRegistrationFor<TargetKey>::target);
+  return registration == registrations.end() ? nullptr : registration->operations;
+}
 
 [[nodiscard]] std::optional<ConSanScratchComponentEncoding>
 decode_consan_scratch_component_encoding(std::span<const uint8_t> instruction, rj_code_arch_t arch);
