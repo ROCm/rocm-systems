@@ -3,7 +3,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_validation_inventory.h"
 
-#include "rocjitsu/code/patch/consan/consan_lowerer.h"
+#include "rocjitsu/code/patch/consan/consan_composition.h"
 
 #include <utility>
 
@@ -16,8 +16,8 @@ rederive_consan_mutation_validation_inventory(std::span<const uint8_t> original_
   options.fault_drop_barrier = true;
   options.fault_dry_run = true;
   ConSanTransformArtifacts artifacts =
-      run_consan_lowering_core(original_image, options, nullptr, {}, {}, nullptr,
-                               ConSanLoweringExtent::ThroughProgramInventory);
+      compose_consan_lowering(original_image, options, nullptr, {}, {}, nullptr,
+                              ConSanLoweringExtent::ThroughProgramInventory, nullptr);
   return {
       .program_inventory = std::move(artifacts.program_inventory),
       .fault_sites = std::move(artifacts.fault_sites),
@@ -31,8 +31,8 @@ rederive_consan_perturbation_validation_inventory(std::span<const uint8_t> origi
   options.fault_dry_run = true;
   ConSanPerturbationPlanningState perturbation;
   ConSanTransformArtifacts artifacts =
-      run_consan_lowering_core(original_image, options, &perturbation, {}, {}, nullptr,
-                               ConSanLoweringExtent::ThroughProgramInventory);
+      compose_consan_lowering(original_image, options, &perturbation, {}, {}, nullptr,
+                              ConSanLoweringExtent::ThroughProgramInventory, nullptr);
   return {
       .program_inventory = std::move(artifacts.program_inventory),
       .candidates = std::move(perturbation.candidates),

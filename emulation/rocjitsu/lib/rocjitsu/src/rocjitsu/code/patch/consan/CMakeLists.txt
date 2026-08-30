@@ -28,7 +28,6 @@ target_sources(
         consan_input_layout.cpp
         consan_instruction_semantics.cpp
         consan_inventory_diagnostics.cpp
-        consan_lowerer.cpp
         consan_moi.cpp
         consan_moi_access_apply.cpp
         consan_moi_access_target.cpp

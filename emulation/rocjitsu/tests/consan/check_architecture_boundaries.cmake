@@ -243,6 +243,13 @@ file(
     "${_consan_dir}/*.h"
     "${_consan_dir}/*.inc"
 )
+foreach(_file IN LISTS _consan_sources)
+    _consan_assert_no_match(
+        "${_file}"
+        "#include.*consan_lowerer[.]h|run_consan_lowering_core|install_consan_lowering_observation|apply_consan_fault_mutation_plans"
+        "core callers must use the actual composition boundary without a forwarding facade"
+    )
+endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_validation_inventory.h"
     "ConSanTransformArtifacts|ConSanPerturbationPlanningState"

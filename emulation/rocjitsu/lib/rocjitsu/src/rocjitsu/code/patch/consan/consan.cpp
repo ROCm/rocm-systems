@@ -5,8 +5,8 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/major_image_ownership.h"
+#include "rocjitsu/code/patch/consan/consan_composition.h"
 #include "rocjitsu/code/patch/consan/consan_final_validation.h"
-#include "rocjitsu/code/patch/consan/consan_lowerer.h"
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 
@@ -86,12 +86,13 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
       // mutation. Rebuild for the rare late-fault path instead of coupling
       // the retained inventory to every mutation-specific analysis choice.
       ConSanTransformArtifacts result =
-          run_consan_lowering_core(code_object_bytes, options, nullptr, {}, {}, execution);
+          compose_consan_lowering(code_object_bytes, options, nullptr, {}, {}, execution,
+                                  ConSanLoweringExtent::Complete, nullptr);
       try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
       return finalize_consan_result(std::move(result), code_object_bytes,
                                     options.moi_report_dispatch_id, false, nullptr, execution);
     }
-    if (!install_consan_lowering_observation(options, inventory, execution, observation)) {
+    if (!compose_consan_observation(options, inventory, execution, observation)) {
       inventory.outcome = ConSanTransformOutcome::Invalid;
       return finalize_consan_result(std::move(inventory), code_object_bytes,
                                     options.moi_report_dispatch_id, false, nullptr, execution);
@@ -127,7 +128,7 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
                                                        code_object_bytes.size());
   try {
     MoiOptions effective_options = options;
-    ConSanTransformArtifacts result = run_consan_lowering_core(
+    ConSanTransformArtifacts result = compose_consan_lowering(
         code_object_bytes, effective_options, inspected_perturbation, preapplied_mutation,
         initial_owner_transient_sgprs, execution, extent, observation);
     const bool stopped_after_inventory =

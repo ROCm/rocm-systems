@@ -3,9 +3,9 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/major_image_ownership.h"
+#include "rocjitsu/code/patch/consan/consan_composition.h"
 #include "rocjitsu/code/patch/consan/consan_fault_selection.h"
 #include "rocjitsu/code/patch/consan/consan_final_validation.h"
-#include "rocjitsu/code/patch/consan/consan_lowerer.h"
 
 namespace rocjitsu {
 namespace {
@@ -21,8 +21,8 @@ apply_planned_faults(std::span<const uint8_t> code_object_bytes,
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
-  apply_consan_fault_mutation_plans(code_object_bytes, application_context,
-                                    planned_artifacts.fault_plans, planned_artifacts);
+  compose_consan_fault_mutation(code_object_bytes, application_context,
+                                planned_artifacts.fault_plans, planned_artifacts);
   return finalize_consan_result(std::move(planned_artifacts), code_object_bytes,
                                 application_context.moi_report_dispatch_id);
 }
