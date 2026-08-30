@@ -1741,3 +1741,64 @@ case serialized separately; the complete 4,721-test nonphysical matrix over
 all five simulated targets at `-j16` in 248.12 seconds; and all 635 physical
 gfx1201 tests at `-j1` in 108.06 seconds. All are green. The inventory increase
 is the direct scalar-ABI fallback regression.
+
+### 16.12 Convergence checkpoint 11: mode-free shared placement
+
+This checkpoint, through commit `42be3760b0`, completes the migration of mode
+selection out of the common placement solver. It follows transient scalar
+allocation, synchronization-island reservation, persistent-state overflow,
+and dispatch-identity exhaustion to their semantic owners, then consumes the
+resulting products without rediscovering the selected engine:
+
+- each mode now declares its transient scalar representation and the exact
+  constraints of that representation. Common placement still owns one
+  register search, liveness proof, spill-window search, and assignment path;
+- synchronization-island reservation consumes admitted barrier decisions,
+  dense-router state, and typed fence intents directly. The old engine tests
+  duplicated facts already present in those products and were deleted;
+- the three CDNA persistent overflow representations are explicit mode-owned
+  choices: exact-workgroup state, owner snapshot, and resident-wave private
+  state. The CDNA allocator implements those named representations without
+  asking which mode selected one; and
+- dispatch-identity exhaustion consumes the mode-owned fallback kind and
+  transient representation. The last two explicit engine tests in placement
+  and redundant Inline fallback initializers were removed.
+
+This is a completed boundary migration, not a parallel interface. There is no
+engine-aware compatibility path in the shared placement body. The structural
+gate now fixes `consan_moi_placement.inc` at **zero** explicit mode-enum
+references, down from 33 at checkpoint 10 and 95 at the starting review. A new
+mode must publish the narrow planning products beside its implementation; it
+cannot add an engine switch to the common solver without failing the build.
+
+| Signal | Checkpoint 11 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 249 | +20 |
+| Physical production lines | 105,170 | +195 |
+| Nonblank production lines | 99,080 | -3 |
+| Production implementation lines | 91,441 | **-9** |
+| `MoiOptions` references / files | 95 / 30 | +8 / +5 |
+| `ConSanTransformArtifacts` references / files | 256 / 58 | -20 / +1 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 316 / 56 | +26 / +5 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | **0** | **-95** |
+| Explicit mode-enum references in `consan_moi_report_plan.cpp` | 15 | -3 |
+| Test inventory | 5,356 | +11 |
+
+The transient and persistent representation contracts add 25 implementation
+lines relative to checkpoint 10 after the synchronization and dispatch
+deletions are harvested. Production remains nine implementation lines below
+the starting baseline, so the checkpoint has not met the material-shrinkage
+property in Section 14. The next slices must exploit the now-explicit
+representations to consolidate or delete mechanics; merely adding more policy
+fields would reverse the required flow. The wide operating point, target
+locality beyond the existing profile packages, component build graph, two
+extension exercises, and independent completion audit also remain open.
+
+Validation includes a 250-test scalar-spill/dense-routing gate, a 181-test
+CDNA persistent-state and pressure gate, and a 125-test dispatch-identity and
+full-pressure gate. The complete 4,721-test nonphysical matrix over all five
+simulated targets passed at `-j16` in 244.18 seconds, and all 635 serialized
+physical gfx1201 tests passed at `-j1` in 109.51 seconds. The test inventory is
+unchanged at this checkpoint.
