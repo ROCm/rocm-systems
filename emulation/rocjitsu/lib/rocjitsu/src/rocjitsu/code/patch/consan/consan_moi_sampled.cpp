@@ -198,11 +198,14 @@ MoiPersistentStateDemand plan_sampled_persistent_state_demand(
   return demand;
 }
 
+MoiDynamicStackSpillPolicy sampled_dynamic_stack_spill(const MoiDynamicStackSpillFacts &facts) {
+  return {.backend_supported = facts.target_has_backend, .requires_every_owner_dynamic = true};
+}
+
 const MoiModeOperations kSampledModeOperations = {
-    plan_sampled_object_mode,
-    apply_sampled_mode_patches,
-    sampled_access_scratch_vgpr_count,
-    plan_sampled_persistent_state_demand,
+    plan_sampled_object_mode,          apply_sampled_mode_patches,
+    sampled_access_scratch_vgpr_count, plan_sampled_persistent_state_demand,
+    sampled_dynamic_stack_spill,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"

@@ -130,8 +130,10 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                                effective_options, effective_options, moi_candidates, result);
   };
   rebuild_resource_plans();
+  const MoiDynamicStackSpillPolicy dynamic_stack_spill =
+      plan_moi_dynamic_stack_spill(effective_options.moi_engine, arch);
   effective_options.moi_dynamic_stack_spill =
-      moi_supports_dynamic_stack_spill(arch, effective_options.moi_engine) &&
+      dynamic_stack_spill.backend_supported &&
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
         if (plan.source != ConSanRegisterAllocationSource::SpillRequired)
           return false;

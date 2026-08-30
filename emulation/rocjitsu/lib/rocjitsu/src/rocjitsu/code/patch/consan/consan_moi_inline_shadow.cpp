@@ -161,11 +161,14 @@ plan_inline_shadow_persistent_state_demand(const ConSanRequest &, const BoundRun
   };
 }
 
+MoiDynamicStackSpillPolicy inline_shadow_dynamic_stack_spill(const MoiDynamicStackSpillFacts &) {
+  return {.backend_supported = true, .requires_every_owner_dynamic = false};
+}
+
 const MoiModeOperations kInlineShadowModeOperations = {
-    plan_inline_shadow_object_mode,
-    apply_inline_shadow_mode_patches,
-    inline_shadow_access_scratch_vgpr_count,
-    plan_inline_shadow_persistent_state_demand,
+    plan_inline_shadow_object_mode,          apply_inline_shadow_mode_patches,
+    inline_shadow_access_scratch_vgpr_count, plan_inline_shadow_persistent_state_demand,
+    inline_shadow_dynamic_stack_spill,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"

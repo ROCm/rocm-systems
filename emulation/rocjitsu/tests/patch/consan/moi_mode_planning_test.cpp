@@ -9,6 +9,7 @@ namespace {
 
 using consan_moi_impl::MoiObjectFacts;
 using consan_moi_impl::MoiPersistentStateFacts;
+using consan_moi_impl::plan_moi_dynamic_stack_spill;
 using consan_moi_impl::plan_moi_object_mode;
 using consan_moi_impl::plan_moi_persistent_state_demand;
 
@@ -32,6 +33,26 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsAutomaticOwnerDefault) {
   request.moi_engine = ConSanMoiEngine::RecordReplay;
   EXPECT_EQ(plan_moi_object_mode(request, point, facts, observation).owner_source,
             ConSanMoiOwnerSource::HwId);
+}
+
+TEST(ConSanMoiModePlanning, EachEngineOwnsItsDynamicStackSpillPolicy) {
+  const auto record_rdna =
+      plan_moi_dynamic_stack_spill(ConSanMoiEngine::RecordReplay, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto sampled_cdna =
+      plan_moi_dynamic_stack_spill(ConSanMoiEngine::Sampled, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto record_unsupported =
+      plan_moi_dynamic_stack_spill(ConSanMoiEngine::RecordReplay, ROCJITSU_CODE_ARCH_INVALID);
+  const auto inline_unsupported =
+      plan_moi_dynamic_stack_spill(ConSanMoiEngine::InlineShadow, ROCJITSU_CODE_ARCH_INVALID);
+
+  EXPECT_TRUE(record_rdna.backend_supported);
+  EXPECT_TRUE(record_rdna.requires_every_owner_dynamic);
+  EXPECT_TRUE(sampled_cdna.backend_supported);
+  EXPECT_TRUE(sampled_cdna.requires_every_owner_dynamic);
+  EXPECT_FALSE(record_unsupported.backend_supported);
+  EXPECT_TRUE(record_unsupported.requires_every_owner_dynamic);
+  EXPECT_TRUE(inline_unsupported.backend_supported);
+  EXPECT_FALSE(inline_unsupported.requires_every_owner_dynamic);
 }
 
 TEST(ConSanMoiModePlanning, RecordReplaySelectsDenseRoutingFromNormalizedTargetFacts) {

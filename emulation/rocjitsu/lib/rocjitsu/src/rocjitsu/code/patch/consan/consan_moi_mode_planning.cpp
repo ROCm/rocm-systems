@@ -69,4 +69,12 @@ MoiPersistentStateDemand plan_moi_persistent_state_demand(const ConSanRequest &r
       .persistent_state_demand(request, resources, point, facts);
 }
 
+MoiDynamicStackSpillPolicy plan_moi_dynamic_stack_spill(ConSanMoiEngine engine,
+                                                        rj_code_arch_t arch) {
+  const MoiDynamicStackSpillFacts facts{
+      .target_has_backend = consan_is_capability_arch(arch),
+  };
+  return moi_mode_operations(engine).dynamic_stack_spill(facts);
+}
+
 } // namespace rocjitsu::consan_moi_impl

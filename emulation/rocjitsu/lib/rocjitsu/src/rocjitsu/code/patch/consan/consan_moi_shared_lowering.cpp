@@ -12,6 +12,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_dynamic_record_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_record_event_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
@@ -403,7 +404,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
           "ConSan MOI spill cannot share one frame recipe across dynamic and fixed owners");
       return std::nullopt;
     }
-    if (!moi_supports_dynamic_stack_spill(arch, request.moi_engine)) {
+    if (!plan_moi_dynamic_stack_spill(request.moi_engine, arch).backend_supported) {
       warnings.emplace_back(
           "ConSan MOI dynamic-stack spill has no backend for this target and engine");
       return std::nullopt;

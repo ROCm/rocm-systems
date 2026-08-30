@@ -61,14 +61,6 @@ inline constexpr uint32_t kMoiRecordReplayBarrierRelaySlotWords =
 inline constexpr uint32_t kMoiDenseBarrierEntryKeyPrologueWords = 6u;
 inline constexpr uint32_t kMoiRecordReplayBorrowedEntryIslandWords = 20u;
 
-[[nodiscard]] constexpr bool moi_supports_dynamic_stack_spill(rj_code_arch_t arch,
-                                                              ConSanMoiEngine engine) {
-  if (engine == ConSanMoiEngine::InlineShadow)
-    return true;
-  return consan_is_capability_arch(arch) &&
-         (engine == ConSanMoiEngine::RecordReplay || engine == ConSanMoiEngine::Sampled);
-}
-
 [[nodiscard]] constexpr uint32_t moi_dense_entry_island_words(bool derive_key_at_entry,
                                                               bool key_encodes_scc = false) {
   // Relocatable dense routers derive the dispatcher key at entry. The SCC

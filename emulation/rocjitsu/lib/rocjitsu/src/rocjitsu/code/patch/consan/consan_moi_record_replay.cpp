@@ -174,11 +174,15 @@ MoiPersistentStateDemand plan_record_replay_persistent_state_demand(
   return demand;
 }
 
+MoiDynamicStackSpillPolicy
+record_replay_dynamic_stack_spill(const MoiDynamicStackSpillFacts &facts) {
+  return {.backend_supported = facts.target_has_backend, .requires_every_owner_dynamic = true};
+}
+
 const MoiModeOperations kRecordReplayModeOperations = {
-    plan_record_replay_object_mode,
-    apply_record_replay_mode_patches,
-    record_replay_access_scratch_vgpr_count,
-    plan_record_replay_persistent_state_demand,
+    plan_record_replay_object_mode,          apply_record_replay_mode_patches,
+    record_replay_access_scratch_vgpr_count, plan_record_replay_persistent_state_demand,
+    record_replay_dynamic_stack_spill,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"

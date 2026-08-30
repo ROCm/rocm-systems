@@ -2592,11 +2592,12 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
         std::ranges::all_of(owners, [](const MoiKernelResourceContext *owner) {
           return owner->kernel->uses_dynamic_stack.value_or(false);
         });
+    const MoiDynamicStackSpillPolicy dynamic_stack_spill =
+        plan_moi_dynamic_stack_spill(semantic_request.moi_engine, state.arch);
     const bool supported_dynamic_spill =
-        moi_supports_dynamic_stack_spill(state.arch, semantic_request.moi_engine) &&
-        every_owner_dynamic;
-    if (has_dynamic_owner && semantic_request.moi_engine != ConSanMoiEngine::InlineShadow &&
-        !supported_dynamic_spill) {
+        dynamic_stack_spill.backend_supported &&
+        (!dynamic_stack_spill.requires_every_owner_dynamic || every_owner_dynamic);
+    if (has_dynamic_owner && !supported_dynamic_spill) {
       plan.source = ConSanRegisterAllocationSource::Unsupported;
       plan.reason = ConSanRegisterPlanReason::DynamicStack;
       plan.scratch_vgpr.reset();

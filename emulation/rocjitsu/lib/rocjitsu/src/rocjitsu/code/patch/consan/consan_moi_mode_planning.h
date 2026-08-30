@@ -74,6 +74,23 @@ struct MoiPersistentStateDemand {
   bool prefer_private_epoch_for_descriptor_growth = false;
 };
 
+/// Target-neutral input to the mode-owned dynamic-stack spill policy.
+struct MoiDynamicStackSpillFacts {
+  bool target_has_backend = false;
+};
+
+/// Mode-owned contract for a site whose ordinary scratch allocation spills
+/// through a runtime-sized private frame. Target inspection is reduced to the
+/// common capability profile before modes publish this policy.
+struct MoiDynamicStackSpillPolicy {
+  bool backend_supported = false;
+  /// Record/Replay and Sampled use one frame recipe shared by all site owners.
+  /// Inline can defer a mixed-owner rejection to its per-owner emission path.
+  bool requires_every_owner_dynamic = true;
+
+  bool operator==(const MoiDynamicStackSpillPolicy &) const = default;
+};
+
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.
 [[nodiscard]] MoiPersistentStateDemand make_exact_workgroup_capture_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
@@ -103,6 +120,9 @@ void apply_moi_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
     const ConSanRequest &request, const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts);
 
+[[nodiscard]] MoiDynamicStackSpillPolicy plan_moi_dynamic_stack_spill(ConSanMoiEngine engine,
+                                                                      rj_code_arch_t arch);
+
 struct MoiModeOperations {
   MoiObjectModePlan (*plan)(const ConSanRequest &, const ConSanMoiOperatingPoint &,
                             const MoiObjectFacts &, const ConSanObservationPlan &);
@@ -116,6 +136,7 @@ struct MoiModeOperations {
                                                       const BoundRuntimeResources &,
                                                       const ConSanMoiOperatingPoint &,
                                                       const MoiPersistentStateFacts &);
+  MoiDynamicStackSpillPolicy (*dynamic_stack_spill)(const MoiDynamicStackSpillFacts &);
 };
 
 extern const MoiModeOperations kRecordReplayModeOperations;
