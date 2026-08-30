@@ -75,9 +75,17 @@ static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
     if (!ctx->collPoolUsed[i]) {
       ctx->collPoolUsed[i] = 1;
-      pthread_mutex_t keep = ctx->collPool[i].mutex;
-      memset(&ctx->collPool[i], 0, sizeof(ctx->collPool[i]));
-      ctx->collPool[i].mutex = keep;
+      // Clear the slot around the mutex, never through it. The mutex is created
+      // once in acclPluginInit and outlives every tenancy; a stale KernelCh
+      // start can be inside pthread_mutex_lock on it at this instant, since that
+      // path does not take collPoolMutex, so writing its bytes here — by memset
+      // or by a save/restore struct copy — is a data race either way. POSIX also
+      // does not define copying a pthread_mutex_t at all.
+      struct acclCollInfo* slot = &ctx->collPool[i];
+      const size_t muOff = offsetof(struct acclCollInfo, mutex);
+      const size_t muEnd = muOff + sizeof(slot->mutex);
+      memset(slot, 0, muOff);
+      memset((char*)slot + muEnd, 0, sizeof(*slot) - muEnd);
       __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
       pthread_mutex_unlock(&ctx->collPoolMutex);
       return &ctx->collPool[i];
