@@ -1249,3 +1249,80 @@ test nonphysical gate over all five emulated targets at `-j16` in 244.53
 seconds. The test inventory is unchanged. The serialized 635-test physical
 gfx1201 baseline remains green and will be repeated at a later periodic
 physical checkpoint.
+
+### 16.6 Convergence checkpoint 5: target-normalized analysis and mode-owned MOI demand
+
+This checkpoint combines two related boundary migrations completed through
+commit `6d94968f72`. First, program analysis no longer spreads raw target-family
+instruction layouts through common inventory code. Pointer provenance, atomic
+inventory, FLAT and GLOBAL decoding, gfx12-family decoding, and pre-gfx12
+decoding now enter analysis through target-normalized products. Shared family
+decoding is implemented once; genuinely distinct target behavior remains in
+the relevant target owner.
+
+Second, the MOI coordinator no longer selects behavior by mode. Record/Replay,
+Sampled, and InlineShadow register one operations product containing their
+object-demand planner, lowering sequence, access-scratch demand, and
+persistent-state demand. Common orchestration and placement consume the typed
+results. The following policy moved out of the common coordinator or placement
+monolith and into mode owners:
+
+- automatic owner-source defaults and post-inventory admission changes;
+- access/synchronization lowering order and mode-local cleanup;
+- access scratch demand, Sampled spill eligibility, and InlineShadow scratch
+  contracts;
+- prologue publication and dynamic-stack entry-reservation policy;
+- Record/Replay assignment validation and compact-barrier preference;
+- InlineShadow dynamic-stack dispatch and dynamic-LDS private-state choices;
+  and
+- persistent owner, workgroup-key, exact-workgroup, and dispatch-capture
+  demand.
+
+The migration exposed a previously hidden two-mode rule: a helper named as
+Record/Replay policy required exact entry-captured workgroup identity for both
+Record/Replay and Sampled. The new boundary represents that rule once as a
+shared Record/Replay-plus-Sampled demand helper. The modes then independently
+add their own persistence semantics. This is the intended form of mode
+locality: mode-owned policy without duplicating genuinely shared behavior.
+
+The coordinator is now an actual common pipeline. Its physical size fell from
+672 to 396 lines, and its explicit `ConSanMoiEngine::{...}` references fell
+from 20 to zero. The still-large common placement body fell from 6,694 to
+6,385 physical lines and from 95 to 69 explicit mode-enum references. Those
+remaining 69 references are the principal evidence that mode locality is not
+finished; many are architecture-sensitive representation fallbacks inside
+persistent and transient placement.
+
+Checkpoint accounting relative to the starting baseline is deliberately
+mixed:
+
+| Signal | Checkpoint 5 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 248 | +19 |
+| Physical production lines | 105,361 | +386 |
+| Nonblank production lines | 99,296 | +213 |
+| Production implementation lines | 91,678 | **+228** |
+| `MoiOptions` references / files | 95 / 30 | +8 / +5 |
+| `ConSanTransformArtifacts` references / files | 256 / 58 | -20 / +1 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 297 / 56 | +7 / +5 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | 69 | -26 |
+| Test inventory | 5,352 | +7 |
+
+This is real component convergence but not yet code-size convergence. New
+typed products and direct tests account for part of the growth, but the fifth
+refactoring contract requires the resulting deletion opportunities to be
+reaped. The larger file count and wider operating-point surface are also not
+end-state virtues. The next iterations must use the new mode and target
+boundaries to delete more common branching, duplicated scans, stale imports,
+and superseded broad contracts than they add. A future checkpoint must restore
+the cumulative implementation count below 91,450 rather than treating
+locality alone as sufficient progress.
+
+Validation for this checkpoint includes repeated 864/865-test focused MOI and
+architecture-boundary gates, the complete 4,717-test nonphysical matrix over
+all five simulated targets at `-j16` in 244.70 seconds, and all 635 serialized
+physical gfx1201 tests at `-j1` in 109.49 seconds. All are green. The seven new
+tests directly pin mode-owned object planning, prologue policy, persistent
+state demand, and the shared Record/Replay-plus-Sampled identity rule.
