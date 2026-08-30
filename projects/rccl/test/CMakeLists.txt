@@ -640,6 +640,24 @@ if(BUILD_TESTS)
       -Wl,--export-dynamic-symbol=ncclNetPlugin_v10
       -Wl,--export-dynamic-symbol=ncclNetPlugin_v11
       -Wl,--export-dynamic-symbol=ncclCollNetPlugin_v11)
+
+    # Transitive nccl_device/gin headers pull sdma/anvil_device.hpp from rocSHMEM.
+    if(ENABLE_ROCSHMEM_GIN)
+      if(ROCSHMEM_SOURCE_DIR)
+        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE
+          "${ROCSHMEM_SOURCE_DIR}/src"
+          "${ROCSHMEM_SOURCE_DIR}/include")
+      else()
+        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE
+          ${CMAKE_SOURCE_DIR}/../rocshmem/src
+          ${CMAKE_SOURCE_DIR}/../rocshmem/include)
+      endif()
+      if(ROCSHMEM_BUILD_DIR)
+        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE ${ROCSHMEM_BUILD_DIR})
+      elseif(ROCSHMEM_INSTALL_DIR)
+        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE "${ROCSHMEM_INSTALL_DIR}/include")
+      endif()
+    endif()
   endif()
 
   # rccl-UnitTestsAltRsmi: Compiles alt_rsmi.cc directly (not via librccl.so) with
