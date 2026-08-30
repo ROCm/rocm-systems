@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -27,8 +28,19 @@ struct ConSanFaultSelection {
   uint32_t ordinal = 0;
 };
 
+/// Narrow immutable input used to resolve semantic fault selections.
+///
+/// Selection needs the normalized program inventory and the exact fault sites
+/// derived from it. It must not inspect mutation state, resource planning,
+/// emitted patches, diagnostics, or any other transformation-transaction
+/// field.
+struct ConSanFaultSelectionView {
+  const ProgramInventory &program_inventory;
+  std::span<const ConSanFaultSite> fault_sites;
+};
+
 /// Fully rederived ordinary-acquire mutation target. Every pointer refers into
-/// the immutable artifacts supplied to the selector.
+/// the immutable inventory supplied to the selector.
 struct OrdinaryAcquireMutationTarget {
   const ConSanFaultSite *site = nullptr;
   const ConSanSyncEvent *load = nullptr;
@@ -95,28 +107,28 @@ consan_fault_admits_cross_block_barrier_move(const ConSanBarrierMoveDestination 
                                              const ConSanOptions &options);
 
 [[nodiscard]] const ConSanFaultSite *
-find_fault_site_by_identity(const ConSanTransformArtifacts &result, std::string_view identity,
+find_fault_site_by_identity(const ConSanFaultSelectionView &inventory, std::string_view identity,
                             ConSanFaultSiteKind kind);
 
 [[nodiscard]] bool
 consan_execution_owners_include_requested_kernel(std::span<const ConSanExecutionOwner> owners,
-                                                 const ConSanTransformArtifacts &result,
+                                                 const ConSanFaultSelectionView &inventory,
                                                  std::string_view kernel_name_filter);
 
 [[nodiscard]] const ConSanFaultSite *
-select_fault_site_for_plan(const ConSanTransformArtifacts &result,
+select_fault_site_for_plan(const ConSanFaultSelectionView &inventory,
                            const ConSanFaultSelection &selection, ConSanFaultSiteKind kind);
 
 [[nodiscard]] std::optional<OrdinaryAcquireMutationTarget>
-select_ordinary_acquire_mutation_target(const ConSanTransformArtifacts &result,
+select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventory,
                                         const ConSanFaultSelection &selection);
 
 [[nodiscard]] ExactBarrierDropPairResolution
-resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result,
+resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
                                 const ConSanFaultSelection &selection);
 
 [[nodiscard]] ExactBarrierDropGroupResolution
-resolve_exact_barrier_drop_group(const ConSanTransformArtifacts &result,
+resolve_exact_barrier_drop_group(const ConSanFaultSelectionView &inventory,
                                  const ConSanFaultSelection &selection);
 
 [[nodiscard]] std::string_view

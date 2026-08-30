@@ -467,8 +467,9 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   if (const ConSanFaultMutationPlan *plan =
           find_fault_plan(plans, ConSanFaultMutationKind::LdsWrongAddress);
       plan != nullptr && result.errors.empty()) {
-    const ConSanFaultSite *site =
-        find_fault_site_by_identity(result, plan->primary_identity, ConSanFaultSiteKind::LdsAccess);
+    const ConSanFaultSite *site = find_fault_site_by_identity(
+        {.program_inventory = result.program_inventory, .fault_sites = result.fault_sites},
+        plan->primary_identity, ConSanFaultSiteKind::LdsAccess);
     if (site == nullptr || site->address_vgpr != plan->original_address_vgpr) {
       result.errors.emplace_back(
           "ConSan LDS fault plan no longer matches its pristine address operand");

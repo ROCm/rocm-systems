@@ -261,6 +261,27 @@ foreach(
     )
 endforeach()
 
+# Immutable semantic selection and exact synchronization proof consume narrow
+# inventory views, never the mutable transformation transaction.
+foreach(
+    _source
+    IN ITEMS
+       consan_fault_selection.h
+       consan_fault_selection.cpp
+       consan_sync_event_index.h
+       consan_sync_event_index.cpp
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_source}"
+        "ConSanTransformArtifacts"
+        "immutable selection/proof must consume narrow inventory products"
+    )
+endforeach()
+file(READ "${_consan_dir}/consan_fault_selection.h" _fault_selection_contract)
+if(NOT _fault_selection_contract MATCHES "ConSanFaultSelectionView")
+    message(FATAL_ERROR "ConSan fault selection lost its narrow immutable inventory contract")
+endif()
+
 # Native emission and target-operation components accept narrow operation
 # contracts, not the broad mutable MoiOptions bus.
 file(

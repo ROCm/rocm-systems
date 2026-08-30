@@ -1770,6 +1770,10 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       reinterpret_cast<const uint8_t *>(original.image_data()), original.image_size());
   const ConSanTransformArtifacts pristine_inventory =
       rederive_consan_mutation_validation_inventory(original_image);
+  const ConSanFaultSelectionView pristine_faults{
+      .program_inventory = pristine_inventory.program_inventory,
+      .fault_sites = pristine_inventory.fault_sites,
+  };
   std::vector<const ConSanPatchInfo *> markerless_sources;
   const ConSanPatchInfo *markerless_target = nullptr;
   std::vector<ConSanBarrierSite> barrier_id_scope_originals;
@@ -1937,7 +1941,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           .kernel_name_filter = {},
           .ordinal = 0,
       };
-      const auto target = select_ordinary_acquire_mutation_target(pristine_inventory, selection);
+      const auto target = select_ordinary_acquire_mutation_target(pristine_faults, selection);
       const bool identities_match =
           target && !patch.fault_primary_identity.empty() &&
           patch.fault_sequence_identity == target->sequence->identity &&
@@ -2024,8 +2028,8 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           .kernel_name_filter = {},
           .ordinal = 0,
       };
-      const ConSanFaultSite *target = select_fault_site_for_plan(
-          pristine_inventory, selection, ConSanFaultSiteKind::LdsAccess);
+      const ConSanFaultSite *target =
+          select_fault_site_for_plan(pristine_faults, selection, ConSanFaultSiteKind::LdsAccess);
       const bool identities_match =
           target != nullptr && !patch.fault_primary_identity.empty() &&
           patch.fault_primary_identity == target->identity &&
@@ -2448,7 +2452,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           .kernel_name_filter = {},
           .ordinal = 0,
       };
-      const auto pair_resolution = resolve_exact_barrier_drop_pair(pristine_inventory, selection);
+      const auto pair_resolution = resolve_exact_barrier_drop_pair(pristine_faults, selection);
       const auto &pair = pair_resolution.pair;
       const size_t member_count = static_cast<size_t>(
           std::ranges::count_if(exact_barrier_drop_patches, [&](const auto *patch) {
@@ -2484,7 +2488,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           .kernel_name_filter = {},
           .ordinal = 0,
       };
-      const auto group_resolution = resolve_exact_barrier_drop_group(pristine_inventory, selection);
+      const auto group_resolution = resolve_exact_barrier_drop_group(pristine_faults, selection);
       const auto &group = group_resolution.group;
       metadata_matches &= exact_barrier_drop_patches.size() == 4u && group &&
                           result.mutation.applied_fault_logical_identity ==

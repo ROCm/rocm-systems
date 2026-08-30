@@ -26,7 +26,7 @@ build_sync_event_semantic_index(std::span<const ConSanSyncEvent> sync_events);
 
 /// Verify that every declared sequence member resolves to the same ordered,
 /// bounded event in the immutable program inventory.
-[[nodiscard]] bool sequence_has_exact_members(const ConSanTransformArtifacts &result,
+[[nodiscard]] bool sequence_has_exact_members(const SynchronizationInventoryView &inventory,
                                               const ConSanSyncSequence &sequence);
 
 /// Indexed form used while synchronization analysis is still constructing its

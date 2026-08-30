@@ -1095,7 +1095,48 @@ Checkpoint accounting relative to the starting baseline:
 
 Validation at the checkpoint includes a full `-j16` rebuild, all 15 exhaustive
 capability-contract tests, the generated capability-manifest comparison, and
-the architecture-boundary test. The pre-change full nonphysical and physical
-gates establish the behavioral baseline; the next periodic full gate will run
-against the converged source before the refactoring moves far beyond this
-checkpoint.
+the architecture-boundary test. The post-change nonphysical gate also passed
+all 4,710 tests at `-j16`; the serialized physical baseline remains green at
+635 tests and will be repeated at a later periodic physical checkpoint.
+
+### 16.3 Convergence checkpoint 2: immutable fault-selection input
+
+Fault selection and exact synchronization-sequence proof were traced through
+fault planning, mutation application, pristine-inventory rederivation, final
+validation, composite retry, and diagnostic retention. The selectors only read
+the immutable program inventory and exact fault-site product, but their public
+contract accepted the complete mutable `ConSanTransformArtifacts` transaction.
+The exact-sequence-member verifier had also duplicated the same ordering and
+boundary proof for immutable inventory and analysis-time index lookups.
+
+The converged path now publishes `ConSanFaultSelectionView`, containing only a
+`ProgramInventory` reference and a read-only fault-site span. Planning,
+composition, and independent validation construct that view at their boundary;
+the selection component cannot inspect mutation state, resources, patches,
+diagnostics, replacement bytes, or other transaction fields. Both immutable
+inventory and construction-time indexes use one exact-member verifier with
+different lookup functions, and the duplicated proof loop is deleted.
+
+The boundary checker now rejects `ConSanTransformArtifacts` in both fault
+selection and synchronization-event indexing and requires the narrow fault
+selection contract to remain present.
+
+| Signal | Checkpoint 2 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 236 | +7 |
+| Physical production lines | 104,899 | -76 |
+| Nonblank production lines | 98,994 | -89 |
+| Production implementation lines | 91,335 | **-115** |
+| `ConSanTransformArtifacts` references / files | 262 / 53 | **-14 / -4** |
+| Other broad-bus reference/file counts | unchanged | 0 |
+| Test inventory | 5,345 | 0 |
+
+This slice spends 14 implementation lines on the explicit view and caller-side
+construction while deleting the parallel exact-member proof body. It is a
+completed boundary migration rather than a compatibility layer: no selector
+overload accepting the broad transaction remains. Cumulative production size
+continues downward, and the broad transaction loses four component consumers.
+
+Validation includes a full `-j16` rebuild, the architecture-boundary test, and
+134 focused fault, perturbation, exact-barrier, ordinary-acquire, LDS-address,
+composition, and independent-final-validation tests.

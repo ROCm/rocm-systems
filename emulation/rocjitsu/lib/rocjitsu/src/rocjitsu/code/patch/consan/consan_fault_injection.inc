@@ -1,5 +1,10 @@
 [[nodiscard]] BarrierSite barrier_site_from_inventory(const ConSanFaultSite &site);
 
+[[nodiscard]] ConSanFaultSelectionView
+fault_selection_view(const ConSanTransformArtifacts &result) {
+  return {.program_inventory = result.program_inventory, .fault_sites = result.fault_sites};
+}
+
 [[nodiscard]] bool owned_by_requested_kernel(std::span<const ConSanExecutionOwner> owners,
                                              const ConSanTransformArtifacts &result,
                                              const ConSanOptions &options);
@@ -12,14 +17,14 @@ select_fault_site_for_plan(const ConSanTransformArtifacts &result, const ConSanO
 select_ordinary_acquire_mutation_target(const ConSanTransformArtifacts &result,
                                         const ConSanOptions &options) {
   return select_ordinary_acquire_mutation_target(
-      result, ConSanFaultSelection{
-                  .primary_site_identity = options.fault_site_identity,
-                  .primary_sequence_identity = {},
-                  .companion_site_identity = {},
-                  .companion_sequence_identity = {},
-                  .kernel_name_filter = options.test_kernel_name_filter,
-                  .ordinal = options.fault_ordinary_index,
-              });
+      fault_selection_view(result), ConSanFaultSelection{
+                                        .primary_site_identity = options.fault_site_identity,
+                                        .primary_sequence_identity = {},
+                                        .companion_site_identity = {},
+                                        .companion_sequence_identity = {},
+                                        .kernel_name_filter = options.test_kernel_name_filter,
+                                        .ordinal = options.fault_ordinary_index,
+                                    });
 }
 
 [[nodiscard]] bool
@@ -39,28 +44,30 @@ is_member_of_qualified_logical_barrier_pair(const ConSanTransformArtifacts &resu
 resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result,
                                 const ConSanOptions &options) {
   return resolve_exact_barrier_drop_pair(
-      result, ConSanFaultSelection{
-                  .primary_site_identity = options.fault_site_identity,
-                  .primary_sequence_identity = options.fault_barrier_sequence_identity,
-                  .companion_site_identity = {},
-                  .companion_sequence_identity = {},
-                  .kernel_name_filter = options.test_kernel_name_filter,
-                  .ordinal = 0,
-              });
+      fault_selection_view(result),
+      ConSanFaultSelection{
+          .primary_site_identity = options.fault_site_identity,
+          .primary_sequence_identity = options.fault_barrier_sequence_identity,
+          .companion_site_identity = {},
+          .companion_sequence_identity = {},
+          .kernel_name_filter = options.test_kernel_name_filter,
+          .ordinal = 0,
+      });
 }
 
 [[nodiscard]] ExactBarrierDropGroupResolution
 resolve_exact_barrier_drop_group(const ConSanTransformArtifacts &result,
                                  const ConSanOptions &options) {
   return resolve_exact_barrier_drop_group(
-      result, ConSanFaultSelection{
-                  .primary_site_identity = options.fault_site_identity,
-                  .primary_sequence_identity = options.fault_barrier_sequence_identity,
-                  .companion_site_identity = options.fault_barrier_companion_site_identity,
-                  .companion_sequence_identity = options.fault_barrier_companion_sequence_identity,
-                  .kernel_name_filter = options.test_kernel_name_filter,
-                  .ordinal = 0,
-              });
+      fault_selection_view(result),
+      ConSanFaultSelection{
+          .primary_site_identity = options.fault_site_identity,
+          .primary_sequence_identity = options.fault_barrier_sequence_identity,
+          .companion_site_identity = options.fault_barrier_companion_site_identity,
+          .companion_sequence_identity = options.fault_barrier_companion_sequence_identity,
+          .kernel_name_filter = options.test_kernel_name_filter,
+          .ordinal = 0,
+      });
 }
 
 [[nodiscard]] const ConSanBarrierLifecycleGroup *
@@ -2007,14 +2014,14 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
 [[nodiscard]] bool owned_by_requested_kernel(std::span<const ConSanExecutionOwner> owners,
                                              const ConSanTransformArtifacts &result,
                                              const ConSanOptions &options) {
-  return consan_execution_owners_include_requested_kernel(owners, result,
+  return consan_execution_owners_include_requested_kernel(owners, fault_selection_view(result),
                                                           options.test_kernel_name_filter);
 }
 
 [[nodiscard]] const ConSanFaultSite *
 select_fault_site_for_plan(const ConSanTransformArtifacts &result, const ConSanOptions &options,
                            ConSanFaultSiteKind kind, uint32_t legacy_index) {
-  return select_fault_site_for_plan(result,
+  return select_fault_site_for_plan(fault_selection_view(result),
                                     ConSanFaultSelection{
                                         .primary_site_identity = options.fault_site_identity,
                                         .primary_sequence_identity = {},

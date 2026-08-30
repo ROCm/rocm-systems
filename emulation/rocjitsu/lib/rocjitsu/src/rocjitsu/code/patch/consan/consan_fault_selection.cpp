@@ -23,14 +23,14 @@ namespace {
          });
 }
 
-[[nodiscard]] const ConSanKernelInfo *requested_kernel_owner(const ConSanTransformArtifacts &result,
+[[nodiscard]] const ConSanKernelInfo *requested_kernel_owner(const ProgramInventory &inventory,
                                                              std::string_view filter) {
   if (filter.empty())
     return nullptr;
-  if (const ConSanKernelInfo *exact = result.program_inventory.find_kernel_by_name(filter))
+  if (const ConSanKernelInfo *exact = inventory.find_kernel_by_name(filter))
     return exact;
   const ConSanKernelInfo *match = nullptr;
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+  for (const ConSanKernelInfo &kernel : inventory.kernels()) {
     if (kernel.name.find(filter) == std::string::npos)
       continue;
     if (match != nullptr)
@@ -68,41 +68,43 @@ bool consan_fault_admits_cross_block_barrier_move(const ConSanBarrierMoveDestina
   return false;
 }
 
-const ConSanFaultSite *find_fault_site_by_identity(const ConSanTransformArtifacts &result,
+const ConSanFaultSite *find_fault_site_by_identity(const ConSanFaultSelectionView &inventory,
                                                    std::string_view identity,
                                                    ConSanFaultSiteKind kind) {
-  const auto site = std::ranges::find_if(result.fault_sites, [&](const ConSanFaultSite &candidate) {
-    return candidate.kind == kind && candidate.identity == identity;
-  });
-  return site == result.fault_sites.end() ? nullptr : &*site;
+  const auto site =
+      std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &candidate) {
+        return candidate.kind == kind && candidate.identity == identity;
+      });
+  return site == inventory.fault_sites.end() ? nullptr : &*site;
 }
 
 bool consan_execution_owners_include_requested_kernel(std::span<const ConSanExecutionOwner> owners,
-                                                      const ConSanTransformArtifacts &result,
+                                                      const ConSanFaultSelectionView &inventory,
                                                       std::string_view kernel_name_filter) {
   if (kernel_name_filter.empty())
     return true;
-  const ConSanKernelInfo *kernel = requested_kernel_owner(result, kernel_name_filter);
+  const ConSanKernelInfo *kernel =
+      requested_kernel_owner(inventory.program_inventory, kernel_name_filter);
   return kernel != nullptr &&
          std::ranges::find(owners, kernel->descriptor_file_offset,
                            &ConSanExecutionOwner::descriptor_file_offset) != owners.end();
 }
 
-const ConSanFaultSite *select_fault_site_for_plan(const ConSanTransformArtifacts &result,
+const ConSanFaultSite *select_fault_site_for_plan(const ConSanFaultSelectionView &inventory,
                                                   const ConSanFaultSelection &selection,
                                                   ConSanFaultSiteKind kind) {
   if (!selection.primary_site_identity.empty()) {
     const ConSanFaultSite *site =
-        find_fault_site_by_identity(result, selection.primary_site_identity, kind);
+        find_fault_site_by_identity(inventory, selection.primary_site_identity, kind);
     return site != nullptr && consan_execution_owners_include_requested_kernel(
-                                  site->execution_owners, result, selection.kernel_name_filter)
+                                  site->execution_owners, inventory, selection.kernel_name_filter)
                ? site
                : nullptr;
   }
   uint32_t index = 0;
-  for (const ConSanFaultSite &site : result.fault_sites) {
+  for (const ConSanFaultSite &site : inventory.fault_sites) {
     if (site.kind != kind || !consan_execution_owners_include_requested_kernel(
-                                 site.execution_owners, result, selection.kernel_name_filter))
+                                 site.execution_owners, inventory, selection.kernel_name_filter))
       continue;
     if (index++ == selection.ordinal)
       return &site;
@@ -111,16 +113,16 @@ const ConSanFaultSite *select_fault_site_for_plan(const ConSanTransformArtifacts
 }
 
 std::optional<OrdinaryAcquireMutationTarget>
-select_ordinary_acquire_mutation_target(const ConSanTransformArtifacts &result,
+select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventory,
                                         const ConSanFaultSelection &selection) {
-  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  const SynchronizationInventoryView sync = inventory.program_inventory.sync();
   const auto qualify =
       [&](const ConSanFaultSite &site) -> std::optional<OrdinaryAcquireMutationTarget> {
     if (site.kind != ConSanFaultSiteKind::OrdinaryMemory ||
         site.ordinary_memory_support_reason != ConSanOrdinaryMemorySupportReason::Supported ||
         site.mnemonic != "global_load_b32" || !site.sync_event_identity ||
         !site.sync_sequence_identity ||
-        !consan_execution_owners_include_requested_kernel(site.execution_owners, result,
+        !consan_execution_owners_include_requested_kernel(site.execution_owners, inventory,
                                                           selection.kernel_name_filter))
       return std::nullopt;
     const ConSanSyncEvent *load = sync.find_event(*site.sync_event_identity);
@@ -137,7 +139,7 @@ select_ordinary_acquire_mutation_target(const ConSanTransformArtifacts &result,
         !consan_sync_confidence_meets(sequence->memory_role_confidence,
                                       ConSanSemanticConfidence::Conservative) ||
         !sequence->basic_block_index || sequence->member_event_identities.size() != 2u ||
-        !sequence_has_exact_members(result, *sequence) ||
+        !sequence_has_exact_members(sync, *sequence) ||
         sequence->member_event_identities.front() != load->identity ||
         !same_execution_owners(sequence->execution_owners, site.execution_owners))
       return std::nullopt;
@@ -153,11 +155,11 @@ select_ordinary_acquire_mutation_target(const ConSanTransformArtifacts &result,
 
   if (!selection.primary_site_identity.empty()) {
     const ConSanFaultSite *site = find_fault_site_by_identity(
-        result, selection.primary_site_identity, ConSanFaultSiteKind::OrdinaryMemory);
+        inventory, selection.primary_site_identity, ConSanFaultSiteKind::OrdinaryMemory);
     return site == nullptr ? std::nullopt : qualify(*site);
   }
   uint32_t index = 0;
-  for (const ConSanFaultSite &site : result.fault_sites) {
+  for (const ConSanFaultSite &site : inventory.fault_sites) {
     auto target = qualify(site);
     if (target && index++ == selection.ordinal)
       return target;
@@ -166,10 +168,10 @@ select_ordinary_acquire_mutation_target(const ConSanTransformArtifacts &result,
 }
 
 ExactBarrierDropPairResolution
-resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result,
+resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
                                 const ConSanFaultSelection &selection) {
   using Issue = ExactBarrierDropPairIssue;
-  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  const SynchronizationInventoryView sync = inventory.program_inventory.sync();
   if (selection.primary_site_identity.empty() || selection.primary_sequence_identity.empty()) {
     return {.pair = std::nullopt, .issue = Issue::MissingExactIdentity};
   }
@@ -182,19 +184,19 @@ resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result,
       sequence->operation != ConSanSyncOperation::BarrierFull ||
       !consan_sync_confidence_meets(sequence->confidence, ConSanSemanticConfidence::Conservative) ||
       sequence->member_event_identities.size() != 2u ||
-      !sequence_has_exact_members(result, *sequence) ||
-      !consan_execution_owners_include_requested_kernel(sequence->execution_owners, result,
+      !sequence_has_exact_members(sync, *sequence) ||
+      !consan_execution_owners_include_requested_kernel(sequence->execution_owners, inventory,
                                                         selection.kernel_name_filter)) {
     return {.pair = std::nullopt, .issue = Issue::SequenceNotQualified};
   }
 
   const ConSanFaultSite *primary = find_fault_site_by_identity(
-      result, selection.primary_site_identity, ConSanFaultSiteKind::Barrier);
+      inventory, selection.primary_site_identity, ConSanFaultSiteKind::Barrier);
   if (primary == nullptr || !primary->sync_event_identity || !primary->sync_sequence_identity ||
       *primary->sync_sequence_identity != sequence->identity ||
       std::ranges::find(sequence->member_event_identities, *primary->sync_event_identity) ==
           sequence->member_event_identities.end() ||
-      !consan_execution_owners_include_requested_kernel(primary->execution_owners, result,
+      !consan_execution_owners_include_requested_kernel(primary->execution_owners, inventory,
                                                         selection.kernel_name_filter)) {
     return {.pair = std::nullopt, .issue = Issue::PrimaryNotMember};
   }
@@ -202,24 +204,25 @@ resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result,
   const ConSanFaultSite *companion = nullptr;
   for (const std::string &member_identity : sequence->member_event_identities) {
     const auto matching_site =
-        std::ranges::find_if(result.fault_sites, [&](const ConSanFaultSite &candidate) {
+        std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &candidate) {
           return candidate.kind == ConSanFaultSiteKind::Barrier &&
                  candidate.sync_event_identity == member_identity &&
                  candidate.sync_sequence_identity == sequence->identity &&
                  candidate.container_name == sequence->container_name &&
                  candidate.in_kernel == sequence->in_kernel &&
                  consan_execution_owners_include_requested_kernel(
-                     candidate.execution_owners, result, selection.kernel_name_filter);
+                     candidate.execution_owners, inventory, selection.kernel_name_filter);
         });
-    if (matching_site == result.fault_sites.end()) {
+    if (matching_site == inventory.fault_sites.end()) {
       return {.pair = std::nullopt, .issue = Issue::MemberSiteMissing};
     }
-    const auto duplicate = std::ranges::find_if(
-        std::next(matching_site), result.fault_sites.end(), [&](const ConSanFaultSite &candidate) {
-          return candidate.kind == ConSanFaultSiteKind::Barrier &&
-                 candidate.sync_event_identity == member_identity;
-        });
-    if (duplicate != result.fault_sites.end()) {
+    const auto duplicate =
+        std::ranges::find_if(std::next(matching_site), inventory.fault_sites.end(),
+                             [&](const ConSanFaultSite &candidate) {
+                               return candidate.kind == ConSanFaultSiteKind::Barrier &&
+                                      candidate.sync_event_identity == member_identity;
+                             });
+    if (duplicate != inventory.fault_sites.end()) {
       return {.pair = std::nullopt, .issue = Issue::MemberSiteAmbiguous};
     }
     if (matching_site->identity != primary->identity)
@@ -233,7 +236,7 @@ resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result,
 }
 
 ExactBarrierDropGroupResolution
-resolve_exact_barrier_drop_group(const ConSanTransformArtifacts &result,
+resolve_exact_barrier_drop_group(const ConSanFaultSelectionView &inventory,
                                  const ConSanFaultSelection &selection) {
   using Issue = ExactBarrierDropGroupIssue;
   if (selection.companion_site_identity.empty() || selection.companion_sequence_identity.empty()) {
@@ -244,7 +247,7 @@ resolve_exact_barrier_drop_group(const ConSanTransformArtifacts &result,
   ConSanFaultSelection first_selection = selection;
   first_selection.companion_site_identity = {};
   first_selection.companion_sequence_identity = {};
-  const auto first = resolve_exact_barrier_drop_pair(result, first_selection);
+  const auto first = resolve_exact_barrier_drop_pair(inventory, first_selection);
   if (!first.pair)
     return {.group = std::nullopt, .issue = Issue::FirstPairRejected, .member_issue = first.issue};
   ConSanFaultSelection second_selection = selection;
@@ -252,7 +255,7 @@ resolve_exact_barrier_drop_group(const ConSanTransformArtifacts &result,
   second_selection.primary_sequence_identity = selection.companion_sequence_identity;
   second_selection.companion_site_identity = {};
   second_selection.companion_sequence_identity = {};
-  const auto second = resolve_exact_barrier_drop_pair(result, second_selection);
+  const auto second = resolve_exact_barrier_drop_pair(inventory, second_selection);
   if (!second.pair)
     return {
         .group = std::nullopt, .issue = Issue::SecondPairRejected, .member_issue = second.issue};
