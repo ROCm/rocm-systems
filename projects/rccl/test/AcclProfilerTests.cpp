@@ -15,6 +15,9 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <atomic>
+#include <chrono>
 #include <unistd.h>
 
 #include <gtest/gtest.h>
@@ -26,6 +29,10 @@
 extern "C" {
   int test_acclDatatypeSize(const char* dt);
   double test_acclBusBwFactor(const char* func, int nRanks);
+  int  test_acclRefCount(void* ctx);
+  void test_acclMarkFinalized(void* coll);
+  void test_acclFreeColl(void* ctx, void* coll);
+  void test_acclWriteDummyRecord(void* ctx);
 }
 extern ncclResult_t acclPluginInit(void**, uint64_t, int*, const char*,
                                    int, int, int, ncclDebugLogger_t);
@@ -1078,6 +1085,116 @@ TEST(AcclProfilerLifecycle, ProxyOpOutlivingFinalizeKeepsContextAlive) {
                 << "ProxyOp stop after finalize must not touch a freed context";
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_ctxref_op"}}
+    );
+}
+
+
+// =========================================================================
+// acclPluginFinalize's drain must not release a slot whose owner has already
+// claimed it.
+//
+// A collective whose owner has passed acclShouldFinalize (finalized = 1) but
+// has not yet reached acclFreeColl still has collPoolUsed set. The drain then
+// destroys its mutex and decrements refCount for a slot the owner is going to
+// release itself. The owner's own decrement drives the count below zero, and
+// because the drain's extra decrement already took it to zero,
+// acclPluginFinalize frees the context out from under the still-running owner.
+//
+// The check is a crash test by construction: sizeof(acclCommContext) is ~4.4 MB,
+// far above glibc's mmap threshold, so free() unmaps the region and the owner's
+// next touch is a hard SIGSEGV. The process-isolated runner reports the dead
+// child as a failure, so no sanitizer build is required.
+// =========================================================================
+TEST(AcclProfilerLifecycle, DrainLeavesSlotsAnOwnerAlreadyClaimed) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.DrainLeavesSlotsAnOwnerAlreadyClaimed",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x4B01, &mask, "drain_claim",
+                                     1, 1, 0, nullptr), 0);
+            EXPECT_EQ(test_acclRefCount(ctx), 1) << "init holds one reference";
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/1, /*count=*/1024);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+            ASSERT_NE(coll, nullptr);
+            EXPECT_EQ(test_acclRefCount(ctx), 2) << "the live collective holds one";
+
+            // The owner has passed acclShouldFinalize and is between
+            // acclFinalizeCollective and acclFreeColl. Its slot is still in use.
+            test_acclMarkFinalized(coll);
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            // The drain must not have released a slot the owner still owns, so
+            // the owner's reference must survive finalize. On the unpatched
+            // plugin this reads a freed context.
+            EXPECT_EQ(test_acclRefCount(ctx), 1)
+                << "drain released a slot whose owner had already claimed it";
+
+            // Now the owner finishes. This is its normal next step, and it must
+            // not drive the count negative or touch a freed context.
+            test_acclFreeColl(ctx, coll);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_drain_claim"}}
+    );
+}
+
+// =========================================================================
+// acclPluginFinalize must not close the output file out from under a writer.
+//
+// It fcloses ctx->outputFile with no outputMutex held, while acclWriteRecord
+// checks that pointer under the mutex and then fprintf()s. A writer that
+// passed the check writes into a closed FILE*.
+//
+// There is no deterministic single-threaded shape for this one, so it is a
+// stress test: a writer loop against a concurrent finalize. It fails by killing
+// the child (glibc faults inside vfprintf on the freed FILE*), which the
+// isolated runner reports. Note ASan cannot see this directly because glibc is
+// uninstrumented.
+// =========================================================================
+TEST(AcclProfilerLifecycle, FinalizeDoesNotCloseOutputUnderAWriter) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.FinalizeDoesNotCloseOutputUnderAWriter",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x4A01, &mask, "fclose_race",
+                                     1, 1, 0, nullptr), 0);
+
+            // Model the only real writer: acclFinalizeAndFree running on the
+            // proxy thread. Its collective holds a context reference and it has
+            // already claimed the slot, so the context cannot be freed under it.
+            // Without that reference the test would be measuring the context
+            // free, not the file close.
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/1, /*count=*/1024);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+            ASSERT_NE(coll, nullptr);
+            test_acclMarkFinalized(coll);
+
+            std::atomic<bool> go{false};
+            std::atomic<long> writes{0};
+            std::thread writer([&]() {
+                while (!go.load(std::memory_order_acquire)) { }
+                for (int i = 0; i < 200000; i++) {
+                    test_acclWriteDummyRecord(ctx);
+                    writes.fetch_add(1, std::memory_order_relaxed);
+                }
+            });
+            go.store(true, std::memory_order_release);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            EXPECT_EQ(acclPluginFinalize(ctx), 0);
+            writer.join();
+            EXPECT_GT(writes.load(), 0) << "writer never ran; test proved nothing";
+
+            // The owner releases last, which is what frees the context.
+            test_acclFreeColl(ctx, coll);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_fclose_race"}}
     );
 }
 
