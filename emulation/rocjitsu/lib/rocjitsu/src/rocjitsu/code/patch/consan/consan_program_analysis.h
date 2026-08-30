@@ -8,6 +8,7 @@
 
 #include "rocjitsu/code/patch/consan/consan.h"
 
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -16,6 +17,22 @@ namespace rocjitsu {
 
 class AmdGpuCodeObject;
 class Decoder;
+
+/// Parse, decode, and semantically analyze one code object into its immutable
+/// program inventory. The caller retains the parser because later lowering
+/// stages may continue against the same image; validation callers may discard
+/// it immediately after projecting the independently derived proof facts.
+///
+/// This is the complete analysis boundary. It deliberately stops before fault
+/// or perturbation selection, observation planning, resource solving, and
+/// mutation. `result` receives diagnostics and the published inventory;
+/// `perturbation` receives only analysis candidates.
+[[nodiscard]] bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes,
+                                                    const ConSanOptions &options,
+                                                    std::unique_ptr<AmdGpuCodeObject> &code_object,
+                                                    ProgramInventoryBuilder &inventory_builder,
+                                                    ConSanPerturbationPlanningState &perturbation,
+                                                    ConSanTransformArtifacts &result);
 
 void decode_consan_kernel_inventory(std::span<const uint8_t> code_object_bytes, Decoder &decoder,
                                     rj_code_arch_t arch, ConSanKernelInfo &kernel,
