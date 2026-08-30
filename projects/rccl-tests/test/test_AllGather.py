@@ -153,20 +153,22 @@ _ag_skip = pytest.mark.skipif(
 # as the shell harness does. A genuine wrong-element data check is never retried.
 _CONN_GATE_RE = re.compile(r"LSA signal connectivity gate failed|unhandled system error", re.I)
 _DATA_FAIL_RE = re.compile(r"Wrong|mismatch|check.*fail|Out of bounds values\s*:\s*[1-9]", re.I)
+_AG_DEVTIME_TIER_RE = re.compile(r"#\[ag-devtime\].*tier\s+(LSA|SDMA)", re.I)
 
 
-def _launch_ag_gin_sdma(request, total_bytes, dtype):
+def _launch_ag_gin_sdma(request, total_bytes, dtype, force_sdma_tier=True, device_timing=False):
     """Launch all_gather_perf -D 3 once at a fixed TOTAL gathered size (per-rank
-    chunk = total/NP), forcing the GIN-SDMA tier via threshold=0. Returns
-    (returncode, stdout). A timeout (hang) fails the test immediately."""
+    chunk = total/NP). When force_sdma_tier is True (default), threshold=0 pins the
+    SDMA tier for every size. Returns (returncode, stdout). A timeout (hang) fails
+    the test immediately."""
     size = str(int(total_bytes))
-    # Essentials to bring up the GIN-SDMA put path and force the SDMA (large)
-    # tier for every size. Deployment-specific env comes from RCCL_TESTS_AG_XENV.
     gin_env = []
-    for kv in ["NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=5",
-               "NCCL_GIN_ANVIL_SDMA_THRESHOLD=0",
-               "NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER=0"] + AG_XENV:
+    for kv in ["NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=5"] + AG_XENV:
         gin_env += ["-x", kv]
+    if force_sdma_tier:
+        for kv in ["NCCL_GIN_ANVIL_SDMA_THRESHOLD=0",
+                   "NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER=0"]:
+            gin_env += ["-x", kv]
 
     hostfile = request.config.getoption("--hostfile")
     launch = [AG_LAUNCHER, "-np", str(AG_NP)] + AG_MPI_OPTS
@@ -187,6 +189,8 @@ def _launch_ag_gin_sdma(request, total_bytes, dtype):
         "-w", "1",
         "-n", "3",
     ]
+    if device_timing:
+        args += ["-B", "1"]  # augment stdout with #[ag-devtime] tier line
     cmd = " ".join(shlex.quote(a) for a in args)
     print(cmd)
     # New session so a hang can be killed as a whole process group -- otherwise a
@@ -211,7 +215,7 @@ def _launch_ag_gin_sdma(request, total_bytes, dtype):
     return proc.returncode, out
 
 
-def _run_ag_gin_sdma(request, total_bytes, dtype):
+def _run_ag_gin_sdma(request, total_bytes, dtype, **launch_kw):
     """Launch with connectivity-gate retry. Returns (returncode, stdout) of the
     first run that either succeeds, hits a genuine data-check failure, or fails
     for a non-connectivity-gate reason; otherwise the last attempt."""
@@ -220,7 +224,7 @@ def _run_ag_gin_sdma(request, total_bytes, dtype):
 
     rc, out = 1, ""
     for attempt in range(1, max(1, AG_CONN_RETRIES) + 1):
-        rc, out = _launch_ag_gin_sdma(request, total_bytes, dtype)
+        rc, out = _launch_ag_gin_sdma(request, total_bytes, dtype, **launch_kw)
         if rc == 0:
             return rc, out
         # A real wrong-element mismatch must fail now, never retried.
@@ -248,12 +252,31 @@ def test_AllGatherGinSdmaLargeSegmented(request, per_rank_mib, dtype):
         per_rank_mib, dtype)
 
 
-# (item 3) 2 GiB-total completion guard. At 8 ranks this is 256 MiB/rank -- a
-# multi-segment (2 x 128 MiB) put; a reintroduced hang trips the timeout.
+# (item 3) 4 GiB-total completion guard. At 8 ranks this is 512 MiB/rank -- distinct
+# from the 256 MiB/rank parametrized case above; a reintroduced hang trips the timeout.
 @_ag_skip
-def test_AllGatherGinSdma2GiBTotalHangGuard(request):
-    rc, _ = _run_ag_gin_sdma(request, 2 * GiB, "int32")
-    assert rc == 0, "AllGather 2 GiB-total data check failed (nonzero exit)"
+def test_AllGatherGinSdma4GiBTotalHangGuard(request):
+    rc, _ = _run_ag_gin_sdma(request, 4 * GiB, "int32")
+    assert rc == 0, "AllGather 4 GiB-total data check failed (nonzero exit)"
+
+
+# Default-threshold tier crossover (compiled 32 KiB/rank): 16 KiB/rank -> LSA,
+# 64 KiB/rank -> SDMA. Does not force threshold=0 so the compiled default applies.
+@_ag_skip
+def test_AllGatherGinSdmaTierCrossover(request):
+    cases = [
+        (AG_NP * 16 * 1024, "LSA"),   # 16 KiB/rank <= 32 KiB default
+        (AG_NP * 64 * 1024, "SDMA"),  # 64 KiB/rank > 32 KiB default
+    ]
+    for total, expect_tier in cases:
+        rc, out = _run_ag_gin_sdma(
+            request, total, "int8", force_sdma_tier=False, device_timing=True)
+        assert rc == 0, "AllGather tier crossover failed at total={} bytes".format(total)
+        m = _AG_DEVTIME_TIER_RE.search(out or "")
+        assert m, "missing #[ag-devtime] tier line at total={} bytes".format(total)
+        assert m.group(1).upper() == expect_tier, (
+            "expected tier {} at total={} bytes, got {} in:\n{}".format(
+                expect_tier, total, m.group(1), (out or "")[-1500:]))
 
 
 @pytest.mark.parametrize("nthreads, nprocs, ngpus_mpi, byte_range, op, step_factor, datatype",
