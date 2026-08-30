@@ -86,8 +86,13 @@ using Reason = ConSanAtomicClassifierReason;
 
 ConSanAtomicLoweringClassification
 classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arch, bool is_rmw) {
-  if (!consan_is_capability_arch(arch))
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (!target)
     return reject(Reason::TargetUnavailable);
+  const bool gfx9_cdna_encoding = consan_uses_gfx9_cdna_encoding(arch);
+  const bool gfx12_encoding = target->encoding_family == ConSanEncodingFamily::Gfx12;
+  const bool gfx12_cdna_execution =
+      gfx12_encoding && target->architecture_family == ConSanArchitectureFamily::Cdna;
 
   const bool compare_exchange = is_rmw && consan_atomic_is_compare_exchange(site);
   const uint16_t value_register_count = static_cast<uint16_t>((site.width_bits + 31u) / 32u);
@@ -109,7 +114,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   };
 
   if (site.mnemonic.starts_with("ds_")) {
-    if (arch != ROCJITSU_CODE_ARCH_CDNA5)
+    if (!gfx12_cdna_execution)
       return reject(Reason::UnsupportedAddressSource);
     if (site.width_bits != 32u)
       return reject(Reason::InvalidAccessWidth);
@@ -146,7 +151,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
     constexpr uint32_t kNullScalarOffset = 0x7cu;
     constexpr int32_t kSigned24Min = -(1 << 23);
     constexpr int32_t kSigned24Max = (1 << 23) - 1;
-    if (arch != ROCJITSU_CODE_ARCH_CDNA5)
+    if (!gfx12_cdna_execution)
       return reject(Reason::UnsupportedAddressSource);
     if (site.width_bits == 0u || site.width_bits > 128u)
       return reject(Reason::InvalidAccessWidth);
@@ -193,23 +198,20 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   if (site.width_bits != 32u && site.width_bits != 64u)
     return reject(Reason::InvalidAccessWidth);
 
-  const bool cdna_encoding = consan_uses_gfx9_cdna_encoding(arch);
-  const bool rdna3_encoding = arch == ROCJITSU_CODE_ARCH_RDNA3;
-  const bool two_word_encoding = cdna_encoding || rdna3_encoding;
+  const bool two_word_encoding = !gfx12_encoding;
   const uint32_t expected_size = two_word_encoding ? 2u * sizeof(uint32_t) : 3u * sizeof(uint32_t);
   if (site.size != expected_size || !site.raw_saddr || !site.raw_vaddr || !site.raw_ioffset)
     return reject(Reason::UnsupportedEncoding);
-  if ((arch == ROCJITSU_CODE_ARCH_CDNA5 && !site.raw_scale_offset) ||
-      (arch != ROCJITSU_CODE_ARCH_CDNA5 && site.raw_scale_offset.value_or(false)))
+  if ((gfx12_cdna_execution && !site.raw_scale_offset) ||
+      (!gfx12_cdna_execution && site.raw_scale_offset.value_or(false)))
     return reject(Reason::UnsupportedEncoding);
   if (!site.addr_vgpr || !site.data_vgpr || *site.raw_vaddr != *site.addr_vgpr)
     return reject(Reason::MissingOperands);
 
   constexpr uint32_t kCdnaGlobalNoSaddr = 0x7fu;
   constexpr uint32_t kGfx11NoSaddr = 0x7cu;
-  const uint32_t vector_only_saddr = rdna3_encoding  ? kGfx11NoSaddr
-                                     : cdna_encoding ? (global ? kCdnaGlobalNoSaddr : 0u)
-                                                     : 0x7cu;
+  const uint32_t vector_only_saddr =
+      gfx9_cdna_encoding ? (global ? kCdnaGlobalNoSaddr : 0u) : kGfx11NoSaddr;
   constexpr int32_t kSigned13Min = -(1 << 12);
   constexpr int32_t kSigned13Max = (1 << 12) - 1;
   constexpr int32_t kSigned24Min = -(1 << 23);
@@ -231,7 +233,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
                 : ConSanAtomicLoweringFormKind::GlobalVectorAddress;
     address_register_count = 2u;
   } else {
-    if (!consan_uses_gfx12_encoding(arch) && flat)
+    if (!gfx12_encoding && flat)
       return reject(Reason::UnsupportedEncoding);
     if (!site.saddr_sgpr || *site.raw_saddr != *site.saddr_sgpr)
       return reject(Reason::UnsupportedInputWidth);
@@ -263,7 +265,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
       .signed_byte_offset = *site.raw_ioffset,
       .scope = site.raw_scope.value_or(0u),
       .scale_vector_offset = site.raw_scale_offset.value_or(false),
-      .sign_extend_vector_offset = cdna_encoding && arch != ROCJITSU_CODE_ARCH_CDNA5,
+      .sign_extend_vector_offset = gfx9_cdna_encoding,
       .is_rmw = is_rmw,
       .compare_exchange = compare_exchange,
       .returns_old_value = site.returns_old_value.value_or(false),

@@ -65,6 +65,12 @@ foreach(_source IN LISTS _semantic_policy_sources)
     )
 endforeach()
 
+_consan_assert_no_match(
+    "${_consan_dir}/consan_atomic_classifier.cpp"
+    "ROCJITSU_CODE_ARCH_"
+    "atomic classification must consume the typed target profile"
+)
+
 # Mode implementations may select typed target capabilities, but may not see
 # product constants, generated ISA declarations, or member namespaces.
 file(
