@@ -158,6 +158,29 @@ def extract_counters_and_variables(
     return hw, builtin_vars
 
 
+def extract_metric_formula_hw_counters(text: str, gpu_series: str) -> set[str]:
+    """Return HW counters referenced by *text* metric formulas only.
+
+    Unlike :func:`extract_counters_and_variables`, does not merge
+    :data:`SUPPORTED_DENOM`. Used when deciding which PMCs must share one
+    perfmon bucket for a single metric (metric-aware coalescing).
+    """
+    hw, variables = parse_counters_text(text)
+    variables.update(AMMOLITE_VAR_RE.findall(text))
+    build_in_vars = get_build_in_vars(gpu_series)
+    seen: set[str] = set()
+    while variables - seen:
+        new_vars: set[str] = set()
+        for var in variables - seen:
+            seen.add(var)
+            if var in build_in_vars:
+                hw_v, var_v = parse_counters_text(build_in_vars[var])
+                hw.update(hw_v)
+                new_vars.update(var_v)
+        variables.update(new_vars)
+    return hw
+
+
 def counter_to_block(counter: str) -> str:
     """Map a counter name to its IP block, applying :data:`BLOCK_REMAP`."""
     if counter.startswith("GC_CANE_"):

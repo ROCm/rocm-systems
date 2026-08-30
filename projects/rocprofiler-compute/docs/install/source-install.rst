@@ -74,23 +74,13 @@ follows.
       - Specifies the path to the ROCprofiler-SDK CMake package configuration directory used to build the rocprofiler-compute counter collection tool.
         This directory should contain ``rocprofiler-sdkConfig.cmake`` (for example, ``<rocprofiler-sdk-install-path>/lib/cmake/rocprofiler-sdk``).
 
-    * - ``STANDALONEBINARY_EXTRACT_DIR``
-      - Specifies an optional temporary path to be used for extraction by the ROCm Compute Profiler standalone binary.
-
-    * - ``STANDALONEBINARY``
-      - Should be ON to enable the build of a standalone binary for ROCm Compute Profiler.
-
     * - ``TEST_FROM_INSTALL``
       - Should be ON to enable testing from the installation location without dependency on the source directory.
-
-    * - ``SKIP_NATIVE_TOOL_BUILD``
-      - Should be ON to skip building the native profiling tool. When enabled, the native tool will be compiled at runtime instead of build time. This is useful when ROCprofiler-SDK is not available during build time.
 
     * - ``ENABLE_SANITIZER``
       - Builds with sanitizer instrumentation for development.
         One of ``OFF`` (default), ``ASAN``, ``HOST_ASAN``, ``TSAN``, or ``UBSAN``. See
-        :ref:`sanitizer builds <source-install-sanitizers>`. Cannot be combined with
-        ``STANDALONEBINARY=ON``.
+        :ref:`sanitizer builds <source-install-sanitizers>`.
 
 .. _core-install-steps:
 
@@ -196,8 +186,6 @@ AddressSanitizer.
               -DENABLE_SANITIZER=ASAN ..
 
 .. note::
-
-   ``ENABLE_SANITIZER`` cannot be combined with ``STANDALONEBINARY=ON``.
 
    For device-side instrumentation with ``ASAN`` or ``TSAN`` on ``gfx942`` or
    ``gfx950``, pass ``-DGPU_TARGETS=...`` so the targets are rewritten to

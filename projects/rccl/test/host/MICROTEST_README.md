@@ -30,6 +30,25 @@ This document is the standing record of:
 If you just want to *run* it, jump to [Running and rebuilding](#running-and-rebuilding).
 
 
+## Units under test
+
+Each production `.cc` gets its own binary so that `#include`-ing it cannot
+collide with another unit's file-scope state (`static` globals, `std::once_flag`,
+translation-unit anonymous namespaces):
+
+- **`rccl-UnitTestsMicro`** — `p2p.cc` (via `P2P_CC_PATH`); suites `P2pMicrotest.*`,
+  `FreshRegistration*`.
+- **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**) — `init.cc` (via `INIT_CC_PATH`);
+  suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
+  `HIP_HOST_UNCACHED_MEMORY`/`HIP_UNCACHED_MEMORY` to cover the alternate host-alloc
+  arm. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/`utils.cc` ("oracle"
+  TUs) from the hipify tree rather than stubbing them; `--gc-sections` drops the
+  deep-path symbols the tests never reach. See `test_categories_micro_init.yaml`.
+
+Everything below (seams, fakes, coverage) applies to both; the concrete examples
+use `p2p.cc`.
+
+
 ## Why a separate test binary
 
 The existing `rccl-UnitTests` binary links against `librccl.so`. That
@@ -86,17 +105,22 @@ build-time path macro (e.g. `P2P_CC_PATH` → the hipified `p2p.cc`). To add a
 test:
 
 1. **Pick the unit.** If it lives in a `.cc` that is already `#include`d
-   (currently `p2p.cc`), skip to step 3. Otherwise add a new path macro in
-   `CMakeLists.txt` (mirror `P2P_CC_PATH`) pointing at the hipified copy, and
-   `#include` it from the test TU *after* the fakes/macro shims are in scope.
+   (currently `p2p.cc` or `init.cc`), skip to step 3. Otherwise add a new path
+   macro in `CMakeLists.txt` (mirror `P2P_CC_PATH`/`INIT_CC_PATH`) pointing at the
+   hipified copy, and `#include` it from the test TU *after* the fakes/macro shims
+   are in scope. A new unit generally warrants its own binary (see
+   [Units under test](#units-under-test)) so its file-scope state stays isolated.
 2. **Register the source.** Add the test `.cc` to the target's source list in
-   `test/host/CMakeLists.txt` — both the in-build `TEST_MICRO_SOURCE_FILES`
-   and the standalone `rccl-UnitTestsMicro` list. If you add a new gtest suite,
-   add its pattern to `test/test_categories_micro.yaml` so CTest runs it.
+   `test/host/CMakeLists.txt` — both the in-build source list and the standalone
+   list for that target. If you add a new gtest suite, add its pattern to the
+   target's `test/test_categories_micro*.yaml` so CTest runs it.
 3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls
    `ResetP2pFakes()` so hooks do not leak between tests. Install per-test
-   behaviour by overwriting a `std::function` hook (see the `ScopedHook`
-   helper in `p2p-test.cc`) rather than editing a fake's default.
+   behaviour by overwriting a `std::function` hook rather than editing a fake's
+   default. Prefer the `ScopedHook` helper in `ScopedHook.h` (see
+   [Installing per-test behaviour with `ScopedHook`](#installing-per-test-behaviour-with-scopedhook)),
+   which installs the hook, counts calls, and restores the previous behaviour
+   automatically on scope exit.
 4. **Only exercise faked seams.** Every external symbol the `#include`d `.cc`
    reaches must be satisfied by `fakes/`: a missing symbol surfaces as a
    link error, a wrongly
@@ -147,6 +171,109 @@ is:
 This is preferable to e.g. `LD_PRELOAD` or `--wrap` because the seam
 is explicit, greppable, and visible in code review.
 
+### Factor each default into a named `Default*` function
+
+A hook's default behaviour is needed in two places — the hook's
+initialiser and the fakes file's `Reset*()` function. Do **not** write
+the lambda body out twice; the two copies drift. Instead put each
+default in a named free function prefixed `Default` and reference it
+from both. `fakes/hip_fakes.cc` and `fakes/rma_fakes.cc` follow this
+pattern:
+
+```cpp
+// One definition of the behaviour...
+static ncclResult_t DefaultRmaDestroyDesc(struct ncclComm*,
+                                          struct ncclRmaProxyDesc** desc) {
+    *desc = nullptr;
+    return ncclSuccess;
+}
+
+// ...used for the hook's initial value...
+std::function<ncclResult_t(struct ncclComm*, struct ncclRmaProxyDesc**)>
+    g_rmaDestroyDesc = DefaultRmaDestroyDesc;
+
+// ...and reused by the reset, no duplicated body.
+void ResetRmaFakes() {
+    g_rmaDestroyDesc = DefaultRmaDestroyDesc;
+}
+```
+
+### Installing per-test behaviour with `ScopedHook`
+
+Once a seam is a `std::function` hook, install per-test behaviour with the
+`ScopedHook` RAII helper (`test/host/ScopedHook.h`) instead of assigning the
+global directly and remembering to reset it. `ScopedHook` does three things:
+
+1. installs the test's behaviour on construction,
+2. counts calls automatically via its `.calls` member, and
+3. restores the previous behaviour in its destructor — so a hook can't leak
+   into the next test even if you forget the fixture's `TearDown` reset.
+
+Class template argument deduction picks up the signature from the hook
+variable, so call sites don't spell it out:
+
+```cpp
+#include "ScopedHook.h"
+
+TEST_F(P2pMicrotest, IpcRegisterBuffer_UsesBaseAddr) {
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pb, std::size_t* ps, hipDeviceptr_t) {
+            if (pb) *pb = /* canned base addr */;
+            if (ps) *ps = /* canned size */;
+            return hipSuccess;
+        });
+
+    // ... call the unit under test ...
+
+    EXPECT_EQ(memGet.calls, 1);
+    // memGet's destructor restores g_hipMemGetAddressRange here.
+}
+```
+
+`ScopedHook` is intentionally non-copyable and non-movable (the installed
+lambda captures `this` to bump the counter), so declare it as a local; C++17
+guaranteed copy elision lets helper factories still return it by value.
+
+### Naming a reusable seam behaviour with a lambda factory
+
+When the *same* seam behaviour is needed by many tests — e.g. "make this param
+return non-zero so control reaches branch X" — don't copy-paste the lambda into
+every test. Wrap it in a small **lambda-factory helper**: a function that
+*returns a lambda* whose signature matches the seam. This keeps the "what value
+must this seam return, and why" knowledge in one named, commented place.
+
+```cpp
+// Returns a hook lambda that reports the buffer as legacy-IPC-capable, so the
+// `else if (legacyIpcCap)` arm of ipcRegisterBuffer is reachable.
+auto ForceLegacyIpcCapable()
+{
+    return [](void* data, hipPointer_attribute attribute,
+              hipDeviceptr_t) -> hipError_t {
+        if (data && attribute == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE)
+            *static_cast<int*>(data) = 1;
+        return hipSuccess;
+    };
+}
+```
+
+Return a **plain lambda, not a pre-wrapped `ScopedHook`**, so call sites stay
+free to compose the recipe into whichever installation form they need:
+
+```cpp
+// As a ScopedHook local (CTAD deduces the signature from the hook variable):
+ScopedHook pointerAttr(g_hipPointerGetAttribute, ForceLegacyIpcCapable());
+
+// Or into an optional/emplace form owned by a shared fixture:
+pointerAttr.emplace(g_hipPointerGetAttribute, ForceLegacyIpcCapable());
+```
+
+Name the factory after the *state it forces* (`ForceLegacyIpcCapable`,
+`ForceLegacyCudaRegister`), not after the seam it drives — the point is that a
+test reads as "force this precondition, then call the unit under test". Where a
+single branch depends on HIP version (only one arm is live per build, but the
+test can't know which at authoring time), pair the factories that drive each
+version's arm so the test passes regardless of the toolchain — see
+`ForceLegacyCudaRegister` + `ForceLegacyIpcCapable` in `p2p-test.cc`.
 
 ## Dealing with each kind of dependency
 
@@ -299,7 +426,9 @@ cd projects/rccl/test/host
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DRCCL_BUILD_DIR=/path/to/projects/rccl/build/release
 cmake --build build -j"$(nproc)"
-./build/rccl-UnitTestsMicro     # 30/30 p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
+./build/rccl-UnitTestsMicro          # p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
+./build/rccl-UnitTestsMicroInit      # init.cc tests
+./build/rccl-UnitTestsMicroInit-uncached
 ./build/rccl-HostUnitTests
 ```
 

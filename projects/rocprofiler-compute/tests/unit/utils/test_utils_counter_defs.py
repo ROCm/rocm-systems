@@ -64,3 +64,23 @@ class TestExtractCountersAndVariables:
         # ammolite__cu_per_gpu is a sys var, not a built-in var
         _, vars_ = extract_counters_and_variables("ammolite__cu_per_gpu", "MI200")
         assert "cu_per_gpu" not in vars_
+
+
+class TestExtractMetricFormulaHwCounters:
+    """Tests for utils.utils_counter_defs.extract_metric_formula_hw_counters."""
+
+    def test_omits_supported_denom_spill(self):
+        from utils.utils_counter_defs import (
+            extract_counters_and_variables,
+            extract_metric_formula_hw_counters,
+        )
+
+        text = (
+            "avg: 100 * SUM(GRBM_CP_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)\n"
+            "min: 100 * MIN(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)\n"
+        )
+        full, _ = extract_counters_and_variables(text, "MI200")
+        formula = extract_metric_formula_hw_counters(text, "MI200")
+        assert formula == {"GRBM_CP_BUSY_sum", "GRBM_GUI_ACTIVE_sum"}
+        assert "SQ_WAVES" in full
+        assert "SQ_WAVES" not in formula

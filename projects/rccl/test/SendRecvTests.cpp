@@ -83,6 +83,85 @@ namespace RcclUnitTesting
     globfree(&g);
   }
 
+  // Force a lightweight NET loopback for P2P+SHM-disabled tests. IB-CAST on this path treats
+  // each GPU as its own node and ibv_create_qp fails (EAGAIN); GIN still opens IB QPs even when
+  // NCCL_NET=Socket. Socket + GIN off still goes through net.cc staging-buffer allocation.
+  struct NetLoopbackEnvBackup {
+    bool        hadNet           = false;
+    bool        hadGinEnable     = false;
+    bool        hadMinNchannels  = false;
+    bool        hadMaxNchannels  = false;
+    std::string net;
+    std::string ginEnable;
+    std::string minNchannels;
+    std::string maxNchannels;
+  };
+
+  static NetLoopbackEnvBackup netLoopbackEnvBackup;
+
+  static void PinNetLoopbackTransport()
+  {
+    if (const char* v = ::getenv("NCCL_NET")) {
+      netLoopbackEnvBackup.hadNet = true;
+      netLoopbackEnvBackup.net    = v;
+    } else {
+      netLoopbackEnvBackup.hadNet = false;
+      netLoopbackEnvBackup.net.clear();
+    }
+
+    if (const char* v = ::getenv("NCCL_GIN_ENABLE")) {
+      netLoopbackEnvBackup.hadGinEnable = true;
+      netLoopbackEnvBackup.ginEnable    = v;
+    } else {
+      netLoopbackEnvBackup.hadGinEnable = false;
+      netLoopbackEnvBackup.ginEnable.clear();
+    }
+
+    if (const char* v = ::getenv("NCCL_MIN_NCHANNELS")) {
+      netLoopbackEnvBackup.hadMinNchannels = true;
+      netLoopbackEnvBackup.minNchannels    = v;
+    } else {
+      netLoopbackEnvBackup.hadMinNchannels = false;
+      netLoopbackEnvBackup.minNchannels.clear();
+    }
+
+    if (const char* v = ::getenv("NCCL_MAX_NCHANNELS")) {
+      netLoopbackEnvBackup.hadMaxNchannels = true;
+      netLoopbackEnvBackup.maxNchannels    = v;
+    } else {
+      netLoopbackEnvBackup.hadMaxNchannels = false;
+      netLoopbackEnvBackup.maxNchannels.clear();
+    }
+
+    ::setenv("NCCL_NET", "Socket", 1);
+    ::setenv("NCCL_GIN_ENABLE", "0", 1);
+    ::setenv("NCCL_MIN_NCHANNELS", "1", 1);
+    ::setenv("NCCL_MAX_NCHANNELS", "2", 1);
+  }
+
+  static void UnpinNetLoopbackTransport()
+  {
+    if (netLoopbackEnvBackup.hadMaxNchannels)
+      ::setenv("NCCL_MAX_NCHANNELS", netLoopbackEnvBackup.maxNchannels.c_str(), 1);
+    else
+      ::unsetenv("NCCL_MAX_NCHANNELS");
+
+    if (netLoopbackEnvBackup.hadMinNchannels)
+      ::setenv("NCCL_MIN_NCHANNELS", netLoopbackEnvBackup.minNchannels.c_str(), 1);
+    else
+      ::unsetenv("NCCL_MIN_NCHANNELS");
+
+    if (netLoopbackEnvBackup.hadGinEnable)
+      ::setenv("NCCL_GIN_ENABLE", netLoopbackEnvBackup.ginEnable.c_str(), 1);
+    else
+      ::unsetenv("NCCL_GIN_ENABLE");
+
+    if (netLoopbackEnvBackup.hadNet)
+      ::setenv("NCCL_NET", netLoopbackEnvBackup.net.c_str(), 1);
+    else
+      ::unsetenv("NCCL_NET");
+  }
+
   TEST(SendRecv, SinglePairs)
   {
     TestBed testBed;
@@ -271,6 +350,7 @@ namespace RcclUnitTesting
                         {1,2}, //two group, second group sendrecv to self, has 2 coll
                         testBed.GetNumStreamsPerGroup(1,2),
                         2);
+      if (::testing::Test::HasFatalFailure()) return;
 
       for (int dataIdx = 0; dataIdx < dataTypes.size() && isCorrect; ++dataIdx)
       for (int numIdx = 0; numIdx < numElements.size() && isCorrect; ++numIdx)
@@ -446,6 +526,7 @@ namespace RcclUnitTesting
   {
     setenv("NCCL_P2P_DISABLE", "1", 1);              // disable P2P/IPC so send/recv does not use it
     setenv("NCCL_SHM_DISABLE", "1", 1);              // disable SHM so send/recv falls through to NET
+    PinNetLoopbackTransport();
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // disabled case
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL threshold governs when the LL128 path is off
@@ -466,6 +547,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_P2P_LL_THRESHOLD");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
+    UnpinNetLoopbackTransport();
     unsetenv("NCCL_SHM_DISABLE");
     unsetenv("NCCL_P2P_DISABLE");
   }
@@ -480,6 +562,7 @@ namespace RcclUnitTesting
   {
     setenv("NCCL_P2P_DISABLE", "1", 1);              // disable P2P/IPC so send/recv does not use it
     setenv("NCCL_SHM_DISABLE", "1", 1);              // disable SHM so send/recv falls through to NET
+    PinNetLoopbackTransport();
     setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enabled case
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
@@ -509,6 +592,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
     unsetenv("RCCL_LL128_FORCE_ENABLE");
+    UnpinNetLoopbackTransport();
     unsetenv("NCCL_SHM_DISABLE");
     unsetenv("NCCL_P2P_DISABLE");
   }
@@ -596,6 +680,7 @@ namespace RcclUnitTesting
   {
     setenv("NCCL_P2P_DISABLE", "1", 1);              // disable P2P/IPC so send/recv does not use it
     setenv("NCCL_SHM_DISABLE", "1", 1);              // disable SHM so send/recv falls through to NET
+    PinNetLoopbackTransport();
     setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enable the LL128 staging buffer
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
@@ -623,6 +708,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
     unsetenv("RCCL_LL128_FORCE_ENABLE");
+    UnpinNetLoopbackTransport();
     unsetenv("NCCL_SHM_DISABLE");
     unsetenv("NCCL_P2P_DISABLE");
   }

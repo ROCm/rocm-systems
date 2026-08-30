@@ -17,6 +17,7 @@ test_categories:
       - "ParameterApiTests.*"
       - "EnqueueTests.*"
       - "ProxyTests.*"
+      - "PatAGAlgorithmTests.*"
       - "Rcclwrap.*"
       - "TransportTest.*"
       - "ArgCheckTest.*"
@@ -35,6 +36,7 @@ test_categories:
       - "NetDevsPolicyP2pNetTests.*"
       - "TopoTest.*"
       - "TopoNicFusionTests.*"
+      - "P2pMaxNchannels.*"
     exclude_windows:
       - "*"
     labels:

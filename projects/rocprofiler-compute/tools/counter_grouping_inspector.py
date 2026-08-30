@@ -48,11 +48,17 @@ from rocprof_compute_soc.soc_base import (  # noqa: E402
 )
 from utils.logger import console_error  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
+from utils.utils_common import canonical_config_arch  # noqa: E402
 from utils.utils_counter_defs import (  # noqa: E402
     get_build_in_vars,
     parse_counters_text,
 )
 from vendored import yaml  # noqa: E402
+
+
+def analysis_config_arch(gpu_arch: str) -> str:
+    """Analysis YAML subdirectory for *gpu_arch* (e.g. gfx1151 -> gfx115x)."""
+    return canonical_config_arch(gpu_arch) or gpu_arch
 
 
 def _counter_display_ip_prefix(counter: str) -> str:
@@ -99,10 +105,10 @@ def parse_counters(config_text: str, gpu_series: str) -> set[str]:
 
 def iter_yaml_metrics(
     config_dir: Path,
-    arch: str,
+    gpu_arch: str,
 ) -> Iterator[tuple[str, Any, int, str, str]]:
     """Iterate over all metrics in analysis YAML files."""
-    config_root = config_dir / arch
+    config_root = config_dir / analysis_config_arch(gpu_arch)
     if not config_root.is_dir():
         return
 
@@ -333,6 +339,7 @@ def generate_bucket_metrics(
     total_metrics = 0
 
     gpu_series = mi_gpu_specs.get_gpu_series(arch)
+    config_arch = analysis_config_arch(arch)
     for file_id, panel_id, metric_idx, metric_name, metric_yaml in iter_yaml_metrics(
         config_dir, arch
     ):
@@ -376,7 +383,7 @@ def generate_bucket_metrics(
         "least one formula counter is in this plan's collection and those "
         "counters map to 2+ buckets in the layout above.\n"
     )
-    buf.write(f"Config tree: {config_dir / arch}\n")
+    buf.write(f"Config tree: {config_dir / config_arch}\n")
 
     if multi_rows:
         # Calculate column widths
@@ -603,9 +610,12 @@ Examples:
     if not perfmon_config:
         console_error(f"Error: No perfmon config found for architecture: {arch}")
 
-    config_arch = config_dir / arch
-    if not config_arch.is_dir():
-        console_error(f"Error: Architecture config directory not found: {config_arch}")
+    config_arch_name = analysis_config_arch(arch)
+    config_arch_path = config_dir / config_arch_name
+    if not config_arch_path.is_dir():
+        console_error(
+            f"Error: Architecture config directory not found: {config_arch_path}"
+        )
 
     with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmpdir:
         workload_root = Path(tmpdir)

@@ -22,6 +22,7 @@ template <typename Isa> class AmdgpuIsaOperand;
 
 namespace amdgpu {
 class ComputeUnitCore;
+class InstructionCache;
 class L1ScalarCache;
 class L1VectorCache;
 class L2Cache;
@@ -39,6 +40,7 @@ class InstructionComputeUnitView {
 public:
   explicit InstructionComputeUnitView(ComputeUnitCore &cu) : cu_(&cu) {}
 
+  InstructionCache &instruction_cache();
   L1ScalarCache &l1_scalar();
   L1VectorCache &l1_vector();
   L2Cache *l2() const;

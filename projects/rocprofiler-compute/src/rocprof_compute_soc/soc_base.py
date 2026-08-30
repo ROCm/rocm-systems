@@ -40,6 +40,7 @@ from utils.utils_common import (
 from utils.utils_counter_defs import (
     counter_to_block,
     extract_counters_and_variables,
+    extract_metric_formula_hw_counters,
 )
 from vendored import yaml
 
@@ -351,12 +352,15 @@ class OmniSoC_Base:
         """Metric ids whose PMCs get tier-0 priority in the greedy coalescing pass.
 
         Loaded from profiling_counter_grouping_policy.yaml for the current arch.
+        gfx1150–gfx1153 share the ``gfx115x`` policy block (see
+        :func:`utils.utils_common.canonical_config_arch`).
         Returns an empty tuple when the arch has no grouping policy.
         """
         arch = self.__arch
         if not arch:
             return ()
-        return _load_same_bucket_priority_policy_map().get(arch, ())
+        policy_arch = canonical_config_arch(arch) or arch
+        return _load_same_bucket_priority_policy_map().get(policy_arch, ())
 
     def _metric_aware_coalesce_pass(
         self,
@@ -401,8 +405,9 @@ class OmniSoC_Base:
             metric_name,
             metric_yaml,
         ) in self._iter_arch_analysis_yaml_metrics():
-            hw, _ = extract_counters_and_variables(metric_yaml, self._mspec.gpu_series)
-            hw = self._expand_tcc_template_counters(hw)
+            hw = self._expand_tcc_template_counters(
+                extract_metric_formula_hw_counters(metric_yaml, self._mspec.gpu_series)
+            )
             counters = frozenset(hw & remaining)
             if not counters:
                 continue
@@ -422,8 +427,6 @@ class OmniSoC_Base:
                 continue
             placed = False
             for bucket_idx, bucket in enumerate(files):
-                if _is_accum_counter(bucket.name):
-                    continue
                 trial = _trial_counter_file_with_extra(bucket, cfg, need_sorted)
                 if trial is not None:
                     files[bucket_idx] = trial
@@ -553,7 +556,7 @@ class OmniSoC_Base:
         accu_file_count = 0
         work = sorted(list(counters))
         for counter in work.copy():
-            if _is_accum_counter(counter) and not is_tcc_channel_counter(counter):
+            if counter.endswith("_ACCUM") and not is_tcc_channel_counter(counter):
                 work.remove(counter)
                 output_files.append(CounterFile(counter, self.__perfmon_config))
                 output_files[-1].add(counter)
@@ -878,11 +881,6 @@ class CounterFile:
 
     def reserve(self, counter: str, n: int) -> bool:
         return self.blocks[counter_to_block(counter)].reserve(n)
-
-
-def _is_accum_counter(counter: str) -> bool:
-    """Return whether a counter requires a paired level-event slot."""
-    return counter.endswith("_ACCUM") or counter.endswith("_ACCUM_sum")
 
 
 def _trial_counter_file_with_extra(

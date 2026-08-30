@@ -685,6 +685,38 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
     assert set(exprs["metric_id"]) == {"7.1.0"}
 
 
+LONG_FORM_PMC_PERF = (
+    "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
+    "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
+    "Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value\n"
+    "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_WAVES,4\n"
+)
+
+
+def test_calc_pmc_df_data_reads_the_compressed_merge(tmp_path):
+    """The merged intermediate is discovered through the compression interface."""
+    common.write_pmc_perf(tmp_path, LONG_FORM_PMC_PERF)
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._runs = {str(tmp_path): MagicMock()}
+    analyzer._profiling_config = {}
+
+    pmc_df_per_workload = analyzer.calc_pmc_df_data()
+
+    assert pmc_df_per_workload[str(tmp_path)]["SQ_WAVES"].tolist() == [4]
+
+
+def test_calc_pmc_df_data_skips_workload_without_a_merge(tmp_path):
+    """A workload with no merged intermediate is skipped, not read as plain CSV."""
+    (tmp_path / f"{schema.PMC_PERF_FILE_PREFIX}.csv").write_text(LONG_FORM_PMC_PERF)
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._runs = {str(tmp_path): MagicMock()}
+    analyzer._profiling_config = {}
+
+    assert analyzer.calc_pmc_df_data() == {}
+
+
 # =============================================================================
 # Noise-clamp warning + summary tests
 # =============================================================================
