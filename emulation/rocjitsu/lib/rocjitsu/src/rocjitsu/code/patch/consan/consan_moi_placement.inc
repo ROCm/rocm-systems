@@ -617,13 +617,11 @@ apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
     if (!assignment)
       continue;
     ++assigned_owner_count;
-    if (selected &&
-        (selected->owner_vgpr != assignment->owner_vgpr ||
-         selected->epoch_vgpr != assignment->epoch_vgpr ||
-         selected->workgroup_key_vgpr != assignment->workgroup_key_vgpr ||
-         selected->record_replay_workgroup_vgprs != assignment->record_replay_workgroup_vgprs ||
-         selected->dispatch_id_vgpr != assignment->dispatch_id_vgpr)) {
-      return false;
+    if (selected) {
+      ConSanMoiPersistentVgprAssignment comparable = *assignment;
+      comparable.descriptor_file_offset = selected->descriptor_file_offset;
+      if (comparable != *selected)
+        return false;
     }
     selected = assignment;
   }
