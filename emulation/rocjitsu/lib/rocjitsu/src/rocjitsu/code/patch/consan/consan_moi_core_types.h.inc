@@ -274,14 +274,6 @@ plan_consan_moi_atomic_address(const ConSanAtomicLoweringForm &form, uint16_t sc
                                ConSanRegisterAllocationSource resource_source,
                                bool allow_post_guest_spill_operand_overlap = false);
 
-/// Compatibility entry point for focused decoder/planner tests. Production
-/// lowering carries the normalized form and uses the overload above.
-[[nodiscard]] ConSanMoiAtomicAddressPlan
-plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vgpr,
-                               uint16_t scratch_vgpr_count,
-                               ConSanRegisterAllocationSource resource_source, rj_code_arch_t arch,
-                               bool allow_post_guest_spill_operand_overlap = false);
-
 /// Emit the consumer-neutral VGLOBAL materialization. The returned sequence
 /// snapshots and restores both VCC and SCC; @p vcc_save_sgpr names a pair and
 /// @p scc_save_sgpr names one scalar register. A supported FLAT alias produces

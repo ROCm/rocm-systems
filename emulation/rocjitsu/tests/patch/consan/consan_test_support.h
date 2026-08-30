@@ -51,6 +51,78 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 
+/// Focused classifier/planner tests start from decoded sites so they can
+/// exercise rejection mapping as well as normalized address planning.
+/// Production lowering carries ConSanAtomicLoweringForm across that boundary.
+[[nodiscard]] inline ConSanMoiAtomicAddressPlan
+plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vgpr,
+                               uint16_t scratch_vgpr_count,
+                               ConSanRegisterAllocationSource resource_source, rj_code_arch_t arch,
+                               bool allow_post_guest_spill_operand_overlap = false) {
+  const auto rejected = [&](ConSanMoiAtomicAddressSupport support) {
+    ConSanMoiAtomicAddressPlan result;
+    result.kind = ConSanMoiAtomicAddressKind::Unsupported;
+    result.support = support;
+    result.scratch_vgpr = scratch_vgpr;
+    result.scratch_vgpr_count = scratch_vgpr_count;
+    result.resource_source = resource_source;
+    return result;
+  };
+  const auto map_reason = [](ConSanAtomicClassifierReason reason) {
+    switch (reason) {
+    case ConSanAtomicClassifierReason::None:
+      return ConSanMoiAtomicAddressSupport::Supported;
+    case ConSanAtomicClassifierReason::UnsupportedAddressSource:
+      return ConSanMoiAtomicAddressSupport::UnsupportedAddressKind;
+    case ConSanAtomicClassifierReason::InvalidAccessWidth:
+      return ConSanMoiAtomicAddressSupport::UnsupportedWidth;
+    case ConSanAtomicClassifierReason::UnsupportedEncoding:
+      return ConSanMoiAtomicAddressSupport::UnsupportedEncoding;
+    case ConSanAtomicClassifierReason::NonzeroImmediateOffset:
+    case ConSanAtomicClassifierReason::UnsupportedOffset:
+      return ConSanMoiAtomicAddressSupport::UnsupportedOffset;
+    case ConSanAtomicClassifierReason::MissingOperands:
+    case ConSanAtomicClassifierReason::CompareExchangeOutcomeUnavailable:
+      return ConSanMoiAtomicAddressSupport::MissingAddressOperands;
+    case ConSanAtomicClassifierReason::UnsupportedInputWidth:
+      return ConSanMoiAtomicAddressSupport::UnsupportedInputWidth;
+    case ConSanAtomicClassifierReason::ResultAddressAlias:
+      return ConSanMoiAtomicAddressSupport::ResultAddressAlias;
+    case ConSanAtomicClassifierReason::MissingOrderingMetadata:
+    case ConSanAtomicClassifierReason::UnsupportedScope:
+      return ConSanMoiAtomicAddressSupport::UnsupportedScope;
+    case ConSanAtomicClassifierReason::TargetUnavailable:
+      return ConSanMoiAtomicAddressSupport::UnsupportedArchitecture;
+    case ConSanAtomicClassifierReason::Count:
+      break;
+    }
+    return ConSanMoiAtomicAddressSupport::UnsupportedEncoding;
+  };
+
+  const bool ordinary =
+      site.mnemonic.find("atomic") == std::string::npos && !site.mnemonic.starts_with("ds_");
+  const ConSanAtomicLoweringClassification classification =
+      classify_consan_atomic_lowering(site, arch, !ordinary);
+  if (!classification.normalized()) {
+    if (classification.normalization_reason ==
+            ConSanAtomicClassifierReason::UnsupportedAddressSource &&
+        ((site.mnemonic.starts_with("ds_") && arch != ROCJITSU_CODE_ARCH_CDNA5) ||
+         (site.mnemonic.starts_with("buffer_") && arch != ROCJITSU_CODE_ARCH_CDNA5))) {
+      return rejected(ConSanMoiAtomicAddressSupport::UnsupportedArchitecture);
+    }
+    return rejected(map_reason(classification.normalization_reason));
+  }
+  if (!classification.address_available())
+    return rejected(map_reason(classification.address_reason));
+  if (classification.causal_ordering_reason ==
+          ConSanAtomicClassifierReason::MissingOrderingMetadata ||
+      classification.causal_ordering_reason == ConSanAtomicClassifierReason::UnsupportedScope) {
+    return rejected(map_reason(classification.causal_ordering_reason));
+  }
+  return plan_consan_moi_atomic_address(*classification.form, scratch_vgpr, scratch_vgpr_count,
+                                        resource_source, allow_post_guest_spill_operand_overlap);
+}
+
 /// Explicitly test-only access to compatibility-lowering working state. No
 /// production header declares this symbol.
 [[nodiscard]] ConSanTransformArtifacts complete_consan_lowering(
