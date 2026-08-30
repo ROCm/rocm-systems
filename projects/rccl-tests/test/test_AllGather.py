@@ -22,13 +22,12 @@
 import os
 import re
 import shlex
-import signal
-import subprocess
-import time
 import itertools
 import math
 
 import pytest
+
+from conftest import launch_mpi_shell, run_with_conn_gate_retry
 
 ngpus = 0
 if os.environ.get('ROCR_VISIBLE_DEVICES') is not None:
@@ -147,13 +146,7 @@ _ag_skip = pytest.mark.skipif(
            "a GIN-SDMA-capable (e.g. 8x MI355X) node to enable.")
 
 
-# Intermittent gfx950 cuMem-VMM connectivity-gate abort (not a data error): the
-# LSA signal connectivity self-test fails to map a peer aperture and the run
-# aborts before any collective work. Re-launched after a short settle, exactly
-# as the shell harness does. A genuine wrong-element data check is never retried.
-_CONN_GATE_RE = re.compile(r"LSA signal connectivity gate failed|unhandled system error", re.I)
-_DATA_FAIL_RE = re.compile(
-    r"#wrong\s*=\s*[1-9]|mismatch|check.*fail|Out of bounds values\s*:\s*[1-9]", re.I)
+# Intermittent gfx950 cuMem-VMM connectivity-gate abort: see conftest.py helpers.
 _AG_DEVTIME_TIER_RE = re.compile(r"#\[ag-devtime\].*tier\s+(LSA|SDMA)", re.I)
 
 
@@ -193,27 +186,11 @@ def _launch_ag_gin_sdma(request, total_bytes, dtype, force_sdma_tier=True, devic
     if device_timing:
         args += ["-B", "1"]  # augment stdout with #[ag-devtime] tier line
     cmd = " ".join(shlex.quote(a) for a in args)
-    print(cmd)
-    # New session so a hang can be killed as a whole process group -- otherwise a
-    # wedged launcher leaves orphaned ranks pinning the GPUs (and exhausting SDMA
-    # queues for later tests).
-    proc = subprocess.Popen(cmd, shell=True, universal_newlines=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            start_new_session=True)
-    try:
-        out, _ = proc.communicate(timeout=AG_TIMEOUT_S)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        out, _ = proc.communicate()
-        pytest.fail(
-            "AllGather GIN-SDMA HANG: no completion within {}s at total={} bytes "
-            "({} MiB/rank), dtype={}. Output tail:\n{}".format(
-                AG_TIMEOUT_S, size, total_bytes // AG_NP // MiB, dtype, (out or "")[-2000:]))
-    print(out)
-    return proc.returncode, out
+    hang_msg = (
+        "AllGather GIN-SDMA HANG: no completion within {}s at total={} bytes "
+        "({} MiB/rank), dtype={}. Output tail:\n{{}}".format(
+            AG_TIMEOUT_S, size, total_bytes // AG_NP // MiB, dtype))
+    return launch_mpi_shell(cmd, AG_TIMEOUT_S, hang_msg)
 
 
 def _run_ag_gin_sdma(request, total_bytes, dtype, **launch_kw):
@@ -223,22 +200,9 @@ def _run_ag_gin_sdma(request, total_bytes, dtype, **launch_kw):
     if AG_NP < 2:
         pytest.skip("need >= 2 ranks/GPUs for GIN-SDMA AllGather")
 
-    rc, out = 1, ""
-    for attempt in range(1, max(1, AG_CONN_RETRIES) + 1):
-        rc, out = _launch_ag_gin_sdma(request, total_bytes, dtype, **launch_kw)
-        if rc == 0:
-            return rc, out
-        # A real wrong-element mismatch must fail now, never retried.
-        if _DATA_FAIL_RE.search(out or ""):
-            return rc, out
-        # Intermittent gfx950 cuMem-VMM connectivity-gate abort: settle + retry.
-        if _CONN_GATE_RE.search(out or "") and attempt < AG_CONN_RETRIES:
-            print("=== connectivity-gate abort (attempt {}/{}); re-launching after settle ===".format(
-                attempt, AG_CONN_RETRIES))
-            time.sleep(3)
-            continue
-        return rc, out
-    return rc, out
+    return run_with_conn_gate_retry(
+        lambda: _launch_ag_gin_sdma(request, total_bytes, dtype, **launch_kw),
+        AG_CONN_RETRIES)
 
 
 # (items 1 + 2) Multi-segment loop and the 1 GiB single-copy boundary. per_rank

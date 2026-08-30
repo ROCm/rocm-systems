@@ -72,14 +72,23 @@ fi
 cd "${RCCL_TESTS_DIR}"
 
 export PATH="${MPI_HOME}/bin:${ROCM_PATH}/bin:${PATH}"
-export LD_LIBRARY_PATH="${RCCL_LIB_DIR}:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
+if [[ -n "${ROCSHMEM_INSTALL_DIR:-}" ]]; then
+  export LD_LIBRARY_PATH="${RCCL_LIB_DIR}:${ROCSHMEM_INSTALL_DIR}/lib:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
+else
+  export LD_LIBRARY_PATH="${RCCL_LIB_DIR}:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
+fi
 
-PERF_DIR=build
+if [[ -n "${RCCL_TESTS_BIN_DIR:-}" ]]; then
+  PERF_DIR="${RCCL_TESTS_BIN_DIR}"
+else
+  PERF_DIR="${RCCL_TESTS_DIR}/build"
+fi
 if [[ ! -d "${PERF_DIR}" || ! -f "${PERF_DIR}/all_reduce_perf" ]]; then
   echo "rccl-tests perf binaries not found under ${PERF_DIR}"
-  ls -la
+  ls -la "${PERF_DIR}" 2>/dev/null || ls -la "${RCCL_TESTS_DIR}"
   exit 1
 fi
+echo "==> rccl-tests perf dir = ${PERF_DIR}"
 
 PARSER="${script_dir}/lib/parse_device_api_config.py"
 [[ -f "${CONFIG}" ]] || { echo "ERROR: test-matrix config not found: ${CONFIG}" >&2; exit 1; }
@@ -136,7 +145,7 @@ run_bench() {
   set +e
   timeout --kill-after="${BENCH_KILL_AFTER}" "${BENCH_TIMEOUT}" \
     mpirun -np "${NP}" ${env_flags} -x LD_LIBRARY_PATH \
-      "./${PERF_DIR}/${bin}" ${BENCH_ARGS} ${extra_args}
+      "${PERF_DIR}/${bin}" ${BENCH_ARGS} ${extra_args}
   local rc=$?
   set -e
   if [[ ${rc} -ne 0 ]]; then
@@ -175,7 +184,7 @@ echo "All device-api benchmark runs succeeded."
 # Requires ENABLE_DEVICE_API=ON rccl-tests build (alltoall_perf with -B flags).
 run_devtime_smoke() {
   local pytest_dir="${RCCL_TESTS_DIR}/test"
-  local perf_bin="${RCCL_TESTS_DIR}/${PERF_DIR}/alltoall_perf"
+  local perf_bin="${PERF_DIR}/alltoall_perf"
   if [[ ! -x "${perf_bin}" ]]; then
     echo "WARN: skip devtime smoke: ${perf_bin} not found"
     return 0

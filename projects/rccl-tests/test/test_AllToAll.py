@@ -56,10 +56,11 @@
 
 import os
 import shlex
-import signal
 import subprocess
 
 import pytest
+
+from conftest import launch_mpi_shell, run_with_conn_gate_retry
 
 MiB = 1024 * 1024
 GiB = 1024 * MiB
@@ -93,6 +94,7 @@ CTAS = os.environ.get("RCCL_TESTS_A2A_CTAS", "16")
 # Generous per-call timeout; a real hang spins forever, so a finite cap is what
 # converts item (3) into a detectable failure. Scaled up for the multi-GiB case.
 TIMEOUT_S = int(os.environ.get("RCCL_TESTS_A2A_TIMEOUT_S", "900"))
+CONN_RETRIES = int(os.environ.get("RCCL_TESTS_A2A_CONN_RETRIES", "3"))
 
 # Extra launcher options (e.g. "--allow-run-as-root -mca pml ob1 ...") and any
 # deployment-specific env the GIN-SDMA backend needs beyond the essentials below
@@ -108,15 +110,9 @@ pytestmark = pytest.mark.skipif(
            "a GIN-SDMA-capable (e.g. 8x MI355X) node to enable.")
 
 
-def _run_a2a(request, total_bytes, dtype):
-    """Run one all-to-all at a fixed total (per-rank) size, forcing the GIN-SDMA
-    tier. Returns (returncode, stdout). A timeout (hang) fails the test."""
-    if NP < 2:
-        pytest.skip("need >= 2 ranks/GPUs for AllToAll")
-
+def _launch_a2a(request, total_bytes, dtype):
+    """Launch alltoall_perf -D 3 once at a fixed total (per-rank) size."""
     size = str(int(total_bytes))
-    # Essentials to exercise the GIN-SDMA put path; force the SDMA (large) tier
-    # for every size. Deployment-specific env comes from RCCL_TESTS_A2A_XENV.
     gin_env = []
     for kv in ["NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=6",
                "NCCL_GIN_ANVIL_SDMA_THRESHOLD=0",
@@ -137,32 +133,25 @@ def _run_a2a(request, total_bytes, dtype):
         "-D", "3",
         "-V", CTAS,
         "-d", dtype,
-        "-c", "1",       # data check: nonzero exit on any wrong element
+        "-c", "1",
         "-w", "1",
         "-n", "3",
     ]
     cmd = " ".join(shlex.quote(a) for a in args)
-    print(cmd)
-    # Run in a new session so a hang can be killed as a whole process group --
-    # otherwise a wedged launcher leaves orphaned ranks pinning the GPUs (and
-    # exhausting SDMA queues for later tests).
-    proc = subprocess.Popen(cmd, shell=True, universal_newlines=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            start_new_session=True)
-    try:
-        out, _ = proc.communicate(timeout=TIMEOUT_S)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        out, _ = proc.communicate()
-        pytest.fail(
-            "AllToAll GIN-SDMA HANG: no completion within {}s at total={} bytes "
-            "({} MiB/peer), dtype={}. Output tail:\n{}".format(
-                TIMEOUT_S, size, total_bytes // NP // MiB, dtype, (out or "")[-2000:]))
-    print(out)
-    return proc.returncode, out
+    hang_msg = (
+        "AllToAll GIN-SDMA HANG: no completion within {}s at total={} bytes "
+        "({} MiB/peer), dtype={}. Output tail:\n{{}}".format(
+            TIMEOUT_S, size, total_bytes // NP // MiB, dtype))
+    return launch_mpi_shell(cmd, TIMEOUT_S, hang_msg)
+
+
+def _run_a2a(request, total_bytes, dtype):
+    """Run one all-to-all with connectivity-gate retry on gfx950 VMM aborts."""
+    if NP < 2:
+        pytest.skip("need >= 2 ranks/GPUs for AllToAll")
+    return run_with_conn_gate_retry(
+        lambda: _launch_a2a(request, total_bytes, dtype),
+        CONN_RETRIES)
 
 
 # (item 1 + 2) Multi-segment loop and the 1 GiB truncation boundary. per_peer is

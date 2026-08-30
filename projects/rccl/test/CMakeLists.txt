@@ -532,7 +532,8 @@ if(BUILD_TESTS)
     # direct-LSA gather addressing (the pointer-arithmetic core of
     # AllGatherLsaDirect) on real hardware, self-contained (no librccl / GIN
     # comm). Requires a visible GPU at run time (skips cleanly otherwise), so it
-    # carries a "gpu" label alongside "unit".
+    # carries the "gpu" label only so `ctest -L unit` on CPU nodes does not
+    # count an all-skip binary as a passing unit test.
     add_executable(rccl-UnitTestsGinSdmaAllGatherGpu gin/gin_sdma_allgather_gpu_test.cpp)
     set_source_files_properties(gin/gin_sdma_allgather_gpu_test.cpp PROPERTIES LANGUAGE CXX)
     target_include_directories(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE
@@ -555,7 +556,10 @@ if(BUILD_TESTS)
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
       CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
     add_test(NAME rccl-UnitTestsGinSdmaAllGatherGpu COMMAND rccl-UnitTestsGinSdmaAllGatherGpu)
-    set_tests_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES LABELS "unit;gpu")
+    set_tests_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES LABELS "gpu")
+  else()
+    message(STATUS "Skipping GIN-SDMA AllGather policy/gpu unit tests: "
+                   "${_gin_sdma_ag_hdr_dir}/gin_sdma_allgather_policy.h not found")
   endif()
 
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into

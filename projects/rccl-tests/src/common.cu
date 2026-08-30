@@ -2636,8 +2636,10 @@ testResult_t run() {
 
   fflush(stdout);
 
-  // RCCL: Call NCCL's refactored header function with RCCL-specific parameters
-  writeResultHeader(report_cputime, report_timestamps, enable_out_of_place, enable_in_place, output_algo_proto_channels);
+  // RCCL: Call NCCL's refactored header function with RCCL-specific parameters.
+  // For deviceImpl != 0 (-D 3), the metric column always reports device/graph
+  // time (deltaSec), so do not label the header "cputime" when only device kernels run.
+  writeResultHeader(report_cputime && deviceImpl == 0, report_timestamps, enable_out_of_place, enable_in_place, output_algo_proto_channels);
 
   // RCCL: Initialize Reporter for file output (-Z flag)
   Reporter reporter(rccl_output_file, rccl_output_format);
