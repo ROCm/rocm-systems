@@ -25,6 +25,7 @@
 
 extern "C" {
 #include <libvfio-user.h>
+#include <pci_caps/msix.h>
 }
 
 #include <poll.h>
@@ -32,9 +33,11 @@ extern "C" {
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cstring>
 #include <format>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -42,10 +45,22 @@ namespace rocjitsu {
 namespace {
 
 /// @brief Longest a serving thread waits for socket activity before rechecking
-/// its stop token. Nothing observes this delay except shutdown latency.
+/// its stop token.
+///
+/// @details Two things wait on it, not one: shutdown, and any work handed over
+/// by ask_serving_thread(), which the serving thread only picks up when this
+/// poll returns. Raising it lengthens both, so a request that looks instant
+/// from the caller can sit here for the whole interval.
 constexpr int kPollTimeoutMs = 100;
 
-/// @brief Most scatter-gather entries one guest memory transfer may span.
+/// @brief Bytes one message-table entry occupies: two address words, a data
+/// word and a vector-control word.
+constexpr uint64_t kMsixEntryBytes = 16;
+
+/// @brief Bytes one word of the pending-bit array occupies; the array is words
+/// of 64 bits rather than a byte per vector.
+constexpr uint64_t kMsixPendingWordBytes = 8;
+
 /// @brief Scatter-gather entries a transfer is attempted with before the
 /// library is asked how many it actually needs.
 constexpr std::size_t kInitialSgEntries = 8;
@@ -194,6 +209,30 @@ void VfioDeviceHost::detach() {
   device_.set_dma_engine(nullptr);
 }
 
+bool VfioDeviceHost::ask_serving_thread(std::function<void()> work) {
+  // Refused here rather than thrown there. An empty target reaches the serving
+  // thread as a bad_function_call, which is reported as work that failed --
+  // indistinguishable from work that ran and could not be done -- and it
+  // occupies the single slot while doing nothing at all.
+  if (!work) {
+    return false;
+  }
+  const std::lock_guard lock(asked_mutex_);
+  // One slot, and a refusal rather than a drop. The serving thread can be parked
+  // reading from a stalled client while requests keep arriving, so something has
+  // to give; telling the caller lets it decide, where silently discarding the
+  // 65th of a backlog only looked like it had a policy.
+  // Outstanding means accepted but not yet FINISHED, not merely not yet picked
+  // up. Freeing the slot the moment the serving thread takes the work would let
+  // a second request be accepted while the first is still running, which is not
+  // the one-at-a-time contract this promises.
+  if (asked_.has_value() || asked_running_) {
+    return false;
+  }
+  asked_ = std::move(work);
+  return true;
+}
+
 bool VfioDeviceHost::build() {
   const std::lock_guard lock(vfu_mutex_);
 
@@ -219,6 +258,7 @@ bool VfioDeviceHost::build() {
   // library, so the byte is written directly or the guest sees revision zero.
   vfu_pci_get_config_space(ctx_)->hdr.rid = id.revision;
 
+  std::array<uint64_t, 6> bar_sizes{};
   for (const simdojo::BarSpec &bar : device_.bars()) {
     const BarRegionPlan plan = plan_bar_region(bar);
     single_client_ = single_client_ || !plan.mmap_areas.empty();
@@ -255,19 +295,69 @@ bool VfioDeviceHost::build() {
           std::format("vfu: cannot set up BAR{}: {}", bar.index, std::strerror(errno)));
       return false;
     }
+    bar_sizes[static_cast<std::size_t>(bar.index)] = bar.size;
   }
 
   const InterruptPlan interrupts = plan_interrupts(device_.interrupts());
   if (!interrupts.supported) {
-    util::Logger::warn(std::format(
-        "vfu: device {} asked for an interrupt kind this transport does not implement yet",
-        device_.name()));
+    util::Logger::warn(
+        std::format("vfu: device {} declared interrupts this transport cannot advertise, either a "
+                    "kind it does not implement or one described in terms a capability cannot "
+                    "express",
+                    device_.name()));
     return false;
   }
+  // Both of these must happen before the device is realized: the interrupt
+  // count decides whether a pin is published in configuration space, and a
+  // capability added afterwards is not published at all. Neither call reports
+  // being too late, so the ordering is the only thing enforcing it.
   if (interrupts.intx_count != 0 &&
       vfu_setup_device_nr_irqs(ctx_, VFU_DEV_INTX_IRQ, interrupts.intx_count) < 0) {
     util::Logger::warn(std::format("vfu: cannot set up interrupts: {}", std::strerror(errno)));
     return false;
+  }
+  if (interrupts.msix_count != 0) {
+    // The capability names a BAR and two offsets, and nothing downstream
+    // checks that they describe somewhere the device actually answers. A
+    // client refuses a table that runs past its BAR or that overlaps the
+    // pending bits, but it does so at the guest's realization and in terms of
+    // the guest's own layout, naming none of the offsets involved.
+    //
+    // plan_interrupts has already bounded the index, so this indexes safely.
+    const auto table_bar = static_cast<std::size_t>(interrupts.table_bar);
+    const uint64_t table_end = interrupts.table_offset + interrupts.msix_count * kMsixEntryBytes;
+    // The pending bits are an array of 64-bit words, not a byte per vector.
+    const uint64_t pending_end =
+        interrupts.pending_offset + ((interrupts.msix_count + 63) / 64) * kMsixPendingWordBytes;
+    const bool overlap =
+        interrupts.table_offset < pending_end && interrupts.pending_offset < table_end;
+    if (table_end > bar_sizes[table_bar] || pending_end > bar_sizes[table_bar] || overlap) {
+      util::Logger::warn(std::format(
+          "vfu: device {} puts its message table at {:#x}..{:#x} and its pending bits at "
+          "{:#x}..{:#x} of BAR{}, which is {} bytes",
+          device_.name(), interrupts.table_offset, table_end, interrupts.pending_offset,
+          pending_end, interrupts.table_bar, bar_sizes[table_bar]));
+      return false;
+    }
+    if (vfu_setup_device_nr_irqs(ctx_, VFU_DEV_MSIX_IRQ, interrupts.msix_count) < 0) {
+      util::Logger::warn(
+          std::format("vfu: cannot set up message interrupts: {}", std::strerror(errno)));
+      return false;
+    }
+    // The table and pending-bit offsets are recorded in units of eight bytes,
+    // and the low three bits of each field carry the BAR index instead.
+    msixcap msix{};
+    msix.hdr.id = PCI_CAP_ID_MSIX;
+    msix.mxc.ts = static_cast<uint16_t>(interrupts.msix_count - 1);
+    msix.mtab.tbir = static_cast<uint32_t>(interrupts.table_bar);
+    msix.mtab.to = static_cast<uint32_t>(interrupts.table_offset >> 3);
+    msix.mpba.pbir = static_cast<uint32_t>(interrupts.table_bar);
+    msix.mpba.pbao = static_cast<uint32_t>(interrupts.pending_offset >> 3);
+    if (vfu_pci_add_capability(ctx_, 0, 0, &msix) < 0) {
+      util::Logger::warn(
+          std::format("vfu: cannot publish the message table: {}", std::strerror(errno)));
+      return false;
+    }
   }
 
   if (vfu_setup_device_dma(ctx_, LIBVFIO_USER_MAX_DMA_REGIONS, &dma_register_trampoline,
@@ -305,6 +395,33 @@ VfioDeviceHost::ServeResult VfioDeviceHost::run(std::stop_token stop_token) {
     if (poll_fd < 0) {
       util::Logger::warn("vfu: transport has no descriptor to wait on");
       return ServeResult::Failed;
+    }
+
+    // Anything another thread handed over runs here, on the serving thread and
+    // between protocol messages, so it sees the device the way a callback does.
+    // Drained before the wait rather than after it, which bounds the delay at
+    // one poll timeout rather than leaving a request until the next message.
+    std::optional<std::function<void()>> asked;
+    {
+      const std::lock_guard asked_lock(asked_mutex_);
+      asked.swap(asked_);
+      asked_running_ = asked.has_value();
+    }
+    if (asked.has_value()) {
+      const std::lock_guard lock(vfu_mutex_);
+      // The request runs on this thread, so an exception escaping it would take
+      // the process down rather than the request. Report and carry on serving:
+      // a faulty request is not a reason to drop the guest's device.
+      try {
+        (*asked)();
+      } catch (const std::exception &error) {
+        util::Logger::warn(
+            std::format("vfu: a request for the serving thread failed: {}", error.what()));
+      } catch (...) {
+        util::Logger::warn("vfu: a request for the serving thread failed");
+      }
+      const std::lock_guard asked_lock(asked_mutex_);
+      asked_running_ = false;
     }
 
     pollfd wait = {.fd = poll_fd, .events = POLLIN, .revents = 0};
@@ -462,8 +579,17 @@ bool VfioDeviceHost::read(uint64_t guest_phys, std::span<std::byte> dst) {
 
 bool VfioDeviceHost::write(uint64_t guest_phys, std::span<const std::byte> src) {
   // vfu_sgl_write does not modify the source, but takes it as void*.
-  return copy_guest_memory(guest_phys, const_cast<std::byte *>(src.data()), src.size(),
-                           /*to_guest=*/true);
+  if (!copy_guest_memory(guest_phys, const_cast<std::byte *>(src.data()), src.size(),
+                         /*to_guest=*/true)) {
+    return false;
+  }
+  // DmaEngine::write() promises the bytes are guest-visible on return, and that
+  // writes become visible in the order they return. The copy above lands in
+  // memory the guest has mapped, so completeness is already met; this is what
+  // makes the ORDER hold, and it belongs here because this is the code that owns
+  // the transfer -- a caller cannot order stores on its behalf.
+  std::atomic_thread_fence(std::memory_order_release);
+  return true;
 }
 
 bool VfioDeviceHost::copy_guest_memory(uint64_t guest_phys, void *data, std::size_t length,

@@ -22,15 +22,16 @@ namespace rocjitsu {
 
 /// @brief Register index, in dwords, as the driver's accessors take it.
 enum class MmioRegister : uint32_t {
-  MmIndex = 0x0,               ///< Selects a register for the indirect window.
-  MmData = 0x1,                ///< Reads or writes the register selected above.
-  MmIndexHi = 0x6,             ///< High half of the indirect window selector.
-  DriverScratch0 = 0x94,       ///< Low half of a discovery table offset, when nonzero.
-  DriverScratch1 = 0x95,       ///< High half of that offset.
-  DriverScratch2 = 0x96,       ///< Discovery table size; zero means it is not published here.
-  RccConfigMemsize = 0xde3,    ///< Video memory size in megabytes.
-  Mp0SmnC2pmsg33 = 0x16061,    ///< Firmware init status; bit 31 means initialization finished.
-  IpDiscoveryVersion = 0x16a00 ///< Version of the discovery table format.
+  MmIndex = 0x0,                ///< Selects a register for the indirect window.
+  MmData = 0x1,                 ///< Reads or writes the register selected above.
+  MmIndexHi = 0x6,              ///< High half of the indirect window selector.
+  DriverScratch0 = 0x94,        ///< Low half of a discovery table offset, when nonzero.
+  DriverScratch1 = 0x95,        ///< High half of that offset.
+  DriverScratch2 = 0x96,        ///< Discovery table size; zero means it is not published here.
+  RccConfigMemsize = 0xde3,     ///< Video memory size in megabytes.
+  RccIovFuncIdentifier = 0xde5, ///< Whether this function is virtualized.
+  Mp0SmnC2pmsg33 = 0x16061,     ///< Firmware init status; bit 31 means initialization finished.
+  IpDiscoveryVersion = 0x16a00  ///< Version of the discovery table format.
 };
 
 /// @brief Byte offset of a register within the aperture.

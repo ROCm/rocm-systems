@@ -550,6 +550,7 @@ add_executable(
     pci/bar_access_trace_test.cpp
     pci/gpu_pci_device_test.cpp
     pci/scratch_pci_device_test.cpp
+    pci/ip_discovery_test.cpp
 )
 if(HAS_DEVICE_KERNELS)
     target_sources(
@@ -2687,6 +2688,24 @@ if(RJ_ENABLE_HIP_TESTS)
             "HipMemcpyTest.RoundTripInt"
             CONFIG ${RJ_HIP_TEST_CONFIG}
         )
+        # The only case that reaches ROCr's pinned SDMA blit, and both sanitizers
+        # report that library rather than rocjitsu. TSan sees the blit's memcpy
+        # into the ring but not the release store on the doorbell that follows
+        # it, because libhsa-runtime64 is not instrumented; the pair it forms
+        # with the acquire load in poll_doorbells() is therefore invisible and
+        # the fetch looks unordered. LSan reports ~5.7 KB allocated entirely
+        # within that library, in frames with no rocjitsu caller. Neither is
+        # actionable from here, and suppressing them by file would hide the same
+        # classes of defect on the paths rocjitsu does own. The case still runs
+        # in regular builds, in both local and daemon mode, which is where it
+        # regression-tests the transfer.
+        if(NOT RJ_ENABLE_ASAN AND NOT RJ_ENABLE_TSAN)
+            rj_add_hip_test_case(
+                hip_memcpy_test
+                "HipMemcpyTest.RoundTripPageableAbovePinThreshold"
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+            )
+        endif()
         rj_add_hip_test_case(
             hip_memcpy_test
             "HipMemcpyTest.DeviceToDevice"
@@ -2793,6 +2812,16 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.InterposerDup2OverPrimaryInvalidatesRemote
             DaemonTest.InterposerProcMapsNamesRemoteKfdMarker
         )
+        # Excluded under sanitizers for the reason given at its local-mode
+        # registration above: the pinned SDMA path this case exists to cover
+        # runs inside an uninstrumented libhsa-runtime64, and both the race TSan
+        # infers and the allocations LSan finds are that library's.
+        if(NOT RJ_ENABLE_ASAN AND NOT RJ_ENABLE_TSAN)
+            list(
+                APPEND RJ_DAEMON_TESTS
+                DaemonTest.HipMemcpyRoundTripPageableAbovePinThreshold
+            )
+        endif()
         foreach(TC IN LISTS RJ_DAEMON_TESTS)
             rj_add_test(
                 NAME ${TC}

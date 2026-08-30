@@ -4,6 +4,23 @@
 #include "rocjitsu/vmm/vfu/bus_plan.h"
 
 namespace rocjitsu {
+namespace {
+
+/// @brief Highest BAR index a PCI function has.
+constexpr int kMaxBarIndex = 5;
+
+/// @brief Vectors a message-interrupt capability can describe, its table-size
+/// field being eleven bits holding one less than the count.
+constexpr uint32_t kMaxMsixVectors = 2048;
+
+/// @brief Units the table and pending-bit offsets are recorded in, the low
+/// three bits of each field carrying the BAR index instead.
+constexpr uint64_t kMsixOffsetUnit = 8;
+
+/// @brief Largest offset those fields can express, twenty-nine bits of units.
+constexpr uint64_t kMaxMsixOffset = (uint64_t{1} << 32) - kMsixOffsetUnit;
+
+} // namespace
 
 BarRegionPlan plan_bar_region(const simdojo::BarSpec &bar) {
   BarRegionPlan plan;
@@ -43,8 +60,28 @@ InterruptPlan plan_interrupts(const simdojo::InterruptSpec &spec) {
     plan.intx_count = 1;
     break;
   case simdojo::InterruptKind::MsiX:
-    // MSI-X needs a vector table inside a BAR, which arrives with the first
-    // device that raises per-vector completions.
+    // A table of no vectors is not a capability: a guest would allocate from
+    // it and get nothing back, which is worse than not offering it.
+    if (spec.vectors == 0) {
+      break;
+    }
+    // What a capability can say about itself, and therefore what a device is
+    // allowed to declare: a table size one less than the count in eleven bits,
+    // a BAR index in three, and two offsets in units of eight bytes in
+    // twenty-nine. A declaration that does not fit would not be refused
+    // anywhere downstream -- it would be published rounded down or wrapped
+    // around, naming bytes the device does not treat as a table.
+    if (spec.vectors > kMaxMsixVectors || spec.table_bar < 0 || spec.table_bar > kMaxBarIndex ||
+        (spec.table_offset % kMsixOffsetUnit) != 0 ||
+        (spec.pending_offset % kMsixOffsetUnit) != 0 || spec.table_offset > kMaxMsixOffset ||
+        spec.pending_offset > kMaxMsixOffset) {
+      break;
+    }
+    plan.supported = true;
+    plan.msix_count = spec.vectors;
+    plan.table_bar = spec.table_bar;
+    plan.table_offset = spec.table_offset;
+    plan.pending_offset = spec.pending_offset;
     break;
   }
   return plan;

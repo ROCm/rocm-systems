@@ -56,10 +56,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <stop_token>
 #include <string>
+#include <vector>
 
 struct vfu_ctx;
 struct dma_sg;
@@ -111,6 +114,40 @@ public:
   /// @brief Device this host serves, for the protocol callbacks to dispatch to.
   [[nodiscard]] simdojo::PciDevice &device() { return device_; }
 
+  /// @brief Ask for @p work to run on the serving thread, one request at a time.
+  ///
+  /// @details The device is otherwise touched only by protocol callbacks, which
+  /// all arrive on the serving thread. A thread that wants to make the device
+  /// act on its own -- to raise an interrupt for something the guest did not
+  /// ask for -- hands the work here rather than reaching into the device, so
+  /// that invariant holds rather than being widened to a second thread.
+  ///
+  /// Deliberately not "run it under the transport's lock". That lock is held
+  /// across protocol dispatch, which can block reading from a stalled client,
+  /// so waiting for it would let one guest make the caller unresponsive -- and
+  /// the caller here is the thread that handles shutdown signals.
+  ///
+  /// This is deliberately NOT a general work queue, and should not become one
+  /// without the semantics a producer of completions or faults would need. What
+  /// it promises is only what the one-shot request it exists for needs:
+  /// - **At most one request is outstanding**, where outstanding means accepted
+  ///   but not yet finished -- not merely not yet picked up. A second while one
+  ///   is outstanding is REFUSED, so a caller is told rather than having its work
+  ///   silently dropped.
+  /// - **Latency is bounded by one transport poll**, because the serving thread
+  ///   drains before it waits. It is not immediate, and there is no wake-up: a
+  ///   caller needing promptness needs a different mechanism.
+  /// - **@p work must not throw.** It runs on the serving thread, so an escaping
+  ///   exception would terminate the process; this catches and reports instead,
+  ///   which keeps a faulty request from taking the device down but does NOT
+  ///   make throwing a supported way to report failure.
+  /// - **It may never run.** If serving stops first the request is discarded.
+  ///
+  /// @param[in] work What the serving thread should do.
+  /// @retval true The request was accepted and will run, unless serving stops.
+  /// @retval false A request is already outstanding; @p work was not taken.
+  [[nodiscard]] bool ask_serving_thread(std::function<void()> work);
+
   /// @brief Record a guest memory window the client registered.
   /// @param[in] region The window, as the transport reported it.
   /// @retval true The window was not already known, so the device should be told.
@@ -149,6 +186,16 @@ private:
   simdojo::PciDevice &device_;
 
   std::recursive_mutex vfu_mutex_;
+
+  /// @brief The single outstanding request, and the lock guarding it.
+  ///
+  /// @details Its own lock rather than @ref vfu_mutex_, so handing work over
+  /// never waits on protocol dispatch. One slot rather than a queue: see
+  /// ask_serving_thread() for why this is not a general work queue.
+  std::mutex asked_mutex_;
+  std::optional<std::function<void()>> asked_;
+  /// @brief Set while the serving thread is running a request it already took.
+  bool asked_running_ = false;
   vfu_ctx *ctx_ = nullptr;
   bool attached_ = false;
 

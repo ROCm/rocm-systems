@@ -159,6 +159,15 @@ enum class InterruptKind {
 struct InterruptSpec {
   InterruptKind kind = InterruptKind::None; ///< What to advertise.
   uint32_t vectors = 0;                     ///< Vector count, for @ref InterruptKind::MsiX.
+  /// @brief BAR holding the message table and its pending-bit array.
+  ///
+  /// @details Message-signalled interrupts are configured through a table in
+  /// the device's own memory rather than through configuration space, so the
+  /// device decides where that table lives and the transport only reports the
+  /// decision. Meaningful only for @ref InterruptKind::MsiX.
+  int table_bar = 0;
+  uint64_t table_offset = 0;   ///< Byte offset of the table within that BAR.
+  uint64_t pending_offset = 0; ///< Byte offset of the pending-bit array, likewise.
 };
 
 /// @brief Sink through which a device raises interrupts toward the guest.
@@ -197,8 +206,19 @@ public:
   /// @brief Write @p src to guest memory at @p guest_phys.
   /// @param[in] guest_phys Guest-physical destination address.
   /// @param[in] src Source bytes; their size is the transfer length.
-  /// @retval true The full range was written.
+  /// @retval true The full range was written AND is visible to the guest.
   /// @retval false The access failed or fell outside a mapped window.
+  /// @details Writes are ORDERED AND COMPLETE on return. A true result means the
+  /// bytes are guest-visible, not merely accepted for later transfer, and two
+  /// writes that return in order become visible to the guest in that order.
+  ///
+  /// This is part of the contract rather than something a caller can arrange,
+  /// because a caller cannot: publishing a ring entry and then its write pointer
+  /// is only safe if the entry is already visible when the pointer write starts,
+  /// and no fence a caller issues can order stores an implementation has merely
+  /// queued. A driver reads the pointer and the entry with a barrier between
+  /// them, so an implementation that buffers has to flush here to hold up its
+  /// side -- an implementation that cannot must fail rather than return true.
   [[nodiscard]] virtual bool write(uint64_t guest_phys, std::span<const std::byte> src) = 0;
 };
 

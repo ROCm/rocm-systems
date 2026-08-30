@@ -14,6 +14,22 @@
 
 namespace rocjitsu {
 
+/// @brief What the serving loop does about a signal it woke on.
+enum class ServerSignalAction {
+  KeepServing,      ///< Nothing arrived, or nothing this server acts on.
+  Stop,             ///< Shut down and exit.
+  DeliverInterrupt, ///< Ask the device to put an entry in its interrupt ring.
+};
+
+/// @brief Map a signal the server waits on to what it should do about it.
+/// @details Exposed because the loop that consumes it needs a process, a socket
+/// and a connected client before it runs a single line, so nothing that tests
+/// the loop tests only this. A signal routed to the wrong arm, or an arm
+/// deleted, is otherwise invisible.
+/// @param[in] signal Signal number, or negative when the wait timed out.
+/// @returns What the loop should do next.
+[[nodiscard]] ServerSignalAction action_for_signal(int signal);
+
 /// @brief Serve a PCI function on @p socket_path until the process is signalled.
 /// @param[in] config_path Simulation config describing the GPU to present.
 /// @param[in] socket_path Filesystem path of the AF_UNIX socket to listen on.

@@ -148,8 +148,20 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
       continue;
     uint64_t vaddr;
     if (saddr_present) {
-      vaddr = vaddr_region.lane(0, lane);
-      vaddr *= scale;
+      // The VGPR half of a GLOBAL saddr address is a SIGNED 32-bit offset on
+      // gfx1250, and its scaled form scales that value signed as well. LLVM
+      // gates both on hasSignedGVSOffset, matching a sign extension over a zero
+      // extension and selecting the signed multiply-add, so it emits a negative
+      // value here whenever an access walks backwards from its base -- a
+      // reversed iteration order is enough. Zero-extending one does not reach
+      // below the base, it reaches 4 GiB above the allocation, where the access
+      // silently reads or drops rather than faulting. The steps are named
+      // rather than nested so both signed conversions stay visible: the offset
+      // is reinterpreted as signed before it is widened, and it is widened
+      // before it is scaled, which is what keeps the multiply signed.
+      const int32_t voffset = static_cast<int32_t>(vaddr_region.lane(0, lane));
+      const int64_t scaled_voffset = static_cast<int64_t>(voffset) * scale;
+      vaddr = static_cast<uint64_t>(scaled_voffset);
     } else {
       vaddr = vaddr_region.lane64(0, lane);
     }
