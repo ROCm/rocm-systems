@@ -652,6 +652,9 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     assert 'apply_gpr_idx(wf, *off, amdgpu::VgprMsbRole::Dst)' not in operand_exec_cpp
     assert 'execution_backend_registered_' not in operand_exec_cpp
     assert 'rocjitsu/vm/amdgpu/compute_unit.h' in operand_exec_cpp
+    assert 'RegisterAccess(wf.cu())' not in operand_exec_cpp
+    assert 'RegisterAccess(wf)' in operand_exec_cpp
+    assert 'owns_vgpr_range(wf, reg, 1)' in operand_exec_cpp
 
 
 def test_gfx1250_instruction_execution_backend_is_dense_and_scoped(tmp_path):
