@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_planning.h"
 
+#include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
@@ -14,6 +15,35 @@
 namespace rocjitsu::consan_moi_impl {
 
 using consan_moi_detail::moi_report_dispatch_id_word_source;
+
+[[nodiscard]] bool moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
+    const ConSanRequest &request, const ConSanMoiOperatingPoint &allocation,
+    std::span<const uint64_t> owner_descriptor_offsets) {
+  return request.moi_engine == ConSanMoiEngine::RecordReplay && !owner_descriptor_offsets.empty() &&
+         std::ranges::all_of(owner_descriptor_offsets, [&](uint64_t descriptor_offset) {
+           const auto assignment =
+               std::ranges::find(allocation.owner_transient_sgprs, descriptor_offset,
+                                 &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+           return assignment != allocation.owner_transient_sgprs.end() &&
+                  assignment->branch_only_scalar_spill && assignment->indirect_pc_sgpr &&
+                  assignment->indirect_scc_sgpr && !assignment->dispatch_key_sgpr &&
+                  !assignment->call_return_sgpr;
+         });
+}
+
+[[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
+    const ConSanRequest &request, ConSanMoiOperatingPoint &point,
+    const ConSanMoiOperatingPoint &allocation, std::span<const uint64_t> owner_descriptor_offsets) {
+  if (!consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(point))
+    return false;
+  if (!consan_moi_detail::record_replay_requires_entry_workgroup_capture(request.moi_engine) ||
+      consan_moi_detail::record_replay_has_entry_workgroup_capture(point)) {
+    return true;
+  }
+  return apply_moi_persistent_vgpr_assignment(point, allocation, owner_descriptor_offsets) &&
+         consan_moi_detail::record_replay_has_entry_workgroup_capture(point) &&
+         consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(point);
+}
 
 void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
                                 const ResolvedMoiScratchPlan &resources,

@@ -19,6 +19,18 @@ namespace rocjitsu::consan_moi_impl {
 
 using consan_detail::MoiWorkitemOwnerDerivationPlan;
 
+[[nodiscard]] bool moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
+    const ConSanRequest &request, const ConSanMoiOperatingPoint &allocation,
+    std::span<const uint64_t> owner_descriptor_offsets);
+
+/// Restore an owner-local persistent assignment when placement could not use a
+/// code-object-wide tuple, then verify that the probe has one exact
+/// entry-captured workgroup source. A scalar tuple is already global and needs
+/// no owner-local VGPR assignment.
+[[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
+    const ConSanRequest &request, ConSanMoiOperatingPoint &point,
+    const ConSanMoiOperatingPoint &allocation, std::span<const uint64_t> owner_descriptor_offsets);
+
 void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
                                 const ResolvedMoiScratchPlan &resources,
                                 const MoiRecordEventEmissionPlan &plan, rj_code_arch_t arch);

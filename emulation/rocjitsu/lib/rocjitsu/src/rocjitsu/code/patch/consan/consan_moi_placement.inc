@@ -609,19 +609,6 @@ moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiOperatingPoint &allo
          });
 }
 
-[[nodiscard]] bool moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
-    const ConSanRequest &request, const ConSanMoiOperatingPoint &allocation,
-    std::span<const uint64_t> owner_descriptor_offsets) {
-  return request.moi_engine == ConSanMoiEngine::RecordReplay && !owner_descriptor_offsets.empty() &&
-         std::ranges::all_of(owner_descriptor_offsets, [&](uint64_t descriptor_offset) {
-           const ConSanMoiTransientSgprAssignment *assignment =
-               find_moi_transient_sgpr_assignment(allocation, descriptor_offset);
-           return assignment != nullptr && assignment->branch_only_scalar_spill &&
-                  assignment->indirect_pc_sgpr && assignment->indirect_scc_sgpr &&
-                  !assignment->dispatch_key_sgpr && !assignment->call_return_sgpr;
-         });
-}
-
 [[nodiscard]] bool
 apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
                                      const ConSanMoiOperatingPoint &allocation,
@@ -676,24 +663,6 @@ apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
   point.moi_record_replay_workgroup_vgprs = selected->record_replay_workgroup_vgprs;
   point.moi_dispatch_id_vgpr = selected->dispatch_id_vgpr;
   return true;
-}
-
-/// Restore an owner-local persistent assignment when placement could not use a
-/// code-object-wide tuple, then verify that the probe has one exact
-/// entry-captured workgroup source. A scalar tuple is already global and needs
-/// no owner-local VGPR assignment.
-[[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
-    const ConSanRequest &request, ConSanMoiOperatingPoint &point,
-    const ConSanMoiOperatingPoint &allocation, std::span<const uint64_t> owner_descriptor_offsets) {
-  if (!record_replay_entry_workgroup_capture_is_unambiguous(point))
-    return false;
-  if (!record_replay_requires_entry_workgroup_capture(request.moi_engine) ||
-      record_replay_has_entry_workgroup_capture(point)) {
-    return true;
-  }
-  return apply_moi_persistent_vgpr_assignment(point, allocation, owner_descriptor_offsets) &&
-         record_replay_has_entry_workgroup_capture(point) &&
-         record_replay_entry_workgroup_capture_is_unambiguous(point);
 }
 
 [[nodiscard]] bool is_indirect_sgpr_access(const Instruction &instruction) {

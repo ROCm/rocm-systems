@@ -296,10 +296,6 @@ moi_resource_preceding_instruction(const MoiResourcePlanningState &state, uint64
 resource_plan_for_candidate(std::span<const ConSanCandidateResourcePlan> plans,
                             const ConSanMoiCandidate &candidate);
 
-[[nodiscard]] bool moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
-    const ConSanRequest &request, const ConSanMoiOperatingPoint &allocation,
-    std::span<const uint64_t> owner_descriptor_offsets);
-
 [[nodiscard]] bool
 moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiOperatingPoint &allocation,
                                              std::span<const uint64_t> owner_descriptor_offsets);
@@ -522,10 +518,6 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
 apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
                                      const ConSanMoiOperatingPoint &allocation,
                                      std::span<const uint64_t> owner_descriptor_offsets);
-
-[[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
-    const ConSanRequest &request, ConSanMoiOperatingPoint &point,
-    const ConSanMoiOperatingPoint &allocation, std::span<const uint64_t> owner_descriptor_offsets);
 
 void note_descriptor_requirements(MoiDescriptorVgprRequirements &requirements,
                                   const ResolvedMoiScratchPlan &plan);
