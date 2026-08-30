@@ -224,6 +224,9 @@ struct ConSanMoiPersistentWorkgroupRegisters {
 
   [[nodiscard]] bool empty() const { return !x && !y && !z && !cluster_workgroup_id; }
   [[nodiscard]] bool complete() const { return x && y && z; }
+  [[nodiscard]] std::array<std::optional<uint16_t>, 4> registers() const {
+    return {x, y, z, cluster_workgroup_id};
+  }
 
   auto operator<=>(const ConSanMoiPersistentWorkgroupRegisters &) const = default;
 };
