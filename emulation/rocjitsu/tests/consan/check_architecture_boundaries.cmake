@@ -211,6 +211,11 @@ _consan_assert_no_match(
     "isa/arch/amdgpu/generated/|(cdna[0-9_]*|rdna[0-9_]*)::"
     "common validation implementation must consume independent target validation operations"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_validation_target_ops.h"
+    "validate_consan_(ordinary_global|atomic)"
+    "encoded mutation validation must remain one operation over a typed semantic kind"
+)
 file(
     GLOB _consan_sources
     "${_consan_dir}/*.cpp"

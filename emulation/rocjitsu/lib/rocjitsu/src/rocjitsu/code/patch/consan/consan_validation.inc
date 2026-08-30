@@ -1918,8 +1918,9 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
               "ConSan mutation proof found stale ordinary acquire address metadata");
           continue;
         }
-        const auto validation = validate_consan_ordinary_global_address_mutation(
-            arch, original_text.subspan(patch.anchor_offset, patch.original_size),
+        const auto validation = validate_consan_encoded_mutation(
+            arch, ConSanEncodedMutationKind::OrdinaryGlobalAddress,
+            original_text.subspan(patch.anchor_offset, patch.original_size),
             replacement_text.subspan(patch.anchor_offset, patch.original_size));
         if (validation == ConSanEncodedMutationValidation::UnexpectedInstructionSize ||
             validation == ConSanEncodedMutationValidation::UnsupportedInstructionEncoding) {
@@ -1957,8 +1958,9 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
         errors.emplace_back("ConSan mutation proof found stale ordinary acquire scope metadata");
         continue;
       }
-      const auto validation = validate_consan_ordinary_global_scope_mutation(
-          arch, original_text.subspan(patch.anchor_offset, patch.original_size),
+      const auto validation = validate_consan_encoded_mutation(
+          arch, ConSanEncodedMutationKind::OrdinaryGlobalScope,
+          original_text.subspan(patch.anchor_offset, patch.original_size),
           replacement_text.subspan(patch.anchor_offset, patch.original_size));
       if (validation == ConSanEncodedMutationValidation::UnexpectedInstructionSize ||
           validation == ConSanEncodedMutationValidation::UnsupportedInstructionEncoding) {
@@ -2222,8 +2224,8 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
     const std::span<const uint8_t> before_bytes =
         original_text.subspan(patch.anchor_offset, patch.original_size);
     if (patch.kind == ConSanPatchKind::InlineAtomicAddressRewrite) {
-      const auto validation =
-          validate_consan_atomic_address_mutation(arch, before_bytes, after_bytes);
+      const auto validation = validate_consan_encoded_mutation(
+          arch, ConSanEncodedMutationKind::AtomicAddress, before_bytes, after_bytes);
       if (validation == ConSanEncodedMutationValidation::UnexpectedInstructionSize ||
           validation == ConSanEncodedMutationValidation::UnsupportedInstructionEncoding) {
         errors.emplace_back("ConSan mutation proof found an unexpected atomic instruction size");
@@ -2231,7 +2233,8 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
         errors.emplace_back("ConSan mutation proof found the wrong atomic address displacement");
       }
     } else {
-      const auto validation = validate_consan_atomic_scope_mutation(arch, before_bytes, after_bytes);
+      const auto validation = validate_consan_encoded_mutation(
+          arch, ConSanEncodedMutationKind::AtomicScope, before_bytes, after_bytes);
       if (validation == ConSanEncodedMutationValidation::UnexpectedInstructionSize) {
         errors.emplace_back("ConSan mutation proof found an unexpected atomic instruction size");
         continue;

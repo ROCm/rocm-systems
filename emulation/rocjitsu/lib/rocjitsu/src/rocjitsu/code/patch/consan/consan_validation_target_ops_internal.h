@@ -11,16 +11,7 @@
 namespace rocjitsu::consan_validation_target_detail {
 
 [[nodiscard]] ConSanEncodedMutationValidation
-validate_gfx12_ordinary_global_address_mutation(std::span<const uint8_t> before,
-                                                std::span<const uint8_t> after);
-[[nodiscard]] ConSanEncodedMutationValidation
-validate_gfx12_ordinary_global_scope_mutation(std::span<const uint8_t> before,
-                                              std::span<const uint8_t> after);
-[[nodiscard]] ConSanEncodedMutationValidation
-validate_gfx12_atomic_address_mutation(std::span<const uint8_t> before,
-                                       std::span<const uint8_t> after);
-[[nodiscard]] ConSanEncodedMutationValidation
-validate_gfx12_atomic_scope_mutation(std::span<const uint8_t> before,
-                                     std::span<const uint8_t> after);
+validate_gfx12_encoded_mutation(ConSanEncodedMutationKind kind, std::span<const uint8_t> before,
+                                std::span<const uint8_t> after);
 
 } // namespace rocjitsu::consan_validation_target_detail

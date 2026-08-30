@@ -20,16 +20,15 @@ enum class ConSanEncodedMutationValidation : uint8_t {
   InvalidMutation,
 };
 
-[[nodiscard]] ConSanEncodedMutationValidation validate_consan_ordinary_global_address_mutation(
-    rj_code_arch_t arch, std::span<const uint8_t> before, std::span<const uint8_t> after);
+enum class ConSanEncodedMutationKind : uint8_t {
+  OrdinaryGlobalAddress,
+  OrdinaryGlobalScope,
+  AtomicAddress,
+  AtomicScope,
+};
+
 [[nodiscard]] ConSanEncodedMutationValidation
-validate_consan_ordinary_global_scope_mutation(rj_code_arch_t arch, std::span<const uint8_t> before,
-                                               std::span<const uint8_t> after);
-[[nodiscard]] ConSanEncodedMutationValidation
-validate_consan_atomic_address_mutation(rj_code_arch_t arch, std::span<const uint8_t> before,
-                                        std::span<const uint8_t> after);
-[[nodiscard]] ConSanEncodedMutationValidation
-validate_consan_atomic_scope_mutation(rj_code_arch_t arch, std::span<const uint8_t> before,
-                                      std::span<const uint8_t> after);
+validate_consan_encoded_mutation(rj_code_arch_t arch, ConSanEncodedMutationKind kind,
+                                 std::span<const uint8_t> before, std::span<const uint8_t> after);
 
 } // namespace rocjitsu

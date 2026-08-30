@@ -26,8 +26,6 @@ namespace {
   return result;
 }
 
-} // namespace
-
 ConSanEncodedMutationValidation
 validate_gfx12_ordinary_global_address_mutation(std::span<const uint8_t> before_bytes,
                                                 std::span<const uint8_t> after_bytes) {
@@ -101,6 +99,24 @@ validate_gfx12_atomic_scope_mutation(std::span<const uint8_t> before_bytes,
       after[0] == before[0] && after[1] == expected_scope_word && after[2] == before[2];
   return valid ? ConSanEncodedMutationValidation::Valid
                : ConSanEncodedMutationValidation::InvalidMutation;
+}
+
+} // namespace
+
+ConSanEncodedMutationValidation validate_gfx12_encoded_mutation(ConSanEncodedMutationKind kind,
+                                                                std::span<const uint8_t> before,
+                                                                std::span<const uint8_t> after) {
+  switch (kind) {
+  case ConSanEncodedMutationKind::OrdinaryGlobalAddress:
+    return validate_gfx12_ordinary_global_address_mutation(before, after);
+  case ConSanEncodedMutationKind::OrdinaryGlobalScope:
+    return validate_gfx12_ordinary_global_scope_mutation(before, after);
+  case ConSanEncodedMutationKind::AtomicAddress:
+    return validate_gfx12_atomic_address_mutation(before, after);
+  case ConSanEncodedMutationKind::AtomicScope:
+    return validate_gfx12_atomic_scope_mutation(before, after);
+  }
+  return ConSanEncodedMutationValidation::UnsupportedInstructionEncoding;
 }
 
 } // namespace rocjitsu::consan_validation_target_detail
