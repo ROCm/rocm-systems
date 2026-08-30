@@ -499,16 +499,34 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
     int opIdx = coll->proxyOpIndices[i];
     if (opIdx < 0 || opIdx >= ACCL_PROXY_OP_POOL_SIZE) continue;
     struct acclProxyOpInfo* op = &ctx->proxyOpPool[opIdx];
+    // Snapshot the five accumulators under the lock the header declares
+    // protects them. RCCL stops every one of a sub's proxy steps before that
+    // sub's proxy op, on the one proxy-progress thread, and an op only enters
+    // proxyOpIndices from inside the ProxyOp-stop critical section, so today
+    // coll->mutex already orders these writes ahead of this read. That is a
+    // property of the caller, not of this function: hold the lock the struct
+    // says it needs rather than depend on an emission order the plugin does
+    // not control. Callers reach here with no lock held — every
+    // acclFinalizeAndFree site releases coll->mutex first — so this takes
+    // op->mutex on its own and establishes no coll->mutex/op->mutex order.
+    pthread_mutex_lock(&op->mutex);
+    uint64_t opGpuWait     = op->totalGpuWaitUs;
+    uint64_t opPeerWait    = op->totalPeerWaitUs;
+    uint64_t opNetwork     = op->totalNetworkUs;
+    uint64_t opFlush       = op->totalFlushUs;
+    uint64_t opGpuRecvWait = op->totalGpuRecvWaitUs;
+    pthread_mutex_unlock(&op->mutex);
+
     if (op->isSend) {
       nSend++;
-      sendGpuWait += (double)op->totalGpuWaitUs;
-      sendPeerWait += (double)op->totalPeerWaitUs;
-      sendNetwork += (double)op->totalNetworkUs;
+      sendGpuWait += (double)opGpuWait;
+      sendPeerWait += (double)opPeerWait;
+      sendNetwork += (double)opNetwork;
     } else {
       nRecv++;
-      recvFlush += (double)op->totalFlushUs;
-      recvGpuWait += (double)op->totalGpuRecvWaitUs;
-      recvNetwork += (double)op->totalNetworkUs;
+      recvFlush += (double)opFlush;
+      recvGpuWait += (double)opGpuRecvWait;
+      recvNetwork += (double)opNetwork;
     }
   }
 
@@ -859,8 +877,23 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
       *eHandle = NULL;
       return ncclSuccess;
     }
+    // Tag-check the parent as the Coll and ProxyOp paths above do. RCCL only
+    // ever passes sub->opEventHandle here (src/plugin/profiler.cc), which is
+    // either NULL or a handle this plugin returned for a ProxyOp, so no
+    // in-tree caller trips this. It is defence in depth, not a proof: the
+    // probe reads through the very pointer it is validating, and a freed pool
+    // slot keeps its old bytes until the next acclAllocProxyOp memsets them,
+    // so a stale-but-plausible ncclProfileProxyOp tag still passes. It closes
+    // the mistyped-handle case and narrows, without closing, the recycled-slot
+    // one; without it the ProxyStep-stop path locks `op->mutex` at the
+    // acclProxyOpInfo offset of whatever object it was handed.
+    struct acclProxyOpInfo* parentOp = NULL;
+    if (eDescr->parentObj &&
+        *(uint64_t*)eDescr->parentObj == ncclProfileProxyOp) {
+      parentOp = (struct acclProxyOpInfo*)eDescr->parentObj;
+    }
     step->type = ncclProfileProxyStep;
-    step->parentObj = eDescr->parentObj;
+    step->parentObj = parentOp;
     step->commCtx = ctx;
     step->step = eDescr->proxyStep.step;
     step->tsStartUs = acclGetTimeUs();
@@ -883,13 +916,20 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
   if (type == ncclProfileColl) {
     struct acclCollInfo* coll = (struct acclCollInfo*)eHandle;
     struct acclCommContext* ctx = (struct acclCommContext*)coll->commCtx;
-    coll->tsCollStopUs = acclGetTimeUs();
-
     pthread_mutex_lock(&coll->mutex);
     if (coll->finalized) {
       pthread_mutex_unlock(&coll->mutex);
       return ncclSuccess;
     }
+    // Stamped here rather than before the lock. No reader could see 0: a
+    // finalize needs collStopped, which is set below in this same critical
+    // section, so the unlock/lock pair already ordered the stamp ahead of any
+    // read of it. What the move does buy is the finalized check above — a
+    // coll-stop arriving after the slot was drained and reissued no longer
+    // stamps the new tenant's stop time — and it keeps every write to the slot
+    // under the slot's own mutex, which is the discipline the rest of the file
+    // follows.
+    coll->tsCollStopUs = acclGetTimeUs();
     coll->collStopped = 1;
     int shouldFinalize = acclShouldFinalize(coll);
     pthread_mutex_unlock(&coll->mutex);

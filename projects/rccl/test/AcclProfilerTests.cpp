@@ -42,6 +42,7 @@ extern "C" {
   int  test_acclCollSlot(void* ctx, void* coll);
   int  test_acclProxyOpSlot(void* ctx, void* op);
   int  test_acclProxyOpMutexDestroyed(void* ctx, int slot);
+  void* test_acclProxyStepParent(void* step);
   void test_acclWriteDummyRecord(void* ctx);
 }
 extern ncclResult_t acclPluginInit(void**, uint64_t, int*, const char*,
@@ -1006,6 +1007,97 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
             ASSERT_FALSE(line.empty()) << "No coll record was written";
             EXPECT_NE(line.find("\"n_proxy_ops\":1"), std::string::npos);
             EXPECT_NE(line.find("\"n_send_ops\":1"), std::string::npos);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// A ProxyStep's parent must carry the ncclProfileProxyOp tag, as the KernelCh
+// and ProxyOp paths already require of theirs. acclPluginStopEvent casts
+// step->parentObj to acclProxyOpInfo* and locks its mutex, so a handle of any
+// other type would be locked at the wrong offset and accumulated into whatever
+// fields happen to live there.
+//
+// The mistyped steps below are deliberately never stopped: stopping one on
+// unguarded code is the undefined behaviour under test, not a clean failure.
+// The check is on what the start path recorded, which is well-defined either
+// way. The valid parent is asserted alongside so a fix that simply NULLs every
+// parent cannot pass this.
+// =========================================================================
+TEST(AcclProfilerLifecycle, ProxyStepRejectsMistypedParent) {
+    ScopedProfilerDir dir("stepparent");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.ProxyStepRejectsMistypedParent",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x57E0, &mask, "step_parent_test",
+                                     1, 2, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t collDescr;
+            MakeCollDescr(&collDescr, /*nChannels=*/1, /*seqNumber=*/70,
+                          /*count=*/256);
+            void* collHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
+            ASSERT_NE(collHandle, nullptr);
+
+            ncclProfilerEventDescr_v5_t kchDescr;
+            MakeKernelChDescr(&kchDescr, collHandle, /*channelId=*/0,
+                              /*pTimer=*/5000000);
+            void* kchHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kchHandle, &kchDescr), 0);
+            ASSERT_NE(kchHandle, nullptr);
+
+            ncclProfilerEventDescr_v5_t opDescr;
+            memset(&opDescr, 0, sizeof(opDescr));
+            opDescr.type = ncclProfileProxyOp;
+            opDescr.parentObj = collHandle;
+            opDescr.proxyOp.channelId = 0;
+            opDescr.proxyOp.nSteps = 1;
+            opDescr.proxyOp.isSend = 1;
+            void* opHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &opHandle, &opDescr), 0);
+            ASSERT_NE(opHandle, nullptr);
+
+            ncclProfilerEventDescr_v5_t stepDescr;
+            memset(&stepDescr, 0, sizeof(stepDescr));
+            stepDescr.type = ncclProfileProxyStep;
+            stepDescr.proxyStep.step = 0;
+
+            // A Coll handle is not a ProxyOp handle.
+            stepDescr.parentObj = collHandle;
+            void* badCollParent = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &badCollParent, &stepDescr), 0);
+            ASSERT_NE(badCollParent, nullptr);
+            EXPECT_EQ(test_acclProxyStepParent(badCollParent), nullptr)
+                << "ProxyStep accepted a Coll handle as its parent proxy op";
+
+            // Nor is a KernelCh handle.
+            stepDescr.parentObj = kchHandle;
+            void* badKchParent = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &badKchParent, &stepDescr), 0);
+            ASSERT_NE(badKchParent, nullptr);
+            EXPECT_EQ(test_acclProxyStepParent(badKchParent), nullptr)
+                << "ProxyStep accepted a KernelCh handle as its parent proxy op";
+
+            // A NULL parent is what RCCL passes when the ProxyOp was dropped.
+            stepDescr.parentObj = nullptr;
+            void* nullParent = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &nullParent, &stepDescr), 0);
+            ASSERT_NE(nullParent, nullptr);
+            EXPECT_EQ(test_acclProxyStepParent(nullParent), nullptr);
+
+            // The real parent must still be kept, or proxy timing would vanish.
+            stepDescr.parentObj = opHandle;
+            void* goodParent = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &goodParent, &stepDescr), 0);
+            ASSERT_NE(goodParent, nullptr);
+            EXPECT_EQ(test_acclProxyStepParent(goodParent), opHandle);
+
+            // Only the well-typed step is safe to stop.
+            EXPECT_EQ(acclPluginStopEvent(goodParent), 0);
+            EXPECT_EQ(acclPluginFinalize(ctx), 0);
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );

@@ -44,6 +44,13 @@ extern "C" {
     if (slot < 0 || slot >= ACCL_PROXY_OP_POOL_SIZE) return -1;
     return ctx->proxyOpPool[slot].mutex.__data.__kind == -1 ? 1 : 0;
   }
+  // Parent recorded for a ProxyStep handle. The stop path locks this pointer as
+  // an acclProxyOpInfo, so a test that fed it a mistyped parent must be able to
+  // check the plugin rejected it *without* stopping the step — stopping it is
+  // exactly the undefined behaviour the check exists to prevent.
+  void* test_acclProxyStepParent(void* step) {
+    return ((struct acclProxyStepInfo*)step)->parentObj;
+  }
   void test_acclWriteDummyRecord(void* ctx) {
     struct acclCompletedRecord rec;
     memset(&rec, 0, sizeof(rec));
