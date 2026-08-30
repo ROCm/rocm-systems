@@ -39,6 +39,7 @@ struct acclProxyStepInfo {
   uint64_t tsStartUs;
   uint64_t tsStopUs;
   uint64_t lastStateTs;
+  int      prevState;    // state the step is currently IN; -1 before the first transition
   // Accumulated time in each proxy step state (us)
   uint64_t gpuWaitUs;
   uint64_t peerWaitUs;
@@ -108,6 +109,41 @@ struct acclCollInfo {
   void*       commCtx;
 };
 
+// Schema for the "decomposition" JSON object: one row per field, driving the
+// acclCompletedRecord members, the JSON keys and the fprintf argument list from
+// one list so a key can never drift onto another field's value. XE marks the
+// last row, which emits no trailing comma. Rows are (C type, JSON key, printf
+// conversion, acclCompletedRecord member); the row order is the emission order.
+//
+// The macro body cannot carry // comments, since the line-continuation backslash
+// would be swallowed by them, so the field meanings live here:
+//   gpu_kernel_avg_us      avg kernel duration across channels
+//   proxy_gpu_wait_us      proxy waiting for the GPU to produce data
+//   proxy_network_us       actual network send/recv
+//   proxy_peer_wait_us     waiting for the remote FIFO
+//   proxy_flush_us         GDR flush
+//   proxy_gpu_recv_wait_us proxy waiting for the GPU to consume
+// The n_* counts are totals over all proxy ops. Each proxy_* row is a mean over
+// the op class that can produce it — the send-only states over n_send_ops, the
+// recv-only ones over n_recv_ops — so it is a per-channel cost for the usual
+// one-send-plus-one-recv-per-channel ring, not a per-op cost. proxy_network_us
+// spans both classes and is the sum of the two per-class means.
+#define ACCL_DECOMP_FIELDS(X, XE)                                    \
+  X (double, enqueue_to_kernel_us,   "%.2f", enqueueToKernelUs)      \
+  X (double, gpu_kernel_avg_us,      "%.2f", gpuKernelUs)            \
+  X (double, gpu_kernel_min_us,      "%.2f", gpuKernelMinUs)         \
+  X (double, gpu_kernel_max_us,      "%.2f", gpuKernelMaxUs)         \
+  X (double, proxy_gpu_wait_us,      "%.2f", proxyGpuWaitUs)         \
+  X (double, proxy_network_us,       "%.2f", proxyNetworkUs)         \
+  X (double, proxy_peer_wait_us,     "%.2f", proxyPeerWaitUs)        \
+  X (double, proxy_flush_us,         "%.2f", proxyFlushUs)           \
+  X (double, proxy_gpu_recv_wait_us, "%.2f", proxyGpuRecvWaitUs)     \
+  X (int,    n_proxy_ops,            "%d",   nProxyOps)              \
+  X (int,    n_send_ops,             "%d",   nSendOps)               \
+  XE(int,    n_recv_ops,             "%d",   nRecvOps)
+
+#define ACCL_DECOMP_DECL(ctype, key, fmt, member) ctype member;
+
 // Completed record for output
 struct acclCompletedRecord {
   // Metadata
@@ -123,20 +159,7 @@ struct acclCompletedRecord {
 
   // Timing decomposition (microseconds)
   double      totalExecUs;
-  double      enqueueToKernelUs;
-  double      gpuKernelUs;        // avg kernel duration across channels
-  double      gpuKernelMinUs;
-  double      gpuKernelMaxUs;
-
-  // Proxy decomposition (aggregated across all proxy ops)
-  double      proxyGpuWaitUs;     // proxy waiting for GPU to produce data
-  double      proxyNetworkUs;     // actual network send/recv
-  double      proxyPeerWaitUs;    // waiting for remote FIFO
-  double      proxyFlushUs;       // GDR flush
-  double      proxyGpuRecvWaitUs; // proxy waiting for GPU to consume
-  int         nProxyOps;
-  int         nSendOps;
-  int         nRecvOps;
+  ACCL_DECOMP_FIELDS(ACCL_DECOMP_DECL, ACCL_DECOMP_DECL)
 
   // Per-channel kernel events
   struct {
@@ -162,7 +185,19 @@ struct acclCommContext {
   uint64_t    droppedCollectives;   // never allocated a slot: pool was full
   uint64_t    leakedCollectives;    // allocated but never finalized; freed by the drain
   int         poolExhaustedWarned;  // one-shot guard for the pool-exhaustion WARN
+  // Proxy-side loss. Written from the proxy thread under three different locks,
+  // so these are atomic rather than adopting any one of them.
+  uint64_t    droppedProxyOps;      // proxy-op pool was full: this op is unprofiled
+  uint64_t    droppedProxySteps;    // proxy-step pool was full: this step is unprofiled
+  uint64_t    overflowProxyOps;     // op completed but the coll already held ACCL_MAX_PROXY_OPS
+  int         proxyOpPoolWarned;    // one-shot guards, as for the coll pool above
+  int         proxyStepPoolWarned;
   uint64_t    commHash;
+  // ACCL_PROFILER_MIN_SIZE_BYTES as read when THIS communicator was created.
+  // Per-comm, not process-global: a later communicator created after the
+  // variable changed must not retroactively re-filter this one, and the
+  // minSize= this comm echoed in its init log has to keep describing it.
+  size_t      minMsgSize;
   int         rank;
   int         nRanks;
   int         nNodes;

@@ -10,6 +10,8 @@
 #include "accl_profiler.h"
 
 #include <errno.h>
+#include <limits.h>
+#include <stddef.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -19,13 +21,87 @@
 
 static ncclDebugLogger_t gLogFn;
 
+// INFO is scoped to the NCCL_PROFILE subsystem (0x4000) so it appears only for
+// someone who asked for profiler chatter. WARN uses NCCL_ALL (~0), as RCCL's own
+// WARN macro does: the default NCCL_DEBUG_SUBSYS mask is INIT|BOOTSTRAP|ENV, so
+// a WARN tagged NCCL_PROFILE is dropped unless the user also set
+// NCCL_DEBUG_SUBSYS, and every WARN below reports lost profiling data.
 #define ACCL_INFO(...)  do { if (gLogFn) gLogFn(4, 0x4000, __func__, __LINE__, __VA_ARGS__); } while(0)
-#define ACCL_WARN(...)  do { if (gLogFn) gLogFn(3, 0x4000, __func__, __LINE__, __VA_ARGS__); } while(0)
-
-// Env vars
-static size_t gMinMsgSize = 0;  // ACCL_PROFILER_MIN_SIZE_BYTES
+#define ACCL_WARN(...)  do { if (gLogFn) gLogFn(3, ~0UL, __func__, __LINE__, __VA_ARGS__); } while(0)
 
 static inline const char* safeStr(const char* s) { return s ? s : ""; }
+
+// Parse ACCL_PROFILER_MIN_SIZE_BYTES. Returns the threshold, or 0 with *bad set
+// for anything that is not a plain non-negative decimal integer fitting size_t.
+//
+// atol() used to do this, and both of its failure modes end in silence rather
+// than in an error. "-1" converts to SIZE_MAX and an out-of-range value
+// saturates to LONG_MAX; either way the threshold exceeds every collective, so
+// every start returns a NULL handle, no record is ever allocated, and the run
+// writes only a summary that truthfully reports zero drops over zero records --
+// an empty file that reads as a clean run. "abc" and "0x10" convert to 0, which
+// is indistinguishable from a deliberate 0.
+static size_t acclParseMinSize(const char* env, int* bad) {
+  *bad = 0;
+  const char* p = env;
+  while (*p == ' ' || *p == '\t') {
+    p++;
+  }
+  // An all-blank value is the usual shell idiom for "off", not a typo, so it
+  // takes the default without complaint.
+  if (*p == '\0') {
+    return 0;
+  }
+  // strtoull accepts a leading '-' and wraps it to a huge positive, which is the
+  // silent filter-everything case above, so reject the sign before parsing.
+  if (*p == '-') {
+    *bad = 1;
+    return 0;
+  }
+  errno = 0;
+  char* end = NULL;
+  unsigned long long v = strtoull(p, &end, 10);
+  if (end == p || errno == ERANGE) {
+    *bad = 1;
+    return 0;
+  }
+  while (*end == ' ' || *end == '\t') {
+    end++;
+  }
+  if (*end != '\0') {
+    *bad = 1;
+    return 0;
+  }
+#if SIZE_MAX < ULLONG_MAX
+  if (v > (unsigned long long)SIZE_MAX) {
+    *bad = 1;
+    return 0;
+  }
+#endif
+  return (size_t)v;
+}
+
+// mkdir -p for the output directory. Returns 0 on success, -1 with errno set.
+// A bare mkdir() only ever creates the last component, so the multi-level path
+// the README documents fails ENOENT whenever two or more levels are missing.
+static int acclMkdirRecursive(const char* path) {
+  if (!path || !path[0]) { errno = EINVAL; return -1; }
+  char buf[1024];
+  size_t len = strlen(path);
+  if (len >= sizeof(buf)) { errno = ENAMETOOLONG; return -1; }
+  memcpy(buf, path, len + 1);
+  // Trailing slashes would make the loop try to create the same level twice.
+  while (len > 1 && buf[len - 1] == '/') buf[--len] = '\0';
+  // Start at buf+1 so a leading '/' is never mkdir'd as the empty string.
+  for (char* p = buf + 1; *p; p++) {
+    if (*p != '/') continue;
+    *p = '\0';
+    if (mkdir(buf, 0755) != 0 && errno != EEXIST) return -1;
+    *p = '/';
+  }
+  if (mkdir(buf, 0755) != 0 && errno != EEXIST) return -1;
+  return 0;
+}
 
 // Forward declarations for cross-referenced pool functions
 static void acclFreeProxyOp(struct acclCommContext* ctx, struct acclProxyOpInfo* op);
@@ -44,13 +120,47 @@ static void acclFreeCollProxyOps(struct acclCommContext* ctx,
 // Per-communicator pool allocators
 // ============================================================================
 
+// Release one context reference. The last holder tears the context down, so a
+// callback that outlives acclPluginFinalize still finds live mutexes and file.
+static void acclCtxUnref(struct acclCommContext* ctx) {
+  if (__atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST) != 0) {
+    return;
+  }
+  pthread_mutex_lock(&ctx->outputMutex);
+  if (ctx->outputFile) {
+    fclose(ctx->outputFile);
+    ctx->outputFile = NULL;
+  }
+  pthread_mutex_unlock(&ctx->outputMutex);
+  for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
+    pthread_mutex_destroy(&ctx->collPool[i].mutex);
+  }
+  for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
+    pthread_mutex_destroy(&ctx->proxyOpPool[i].mutex);
+  }
+  pthread_mutex_destroy(&ctx->outputMutex);
+  pthread_mutex_destroy(&ctx->collPoolMutex);
+  pthread_mutex_destroy(&ctx->proxyOpPoolMutex);
+  pthread_mutex_destroy(&ctx->proxyStepPoolMutex);
+  free(ctx);
+}
+
 static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
   pthread_mutex_lock(&ctx->collPoolMutex);
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
     if (!ctx->collPoolUsed[i]) {
       ctx->collPoolUsed[i] = 1;
-      memset(&ctx->collPool[i], 0, sizeof(ctx->collPool[i]));
-      pthread_mutex_init(&ctx->collPool[i].mutex, NULL);
+      // Clear the slot around the mutex, never through it. The mutex is created
+      // once in acclPluginInit and outlives every tenancy; a stale KernelCh
+      // start can be inside pthread_mutex_lock on it at this instant, since that
+      // path does not take collPoolMutex, so writing its bytes here — by memset
+      // or by a save/restore struct copy — is a data race either way. POSIX also
+      // does not define copying a pthread_mutex_t at all.
+      struct acclCollInfo* slot = &ctx->collPool[i];
+      const size_t muOff = offsetof(struct acclCollInfo, mutex);
+      const size_t muEnd = muOff + sizeof(slot->mutex);
+      memset(slot, 0, muOff);
+      memset((char*)slot + muEnd, 0, sizeof(*slot) - muEnd);
       __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
       pthread_mutex_unlock(&ctx->collPoolMutex);
       return &ctx->collPool[i];
@@ -74,14 +184,13 @@ static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
 
 static void acclFreeColl(struct acclCommContext* ctx, struct acclCollInfo* coll) {
   if (!coll) return;
-  pthread_mutex_destroy(&coll->mutex);
   pthread_mutex_lock(&ctx->collPoolMutex);
   int idx = (int)(coll - ctx->collPool);
   if (idx >= 0 && idx < ACCL_COLL_POOL_SIZE) {
     ctx->collPoolUsed[idx] = 0;
   }
   pthread_mutex_unlock(&ctx->collPoolMutex);
-  __atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
+  acclCtxUnref(ctx);
 }
 
 static struct acclProxyOpInfo* acclAllocProxyOp(struct acclCommContext* ctx) {
@@ -89,26 +198,44 @@ static struct acclProxyOpInfo* acclAllocProxyOp(struct acclCommContext* ctx) {
   for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
     if (!ctx->proxyOpPoolUsed[i]) {
       ctx->proxyOpPoolUsed[i] = 1;
-      memset(&ctx->proxyOpPool[i], 0, sizeof(ctx->proxyOpPool[i]));
-      pthread_mutex_init(&ctx->proxyOpPool[i].mutex, NULL);
+      __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
+      // Clear the slot around the mutex, never through it. The mutex is created
+      // once in acclPluginInit and outlives every tenancy; a stale ProxyStep
+      // stop can be inside pthread_mutex_lock on it at this instant, since that
+      // path does not take proxyOpPoolMutex, so writing its bytes here — by
+      // memset or by a save/restore struct copy — is a data race either way.
+      struct acclProxyOpInfo* slot = &ctx->proxyOpPool[i];
+      const size_t muOff = offsetof(struct acclProxyOpInfo, mutex);
+      const size_t muEnd = muOff + sizeof(slot->mutex);
+      memset(slot, 0, muOff);
+      memset((char*)slot + muEnd, 0, sizeof(*slot) - muEnd);
       pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
       return &ctx->proxyOpPool[i];
     }
   }
   pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
-  ACCL_WARN("ACCL Profiler: proxy op pool exhausted (%d slots)", ACCL_PROXY_OP_POOL_SIZE);
+  __atomic_add_fetch(&ctx->droppedProxyOps, 1, __ATOMIC_SEQ_CST);
+  if (__atomic_exchange_n(&ctx->proxyOpPoolWarned, 1, __ATOMIC_SEQ_CST) == 0) {
+    ACCL_WARN("ACCL Profiler: proxy op pool exhausted (%d slots). Proxy timing for this "
+              "communicator is now INCOMPLETE. Further drops are counted in the "
+              "end-of-run summary only.", ACCL_PROXY_OP_POOL_SIZE);
+  }
   return NULL;
 }
 
 static void acclFreeProxyOp(struct acclCommContext* ctx, struct acclProxyOpInfo* op) {
   if (!op) return;
-  pthread_mutex_destroy(&op->mutex);
+  // The mutex is not destroyed here. A ProxyStep stop still locks it after the
+  // op's slot has been released, so destroying per free leaves that path locking
+  // a destroyed mutex once the slot is reissued. It is destroyed once, in
+  // acclCtxUnref, when the last context reference drops.
   pthread_mutex_lock(&ctx->proxyOpPoolMutex);
   int idx = (int)(op - ctx->proxyOpPool);
   if (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE) {
     ctx->proxyOpPoolUsed[idx] = 0;
   }
   pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
+  acclCtxUnref(ctx);
 }
 
 static struct acclProxyStepInfo* acclAllocProxyStep(struct acclCommContext* ctx) {
@@ -116,13 +243,19 @@ static struct acclProxyStepInfo* acclAllocProxyStep(struct acclCommContext* ctx)
   for (int i = 0; i < ACCL_PROXY_STEP_POOL_SIZE; i++) {
     if (!ctx->proxyStepPoolUsed[i]) {
       ctx->proxyStepPoolUsed[i] = 1;
+      __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
       memset(&ctx->proxyStepPool[i], 0, sizeof(ctx->proxyStepPool[i]));
       pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
       return &ctx->proxyStepPool[i];
     }
   }
   pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
-  ACCL_WARN("ACCL Profiler: proxy step pool exhausted (%d slots)", ACCL_PROXY_STEP_POOL_SIZE);
+  __atomic_add_fetch(&ctx->droppedProxySteps, 1, __ATOMIC_SEQ_CST);
+  if (__atomic_exchange_n(&ctx->proxyStepPoolWarned, 1, __ATOMIC_SEQ_CST) == 0) {
+    ACCL_WARN("ACCL Profiler: proxy step pool exhausted (%d slots). Proxy timing for this "
+              "communicator is now INCOMPLETE. Further drops are counted in the "
+              "end-of-run summary only.", ACCL_PROXY_STEP_POOL_SIZE);
+  }
   return NULL;
 }
 
@@ -134,6 +267,39 @@ static void acclFreeProxyStep(struct acclCommContext* ctx, struct acclProxyStepI
     ctx->proxyStepPoolUsed[idx] = 0;
   }
   pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
+  acclCtxUnref(ctx);
+}
+
+// Charge `elapsed` to the bucket of the state the step was IN over that interval.
+// RCCL announces a proxy-step state on ENTRY (src/transport/net.cc:1783,1849,1877,
+// 2059,2092,2187), so the interval that just closed belongs to `state`, the
+// previously announced one, not to the state being entered.  See the note above
+// the switch in acclPluginRecordEventState.
+static void acclProxyStepChargeState(struct acclProxyStepInfo* step, int state, uint64_t elapsed) {
+  switch (state) {
+  case ncclProfilerProxyStepSendGPUWait:
+    step->gpuWaitUs += elapsed;
+    break;
+  case ncclProfilerProxyStepSendPeerWait_v4:
+    step->peerWaitUs += elapsed;
+    break;
+  case ncclProfilerProxyStepSendWait:
+    step->sendWaitUs += elapsed;
+    break;
+  case ncclProfilerProxyStepRecvWait:
+    step->recvWaitUs += elapsed;
+    break;
+  case ncclProfilerProxyStepRecvFlushWait:
+    step->flushWaitUs += elapsed;
+    break;
+  case ncclProfilerProxyStepRecvGPUWait:
+    step->gpuRecvWaitUs += elapsed;
+    break;
+  default:
+    // -1 before the first transition: the buffer-post/irecv-post interval that
+    // precedes it belongs to no named state, so it is deliberately dropped.
+    break;
+  }
 }
 
 // ============================================================================
@@ -177,6 +343,11 @@ static double acclBusBwFactor(const char* func, int nRanks) {
   return 1.0;
 }
 
+// Expansions of ACCL_DECOMP_FIELDS (accl_profiler.h) used by acclWriteRecord().
+#define ACCL_DECOMP_KEY(ctype, key, fmt, member)      "\"" #key "\":" fmt ","
+#define ACCL_DECOMP_KEY_LAST(ctype, key, fmt, member) "\"" #key "\":" fmt
+#define ACCL_DECOMP_ARG(ctype, key, fmt, member)      , rec->member
+
 // ============================================================================
 // JSON output for a completed collective
 // ============================================================================
@@ -202,18 +373,7 @@ static void acclWriteRecord(struct acclCommContext* ctx,
     "\"coll_algobw_gbs\":%.6f,\"coll_busbw_gbs\":%.6f,"
     "\"coll_timing_source\":\"%s\","
     "\"decomposition\":{"
-      "\"enqueue_to_kernel_us\":%.2f,"
-      "\"gpu_kernel_avg_us\":%.2f,"
-      "\"gpu_kernel_min_us\":%.2f,"
-      "\"gpu_kernel_max_us\":%.2f,"
-      "\"proxy_gpu_wait_us\":%.2f,"
-      "\"proxy_network_us\":%.2f,"
-      "\"proxy_peer_wait_us\":%.2f,"
-      "\"proxy_flush_us\":%.2f,"
-      "\"proxy_gpu_recv_wait_us\":%.2f,"
-      "\"n_proxy_ops\":%d,"
-      "\"n_send_ops\":%d,"
-      "\"n_recv_ops\":%d"
+      ACCL_DECOMP_FIELDS(ACCL_DECOMP_KEY, ACCL_DECOMP_KEY_LAST)
     "},",
     rec->rank, rec->nRanks,
     safeStr(rec->func), (unsigned long)rec->seqNumber, rec->msgSizeBytes,
@@ -221,19 +381,8 @@ static void acclWriteRecord(struct acclCommContext* ctx,
     rec->nChannels, rec->nChannelsRaw,
     rec->totalExecUs,
     algoBw, busBw,
-    rec->hasGpuTiming ? "gpu_globaltimer" : "cpu_wallclock",
-    rec->enqueueToKernelUs,
-    rec->gpuKernelUs,
-    rec->gpuKernelMinUs,
-    rec->gpuKernelMaxUs,
-    rec->proxyGpuWaitUs,
-    rec->proxyNetworkUs,
-    rec->proxyPeerWaitUs,
-    rec->proxyFlushUs,
-    rec->proxyGpuRecvWaitUs,
-    rec->nProxyOps,
-    rec->nSendOps,
-    rec->nRecvOps
+    rec->hasGpuTiming ? "gpu_globaltimer" : "cpu_wallclock"
+    ACCL_DECOMP_FIELDS(ACCL_DECOMP_ARG, ACCL_DECOMP_ARG)
   );
 
   // Kernel events array
@@ -334,29 +483,65 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
       ? (double)(coll->tsCollStopUs - coll->tsCollStartUs) : 0;
   }
 
-  // Proxy decomposition
-  double totalGpuWait = 0, totalNetwork = 0, totalPeerWait = 0;
-  double totalFlush = 0, totalGpuRecvWait = 0;
+  // Proxy decomposition. Each component is averaged over the ops that can
+  // contribute to it, not over every proxy op: a send op only ever passes
+  // through the SendGPUWait/SendPeerWait/SendWait states and a recv op only
+  // through RecvWait/RecvFlushWait/RecvGPUWait, so dividing a one-sided total
+  // by nProxyOps scales it by that class's share of the op mix. A ring
+  // collective posts one send and one recv op per channel, so the per-class
+  // means below are per-channel costs, which is the scale gpu_kernel_avg_us is
+  // already on and the scale accl_report.py's classifier compares against.
+  double sendGpuWait = 0, sendPeerWait = 0, sendNetwork = 0;
+  double recvFlush = 0, recvGpuWait = 0, recvNetwork = 0;
   int nSend = 0, nRecv = 0;
 
   for (int i = 0; i < coll->nProxyOps; i++) {
     int opIdx = coll->proxyOpIndices[i];
     if (opIdx < 0 || opIdx >= ACCL_PROXY_OP_POOL_SIZE) continue;
     struct acclProxyOpInfo* op = &ctx->proxyOpPool[opIdx];
-    totalGpuWait += (double)op->totalGpuWaitUs;
-    totalNetwork += (double)op->totalNetworkUs;
-    totalPeerWait += (double)op->totalPeerWaitUs;
-    totalFlush += (double)op->totalFlushUs;
-    totalGpuRecvWait += (double)op->totalGpuRecvWaitUs;
-    if (op->isSend) nSend++; else nRecv++;
+    // Snapshot the five accumulators under the lock the header declares
+    // protects them. RCCL stops every one of a sub's proxy steps before that
+    // sub's proxy op, on the one proxy-progress thread, and an op only enters
+    // proxyOpIndices from inside the ProxyOp-stop critical section, so today
+    // coll->mutex already orders these writes ahead of this read. That is a
+    // property of the caller, not of this function: hold the lock the struct
+    // says it needs rather than depend on an emission order the plugin does
+    // not control. Callers reach here with no lock held — every
+    // acclFinalizeAndFree site releases coll->mutex first — so this takes
+    // op->mutex on its own and establishes no coll->mutex/op->mutex order.
+    pthread_mutex_lock(&op->mutex);
+    uint64_t opGpuWait     = op->totalGpuWaitUs;
+    uint64_t opPeerWait    = op->totalPeerWaitUs;
+    uint64_t opNetwork     = op->totalNetworkUs;
+    uint64_t opFlush       = op->totalFlushUs;
+    uint64_t opGpuRecvWait = op->totalGpuRecvWaitUs;
+    pthread_mutex_unlock(&op->mutex);
+
+    if (op->isSend) {
+      nSend++;
+      sendGpuWait += (double)opGpuWait;
+      sendPeerWait += (double)opPeerWait;
+      sendNetwork += (double)opNetwork;
+    } else {
+      nRecv++;
+      recvFlush += (double)opFlush;
+      recvGpuWait += (double)opGpuRecvWait;
+      recvNetwork += (double)opNetwork;
+    }
   }
 
+  // A zero denominator only happens when the class has no ops at all, in which
+  // case its numerator is zero too, so reporting 0 states the truth rather than
+  // papering over a division; the guard exists only to avoid 0/0.
+  double meanSendNet = nSend > 0 ? sendNetwork / nSend : 0;
+  double meanRecvNet = nRecv > 0 ? recvNetwork / nRecv : 0;
+
   int nOps = coll->nProxyOps;
-  rec.proxyGpuWaitUs = nOps > 0 ? totalGpuWait / nOps : 0;
-  rec.proxyNetworkUs = nOps > 0 ? totalNetwork / nOps : 0;
-  rec.proxyPeerWaitUs = nOps > 0 ? totalPeerWait / nOps : 0;
-  rec.proxyFlushUs = nOps > 0 ? totalFlush / nOps : 0;
-  rec.proxyGpuRecvWaitUs = nOps > 0 ? totalGpuRecvWait / nOps : 0;
+  rec.proxyGpuWaitUs = nSend > 0 ? sendGpuWait / nSend : 0;
+  rec.proxyNetworkUs = meanSendNet + meanRecvNet;
+  rec.proxyPeerWaitUs = nSend > 0 ? sendPeerWait / nSend : 0;
+  rec.proxyFlushUs = nRecv > 0 ? recvFlush / nRecv : 0;
+  rec.proxyGpuRecvWaitUs = nRecv > 0 ? recvGpuWait / nRecv : 0;
   rec.nProxyOps = nOps;
   rec.nSendOps = nSend;
   rec.nRecvOps = nRecv;
@@ -392,15 +577,36 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
                                      ncclDebugLogger_t logfn) {
   gLogFn = logfn;
 
-  const char* env;
-  if ((env = getenv("ACCL_PROFILER_MIN_SIZE_BYTES")) != NULL) {
-    gMinMsgSize = (size_t)atol(env);
-  }
-
   struct acclCommContext* ctx = (struct acclCommContext*)calloc(1, sizeof(*ctx));
   if (!ctx) return ncclSuccess;
 
+  // Read into the context, not a file static: with several communicators in one
+  // process a static is last-init-wins, and because the assignment is
+  // conditional it is also never reset once set.
+  const char* env;
+  if ((env = getenv("ACCL_PROFILER_MIN_SIZE_BYTES")) != NULL) {
+    int badMinSize = 0;
+    ctx->minMsgSize = acclParseMinSize(env, &badMinSize);
+    if (badMinSize) {
+      // Fall back to 0, not to any non-zero guess. An unusable threshold has to
+      // fail open: too large a threshold profiles nothing and leaves an empty
+      // file that no summary field marks as wrong, while 0 profiles everything,
+      // so the mistake shows up as more data than asked for rather than as none.
+      ACCL_WARN("ACCL Profiler: ACCL_PROFILER_MIN_SIZE_BYTES=\"%s\" is not a "
+                "non-negative byte count; ignoring it and profiling every "
+                "collective. A negative or out-of-range value would otherwise "
+                "filter out every collective and leave an empty output file.",
+                env);
+    }
+  }
+
   ctx->refCount = 1;
+  for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
+    pthread_mutex_init(&ctx->collPool[i].mutex, NULL);
+  }
+  for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
+    pthread_mutex_init(&ctx->proxyOpPool[i].mutex, NULL);
+  }
   ctx->commHash = commHash;
   ctx->rank = rank;
   ctx->nRanks = nRanks;
@@ -419,14 +625,34 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   char hostname[256] = {0};
   gethostname(hostname, sizeof(hostname) - 1);
 
-  mkdir(outDir, 0755);
+  // fopen() below reports only ENOENT on the assembled filename, which does not
+  // say the directory is the problem, so keep this errno to name the real cause.
+  int dirErrno = (acclMkdirRecursive(outDir) == 0) ? 0 : errno;
 
-  snprintf(ctx->outputPath, sizeof(ctx->outputPath),
+  int pathLen = snprintf(ctx->outputPath, sizeof(ctx->outputPath),
     "%s/accl_profiler_rank%d_%s_pid%d_0x%lx.jsonl",
     outDir, rank, hostname, (int)getpid(), (unsigned long)commHash);
-  ctx->outputFile = fopen(ctx->outputPath, "w");
-  if (!ctx->outputFile) {
-    ACCL_WARN("ACCL Profiler: Failed to open %s: %s", ctx->outputPath, strerror(errno));
+  if (pathLen < 0 || (size_t)pathLen >= sizeof(ctx->outputPath)) {
+    // Truncation cuts the rank/pid/hash suffix, so every rank in the job would
+    // open one shared name and interleave records. Refuse the path instead.
+    ACCL_WARN("ACCL Profiler: ACCL_PROFILER_OUTPUT_DIR is too long: output path "
+              "needs %d bytes but only %zu are available. No profiling output "
+              "will be written.", pathLen, sizeof(ctx->outputPath));
+    ctx->outputPath[0] = '\0';
+    ctx->outputFile = NULL;
+  } else {
+    ctx->outputFile = fopen(ctx->outputPath, "w");
+    if (!ctx->outputFile) {
+      int openErrno = errno;
+      if (dirErrno != 0) {
+        ACCL_WARN("ACCL Profiler: cannot create output directory %s (from "
+                  "ACCL_PROFILER_OUTPUT_DIR): %s. No profiling output will be "
+                  "written.", outDir, strerror(dirErrno));
+      } else {
+        ACCL_WARN("ACCL Profiler: Failed to open %s: %s", ctx->outputPath,
+                  strerror(openErrno));
+      }
+    }
   }
 
   *context = ctx;
@@ -435,7 +661,7 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
 
   ACCL_INFO("ACCL Profiler: init rank=%d nRanks=%d nNodes=%d "
             "output=%s minSize=%zu",
-            rank, nRanks, nNodes, ctx->outputPath, gMinMsgSize);
+            rank, nRanks, nNodes, ctx->outputPath, ctx->minMsgSize);
   return ncclSuccess;
 }
 
@@ -450,52 +676,82 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
     if (ctx->collPoolUsed[i]) {
       struct acclCollInfo* coll = &ctx->collPool[i];
-      if (!coll->finalized) {
-        // Never reached its completion predicate — teardown skipped one or more
-        // of its kernel-channel events. Count it so the loss is visible; no
-        // record is emitted for it.
-        ctx->leakedCollectives++;
-        acclFreeCollProxyOps(ctx, coll);
-      }
+      // Take the claim under the lock every writer uses, not under
+      // collPoolMutex. A slot already claimed belongs to a thread between
+      // acclShouldFinalize and acclFreeColl; it releases the slot and its
+      // reference itself, so touching it here double-releases both. Reading and
+      // setting in one critical section leaves no window for a writer to claim
+      // a slot this drain has decided to release.
+      pthread_mutex_lock(&coll->mutex);
+      int claimed = coll->finalized;
       coll->finalized = 1;
-      pthread_mutex_destroy(&coll->mutex);
+      pthread_mutex_unlock(&coll->mutex);
+      if (claimed) continue;
+      // Never reached its completion predicate — teardown skipped one or more of
+      // its kernel-channel events. Count it so the loss is visible; no record is
+      // emitted for it.
+      ctx->leakedCollectives++;
+      acclFreeCollProxyOps(ctx, coll);
       ctx->collPoolUsed[i] = 0;
       __atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
     }
   }
   pthread_mutex_unlock(&ctx->collPoolMutex);
 
-  // Write drop summary and close output before tearing down mutexes.
+  // Write the drop summary while the output file is still open, under the lock
+  // acclWriteRecord uses, so the summary cannot land inside a record. The file
+  // is closed by acclCtxUnref once the last reference goes away.
+  pthread_mutex_lock(&ctx->outputMutex);
   if (ctx->outputFile) {
     // Emit the summary unconditionally, including on a clean run: a consumer
     // that finds no summary line cannot distinguish "nothing was lost" from
     // "the process died before finalize".
-    int complete = (ctx->droppedCollectives == 0 && ctx->leakedCollectives == 0);
+    uint64_t dOps   = __atomic_load_n(&ctx->droppedProxyOps, __ATOMIC_SEQ_CST);
+    uint64_t dSteps = __atomic_load_n(&ctx->droppedProxySteps, __ATOMIC_SEQ_CST);
+    uint64_t oOps   = __atomic_load_n(&ctx->overflowProxyOps, __ATOMIC_SEQ_CST);
+    // A run is complete only if nothing was lost anywhere. Proxy loss leaves the
+    // decomposition understated with no marker on the affected records, so it
+    // has to clear this flag too.
+    // Records go out through fprintf/fflush whose results are discarded on the
+    // hot path; the stream's sticky error flag is the one place a write failure
+    // (ENOSPC, EIO) is still visible, so fold it into the verdict here rather
+    // than branching per record.
+    int writeError = ferror(ctx->outputFile) != 0;
+    int complete = (ctx->droppedCollectives == 0 && ctx->leakedCollectives == 0 &&
+                    dOps == 0 && dSteps == 0 && oOps == 0 && !writeError);
     fprintf(ctx->outputFile,
       "{\"summary\":{\"dropped_collectives\":%lu,\"leaked_collectives\":%lu,"
-      "\"pool_size\":%d,\"complete\":%s}}\n",
+      "\"dropped_proxy_ops\":%lu,\"dropped_proxy_steps\":%lu,"
+      "\"overflow_proxy_ops\":%lu,"
+      "\"coll_pool_size\":%d,\"proxy_op_pool_size\":%d,\"proxy_step_pool_size\":%d,"
+      "\"max_proxy_ops_per_coll\":%d,\"complete\":%s}}\n",
       (unsigned long)ctx->droppedCollectives,
       (unsigned long)ctx->leakedCollectives,
-      ACCL_COLL_POOL_SIZE, complete ? "true" : "false");
+      (unsigned long)dOps, (unsigned long)dSteps, (unsigned long)oOps,
+      ACCL_COLL_POOL_SIZE, ACCL_PROXY_OP_POOL_SIZE, ACCL_PROXY_STEP_POOL_SIZE,
+      ACCL_MAX_PROXY_OPS, complete ? "true" : "false");
     fflush(ctx->outputFile);
     if (!complete) {
-      ACCL_WARN("ACCL Profiler: rank=%d output INCOMPLETE — %lu collectives dropped "
-                "(pool exhausted), %lu slots leaked (teardown-skipped kernel events)",
+      ACCL_WARN("ACCL Profiler: rank=%d output INCOMPLETE: %lu collectives dropped "
+                "(coll pool exhausted), %lu slots leaked (teardown-skipped kernel "
+                "events), %lu proxy ops dropped, %lu proxy steps dropped, %lu proxy "
+                "ops discarded (more than %d on one collective)",
                 ctx->rank, (unsigned long)ctx->droppedCollectives,
-                (unsigned long)ctx->leakedCollectives);
+                (unsigned long)ctx->leakedCollectives,
+                (unsigned long)dOps, (unsigned long)dSteps, (unsigned long)oOps,
+                ACCL_MAX_PROXY_OPS);
     }
-    fclose(ctx->outputFile);
-    ctx->outputFile = NULL;
+    if (writeError) {
+      // Say it separately: when writes are failing the summary above may not
+      // reach disk at all, so the log is the only channel left.
+      ACCL_WARN("ACCL Profiler: rank=%d hit a write error on %s; the records on "
+                "disk are truncated", ctx->rank, ctx->outputPath);
+    }
   }
+  pthread_mutex_unlock(&ctx->outputMutex);
 
-  // Tear down context only after refcount reaches zero.
-  if (__atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST) == 0) {
-    pthread_mutex_destroy(&ctx->outputMutex);
-    pthread_mutex_destroy(&ctx->collPoolMutex);
-    pthread_mutex_destroy(&ctx->proxyOpPoolMutex);
-    pthread_mutex_destroy(&ctx->proxyStepPoolMutex);
-    free(ctx);
-  }
+  // Drop the init reference; outstanding proxy ops/steps hold their own.
+  acclCtxUnref(ctx);
   return ncclSuccess;
 }
 
@@ -511,7 +767,7 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
   if (eDescr->type == ncclProfileColl) {
     // Check message size filter
     size_t msgSize = (size_t)acclDatatypeSize(eDescr->coll.datatype) * eDescr->coll.count;
-    if (msgSize < gMinMsgSize) {
+    if (msgSize < ctx->minMsgSize) {
       *eHandle = NULL;
       return ncclSuccess;
     }
@@ -561,6 +817,12 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
 
     struct acclCollInfo* coll = (struct acclCollInfo*)eDescr->parentObj;
     uint8_t chId = eDescr->kernelCh.channelId;
+    // Unreachable at the current bound, and the compiler says so: ACCL_MAX_CHANNELS is 256,
+    // exactly the range of the v5/v6 ABI's uint8_t channelId. Kept as the only bound on the
+    // kernelCh[] index below. Widening chId would not make it live -- the descriptor field
+    // stays uint8_t -- it would only hide the warning. Nor is shrinking ACCL_MAX_CHANNELS a
+    // way to reclaim kernelCh[]'s 3.5 MB: MAXCHANNELS is 256 and NCCL_MAX_NCHANNELS=256 is a
+    // supported setting, so every channel at or above a smaller bound would be dropped here.
     if (chId >= ACCL_MAX_CHANNELS) {
       *eHandle = NULL;
       return ncclSuccess;
@@ -621,12 +883,28 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
       *eHandle = NULL;
       return ncclSuccess;
     }
+    // Tag-check the parent as the Coll and ProxyOp paths above do. RCCL only
+    // ever passes sub->opEventHandle here (src/plugin/profiler.cc), which is
+    // either NULL or a handle this plugin returned for a ProxyOp, so no
+    // in-tree caller trips this. It is defence in depth, not a proof: the
+    // probe reads through the very pointer it is validating, and a freed pool
+    // slot keeps its old bytes until the next acclAllocProxyOp memsets them,
+    // so a stale-but-plausible ncclProfileProxyOp tag still passes. It closes
+    // the mistyped-handle case and narrows, without closing, the recycled-slot
+    // one; without it the ProxyStep-stop path locks `op->mutex` at the
+    // acclProxyOpInfo offset of whatever object it was handed.
+    struct acclProxyOpInfo* parentOp = NULL;
+    if (eDescr->parentObj &&
+        *(uint64_t*)eDescr->parentObj == ncclProfileProxyOp) {
+      parentOp = (struct acclProxyOpInfo*)eDescr->parentObj;
+    }
     step->type = ncclProfileProxyStep;
-    step->parentObj = eDescr->parentObj;
+    step->parentObj = parentOp;
     step->commCtx = ctx;
     step->step = eDescr->proxyStep.step;
     step->tsStartUs = acclGetTimeUs();
     step->lastStateTs = step->tsStartUs;
+    step->prevState = -1;
 
     *eHandle = step;
     return ncclSuccess;
@@ -644,13 +922,20 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
   if (type == ncclProfileColl) {
     struct acclCollInfo* coll = (struct acclCollInfo*)eHandle;
     struct acclCommContext* ctx = (struct acclCommContext*)coll->commCtx;
-    coll->tsCollStopUs = acclGetTimeUs();
-
     pthread_mutex_lock(&coll->mutex);
     if (coll->finalized) {
       pthread_mutex_unlock(&coll->mutex);
       return ncclSuccess;
     }
+    // Stamped here rather than before the lock. No reader could see 0: a
+    // finalize needs collStopped, which is set below in this same critical
+    // section, so the unlock/lock pair already ordered the stamp ahead of any
+    // read of it. What the move does buy is the finalized check above — a
+    // coll-stop arriving after the slot was drained and reissued no longer
+    // stamps the new tenant's stop time — and it keeps every write to the slot
+    // under the slot's own mutex, which is the discipline the rest of the file
+    // follows.
+    coll->tsCollStopUs = acclGetTimeUs();
     coll->collStopped = 1;
     int shouldFinalize = acclShouldFinalize(coll);
     pthread_mutex_unlock(&coll->mutex);
@@ -689,11 +974,19 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
 
     if (coll) {
       pthread_mutex_lock(&coll->mutex);
+      if (coll->finalized) {
+        pthread_mutex_unlock(&coll->mutex);
+        acclFreeProxyOp(ctx, op);
+        return ncclSuccess;
+      }
       int opIdx = (int)(op - ctx->proxyOpPool);
       if (coll->nProxyOps < ACCL_MAX_PROXY_OPS) {
         coll->proxyOpIndices[coll->nProxyOps] = opIdx;
         coll->nProxyOps++;
       } else {
+        // The op completed normally; the collective simply has no room to record
+        // it, so its timing is lost and the decomposition understates the total.
+        __atomic_add_fetch(&ctx->overflowProxyOps, 1, __ATOMIC_SEQ_CST);
         acclFreeProxyOp(ctx, op);
       }
       coll->nProxyOpsCompleted++;
@@ -711,6 +1004,11 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
   if (type == ncclProfileProxyStep) {
     struct acclProxyStepInfo* step = (struct acclProxyStepInfo*)eHandle;
     step->tsStopUs = acclGetTimeUs();
+    // Close the last state: no further transition is announced, so the interval
+    // from the last transition to the stop belongs to the state still in effect
+    // (SendWait on the send side, RecvGPUWait on the recv side).
+    acclProxyStepChargeState(step, step->prevState, step->tsStopUs - step->lastStateTs);
+    step->prevState = -1;
 
     // Accumulate step timing into parent proxy op under lock
     struct acclProxyOpInfo* op = (struct acclProxyOpInfo*)step->parentObj;
@@ -751,30 +1049,16 @@ __hidden ncclResult_t acclPluginRecordEventState(void* eHandle,
   // ProxyStep state transitions — accumulate time per state
   if (type == ncclProfileProxyStep) {
     struct acclProxyStepInfo* step = (struct acclProxyStepInfo*)eHandle;
+    // RCCL signals a proxy-step state when the step ENTERS it, so the interval
+    // that just closed was spent in step->prevState, not in eState.  Verified
+    // against the emission sites in src/transport/net.cc and against the
+    // reference consumer plugins/profiler/example, whose chrome-trace spans run
+    // ts(state) -> ts(next state) (print_event.cc:118-152).  The final interval
+    // is charged in the ProxyStep stop path.
     uint64_t now = acclGetTimeUs();
-    uint64_t elapsed = now - step->lastStateTs;
+    acclProxyStepChargeState(step, step->prevState, now - step->lastStateTs);
     step->lastStateTs = now;
-
-    switch ((int)eState) {
-    case ncclProfilerProxyStepSendGPUWait:
-      step->gpuWaitUs += elapsed;
-      break;
-    case ncclProfilerProxyStepSendPeerWait_v4:
-      step->peerWaitUs += elapsed;
-      break;
-    case ncclProfilerProxyStepSendWait:
-      step->sendWaitUs += elapsed;
-      break;
-    case ncclProfilerProxyStepRecvWait:
-      step->recvWaitUs += elapsed;
-      break;
-    case ncclProfilerProxyStepRecvFlushWait:
-      step->flushWaitUs += elapsed;
-      break;
-    case ncclProfilerProxyStepRecvGPUWait:
-      step->gpuRecvWaitUs += elapsed;
-      break;
-    }
+    step->prevState = (int)eState;
     return ncclSuccess;
   }
 
