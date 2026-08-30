@@ -50,6 +50,18 @@ using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::ConSanMoiLiteralDispatchIdPolicy;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 
+std::optional<uint16_t> inline_shadow_visible_evidence_sgpr(const ConSanRequest &request,
+                                                            const ConSanMoiOperatingPoint &point) {
+  if (request.moi_engine != ConSanMoiEngine::InlineShadow || !point.moi_exec_save_sgpr)
+    return std::nullopt;
+  if (point.automatic_moi_inline_sgpr_spill)
+    return point.moi_inline_visible_evidence_sgpr;
+  if (!point.moi_exec_save_sgprs_persistent)
+    return std::nullopt;
+  return static_cast<uint16_t>(*point.moi_exec_save_sgpr +
+                               (point.moi_dynamic_stack_spill ? 25u : 24u));
+}
+
 uint16_t inline_shadow_loop_scratch_count(const ConSanMoiCandidate &candidate) {
   // Wide local accesses retain an offset and iteration counter. Wide external
   // accesses retain an iteration counter and the workgroup key, since the

@@ -3270,20 +3270,6 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
              : resolve_moi_scratch_plan(*plan, operating_point, operating_point, expected_count);
 }
 
-[[nodiscard]] std::optional<uint16_t>
-inline_shadow_visible_evidence_sgpr(const ConSanRequest &request,
-                                    const ConSanMoiOperatingPoint &point) {
-  if (request.moi_engine != ConSanMoiEngine::InlineShadow || !point.moi_exec_save_sgpr) {
-    return std::nullopt;
-  }
-  if (point.automatic_moi_inline_sgpr_spill)
-    return point.moi_inline_visible_evidence_sgpr;
-  if (!point.moi_exec_save_sgprs_persistent)
-    return std::nullopt;
-  return static_cast<uint16_t>(*point.moi_exec_save_sgpr +
-                               (point.moi_dynamic_stack_spill ? 25u : 24u));
-}
-
 static_assert(!persistent_sgpr_range_overlaps_reserved_ordinary_range(102u, 2u,
                                                                       ROCJITSU_CODE_ARCH_CDNA4));
 static_assert(persistent_sgpr_range_overlaps_reserved_ordinary_range(102u, 2u,
@@ -3355,25 +3341,6 @@ moi_special_state_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPo
               ? *point.moi_inline_indirect_scc_sgpr
               : static_cast<uint16_t>(*point.moi_exec_save_sgpr + vcc_offset + 2u),
   };
-}
-
-/// Returns the SCC snapshot that remains valid after a sampled access body.
-///
-/// Fixed layouts return after the sampled body has overwritten the runtime
-/// gate's residue field with the guest SCC snapshot. Spill-backed layouts
-/// restore the complete transient window before returning, so their separately
-/// allocated indirect-jump SCC register remains the stable snapshot.
-[[nodiscard]] std::optional<uint16_t>
-moi_sampled_access_return_scc_sgpr(const ConSanRequest &request,
-                                   const ConSanMoiOperatingPoint &point) {
-  if (request.moi_engine != ConSanMoiEngine::Sampled || !point.moi_exec_save_sgpr)
-    return std::nullopt;
-  if (point.automatic_moi_record_replay_sgpr_spill) {
-    const auto indirect = moi_indirect_jump_sgprs(request, point);
-    return indirect ? std::optional<uint16_t>(indirect->scc_save_sgpr) : std::nullopt;
-  }
-  const auto publication = moi_sampled_publication_state_sgprs(request, point);
-  return publication ? std::optional<uint16_t>(publication->guest_scc_snapshot_sgpr) : std::nullopt;
 }
 
 [[nodiscard]] std::optional<MoiIndirectJumpSgprs>

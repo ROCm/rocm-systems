@@ -120,6 +120,24 @@ using consan_moi_detail::resolve_moi_report_layout;
 
 namespace consan_moi_impl {
 
+/// Returns the SCC snapshot that remains valid after a sampled access body.
+///
+/// Fixed layouts return after the sampled body has overwritten the runtime
+/// gate's residue field with the guest SCC snapshot. Spill-backed layouts
+/// restore the complete transient window before returning, so their separately
+/// allocated indirect-jump SCC register remains the stable snapshot.
+std::optional<uint16_t> moi_sampled_access_return_scc_sgpr(const ConSanRequest &request,
+                                                           const ConSanMoiOperatingPoint &point) {
+  if (request.moi_engine != ConSanMoiEngine::Sampled || !point.moi_exec_save_sgpr)
+    return std::nullopt;
+  if (point.automatic_moi_record_replay_sgpr_spill) {
+    const auto indirect = moi_indirect_jump_sgprs(request, point);
+    return indirect ? std::optional<uint16_t>(indirect->scc_save_sgpr) : std::nullopt;
+  }
+  const auto publication = moi_sampled_publication_state_sgprs(request, point);
+  return publication ? std::optional<uint16_t>(publication->guest_scc_snapshot_sgpr) : std::nullopt;
+}
+
 MoiObjectModePlan plan_sampled_object_mode(const ConSanRequest &request,
                                            const ConSanMoiOperatingPoint &point,
                                            const MoiObjectFacts &facts,
