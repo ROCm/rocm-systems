@@ -3206,9 +3206,9 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
 
 ### Slice 5A: Record/Replay evidence requirements
 
-- **Completed boundary and contract:** The pure Record/Replay evidence planner
-  consumes only `ConSanObservationPlan` and
-  `ConSanRecordReplayCapacityPolicy`. It returns a typed alternative that
+- **Completed boundary and contract:** The mode-owned Record/Replay evidence
+  planner consumes classified evidence intents and narrow caller bounds through
+  the shared mode-operations registry. It returns a typed alternative that
   intrinsically denotes bounded-first-light retention, completeness-invalidating
   evidence loss, and executable lifetime, plus runtime requirements and exact
   address-free ABI sizing input and result. The current heterogeneous

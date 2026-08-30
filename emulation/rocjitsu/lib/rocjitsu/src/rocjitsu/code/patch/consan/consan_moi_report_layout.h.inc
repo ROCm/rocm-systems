@@ -462,21 +462,6 @@ struct ConSanEvidenceIntentPlan {
 [[nodiscard]] ConSanEvidenceIntentPlan
 plan_consan_evidence_intents(const ConSanObservationPlan &observation_plan);
 
-/// Caller policy controlling bounded Record/Replay evidence capacity.
-///
-/// A zero byte ceiling means the engine safety ceiling. The optional physical
-/// access-probe limit models only the explicit expert patch limit; absence
-/// means that every admitted access intent contributes requirements. It does
-/// not cap barrier, atomic, or fence intents and contains no report address.
-struct ConSanRecordReplayCapacityPolicy {
-  /// Optional caller cap, bounded internally by the engine safety ceiling.
-  uint64_t caller_ceiling_bytes = 0;
-  /// Maximum admitted physical access intents, or no limit when absent.
-  std::optional<uint64_t> maximum_access_probe_count;
-
-  bool operator==(const ConSanRecordReplayCapacityPolicy &) const = default;
-};
-
 /// Report-backed evidence contract shared by the three MOI engines.
 ///
 /// This base owns only the representation-independent runtime and ABI product.
@@ -518,29 +503,6 @@ struct ConSanRecordReplayEvidenceRequirements : ConSanMoiEvidenceRequirements {
   bool operator==(const ConSanRecordReplayEvidenceRequirements &) const = default;
 };
 
-/// Derive the complete address-free Record/Replay evidence contract from an
-/// already-classified evidence-intent plan. The function performs no
-/// allocation, reads no code-object bytes, and does not inspect patches or
-/// resource assignments.
-[[nodiscard]] ConSanRecordReplayEvidenceRequirements
-plan_consan_record_replay_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
-                                   const ConSanRecordReplayCapacityPolicy &capacity_policy = {});
-
-/// Caller policy controlling bounded Sampled evidence capacity.
-///
-/// The optional physical-probe limit carries the explicit expert admission
-/// bound; it does not truncate logical ranges within an admitted instruction
-/// or synchronization intents. The byte ceiling affects only ABI fitting.
-/// Neither member contains a report address or mutable lowering state.
-struct ConSanSampledCapacityPolicy {
-  /// Optional caller cap, bounded internally by the engine safety ceiling.
-  uint64_t caller_ceiling_bytes = 0;
-  /// Maximum admitted physical access intents, or no limit when absent.
-  std::optional<uint64_t> maximum_access_probe_count;
-
-  bool operator==(const ConSanSampledCapacityPolicy &) const = default;
-};
-
 /// Address-free Sampled evidence contract for one code object.
 ///
 /// The observation plan supplies logical access windows and ordering events;
@@ -562,23 +524,6 @@ struct ConSanSampledEvidenceRequirements : ConSanMoiEvidenceRequirements {
   }
 
   bool operator==(const ConSanSampledEvidenceRequirements &) const = default;
-};
-
-/// Caller policy controlling bounded InlineShadow evidence capacity.
-///
-/// `maximum_workgroup_lds_bytes` is the runtime- or caller-supplied aperture
-/// used when an admitted group-FLAT or dynamic-LDS access cannot be bounded by
-/// a kernel's fixed descriptor declaration. Its absence selects the immutable
-/// target profile. The policy owns neither original ELF bytes nor a report.
-struct ConSanInlineShadowCapacityPolicy {
-  /// Optional caller cap, bounded internally by the engine safety ceiling.
-  uint64_t caller_ceiling_bytes = 0;
-  /// Maximum admitted physical access intents, or no limit when absent.
-  std::optional<uint64_t> maximum_access_probe_count;
-  /// Explicit full LDS aperture used for address-free shadow sizing.
-  std::optional<uint32_t> maximum_workgroup_lds_bytes;
-
-  bool operator==(const ConSanInlineShadowCapacityPolicy &) const = default;
 };
 
 /// Address-free InlineShadow evidence contract for one code object.
@@ -650,21 +595,6 @@ using ConSanEvidenceRequirements =
 /// consistent and can safely cross the runtime-coordination boundary.
 [[nodiscard]] bool
 consan_evidence_requirements_well_formed(const ConSanEvidenceRequirements &requirements);
-
-/// Derive Sampled evidence solely from an already-classified evidence-intent
-/// plan and capacity policy. The function reads no code bytes, patches, or
-/// resource assignments.
-[[nodiscard]] ConSanSampledEvidenceRequirements
-plan_consan_sampled_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
-                             const ConSanSampledCapacityPolicy &capacity_policy = {});
-
-/// Derive InlineShadow evidence from typed policy plus immutable original-
-/// program facts. The function reads no code bytes, emitted patches, or
-/// mutable resource assignments.
-[[nodiscard]] ConSanInlineShadowEvidenceRequirements
-plan_consan_inline_shadow_evidence(const ProgramInventory &inventory,
-                                   const ConSanEvidenceIntentPlan &evidence_intents,
-                                   const ConSanInlineShadowCapacityPolicy &capacity_policy = {});
 
 /// Derive the fixed SuperCollider marker contract from a typed observation
 /// plan. No report-layout or allocation mechanism participates.

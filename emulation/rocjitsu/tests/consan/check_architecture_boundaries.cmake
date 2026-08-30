@@ -120,6 +120,13 @@ _consan_assert_no_match(
     "plan_consan_(record_replay|sampled|inline_shadow)_evidence"
     "the common pipeline must compose mode-owned evidence planning through the mode registry"
 )
+foreach(_file IN LISTS _consan_sources)
+    _consan_assert_no_match(
+        "${_file}"
+        "plan_consan_(record_replay|sampled|inline_shadow)_evidence"
+        "the mode registry is the only production MOI evidence-planning entry point"
+    )
+endforeach()
 foreach(_source IN ITEMS consan_moi_barrier.inc consan_moi_sync_emission.cpp)
     _consan_assert_no_match(
         "${_consan_dir}/${_source}"

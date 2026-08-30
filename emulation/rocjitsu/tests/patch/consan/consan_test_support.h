@@ -12,6 +12,7 @@
 #include "rocjitsu/code/patch/cdna3_instrumentation_builder.h"
 #include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/gfx1250_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -197,6 +198,68 @@ inline constexpr uint32_t kRdna4Wave64AllVgprsGranulated = 63;
              (sizeof(uint64_t) + sizeof(ConSanMoiSampledCausalWindow) +
               sizeof(ConSanMoiSampledSyncMetadataPacked) +
               sizeof(ConSanMoiSampledPendingAcquireSlot));
+}
+
+// Test-only typed adapters keep focused contract tests concise while
+// production has one mode-registry entry point and no parallel per-mode API.
+struct ConSanRecordReplayCapacityPolicy {
+  uint64_t caller_ceiling_bytes = 0;
+  std::optional<uint64_t> maximum_access_probe_count;
+  bool operator==(const ConSanRecordReplayCapacityPolicy &) const = default;
+};
+
+using ConSanSampledCapacityPolicy = ConSanRecordReplayCapacityPolicy;
+
+struct ConSanInlineShadowCapacityPolicy {
+  uint64_t caller_ceiling_bytes = 0;
+  std::optional<uint64_t> maximum_access_probe_count;
+  std::optional<uint32_t> maximum_workgroup_lds_bytes;
+  bool operator==(const ConSanInlineShadowCapacityPolicy &) const = default;
+};
+
+[[nodiscard]] inline ConSanRecordReplayEvidenceRequirements
+plan_consan_record_replay_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
+                                   const ConSanRecordReplayCapacityPolicy &policy = {}) {
+  ProgramInventory unused_inventory;
+  return std::get<ConSanRecordReplayEvidenceRequirements>(
+      consan_moi_impl::plan_moi_evidence_requirements(
+          ConSanMoiEngine::RecordReplay,
+          {.program_inventory = unused_inventory,
+           .evidence_intents = evidence_intents,
+           .requested_report_buffer_size = policy.caller_ceiling_bytes,
+           .maximum_access_probe_count = policy.maximum_access_probe_count,
+           .maximum_workgroup_lds_bytes = std::nullopt,
+           .dynamic_access_records = false}));
+}
+
+[[nodiscard]] inline ConSanSampledEvidenceRequirements
+plan_consan_sampled_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
+                             const ConSanSampledCapacityPolicy &policy = {}) {
+  ProgramInventory unused_inventory;
+  return std::get<ConSanSampledEvidenceRequirements>(
+      consan_moi_impl::plan_moi_evidence_requirements(
+          ConSanMoiEngine::Sampled,
+          {.program_inventory = unused_inventory,
+           .evidence_intents = evidence_intents,
+           .requested_report_buffer_size = policy.caller_ceiling_bytes,
+           .maximum_access_probe_count = policy.maximum_access_probe_count,
+           .maximum_workgroup_lds_bytes = std::nullopt,
+           .dynamic_access_records = false}));
+}
+
+[[nodiscard]] inline ConSanInlineShadowEvidenceRequirements
+plan_consan_inline_shadow_evidence(const ProgramInventory &inventory,
+                                   const ConSanEvidenceIntentPlan &evidence_intents,
+                                   const ConSanInlineShadowCapacityPolicy &policy = {}) {
+  return std::get<ConSanInlineShadowEvidenceRequirements>(
+      consan_moi_impl::plan_moi_evidence_requirements(
+          ConSanMoiEngine::InlineShadow,
+          {.program_inventory = inventory,
+           .evidence_intents = evidence_intents,
+           .requested_report_buffer_size = policy.caller_ceiling_bytes,
+           .maximum_access_probe_count = policy.maximum_access_probe_count,
+           .maximum_workgroup_lds_bytes = policy.maximum_workgroup_lds_bytes,
+           .dynamic_access_records = false}));
 }
 
 /// Derive the MOI report inventory used by mechanism-focused tests from the

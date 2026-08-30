@@ -134,19 +134,18 @@ bool ConSanSampledEvidenceRequirements::well_formed() const {
   return common_well_formed(ConSanMoiEngine::Sampled);
 }
 
-ConSanSampledEvidenceRequirements
-plan_consan_sampled_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
-                             const ConSanSampledCapacityPolicy &capacity_policy) {
+ConSanEvidenceRequirements
+consan_moi_impl::plan_sampled_evidence_requirements(const MoiEvidencePlanningContext &context) {
   ConSanSampledEvidenceRequirements requirements;
   requirements.reason = consan_moi_impl::validate_moi_evidence_intents(
-      evidence_intents, ConSanCapabilityEngine::Sampled);
+      context.evidence_intents, ConSanCapabilityEngine::Sampled);
   if (requirements.reason != ConSanEvidenceRequirementReason::None)
     return requirements;
 
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = ConSanMoiEngine::Sampled;
   (void)consan_moi_impl::accumulate_moi_evidence_counts(
-      evidence_intents, capacity_policy.maximum_access_probe_count, inventory);
+      context.evidence_intents, context.maximum_access_probe_count, inventory);
 
   constexpr uint64_t kSampledBanksPerLogicalRange = 8u;
   const uint64_t access_banks =
@@ -161,18 +160,11 @@ plan_consan_sampled_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
                                    ? 0u
                                    : std::max<uint64_t>(inventory.access_range_count, 1u);
   inventory =
-      fit_consan_moi_sampled_auto_report_inventory(inventory, capacity_policy.caller_ceiling_bytes);
+      fit_consan_moi_sampled_auto_report_inventory(inventory, context.requested_report_buffer_size);
 
   consan_moi_impl::publish_moi_evidence_requirements(requirements, std::move(inventory),
-                                                     capacity_policy.caller_ceiling_bytes);
+                                                     context.requested_report_buffer_size);
   return requirements;
-}
-
-ConSanEvidenceRequirements
-consan_moi_impl::plan_sampled_evidence_requirements(const MoiEvidencePlanningContext &context) {
-  return plan_consan_sampled_evidence(
-      context.evidence_intents, {.caller_ceiling_bytes = context.requested_report_buffer_size,
-                                 .maximum_access_probe_count = context.maximum_access_probe_count});
 }
 
 } // namespace rocjitsu

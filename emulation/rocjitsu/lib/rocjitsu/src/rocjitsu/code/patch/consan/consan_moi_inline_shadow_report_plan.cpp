@@ -147,13 +147,11 @@ bool ConSanInlineShadowEvidenceRequirements::well_formed() const {
          common_well_formed(ConSanMoiEngine::InlineShadow);
 }
 
-ConSanInlineShadowEvidenceRequirements
-plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
-                                   const ConSanEvidenceIntentPlan &evidence_intents,
-                                   const ConSanInlineShadowCapacityPolicy &capacity_policy) {
+ConSanEvidenceRequirements consan_moi_impl::plan_inline_shadow_evidence_requirements(
+    const MoiEvidencePlanningContext &context) {
   ConSanInlineShadowEvidenceRequirements requirements;
   requirements.reason = consan_moi_impl::validate_moi_evidence_intents(
-      evidence_intents, ConSanCapabilityEngine::InlineShadow);
+      context.evidence_intents, ConSanCapabilityEngine::InlineShadow);
   if (requirements.reason != ConSanEvidenceRequirementReason::None)
     return requirements;
 
@@ -161,7 +159,7 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
   inventory.engine = ConSanMoiEngine::InlineShadow;
   const std::vector<const ConSanEvidenceIntent *> retained_accesses =
       consan_moi_impl::accumulate_moi_evidence_counts(
-          evidence_intents, capacity_policy.maximum_access_probe_count, inventory);
+          context.evidence_intents, context.maximum_access_probe_count, inventory);
   bool requires_full_lds_aperture = false;
   uint64_t declared_lds_extent = 0;
   uint64_t native_static_extent = 0;
@@ -170,7 +168,7 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
         util::saturating_add(inventory.inline_compact_token_mapping_count, uint64_t{1});
     for (const SemanticSiteId &range_id : intent->semantic_sites) {
       const ConSanAccessInventorySite *site =
-          find_inventory_access_range(program_inventory, range_id);
+          find_inventory_access_range(context.program_inventory, range_id);
       if (!site) {
         requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
         return requirements;
@@ -200,7 +198,8 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
         return requirements;
       }
       for (uint64_t owner_offset : owners) {
-        const ConSanKernelInfo *owner = program_inventory.find_kernel_by_descriptor(owner_offset);
+        const ConSanKernelInfo *owner =
+            context.program_inventory.find_kernel_by_descriptor(owner_offset);
         if (owner == nullptr || !owner->declared_group_segment_bytes) {
           requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
           return requirements;
@@ -214,8 +213,8 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
 
   requires_full_lds_aperture |=
       inventory.access_range_count != 0u && declared_lds_extent < native_static_extent;
-  const uint64_t full_lds_aperture = capacity_policy.maximum_workgroup_lds_bytes.value_or(
-      consan_moi_max_workgroup_lds_bytes(program_inventory.arch()));
+  const uint64_t full_lds_aperture = context.maximum_workgroup_lds_bytes.value_or(
+      consan_moi_max_workgroup_lds_bytes(context.program_inventory.arch()));
   inventory.inline_lds_bytes =
       std::max(declared_lds_extent, requires_full_lds_aperture ? full_lds_aperture : 0u);
   const uint64_t ordering_capacity = std::max<uint64_t>(
@@ -234,21 +233,12 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
                 static_cast<uint64_t>(kConSanMoiInlineShadowDefaultDiagnosticCapacity)});
   inventory.inline_diagnostic_count_adaptive = true;
   inventory =
-      fit_consan_moi_inline_auto_report_inventory(inventory, capacity_policy.caller_ceiling_bytes);
+      fit_consan_moi_inline_auto_report_inventory(inventory, context.requested_report_buffer_size);
 
   requirements.required_lds_aperture_bytes = inventory.inline_lds_bytes;
   consan_moi_impl::publish_moi_evidence_requirements(requirements, std::move(inventory),
-                                                     capacity_policy.caller_ceiling_bytes);
+                                                     context.requested_report_buffer_size);
   return requirements;
-}
-
-ConSanEvidenceRequirements consan_moi_impl::plan_inline_shadow_evidence_requirements(
-    const MoiEvidencePlanningContext &context) {
-  return plan_consan_inline_shadow_evidence(
-      context.program_inventory, context.evidence_intents,
-      {.caller_ceiling_bytes = context.requested_report_buffer_size,
-       .maximum_access_probe_count = context.maximum_access_probe_count,
-       .maximum_workgroup_lds_bytes = context.maximum_workgroup_lds_bytes});
 }
 
 } // namespace rocjitsu
