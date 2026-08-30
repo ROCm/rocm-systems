@@ -9,32 +9,12 @@
 #include "rocjitsu/code/patch/consan/consan_lowerer.h"
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
-#include "rocjitsu/code/patch/consan/consan_validation_inventory.h"
 
 #include <exception>
 #include <string>
 #include <utility>
 
 namespace rocjitsu {
-
-ConSanTransformArtifacts
-rederive_consan_mutation_validation_inventory(std::span<const uint8_t> original_image) {
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.fault_drop_barrier = true;
-  options.fault_dry_run = true;
-  return run_consan_lowering_core(original_image, options);
-}
-
-ConSanPerturbationValidationInventory
-rederive_consan_perturbation_validation_inventory(std::span<const uint8_t> original_image) {
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.fault_dry_run = true;
-  ConSanPerturbationValidationInventory inventory;
-  inventory.artifacts = run_consan_lowering_core(original_image, options, &inventory.planning);
-  return inventory;
-}
 
 ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
     ConSanTransformArtifacts inventory_artifacts, ConSanOptions options,

@@ -1724,12 +1724,9 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
   const uint32_t nop = build_s_nop(0, arch);
   const auto original_image = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(original.image_data()), original.image_size());
-  const ConSanTransformArtifacts pristine_inventory =
+  const ConSanMutationValidationInventory pristine_inventory =
       rederive_consan_mutation_validation_inventory(original_image);
-  const ConSanFaultSelectionView pristine_faults{
-      .program_inventory = pristine_inventory.program_inventory,
-      .fault_sites = pristine_inventory.fault_sites,
-  };
+  const ConSanFaultSelectionView pristine_faults = pristine_inventory.fault_selection();
   std::vector<const ConSanPatchInfo *> markerless_sources;
   const ConSanPatchInfo *markerless_target = nullptr;
   std::vector<ConSanBarrierSite> barrier_id_scope_originals;
@@ -2665,11 +2662,9 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
     return errors;
   }
 
-  const ConSanPerturbationValidationInventory pristine_inventory =
+  const ConSanPerturbationValidationInventory pristine =
       rederive_consan_perturbation_validation_inventory(original_image);
-  const ConSanTransformArtifacts &pristine = pristine_inventory.artifacts;
-  const ConSanPerturbationPlanningState &pristine_perturbation = pristine_inventory.planning;
-  if (!validating_carried_composite_stage && !pristine.errors.empty()) {
+  if (!validating_carried_composite_stage && !pristine.analysis_succeeded) {
     errors.emplace_back(
         "ConSan SC perturbation proof could not rederive pristine synchronization semantics");
     return errors;
@@ -2747,11 +2742,10 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       continue;
     }
 
-    const ConSanTransformArtifacts &semantic_inventory =
-        validating_carried_composite_stage ? result : pristine;
+    const ProgramInventory &semantic_inventory =
+        validating_carried_composite_stage ? result.program_inventory : pristine.program_inventory;
     const std::span<const ConSanPerturbationCandidate> semantic_candidates =
-        validating_carried_composite_stage ? carried_perturbation->candidates
-                                           : pristine_perturbation.candidates;
+        validating_carried_composite_stage ? carried_perturbation->candidates : pristine.candidates;
     const auto candidate_matches = [&](const ConSanPerturbationCandidate &candidate) {
       return candidate.eligible && candidate.sequence_identity == proof_sequence_identity &&
              candidate.edge == *patch.perturbation_edge &&
@@ -2778,7 +2772,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       }
     } else if (candidate->in_kernel) {
       const ConSanKernelInfo *owner =
-          semantic_inventory.program_inventory.find_kernel_by_name(candidate->container_name);
+          semantic_inventory.find_kernel_by_name(candidate->container_name);
       if (owner == nullptr || patch.owner_descriptor_file_offsets.size() != 1u ||
           patch.owner_descriptor_file_offsets.front() != owner->descriptor_file_offset) {
         errors.emplace_back("ConSan SC perturbation proof did not retain its exact kernel owner");

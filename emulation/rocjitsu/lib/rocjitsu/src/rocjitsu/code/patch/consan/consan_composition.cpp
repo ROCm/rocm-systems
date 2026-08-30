@@ -45,7 +45,6 @@
 #include "rocjitsu/code/patch/consan/consan_sync_analysis.h"
 #include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
 #include "rocjitsu/code/patch/consan/consan_sync_metadata.h"
-#include "rocjitsu/code/patch/consan/consan_validation_inventory.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/spill_manager.h"

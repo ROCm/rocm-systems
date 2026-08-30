@@ -222,6 +222,33 @@ file(
     "${_consan_dir}/*.h"
     "${_consan_dir}/*.inc"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_validation_inventory.h"
+    "ConSanTransformArtifacts|ConSanPerturbationPlanningState"
+    "independent validation inventory must expose only immutable proof facts"
+)
+file(READ "${_consan_dir}/consan_validation_inventory.h" _validation_inventory_contract)
+if(NOT _validation_inventory_contract MATCHES "ConSanMutationValidationInventory" OR
+   NOT _validation_inventory_contract MATCHES "ConSanPerturbationValidationInventory" OR
+   NOT _validation_inventory_contract MATCHES "ConSanFaultSelectionView" OR
+   NOT _validation_inventory_contract MATCHES "candidates")
+    message(FATAL_ERROR "ConSan pristine validation lost its narrow proof inventories")
+endif()
+file(READ "${_consan_dir}/consan_validation_inventory.cpp" _validation_inventory_owner)
+string(
+    REGEX MATCHALL
+    "ConSanLoweringExtent::ThroughProgramInventory"
+    _validation_inventory_extents
+    "${_validation_inventory_owner}"
+)
+list(LENGTH _validation_inventory_extents _validation_inventory_extent_count)
+if(NOT _validation_inventory_extent_count EQUAL 2 OR
+   NOT _validation_inventory_owner MATCHES "fault_drop_barrier = true")
+    message(
+        FATAL_ERROR
+        "ConSan validation rederivation must stop after its two distinct semantic inventories"
+    )
+endif()
 foreach(_file IN LISTS _consan_sources)
     _consan_assert_no_match(
         "${_file}"
