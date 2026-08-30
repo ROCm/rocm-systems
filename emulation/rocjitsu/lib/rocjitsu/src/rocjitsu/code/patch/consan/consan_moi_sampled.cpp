@@ -150,9 +150,18 @@ void apply_sampled_mode_patches(std::span<const uint8_t> bytes, MoiOptions &opti
     try_apply_sampled_barrier_sync_patch(bytes, options, arch, resource_state, candidates, result);
 }
 
+uint16_t sampled_access_scratch_vgpr_count(const ConSanRequest &request,
+                                           const BoundRuntimeResources &,
+                                           const ConSanMoiOperatingPoint &point,
+                                           const ConSanMoiCandidate &candidate,
+                                           rj_code_arch_t arch) {
+  return direct_sampled_scratch_count(request, point, candidate, arch);
+}
+
 const MoiModeOperations kSampledModeOperations = {
     plan_sampled_object_mode,
     apply_sampled_mode_patches,
+    sampled_access_scratch_vgpr_count,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"

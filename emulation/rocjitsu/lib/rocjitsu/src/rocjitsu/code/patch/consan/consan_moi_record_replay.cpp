@@ -11,6 +11,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
+#include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_apply.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
@@ -124,9 +125,29 @@ void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, MoiOptions
     try_apply_fence_record_patch(bytes, options, arch, result);
 }
 
+uint16_t record_replay_access_scratch_vgpr_count(const ConSanRequest &request,
+                                                 const BoundRuntimeResources &resources,
+                                                 const ConSanMoiOperatingPoint &,
+                                                 const ConSanMoiCandidate &candidate,
+                                                 rj_code_arch_t arch) {
+  const uint16_t address_count = flat_access_address_scratch_count(candidate);
+  return static_cast<uint16_t>(
+      (record_replay_uses_automatic_banked_capture(request, resources) ? 10u : 6u) +
+      (address_count != 0u ? address_count
+       : candidate.is_direct_to_lds() || moi_load_clobbers_address(candidate) ||
+               moi_access_requires_high_bank_address_capture(candidate, arch)
+           ? 1u
+           : 0u) +
+      (consan_uses_gfx12_cdna_execution(arch) && candidate.is_native_two_range() &&
+               candidate.encoded_offset_scale_bytes() > 8u
+           ? 1u
+           : 0u));
+}
+
 const MoiModeOperations kRecordReplayModeOperations = {
     plan_record_replay_object_mode,
     apply_record_replay_mode_patches,
+    record_replay_access_scratch_vgpr_count,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"

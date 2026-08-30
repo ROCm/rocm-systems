@@ -69,10 +69,15 @@ struct MoiModeOperations {
   void (*apply)(std::span<const uint8_t>, MoiOptions &, rj_code_arch_t, MoiResourcePlanningState &,
                 std::span<const ConSanMoiCandidate>, const MoiObjectFacts &,
                 ConSanTransformArtifacts &);
+  uint16_t (*access_scratch_vgpr_count)(const ConSanRequest &, const BoundRuntimeResources &,
+                                        const ConSanMoiOperatingPoint &, const ConSanMoiCandidate &,
+                                        rj_code_arch_t);
 };
 
 extern const MoiModeOperations kRecordReplayModeOperations;
 extern const MoiModeOperations kSampledModeOperations;
 extern const MoiModeOperations kInlineShadowModeOperations;
+
+[[nodiscard]] const MoiModeOperations &moi_mode_operations(ConSanMoiEngine engine);
 
 } // namespace rocjitsu::consan_moi_impl

@@ -515,7 +515,7 @@ void try_apply_first_light_access_record_patch(
       continue;
     }
     const uint16_t access_scratch_count =
-        moi_access_scratch_vgpr_count(options, options, options, candidate, arch);
+        record_replay_access_scratch_vgpr_count(options, options, options, candidate, arch);
     const auto resources =
         resolve_moi_scratch(result.resource_plans, candidate, options, access_scratch_count);
     if (!resources) {

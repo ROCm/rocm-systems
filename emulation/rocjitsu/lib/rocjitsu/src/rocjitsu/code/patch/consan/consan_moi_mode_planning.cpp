@@ -19,7 +19,7 @@ MoiObjectModePlan make_moi_object_mode_plan(const ConSanRequest &request,
   return plan;
 }
 
-[[nodiscard]] const MoiModeOperations &moi_mode_operations(ConSanMoiEngine engine) {
+const MoiModeOperations &moi_mode_operations(ConSanMoiEngine engine) {
   switch (engine) {
   case ConSanMoiEngine::RecordReplay:
     return kRecordReplayModeOperations;

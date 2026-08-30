@@ -136,9 +136,18 @@ void apply_inline_shadow_mode_patches(std::span<const uint8_t> bytes, MoiOptions
     try_apply_inline_atomic_ordering_patch(bytes, options, arch, result);
 }
 
+uint16_t inline_shadow_access_scratch_vgpr_count(const ConSanRequest &request,
+                                                 const BoundRuntimeResources &,
+                                                 const ConSanMoiOperatingPoint &point,
+                                                 const ConSanMoiCandidate &candidate,
+                                                 rj_code_arch_t arch) {
+  return inline_shadow_scratch_count(request, point, candidate, arch);
+}
+
 const MoiModeOperations kInlineShadowModeOperations = {
     plan_inline_shadow_object_mode,
     apply_inline_shadow_mode_patches,
+    inline_shadow_access_scratch_vgpr_count,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"

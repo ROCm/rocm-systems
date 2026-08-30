@@ -430,12 +430,6 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
                          const ConSanMoiOperatingPoint &site_point,
                          const ConSanMoiOperatingPoint &allocation, uint16_t expected_count);
 
-[[nodiscard]] uint16_t moi_access_scratch_vgpr_count(const ConSanRequest &request,
-                                                     const BoundRuntimeResources &resources,
-                                                     const ConSanMoiOperatingPoint &point,
-                                                     const ConSanMoiCandidate &candidate,
-                                                     rj_code_arch_t arch);
-
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                     const ConSanMoiCandidate &candidate,

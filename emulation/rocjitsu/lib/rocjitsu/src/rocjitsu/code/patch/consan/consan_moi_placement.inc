@@ -886,33 +886,6 @@ struct MoiOwnerRegisterReferenceSummary {
   return it == block->instructions().end() ? nullptr : &*it;
 }
 
-[[nodiscard]] uint16_t moi_access_scratch_vgpr_count(const ConSanRequest &request,
-                                                     const BoundRuntimeResources &resources,
-                                                     const ConSanMoiOperatingPoint &point,
-                                                     const ConSanMoiCandidate &candidate,
-                                                     rj_code_arch_t arch) {
-  switch (request.moi_engine) {
-  case ConSanMoiEngine::RecordReplay:
-    return static_cast<uint16_t>(
-        (record_replay_uses_automatic_banked_capture(request, resources) ? 10u : 6u) +
-        (flat_access_address_scratch_count(candidate) != 0u
-             ? flat_access_address_scratch_count(candidate)
-         : candidate.is_direct_to_lds() || moi_load_clobbers_address(candidate) ||
-                 moi_access_requires_high_bank_address_capture(candidate, arch)
-             ? 1u
-             : 0u) +
-        (consan_uses_gfx12_cdna_execution(arch) && candidate.is_native_two_range() &&
-                 candidate.encoded_offset_scale_bytes() > 8u
-             ? 1u
-             : 0u));
-  case ConSanMoiEngine::InlineShadow:
-    return inline_shadow_scratch_count(request, point, candidate, arch);
-  case ConSanMoiEngine::Sampled:
-    return direct_sampled_scratch_count(request, point, candidate, arch);
-  }
-  return 0;
-}
-
 [[nodiscard]] bool moi_context_references_sgpr_ranges(const MoiKernelResourceContext &context,
                                                       std::span<const MoiSgprRange> ranges) {
   const auto intersects = [&](const RegisterSet &set) {
@@ -2693,7 +2666,8 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
     const ConSanMoiCandidate &candidate = candidates[candidate_index];
     ConSanMoiOperatingPoint site_point = point;
     uint16_t scratch_count =
-        moi_access_scratch_vgpr_count(request, resources, site_point, candidate, state.arch);
+        moi_mode_operations(request.moi_engine)
+            .access_scratch_vgpr_count(request, resources, site_point, candidate, state.arch);
     ConSanCandidateResourcePlan plan = plan_moi_resource_site(
         state, request, debug, site_point, ConSanResourceSiteKind::Access, candidate_index,
         candidate.anchor(), candidate.kernel_descriptor_file_offset, scratch_count, &candidate);
@@ -2705,7 +2679,8 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
     if (apply_moi_persistent_vgpr_assignment(owner_point, state.register_allocation,
                                              plan.owner_descriptor_file_offsets)) {
       const uint16_t owner_scratch_count =
-          moi_access_scratch_vgpr_count(request, resources, owner_point, candidate, state.arch);
+          moi_mode_operations(request.moi_engine)
+              .access_scratch_vgpr_count(request, resources, owner_point, candidate, state.arch);
       if (owner_scratch_count != scratch_count) {
         scratch_count = owner_scratch_count;
         plan = plan_moi_resource_site(
