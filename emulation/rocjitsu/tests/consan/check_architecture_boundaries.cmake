@@ -47,6 +47,114 @@ function(_consan_assert_match_count_at_most file regex maximum rule)
     endif()
 endfunction()
 
+# The production build graph is intentionally small and forward-only:
+# contracts -> target normalization -> analysis -> transformation ->
+# independent validation -> orchestration. Validation also reads analysis
+# products directly, but neither validation nor orchestration is visible below
+# its own layer.
+set(_consan_build_manifest "${_consan_dir}/CMakeLists.txt")
+file(READ "${_consan_build_manifest}" _consan_build_graph)
+foreach(
+    _component
+    IN ITEMS
+        contracts
+        targets
+        analysis
+        transform
+        validation
+        orchestration
+)
+    if(NOT _consan_build_graph MATCHES "rocjitsu_consan_${_component}")
+        message(
+            FATAL_ERROR
+            "ConSan production build graph is missing ${_component}"
+        )
+    endif()
+endforeach()
+if(_consan_build_graph MATCHES "target_sources[(][ \n]*rocjitsu_code")
+    message(
+        FATAL_ERROR
+        "ConSan production sources must not collapse back into rocjitsu_code"
+    )
+endif()
+
+set(
+    _contract_sources
+    consan_access_classifier.cpp
+    consan_atomic_classifier.cpp
+    consan_access_policy.cpp
+    consan_atomic_fence_policy.cpp
+    consan_barrier_policy.cpp
+    consan_input_layout.cpp
+    consan_instruction_semantics.cpp
+    consan_inventory_diagnostics.cpp
+    consan_observation_policy.cpp
+    consan_perturbation_policy.cpp
+    consan_semantic_classifiers.cpp
+    consan_sync_event_index.cpp
+    consan_sync_metadata.cpp
+    consan_types.cpp
+)
+foreach(_source IN LISTS _contract_sources)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_source}"
+        "#include.*consan_(program_analysis|sync_analysis|fault_injection|moi|supercollider|final_validation|validation_inventory|composition|pipeline)[.]h"
+        "contracts may not depend on analysis, transformation, validation, or orchestration"
+    )
+endforeach()
+
+file(GLOB _target_component_sources "${_consan_dir}/*target_ops.cpp")
+list(
+    APPEND
+    _target_component_sources
+    "${_consan_dir}/consan_gfx1250_lds_target_ops.cpp"
+    "${_consan_dir}/consan_gfx1250_vgpr_bank_state.cpp"
+)
+foreach(_file IN LISTS _target_component_sources)
+    _consan_assert_no_match(
+        "${_file}"
+        "#include.*consan_(sync_analysis|fault_injection|moi_pipeline|supercollider|final_validation|validation_inventory|composition|pipeline)[.]h"
+        "target normalization may not depend on analysis, transformation, validation, or orchestration"
+    )
+endforeach()
+
+foreach(_source IN ITEMS consan_fault_selection.cpp consan_program_analysis.cpp consan_sync_analysis.cpp)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_source}"
+        "#include.*consan_(fault_injection|moi_pipeline|supercollider|final_validation|validation_inventory|composition|pipeline)[.]h"
+        "analysis may not depend on transformation, validation, or orchestration"
+    )
+endforeach()
+
+file(
+    GLOB _transform_component_sources
+    "${_consan_dir}/consan_moi*.cpp"
+    "${_consan_dir}/consan_supercollider.cpp"
+    "${_consan_dir}/consan_supercollider_report_plan.cpp"
+    "${_consan_dir}/consan_supercollider_support.cpp"
+    "${_consan_dir}/consan_fault_injection.cpp"
+    "${_consan_dir}/consan_perturbation.cpp"
+    "${_consan_dir}/consan_barrier_move_proof.cpp"
+    "${_consan_dir}/consan_branch_only_relay_router.cpp"
+    "${_consan_dir}/consan_descriptor_growth.cpp"
+    "${_consan_dir}/consan_placement.cpp"
+    "${_consan_dir}/consan_resource.cpp"
+)
+foreach(_file IN LISTS _transform_component_sources)
+    _consan_assert_no_match(
+        "${_file}"
+        "#include.*consan_(final_validation|validation_inventory|composition|pipeline)[.]h"
+        "transformation may not depend on validation or orchestration"
+    )
+endforeach()
+foreach(_source IN ITEMS consan_final_validation.cpp consan_validation_inventory.cpp)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_source}"
+        "#include.*consan_(composition|pipeline)[.]h"
+        "validation may not depend on orchestration"
+    )
+endforeach()
+
 # Semantic policy owns meaning, never an ISA recipe or product identity.
 set(
     _semantic_policy_sources

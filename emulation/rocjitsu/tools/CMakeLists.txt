@@ -6,6 +6,7 @@ include(rj_configure_target)
 set(RJ_TOOL_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
+    ${ROCJITSU_CONSAN_OBJECT_LIBS}
     rocjitsu_isa
     rocjitsu_amdgpu_isa_registry
     simdojo

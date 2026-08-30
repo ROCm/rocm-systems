@@ -43,6 +43,7 @@ add_subdirectory(kernels)
 set(RJ_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
+    ${ROCJITSU_CONSAN_OBJECT_LIBS}
     rocjitsu_isa
     rocjitsu_isa_registry
     simdojo

@@ -30,6 +30,7 @@ target_link_libraries(
         rocjitsu_kmd
         rocjitsu_analysis
         rocjitsu_code
+        ${ROCJITSU_CONSAN_OBJECT_LIBS}
         rocjitsu_isa
         rocjitsu_isa_registry
         simdojo

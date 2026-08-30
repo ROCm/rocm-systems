@@ -24,6 +24,7 @@ target_link_libraries(rocjitsu_hsa_tool_lifetime PUBLIC ${CMAKE_DL_LIBS})
 set(RJ_HOOKS_LINK_LIBS
     rocjitsu_analysis
     rocjitsu_code
+    ${ROCJITSU_CONSAN_OBJECT_LIBS}
     rocjitsu_dbt_config
     rocjitsu_isa
     rocjitsu_amdgpu_isa_registry

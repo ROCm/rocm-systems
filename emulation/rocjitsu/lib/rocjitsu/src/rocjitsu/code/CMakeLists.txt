@@ -48,5 +48,6 @@ rj_add_object_library(rocjitsu_code
 )
 
 add_subdirectory(patch/consan)
+set(ROCJITSU_CONSAN_OBJECT_LIBS ${ROCJITSU_CONSAN_OBJECT_LIBS} PARENT_SCOPE)
 
 target_link_libraries(rocjitsu_code PUBLIC ZLIB::ZLIB zstd::libzstd)
