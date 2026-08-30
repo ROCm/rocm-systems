@@ -11,6 +11,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_candidate_projection.h"
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_pipeline.h"
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.h"
@@ -46,23 +47,11 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   if (!result.moi_operating_point.owner_persistent_vgprs.empty()) {
     effective_options.owner_persistent_vgprs = result.moi_operating_point.owner_persistent_vgprs;
   }
-  if (effective_options.moi_owner_source == ConSanMoiOwnerSource::Automatic) {
-    effective_options.moi_owner_source =
-        effective_options.moi_engine == ConSanMoiEngine::InlineShadow
-            ? ConSanMoiOwnerSource::HwId
-            : ConSanMoiOwnerSource::WorkitemId;
-  }
   result.outcome =
       result.errors.empty() ? ConSanTransformOutcome::Unchanged : ConSanTransformOutcome::Invalid;
   result.replacement.clear();
   result.resource_plans.clear();
   result.patches.clear();
-  if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow &&
-      effective_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
-    result.errors.emplace_back(
-        "ConSan MOI Inline Shadow requires resident-wave ownership; workitem_id_x is not exact "
-        "for multidimensional workgroups");
-  }
   if (!result.errors.empty())
     return result;
   if (execution != nullptr)
@@ -82,54 +71,30 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
           candidate.file_offset);
     }
   }
-  if (effective_options.moi_engine == ConSanMoiEngine::Sampled &&
-      effective_options.moi_track_atomics && moi_candidates.empty()) {
-    // Sampled atomics publish ordering only into a selected LDS watchpoint's
-    // causal window. In an access-free code object there is no consumer for
-    // that metadata, so treating standalone runtime atomics as required
-    // instrumentation would reject the workload without improving coverage.
-    // Keep them in decoded/fault inventory, but make them operationally not
-    // applicable for this object's sampled report and coverage ledger.
-    effective_options.moi_track_atomics = false;
-    result.warnings.emplace_back(
-        "ConSan MOI sampled engine skipped atomic ordering in a code object with no selected "
-        "LDS access candidates");
-  }
-  const bool has_supported_atomic_or_fence =
-      std::ranges::any_of(result.observation_plan.atomic_site_decisions,
-                          [](const ConSanAtomicSiteDecision &decision) {
-                            return decision.kind == ConSanSiteDecisionKind::Admitted;
-                          }) ||
-      (effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-       std::ranges::any_of(result.observation_plan.fence_site_decisions,
-                           [](const ConSanFenceSiteDecision &decision) {
-                             return decision.kind == ConSanSiteDecisionKind::Admitted;
-                           }));
-  const bool has_supported_barrier =
-      std::ranges::any_of(result.observation_plan.barrier_site_decisions,
-                          [](const ConSanBarrierSiteDecision &decision) {
-                            return decision.kind == ConSanSiteDecisionKind::Admitted;
-                          });
-  if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow &&
-      effective_options.moi_track_barriers && !has_supported_barrier) {
-    // The standard profile requests barrier tracking, but an access-only
-    // object has no synchronization probe that can consume it. Keep the
-    // effective option aligned with admitted instrumentation so downstream
-    // layout selection can retain generation-qualified local LDS.
-    effective_options.moi_track_barriers = false;
-    result.warnings.emplace_back(
-        "ConSan MOI skipped barrier tracking for a code object with no admitted barrier sites");
-  }
-  const size_t supported_barrier_members =
+  MoiObjectFacts object_facts;
+  object_facts.has_access_candidate = !moi_candidates.empty();
+  object_facts.has_admitted_atomic = std::ranges::any_of(
+      result.observation_plan.atomic_site_decisions, [](const ConSanAtomicSiteDecision &decision) {
+        return decision.kind == ConSanSiteDecisionKind::Admitted;
+      });
+  object_facts.has_admitted_fence = std::ranges::any_of(
+      result.observation_plan.fence_site_decisions, [](const ConSanFenceSiteDecision &decision) {
+        return decision.kind == ConSanSiteDecisionKind::Admitted;
+      });
+  object_facts.admitted_barrier_count =
       std::ranges::count_if(result.observation_plan.barrier_site_decisions,
                             [](const ConSanBarrierSiteDecision &decision) {
                               return decision.kind == ConSanSiteDecisionKind::Admitted;
                             });
+  object_facts.has_admitted_barrier = object_facts.admitted_barrier_count != 0u;
+  object_facts.target_supports_dense_barrier_router = consan_is_capability_arch(arch);
+  object_facts.has_explicit_persistent_state =
+      effective_options.moi_owner_vgpr || effective_options.moi_epoch_vgpr;
   AmdGpuCodeObject original_code_object(code_object_bytes.data(), code_object_bytes.size());
   const uint64_t original_text_size = original_code_object.text_sections().size() == 1
                                           ? original_code_object.text_sections().front()->size()
                                           : 0u;
-  const bool has_stranded_record_replay_barrier =
+  object_facts.has_stranded_admitted_barrier =
       original_text_size != 0u &&
       std::ranges::any_of(result.observation_plan.barrier_site_decisions,
                           [&](const ConSanBarrierSiteDecision &decision) {
@@ -138,64 +103,24 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                                        decision.semantic_site.physical.original_text_offset,
                                        original_text_size);
                           });
-  // Record/Replay's compact persistent-epoch operating point handles bounded
-  // barrier inventories whose sites can reach the appended reservation without
-  // the relocated dense router. A large generated object can strand even a
-  // small inventory, so reserve the router's key and call-return state based on
-  // architectural branch reach as well as the conservative member-count bound.
-  // Do not impose that wider liveness window on ordinary kernels: on
-  // full-pressure compiler output, otherwise-unused adjacent SGPRs may still
-  // carry entry ABI state.
-  constexpr size_t kCompactRecordReplayBarrierMemberLimit = 32u;
-  effective_options.moi_record_replay_dense_barrier_router =
-      effective_options.moi_record_replay_dense_barrier_router ||
-      (consan_is_capability_arch(arch) &&
-       effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-       (supported_barrier_members > kCompactRecordReplayBarrierMemberLimit ||
-        has_stranded_record_replay_barrier));
-  const bool atomic_or_fence_relevant =
-      effective_options.moi_track_atomics && has_supported_atomic_or_fence;
-  if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow &&
-      effective_options.moi_track_atomics && !atomic_or_fence_relevant) {
-    // Atomic-token tracking enlarges every Inline access probe even though its
-    // release/acquire tables can never be populated in an object with no
-    // admitted atomic event. Keep every typed unsupported decision, but do
-    // not impose the unusable transaction path or its extra scratch demand.
-    for (const ConSanAtomicSiteDecision &decision : result.observation_plan.atomic_site_decisions) {
-      if (decision.kind != ConSanSiteDecisionKind::Unsupported)
-        continue;
-      for (const std::string &container_name : decision.source_containers) {
-        result.warnings.emplace_back(
-            "ConSan MOI inline atomic ordering skipped " +
-            std::string(consan_atomic_policy_reason_name(decision.reason)) + " in " +
-            container_name);
-      }
-    }
-    effective_options.moi_track_atomics = false;
-    result.warnings.emplace_back(
-        "ConSan MOI skipped atomic ordering instrumentation for a code object with no relevant "
-        "atomic sites");
-  }
-  const bool explicit_persistent_state =
-      effective_options.moi_owner_vgpr || effective_options.moi_epoch_vgpr;
-  if (effective_options.moi_engine == ConSanMoiEngine::RecordReplay && moi_candidates.empty() &&
-      !explicit_persistent_state && !has_supported_barrier && !atomic_or_fence_relevant) {
-    // Do not synthesize persistent state for an inventory-only object.
-    // Standalone barrier, atomic, and fence records still require an exact
-    // entry-captured workgroup tuple, so only the true no-consumer case can
-    // disable the prologue.
-    effective_options.moi_initialize_owner_epoch = false;
-    effective_options.moi_track_barriers = false;
-    result.warnings.emplace_back(
-        "ConSan MOI record/replay skipped persistent state for a code object "
-        "with no admitted access, barrier, atomic, or fence sites");
-  }
-  bool inline_atomic_without_access = false;
-  if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow) {
-    effective_options.moi_inline_access_present = !moi_candidates.empty();
-    inline_atomic_without_access =
-        moi_candidates.empty() && effective_options.moi_track_atomics && atomic_or_fence_relevant;
-  }
+  MoiObjectModePlan mode_plan = plan_moi_object_mode(effective_options, effective_options,
+                                                     object_facts, result.observation_plan);
+  effective_options.moi_owner_source = mode_plan.owner_source;
+  effective_options.moi_track_atomics = mode_plan.track_atomics;
+  effective_options.moi_track_barriers = mode_plan.track_barriers;
+  effective_options.moi_initialize_owner_epoch = mode_plan.initialize_owner_epoch;
+  effective_options.moi_record_replay_dense_barrier_router = mode_plan.dense_barrier_router;
+  effective_options.moi_inline_access_present = mode_plan.inline_access_present;
+  result.warnings.insert(result.warnings.end(), std::make_move_iterator(mode_plan.warnings.begin()),
+                         std::make_move_iterator(mode_plan.warnings.end()));
+  result.errors.insert(result.errors.end(), std::make_move_iterator(mode_plan.errors.begin()),
+                       std::make_move_iterator(mode_plan.errors.end()));
+  if (!result.errors.empty())
+    return result;
+  const bool has_supported_barrier = object_facts.has_admitted_barrier;
+  const bool atomic_or_fence_relevant = mode_plan.atomic_or_fence_relevant;
+  const bool explicit_persistent_state = object_facts.has_explicit_persistent_state;
+  const bool inline_atomic_without_access = mode_plan.inline_atomic_without_access;
   // Register selection iterates as automatic persistent and transient state is
   // chosen. The code bytes, decoded CFG, ownership scopes, and liveness facts
   // do not change during those iterations; retain one analysis state instead

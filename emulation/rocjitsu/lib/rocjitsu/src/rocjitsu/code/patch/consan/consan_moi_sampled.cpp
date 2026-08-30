@@ -26,6 +26,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
@@ -117,6 +118,23 @@ using consan_moi_detail::note_moi_persistent_vgpr_state;
 using consan_moi_detail::resolve_moi_report_layout;
 
 namespace consan_moi_impl {
+
+MoiObjectModePlan plan_sampled_object_mode(const ConSanRequest &request,
+                                           const ConSanMoiOperatingPoint &point,
+                                           const MoiObjectFacts &facts) {
+  MoiObjectModePlan plan =
+      make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::WorkitemId);
+  if (plan.track_atomics && !facts.has_access_candidate) {
+    // Sampled atomics publish ordering only into a selected LDS watchpoint's
+    // causal window. Without that consumer they do not improve coverage.
+    plan.track_atomics = false;
+    plan.warnings.emplace_back(
+        "ConSan MOI sampled engine skipped atomic ordering in a code object with no selected "
+        "LDS access candidates");
+  }
+  plan.atomic_or_fence_relevant = plan.track_atomics && facts.has_admitted_atomic;
+  return plan;
+}
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"
 

@@ -27,6 +27,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
@@ -85,6 +86,43 @@ using consan_moi_detail::note_moi_persistent_vgpr_state;
 using consan_moi_detail::resolve_moi_report_layout;
 
 namespace consan_moi_impl {
+
+MoiObjectModePlan plan_inline_shadow_object_mode(const ConSanRequest &request,
+                                                 const ConSanMoiOperatingPoint &point,
+                                                 const MoiObjectFacts &facts,
+                                                 const ConSanObservationPlan &observation_plan) {
+  MoiObjectModePlan plan = make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::HwId);
+  if (plan.owner_source == ConSanMoiOwnerSource::WorkitemId) {
+    plan.errors.emplace_back(
+        "ConSan MOI Inline Shadow requires resident-wave ownership; workitem_id_x is not exact "
+        "for multidimensional workgroups");
+  }
+  if (plan.track_barriers && !facts.has_admitted_barrier) {
+    plan.track_barriers = false;
+    plan.warnings.emplace_back(
+        "ConSan MOI skipped barrier tracking for a code object with no admitted barrier sites");
+  }
+  plan.atomic_or_fence_relevant = plan.track_atomics && facts.has_admitted_atomic;
+  if (plan.track_atomics && !plan.atomic_or_fence_relevant) {
+    for (const ConSanAtomicSiteDecision &decision : observation_plan.atomic_site_decisions) {
+      if (decision.kind != ConSanSiteDecisionKind::Unsupported)
+        continue;
+      for (const std::string &container_name : decision.source_containers) {
+        plan.warnings.emplace_back("ConSan MOI inline atomic ordering skipped " +
+                                   std::string(consan_atomic_policy_reason_name(decision.reason)) +
+                                   " in " + container_name);
+      }
+    }
+    plan.track_atomics = false;
+    plan.warnings.emplace_back(
+        "ConSan MOI skipped atomic ordering instrumentation for a code object with no relevant "
+        "atomic sites");
+  }
+  plan.inline_access_present = facts.has_access_candidate;
+  plan.inline_atomic_without_access =
+      !facts.has_access_candidate && plan.track_atomics && plan.atomic_or_fence_relevant;
+  return plan;
+}
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"
 

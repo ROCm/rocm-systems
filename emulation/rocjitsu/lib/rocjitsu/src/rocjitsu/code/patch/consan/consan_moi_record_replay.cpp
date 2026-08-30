@@ -16,6 +16,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
@@ -49,6 +50,31 @@ using consan_moi_detail::record_replay_uses_automatic_banked_capture;
 using consan_moi_detail::resolve_moi_report_layout;
 
 namespace consan_moi_impl {
+
+MoiObjectModePlan plan_record_replay_object_mode(const ConSanRequest &request,
+                                                 const ConSanMoiOperatingPoint &point,
+                                                 const MoiObjectFacts &facts) {
+  MoiObjectModePlan plan =
+      make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::WorkitemId);
+  plan.atomic_or_fence_relevant =
+      plan.track_atomics && (facts.has_admitted_atomic || facts.has_admitted_fence);
+
+  constexpr size_t kCompactBarrierMemberLimit = 32u;
+  plan.dense_barrier_router =
+      plan.dense_barrier_router || (facts.target_supports_dense_barrier_router &&
+                                    (facts.admitted_barrier_count > kCompactBarrierMemberLimit ||
+                                     facts.has_stranded_admitted_barrier));
+
+  if (!facts.has_access_candidate && !facts.has_explicit_persistent_state &&
+      !facts.has_admitted_barrier && !plan.atomic_or_fence_relevant) {
+    plan.initialize_owner_epoch = false;
+    plan.track_barriers = false;
+    plan.warnings.emplace_back(
+        "ConSan MOI record/replay skipped persistent state for a code object "
+        "with no admitted access, barrier, atomic, or fence sites");
+  }
+  return plan;
+}
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"
 
