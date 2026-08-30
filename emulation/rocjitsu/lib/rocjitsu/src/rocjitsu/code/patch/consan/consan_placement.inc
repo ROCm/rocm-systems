@@ -681,10 +681,10 @@ void append_consan_patch_words(std::vector<uint8_t> &bytes, std::span<const uint
   return count;
 }
 
-[[nodiscard]] bool has_only_rocclr_runtime_kernels(const ConSanTransformArtifacts &result) {
-  if (result.program_inventory.kernels().empty())
+[[nodiscard]] bool has_only_rocclr_runtime_kernels(const ProgramInventory &program_inventory) {
+  if (program_inventory.kernels().empty())
     return false;
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+  for (const ConSanKernelInfo &kernel : program_inventory.kernels()) {
     if (!is_rocclr_runtime_kernel_name(kernel.name))
       return false;
   }

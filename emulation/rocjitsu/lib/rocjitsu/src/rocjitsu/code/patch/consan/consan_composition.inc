@@ -319,6 +319,30 @@ void reset_inventory_for_fault_planning(const ConSanOptions &options,
   result.fault_plans.clear();
 }
 
+[[nodiscard]] ConSanFaultPlanningInput
+fault_planning_input(const ConSanTransformArtifacts &result) {
+  return {
+      .selection = {.program_inventory = result.program_inventory,
+                    .fault_sites = result.fault_sites},
+      .barrier_move_destinations = result.barrier_move_destinations,
+      .prior_attempt_unsupported = result.outcome == ConSanTransformOutcome::Unsupported,
+  };
+}
+
+void publish_fault_planning_result(ConSanFaultPlanningResult planning,
+                                   ConSanTransformArtifacts &result) {
+  result.fault_plans.insert(result.fault_plans.end(),
+                            std::make_move_iterator(planning.fault_plans.begin()),
+                            std::make_move_iterator(planning.fault_plans.end()));
+  result.mutation.fault.planned = result.fault_plans.size();
+  if (planning.unsupported)
+    result.outcome = ConSanTransformOutcome::Unsupported;
+  result.warnings.insert(result.warnings.end(), std::make_move_iterator(planning.warnings.begin()),
+                         std::make_move_iterator(planning.warnings.end()));
+  result.errors.insert(result.errors.end(), std::make_move_iterator(planning.errors.begin()),
+                       std::make_move_iterator(planning.errors.end()));
+}
+
 /// Remove every destructive fault kind while retaining independently planned
 /// perturbation policy. A composed instrumentation pass uses this boundary to
 /// ensure it cannot accidentally reapply the already committed fault.
@@ -580,8 +604,11 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       reset_inventory_for_fault_planning(planning_options, pristine_mutation_plan);
       build_perturbation_candidate_inventory(pristine_mutation_plan.program_inventory,
                                              pristine_perturbation);
-      build_fault_mutation_plan(planning_options, pristine_mutation_plan.program_inventory.arch(),
-                                pristine_mutation_plan, true);
+      publish_fault_planning_result(
+          build_fault_mutation_plan(planning_options,
+                                    pristine_mutation_plan.program_inventory.arch(),
+                                    fault_planning_input(pristine_mutation_plan), true),
+          pristine_mutation_plan);
       build_perturbation_plan(planning_options, pristine_perturbation, pristine_mutation_plan);
     } else {
       pristine_mutation_plan =
@@ -969,15 +996,18 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   prune_consan_unreachable_inferred_ranges(
       *code_object, *decoder, arch, result.program_inventory.preapplied_mutation().code_ranges,
       inventory_builder.kernels(), inventory_builder.functions(), inventory_builder.access_sites());
-  if (!analyze_consan_semantic_inventory(code_object_bytes, *code_object, *decoder, arch,
-                                         options, inventory_builder, perturbation, result))
+  if (!analyze_consan_semantic_inventory(code_object_bytes, *code_object, *decoder, arch, options,
+                                         inventory_builder, perturbation, result))
     return result;
   if (extent == ConSanLoweringExtent::ThroughProgramInventory)
     return result;
   if (options.fault_dry_run) {
     if (execution != nullptr)
       execution->note_resource_solving_and_lowering();
-    build_fault_mutation_plan(options, arch, result, require_applicable_fault_plan);
+    publish_fault_planning_result(build_fault_mutation_plan(options, arch,
+                                                            fault_planning_input(result),
+                                                            require_applicable_fault_plan),
+                                  result);
     build_perturbation_plan(options, perturbation, result, carried_plans);
     return result;
   }

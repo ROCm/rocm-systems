@@ -268,6 +268,7 @@ foreach(
     IN ITEMS
        consan_fault_selection.h
        consan_fault_selection.cpp
+       consan_fault_planning.h
        consan_sync_event_index.h
        consan_sync_event_index.cpp
 )
@@ -280,6 +281,11 @@ endforeach()
 file(READ "${_consan_dir}/consan_fault_selection.h" _fault_selection_contract)
 if(NOT _fault_selection_contract MATCHES "ConSanFaultSelectionView")
     message(FATAL_ERROR "ConSan fault selection lost its narrow immutable inventory contract")
+endif()
+file(READ "${_consan_dir}/consan_fault_planning.h" _fault_planning_contract)
+if(NOT _fault_planning_contract MATCHES "ConSanFaultPlanningInput" OR
+   NOT _fault_planning_contract MATCHES "ConSanFaultPlanningResult")
+    message(FATAL_ERROR "ConSan fault planning lost its explicit input/product contract")
 endif()
 
 # Native emission and target-operation components accept narrow operation

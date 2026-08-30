@@ -116,6 +116,6 @@ max_register_refs_in_kernel(const ConSanKernelInfo &kernel, std::span<BasicBlock
 void append_consan_patch_words(std::vector<uint8_t> &bytes, std::span<const uint32_t> words);
 [[nodiscard]] uint32_t count_nop_padding(std::span<const uint8_t> bytes, uint64_t offset,
                                          uint32_t max_word_count, rj_code_arch_t arch);
-[[nodiscard]] bool has_only_rocclr_runtime_kernels(const ConSanTransformArtifacts &result);
+[[nodiscard]] bool has_only_rocclr_runtime_kernels(const ProgramInventory &program_inventory);
 
 } // namespace rocjitsu

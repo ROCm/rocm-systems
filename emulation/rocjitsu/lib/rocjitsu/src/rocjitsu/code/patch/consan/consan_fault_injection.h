@@ -7,16 +7,13 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_fault_planning.h"
 
 #include <cstddef>
 
 namespace rocjitsu {
 
 class AmdGpuCodeObject;
-
-void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch,
-                               ConSanTransformArtifacts &result,
-                               bool require_applicable_plan = false);
 
 [[nodiscard]] size_t applied_fault_mutation_count(const ConSanTransformArtifacts &result);
 

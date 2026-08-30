@@ -6,34 +6,34 @@ fault_selection_view(const ConSanTransformArtifacts &result) {
 }
 
 [[nodiscard]] bool owned_by_requested_kernel(std::span<const ConSanExecutionOwner> owners,
-                                             const ConSanTransformArtifacts &result,
+                                             const ConSanFaultSelectionView &inventory,
                                              const ConSanOptions &options);
 
 [[nodiscard]] const ConSanFaultSite *
-select_fault_site_for_plan(const ConSanTransformArtifacts &result, const ConSanOptions &options,
+select_fault_site_for_plan(const ConSanFaultSelectionView &inventory, const ConSanOptions &options,
                            ConSanFaultSiteKind kind, uint32_t legacy_index);
 
 [[nodiscard]] std::optional<OrdinaryAcquireMutationTarget>
-select_ordinary_acquire_mutation_target(const ConSanTransformArtifacts &result,
+select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventory,
                                         const ConSanOptions &options) {
   return select_ordinary_acquire_mutation_target(
-      fault_selection_view(result), ConSanFaultSelection{
-                                        .primary_site_identity = options.fault_site_identity,
-                                        .primary_sequence_identity = {},
-                                        .companion_site_identity = {},
-                                        .companion_sequence_identity = {},
-                                        .kernel_name_filter = options.test_kernel_name_filter,
-                                        .ordinal = options.fault_ordinary_index,
-                                    });
+      inventory, ConSanFaultSelection{
+                     .primary_site_identity = options.fault_site_identity,
+                     .primary_sequence_identity = {},
+                     .companion_site_identity = {},
+                     .companion_sequence_identity = {},
+                     .kernel_name_filter = options.test_kernel_name_filter,
+                     .ordinal = options.fault_ordinary_index,
+                 });
 }
 
 [[nodiscard]] bool
-is_member_of_qualified_logical_barrier_pair(const ConSanTransformArtifacts &result,
+is_member_of_qualified_logical_barrier_pair(const ConSanFaultSelectionView &inventory,
                                             const ConSanFaultSite &site) {
   if (!site.sync_event_identity)
     return false;
   const ConSanSyncSequence *sequence =
-      result.program_inventory.sync().find_unique_sequence_containing(*site.sync_event_identity);
+      inventory.program_inventory.sync().find_unique_sequence_containing(*site.sync_event_identity);
   return sequence != nullptr && sequence->operation == ConSanSyncOperation::BarrierFull &&
          consan_sync_confidence_meets(sequence->confidence,
                                       ConSanSemanticConfidence::Conservative) &&
@@ -41,25 +41,24 @@ is_member_of_qualified_logical_barrier_pair(const ConSanTransformArtifacts &resu
 }
 
 [[nodiscard]] ExactBarrierDropPairResolution
-resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result,
+resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
                                 const ConSanOptions &options) {
   return resolve_exact_barrier_drop_pair(
-      fault_selection_view(result),
-      ConSanFaultSelection{
-          .primary_site_identity = options.fault_site_identity,
-          .primary_sequence_identity = options.fault_barrier_sequence_identity,
-          .companion_site_identity = {},
-          .companion_sequence_identity = {},
-          .kernel_name_filter = options.test_kernel_name_filter,
-          .ordinal = 0,
-      });
+      inventory, ConSanFaultSelection{
+                     .primary_site_identity = options.fault_site_identity,
+                     .primary_sequence_identity = options.fault_barrier_sequence_identity,
+                     .companion_site_identity = {},
+                     .companion_sequence_identity = {},
+                     .kernel_name_filter = options.test_kernel_name_filter,
+                     .ordinal = 0,
+                 });
 }
 
 [[nodiscard]] ExactBarrierDropGroupResolution
-resolve_exact_barrier_drop_group(const ConSanTransformArtifacts &result,
+resolve_exact_barrier_drop_group(const ConSanFaultSelectionView &inventory,
                                  const ConSanOptions &options) {
   return resolve_exact_barrier_drop_group(
-      fault_selection_view(result),
+      inventory,
       ConSanFaultSelection{
           .primary_site_identity = options.fault_site_identity,
           .primary_sequence_identity = options.fault_barrier_sequence_identity,
@@ -71,9 +70,9 @@ resolve_exact_barrier_drop_group(const ConSanTransformArtifacts &result,
 }
 
 [[nodiscard]] const ConSanBarrierLifecycleGroup *
-find_lifecycle_group_for_sequence(const ConSanTransformArtifacts &result,
+find_lifecycle_group_for_sequence(const ProgramInventory &program_inventory,
                                   const ConSanSyncSequence &sequence) {
-  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  const SynchronizationInventoryView sync = program_inventory.sync();
   const auto group = std::ranges::find_if(sync.barrier_lifecycle_groups, [&](const auto &item) {
     return std::ranges::all_of(sequence.member_event_identities, [&](const std::string &identity) {
       return std::ranges::find(item.member_event_identities, identity) !=
@@ -84,9 +83,9 @@ find_lifecycle_group_for_sequence(const ConSanTransformArtifacts &result,
 }
 
 [[nodiscard]] const ConSanBarrierSite *
-find_static_participant_init(const ConSanTransformArtifacts &result,
+find_static_participant_init(const ProgramInventory &program_inventory,
                              const ConSanBarrierLifecycleGroup &group) {
-  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  const SynchronizationInventoryView sync = program_inventory.sync();
   const auto init_event = std::ranges::find_if(sync.sync_events, [&](const auto &event) {
     return event.operation == ConSanSyncOperation::BarrierInit &&
            event.container_name == group.container_name && event.in_kernel == group.in_kernel &&
@@ -106,8 +105,15 @@ find_static_participant_init(const ConSanTransformArtifacts &result,
     }
     return nullptr;
   };
-  return group.in_kernel ? find_in(result.program_inventory.kernels())
-                         : find_in(result.program_inventory.functions());
+  return group.in_kernel ? find_in(program_inventory.kernels())
+                         : find_in(program_inventory.functions());
+}
+
+void mark_participant_mutation_unsupported(ConSanFaultPlanningResult &result,
+                                           std::string_view reason) {
+  result.unsupported = true;
+  result.warnings.emplace_back("ConSan barrier participant mutation is unsupported: " +
+                               std::string(reason));
 }
 
 void mark_participant_mutation_unsupported(ConSanTransformArtifacts &result,
@@ -177,9 +183,13 @@ void mark_participant_mutation_unsupported(ConSanTransformArtifacts &result,
   return count;
 }
 
-void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch,
-                               ConSanTransformArtifacts &result, bool require_applicable_plan) {
-  const SynchronizationInventoryView sync = result.program_inventory.sync();
+ConSanFaultPlanningResult build_fault_mutation_plan(const ConSanOptions &options,
+                                                    rj_code_arch_t arch,
+                                                    const ConSanFaultPlanningInput &input,
+                                                    bool require_applicable_plan) {
+  ConSanFaultPlanningResult result;
+  const ProgramInventory &program_inventory = input.selection.program_inventory;
+  const SynchronizationInventoryView sync = program_inventory.sync();
   const auto reject_application = [&](std::string dry_run_warning, std::string application_error) {
     if (require_applicable_plan)
       result.errors.push_back(std::move(application_error));
@@ -188,7 +198,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
   };
   const auto make_named_plan = [&](ConSanFaultMutationKind kind, std::string primary_identity) {
     ConSanFaultMutationPlan plan;
-    plan.source_code_object = result.program_inventory.code_object_id();
+    plan.source_code_object = program_inventory.code_object_id();
     plan.kind = kind;
     plan.primary_identity = std::move(primary_identity);
     return plan;
@@ -204,13 +214,13 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
     result.fault_plans.push_back(make_plan(kind, *site));
   };
 
-  if (options.fault_drop_barrier && has_only_rocclr_runtime_kernels(result)) {
+  if (options.fault_drop_barrier && has_only_rocclr_runtime_kernels(program_inventory)) {
     result.warnings.emplace_back("ConSan barrier fault skipped ROCclr runtime helper code object");
   }
 
-  if (options.fault_drop_barrier && !has_only_rocclr_runtime_kernels(result)) {
+  if (options.fault_drop_barrier && !has_only_rocclr_runtime_kernels(program_inventory)) {
     const ConSanFaultSite *primary = select_fault_site_for_plan(
-        result, options, ConSanFaultSiteKind::Barrier, options.fault_barrier_index);
+        input.selection, options, ConSanFaultSiteKind::Barrier, options.fault_barrier_index);
     if (!options.fault_barrier_sequence_identity.empty() ||
         !options.fault_barrier_companion_site_identity.empty() ||
         !options.fault_barrier_companion_sequence_identity.empty()) {
@@ -220,11 +230,11 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
       std::optional<ExactBarrierDropPair> pair;
       std::string reason;
       if (grouped) {
-        const auto resolution = resolve_exact_barrier_drop_group(result, options);
+        const auto resolution = resolve_exact_barrier_drop_group(input.selection, options);
         group = resolution.group;
         reason = exact_barrier_drop_group_issue_message(resolution.issue, resolution.member_issue);
       } else {
-        const auto resolution = resolve_exact_barrier_drop_pair(result, options);
+        const auto resolution = resolve_exact_barrier_drop_pair(input.selection, options);
         pair = resolution.pair;
         reason = exact_barrier_drop_pair_issue_message(resolution.issue);
       }
@@ -256,7 +266,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
         result.fault_plans.push_back(std::move(plan));
       }
     } else if (primary != nullptr &&
-               is_member_of_qualified_logical_barrier_pair(result, *primary) &&
+               is_member_of_qualified_logical_barrier_pair(input.selection, *primary) &&
                !options.fault_allow_destructive_incomplete_barrier_drop) {
       result.warnings.emplace_back(
           "ConSan fault dry run rejected dropping one half of a qualified logical barrier pair; "
@@ -265,7 +275,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
       if (primary != nullptr) {
         ConSanFaultMutationPlan plan = make_plan(ConSanFaultMutationKind::DropBarrier, *primary);
         plan.destructive_incomplete_barrier_drop =
-            is_member_of_qualified_logical_barrier_pair(result, *primary);
+            is_member_of_qualified_logical_barrier_pair(input.selection, *primary);
         result.fault_plans.push_back(std::move(plan));
       } else {
         append_primary(ConSanFaultMutationKind::DropBarrier, primary);
@@ -274,29 +284,32 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
   }
   if (options.fault_move_barrier) {
     const ConSanFaultSite *primary = select_fault_site_for_plan(
-        result, options, ConSanFaultSiteKind::Barrier, options.fault_barrier_index);
+        input.selection, options, ConSanFaultSiteKind::Barrier, options.fault_barrier_index);
     const ConSanSyncSequence *sequence =
         primary != nullptr && primary->sync_event_identity
-            ? result.program_inventory.sync().find_unique_sequence_containing(
+            ? program_inventory.sync().find_unique_sequence_containing(
                   *primary->sync_event_identity)
             : nullptr;
     if (primary == nullptr || sequence == nullptr ||
-        !owned_by_requested_kernel(sequence->execution_owners, result, options) ||
+        !owned_by_requested_kernel(sequence->execution_owners, input.selection, options) ||
         sequence->operation != ConSanSyncOperation::BarrierFull ||
         !consan_sync_confidence_meets(sequence->confidence,
                                       ConSanSemanticConfidence::Conservative) ||
         sequence->member_event_identities.size() != 2u) {
       result.warnings.emplace_back("ConSan fault dry run found no barrier pair to move");
     } else {
-      const auto companion = std::ranges::find_if(result.fault_sites, [&](const auto &candidate) {
-        return candidate.kind == ConSanFaultSiteKind::Barrier && candidate.sync_event_identity &&
-               owned_by_requested_kernel(candidate.execution_owners, result, options) &&
-               candidate.identity != primary->identity &&
-               std::ranges::find(sequence->member_event_identities,
-                                 *candidate.sync_event_identity) !=
-                   sequence->member_event_identities.end();
-      });
-      if (companion == result.fault_sites.end()) {
+      const auto companion =
+          std::ranges::find_if(input.selection.fault_sites, [&](const auto &candidate) {
+            return candidate.kind == ConSanFaultSiteKind::Barrier &&
+                   candidate.sync_event_identity &&
+                   owned_by_requested_kernel(candidate.execution_owners, input.selection,
+                                             options) &&
+                   candidate.identity != primary->identity &&
+                   std::ranges::find(sequence->member_event_identities,
+                                     *candidate.sync_event_identity) !=
+                       sequence->member_event_identities.end();
+          });
+      if (companion == input.selection.fault_sites.end()) {
         result.warnings.emplace_back(
             "ConSan fault dry run found no completing barrier in the selected container");
       } else {
@@ -314,14 +327,15 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
               "ConSan fault dry run markerless barrier move requires an exact destination "
               "identity");
         } else {
-          const auto destination = std::ranges::find(result.barrier_move_destinations,
+          const auto destination = std::ranges::find(input.barrier_move_destinations,
                                                      options.fault_barrier_destination_identity,
                                                      &ConSanBarrierMoveDestination::identity);
-          if (destination == result.barrier_move_destinations.end()) {
+          if (destination == input.barrier_move_destinations.end()) {
             result.warnings.emplace_back(
                 "ConSan fault dry run found no barrier-move destination with exact identity '" +
                 options.fault_barrier_destination_identity + "'");
-          } else if (!owned_by_requested_kernel(destination->execution_owners, result, options)) {
+          } else if (!owned_by_requested_kernel(destination->execution_owners, input.selection,
+                                                options)) {
             result.warnings.emplace_back(
                 "ConSan fault dry run rejected barrier-move destination outside the requested "
                 "dispatch owner");
@@ -408,7 +422,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
       result.warnings.emplace_back(
           "ConSan barrier ID/scope dry run rejected an unqualified logical barrier sequence");
     } else if (const ConSanBarrierLifecycleGroup *group =
-                   find_lifecycle_group_for_sequence(result, *sequence);
+                   find_lifecycle_group_for_sequence(program_inventory, *sequence);
                group != nullptr && !group->admissible()) {
       result.warnings.emplace_back(
           "ConSan barrier ID/scope dry run rejected a partial unresolved lifecycle mutation: " +
@@ -422,7 +436,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
       result.warnings.emplace_back(
           "ConSan barrier ID/scope dry run requires a target different from the original ID");
     } else if (const ConSanBarrierLifecycleGroup *group =
-                   find_lifecycle_group_for_sequence(result, *sequence);
+                   find_lifecycle_group_for_sequence(program_inventory, *sequence);
                group != nullptr &&
                (*options.fault_barrier_target_id < 1 || *options.fault_barrier_target_id > 16)) {
       result.warnings.emplace_back(
@@ -431,11 +445,12 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
       std::array<const ConSanFaultSite *, 2> members{};
       for (size_t i = 0; i < members.size(); ++i) {
         const std::string &event_identity = sequence->member_event_identities[i];
-        const auto member = std::ranges::find_if(result.fault_sites, [&](const auto &candidate) {
-          return candidate.kind == ConSanFaultSiteKind::Barrier &&
-                 candidate.sync_event_identity == event_identity;
-        });
-        if (member != result.fault_sites.end())
+        const auto member =
+            std::ranges::find_if(input.selection.fault_sites, [&](const auto &candidate) {
+              return candidate.kind == ConSanFaultSiteKind::Barrier &&
+                     candidate.sync_event_identity == event_identity;
+            });
+        if (member != input.selection.fault_sites.end())
           members[i] = &*member;
       }
       if (members[0] == nullptr || members[1] == nullptr) {
@@ -443,7 +458,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
             "ConSan barrier ID/scope dry run could not resolve both sequence members");
       } else {
         const ConSanBarrierLifecycleGroup *group =
-            find_lifecycle_group_for_sequence(result, *sequence);
+            find_lifecycle_group_for_sequence(program_inventory, *sequence);
         ConSanFaultMutationPlan plan =
             make_plan(ConSanFaultMutationKind::BarrierIdScope, *members[0]);
         plan.companion_identity = members[1]->identity;
@@ -466,9 +481,9 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
     const ConSanBarrierLifecycleGroup *group =
         selected == sync.sync_sequences.end()
             ? nullptr
-            : find_lifecycle_group_for_sequence(result, *selected);
+            : find_lifecycle_group_for_sequence(program_inventory, *selected);
     const ConSanBarrierSite *init = group != nullptr && group->admissible()
-                                        ? find_static_participant_init(result, *group)
+                                        ? find_static_participant_init(program_inventory, *group)
                                         : nullptr;
     if (options.fault_barrier_target_participant_mask) {
       mark_participant_mutation_unsupported(
@@ -503,7 +518,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
   const ConSanFaultSite *atomic = nullptr;
   if (options.fault_atomic_wrong_address || options.fault_atomic_weaken_order ||
       options.fault_atomic_weaken_scope) {
-    atomic = select_fault_site_for_plan(result, options, ConSanFaultSiteKind::Atomic,
+    atomic = select_fault_site_for_plan(input.selection, options, ConSanFaultSiteKind::Atomic,
                                         options.fault_atomic_index);
     if (atomic == nullptr) {
       if (!options.fault_site_identity.empty()) {
@@ -544,8 +559,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
                           : atomic_fault_encoding(atomic->mnemonic, atomic->size, arch);
     const ConSanSyncSequence *sequence =
         atomic_fault_supports_order(encoding) && atomic->sync_event_identity
-            ? result.program_inventory.sync().find_unique_sequence_containing(
-                  *atomic->sync_event_identity)
+            ? program_inventory.sync().find_unique_sequence_containing(*atomic->sync_event_identity)
             : nullptr;
     const ConSanSyncEvent *fence = nullptr;
     std::optional<uint64_t> release_wait_text_offset;
@@ -610,7 +624,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
   }
   if (options.fault_lds_wrong_address) {
     const ConSanFaultSite *lds = select_fault_site_for_plan(
-        result, options, ConSanFaultSiteKind::LdsAccess, options.fault_lds_index);
+        input.selection, options, ConSanFaultSiteKind::LdsAccess, options.fault_lds_index);
     if (lds == nullptr) {
       append_primary(ConSanFaultMutationKind::LdsWrongAddress, lds);
     } else if (!options.fault_lds_address_vgpr) {
@@ -627,7 +641,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
   }
   if (options.fault_ordinary_wrong_address || options.fault_ordinary_weaken_order ||
       options.fault_ordinary_weaken_scope) {
-    const auto target = select_ordinary_acquire_mutation_target(result, options);
+    const auto target = select_ordinary_acquire_mutation_target(input.selection, options);
     if (!target) {
       result.warnings.emplace_back(
           "ConSan fault dry run found no exact supported ordinary acquire-load sequence");
@@ -665,12 +679,12 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
     result.errors.emplace_back(
         "ConSan fault planner produced an internally inconsistent typed mutation plan");
   }
-  result.mutation.fault.planned = result.fault_plans.size();
-  if (options.fault_require_exactly_one && result.outcome != ConSanTransformOutcome::Unsupported &&
-      result.mutation.fault.planned != 1u) {
+  if (options.fault_require_exactly_one && !input.prior_attempt_unsupported &&
+      !result.unsupported && result.fault_plans.size() != 1u) {
     result.errors.emplace_back("ConSan fault dry run required exactly one planned mutation, got " +
-                               std::to_string(result.mutation.fault.planned));
+                               std::to_string(result.fault_plans.size()));
   }
+  return result;
 }
 
 [[nodiscard]] bool has_proof_nop_candidate(const ConSanTransformArtifacts &result) {
@@ -683,7 +697,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
 
 void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                bool force_trampoline, ConSanTransformArtifacts &result) {
-  if (has_only_rocclr_runtime_kernels(result)) {
+  if (has_only_rocclr_runtime_kernels(result.program_inventory)) {
     result.warnings.emplace_back(
         "ConSan proof NOP patch skipped ROCclr runtime helper code object");
     return;
@@ -748,7 +762,7 @@ void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch
 void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                         const ConSanOptions &options,
                                         ConSanTransformArtifacts &result) {
-  if (has_only_rocclr_runtime_kernels(result)) {
+  if (has_only_rocclr_runtime_kernels(result.program_inventory)) {
     result.warnings.emplace_back("ConSan barrier fault skipped ROCclr runtime helper code object");
     return;
   }
@@ -765,11 +779,13 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
     std::optional<ExactBarrierDropPair> pair;
     std::string reason;
     if (grouped) {
-      const auto resolution = resolve_exact_barrier_drop_group(result, options);
+      const auto resolution =
+          resolve_exact_barrier_drop_group(fault_selection_view(result), options);
       group = resolution.group;
       reason = exact_barrier_drop_group_issue_message(resolution.issue, resolution.member_issue);
     } else {
-      const auto resolution = resolve_exact_barrier_drop_pair(result, options);
+      const auto resolution =
+          resolve_exact_barrier_drop_pair(fault_selection_view(result), options);
       pair = resolution.pair;
       reason = exact_barrier_drop_pair_issue_message(resolution.issue);
     }
@@ -825,8 +841,9 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
   }
 
   std::optional<BarrierSite> site;
-  const ConSanFaultSite *selected_inventory_site = select_fault_site_for_plan(
-      result, options, ConSanFaultSiteKind::Barrier, options.fault_barrier_index);
+  const ConSanFaultSite *selected_inventory_site =
+      select_fault_site_for_plan(fault_selection_view(result), options,
+                                 ConSanFaultSiteKind::Barrier, options.fault_barrier_index);
   if (selected_inventory_site != nullptr)
     site = barrier_site_from_inventory(*selected_inventory_site);
   if (!site) {
@@ -840,7 +857,8 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
     return;
   }
   if (selected_inventory_site != nullptr &&
-      is_member_of_qualified_logical_barrier_pair(result, *selected_inventory_site) &&
+      is_member_of_qualified_logical_barrier_pair(fault_selection_view(result),
+                                                  *selected_inventory_site) &&
       !options.fault_allow_destructive_incomplete_barrier_drop) {
     result.warnings.emplace_back(
         "ConSan barrier fault rejected dropping one half of a qualified logical barrier pair; "
@@ -904,7 +922,7 @@ void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
     return;
   }
   const ConSanBarrierLifecycleGroup *lifecycle_group =
-      find_lifecycle_group_for_sequence(result, *selected);
+      find_lifecycle_group_for_sequence(result.program_inventory, *selected);
   if (lifecycle_group != nullptr && !lifecycle_group->admissible()) {
     result.errors.emplace_back(
         "ConSan barrier ID/scope mutation refused a partial unresolved lifecycle mutation: " +
@@ -1046,11 +1064,13 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
   const auto selected = std::ranges::find(
       sync.sync_sequences, options.fault_barrier_sequence_identity, &ConSanSyncSequence::identity);
   const ConSanBarrierLifecycleGroup *group =
-      selected == sync.sync_sequences.end() ? nullptr
-                                            : find_lifecycle_group_for_sequence(result, *selected);
-  const ConSanBarrierSite *init = group != nullptr && group->admissible()
-                                      ? find_static_participant_init(result, *group)
-                                      : nullptr;
+      selected == sync.sync_sequences.end()
+          ? nullptr
+          : find_lifecycle_group_for_sequence(result.program_inventory, *selected);
+  const ConSanBarrierSite *init =
+      group != nullptr && group->admissible()
+          ? find_static_participant_init(result.program_inventory, *group)
+          : nullptr;
   if (options.fault_barrier_target_participant_mask) {
     mark_participant_mutation_unsupported(
         result, "the GFX12.5 lifecycle exposes a six-bit count in M0, not a participant mask");
@@ -1109,7 +1129,7 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
 void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                         const ConSanOptions &options,
                                         ConSanTransformArtifacts &result) {
-  if (has_only_rocclr_runtime_kernels(result)) {
+  if (has_only_rocclr_runtime_kernels(result.program_inventory)) {
     result.warnings.emplace_back(
         "ConSan barrier move fault skipped ROCclr runtime helper code object");
     return;
@@ -1117,8 +1137,9 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
   std::optional<BarrierSite> site;
-  const ConSanFaultSite *selected_inventory_site = select_fault_site_for_plan(
-      result, options, ConSanFaultSiteKind::Barrier, options.fault_barrier_index);
+  const ConSanFaultSite *selected_inventory_site =
+      select_fault_site_for_plan(fault_selection_view(result), options,
+                                 ConSanFaultSiteKind::Barrier, options.fault_barrier_index);
   if (selected_inventory_site != nullptr)
     site = barrier_site_from_inventory(*selected_inventory_site);
   if (!site) {
@@ -1138,7 +1159,8 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
     selected_sequence = result.program_inventory.sync().find_unique_sequence_containing(
         *selected_inventory_site->sync_event_identity);
     if (selected_sequence == nullptr ||
-        !owned_by_requested_kernel(selected_sequence->execution_owners, result, options) ||
+        !owned_by_requested_kernel(selected_sequence->execution_owners,
+                                   fault_selection_view(result), options) ||
         selected_sequence->operation != ConSanSyncOperation::BarrierFull ||
         !consan_sync_confidence_meets(selected_sequence->confidence,
                                       ConSanSemanticConfidence::Conservative) ||
@@ -1150,7 +1172,8 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
     const auto next =
         std::ranges::find_if(result.fault_sites, [&](const ConSanFaultSite &candidate) {
           return candidate.kind == ConSanFaultSiteKind::Barrier && candidate.sync_event_identity &&
-                 owned_by_requested_kernel(candidate.execution_owners, result, options) &&
+                 owned_by_requested_kernel(candidate.execution_owners, fault_selection_view(result),
+                                           options) &&
                  candidate.identity != selected_inventory_site->identity &&
                  std::ranges::find(selected_sequence->member_event_identities,
                                    *candidate.sync_event_identity) !=
@@ -1179,7 +1202,8 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
           options.fault_barrier_destination_identity + "'");
       return;
     }
-    if (!owned_by_requested_kernel(destination->execution_owners, result, options)) {
+    if (!owned_by_requested_kernel(destination->execution_owners, fault_selection_view(result),
+                                   options)) {
       result.warnings.emplace_back(
           "ConSan barrier move fault rejected destination outside the requested dispatch owner");
       return;
@@ -1454,8 +1478,9 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
 void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                   const ConSanOptions &options, ConSanTransformArtifacts &result) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
-  const ConSanFaultSite *selected = select_fault_site_for_plan(
-      result, options, ConSanFaultSiteKind::Atomic, options.fault_atomic_index);
+  const ConSanFaultSite *selected =
+      select_fault_site_for_plan(fault_selection_view(result), options, ConSanFaultSiteKind::Atomic,
+                                 options.fault_atomic_index);
   if (!selected) {
     if (!options.fault_site_identity.empty()) {
       result.warnings.emplace_back("ConSan atomic fault found no site with exact identity '" +
@@ -1720,8 +1745,9 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
     result.errors.emplace_back("ConSan LDS address fault is unsupported for the selected target");
     return;
   }
-  const ConSanFaultSite *selected = select_fault_site_for_plan(
-      result, options, ConSanFaultSiteKind::LdsAccess, options.fault_lds_index);
+  const ConSanFaultSite *selected =
+      select_fault_site_for_plan(fault_selection_view(result), options,
+                                 ConSanFaultSiteKind::LdsAccess, options.fault_lds_index);
   if (selected == nullptr) {
     if (!options.fault_site_identity.empty()) {
       result.warnings.emplace_back("ConSan LDS fault found no site with exact identity '" +
@@ -1815,7 +1841,8 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
 void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
                                     const ConSanOptions &options,
                                     ConSanTransformArtifacts &result) {
-  const auto target = select_ordinary_acquire_mutation_target(result, options);
+  const auto target =
+      select_ordinary_acquire_mutation_target(fault_selection_view(result), options);
   if (!target) {
     if (!options.fault_site_identity.empty()) {
       result.warnings.emplace_back(
@@ -2012,16 +2039,16 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
 }
 
 [[nodiscard]] bool owned_by_requested_kernel(std::span<const ConSanExecutionOwner> owners,
-                                             const ConSanTransformArtifacts &result,
+                                             const ConSanFaultSelectionView &inventory,
                                              const ConSanOptions &options) {
-  return consan_execution_owners_include_requested_kernel(owners, fault_selection_view(result),
+  return consan_execution_owners_include_requested_kernel(owners, inventory,
                                                           options.test_kernel_name_filter);
 }
 
 [[nodiscard]] const ConSanFaultSite *
-select_fault_site_for_plan(const ConSanTransformArtifacts &result, const ConSanOptions &options,
+select_fault_site_for_plan(const ConSanFaultSelectionView &inventory, const ConSanOptions &options,
                            ConSanFaultSiteKind kind, uint32_t legacy_index) {
-  return select_fault_site_for_plan(fault_selection_view(result),
+  return select_fault_site_for_plan(inventory,
                                     ConSanFaultSelection{
                                         .primary_site_identity = options.fault_site_identity,
                                         .primary_sequence_identity = {},

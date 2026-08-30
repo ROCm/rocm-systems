@@ -1140,3 +1140,59 @@ continues downward, and the broad transaction loses four component consumers.
 Validation includes a full `-j16` rebuild, the architecture-boundary test, and
 134 focused fault, perturbation, exact-barrier, ordinary-acquire, LDS-address,
 composition, and independent-final-validation tests.
+
+### 16.4 Convergence checkpoint 3: fault planning as a typed product
+
+The next trace followed fault planning separately from mutation emission.
+Planning needs the immutable program inventory, eligible fault sites,
+barrier-move destinations, the target architecture, and fault-policy options.
+It produces exact typed mutation plans plus planning diagnostics and an
+unsupported classification. It does not need replacement bytes, emitted
+patches, resource plans, coverage state, operating points, committed lowering,
+or the rest of the mutable transformation transaction. Nevertheless, its API
+previously accepted and modified that entire transaction in place.
+
+The converged path now has an explicit `consan_fault_planning.h` contract.
+`ConSanFaultPlanningInput` contains the narrow selection view, a read-only
+barrier-destination span, and only the prior unsupported fact needed to
+preserve exactly-one diagnostic semantics. `ConSanFaultPlanningResult` owns
+the selected plans, diagnostics, and unsupported result. The planner returns
+that product without naming or mutating `ConSanTransformArtifacts`.
+
+The composition layer is now the sole owner of publishing the planning product
+into its transformation transaction. Both pristine composite planning and the
+ordinary dry-run path cross that same adapter. The closely related runtime-
+kernel predicate now consumes `ProgramInventory`, while the selection,
+ownership, lifecycle, and participant-init helpers used inside fault mutation
+consume their exact immutable products. Stateful byte emitters remain in the
+fault-injection component and retain the mutable transaction deliberately;
+they are the subsequent mutation transaction, not part of pure planning.
+
+The architecture-boundary checker rejects `ConSanTransformArtifacts` in the
+new planning contract and requires both the explicit input and result types.
+No compatibility overload accepting the broad transaction remains.
+
+| Signal | Checkpoint 3 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 237 | +8 |
+| Physical production lines | 104,999 | +24 |
+| Nonblank production lines | 99,083 | 0 |
+| Production implementation lines | 91,409 | **-41** |
+| `ConSanTransformArtifacts` references / files | 250 / 53 | **-26 / -4** |
+| Other broad-bus reference/file counts | unchanged | 0 |
+| Test inventory | 5,345 | 0 |
+
+This boundary costs 74 implementation lines relative to checkpoint 2, mostly
+for the named input/product contract and the single composition publisher. It
+still leaves cumulative production implementation below the starting
+baseline, removes twelve more broad-transaction references, and completes the
+migration rather than installing a parallel path. The next convergence slice
+must cash in a deletion or sharing opportunity: a second consecutive local
+size increase would violate the forward-progress rule in Sections 8 and 10.
+
+Validation includes a full `-j16` rebuild; the architecture-boundary test; 269
+focused fault, barrier, atomic, ordinary-access, LDS, composition, and final-
+validation tests; 14 focused MOI fault-composition and retry tests; and the
+complete 4,710-test nonphysical gate over all five emulated targets at `-j16`
+in 242.73 seconds. The serialized 635-test physical gfx1201 baseline remains
+green and will be repeated at a later periodic physical checkpoint.
