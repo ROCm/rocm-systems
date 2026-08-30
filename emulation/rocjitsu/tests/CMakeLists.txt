@@ -24,6 +24,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_vm_risc_v
     rocjitsu_config
     rocjitsu_dbt_config
+    rocjitsu_pci
 )
 
 if(RJ_INSTALL_TESTS)
@@ -543,8 +544,13 @@ add_executable(
     race-detector/race_detector_event_registry_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
+    race-detector/race_log_expectation_test.cpp
     data_types_test.cpp
     drm_info_layout_test.cpp
+    pci/bar_access_trace_test.cpp
+    pci/gpu_pci_device_test.cpp
+    pci/scratch_pci_device_test.cpp
+    pci/ip_discovery_test.cpp
 )
 if(HAS_DEVICE_KERNELS)
     target_sources(
@@ -562,6 +568,21 @@ if(HAS_GFX1250_DEVICE_KERNELS)
     target_compile_definitions(
         rocjitsu_tests
         PRIVATE HAS_GFX1250_DEVICE_KERNELS=1
+    )
+endif()
+# The vfio-user backend is optional, so its tests build only when it does.
+if(ROCJITSU_ENABLE_VFIO)
+    target_sources(
+        rocjitsu_tests
+        PRIVATE
+            vmm/bus_plan_test.cpp
+            vmm/guest_region_map_test.cpp
+            vmm/vfio_user_client.cpp
+            vmm/vfio_device_host_test.cpp
+    )
+    target_link_libraries(
+        rocjitsu_tests
+        PRIVATE rocjitsu_vmm_vfu libvfio-user::libvfio-user
     )
 endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)
@@ -845,7 +866,11 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
         probe_fixture_test
         PRIVATE KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
     )
-    add_dependencies(probe_fixture_test probe_rj_nop_probe_gfx90a)
+    add_dependencies(
+        probe_fixture_test
+        probe_rj_nop_probe_gfx90a
+        probe_callable_sgpr_probe_gfx950
+    )
     rj_configure_target(probe_fixture_test TEST)
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(probe_fixture_test)
@@ -855,6 +880,16 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
         COMMAND probe_fixture_test
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         INSTALL_COMMAND "bin/probe_fixture_test"
+    )
+    rj_add_test(
+        NAME "ProbeFixture.CallableSgprUseExceedsKernelDescriptor"
+        COMMAND
+            probe_fixture_test
+            --gtest_filter=ProbeFixture.CallableSgprUseExceedsKernelDescriptor
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        INSTALL_COMMAND
+            "bin/probe_fixture_test"
+            "--gtest_filter=ProbeFixture.CallableSgprUseExceedsKernelDescriptor"
     )
 endif()
 
@@ -2500,7 +2535,13 @@ if(RJ_ENABLE_HIP_TESTS)
 
     # Helper: build a HIP test binary with amdclang++ + gtest.
     function(rj_add_hip_test TEST_NAME)
-        cmake_parse_arguments(ARG "" "ARCH;SOURCE" "EXTRA_LIBS" ${ARGN})
+        cmake_parse_arguments(
+            ARG
+            ""
+            "ARCH;SOURCE"
+            "DEPENDENCIES;EXTRA_LIBS"
+            ${ARGN}
+        )
         if(NOT ARG_ARCH)
             set(ARG_ARCH ${RJ_HIP_TEST_ARCH})
         endif()
@@ -2524,7 +2565,11 @@ if(RJ_ENABLE_HIP_TESTS)
                 ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest -lpthread
                 -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
                 ${RJ_HIP_SANITIZER_LINK_FLAGS}
-            DEPENDS ${HIP_TEST_SRC} GTest::gtest GTest::gtest_main
+            DEPENDS
+                ${HIP_TEST_SRC}
+                ${ARG_DEPENDENCIES}
+                GTest::gtest
+                GTest::gtest_main
             COMMENT "Building ${TEST_NAME} with amdclang++ -x hip (${ARG_ARCH})"
             VERBATIM
         )
@@ -2643,6 +2688,24 @@ if(RJ_ENABLE_HIP_TESTS)
             "HipMemcpyTest.RoundTripInt"
             CONFIG ${RJ_HIP_TEST_CONFIG}
         )
+        # The only case that reaches ROCr's pinned SDMA blit, and both sanitizers
+        # report that library rather than rocjitsu. TSan sees the blit's memcpy
+        # into the ring but not the release store on the doorbell that follows
+        # it, because libhsa-runtime64 is not instrumented; the pair it forms
+        # with the acquire load in poll_doorbells() is therefore invisible and
+        # the fetch looks unordered. LSan reports ~5.7 KB allocated entirely
+        # within that library, in frames with no rocjitsu caller. Neither is
+        # actionable from here, and suppressing them by file would hide the same
+        # classes of defect on the paths rocjitsu does own. The case still runs
+        # in regular builds, in both local and daemon mode, which is where it
+        # regression-tests the transfer.
+        if(NOT RJ_ENABLE_ASAN AND NOT RJ_ENABLE_TSAN)
+            rj_add_hip_test_case(
+                hip_memcpy_test
+                "HipMemcpyTest.RoundTripPageableAbovePinThreshold"
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+            )
+        endif()
         rj_add_hip_test_case(
             hip_memcpy_test
             "HipMemcpyTest.DeviceToDevice"
@@ -2749,6 +2812,16 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.InterposerDup2OverPrimaryInvalidatesRemote
             DaemonTest.InterposerProcMapsNamesRemoteKfdMarker
         )
+        # Excluded under sanitizers for the reason given at its local-mode
+        # registration above: the pinned SDMA path this case exists to cover
+        # runs inside an uninstrumented libhsa-runtime64, and both the race TSan
+        # infers and the allocations LSan finds are that library's.
+        if(NOT RJ_ENABLE_ASAN AND NOT RJ_ENABLE_TSAN)
+            list(
+                APPEND RJ_DAEMON_TESTS
+                DaemonTest.HipMemcpyRoundTripPageableAbovePinThreshold
+            )
+        endif()
         foreach(TC IN LISTS RJ_DAEMON_TESTS)
             rj_add_test(
                 NAME ${TC}
