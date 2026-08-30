@@ -880,6 +880,20 @@ struct ConSanMoiOperatingPoint {
   /// Per-owner-component transient scalar overrides selected by placement.
   std::vector<ConSanMoiTransientSgprAssignment> owner_transient_sgprs;
 
+  /// Visit every fixed-width auxiliary scalar reservation represented by this
+  /// operating point. EXEC, owner, dispatch, and persistent state have
+  /// separate lifetime rules and are intentionally not part of this view.
+  template <typename Visitor> void for_each_auxiliary_sgpr_range(Visitor &&visit) const {
+    visit(moi_inline_indirect_pc_sgpr, 2u);
+    visit(moi_inline_indirect_scc_sgpr, 1u);
+    visit(moi_inline_dispatch_key_sgpr, 1u);
+    visit(moi_inline_call_return_sgpr, 2u);
+    visit(moi_inline_visible_evidence_sgpr, 1u);
+    visit(moi_inline_dynamic_stack_borrowed_sgpr, 2u);
+    visit(moi_record_replay_dispatch_key_sgpr, 1u);
+    visit(moi_record_replay_call_return_sgpr, 2u);
+  }
+
   bool operator==(const ConSanMoiOperatingPoint &) const = default;
 };
 
