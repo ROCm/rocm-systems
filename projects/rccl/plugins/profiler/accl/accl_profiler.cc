@@ -119,7 +119,12 @@ static struct acclProxyOpInfo* acclAllocProxyOp(struct acclCommContext* ctx) {
     }
   }
   pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
-  ACCL_WARN("ACCL Profiler: proxy op pool exhausted (%d slots)", ACCL_PROXY_OP_POOL_SIZE);
+  __atomic_add_fetch(&ctx->droppedProxyOps, 1, __ATOMIC_SEQ_CST);
+  if (__atomic_exchange_n(&ctx->proxyOpPoolWarned, 1, __ATOMIC_SEQ_CST) == 0) {
+    ACCL_WARN("ACCL Profiler: proxy op pool exhausted (%d slots). Proxy timing for this "
+              "communicator is now INCOMPLETE. Further drops are counted in the "
+              "end-of-run summary only.", ACCL_PROXY_OP_POOL_SIZE);
+  }
   return NULL;
 }
 
@@ -147,7 +152,12 @@ static struct acclProxyStepInfo* acclAllocProxyStep(struct acclCommContext* ctx)
     }
   }
   pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
-  ACCL_WARN("ACCL Profiler: proxy step pool exhausted (%d slots)", ACCL_PROXY_STEP_POOL_SIZE);
+  __atomic_add_fetch(&ctx->droppedProxySteps, 1, __ATOMIC_SEQ_CST);
+  if (__atomic_exchange_n(&ctx->proxyStepPoolWarned, 1, __ATOMIC_SEQ_CST) == 0) {
+    ACCL_WARN("ACCL Profiler: proxy step pool exhausted (%d slots). Proxy timing for this "
+              "communicator is now INCOMPLETE. Further drops are counted in the "
+              "end-of-run summary only.", ACCL_PROXY_STEP_POOL_SIZE);
+  }
   return NULL;
 }
 
@@ -509,19 +519,35 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
     // Emit the summary unconditionally, including on a clean run: a consumer
     // that finds no summary line cannot distinguish "nothing was lost" from
     // "the process died before finalize".
-    int complete = (ctx->droppedCollectives == 0 && ctx->leakedCollectives == 0);
+    uint64_t dOps   = __atomic_load_n(&ctx->droppedProxyOps, __ATOMIC_SEQ_CST);
+    uint64_t dSteps = __atomic_load_n(&ctx->droppedProxySteps, __ATOMIC_SEQ_CST);
+    uint64_t oOps   = __atomic_load_n(&ctx->overflowProxyOps, __ATOMIC_SEQ_CST);
+    // A run is complete only if nothing was lost anywhere. Proxy loss leaves the
+    // decomposition understated with no marker on the affected records, so it
+    // has to clear this flag too.
+    int complete = (ctx->droppedCollectives == 0 && ctx->leakedCollectives == 0 &&
+                    dOps == 0 && dSteps == 0 && oOps == 0);
     fprintf(ctx->outputFile,
       "{\"summary\":{\"dropped_collectives\":%lu,\"leaked_collectives\":%lu,"
-      "\"pool_size\":%d,\"complete\":%s}}\n",
+      "\"dropped_proxy_ops\":%lu,\"dropped_proxy_steps\":%lu,"
+      "\"overflow_proxy_ops\":%lu,"
+      "\"coll_pool_size\":%d,\"proxy_op_pool_size\":%d,\"proxy_step_pool_size\":%d,"
+      "\"max_proxy_ops_per_coll\":%d,\"complete\":%s}}\n",
       (unsigned long)ctx->droppedCollectives,
       (unsigned long)ctx->leakedCollectives,
-      ACCL_COLL_POOL_SIZE, complete ? "true" : "false");
+      (unsigned long)dOps, (unsigned long)dSteps, (unsigned long)oOps,
+      ACCL_COLL_POOL_SIZE, ACCL_PROXY_OP_POOL_SIZE, ACCL_PROXY_STEP_POOL_SIZE,
+      ACCL_MAX_PROXY_OPS, complete ? "true" : "false");
     fflush(ctx->outputFile);
     if (!complete) {
-      ACCL_WARN("ACCL Profiler: rank=%d output INCOMPLETE — %lu collectives dropped "
-                "(pool exhausted), %lu slots leaked (teardown-skipped kernel events)",
+      ACCL_WARN("ACCL Profiler: rank=%d output INCOMPLETE: %lu collectives dropped "
+                "(coll pool exhausted), %lu slots leaked (teardown-skipped kernel "
+                "events), %lu proxy ops dropped, %lu proxy steps dropped, %lu proxy "
+                "ops discarded (more than %d on one collective)",
                 ctx->rank, (unsigned long)ctx->droppedCollectives,
-                (unsigned long)ctx->leakedCollectives);
+                (unsigned long)ctx->leakedCollectives,
+                (unsigned long)dOps, (unsigned long)dSteps, (unsigned long)oOps,
+                ACCL_MAX_PROXY_OPS);
     }
   }
   pthread_mutex_unlock(&ctx->outputMutex);
@@ -731,6 +757,9 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
         coll->proxyOpIndices[coll->nProxyOps] = opIdx;
         coll->nProxyOps++;
       } else {
+        // The op completed normally; the collective simply has no room to record
+        // it, so its timing is lost and the decomposition understates the total.
+        __atomic_add_fetch(&ctx->overflowProxyOps, 1, __ATOMIC_SEQ_CST);
         acclFreeProxyOp(ctx, op);
       }
       coll->nProxyOpsCompleted++;
