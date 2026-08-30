@@ -477,6 +477,22 @@ struct ConSanRecordReplayCapacityPolicy {
   bool operator==(const ConSanRecordReplayCapacityPolicy &) const = default;
 };
 
+/// Report-backed evidence contract shared by the three MOI engines.
+///
+/// This base owns only the representation-independent runtime and ABI product.
+/// Each mode retains its semantic validation and any additional requirements
+/// in the corresponding derived contract.
+struct ConSanMoiEvidenceRequirements {
+  RuntimeCapabilityRequirements runtime_requirements;
+  ConSanMoiAutoReportInventory sizing_inventory;
+  ConSanMoiAutoReportPlan abi_plan;
+  ConSanEvidenceRequirementReason reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+
+  [[nodiscard]] bool common_well_formed(ConSanMoiEngine expected_engine) const;
+
+  bool operator==(const ConSanMoiEvidenceRequirements &) const = default;
+};
+
 /// Address-free Record/Replay evidence contract for one code object.
 ///
 /// The immutable observation plan determines logical record counts; capacity
@@ -487,16 +503,7 @@ struct ConSanRecordReplayCapacityPolicy {
 /// Runtime requirements state allocation properties without an address or
 /// handle. A capacity-limited or overflowing ABI plan remains a well-formed
 /// requirement and can be reported without attempting allocation.
-struct ConSanRecordReplayEvidenceRequirements {
-  /// Runtime facts required before allocation or executable binding.
-  RuntimeCapabilityRequirements runtime_requirements;
-  /// Exact address-free capacities consumed by the current ABI layout planner.
-  ConSanMoiAutoReportInventory sizing_inventory;
-  /// Exact byte geometry or typed capacity/overflow outcome.
-  ConSanMoiAutoReportPlan abi_plan;
-  /// Construction result, distinct from `abi_plan` capacity outcomes.
-  ConSanEvidenceRequirementReason reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
-
+struct ConSanRecordReplayEvidenceRequirements : ConSanMoiEvidenceRequirements {
   /// Return whether all cross-type relationships form a usable requirement.
   [[nodiscard]] bool well_formed() const;
 
@@ -543,16 +550,7 @@ struct ConSanSampledCapacityPolicy {
 /// evidence whose loss invalidates completeness and whose concrete binding has
 /// executable lifetime. Runtime requirements describe that binding but never
 /// own it.
-struct ConSanSampledEvidenceRequirements {
-  /// Runtime facts required before allocation or executable binding.
-  RuntimeCapabilityRequirements runtime_requirements;
-  /// Exact address-free capacities consumed by the current ABI planner.
-  ConSanMoiAutoReportInventory sizing_inventory;
-  /// Exact byte geometry or typed capacity/overflow outcome.
-  ConSanMoiAutoReportPlan abi_plan;
-  /// Construction result, distinct from `abi_plan` capacity outcomes.
-  ConSanEvidenceRequirementReason reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
-
+struct ConSanSampledEvidenceRequirements : ConSanMoiEvidenceRequirements {
   /// Return whether all cross-type relationships form a usable requirement.
   [[nodiscard]] bool well_formed() const;
   /// Return whether a well-formed requirement has an allocatable ABI layout.
@@ -593,17 +591,9 @@ struct ConSanInlineShadowCapacityPolicy {
 /// alternative intrinsically denotes exact on-device conflict decisions with
 /// bounded diagnostics; any evidence loss invalidates completeness and the
 /// concrete binding has executable lifetime.
-struct ConSanInlineShadowEvidenceRequirements {
-  /// Runtime facts required before allocation or executable binding.
-  RuntimeCapabilityRequirements runtime_requirements;
+struct ConSanInlineShadowEvidenceRequirements : ConSanMoiEvidenceRequirements {
   /// Largest byte aperture that any admitted exact-shadow access can address.
   uint64_t required_lds_aperture_bytes = 0;
-  /// Exact address-free capacities consumed by the current ABI planner.
-  ConSanMoiAutoReportInventory sizing_inventory;
-  /// Exact byte geometry or typed capacity/overflow outcome.
-  ConSanMoiAutoReportPlan abi_plan;
-  /// Construction result, distinct from `abi_plan` capacity outcomes.
-  ConSanEvidenceRequirementReason reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
 
   /// Return whether all cross-type relationships form a usable requirement.
   [[nodiscard]] bool well_formed() const;

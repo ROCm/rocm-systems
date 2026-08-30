@@ -223,4 +223,35 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
   }
 }
 
+bool ConSanRecordReplayEvidenceRequirements::well_formed() const {
+  return common_well_formed(ConSanMoiEngine::RecordReplay);
+}
+
+ConSanRecordReplayEvidenceRequirements
+plan_consan_record_replay_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
+                                   const ConSanRecordReplayCapacityPolicy &capacity_policy) {
+  ConSanRecordReplayEvidenceRequirements requirements;
+  requirements.reason = consan_moi_impl::validate_moi_evidence_intents(
+      evidence_intents, ConSanCapabilityEngine::RecordReplay);
+  if (requirements.reason != ConSanEvidenceRequirementReason::None)
+    return requirements;
+
+  ConSanMoiAutoReportInventory inventory;
+  inventory.engine = ConSanMoiEngine::RecordReplay;
+  (void)consan_moi_impl::accumulate_moi_evidence_counts(
+      evidence_intents, capacity_policy.maximum_access_probe_count, inventory);
+  const bool has_evidence = inventory.access_range_count != 0u ||
+                            inventory.barrier_event_count != 0u ||
+                            inventory.atomic_event_count != 0u || inventory.fence_event_count != 0u;
+  inventory.diagnostic_count =
+      has_evidence ? std::max<uint64_t>(inventory.access_range_count, 1u) : 0u;
+  inventory.record_replay_bank_count_adaptive = inventory.access_range_count != 0u;
+  inventory = fit_consan_moi_record_replay_auto_report_inventory(
+      inventory, capacity_policy.caller_ceiling_bytes);
+
+  consan_moi_impl::publish_moi_evidence_requirements(requirements, std::move(inventory),
+                                                     capacity_policy.caller_ceiling_bytes);
+  return requirements;
+}
+
 } // namespace rocjitsu

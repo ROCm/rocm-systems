@@ -52,6 +52,7 @@ target_sources(
         consan_moi_probe_planning.cpp
         consan_moi_prologue.cpp
         consan_moi_report_plan.cpp
+        consan_supercollider_report_plan.cpp
         consan_moi_relocation.cpp
         consan_moi_report_emission.cpp
         consan_moi_record_event_emission.cpp

@@ -6,6 +6,7 @@
 #include "util/bit.h"
 
 #include <algorithm>
+#include <bit>
 
 namespace rocjitsu::consan_moi_impl {
 
@@ -102,6 +103,68 @@ fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory invent
         util::saturating_add(inventory.sampled_range_bank_count, extra_watchpoints);
   }
   return inventory;
+}
+
+bool ConSanSampledEvidenceRequirements::well_formed() const {
+  if (sizing_inventory.diagnostic_count != sizing_inventory.access_range_count ||
+      sizing_inventory.sampled_bank_count_adaptive != (sizing_inventory.access_range_count != 0u)) {
+    return false;
+  }
+  if (sizing_inventory.access_range_count == 0u) {
+    if (sizing_inventory.sampled_range_bank_count != 0u ||
+        sizing_inventory.sampled_sync_slot_count != 0u ||
+        sizing_inventory.sampled_watchpoint_count != 0u) {
+      return false;
+    }
+  } else {
+    if (sizing_inventory.sampled_range_bank_count % sizing_inventory.access_range_count != 0u)
+      return false;
+    const uint64_t banks_per_range =
+        sizing_inventory.sampled_range_bank_count / sizing_inventory.access_range_count;
+    if (banks_per_range == 0u || banks_per_range > 8u || !std::has_single_bit(banks_per_range))
+      return false;
+    const uint64_t expected_slots = util::saturating_add(sizing_inventory.sampled_range_bank_count,
+                                                         sizing_inventory.atomic_event_count);
+    if (sizing_inventory.sampled_sync_slot_count != expected_slots ||
+        sizing_inventory.sampled_watchpoint_count != expected_slots) {
+      return false;
+    }
+  }
+  return common_well_formed(ConSanMoiEngine::Sampled);
+}
+
+ConSanSampledEvidenceRequirements
+plan_consan_sampled_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
+                             const ConSanSampledCapacityPolicy &capacity_policy) {
+  ConSanSampledEvidenceRequirements requirements;
+  requirements.reason = consan_moi_impl::validate_moi_evidence_intents(
+      evidence_intents, ConSanCapabilityEngine::Sampled);
+  if (requirements.reason != ConSanEvidenceRequirementReason::None)
+    return requirements;
+
+  ConSanMoiAutoReportInventory inventory;
+  inventory.engine = ConSanMoiEngine::Sampled;
+  (void)consan_moi_impl::accumulate_moi_evidence_counts(
+      evidence_intents, capacity_policy.maximum_access_probe_count, inventory);
+
+  constexpr uint64_t kSampledBanksPerLogicalRange = 8u;
+  const uint64_t access_banks =
+      util::saturating_mul(inventory.access_range_count, kSampledBanksPerLogicalRange);
+  inventory.sampled_range_bank_count = access_banks;
+  const uint64_t sampled_slots =
+      access_banks == 0u ? 0u : util::saturating_add(access_banks, inventory.atomic_event_count);
+  inventory.sampled_sync_slot_count = sampled_slots;
+  inventory.sampled_watchpoint_count = sampled_slots;
+  inventory.sampled_bank_count_adaptive = inventory.access_range_count != 0u;
+  inventory.diagnostic_count = inventory.access_range_count == 0u
+                                   ? 0u
+                                   : std::max<uint64_t>(inventory.access_range_count, 1u);
+  inventory =
+      fit_consan_moi_sampled_auto_report_inventory(inventory, capacity_policy.caller_ceiling_bytes);
+
+  consan_moi_impl::publish_moi_evidence_requirements(requirements, std::move(inventory),
+                                                     capacity_policy.caller_ceiling_bytes);
+  return requirements;
 }
 
 } // namespace rocjitsu

@@ -29,6 +29,19 @@ template <typename Element>
 [[nodiscard]] bool plan_moi_report_regions(std::initializer_list<MoiReportRegionPlan> regions,
                                            ConSanMoiAutoReportPlan &plan, uint64_t &cursor);
 
+[[nodiscard]] ConSanEvidenceRequirementReason
+validate_moi_evidence_intents(const ConSanEvidenceIntentPlan &plan,
+                              ConSanCapabilityEngine expected_engine);
+
+[[nodiscard]] std::vector<const ConSanEvidenceIntent *>
+accumulate_moi_evidence_counts(const ConSanEvidenceIntentPlan &plan,
+                               std::optional<uint64_t> maximum_access_probe_count,
+                               ConSanMoiAutoReportInventory &inventory);
+
+void publish_moi_evidence_requirements(ConSanMoiEvidenceRequirements &requirements,
+                                       ConSanMoiAutoReportInventory inventory,
+                                       uint64_t caller_ceiling_bytes);
+
 [[nodiscard]] bool plan_record_replay_report_layout(const ConSanMoiAutoReportInventory &inventory,
                                                     ConSanMoiAutoReportPlan &plan,
                                                     uint64_t &cursor);
