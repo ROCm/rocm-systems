@@ -152,7 +152,8 @@ _ag_skip = pytest.mark.skipif(
 # aborts before any collective work. Re-launched after a short settle, exactly
 # as the shell harness does. A genuine wrong-element data check is never retried.
 _CONN_GATE_RE = re.compile(r"LSA signal connectivity gate failed|unhandled system error", re.I)
-_DATA_FAIL_RE = re.compile(r"Wrong|mismatch|check.*fail|Out of bounds values\s*:\s*[1-9]", re.I)
+_DATA_FAIL_RE = re.compile(
+    r"#wrong\s*=\s*[1-9]|mismatch|check.*fail|Out of bounds values\s*:\s*[1-9]", re.I)
 _AG_DEVTIME_TIER_RE = re.compile(r"#\[ag-devtime\].*tier\s+(LSA|SDMA)", re.I)
 
 
