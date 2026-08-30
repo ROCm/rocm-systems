@@ -189,14 +189,11 @@ inline_shadow_access_spill_fallback(const MoiAccessSpillFallbackContext &context
 MoiDispatchIdentityPlan
 plan_inline_shadow_dispatch_identity(const ConSanRequest &request,
                                      const MoiDispatchIdentityFacts &facts) {
-  return {
-      .needs_dispatch_id =
-          !(facts.target_uses_gfx12_cdna_execution && !request.moi_track_atomics) &&
-          facts.has_access_or_atomic_consumer,
-      .fallback_kind = std::nullopt,
-      .fallback_replans_dispatch_only = false,
-      .fallback_diagnostic = {},
-  };
+  MoiDispatchIdentityPlan plan;
+  plan.needs_dispatch_id =
+      !(facts.target_uses_gfx12_cdna_execution && !request.moi_track_atomics) &&
+      facts.has_access_or_atomic_consumer;
+  return plan;
 }
 
 MoiScalarAbiPlan plan_inline_shadow_scalar_abi(const ConSanRequest &,

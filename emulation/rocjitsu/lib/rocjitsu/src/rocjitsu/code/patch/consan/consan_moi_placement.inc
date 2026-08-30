@@ -4631,7 +4631,8 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
     }
   }
 
-  if (consan_uses_gfx12_rdna_execution(arch) || request.moi_engine == ConSanMoiEngine::Sampled) {
+  if (consan_uses_gfx12_rdna_execution(arch) ||
+      dispatch_identity.fallback_kind == ConSanMoiFallbackKind::SampledLiteralDispatchId) {
     // Automatic banked Record/Replay can capture the preload into persistent
     // descriptor-grown VGPRs during the later owner-state placement pass.
     // Sampled instead records the stable reader identity literal when no
@@ -4644,7 +4645,8 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
     return update;
   }
   if ((consan_uses_gfx9_cdna_encoding(arch)) &&
-      request.moi_engine == ConSanMoiEngine::InlineShadow &&
+      moi_mode_operations(request.moi_engine).transient_scalar_placement.spill_layout ==
+          ConSanMoiScalarSpillLayout::Inline &&
       std::ranges::any_of(site_plans, [](const ConSanCandidateResourcePlan &plan) {
         return plan.source != ConSanRegisterAllocationSource::Unsupported &&
                plan.site_kind == ConSanResourceSiteKind::Access;
