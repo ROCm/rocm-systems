@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -96,7 +96,8 @@ static constexpr size_t kAllGatherCtasUnset = (size_t)-1;
 //     puts (the copy engines move the bytes), so extra CTAs are pure barrier/signal
 //     overhead -- FEW CTAs win (V=32 costs ~13% at 8 MiB, ~18% at 2 MiB vs V=4),
 //     and 4 is a stable near-peak across 1 MiB-128 MiB.
-// NCCL_GIN_ANVIL_AG_CTAS pins a fixed count for all sizes (diagnostic). The pin is
+// NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS pins a fixed count for all sizes (diagnostic).
+// NCCL_GIN_ANVIL_AG_CTAS is a deprecated alias. The pin is
 // clamped to the launched barrier/lsaBarrier/signal pool (allGatherPoolCtas): the
 // kernel indexes those pools by blockIdx.x, so a pin above the pool would launch
 // more CTAs than slots and read/write past the arrays. See allGatherCtas().
@@ -116,7 +117,8 @@ GIN_SDMA_AG_HD inline int allGatherPoolCtas(int deviceCtaCount) {
 }
 
 // Launched grid CTA count. With no env pin, the size-adaptive ladder (kAllGatherCtasLsa
-// / kAllGatherCtasSdma, both <= poolCtas) is used. An NCCL_GIN_ANVIL_AG_CTAS pin is
+// / kAllGatherCtasSdma, both <= poolCtas) is used. An NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS
+// pin is
 // honored but clamped to poolCtas so the grid never exceeds the barrier/signal pool
 // (avoids the OOB the pin used to allow when it exceeded max(-V, 16)).
 GIN_SDMA_AG_HD inline int allGatherCtas(size_t chunkBytes_, size_t sdmaThreshold,
@@ -139,15 +141,50 @@ GIN_SDMA_AG_HD inline size_t allGatherRecvSliceOffset(int rank, size_t count) {
 // AllGather algorithm / bus bandwidth (GB/s) given the per-rank element count,
 // element size, elapsed seconds and rank count. algBw counts every rank's
 // contribution; busBw applies the AllGather (nranks-1)/nranks correction.
-GIN_SDMA_AG_HD inline void bandwidthGBps(size_t perRankCount, int typeSize, double sec,
+GIN_SDMA_AG_HD inline void bandwidthGBps(size_t perRankCount, size_t typeSize, double sec,
                                          int nranks, double* algBw, double* busBw) {
-  const double baseBw = (double)(perRankCount * (size_t)typeSize * (size_t)nranks) / 1.0e9 / sec;
+  const double baseBw = (double)(perRankCount * typeSize * (size_t)nranks) / 1.0e9 / sec;
   if (algBw) *algBw = baseBw;
   if (busBw) {
     const double factor = ((double)(nranks - 1)) / ((double)nranks);
     *busBw = baseBw * factor;
   }
 }
+
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+// Host-side env resolution (unit-testable without pulling in all_gather.cu).
+#include <cstdlib>
+
+inline bool parseEnvU64(const char* name, unsigned long long* val) {
+  const char* e = getenv(name);
+  if (!e || !e[0]) return false;
+  char* end = nullptr;
+  unsigned long long v = strtoull(e, &end, 10);
+  if (end == e) return false;
+  *val = v;
+  return true;
+}
+
+inline size_t parseAllGatherCtasEnv() {
+  const char* e = getenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS");
+  if (!e || !e[0]) e = getenv("NCCL_GIN_ANVIL_AG_CTAS");  // deprecated alias
+  if (!e || !e[0]) return kAllGatherCtasUnset;
+  char* end = nullptr;
+  unsigned long long v = strtoull(e, &end, 10);
+  if (end == e) return kAllGatherCtasUnset;
+  return (size_t)v;
+}
+
+inline size_t resolveSdmaThresholdFromEnv() {
+  bool perCollSet = false, globalSet = false;
+  unsigned long long perCollVal = 0, globalVal = 0;
+  perCollSet = parseEnvU64("NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER", &perCollVal);
+  globalSet = parseEnvU64("NCCL_GIN_ANVIL_SDMA_THRESHOLD", &globalVal);
+  return pickSdmaThreshold(perCollSet, perCollVal, globalSet, globalVal,
+                           kAllGatherSdmaThresholdDefault);
+}
+
+#endif  // host env helpers
 
 }  // namespace gin_sdma_allgather
 
