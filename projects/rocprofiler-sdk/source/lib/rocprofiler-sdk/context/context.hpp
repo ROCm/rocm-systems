@@ -115,10 +115,23 @@ struct spm_dispatch_counter_collection_service
     // Contains callback information along with other data needed to collect/process
     // SPM counters.
     std::vector<std::shared_ptr<spm::spm_counter_callback_info>> callbacks{};
+    // GPU agents this context collects on. An empty set means every GPU agent, which is what a
+    // plain configure_{buffer,callback}_dispatch call produces;
+    // rocprofiler_spm_dispatch_counting_service_set_agents narrows it. The set is read on the
+    // dispatch path and when scoping serialization, so it is fixed at configure time and never
+    // mutated once the context is started.
+    std::unordered_set<rocprofiler_agent_id_t> agents{};
     // A flag to state whether or not the counter set is currently enabled. This is primarily
     // to protect against multithreaded calls to enable a context (and enabling already enabled
     // counters).
     common::Synchronized<bool> enabled{false};
+
+    bool collects_on(rocprofiler_agent_id_t agent_id) const
+    {
+        return agents.empty() || agents.count(agent_id) > 0;
+    }
+
+    bool intersects(const spm_dispatch_counter_collection_service& rhs) const;
 };
 
 struct device_counting_service
