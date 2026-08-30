@@ -38,6 +38,7 @@ extern "C" {
   int  test_acclRefCount(void* ctx);
   void test_acclMarkFinalized(void* coll);
   void test_acclFreeColl(void* ctx, void* coll);
+  int  test_acclCollSlot(void* ctx, void* coll);
   int  test_acclProxyOpSlot(void* ctx, void* op);
   int  test_acclProxyOpMutexDestroyed(void* ctx, int slot);
   void test_acclWriteDummyRecord(void* ctx);
@@ -1558,6 +1559,113 @@ TEST(AcclProfilerLifecycle, ProxyOpMutexSurvivesSlotRelease) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// Reusing a coll pool slot must not write the slot's mutex.
+//
+// acclAllocColl clears a reclaimed slot. The mutex lives inside that struct and
+// is created once in acclPluginInit, so the clear has to step around it: a stale
+// KernelCh start can be inside pthread_mutex_lock(&coll->mutex) at that instant,
+// and that path does not take collPoolMutex. Saving the mutex, memsetting the
+// struct and writing the saved bytes back restores the same values, but the
+// intervening zero-and-restore is still a write racing a live lock — and POSIX
+// does not define copying a pthread_mutex_t at all.
+//
+// The write is not visible as a value: the saved and restored bytes are the
+// bytes that were already there, so no before/after comparison can separate
+// fixed from unfixed. What is visible is the race itself, so the test runs the
+// two paths against each other. glibc's lock fast path asserts on __owner, and a
+// lock word zeroed mid-acquire trips it.
+//
+// The unfixed failure therefore arrives as an abort, or as the hang it can take
+// instead — a waiter parked on a lock word that is then zeroed is never woken.
+// The body runs in a forked child, so both are reported as a test failure rather
+// than taking the whole binary down, and the config carries an explicit timeout
+// because the runner otherwise waits forever and a regression would stall the
+// suite instead of failing it.
+//
+// Measured: unfixed dies on every run in under 200 ms; fixed never writes the
+// mutex bytes, so there is nothing left to race and the loop is unconditionally
+// clean, finishing in about the same time.
+// =========================================================================
+static constexpr int kCollMutexTimeoutSeconds = 60;
+
+TEST(AcclProfilerLifecycle, CollSlotReuseDoesNotWriteTheSlotMutex) {
+    ScopedProfilerDir dir("collmutex");
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+        "AcclProfilerLifecycle.CollSlotReuseDoesNotWriteTheSlotMutex",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x4B03, &mask, "collmutex",
+                                     1, 1, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            memset(&cd, 0, sizeof(cd));
+            cd.type = ncclProfileColl;
+            cd.coll.func = "AllReduce";
+            cd.coll.algo = "Ring";
+            cd.coll.proto = "Simple";
+            cd.coll.datatype = "ncclFloat32";
+            cd.coll.count = 1024;
+            cd.coll.nChannels = 1;
+
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+            ASSERT_NE(coll, nullptr);
+            const int slot = test_acclCollSlot(ctx, coll);
+            ASSERT_EQ(slot, 0) << "expected the first coll to take slot 0";
+
+            // The stale handle. This is exactly what RCCL still holds when a
+            // KernelCh event arrives after the coll's slot has been released:
+            // an interior pointer into the pool, with no idea the slot moved on.
+            std::atomic<bool> stop{false};
+            std::atomic<unsigned long> locks{0};
+            std::thread kernelCh([&]() {
+                ncclProfilerEventDescr_v5_t kd;
+                memset(&kd, 0, sizeof(kd));
+                kd.type = ncclProfileKernelCh;
+                kd.parentObj = coll;
+                kd.kernelCh.channelId = 0;
+                while (!stop.load(std::memory_order_relaxed)) {
+                    void* kh = nullptr;
+                    // Reaches pthread_mutex_lock(&coll->mutex) whenever the slot
+                    // currently reads as a live coll; the type check skips the
+                    // instants when the reuse has the header zeroed.
+                    if (acclPluginStartEvent(ctx, &kh, &kd) == 0 && kh) {
+                        locks.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
+            });
+
+            // Free and immediately re-take the same slot. Each iteration runs
+            // acclAllocColl's clear while the thread above is locking.
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::seconds(20);
+            for (int i = 0; i < 400000; i++) {
+                test_acclFreeColl(ctx, coll);
+                void* again = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &again, &cd), 0);
+                ASSERT_EQ(again, coll) << "expected slot " << slot << " back";
+                if ((i & 0x3FF) == 0 &&
+                    std::chrono::steady_clock::now() > deadline) {
+                    break;
+                }
+            }
+
+            stop.store(true, std::memory_order_relaxed);
+            kernelCh.join();
+            EXPECT_GT(locks.load(), 0u)
+                << "the KernelCh thread never took coll->mutex, so nothing was "
+                   "raced against the slot reuse and this test proved nothing";
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+        })
+        .withEnvironment({{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}})
+        .withTimeout(std::chrono::seconds(kCollMutexTimeoutSeconds))
     );
 }
 
