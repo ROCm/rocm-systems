@@ -1232,7 +1232,7 @@ void record_fence_site(const Instruction &inst, ConSanKernelInfo &kernel,
 }
 
 void apply_flat_memory_encoding(ConSanAccessInventorySite &site,
-                                const ConSanFlatMemoryEncoding &encoding,
+                                const ConSanVectorMemoryEncoding &encoding,
                                 const FlatPointerTracker &tracker) {
   site.operands.raw_op = encoding.raw_op;
   site.operands.raw_saddr = encoding.raw_saddr;
@@ -1284,7 +1284,7 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
     site.operands.address_vgpr = vgpr_index(inst.src_operand(0));
     site.operands.data_vgpr = vgpr_index(inst.src_operand(1));
   }
-  const ConSanFlatMemoryDecode raw = decode_consan_flat_memory_encoding(instruction_bytes, arch);
+  const ConSanVectorMemoryDecode raw = decode_consan_flat_memory_encoding(instruction_bytes, arch);
   if (raw.status == ConSanTargetDecodeStatus::Decoded)
     apply_flat_memory_encoding(site, raw.encoding, tracker);
   count_flat_address_space_hint(kernel.stats, site.flat_address_space_hint);
@@ -1313,86 +1313,8 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
   return 32u;
 }
 
-template <typename Raw>
-void fill_ordinary_memory_raw(ConSanOrdinaryMemorySite &site, const Raw &raw) {
-  site.raw_saddr = static_cast<uint32_t>(raw.saddr);
-  site.raw_nv = static_cast<uint32_t>(raw.nv);
-  if constexpr (requires { raw.scale_offset; })
-    site.raw_scale_offset = raw.scale_offset != 0u;
-  site.raw_sve = static_cast<uint32_t>(raw.sve);
-  site.raw_vaddr = static_cast<uint32_t>(raw.vaddr);
-  site.raw_vsrc = static_cast<uint32_t>(raw.vsrc);
-  site.raw_vdst = static_cast<uint32_t>(raw.vdst);
-  site.raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset));
-  site.raw_scope = static_cast<uint32_t>(raw.scope);
-  site.raw_th = static_cast<uint32_t>(raw.th);
-  site.address_vgpr = static_cast<uint16_t>(raw.vaddr);
-  if (raw.saddr != rdna4::OPR_SREG_NULL)
-    site.address_sgpr = static_cast<uint16_t>(raw.saddr);
-  if (site.operation == ConSanOrdinaryMemoryOperation::Load)
-    site.destination_vgpr = static_cast<uint16_t>(raw.vdst);
-  else
-    site.value_vgpr = static_cast<uint16_t>(raw.vsrc);
-}
-
-template <typename Raw>
-[[nodiscard]] bool ordinary_memory_encoding_is_well_formed(const Raw &raw,
-                                                           uint32_t expected_encoding) {
-  return raw.encoding == expected_encoding && raw.pad_8_13 == 0u && raw.pad_22_23 == 0u &&
-         raw.pad_40_48 == 0u && raw.pad_63 == 0u;
-}
-
-[[nodiscard]] bool ordinary_memory_encoding_is_well_formed(const cdna5::VglobalMachineInst &raw,
-                                                           uint32_t expected_encoding) {
-  return raw.encoding == expected_encoding && raw.pad_8_13 == 0u && raw.pad_22_23 == 0u &&
-         raw.pad_40_47 == 0u && raw.pad_63 == 0u;
-}
-
-void fill_cdna_global_ordinary_memory_raw(ConSanOrdinaryMemorySite &site,
-                                          const cdna4::FlatGlblMachineInst &raw) {
-  site.raw_saddr = static_cast<uint32_t>(raw.saddr);
-  site.raw_sve = static_cast<uint32_t>(raw.sve);
-  site.raw_vaddr = static_cast<uint32_t>(raw.addr);
-  site.raw_vsrc = static_cast<uint32_t>(raw.data);
-  site.raw_vdst = static_cast<uint32_t>(raw.vdst);
-  site.raw_ioffset = sign_extend_13_bit_offset(static_cast<uint32_t>(raw.offset));
-  // CDNA3/4 VGLOBAL ordinary memory has qualified device visibility but no
-  // explicit scope operand. Match the target-neutral convention used for its
-  // atomics and preserve SC0/SC1 separately as native ordering metadata.
-  site.raw_scope = 2u;
-  site.raw_th = static_cast<uint32_t>(raw.sc0) | (static_cast<uint32_t>(raw.sc1) << 1u);
-  site.address_vgpr = static_cast<uint16_t>(raw.addr);
-  if (raw.saddr != kCdnaGlobalNoSaddrEncoding)
-    site.address_sgpr = static_cast<uint16_t>(raw.saddr);
-  if (site.operation == ConSanOrdinaryMemoryOperation::Load)
-    site.destination_vgpr = static_cast<uint16_t>(raw.vdst);
-  else
-    site.value_vgpr = static_cast<uint16_t>(raw.data);
-}
-
-void fill_rdna3_global_ordinary_memory_raw(ConSanOrdinaryMemorySite &site,
-                                           const rdna3::FlatGlobalMachineInst &raw) {
-  site.raw_saddr = static_cast<uint32_t>(raw.saddr);
-  site.raw_sve = static_cast<uint32_t>(raw.sve);
-  site.raw_vaddr = static_cast<uint32_t>(raw.addr);
-  site.raw_vsrc = static_cast<uint32_t>(raw.data);
-  site.raw_vdst = static_cast<uint32_t>(raw.vdst);
-  site.raw_ioffset = sign_extend_13_bit_offset(static_cast<uint32_t>(raw.offset));
-  // gfx11 GLOBAL likewise has no explicit scope field. Its admitted coherent
-  // compiler sequence is device-scoped; GLC/SLC remain native metadata.
-  site.raw_scope = 2u;
-  site.raw_th = static_cast<uint32_t>(raw.glc) | (static_cast<uint32_t>(raw.slc) << 1u);
-  site.address_vgpr = static_cast<uint16_t>(raw.addr);
-  if (raw.saddr != kRdna3GlobalNoSaddrEncoding)
-    site.address_sgpr = static_cast<uint16_t>(raw.saddr);
-  if (site.operation == ConSanOrdinaryMemoryOperation::Load)
-    site.destination_vgpr = static_cast<uint16_t>(raw.vdst);
-  else
-    site.value_vgpr = static_cast<uint16_t>(raw.data);
-}
-
-void apply_flat_memory_encoding(ConSanOrdinaryMemorySite &site,
-                                const ConSanFlatMemoryEncoding &encoding) {
+void apply_vector_memory_encoding(ConSanOrdinaryMemorySite &site,
+                                  const ConSanVectorMemoryEncoding &encoding) {
   site.raw_saddr = encoding.raw_saddr;
   site.raw_nv = encoding.raw_nv;
   site.raw_scale_offset = encoding.raw_scale_offset;
@@ -1407,11 +1329,39 @@ void apply_flat_memory_encoding(ConSanOrdinaryMemorySite &site,
           : encoding.raw_scope;
   site.raw_th = encoding.raw_th;
   site.address_vgpr = static_cast<uint16_t>(encoding.raw_vaddr);
-  site.address_sgpr = encoding.scalar_provenance_sgpr;
+  if (encoding.scalar_provenance_sgpr)
+    site.address_sgpr = encoding.scalar_provenance_sgpr;
   if (site.operation == ConSanOrdinaryMemoryOperation::Load)
     site.destination_vgpr = static_cast<uint16_t>(encoding.raw_vdst);
   else
     site.value_vgpr = static_cast<uint16_t>(encoding.raw_vsrc);
+}
+
+void apply_vector_memory_decode(ConSanOrdinaryMemorySite &site,
+                                const ConSanVectorMemoryDecode &raw) {
+  if (raw.status == ConSanTargetDecodeStatus::UnsupportedArchitecture) {
+    site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture;
+    return;
+  }
+  if (raw.status == ConSanTargetDecodeStatus::UnsupportedEncodingSize || !raw.encoding.exact_size) {
+    site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
+    return;
+  }
+  apply_vector_memory_encoding(site, raw.encoding);
+  if (!raw.encoding.ordinary_well_formed)
+    site.support_reason = ConSanOrdinaryMemorySupportReason::MalformedEncoding;
+  else if (raw.encoding.ordinary_requires_complete_registers && !site.address_vgpr)
+    site.support_reason = ConSanOrdinaryMemorySupportReason::MissingAddressVgpr;
+  else if (raw.encoding.ordinary_requires_complete_registers &&
+           site.operation == ConSanOrdinaryMemoryOperation::Load && !site.destination_vgpr)
+    site.support_reason = ConSanOrdinaryMemorySupportReason::MissingDestinationVgpr;
+  else if (raw.encoding.ordinary_requires_complete_registers &&
+           site.operation == ConSanOrdinaryMemoryOperation::Store && !site.value_vgpr)
+    site.support_reason = ConSanOrdinaryMemorySupportReason::MissingValueVgpr;
+  else
+    site.support_reason = raw.encoding.ordinary_mutation_supported
+                              ? ConSanOrdinaryMemorySupportReason::Supported
+                              : ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly;
 }
 
 void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTracker &tracker,
@@ -1481,93 +1431,12 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
   }
 
   if (mnemonic.starts_with("flat_")) {
-    const ConSanFlatMemoryDecode raw = decode_consan_flat_memory_encoding(instruction_bytes, arch);
-    if (raw.status == ConSanTargetDecodeStatus::UnsupportedArchitecture) {
-      site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture;
-    } else if (raw.status == ConSanTargetDecodeStatus::UnsupportedEncodingSize ||
-               !raw.encoding.exact_size) {
-      site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
-    } else {
-      apply_flat_memory_encoding(site, raw.encoding);
-      if (!raw.encoding.ordinary_well_formed)
-        site.support_reason = ConSanOrdinaryMemorySupportReason::MalformedEncoding;
-      else if (raw.encoding.ordinary_requires_complete_registers && !site.address_vgpr)
-        site.support_reason = ConSanOrdinaryMemorySupportReason::MissingAddressVgpr;
-      else if (raw.encoding.ordinary_requires_complete_registers &&
-               site.operation == ConSanOrdinaryMemoryOperation::Load && !site.destination_vgpr)
-        site.support_reason = ConSanOrdinaryMemorySupportReason::MissingDestinationVgpr;
-      else if (raw.encoding.ordinary_requires_complete_registers &&
-               site.operation == ConSanOrdinaryMemoryOperation::Store && !site.value_vgpr)
-        site.support_reason = ConSanOrdinaryMemorySupportReason::MissingValueVgpr;
-      else
-        site.support_reason = raw.encoding.ordinary_mutation_supported
-                                  ? ConSanOrdinaryMemorySupportReason::Supported
-                                  : ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly;
-    }
+    apply_vector_memory_decode(site, decode_consan_flat_memory_encoding(instruction_bytes, arch));
     kernel.ordinary_memory_sites.push_back(std::move(site));
     return;
   }
 
-  bool well_formed = false;
-  if ((consan_uses_gfx9_cdna_encoding(arch)) && mnemonic.starts_with("global_")) {
-    if (instruction_bytes.size() != sizeof(cdna4::FlatGlblMachineInst)) {
-      site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
-    } else {
-      cdna4::FlatGlblMachineInst raw{};
-      std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-      fill_cdna_global_ordinary_memory_raw(site, raw);
-      well_formed = raw.encoding == 0x37u && raw.seg == 2u;
-      site.support_reason = well_formed
-                                ? ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly
-                                : ConSanOrdinaryMemorySupportReason::MalformedEncoding;
-    }
-  } else if (arch == ROCJITSU_CODE_ARCH_RDNA3 && mnemonic.starts_with("global_")) {
-    if (instruction_bytes.size() != sizeof(rdna3::FlatGlobalMachineInst)) {
-      site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
-    } else {
-      rdna3::FlatGlobalMachineInst raw{};
-      std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-      fill_rdna3_global_ordinary_memory_raw(site, raw);
-      well_formed = raw.encoding == 0x37u && raw.seg == 2u && raw.pad_25 == 0u;
-      site.support_reason = well_formed
-                                ? ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly
-                                : ConSanOrdinaryMemorySupportReason::MalformedEncoding;
-    }
-  } else if (consan_uses_gfx12_encoding(arch)) {
-    const size_t expected_size = arch == ROCJITSU_CODE_ARCH_RDNA4
-                                     ? sizeof(rdna4::VglobalMachineInst)
-                                     : sizeof(cdna5::VglobalMachineInst);
-    if (instruction_bytes.size() != expected_size) {
-      site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
-      kernel.ordinary_memory_sites.push_back(std::move(site));
-      return;
-    }
-    if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
-      rdna4::VglobalMachineInst raw{};
-      std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-      fill_ordinary_memory_raw(site, raw);
-      well_formed = ordinary_memory_encoding_is_well_formed(raw, 0xeeu);
-    } else {
-      cdna5::VglobalMachineInst raw{};
-      std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-      fill_ordinary_memory_raw(site, raw);
-      well_formed = ordinary_memory_encoding_is_well_formed(raw, 0xeeu);
-    }
-    if (!well_formed)
-      site.support_reason = ConSanOrdinaryMemorySupportReason::MalformedEncoding;
-    else if (!site.address_vgpr)
-      site.support_reason = ConSanOrdinaryMemorySupportReason::MissingAddressVgpr;
-    else if (site.operation == ConSanOrdinaryMemoryOperation::Load && !site.destination_vgpr)
-      site.support_reason = ConSanOrdinaryMemorySupportReason::MissingDestinationVgpr;
-    else if (site.operation == ConSanOrdinaryMemoryOperation::Store && !site.value_vgpr)
-      site.support_reason = ConSanOrdinaryMemorySupportReason::MissingValueVgpr;
-    else
-      site.support_reason = arch == ROCJITSU_CODE_ARCH_RDNA4
-                                ? ConSanOrdinaryMemorySupportReason::Supported
-                                : ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly;
-  } else {
-    site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture;
-  }
+  apply_vector_memory_decode(site, decode_consan_global_memory_encoding(instruction_bytes, arch));
   kernel.ordinary_memory_sites.push_back(std::move(site));
 }
 

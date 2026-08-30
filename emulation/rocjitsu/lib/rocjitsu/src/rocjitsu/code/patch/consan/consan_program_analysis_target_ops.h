@@ -56,7 +56,7 @@ enum class ConSanEncodedFlatSegment : uint8_t {
 /// Target-normalized FLAT fields shared by access and ordinary-memory
 /// inventory. The target owner validates raw padding and form bits once;
 /// semantic inventory owners decide how the decoded operation is used.
-struct ConSanFlatMemoryEncoding {
+struct ConSanVectorMemoryEncoding {
   uint32_t raw_op = 0;
   uint32_t raw_saddr = 0;
   uint32_t raw_nv = 0;
@@ -78,9 +78,9 @@ struct ConSanFlatMemoryEncoding {
   bool ordinary_mutation_supported = false;
 };
 
-struct ConSanFlatMemoryDecode {
+struct ConSanVectorMemoryDecode {
   ConSanTargetDecodeStatus status = ConSanTargetDecodeStatus::UnsupportedArchitecture;
-  ConSanFlatMemoryEncoding encoding;
+  ConSanVectorMemoryEncoding encoding;
 };
 
 [[nodiscard]] std::optional<ConSanScratchComponentEncoding>
@@ -99,8 +99,11 @@ decode_consan_lane_transfer_encoding(std::span<const uint8_t> instruction, rj_co
 decode_consan_accvgpr_transfer_index(std::span<const uint8_t> instruction, rj_code_arch_t arch,
                                      bool write_accumulator);
 
-[[nodiscard]] ConSanFlatMemoryDecode
+[[nodiscard]] ConSanVectorMemoryDecode
 decode_consan_flat_memory_encoding(std::span<const uint8_t> instruction, rj_code_arch_t arch);
+
+[[nodiscard]] ConSanVectorMemoryDecode
+decode_consan_global_memory_encoding(std::span<const uint8_t> instruction, rj_code_arch_t arch);
 
 /// Decode target-native atomic operands into the common atomic inventory
 /// product. Returns false when the target or encoded form is not represented;

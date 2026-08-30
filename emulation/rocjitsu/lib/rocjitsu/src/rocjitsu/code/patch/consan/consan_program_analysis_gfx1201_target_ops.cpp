@@ -59,7 +59,7 @@ decode_gfx1201_lane_transfer(std::span<const uint8_t> instruction) {
   };
 }
 
-ConSanFlatMemoryDecode decode_gfx1201_flat_memory(std::span<const uint8_t> instruction) {
+ConSanVectorMemoryDecode decode_gfx1201_flat_memory(std::span<const uint8_t> instruction) {
   if (instruction.size() < sizeof(rdna4::VflatMachineInst))
     return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
   rdna4::VflatMachineInst raw{};
@@ -69,7 +69,22 @@ ConSanFlatMemoryDecode decode_gfx1201_flat_memory(std::span<const uint8_t> instr
                            raw.pad_63 == 0u;
   return {
       .status = ConSanTargetDecodeStatus::Decoded,
-      .encoding = make_gfx12_flat_memory_encoding(
+      .encoding = make_gfx12_vector_memory_encoding(
+          raw, rdna4::OPR_SREG_NULL, instruction.size() == sizeof(raw), well_formed, true),
+  };
+}
+
+ConSanVectorMemoryDecode decode_gfx1201_global_memory(std::span<const uint8_t> instruction) {
+  if (instruction.size() < sizeof(rdna4::VglobalMachineInst))
+    return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
+  rdna4::VglobalMachineInst raw{};
+  std::memcpy(&raw, instruction.data(), sizeof(raw));
+  const bool well_formed = instruction.size() == sizeof(raw) && raw.encoding == 0xeeu &&
+                           raw.pad_8_13 == 0u && raw.pad_22_23 == 0u && raw.pad_40_48 == 0u &&
+                           raw.pad_63 == 0u;
+  return {
+      .status = ConSanTargetDecodeStatus::Decoded,
+      .encoding = make_gfx12_vector_memory_encoding(
           raw, rdna4::OPR_SREG_NULL, instruction.size() == sizeof(raw), well_formed, true),
   };
 }

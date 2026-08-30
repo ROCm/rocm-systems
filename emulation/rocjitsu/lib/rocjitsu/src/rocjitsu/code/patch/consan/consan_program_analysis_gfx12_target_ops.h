@@ -13,10 +13,10 @@
 namespace rocjitsu::consan_program_analysis_target_detail {
 
 template <typename Raw>
-ConSanFlatMemoryEncoding make_gfx12_flat_memory_encoding(const Raw &raw, uint32_t null_saddr,
-                                                         bool exact_size, bool ordinary_well_formed,
-                                                         bool ordinary_mutation_supported) {
-  return ConSanFlatMemoryEncoding{
+ConSanVectorMemoryEncoding
+make_gfx12_vector_memory_encoding(const Raw &raw, uint32_t null_saddr, bool exact_size,
+                                  bool ordinary_well_formed, bool ordinary_mutation_supported) {
+  return ConSanVectorMemoryEncoding{
       .raw_op = static_cast<uint32_t>(raw.op),
       .raw_saddr = static_cast<uint32_t>(raw.saddr),
       .raw_nv = static_cast<uint32_t>(raw.nv),

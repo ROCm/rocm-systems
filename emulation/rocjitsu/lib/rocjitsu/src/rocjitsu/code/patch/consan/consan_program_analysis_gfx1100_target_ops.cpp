@@ -14,7 +14,7 @@
 
 namespace rocjitsu::consan_program_analysis_target_detail {
 
-ConSanFlatMemoryDecode decode_gfx1100_flat_memory(std::span<const uint8_t> instruction) {
+ConSanVectorMemoryDecode decode_gfx1100_flat_memory(std::span<const uint8_t> instruction) {
   if (instruction.size() < sizeof(rdna3::FlatMachineInst))
     return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
   rdna3::FlatMachineInst raw{};
@@ -45,6 +45,36 @@ ConSanFlatMemoryDecode decode_gfx1100_flat_memory(std::span<const uint8_t> instr
               .ordinary_well_formed = instruction.size() == sizeof(raw) && raw.encoding == 0x37u &&
                                       raw.seg == 0u && raw.pad_25 == 0u,
               .ordinary_requires_complete_registers = false,
+              .ordinary_mutation_supported = false,
+          },
+  };
+}
+
+ConSanVectorMemoryDecode decode_gfx1100_global_memory(std::span<const uint8_t> instruction) {
+  if (instruction.size() < sizeof(rdna3::FlatGlobalMachineInst))
+    return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
+  rdna3::FlatGlobalMachineInst raw{};
+  std::memcpy(&raw, instruction.data(), sizeof(raw));
+  return {
+      .status = ConSanTargetDecodeStatus::Decoded,
+      .encoding =
+          {
+              .raw_op = static_cast<uint32_t>(raw.op),
+              .raw_saddr = static_cast<uint32_t>(raw.saddr),
+              .raw_sve = static_cast<uint32_t>(raw.sve),
+              .raw_vaddr = static_cast<uint32_t>(raw.addr),
+              .raw_vsrc = static_cast<uint32_t>(raw.data),
+              .raw_vdst = static_cast<uint32_t>(raw.vdst),
+              .raw_ioffset = sign_extend_13_bit_offset(static_cast<uint32_t>(raw.offset)),
+              .raw_scope = 2u,
+              .raw_th = static_cast<uint32_t>(raw.glc) | (static_cast<uint32_t>(raw.slc) << 1u),
+              .scalar_provenance_sgpr =
+                  raw.saddr == kRdna3GlobalNoSaddrEncoding
+                      ? std::nullopt
+                      : std::optional<uint16_t>(static_cast<uint16_t>(raw.saddr)),
+              .exact_size = instruction.size() == sizeof(raw),
+              .ordinary_well_formed = instruction.size() == sizeof(raw) && raw.encoding == 0x37u &&
+                                      raw.seg == 2u && raw.pad_25 == 0u,
               .ordinary_mutation_supported = false,
           },
   };

@@ -51,8 +51,8 @@ decode_consan_accvgpr_transfer_index(std::span<const uint8_t> instruction, rj_co
   return std::nullopt;
 }
 
-ConSanFlatMemoryDecode decode_consan_flat_memory_encoding(std::span<const uint8_t> instruction,
-                                                          rj_code_arch_t arch) {
+ConSanVectorMemoryDecode decode_consan_flat_memory_encoding(std::span<const uint8_t> instruction,
+                                                            rj_code_arch_t arch) {
   if (consan_uses_gfx9_cdna_encoding(arch))
     return consan_program_analysis_target_detail::decode_gfx9_cdna_flat_memory(instruction);
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
@@ -61,6 +61,19 @@ ConSanFlatMemoryDecode decode_consan_flat_memory_encoding(std::span<const uint8_
     return consan_program_analysis_target_detail::decode_gfx1201_flat_memory(instruction);
   if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return consan_program_analysis_target_detail::decode_gfx1250_flat_memory(instruction);
+  return {};
+}
+
+ConSanVectorMemoryDecode decode_consan_global_memory_encoding(std::span<const uint8_t> instruction,
+                                                              rj_code_arch_t arch) {
+  if (consan_uses_gfx9_cdna_encoding(arch))
+    return consan_program_analysis_target_detail::decode_gfx9_cdna_global_memory(instruction);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+    return consan_program_analysis_target_detail::decode_gfx1100_global_memory(instruction);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return consan_program_analysis_target_detail::decode_gfx1201_global_memory(instruction);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+    return consan_program_analysis_target_detail::decode_gfx1250_global_memory(instruction);
   return {};
 }
 
