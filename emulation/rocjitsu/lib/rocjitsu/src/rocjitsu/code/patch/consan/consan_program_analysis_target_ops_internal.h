@@ -22,6 +22,9 @@ decode_gfx9_cdna_accvgpr_transfer(std::span<const uint8_t> instruction, bool wri
 decode_gfx9_cdna_flat_memory(std::span<const uint8_t> instruction);
 [[nodiscard]] ConSanVectorMemoryDecode
 decode_gfx9_cdna_global_memory(std::span<const uint8_t> instruction);
+[[nodiscard]] std::optional<ConSanDirectLdsTransferEncoding>
+decode_gfx9_cdna_direct_lds_transfer(std::string_view mnemonic,
+                                     std::span<const uint8_t> instruction);
 [[nodiscard]] bool decode_gfx9_cdna_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
                                                 std::span<const uint8_t> instruction);
 
@@ -53,6 +56,10 @@ decode_gfx1250_lane_transfer(std::span<const uint8_t> instruction);
 decode_gfx1250_flat_memory(std::span<const uint8_t> instruction);
 [[nodiscard]] ConSanVectorMemoryDecode
 decode_gfx1250_global_memory(std::span<const uint8_t> instruction);
+[[nodiscard]] ConSanBufferMemoryDecode
+decode_gfx1250_buffer_memory(std::span<const uint8_t> instruction);
+[[nodiscard]] std::optional<ConSanDirectLdsTransferEncoding>
+decode_gfx1250_direct_lds_transfer(std::string_view mnemonic, std::span<const uint8_t> instruction);
 [[nodiscard]] bool decode_gfx1250_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
                                               std::span<const uint8_t> instruction);
 

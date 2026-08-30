@@ -102,7 +102,6 @@ set(
     consan_final_validation.cpp
     consan_gfx1250_lds_target_ops.cpp
     consan_moi_gfx9_target_ops.cpp
-    consan_program_analysis.cpp
     consan_program_analysis_gfx9_cdna_target_ops.cpp
     consan_program_analysis_gfx1100_target_ops.cpp
     consan_program_analysis_gfx1201_target_ops.cpp

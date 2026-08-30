@@ -1091,67 +1091,26 @@ record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t
                                 std::vector<ConSanAccessInventorySite> &accesses,
                                 uint64_t instruction_text_offset, rj_code_arch_t arch) {
   const std::string_view mnemonic = inst.mnemonic();
-  const bool gfx1250_async_load =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 && mnemonic.starts_with("global_load_async_to_lds_b");
-  const bool gfx1250_async_store =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 && mnemonic.starts_with("global_store_async_from_lds_b");
-  if ((gfx1250_async_load || gfx1250_async_store) &&
-      instruction_bytes.size() == sizeof(cdna5::VglobalMachineInst)) {
-    cdna5::VglobalMachineInst raw{};
-    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-    // The instrumentation currently snapshots the explicit LDS VGPR but does
-    // not reproduce VGLOBAL's signed immediate. RCCL's AsyncDataCopier and the
-    // corresponding compiler builtins use the zero-offset form. Keep the
-    // admitted contract exact rather than silently reporting a different LDS
-    // byte when a future workload uses a nonzero immediate.
-    if (sign_extend_24(static_cast<uint32_t>(raw.ioffset)) != 0)
-      return std::nullopt;
-
-    ConSanAccessInventorySite site;
-    site.kind = gfx1250_async_load ? ConSanLdsAccessKind::Write : ConSanLdsAccessKind::Read;
-    site.origin = ConSanAccessOrigin::DirectToLds;
-    site.physical_id.original_text_offset = instruction_text_offset;
-    site.file_offset = kernel.text_file_offset + instruction_text_offset;
-    site.instruction_size = static_cast<uint32_t>(inst.size());
-    site.decoded_width_bits = lds_width_bits(mnemonic);
-    // CDNA5 names the LDS byte address explicitly: the async-load destination
-    // is its first source operand, while the async-store source is its second.
-    site.operands.address_vgpr = vgpr_index(inst.src_operand(gfx1250_async_load ? 0 : 1));
-    site.mnemonic = std::string(mnemonic);
-    site.container = consan_program_container_ref(kernel);
-    accesses.push_back(std::move(site));
-    return accesses.back().kind;
-  }
-
-  const bool is_supported_load =
-      mnemonic == "buffer_load_dword" || mnemonic == "buffer_load_dwordx2" ||
-      mnemonic == "buffer_load_dwordx3" || mnemonic == "buffer_load_dwordx4";
-  if ((!consan_uses_gfx9_cdna_encoding(arch)) || !is_supported_load ||
-      instruction_bytes.size() != sizeof(cdna4::MubufMachineInst)) {
-    return std::nullopt;
-  }
-
-  cdna4::MubufMachineInst raw{};
-  std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-  // In the LDS form VDATA is reserved rather than naming a VGPR. Restrict the
-  // prototype to the documented zero encoding, and to widths whose lane-slot
-  // geometry is architecturally established.
-  if (raw.lds == 0u || raw.vdata != 0u || mnemonic == "buffer_load_dwordx2")
+  const std::optional<ConSanDirectLdsTransferEncoding> encoding =
+      decode_consan_direct_lds_transfer_encoding(mnemonic, instruction_bytes, arch);
+  if (!encoding)
     return std::nullopt;
 
   ConSanAccessInventorySite site;
-  site.kind = ConSanLdsAccessKind::Write;
+  site.kind = encoding->writes_lds ? ConSanLdsAccessKind::Write : ConSanLdsAccessKind::Read;
   site.origin = ConSanAccessOrigin::DirectToLds;
   site.physical_id.original_text_offset = instruction_text_offset;
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.instruction_size = static_cast<uint32_t>(inst.size());
   site.decoded_width_bits = lds_width_bits(mnemonic);
-  // The destination is M0 plus an implicit physical-lane slot: four bytes for
-  // DWORD, sixteen for DWORDX3/DWORDX4. No address or payload VGPR is defined.
+  if (encoding->address_source_operand) {
+    site.operands.address_vgpr =
+        vgpr_index(inst.src_operand(static_cast<int>(*encoding->address_source_operand)));
+  }
   site.mnemonic = std::string(mnemonic);
   site.container = consan_program_container_ref(kernel);
   accesses.push_back(std::move(site));
-  return ConSanLdsAccessKind::Write;
+  return accesses.back().kind;
 }
 
 void record_barrier_site(const Instruction &inst, ConSanKernelInfo &kernel,
@@ -1383,34 +1342,31 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
   if (mnemonic.starts_with("flat_"))
     site.flat_address_space_hint = flat_address_space_hint(inst, tracker);
 
-  // Operand objects remain useful on unsupported architectures, while the
-  // raw RDNA4 fields below are the authoritative bounded decode.
+  // Operand objects remain useful on unsupported architectures, while target
+  // operations provide the authoritative bounded decode.
   if (mnemonic.starts_with("buffer_")) {
-    if (arch != ROCJITSU_CODE_ARCH_CDNA5) {
+    const ConSanBufferMemoryDecode raw =
+        decode_consan_buffer_memory_encoding(instruction_bytes, arch);
+    if (raw.status == ConSanTargetDecodeStatus::UnsupportedArchitecture) {
       site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture;
-    } else if (instruction_bytes.size() != sizeof(cdna5::VbufferMachineInst)) {
+    } else if (raw.status == ConSanTargetDecodeStatus::UnsupportedEncodingSize) {
       site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
     } else {
-      cdna5::VbufferMachineInst raw{};
-      std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
-      site.raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset));
-      site.raw_scope = static_cast<uint32_t>(raw.scope);
-      site.raw_th = static_cast<uint32_t>(raw.th);
-      site.raw_rsrc = static_cast<uint32_t>(raw.rsrc);
-      site.raw_soffset = static_cast<uint32_t>(raw.soffset);
-      site.raw_offen = raw.offen != 0u;
-      site.raw_idxen = raw.idxen != 0u;
-      site.raw_vaddr = static_cast<uint32_t>(raw.vaddr);
-      site.address_sgpr = static_cast<uint16_t>(raw.rsrc);
-      if (raw.offen || raw.idxen)
-        site.address_vgpr = static_cast<uint16_t>(raw.vaddr);
+      site.raw_ioffset = raw.encoding.raw_ioffset;
+      site.raw_scope = raw.encoding.raw_scope;
+      site.raw_th = raw.encoding.raw_th;
+      site.raw_rsrc = raw.encoding.raw_rsrc;
+      site.raw_soffset = raw.encoding.raw_soffset;
+      site.raw_offen = raw.encoding.raw_offen;
+      site.raw_idxen = raw.encoding.raw_idxen;
+      site.raw_vaddr = raw.encoding.raw_vaddr;
+      site.address_sgpr = raw.encoding.address_sgpr;
+      site.address_vgpr = raw.encoding.address_vgpr;
       if (site.operation == ConSanOrdinaryMemoryOperation::Load)
-        site.destination_vgpr = static_cast<uint16_t>(raw.vdata);
+        site.destination_vgpr = raw.encoding.data_vgpr;
       else
-        site.value_vgpr = static_cast<uint16_t>(raw.vdata);
-      const bool well_formed =
-          raw.encoding == 0x31u && raw.pad_8_13 == 0u && raw.pad_23_25 == 0u && raw.pad_40 == 0u;
-      site.support_reason = well_formed
+        site.value_vgpr = raw.encoding.data_vgpr;
+      site.support_reason = raw.encoding.well_formed
                                 ? ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly
                                 : ConSanOrdinaryMemorySupportReason::MalformedEncoding;
     }

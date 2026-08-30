@@ -73,6 +73,53 @@ ConSanVectorMemoryDecode decode_gfx1250_global_memory(std::span<const uint8_t> i
   };
 }
 
+ConSanBufferMemoryDecode decode_gfx1250_buffer_memory(std::span<const uint8_t> instruction) {
+  if (instruction.size() != sizeof(cdna5::VbufferMachineInst))
+    return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
+  cdna5::VbufferMachineInst raw{};
+  std::memcpy(&raw, instruction.data(), sizeof(raw));
+  return {
+      .status = ConSanTargetDecodeStatus::Decoded,
+      .encoding =
+          {
+              .raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset)),
+              .raw_scope = static_cast<uint32_t>(raw.scope),
+              .raw_th = static_cast<uint32_t>(raw.th),
+              .raw_rsrc = static_cast<uint32_t>(raw.rsrc),
+              .raw_soffset = static_cast<uint32_t>(raw.soffset),
+              .raw_offen = raw.offen != 0u,
+              .raw_idxen = raw.idxen != 0u,
+              .raw_vaddr = static_cast<uint32_t>(raw.vaddr),
+              .address_sgpr = static_cast<uint16_t>(raw.rsrc),
+              .address_vgpr = raw.offen || raw.idxen
+                                  ? std::optional<uint16_t>(static_cast<uint16_t>(raw.vaddr))
+                                  : std::nullopt,
+              .data_vgpr = static_cast<uint16_t>(raw.vdata),
+              .well_formed = raw.encoding == 0x31u && raw.pad_8_13 == 0u && raw.pad_23_25 == 0u &&
+                             raw.pad_40 == 0u,
+          },
+  };
+}
+
+std::optional<ConSanDirectLdsTransferEncoding>
+decode_gfx1250_direct_lds_transfer(std::string_view mnemonic,
+                                   std::span<const uint8_t> instruction) {
+  const bool async_load = mnemonic.starts_with("global_load_async_to_lds_b");
+  const bool async_store = mnemonic.starts_with("global_store_async_from_lds_b");
+  if ((!async_load && !async_store) || instruction.size() != sizeof(cdna5::VglobalMachineInst))
+    return std::nullopt;
+  cdna5::VglobalMachineInst raw{};
+  std::memcpy(&raw, instruction.data(), sizeof(raw));
+  // Current instrumentation snapshots the explicit LDS VGPR but does not
+  // reproduce VGLOBAL's signed immediate, so admit only the exact zero form.
+  if (sign_extend_24(static_cast<uint32_t>(raw.ioffset)) != 0)
+    return std::nullopt;
+  return ConSanDirectLdsTransferEncoding{
+      .writes_lds = async_load,
+      .address_source_operand = static_cast<uint8_t>(async_load ? 0u : 1u),
+  };
+}
+
 bool decode_gfx1250_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
                                 std::span<const uint8_t> instruction) {
   if (mnemonic.starts_with("ds_") && instruction.size() >= sizeof(cdna5::VdsMachineInst)) {

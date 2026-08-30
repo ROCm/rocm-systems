@@ -77,6 +77,26 @@ ConSanVectorMemoryDecode decode_consan_global_memory_encoding(std::span<const ui
   return {};
 }
 
+ConSanBufferMemoryDecode decode_consan_buffer_memory_encoding(std::span<const uint8_t> instruction,
+                                                              rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+    return consan_program_analysis_target_detail::decode_gfx1250_buffer_memory(instruction);
+  return {};
+}
+
+std::optional<ConSanDirectLdsTransferEncoding> decode_consan_direct_lds_transfer_encoding(
+    std::string_view mnemonic, std::span<const uint8_t> instruction, rj_code_arch_t arch) {
+  if (consan_uses_gfx9_cdna_encoding(arch)) {
+    return consan_program_analysis_target_detail::decode_gfx9_cdna_direct_lds_transfer(mnemonic,
+                                                                                       instruction);
+  }
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    return consan_program_analysis_target_detail::decode_gfx1250_direct_lds_transfer(mnemonic,
+                                                                                     instruction);
+  }
+  return std::nullopt;
+}
+
 bool decode_consan_atomic_site_encoding(ConSanAtomicSite &site, std::string_view mnemonic,
                                         std::span<const uint8_t> instruction, rj_code_arch_t arch) {
   if (consan_uses_gfx9_cdna_encoding(arch)) {

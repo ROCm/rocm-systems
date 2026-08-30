@@ -138,6 +138,24 @@ ConSanVectorMemoryDecode decode_gfx9_cdna_global_memory(std::span<const uint8_t>
   };
 }
 
+std::optional<ConSanDirectLdsTransferEncoding>
+decode_gfx9_cdna_direct_lds_transfer(std::string_view mnemonic,
+                                     std::span<const uint8_t> instruction) {
+  const bool supported_load =
+      mnemonic == "buffer_load_dword" || mnemonic == "buffer_load_dwordx2" ||
+      mnemonic == "buffer_load_dwordx3" || mnemonic == "buffer_load_dwordx4";
+  if (!supported_load || instruction.size() != sizeof(cdna4::MubufMachineInst))
+    return std::nullopt;
+  cdna4::MubufMachineInst raw{};
+  std::memcpy(&raw, instruction.data(), sizeof(raw));
+  // The LDS form reserves VDATA. DWORDX2's physical-lane slot geometry is not
+  // yet admitted by the instrumentation contract.
+  if (raw.lds == 0u || raw.vdata != 0u || mnemonic == "buffer_load_dwordx2")
+    return std::nullopt;
+  return ConSanDirectLdsTransferEncoding{.writes_lds = true,
+                                         .address_source_operand = std::nullopt};
+}
+
 template <typename Raw>
 void fill_gfx9_cdna_flat_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
