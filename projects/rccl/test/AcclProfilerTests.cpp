@@ -30,6 +30,7 @@
 extern "C" {
   int test_acclDatatypeSize(const char* dt);
   double test_acclBusBwFactor(const char* func, int nRanks);
+  size_t test_acclParseMinSize(const char* env, int* bad);
   int  test_acclRefCount(void* ctx);
   void test_acclMarkFinalized(void* coll);
   void test_acclFreeColl(void* ctx, void* coll);
@@ -339,9 +340,10 @@ TEST(AcclProfilerInit, OverlongOutputDirWritesNothing) {
 // Full lifecycle: Coll → KernelCh → stop → finalize → check output JSONL
 // =========================================================================
 TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
+    ScopedProfilerDir dir("lifecycle");
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.CollWithKernelChProducesOutput",
-        []() {
+        [&dir]() {
             void* ctx = nullptr;
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0xBEEF, &mask, "lifecycle_test",
@@ -417,7 +419,294 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
             EXPECT_NE(line.find("\"coll_timing_source\":\"gpu_globaltimer\""),
                        std::string::npos);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_lifecycle"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// ACCL_PROFILER_MIN_SIZE_BYTES: collectives below the threshold are dropped at
+// start, and one exactly at the threshold is kept.
+//
+// Every other test leaves the variable unset, so gMinMsgSize is 0 and both the
+// comparison and its inverse hold for every size those tests use — deleting the
+// filter outright does not move them.  The equal case is a separate collective
+// because the comparison is a strict `<`: a `<=` typo would still drop 4096 B
+// and still keep 16384 B, so only the 8192 B collective can see it.
+//
+// The threshold is read once per acclPluginInit() into that comm's context; the
+// isolated runner fork+execv's /proc/self/exe, so the child re-reads the
+// environment from scratch.
+// =========================================================================
+TEST(AcclProfilerMinSize, DropsBelowThresholdAndKeepsEqual) {
+    ScopedProfilerDir dir("minsize");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerMinSize.DropsBelowThresholdAndKeepsEqual",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x5127, &mask, "minsize_test",
+                                     1, 2, 0, nullptr), 0);
+            ASSERT_NE(ctx, nullptr);
+
+            // Drives one single-channel collective to completion and returns the
+            // coll handle, or nullptr if the size filter rejected it at start.
+            auto runColl = [&](uint64_t seqNumber, size_t count) -> void* {
+                ncclProfilerEventDescr_v5_t cd;
+                MakeCollDescr(&cd, /*nChannels=*/1, seqNumber, count);
+                void* coll = nullptr;
+                EXPECT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+                if (!coll) return nullptr;
+
+                ncclProfilerEventDescr_v5_t kd;
+                MakeKernelChDescr(&kd, coll, /*channelId=*/0,
+                                  /*pTimer=*/1000000);
+                void* kch = nullptr;
+                EXPECT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
+                EXPECT_EQ(acclPluginStopEvent(coll), 0);
+                ncclProfilerEventStateArgs_v5_t sa;
+                memset(&sa, 0, sizeof(sa));
+                sa.kernelCh.pTimer = 1010000;
+                EXPECT_EQ(acclPluginRecordEventState(
+                    kch, ncclProfilerKernelChStop, &sa), 0);
+                EXPECT_EQ(acclPluginStopEvent(kch), 0);
+                return coll;
+            };
+
+            // MakeCollDescr uses ncclFloat32, which acclDatatypeSize reports as
+            // 4 bytes, so count scales by 4: 1024 -> 4096 B, 2048 -> 8192 B,
+            // 4096 -> 16384 B against a threshold of 8192.
+            EXPECT_EQ(runColl(/*seqNumber=*/80, /*count=*/1024), nullptr)
+                << "4096 B is below ACCL_PROFILER_MIN_SIZE_BYTES=8192 and must "
+                   "be rejected with a NULL handle";
+            EXPECT_NE(runColl(/*seqNumber=*/81, /*count=*/2048), nullptr)
+                << "8192 B is exactly the threshold and the comparison is a "
+                   "strict `<`, so this collective must be profiled";
+            EXPECT_NE(runColl(/*seqNumber=*/82, /*count=*/4096), nullptr)
+                << "16384 B is above the threshold and must be profiled";
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string out = ReadProfilerOutput(dir.c_str(), "0x5127");
+            ASSERT_FALSE(out.empty()) << "No profiler output produced";
+
+            // Count coll records only: finalize() always appends a summary line.
+            int records = 0;
+            std::istringstream lines(out);
+            std::string line;
+            while (std::getline(lines, line)) {
+                if (line.find("\"coll_perf\"") != std::string::npos) records++;
+            }
+            EXPECT_EQ(records, 2)
+                << "Expected the two admitted collectives only, got " << records
+                << ":\n" << out;
+
+            EXPECT_EQ(out.find("\"coll_sn\":80"), std::string::npos)
+                << "The filtered collective must not reach the JSONL: " << out;
+            EXPECT_EQ(out.find("\"coll_msg_size_bytes\":4096"),
+                      std::string::npos) << out;
+            EXPECT_NE(out.find("\"coll_msg_size_bytes\":8192"),
+                      std::string::npos)
+                << "The at-threshold collective is missing: " << out;
+            EXPECT_NE(out.find("\"coll_msg_size_bytes\":16384"),
+                      std::string::npos)
+                << "The above-threshold collective is missing: " << out;
+
+            // A size-filtered collective is never allocated, so it must not be
+            // counted as lost — the summary still describes a clean run.
+            std::string s = ReadSummaryLine(dir.c_str(), "0x5127");
+            ASSERT_FALSE(s.empty()) << "no summary line was written";
+            EXPECT_NE(s.find("\"complete\":true"), std::string::npos)
+                << "a size-filtered collective was miscounted as lost: " << s;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()},
+         {"ACCL_PROFILER_MIN_SIZE_BYTES", "8192"}}
+    );
+}
+
+// =========================================================================
+// The size threshold belongs to the communicator that read it.
+//
+// ACCL_PROFILER_MIN_SIZE_BYTES used to land in a file static, so the last
+// acclPluginInit() in the process decided the filter for every communicator,
+// including ones created earlier: a second comm created with the variable unset
+// silently inherited the first comm's threshold (the assignment is conditional,
+// so an unset variable does not even reset it), and the minSize= each comm had
+// already echoed in its own init log no longer described what it applied.
+//
+// Reaching that needs a setenv between two communicator creations in one
+// process, which no RCCL path performs -- the environment is normally fixed for
+// the life of the process, every comm reads the same number, and last-init-wins
+// is invisible. The test does it explicitly because that is the property the
+// per-context field establishes, not because a caller stumbles into it.
+// =========================================================================
+TEST(AcclProfilerMinSize, ThresholdIsPerCommunicator) {
+    ScopedProfilerDir dir("minsize_percomm");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerMinSize.ThresholdIsPerCommunicator",
+        [&dir]() {
+            // Drives one single-channel 4096 B collective (1024 x ncclFloat32)
+            // to completion on `ctx` and reports whether it was admitted.
+            auto runSmallColl = [](void* ctx, uint64_t seqNumber) -> bool {
+                ncclProfilerEventDescr_v5_t cd;
+                MakeCollDescr(&cd, /*nChannels=*/1, seqNumber, /*count=*/1024);
+                void* coll = nullptr;
+                EXPECT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+                if (!coll) return false;
+
+                ncclProfilerEventDescr_v5_t kd;
+                MakeKernelChDescr(&kd, coll, /*channelId=*/0,
+                                  /*pTimer=*/1000000);
+                void* kch = nullptr;
+                EXPECT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
+                EXPECT_EQ(acclPluginStopEvent(coll), 0);
+                ncclProfilerEventStateArgs_v5_t sa;
+                memset(&sa, 0, sizeof(sa));
+                sa.kernelCh.pTimer = 1010000;
+                EXPECT_EQ(acclPluginRecordEventState(
+                    kch, ncclProfilerKernelChStop, &sa), 0);
+                EXPECT_EQ(acclPluginStopEvent(kch), 0);
+                return true;
+            };
+
+            // Comm A is created with a threshold above the 4096 B collective.
+            ASSERT_EQ(setenv("ACCL_PROFILER_MIN_SIZE_BYTES", "8192", 1), 0);
+            void* ctxA = nullptr;
+            int maskA = 0;
+            ASSERT_EQ(acclPluginInit(&ctxA, 0x5128, &maskA, "minsize_comm_a",
+                                     1, 2, 0, nullptr), 0);
+            ASSERT_NE(ctxA, nullptr);
+
+            // Comm B is created with no threshold at all and must profile
+            // everything. Unsetting also covers the conditional assignment: a
+            // file static keeps its old value when the getenv returns NULL.
+            ASSERT_EQ(unsetenv("ACCL_PROFILER_MIN_SIZE_BYTES"), 0);
+            void* ctxB = nullptr;
+            int maskB = 0;
+            ASSERT_EQ(acclPluginInit(&ctxB, 0x5129, &maskB, "minsize_comm_b",
+                                     1, 2, 0, nullptr), 0);
+            ASSERT_NE(ctxB, nullptr);
+
+            EXPECT_TRUE(runSmallColl(ctxB, /*seqNumber=*/90))
+                << "comm B was created with ACCL_PROFILER_MIN_SIZE_BYTES unset, "
+                   "so its threshold is 0 and a 4096 B collective must be "
+                   "profiled; it inherited comm A's 8192 B threshold instead";
+
+            // The reverse direction: comm A must still enforce the threshold it
+            // read, so comm B's creation cannot have relaxed it either.
+            EXPECT_FALSE(runSmallColl(ctxA, /*seqNumber=*/91))
+                << "comm A read ACCL_PROFILER_MIN_SIZE_BYTES=8192 and must keep "
+                   "dropping 4096 B collectives after comm B was created";
+
+            ASSERT_EQ(acclPluginFinalize(ctxA), 0);
+            ASSERT_EQ(acclPluginFinalize(ctxB), 0);
+
+            // Each comm writes its own file, keyed by commHash.
+            const std::string recB = ReadCollRecord(dir.c_str(), "0x5129");
+            ASSERT_FALSE(recB.empty()) << "comm B emitted no collective record";
+            EXPECT_NE(recB.find("\"coll_sn\":90"), std::string::npos) << recB;
+
+            EXPECT_TRUE(ReadCollRecord(dir.c_str(), "0x5128").empty())
+                << "comm A emitted a record for a collective below its own "
+                   "threshold";
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// acclParseMinSize — ACCL_PROFILER_MIN_SIZE_BYTES validation.
+//
+// The threshold used to go through atol(), whose failure modes are all silent.
+// The dangerous direction is a value that comes out ENORMOUS: every collective
+// then fails the `<` filter, every start hands back a NULL handle, nothing is
+// ever allocated, and finalize writes a summary reporting zero drops over zero
+// records. The output file looks like a clean run of a job that did no
+// collectives. "-1" reaches that through the unsigned conversion and an
+// over-long digit string reaches it through atol()'s saturation to LONG_MAX.
+// =========================================================================
+struct MinSizeParseCase {
+    const char* input;
+    int         expectBad;
+    size_t      expectValue;
+};
+
+class AcclParseMinSizeTest
+    : public ::testing::TestWithParam<MinSizeParseCase> {};
+
+TEST_P(AcclParseMinSizeTest, MatchesExpected) {
+    const MinSizeParseCase& c = GetParam();
+    int bad = -1;
+    size_t got = test_acclParseMinSize(c.input, &bad);
+    EXPECT_EQ(bad, c.expectBad) << "input: \"" << c.input << "\"";
+    EXPECT_EQ(got, c.expectValue) << "input: \"" << c.input << "\"";
+}
+
+INSTANTIATE_TEST_SUITE_P(Values, AcclParseMinSizeTest, ::testing::Values(
+    // Accepted.
+    MinSizeParseCase{"0", 0, 0},
+    MinSizeParseCase{"8192", 0, 8192},
+    MinSizeParseCase{"  8192  ", 0, 8192},
+    // An all-blank value is the shell idiom for "off", so it is the default
+    // rather than an error.
+    MinSizeParseCase{"", 0, 0},
+    MinSizeParseCase{"   ", 0, 0},
+    // Rejected. Every one of these produced a usable-looking number from atol().
+    MinSizeParseCase{"-1", 1, 0},        // was SIZE_MAX: filters everything
+    MinSizeParseCase{"-8192", 1, 0},
+    MinSizeParseCase{"99999999999999999999999", 1, 0},  // was LONG_MAX: ditto
+    MinSizeParseCase{"abc", 1, 0},       // was 0, indistinguishable from a real 0
+    MinSizeParseCase{"0x2000", 1, 0},    // was 0, not 8192 as the writer meant
+    MinSizeParseCase{"8192garbage", 1, 0},  // was 8192, ignoring the tail
+    MinSizeParseCase{"8192 4096", 1, 0},
+    MinSizeParseCase{"8.5", 1, 0}
+));
+
+// End to end: a negative threshold must not silently swallow the whole run.
+// Before the validation this wrote a file holding nothing but a summary line
+// claiming "complete":true, which is the one thing the loss accounting on this
+// plugin is supposed to make impossible.
+TEST(AcclProfilerMinSize, NegativeThresholdDoesNotSwallowTheRun) {
+    ScopedProfilerDir dir("minsize_negative");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerMinSize.NegativeThresholdDoesNotSwallowTheRun",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x512A, &mask, "minsize_neg_test",
+                                     1, 2, 0, nullptr), 0);
+            ASSERT_NE(ctx, nullptr);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/95,
+                          /*count=*/1024);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+            ASSERT_NE(coll, nullptr)
+                << "ACCL_PROFILER_MIN_SIZE_BYTES=-1 converted to SIZE_MAX and "
+                   "filtered out a 4096 B collective";
+
+            ncclProfilerEventDescr_v5_t kd;
+            MakeKernelChDescr(&kd, coll, /*channelId=*/0, /*pTimer=*/1000000);
+            void* kch = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
+            EXPECT_EQ(acclPluginStopEvent(coll), 0);
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 1010000;
+            EXPECT_EQ(acclPluginRecordEventState(
+                kch, ncclProfilerKernelChStop, &sa), 0);
+            EXPECT_EQ(acclPluginStopEvent(kch), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            const std::string rec = ReadCollRecord(dir.c_str(), "0x512a");
+            ASSERT_FALSE(rec.empty())
+                << "the run emitted no collective record at all, and its "
+                   "summary line still reads: "
+                << ReadSummaryLine(dir.c_str(), "0x512a");
+            EXPECT_NE(rec.find("\"coll_sn\":95"), std::string::npos) << rec;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()},
+         {"ACCL_PROFILER_MIN_SIZE_BYTES", "-1"}}
     );
 }
 
