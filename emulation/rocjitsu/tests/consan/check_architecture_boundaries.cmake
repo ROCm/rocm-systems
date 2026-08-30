@@ -96,6 +96,11 @@ _consan_assert_no_match(
     "shared synchronization emission must consume normalized target facts and authorized dispatch sources"
 )
 _consan_assert_no_match(
+    "${_consan_dir}/consan_moi_placement.inc"
+    "GFX90A_ACCUM_OFFSET"
+    "common placement must consume the normalized descriptor VGPR-allocation product"
+)
+_consan_assert_no_match(
     "${_consan_dir}/consan_moi_target_address.cpp"
     "ROCJITSU_CODE_ARCH_"
     "atomic-address materialization must consume typed target capabilities"

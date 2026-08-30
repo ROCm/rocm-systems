@@ -86,27 +86,42 @@ read_descriptor_vgpr_allocation_count(std::span<const uint8_t> image,
   return descriptor_vgpr_allocation_count(*descriptor, arch);
 }
 
-/// Return the ordinary-VGPR prefix that ConSan may use for scratch state.
-/// CDNA2-4 split their unified descriptor allocation at ACCUM_OFFSET; a
-/// nonzero boundary below the allocation therefore excludes live AccVGPR
-/// storage. Other targets expose the complete decoded allocation.
-[[nodiscard]] inline uint16_t
-descriptor_ordinary_vgpr_allocation_count(const rocr::llvm::amdhsa::kernel_descriptor_t &descriptor,
-                                          rj_code_arch_t arch) {
-  const uint16_t unified_count = descriptor_vgpr_allocation_count(descriptor, arch);
+/// Normalized ordinary/accumulator view of one target descriptor's unified
+/// VGPR allocation. A present accumulator base is the first physical AccVGPR;
+/// `ordinary_count` remains the currently allocated ordinary prefix.
+struct ConSanDescriptorVgprAllocation {
+  uint16_t unified_count = 0;
+  uint16_t ordinary_count = 0;
+  std::optional<uint16_t> accumulator_base;
+};
+
+[[nodiscard]] inline ConSanDescriptorVgprAllocation
+descriptor_vgpr_allocation(const rocr::llvm::amdhsa::kernel_descriptor_t &descriptor,
+                           rj_code_arch_t arch) {
+  ConSanDescriptorVgprAllocation result;
+  result.unified_count = descriptor_vgpr_allocation_count(descriptor, arch);
+  result.ordinary_count = result.unified_count;
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   if (!profile || profile->accumulator_model != ConSanAccumulatorModel::DescriptorPartitioned)
-    return unified_count;
+    return result;
 
   const uint32_t encoded_accum_offset = AMDHSA_BITS_GET(
       descriptor.compute_pgm_rsrc3, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
   if (encoded_accum_offset == 0u)
-    return unified_count;
+    return result;
   const uint32_t accvgpr_base =
       (encoded_accum_offset + 1u) * profile->accumulator_offset_granularity;
-  return unified_count > accvgpr_base
-             ? static_cast<uint16_t>(std::min<uint32_t>(accvgpr_base, REGISTER_SET_MAX_VGPRS))
-             : unified_count;
+  result.accumulator_base =
+      static_cast<uint16_t>(std::min<uint32_t>(accvgpr_base, REGISTER_SET_MAX_VGPRS));
+  result.ordinary_count = std::min(result.unified_count, *result.accumulator_base);
+  return result;
+}
+
+/// Return the currently allocated ordinary-VGPR prefix available to scratch.
+[[nodiscard]] inline uint16_t
+descriptor_ordinary_vgpr_allocation_count(const rocr::llvm::amdhsa::kernel_descriptor_t &descriptor,
+                                          rj_code_arch_t arch) {
+  return descriptor_vgpr_allocation(descriptor, arch).ordinary_count;
 }
 
 /// The complete policy input for growing one kernel descriptor's ordinary
@@ -163,7 +178,8 @@ grow_descriptor_vgpr_allocation(rocr::llvm::amdhsa::kernel_descriptor_t &descrip
   if (request.required_ordinary_count > maximum_ordinary_count)
     return false;
 
-  const uint32_t ordinary_count = descriptor_ordinary_vgpr_allocation_count(descriptor, arch);
+  const ConSanDescriptorVgprAllocation allocation = descriptor_vgpr_allocation(descriptor, arch);
+  const uint32_t ordinary_count = allocation.ordinary_count;
   if (request.required_ordinary_count <= ordinary_count)
     return true;
 
@@ -172,38 +188,34 @@ grow_descriptor_vgpr_allocation(rocr::llvm::amdhsa::kernel_descriptor_t &descrip
   if (rounded_required > maximum_ordinary_count)
     return false;
 
-  const uint32_t unified_count = descriptor_vgpr_allocation_count(descriptor, arch);
-  if (profile->accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned) {
-    const uint32_t encoded_accum_offset = AMDHSA_BITS_GET(
-        descriptor.compute_pgm_rsrc3, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
-    if (encoded_accum_offset != 0u) {
-      const uint32_t accumulator_granularity = profile->accumulator_offset_granularity;
-      const uint32_t accvgpr_base = (encoded_accum_offset + 1u) * accumulator_granularity;
-      if (rounded_required <= accvgpr_base) {
-        AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
-                        rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                        (rounded_required / granularity - 1u));
-        return true;
-      }
-
-      const bool accumulator_bank_is_empty =
-          unified_count <= accvgpr_base || request.accumulator_bank_is_proven_empty;
-      if (!accumulator_bank_is_empty)
-        return false;
-
-      const uint32_t new_unified_count = std::max(unified_count, rounded_required);
-      if (new_unified_count > maximum_ordinary_count ||
-          new_unified_count % accumulator_granularity != 0u ||
-          new_unified_count / accumulator_granularity > kDescriptorAllocationGranules)
-        return false;
-      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3,
-                      rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
-                      (new_unified_count / accumulator_granularity - 1u));
+  const uint32_t unified_count = allocation.unified_count;
+  if (allocation.accumulator_base) {
+    const uint32_t accumulator_granularity = profile->accumulator_offset_granularity;
+    const uint32_t accvgpr_base = *allocation.accumulator_base;
+    if (rounded_required <= accvgpr_base) {
       AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                       rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                      (new_unified_count / granularity - 1u));
+                      (rounded_required / granularity - 1u));
       return true;
     }
+
+    const bool accumulator_bank_is_empty =
+        unified_count <= accvgpr_base || request.accumulator_bank_is_proven_empty;
+    if (!accumulator_bank_is_empty)
+      return false;
+
+    const uint32_t new_unified_count = std::max(unified_count, rounded_required);
+    if (new_unified_count > maximum_ordinary_count ||
+        new_unified_count % accumulator_granularity != 0u ||
+        new_unified_count / accumulator_granularity > kDescriptorAllocationGranules)
+      return false;
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3,
+                    rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                    (new_unified_count / accumulator_granularity - 1u));
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                    (new_unified_count / granularity - 1u));
+    return true;
   }
 
   AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,

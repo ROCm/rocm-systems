@@ -466,8 +466,8 @@ struct MoiKernelResourceContext {
   uint16_t current_vgpr_count = 0;
   uint16_t max_referenced_vgpr_count = 0;
   uint16_t ordinary_vgpr_limit = kMaxVgprs;
-  bool cdna_accvgpr_boundary_is_allocation_tail = false;
-  bool can_move_empty_cdna_accvgpr_boundary = false;
+  bool accumulator_boundary_is_allocation_tail = false;
+  bool can_move_empty_accumulator_boundary = false;
   uint16_t current_sgpr_count = 0;
   uint16_t max_referenced_sgpr_count = 0;
   uint32_t original_private_segment_size = 0;
@@ -1024,23 +1024,14 @@ struct MoiResourcePlanningState {
       if (!descriptor) {
         continue;
       }
-      stored.current_vgpr_count =
-          static_cast<uint16_t>(descriptor_vgpr_allocation_count(*descriptor, arch));
-      if (consan_uses_gfx9_cdna_encoding(arch)) {
-        const uint32_t encoded_accum_offset = AMDHSA_BITS_GET(
-            descriptor->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
-        // A nonzero ACCUM_OFFSET is the first physical AccVGPR and therefore
-        // the hard upper bound for ordinary instrumentation VGPRs. Encoded
-        // zero remains ambiguous for kernels without an accumulator bank.
-        if (encoded_accum_offset != 0u) {
-          const uint32_t accvgpr_base =
-              std::min<uint32_t>(kMaxVgprs, (encoded_accum_offset + 1u) * 4u);
-          const uint32_t unified_vgpr_count = descriptor_vgpr_allocation_count(*descriptor, arch);
-          stored.ordinary_vgpr_limit = static_cast<uint16_t>(accvgpr_base);
-          stored.cdna_accvgpr_boundary_is_allocation_tail = unified_vgpr_count <= accvgpr_base;
-          stored.can_move_empty_cdna_accvgpr_boundary =
-              stored.cdna_accvgpr_boundary_is_allocation_tail || kernel.agpr_count == 0u;
-        }
+      const ConSanDescriptorVgprAllocation vgprs = descriptor_vgpr_allocation(*descriptor, arch);
+      stored.current_vgpr_count = vgprs.unified_count;
+      if (vgprs.accumulator_base) {
+        stored.ordinary_vgpr_limit = *vgprs.accumulator_base;
+        stored.accumulator_boundary_is_allocation_tail =
+            vgprs.unified_count <= *vgprs.accumulator_base;
+        stored.can_move_empty_accumulator_boundary =
+            stored.accumulator_boundary_is_allocation_tail || kernel.agpr_count == 0u;
       }
       stored.current_sgpr_count =
           static_cast<uint16_t>(descriptor_sgpr_allocation_count(*descriptor, arch));
@@ -1524,7 +1515,7 @@ plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
     // proof before moving ACCUM_OFFSET. Without it, remain below the original
     // boundary even though the pair is dead before the first guest instruction.
     const uint16_t scratch_limit =
-        context->can_move_empty_cdna_accvgpr_boundary ? kMaxVgprs : context->ordinary_vgpr_limit;
+        context->can_move_empty_accumulator_boundary ? kMaxVgprs : context->ordinary_vgpr_limit;
     std::optional<uint16_t> scratch;
     for (uint16_t candidate = 0; candidate + 2u <= scratch_limit; ++candidate) {
       if (!unavailable_vgprs.contains({RegClass::VGPR, candidate, 1u}) &&
@@ -2357,18 +2348,18 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
   plan.ordinary_vgpr_limit = kMaxVgprs;
   plan.current_sgpr_count = kMaxSgprs;
   plan.sgpr_reference_coverage_complete = true;
-  bool every_owner_can_move_empty_cdna_accvgpr_boundary =
+  bool every_owner_can_move_empty_accumulator_boundary =
       consan_uses_gfx9_cdna_encoding(state.arch);
-  bool every_owner_cdna_accvgpr_boundary_is_allocation_tail =
-      every_owner_can_move_empty_cdna_accvgpr_boundary;
+  bool every_owner_accumulator_boundary_is_allocation_tail =
+      every_owner_can_move_empty_accumulator_boundary;
   RegisterSet live_before_all_owners;
   bool descriptors_valid = true;
   for (MoiKernelResourceContext *owner : owners) {
     plan.current_vgpr_count = std::min(plan.current_vgpr_count, owner->current_vgpr_count);
     plan.ordinary_vgpr_limit = std::min(plan.ordinary_vgpr_limit, owner->ordinary_vgpr_limit);
-    every_owner_cdna_accvgpr_boundary_is_allocation_tail &=
-        owner->cdna_accvgpr_boundary_is_allocation_tail;
-    every_owner_can_move_empty_cdna_accvgpr_boundary &= owner->can_move_empty_cdna_accvgpr_boundary;
+    every_owner_accumulator_boundary_is_allocation_tail &=
+        owner->accumulator_boundary_is_allocation_tail;
+    every_owner_can_move_empty_accumulator_boundary &= owner->can_move_empty_accumulator_boundary;
     plan.max_referenced_vgpr_count =
         std::max(plan.max_referenced_vgpr_count, owner->max_referenced_vgpr_count);
     plan.current_sgpr_count = std::min(plan.current_sgpr_count, owner->current_sgpr_count);
@@ -2420,7 +2411,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
   request.current_allocation_count = std::min(plan.current_vgpr_count, plan.ordinary_vgpr_limit);
   request.max_referenced_count = plan.max_referenced_vgpr_count;
   request.architecture_limit =
-      every_owner_cdna_accvgpr_boundary_is_allocation_tail ? kMaxVgprs : plan.ordinary_vgpr_limit;
+      every_owner_accumulator_boundary_is_allocation_tail ? kMaxVgprs : plan.ordinary_vgpr_limit;
   request.explicit_base = debug.scratch_vgpr;
   request.force_spill = debug.test_force_vgpr_spill || require_spill;
   request.forbidden = anchor_def_use.defs | anchor_def_use.uses;
@@ -2472,7 +2463,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
   ConSanRegisterPlan register_plan = plan_consan_registers(request, live_before_all_owners);
   if (register_plan.source == ConSanRegisterAllocationSource::Unsupported &&
       register_plan.reason == ConSanRegisterPlanReason::NoLegalWindow &&
-      every_owner_can_move_empty_cdna_accvgpr_boundary && !request.explicit_base &&
+      every_owner_can_move_empty_accumulator_boundary && !request.explicit_base &&
       !request.force_spill) {
     // Trusted metadata can prove that a rounded unified-VGPR tail contains no
     // accumulator state even when ACCUM_OFFSET conservatively places the
@@ -2520,7 +2511,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
     ConSanRegisterRequest spill_request = request;
     spill_request.force_spill = true;
     spill_request.allow_spill_descriptor_growth = true;
-    if (every_owner_can_move_empty_cdna_accvgpr_boundary)
+    if (every_owner_can_move_empty_accumulator_boundary)
       spill_request.architecture_limit = kMaxVgprs;
     spill_request.forbidden = {};
     forbid_moi_persistent_vgprs(spill_request.forbidden, point, state.register_allocation,
@@ -5588,7 +5579,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
         // accumulator bank. Resource replanning then grows the unified VGPR
         // allocation and moves the empty boundary together. A real AccVGPR
         // bank remains a hard limit for every owner that shares this tuple.
-        if (!context.can_move_empty_cdna_accvgpr_boundary)
+        if (!context.can_move_empty_accumulator_boundary)
           component_limit = std::min<uint32_t>(component_limit, context.ordinary_vgpr_limit);
       }
       for (const ConSanCandidateResourcePlan &plan : resource_plans) {

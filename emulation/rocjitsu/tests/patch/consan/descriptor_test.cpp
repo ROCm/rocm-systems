@@ -52,6 +52,14 @@ TEST(ConSanDescriptor, ResourceFactsShareTargetWaveAndAccumulatorSemantics) {
   EXPECT_EQ(descriptor_vgpr_allocation_count(descriptor, ROCJITSU_CODE_ARCH_CDNA4), 32u);
   EXPECT_EQ(descriptor_ordinary_vgpr_allocation_count(descriptor, ROCJITSU_CODE_ARCH_CDNA4), 16u);
   EXPECT_EQ(descriptor_ordinary_vgpr_allocation_count(descriptor, ROCJITSU_CODE_ARCH_CDNA5), 64u);
+  const ConSanDescriptorVgprAllocation cdna4 =
+      descriptor_vgpr_allocation(descriptor, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(cdna4.unified_count, 32u);
+  EXPECT_EQ(cdna4.ordinary_count, 16u);
+  EXPECT_EQ(cdna4.accumulator_base, 16u);
+  const ConSanDescriptorVgprAllocation gfx1250 =
+      descriptor_vgpr_allocation(descriptor, ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_FALSE(gfx1250.accumulator_base);
 
   AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                   kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 15u);
