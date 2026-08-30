@@ -479,6 +479,81 @@ once and all interested modes may elect to consume it. What should disappear
 is the need to scatter routine target enablement through central analysis,
 placement, validation, and every engine.
 
+### 11.2 Mode locality as a directional ideal
+
+A corresponding ideal is **physical and semantic locality of ConSan modes**.
+Code whose reason for existing is Record/Replay, Sampled, InlineShadow, or
+SuperCollider behavior should be recognizable from its path without requiring
+a reader to infer ownership from enum branches inside common files. A near-term
+form could be consistently named files such as `*_record_replay_*`; a stronger
+eventual form could be packages such as `mode/record_replay/`, `mode/sampled/`,
+`mode/inline_shadow/`, and `mode/supercollider/`. As with architecture
+locality, the exact directory and registration design remain open.
+
+Mode locality should provide the same two practical properties:
+
+1. A maintainer adding a future ConSan mode should find a bounded place to
+   define its semantic-policy contribution, evidence model, resource demand,
+   lowering strategy, runtime/static mapping, report analysis, diagnostics,
+   and validation proof.
+2. A reader interested in common ConSan infrastructure or in one particular
+   mode should be able to omit the other mode packages without losing the
+   common control and dataflow.
+
+This is not a mandate to duplicate domain authorities. Access, barrier,
+atomic/fence, inventory, transaction, resource-search, and report-lifecycle
+code may remain common when they express one genuine operation. The intended
+separation is that common components own the operation and its composition
+rules, while a mode-owned product states what that mode requests, supplies, or
+implements. Common code should not gradually accumulate a complete handwritten
+branch for each mode at every stage.
+
+Mode locality is inherently less one-dimensional than architecture locality.
+A mode has behavior across static policy, resource solving, device emission,
+runtime evidence, host analysis, and final validation. The design must decide
+whether one mode package contains those facets, whether it publishes them to
+stage-oriented components, or whether consistently named mode-owned files
+remain in several build layers. Any of these can satisfy the goal if ownership
+and dependency direction are obvious and a reader can exclude the unwanted
+mode. Merely moving deep switches into a file named `common` cannot.
+
+Behavior shared by several modes needs similarly explicit treatment. When the
+shared behavior has a real semantic name -- for example exact-shadow storage,
+event logging, causal-window tracking, workgroup gating, or a routing strategy
+-- it should be owned by a component bearing that mechanism's name. If no more
+general abstraction is honest, an explicitly named exact-subset package is
+acceptable. What should disappear is anonymous subset behavior encoded as
+repeated mode tests inside a nominally universal coordinator.
+
+The architecture and mode ideals are reciprocal boundaries:
+
+- mode packages may select target-neutral operations and declare semantic or
+  resource requirements, but should not include generated ISA types, raw gfx
+  encodings, or concrete-target recipes; and
+- architecture packages may implement normalized operations and constraints,
+  but should not know which ConSan mode wants them or decide mode policy.
+
+That reciprocity is the structural route toward `O(N + M)` growth. New modes
+compose existing target operations; new targets implement existing normalized
+operations. A genuine new semantic capability may extend the interface once,
+but routine support should not require one implementation for every mode and
+target pair.
+
+A useful extension test is the hypothetical addition of a fifth mode. For
+operations already represented by common semantic and target contracts, the
+expected change should be approximately:
+
+- add one mode package, or one clearly bounded set of mode-owned facets;
+- add one narrow registration/composition entry;
+- add mode-focused host, emulation-matrix, and physical tests as applicable;
+  and
+- make no edits to concrete architecture packages.
+
+Common stage code may need a deliberately extensible interface, but should not
+need new deep branches in analysis, placement, lowering coordination, report
+processing, and validation merely to recognize the mode. This too is a design
+test rather than a prematurely frozen plugin ABI.
+
 ## 12. Initial exploration map
 
 The following is a non-exhaustive map of pressure points and design questions.
@@ -511,6 +586,14 @@ It is expected to grow substantially.
 
 ### 12.3 Mode composition
 
+- What should the cohesive facets of one mode package be, and how should they
+  cross static lowering, runtime evidence, host analysis, and validation build
+  layers without losing mode ownership?
+- Can mode-specific policy, evidence models, resource demands, lowering,
+  mappings, analysis, diagnostics, and proof be made local to clearly named
+  files or one mode directory?
+- Can a reader understand the common transformation and one selected mode while
+  deliberately excluding every other mode package?
 - What is the essential semantic contract of an engine?
 - Which behavior is truly common to all modes, to exact subsets, or only to
   one mode?
@@ -523,6 +606,10 @@ It is expected to grow substantially.
   coincidental similarity?
 - Can a hypothetical fifth engine be used as a design test without requiring
   implementation of a new feature?
+- Can that hypothetical extension be expressed as one mode package, one
+  registry change, and tests, with build and boundary checks rejecting
+  mode-specific additions to concrete architecture packages or unrelated
+  common stages?
 
 ### 12.4 Target composition
 
@@ -634,6 +721,10 @@ already carry forward:
 8. Concrete gfx-architecture support should move toward physically local,
    skippable packages, while genuinely shared family behavior remains in
    explicitly named family owners rather than being duplicated.
+9. Mode-specific behavior should move toward physically local, skippable
+   packages or consistently named facets, while genuine cross-mode mechanisms
+   remain in explicitly named mechanism or exact-subset owners rather than
+   deep common-code switches.
 
 ## 14. Sections intentionally left open
 
