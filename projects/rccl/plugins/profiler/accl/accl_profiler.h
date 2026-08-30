@@ -162,6 +162,13 @@ struct acclCommContext {
   uint64_t    droppedCollectives;   // never allocated a slot: pool was full
   uint64_t    leakedCollectives;    // allocated but never finalized; freed by the drain
   int         poolExhaustedWarned;  // one-shot guard for the pool-exhaustion WARN
+  // Proxy-side loss. Written from the proxy thread under three different locks,
+  // so these are atomic rather than adopting any one of them.
+  uint64_t    droppedProxyOps;      // proxy-op pool was full: this op is unprofiled
+  uint64_t    droppedProxySteps;    // proxy-step pool was full: this step is unprofiled
+  uint64_t    overflowProxyOps;     // op completed but the coll already held ACCL_MAX_PROXY_OPS
+  int         proxyOpPoolWarned;    // one-shot guards, as for the coll pool above
+  int         proxyStepPoolWarned;
   uint64_t    commHash;
   int         rank;
   int         nRanks;
