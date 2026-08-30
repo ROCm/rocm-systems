@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -31,11 +31,12 @@
 // carries a "gpu" label alongside "unit".
 
 #include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
 
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+
+#include <hip/hip_runtime.h>
 
 #include "gin_sdma_allgather_policy.h"
 
@@ -66,6 +67,10 @@ __global__ void tierKernel(const uint64_t* chunk, const uint64_t* thr, uint8_t* 
 
 TEST(AllGatherGpu, TierPredicateMatchesHost) {
   if (!gpuAvailable()) GTEST_SKIP() << "no visible GPU";
+
+  // Absolute semantics at the compiled default crossover (not just host/device parity).
+  EXPECT_TRUE(gin_sdma_allgather::chunkUsesLsaTier(32768, kAllGatherSdmaThresholdDefault));
+  EXPECT_FALSE(gin_sdma_allgather::chunkUsesLsaTier(32769, kAllGatherSdmaThresholdDefault));
 
   std::vector<uint64_t> chunk, thr;
   const uint64_t thresholds[] = {0, 128, 2097152, 16777216};

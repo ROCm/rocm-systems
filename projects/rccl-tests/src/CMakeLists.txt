@@ -157,7 +157,9 @@ if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
 
     # GIN-SDMA hybrid AllGather (all_gather_perf -D 3): same device-RDC link as
     # alltoall_perf so the GinHybridAllGatherKernel resolves the GIN device backend.
-    target_compile_definitions(all_gather_perf PRIVATE ENABLE_ROCSHMEM_GIN)
+    if (ENABLE_DEVICE_API)
+      target_compile_definitions(all_gather_perf PRIVATE ENABLE_DEVICE_API)
+    endif()
     target_compile_options(all_gather_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
     target_link_libraries(all_gather_perf PRIVATE
         -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)

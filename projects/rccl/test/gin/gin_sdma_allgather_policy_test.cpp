@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 
 #define GIN_SDMA_HOST_ONLY 1
@@ -87,6 +88,11 @@ TEST(AllGatherPolicyThreshold, PerCollectiveWins) {
 
 TEST(AllGatherPolicyThreshold, GlobalUsedWhenNoPerCollective) {
   EXPECT_EQ(pickSdmaThreshold(false, 0, true, 65536, kAllGatherSdmaThresholdDefault), 65536u);
+}
+
+TEST(AllGatherPolicyThreshold, DefaultCrossoverAt32KiB) {
+  EXPECT_TRUE(chunkUsesLsaTier(32768, kAllGatherSdmaThresholdDefault));
+  EXPECT_FALSE(chunkUsesLsaTier(32769, kAllGatherSdmaThresholdDefault));
 }
 
 TEST(AllGatherPolicyThreshold, CompiledDefaultWhenNothingSet) {
@@ -192,6 +198,39 @@ TEST(AllGatherPolicyBandwidth, NullPointersAreSafe) {
   double alg = -1.0;
   bandwidthGBps(1000, 4, 0.5, 4, &alg, nullptr);
   EXPECT_GT(alg, 0.0);
+}
+
+// ---- host env resolution (resolveSdmaThresholdFromEnv, parseAllGatherCtasEnv) --
+
+TEST(AllGatherPolicyEnv, ResolveThresholdFromEnv) {
+  unsetenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER");
+  unsetenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD");
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(), kAllGatherSdmaThresholdDefault);
+
+  setenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD", "4096", 1);
+  unsetenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER");
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(), 4096u);
+
+  setenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER", "8192", 1);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(), 8192u);
+
+  unsetenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD");
+  unsetenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER");
+}
+
+TEST(AllGatherPolicyEnv, ParseAllGatherCtasEnv) {
+  unsetenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS");
+  unsetenv("NCCL_GIN_ANVIL_AG_CTAS");
+  EXPECT_EQ(parseAllGatherCtasEnv(), kAllGatherCtasUnset);
+
+  setenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS", "8", 1);
+  EXPECT_EQ(parseAllGatherCtasEnv(), 8u);
+
+  unsetenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS");
+  setenv("NCCL_GIN_ANVIL_AG_CTAS", "4", 1);
+  EXPECT_EQ(parseAllGatherCtasEnv(), 4u);
+
+  unsetenv("NCCL_GIN_ANVIL_AG_CTAS");
 }
 
 }  // namespace
