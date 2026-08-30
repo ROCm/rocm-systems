@@ -22,6 +22,12 @@ extern "C" {
   void test_acclFreeColl(void* ctx, void* coll) {
     acclFreeColl((struct acclCommContext*)ctx, (struct acclCollInfo*)coll);
   }
+  // Coll pool slot of a coll handle, or -1 if the handle is not in the pool.
+  int test_acclCollSlot(void* ctxv, void* collv) {
+    struct acclCommContext* ctx = (struct acclCommContext*)ctxv;
+    int idx = (int)((struct acclCollInfo*)collv - ctx->collPool);
+    return (idx >= 0 && idx < ACCL_COLL_POOL_SIZE) ? idx : -1;
+  }
   // Proxy-op pool slot of an op handle, or -1 if the handle is not in the pool.
   int test_acclProxyOpSlot(void* ctxv, void* opv) {
     struct acclCommContext* ctx = (struct acclCommContext*)ctxv;
