@@ -222,6 +222,7 @@ const MoiModeOperations kInlineShadowModeOperations = {
     inline_shadow_access_spill_fallback,
     plan_inline_shadow_dispatch_identity,
     plan_inline_shadow_scalar_abi,
+    plan_inline_shadow_evidence_requirements,
     plan_inline_shadow_report_layout,
     reconstruct_inline_shadow_report_inventory,
 };

@@ -224,6 +224,7 @@ const MoiModeOperations kRecordReplayModeOperations = {
     nullptr,
     plan_record_replay_dispatch_identity,
     plan_record_replay_scalar_abi,
+    plan_record_replay_evidence_requirements,
     plan_record_replay_report_layout,
     reconstruct_record_replay_report_inventory,
 };

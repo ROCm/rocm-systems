@@ -118,6 +118,11 @@ MoiScalarAbiPlan plan_moi_scalar_abi(const ConSanRequest &request,
   return moi_mode_operations(request.moi_engine).scalar_abi(request, point);
 }
 
+ConSanEvidenceRequirements
+plan_moi_evidence_requirements(ConSanMoiEngine engine, const MoiEvidencePlanningContext &context) {
+  return moi_mode_operations(engine).plan_evidence(context);
+}
+
 std::optional<consan_detail::MoiSpecialStateSgprs>
 moi_special_state_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point) {
   return plan_moi_scalar_abi(request, point).special_state;

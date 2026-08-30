@@ -153,6 +153,18 @@ struct MoiScalarAbiPlan {
   bool access_router_uses_dense_abi = false;
 };
 
+/// Mode-neutral inputs from the transform pipeline to evidence planning.
+/// Modes translate these caller and target bounds into their own typed
+/// capacity policies beside their report implementation.
+struct MoiEvidencePlanningContext {
+  const ProgramInventory &program_inventory;
+  const ConSanEvidenceIntentPlan &evidence_intents;
+  uint64_t requested_report_buffer_size = 0;
+  std::optional<uint64_t> maximum_access_probe_count;
+  std::optional<uint32_t> maximum_workgroup_lds_bytes;
+  bool dynamic_access_records = false;
+};
+
 /// Mode-owned representation selected when no code-object-wide transient
 /// scalar window is legal. Common placement owns the register search; a mode
 /// declares which spill ABI it can emit and any exact constraints of that ABI.
@@ -211,6 +223,16 @@ make_moi_scalar_abi_plan(const ConSanMoiOperatingPoint &point,
 [[nodiscard]] MoiScalarAbiPlan plan_moi_scalar_abi(const ConSanRequest &request,
                                                    const ConSanMoiOperatingPoint &point);
 
+[[nodiscard]] ConSanEvidenceRequirements
+plan_moi_evidence_requirements(ConSanMoiEngine engine, const MoiEvidencePlanningContext &context);
+
+[[nodiscard]] ConSanEvidenceRequirements
+plan_record_replay_evidence_requirements(const MoiEvidencePlanningContext &context);
+[[nodiscard]] ConSanEvidenceRequirements
+plan_sampled_evidence_requirements(const MoiEvidencePlanningContext &context);
+[[nodiscard]] ConSanEvidenceRequirements
+plan_inline_shadow_evidence_requirements(const MoiEvidencePlanningContext &context);
+
 struct MoiModeOperations {
   MoiObjectModePlan (*plan)(const ConSanRequest &, const ConSanMoiOperatingPoint &,
                             const MoiObjectFacts &, const ConSanObservationPlan &);
@@ -232,6 +254,7 @@ struct MoiModeOperations {
   MoiDispatchIdentityPlan (*dispatch_identity)(const ConSanRequest &,
                                                const MoiDispatchIdentityFacts &);
   MoiScalarAbiPlan (*scalar_abi)(const ConSanRequest &, const ConSanMoiOperatingPoint &);
+  ConSanEvidenceRequirements (*plan_evidence)(const MoiEvidencePlanningContext &);
   bool (*plan_report_layout)(const ConSanMoiAutoReportInventory &, ConSanMoiAutoReportPlan &,
                              uint64_t &cursor);
   std::optional<ConSanMoiAutoReportInventory> (*reconstruct_report_inventory)(

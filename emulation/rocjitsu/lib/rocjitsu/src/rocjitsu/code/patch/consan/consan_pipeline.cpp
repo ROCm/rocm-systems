@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_transform_diagnostics.h"
 
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
@@ -1090,31 +1091,13 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
       result.evidence_requirements = plan_consan_supercollider_evidence(
           *result.evidence_intent_plan, request.supercollider_evidence_mode);
     } else if (flavor == ConSanFlavor::Moi) {
-      switch (request.moi_engine) {
-      case ConSanMoiEngine::RecordReplay:
-        // Dynamic append reports intentionally expose bounded-ring overflow.
-        // Their explicit byte cap chooses runtime ring capacity; it must not
-        // make the address-free semantic evidence contract incomplete.
-        result.evidence_requirements = plan_consan_record_replay_evidence(
-            *result.evidence_intent_plan,
-            {.caller_ceiling_bytes =
-                 request.moi_dynamic_access_records ? 0u : request.moi_auto_report_buffer_size,
-             .maximum_access_probe_count = maximum_access_probe_count});
-        break;
-      case ConSanMoiEngine::Sampled:
-        result.evidence_requirements = plan_consan_sampled_evidence(
-            *result.evidence_intent_plan,
-            {.caller_ceiling_bytes = request.moi_auto_report_buffer_size,
-             .maximum_access_probe_count = maximum_access_probe_count});
-        break;
-      case ConSanMoiEngine::InlineShadow:
-        result.evidence_requirements = plan_consan_inline_shadow_evidence(
-            result.program_inventory, *result.evidence_intent_plan,
-            {.caller_ceiling_bytes = request.moi_auto_report_buffer_size,
-             .maximum_access_probe_count = maximum_access_probe_count,
-             .maximum_workgroup_lds_bytes = capabilities.max_workgroup_lds_bytes});
-        break;
-      }
+      result.evidence_requirements = consan_moi_impl::plan_moi_evidence_requirements(
+          request.moi_engine, {.program_inventory = result.program_inventory,
+                               .evidence_intents = *result.evidence_intent_plan,
+                               .requested_report_buffer_size = request.moi_auto_report_buffer_size,
+                               .maximum_access_probe_count = maximum_access_probe_count,
+                               .maximum_workgroup_lds_bytes = capabilities.max_workgroup_lds_bytes,
+                               .dynamic_access_records = request.moi_dynamic_access_records});
     }
   }
 

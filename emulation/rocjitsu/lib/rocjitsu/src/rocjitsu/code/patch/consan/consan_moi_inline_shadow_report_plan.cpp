@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_planning.h"
 
 #include "util/bit.h"
@@ -239,6 +240,15 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
   consan_moi_impl::publish_moi_evidence_requirements(requirements, std::move(inventory),
                                                      capacity_policy.caller_ceiling_bytes);
   return requirements;
+}
+
+ConSanEvidenceRequirements consan_moi_impl::plan_inline_shadow_evidence_requirements(
+    const MoiEvidencePlanningContext &context) {
+  return plan_consan_inline_shadow_evidence(
+      context.program_inventory, context.evidence_intents,
+      {.caller_ceiling_bytes = context.requested_report_buffer_size,
+       .maximum_access_probe_count = context.maximum_access_probe_count,
+       .maximum_workgroup_lds_bytes = context.maximum_workgroup_lds_bytes});
 }
 
 } // namespace rocjitsu

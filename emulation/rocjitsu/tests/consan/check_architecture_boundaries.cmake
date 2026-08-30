@@ -115,6 +115,11 @@ _consan_assert_no_match(
     "ConSanTransformArtifacts"
     "evidence planning must consume immutable forward products, not the mutable transaction bus"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_pipeline.cpp"
+    "plan_consan_(record_replay|sampled|inline_shadow)_evidence"
+    "the common pipeline must compose mode-owned evidence planning through the mode registry"
+)
 foreach(_source IN ITEMS consan_moi_barrier.inc consan_moi_sync_emission.cpp)
     _consan_assert_no_match(
         "${_consan_dir}/${_source}"
@@ -565,7 +570,7 @@ _consan_assert_reviewed_mode_switch_budget(
     consan_moi.cpp 20 "top-level engine dispatch and result publication"
 )
 _consan_assert_reviewed_mode_switch_budget(
-    consan_moi_report_plan.cpp 6 "mode-neutral report composition and evidence publication"
+    consan_moi_report_plan.cpp 0 "mode-neutral report and evidence composition"
 )
 _consan_assert_reviewed_mode_switch_budget(
     consan_moi_barrier.inc 17 "named RecordReplay/Sampled/Inline barrier component"

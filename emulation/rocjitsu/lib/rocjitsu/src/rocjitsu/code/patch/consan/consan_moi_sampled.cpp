@@ -279,6 +279,7 @@ const MoiModeOperations kSampledModeOperations = {
     sampled_access_spill_fallback,
     plan_sampled_dispatch_identity,
     plan_sampled_scalar_abi,
+    plan_sampled_evidence_requirements,
     plan_sampled_report_layout,
     reconstruct_sampled_report_inventory,
 };
