@@ -476,7 +476,8 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
       const auto require_dispatch_equal = [&](size_t offset, bool high_word) {
         if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch) ||
             !append_compare_moi_report_dispatch_id_word(
-                words, point, bound_resources, tmp_vgpr, source_version, high_word, arch,
+                words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
+                tmp_vgpr, source_version, high_word, arch,
                 ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
           return false;
         }
@@ -1502,8 +1503,9 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     return false;
   words.push_back(*save_claimed_publishers);
   if (!append_compare_moi_report_dispatch_id_word(
-          words, point, bound_resources, prior_dispatch_low_vgpr, tmp_vgpr, /*high_word=*/false,
-          arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
+          words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
+          prior_dispatch_low_vgpr, tmp_vgpr, /*high_word=*/false, arch,
+          ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
     return false;
   }
   if (!narrow_vcc())
@@ -1513,8 +1515,9 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const auto restore_claimed_publishers =
       instrumentation::build_s_mov_b64(kRdna4ExecLo, committed_exec_sgpr, arch);
   if (!append_compare_moi_report_dispatch_id_word(
-          words, point, bound_resources, prior_dispatch_high_vgpr, tmp_vgpr, /*high_word=*/true,
-          arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly) ||
+          words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
+          prior_dispatch_high_vgpr, tmp_vgpr, /*high_word=*/true, arch,
+          ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly) ||
       !save_same_dispatch || !restore_claimed_publishers) {
     return false;
   }
@@ -1548,9 +1551,10 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
                                        current_low_vgpr, arch)) {
     return false;
   }
-  if (!append_moi_report_dispatch_id_pair(words, point, bound_resources, current_low_vgpr,
-                                          static_cast<uint16_t>(current_low_vgpr + 1u), arch,
-                                          ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly) ||
+  if (!append_moi_report_dispatch_id_pair(
+          words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
+          current_low_vgpr, static_cast<uint16_t>(current_low_vgpr + 1u), arch,
+          ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly) ||
       !append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
                                        offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id),
                                        current_low_vgpr, arch) ||
@@ -3155,9 +3159,10 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
         }
       }
       std::vector<uint32_t> copy_dispatch_id;
-      if (!append_moi_report_dispatch_id_word(copy_dispatch_id, point, bound_resources, tmp_vgpr,
-                                              /*high_word=*/false, arch,
-                                              ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
+      if (!append_moi_report_dispatch_id_word(
+              copy_dispatch_id,
+              consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), tmp_vgpr,
+              /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode dispatch ID");
         return std::nullopt;
       }

@@ -204,8 +204,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     words.insert(words.end(), zero->begin(), zero->end());
     return true;
   }
-  if (!append_moi_report_dispatch_id_pair(words, point, resources, bank_vgpr, temporary_vgpr, arch,
-                                          ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+  if (!append_moi_report_dispatch_id_pair(
+          words, consan_moi_detail::moi_report_dispatch_id_sources(point, resources), bank_vgpr,
+          temporary_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
     return false;
   }
   const auto mix = [&](uint16_t source) {
@@ -272,9 +273,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     const ConSanMoiOperatingPoint &point, const BoundRuntimeResources &resources,
     const ConSanMoiWorkgroupSources &workgroup_sources, uint16_t residue_vgpr,
     uint16_t temporary_vgpr, uint16_t coordinate_vgpr, rj_code_arch_t arch) {
-  if (!append_moi_report_dispatch_id_pair(words, point, resources, residue_vgpr, temporary_vgpr,
-                                          arch,
-                                          ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+  if (!append_moi_report_dispatch_id_pair(
+          words, consan_moi_detail::moi_report_dispatch_id_sources(point, resources), residue_vgpr,
+          temporary_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
     return false;
   }
   const auto mix = [&](uint16_t source) {
@@ -839,7 +840,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
       !record.store_literal(offsetof(ConSanMoiSampledCausalWindow, generation) + 4u,
                             static_cast<uint32_t>(bound_resources.moi_report_generation >> 32u)) ||
       !append_store_moi_report_dispatch_id_pair(
-          record, point, bound_resources, offsetof(ConSanMoiSampledCausalWindow, dispatch_id), arch,
+          record, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
+          offsetof(ConSanMoiSampledCausalWindow, dispatch_id), arch,
           ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_x),
                               workgroup_sources->x,
@@ -995,7 +997,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
   const auto reject_unless_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
     if (!record.load(offset, low_vgpr) ||
         !append_compare_moi_report_dispatch_id_word(
-            words, point, bound_resources, low_vgpr, high_vgpr, high_word, arch,
+            words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
+            low_vgpr, high_vgpr, high_word, arch,
             ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
       return false;
     }

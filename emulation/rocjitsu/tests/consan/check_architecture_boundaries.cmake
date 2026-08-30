@@ -435,6 +435,17 @@ foreach(_file IN LISTS _native_emitter_sources)
         "native emitters must accept narrow typed plans"
     )
 endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_dynamic_record_emission.h"
+    "ConSanMoiOperatingPoint|BoundRuntimeResources"
+    "dynamic record emission must consume planned dispatch-identity sources"
+)
+_consan_assert_match_count_at_most(
+    "${_consan_dir}/consan_moi_report_emission.h"
+    "ConSanMoiOperatingPoint"
+    1
+    "report emission may inspect the operating point only at its source-planning boundary"
+)
 
 # Host decoding/analysis accepts typed static mappings rather than private
 # patch telemetry. Keep this checked separately from the lifecycle hook.

@@ -471,8 +471,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       !record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, generation) + 4u,
                             static_cast<uint32_t>(bound_resources.moi_report_generation >> 32u)) ||
       !append_store_moi_report_dispatch_id_pair(
-          record, point, bound_resources, offsetof(ConSanMoiSampledPendingAcquireSlot, dispatch_id),
-          arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
+          record, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
+          offsetof(ConSanMoiSampledPendingAcquireSlot, dispatch_id), arch,
+          ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_x),
                               workgroup_sources->x) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_y),
@@ -763,8 +764,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto narrow_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
     if (!append_load_u32_vgpr_at_offset(words, base, offset, value, arch) ||
         !append_compare_moi_report_dispatch_id_word(
-            words, point, bound_resources, value, expected, high_word, arch,
-            ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+            words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), value,
+            expected, high_word, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
       return false;
     }
     const auto narrow =

@@ -158,8 +158,8 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
 
 [[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
     std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
-    const std::array<ConSanMoiReportDispatchIdWordSource, 2> &sources, uint16_t slot_vgpr,
-    uint16_t scratch_vgpr, rj_code_arch_t arch, ConSanMoiLiteralDispatchIdPolicy policy) {
+    const ConSanMoiReportDispatchIdSources &sources, uint16_t slot_vgpr, uint16_t scratch_vgpr,
+    rj_code_arch_t arch, ConSanMoiLiteralDispatchIdPolicy policy) {
   for (const bool high_word : {false, true}) {
     const ConSanMoiReportDispatchIdWordSource &source = sources[high_word ? 1u : 0u];
     if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
@@ -177,18 +177,6 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
       return false;
   }
   return true;
-}
-
-[[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
-    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
-    const ConSanMoiOperatingPoint &point, const BoundRuntimeResources &resources,
-    uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch,
-    ConSanMoiLiteralDispatchIdPolicy policy) {
-  const std::array sources{
-      moi_report_dispatch_id_word_source(point, resources, /*high_word=*/false),
-      moi_report_dispatch_id_word_source(point, resources, /*high_word=*/true)};
-  return append_dynamic_record_store_moi_report_dispatch_id_pair(
-      words, layout, low_field_address, sources, slot_vgpr, scratch_vgpr, arch, policy);
 }
 
 [[nodiscard]] bool append_dynamic_record_store_workgroup_source(
