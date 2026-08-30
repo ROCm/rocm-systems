@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu::consan_moi_impl {
@@ -117,6 +118,23 @@ struct MoiAccessSpillFallbackContext {
   bool initial_spill_overlaps_guest = false;
 };
 
+/// Normalized facts used by a mode to declare its dispatch-identity demand.
+/// Target-family inspection and site traversal remain common solver work.
+struct MoiDispatchIdentityFacts {
+  bool target_uses_gfx12_cdna_execution = false;
+  bool has_access_or_atomic_consumer = false;
+};
+
+/// Mode-owned dispatch-identity policy consumed by common placement. The
+/// solver owns register search and retry; the mode owns whether identity is
+/// semantically required and which lossless fallback it permits.
+struct MoiDispatchIdentityPlan {
+  bool needs_dispatch_id = false;
+  std::optional<ConSanMoiFallbackKind> fallback_kind;
+  bool fallback_replans_dispatch_only = false;
+  std::string_view fallback_diagnostic;
+};
+
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.
 [[nodiscard]] MoiPersistentStateDemand make_exact_workgroup_capture_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
@@ -152,6 +170,9 @@ void apply_moi_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
 [[nodiscard]] MoiOperandOverlapSpillPolicy
 plan_moi_operand_overlap_spill(const MoiOperandOverlapSpillContext &context);
 
+[[nodiscard]] MoiDispatchIdentityPlan
+plan_moi_dispatch_identity(const ConSanRequest &request, const MoiDispatchIdentityFacts &facts);
+
 struct MoiModeOperations {
   MoiObjectModePlan (*plan)(const ConSanRequest &, const ConSanMoiOperatingPoint &,
                             const MoiObjectFacts &, const ConSanObservationPlan &);
@@ -169,6 +190,8 @@ struct MoiModeOperations {
   bool dynamic_stack_spill_requires_every_owner_dynamic;
   MoiOperandOverlapSpillPolicy (*operand_overlap_spill)(const MoiOperandOverlapSpillContext &);
   std::optional<uint16_t> (*access_spill_fallback)(const MoiAccessSpillFallbackContext &);
+  MoiDispatchIdentityPlan (*dispatch_identity)(const ConSanRequest &,
+                                               const MoiDispatchIdentityFacts &);
 };
 
 extern const MoiModeOperations kRecordReplayModeOperations;

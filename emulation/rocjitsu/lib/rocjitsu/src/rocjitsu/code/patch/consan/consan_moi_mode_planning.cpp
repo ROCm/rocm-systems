@@ -84,4 +84,9 @@ plan_moi_operand_overlap_spill(const MoiOperandOverlapSpillContext &context) {
   return moi_mode_operations(context.request.moi_engine).operand_overlap_spill(context);
 }
 
+MoiDispatchIdentityPlan plan_moi_dispatch_identity(const ConSanRequest &request,
+                                                   const MoiDispatchIdentityFacts &facts) {
+  return moi_mode_operations(request.moi_engine).dispatch_identity(request, facts);
+}
+
 } // namespace rocjitsu::consan_moi_impl

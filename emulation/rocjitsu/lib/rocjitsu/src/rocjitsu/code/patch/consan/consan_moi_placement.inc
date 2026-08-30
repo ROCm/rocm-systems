@@ -4496,20 +4496,17 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
   const ConSanRequest &request = problem.request();
   const BoundRuntimeResources &resources = problem.resources();
   const rj_code_arch_t arch = state.arch;
-  const bool has_inline_dispatch_consumer =
-      request.moi_engine == ConSanMoiEngine::InlineShadow &&
-      !(consan_uses_gfx12_cdna_execution(arch) && !request.moi_track_atomics) &&
+  const bool has_access_or_atomic_consumer =
       std::ranges::any_of(site_plans, [](const ConSanCandidateResourcePlan &plan) {
         return !plan.owner_descriptor_file_offsets.empty() &&
                (plan.site_kind == ConSanResourceSiteKind::Access ||
                 plan.site_kind == ConSanResourceSiteKind::Atomic);
       });
-  const bool needs_dispatch_id =
-      has_inline_dispatch_consumer || request.moi_engine == ConSanMoiEngine::RecordReplay ||
-      (request.moi_engine == ConSanMoiEngine::Sampled && request.moi_runtime_sample_stride > 1u &&
-       !consan_uses_gfx12_cdna_execution(arch));
-  if (!needs_dispatch_id || !resources.moi_report_buffer_address || options.moi_dispatch_id_sgpr ||
-      options.moi_dispatch_id_vgpr) {
+  const MoiDispatchIdentityPlan dispatch_identity = plan_moi_dispatch_identity(
+      request, {.target_uses_gfx12_cdna_execution = consan_uses_gfx12_cdna_execution(arch),
+                .has_access_or_atomic_consumer = has_access_or_atomic_consumer});
+  if (!dispatch_identity.needs_dispatch_id || !resources.moi_report_buffer_address ||
+      options.moi_dispatch_id_sgpr || options.moi_dispatch_id_vgpr) {
     return update;
   }
   const auto plan_contexts = resolve_moi_resource_plan_scalar_owner_contexts(state, site_plans);
@@ -4771,9 +4768,17 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
       .diagnostics = {},
   };
   const rj_code_arch_t arch = problem.arch();
-  if (!consan_is_capability_arch(arch) ||
-      (options.moi_engine != ConSanMoiEngine::RecordReplay &&
-       options.moi_engine != ConSanMoiEngine::Sampled) ||
+  const bool has_access_or_atomic_consumer =
+      std::ranges::any_of(site_plans, [](const ConSanCandidateResourcePlan &plan) {
+        return !plan.owner_descriptor_file_offsets.empty() &&
+               (plan.site_kind == ConSanResourceSiteKind::Access ||
+                plan.site_kind == ConSanResourceSiteKind::Atomic);
+      });
+  const MoiDispatchIdentityPlan dispatch_identity = plan_moi_dispatch_identity(
+      problem.request(),
+      {.target_uses_gfx12_cdna_execution = consan_uses_gfx12_cdna_execution(arch),
+       .has_access_or_atomic_consumer = has_access_or_atomic_consumer});
+  if (!consan_is_capability_arch(arch) || !dispatch_identity.fallback_kind ||
       !options.automatic_moi_dispatch_id_sgprs || !options.moi_dispatch_id_sgpr ||
       !options.moi_exec_save_sgpr) {
     return attempt;
@@ -4787,7 +4792,7 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
       options.owner_transient_sgprs;
   owner_transient_sgprs.clear();
   options.automatic_moi_partial_exec_save_sgprs = true;
-  const bool dispatch_only = options.moi_engine == ConSanMoiEngine::Sampled;
+  const bool dispatch_only = dispatch_identity.fallback_replans_dispatch_only;
   MoiResourcePlanningState planning_state(problem, options, site_plans);
   std::vector<std::string> diagnostics;
   if (!configure_automatic_moi_transient_sgpr_assignments(options, problem, site_plans, diagnostics,
@@ -4848,16 +4853,9 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
     return attempt;
   }
 
-  diagnostics.emplace_back(
-      options.moi_engine == ConSanMoiEngine::Sampled
-          ? "ConSan MOI selected owner-local literal dispatch IDs where the hardware pair "
-            "overlaps guest scalar state"
-          : "ConSan MOI selected owner-local zero-generation records where the hardware "
-            "dispatch-ID pair overlaps guest scalar state");
+  diagnostics.emplace_back(dispatch_identity.fallback_diagnostic);
   attempt.attempted_operating_point = static_cast<const ConSanMoiOperatingPoint &>(options);
-  attempt.accepted_fallback = options.moi_engine == ConSanMoiEngine::Sampled
-                                  ? ConSanMoiFallbackKind::SampledLiteralDispatchId
-                                  : ConSanMoiFallbackKind::RecordReplayZeroGeneration;
+  attempt.accepted_fallback = dispatch_identity.fallback_kind;
   attempt.diagnostics = std::move(diagnostics);
   return attempt;
 }

@@ -9,6 +9,7 @@ namespace {
 
 using consan_moi_impl::MoiObjectFacts;
 using consan_moi_impl::MoiPersistentStateFacts;
+using consan_moi_impl::plan_moi_dispatch_identity;
 using consan_moi_impl::plan_moi_dynamic_stack_spill;
 using consan_moi_impl::plan_moi_object_mode;
 using consan_moi_impl::plan_moi_operand_overlap_spill;
@@ -79,6 +80,34 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsOperandOverlapSpillPolicy) {
   request.moi_engine = ConSanMoiEngine::Sampled;
   EXPECT_TRUE(
       plan(ConSanResourceSiteKind::Atomic, ROCJITSU_CODE_ARCH_CDNA5, false, nullptr).supported);
+}
+
+TEST(ConSanMoiModePlanning, EachEngineOwnsItsDispatchIdentityPolicy) {
+  ConSanRequest request;
+
+  request.moi_engine = ConSanMoiEngine::RecordReplay;
+  auto plan = plan_moi_dispatch_identity(request, {});
+  EXPECT_TRUE(plan.needs_dispatch_id);
+  EXPECT_EQ(plan.fallback_kind, ConSanMoiFallbackKind::RecordReplayZeroGeneration);
+  EXPECT_FALSE(plan.fallback_replans_dispatch_only);
+
+  request.moi_engine = ConSanMoiEngine::Sampled;
+  request.moi_runtime_sample_stride = 8u;
+  plan = plan_moi_dispatch_identity(request, {});
+  EXPECT_TRUE(plan.needs_dispatch_id);
+  EXPECT_EQ(plan.fallback_kind, ConSanMoiFallbackKind::SampledLiteralDispatchId);
+  EXPECT_TRUE(plan.fallback_replans_dispatch_only);
+  EXPECT_FALSE(plan_moi_dispatch_identity(request, {.target_uses_gfx12_cdna_execution = true})
+                   .needs_dispatch_id);
+
+  request.moi_engine = ConSanMoiEngine::InlineShadow;
+  plan = plan_moi_dispatch_identity(request, {.has_access_or_atomic_consumer = true});
+  EXPECT_TRUE(plan.needs_dispatch_id);
+  EXPECT_FALSE(plan.fallback_kind);
+  request.moi_track_atomics = false;
+  EXPECT_FALSE(plan_moi_dispatch_identity(request, {.target_uses_gfx12_cdna_execution = true,
+                                                    .has_access_or_atomic_consumer = true})
+                   .needs_dispatch_id);
 }
 
 TEST(ConSanMoiModePlanning, RecordReplaySelectsDenseRoutingFromNormalizedTargetFacts) {

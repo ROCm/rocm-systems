@@ -237,6 +237,19 @@ sampled_access_spill_fallback(const MoiAccessSpillFallbackContext &context) {
                                             context.arch);
 }
 
+MoiDispatchIdentityPlan plan_sampled_dispatch_identity(const ConSanRequest &request,
+                                                       const MoiDispatchIdentityFacts &facts) {
+  return {
+      .needs_dispatch_id =
+          request.moi_runtime_sample_stride > 1u && !facts.target_uses_gfx12_cdna_execution,
+      .fallback_kind = ConSanMoiFallbackKind::SampledLiteralDispatchId,
+      .fallback_replans_dispatch_only = true,
+      .fallback_diagnostic =
+          "ConSan MOI selected owner-local literal dispatch IDs where the hardware pair "
+          "overlaps guest scalar state",
+  };
+}
+
 const MoiModeOperations kSampledModeOperations = {
     plan_sampled_object_mode,
     apply_sampled_mode_patches,
@@ -246,6 +259,7 @@ const MoiModeOperations kSampledModeOperations = {
     true,
     sampled_operand_overlap_spill,
     sampled_access_spill_fallback,
+    plan_sampled_dispatch_identity,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"

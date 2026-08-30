@@ -184,6 +184,17 @@ record_replay_operand_overlap_spill(const MoiOperandOverlapSpillContext &context
   return policy;
 }
 
+MoiDispatchIdentityPlan plan_record_replay_dispatch_identity(const ConSanRequest &,
+                                                             const MoiDispatchIdentityFacts &) {
+  return {
+      .needs_dispatch_id = true,
+      .fallback_kind = ConSanMoiFallbackKind::RecordReplayZeroGeneration,
+      .fallback_diagnostic =
+          "ConSan MOI selected owner-local zero-generation records where the hardware "
+          "dispatch-ID pair overlaps guest scalar state",
+  };
+}
+
 const MoiModeOperations kRecordReplayModeOperations = {
     plan_record_replay_object_mode,
     apply_record_replay_mode_patches,
@@ -193,6 +204,7 @@ const MoiModeOperations kRecordReplayModeOperations = {
     true,
     record_replay_operand_overlap_spill,
     nullptr,
+    plan_record_replay_dispatch_identity,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"

@@ -185,6 +185,19 @@ inline_shadow_access_spill_fallback(const MoiAccessSpillFallbackContext &context
                                                   context.arch);
 }
 
+MoiDispatchIdentityPlan
+plan_inline_shadow_dispatch_identity(const ConSanRequest &request,
+                                     const MoiDispatchIdentityFacts &facts) {
+  return {
+      .needs_dispatch_id =
+          !(facts.target_uses_gfx12_cdna_execution && !request.moi_track_atomics) &&
+          facts.has_access_or_atomic_consumer,
+      .fallback_kind = std::nullopt,
+      .fallback_replans_dispatch_only = false,
+      .fallback_diagnostic = {},
+  };
+}
+
 const MoiModeOperations kInlineShadowModeOperations = {
     plan_inline_shadow_object_mode,
     apply_inline_shadow_mode_patches,
@@ -194,6 +207,7 @@ const MoiModeOperations kInlineShadowModeOperations = {
     false,
     inline_shadow_operand_overlap_spill,
     inline_shadow_access_spill_fallback,
+    plan_inline_shadow_dispatch_identity,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"
