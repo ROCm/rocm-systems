@@ -468,16 +468,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       result.errors.emplace_back(
           "ConSan atomic fault plans do not describe one composed semantic target");
     } else {
-      ConSanOptions options = make_fault_application_options(context);
-      options.fault_site_identity = primary.primary_identity;
-      options.fault_atomic_wrong_address = atomic_address != nullptr;
-      options.fault_atomic_weaken_order = atomic_order != nullptr;
-      options.fault_atomic_weaken_scope = atomic_scope != nullptr;
-      if (atomic_address)
-        options.fault_atomic_address_delta = *atomic_address->address_delta_bytes;
-      if (atomic_order)
-        options.fault_atomic_order_edge = *atomic_order->atomic_order_edge;
-      try_apply_atomic_fault_patch(code_object, arch, options, result);
+      try_apply_atomic_fault_patch(code_object, arch, atomic_address, atomic_order, atomic_scope,
+                                   result);
     }
   }
   if (const ConSanFaultMutationPlan *plan =

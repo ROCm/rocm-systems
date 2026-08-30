@@ -293,6 +293,7 @@ foreach(
     IN ITEMS
        try_apply_barrier_id_scope_fault_patch
        try_apply_barrier_participant_fault_patch
+       try_apply_atomic_fault_patch
        try_apply_lds_fault_patch
 )
     if(NOT _fault_application_contract MATCHES

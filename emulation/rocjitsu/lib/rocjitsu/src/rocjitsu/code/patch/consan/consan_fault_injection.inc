@@ -1473,36 +1473,36 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
 }
 
 void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                  const ConSanOptions &options, ConSanTransformArtifacts &result) {
+                                  const ConSanFaultMutationPlan *address_plan,
+                                  const ConSanFaultMutationPlan *order_plan,
+                                  const ConSanFaultMutationPlan *scope_plan,
+                                  ConSanTransformArtifacts &result) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
+  const ConSanFaultMutationPlan *primary_plan =
+      address_plan != nullptr ? address_plan : (order_plan != nullptr ? order_plan : scope_plan);
   const ConSanFaultSite *selected =
-      select_fault_site_for_plan(fault_selection_view(result), options, ConSanFaultSiteKind::Atomic,
-                                 options.fault_atomic_index);
+      primary_plan != nullptr
+          ? find_fault_site_by_identity(fault_selection_view(result),
+                                        primary_plan->primary_identity, ConSanFaultSiteKind::Atomic)
+          : nullptr;
   if (!selected) {
-    if (!options.fault_site_identity.empty()) {
-      result.warnings.emplace_back("ConSan atomic fault found no site with exact identity '" +
-                                   options.fault_site_identity + "'");
-    } else {
-      result.warnings.emplace_back(
-          "ConSan atomic fault found no patchable flat/global atomic at index " +
-          std::to_string(options.fault_atomic_index));
-    }
+    result.errors.emplace_back("ConSan atomic fault plan no longer matches its pristine site");
     return;
   }
 
   const AtomicFaultEncoding encoding =
       atomic_fault_encoding(selected->mnemonic, selected->size, arch);
-  if (options.fault_atomic_weaken_scope && !atomic_fault_supports_scope(encoding)) {
+  if (scope_plan != nullptr && !atomic_fault_supports_scope(encoding)) {
     result.errors.emplace_back(
         "ConSan atomic scope fault is unsupported for the selected atomic encoding");
     return;
   }
-  if (options.fault_atomic_weaken_order && !atomic_fault_supports_order(encoding)) {
+  if (order_plan != nullptr && !atomic_fault_supports_order(encoding)) {
     result.errors.emplace_back(
         "ConSan atomic order fault is unsupported for the selected atomic encoding");
     return;
   }
-  if (options.fault_atomic_wrong_address && !atomic_fault_supports_address(encoding)) {
+  if (address_plan != nullptr && !atomic_fault_supports_address(encoding)) {
     result.errors.emplace_back(
         "ConSan atomic address fault is unsupported for the selected atomic encoding");
     return;
@@ -1514,10 +1514,9 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
     result.replacement.assign(original_bytes.begin(), original_bytes.end());
   std::array<uint32_t, 3> words{};
   std::memcpy(words.data(), result.replacement.data() + selected->file_offset, selected->size);
-  if (options.fault_atomic_wrong_address) {
-    if (options.fault_atomic_address_delta == 0 ||
-        options.fault_atomic_address_delta % sizeof(uint32_t) != 0 ||
-        options.fault_atomic_address_delta > 0x7fffffu) {
+  if (address_plan != nullptr) {
+    const uint32_t address_delta = address_plan->address_delta_bytes.value_or(0u);
+    if (address_delta == 0 || address_delta % sizeof(uint32_t) != 0 || address_delta > 0x7fffffu) {
       result.errors.emplace_back(
           "ConSan atomic address delta must be a positive aligned signed-24-bit offset");
       return;
@@ -1525,7 +1524,7 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
     if (encoding == AtomicFaultEncoding::Ds) {
       // RDNA4 VDS offset0 is the low byte of word 0. DS atomic addresses are
       // byte addressed, so retain the requested natural u32 alignment.
-      const uint32_t replacement_offset = (words[0] & 0xffu) + options.fault_atomic_address_delta;
+      const uint32_t replacement_offset = (words[0] & 0xffu) + address_delta;
       if (replacement_offset > 0xffu) {
         result.errors.emplace_back("ConSan DS atomic address delta overflows 8-bit offset0");
         return;
@@ -1541,8 +1540,7 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
       // The high 24 bits of word 2 are the signed byte ioffset on RDNA4 flat,
       // global, and buffer atomics.
       const int32_t original_offset = sign_extend_24(words[2] >> 8u);
-      const int64_t replacement_offset =
-          static_cast<int64_t>(original_offset) + options.fault_atomic_address_delta;
+      const int64_t replacement_offset = static_cast<int64_t>(original_offset) + address_delta;
       if (replacement_offset > 0x7fffff) {
         result.errors.emplace_back("ConSan atomic address delta overflows signed-24-bit ioffset");
         return;
@@ -1558,7 +1556,9 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
     info.original_size = selected->size;
     result.patches.push_back(info);
   }
-  if (options.fault_atomic_weaken_order) {
+  if (order_plan != nullptr) {
+    const ConSanAtomicOrderEdge order_edge =
+        order_plan->atomic_order_edge.value_or(ConSanAtomicOrderEdge::Any);
     const ConSanSyncSequence *sequence =
         selected->sync_event_identity
             ? result.program_inventory.sync().find_unique_sequence_containing(
@@ -1569,7 +1569,7 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
     if (sequence != nullptr &&
         consan_sync_confidence_meets(sequence->memory_role_confidence,
                                      ConSanSemanticConfidence::Conservative)) {
-      if (options.fault_atomic_order_edge != ConSanAtomicOrderEdge::Acquire)
+      if (order_edge != ConSanAtomicOrderEdge::Acquire)
         release_wait_text_offset = sequence->release_wait_text_offset;
       for (const std::string &identity : sequence->member_event_identities) {
         const auto event = std::ranges::find_if(sync.sync_events, [&](const auto &candidate) {
@@ -1577,11 +1577,9 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
         });
         const bool edge_matches =
             event != sync.sync_events.end() &&
-            (options.fault_atomic_order_edge == ConSanAtomicOrderEdge::Any ||
-             (options.fault_atomic_order_edge == ConSanAtomicOrderEdge::Release &&
-              is_release_cache_event(&*event)) ||
-             (options.fault_atomic_order_edge == ConSanAtomicOrderEdge::Acquire &&
-              is_acquire_cache_event(&*event)));
+            (order_edge == ConSanAtomicOrderEdge::Any ||
+             (order_edge == ConSanAtomicOrderEdge::Release && is_release_cache_event(&*event)) ||
+             (order_edge == ConSanAtomicOrderEdge::Acquire && is_acquire_cache_event(&*event)));
         if (edge_matches) {
           fence = &*event;
           break;
@@ -1594,8 +1592,8 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
     // removed. Discover it directly so the staged reinventory observes the
     // complete weakened boundary rather than re-admitting the same atomic.
     if (encoding != AtomicFaultEncoding::CdnaFlat && !release_wait_text_offset &&
-        options.fault_atomic_order_edge != ConSanAtomicOrderEdge::Acquire &&
-        selected->text_offset >= sizeof(uint32_t) && selected->file_offset >= sizeof(uint32_t)) {
+        order_edge != ConSanAtomicOrderEdge::Acquire && selected->text_offset >= sizeof(uint32_t) &&
+        selected->file_offset >= sizeof(uint32_t)) {
       const auto expected_combined = build_s_wait_storecnt_dscnt0(arch);
       const auto expected_store = build_s_wait_storecnt0(arch);
       uint32_t preceding_word = 0;
@@ -1710,7 +1708,7 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
     if (release_wait_info)
       result.patches.push_back(*release_wait_info);
   }
-  if (options.fault_atomic_weaken_scope) {
+  if (scope_plan != nullptr) {
     const uint32_t original_scope = (words[1] >> 18u) & 0x3u;
     if (original_scope == 0) {
       result.errors.emplace_back("ConSan atomic scope fault cannot weaken wave scope further");
@@ -1729,10 +1727,10 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
   }
   std::memcpy(result.replacement.data() + selected->file_offset, words.data(), selected->size);
   result.mark_modified();
-  if (options.fault_atomic_wrong_address) {
+  if (address_plan != nullptr) {
     result.warnings.emplace_back("ConSan atomic fault rewrote " + selected->mnemonic +
                                  " with validated address delta " +
-                                 std::to_string(options.fault_atomic_address_delta));
+                                 std::to_string(*address_plan->address_delta_bytes));
   }
 }
 
