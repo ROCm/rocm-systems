@@ -230,10 +230,22 @@ sampled_operand_overlap_spill(const MoiOperandOverlapSpillContext &context) {
   return policy;
 }
 
+std::optional<uint16_t>
+sampled_access_spill_fallback(const MoiAccessSpillFallbackContext &context) {
+  if (!sampled_access_supports_spill_backed_operand_recovery(context.request, context.candidate,
+                                                             context.arch) ||
+      (!context.no_ordinary_window && !context.initial_spill_overlaps_guest)) {
+    return std::nullopt;
+  }
+  return sampled_spill_backed_scratch_count(context.request, context.point, context.candidate,
+                                            context.arch);
+}
+
 const MoiModeOperations kSampledModeOperations = {
     plan_sampled_object_mode,          apply_sampled_mode_patches,
     sampled_access_scratch_vgpr_count, plan_sampled_persistent_state_demand,
     sampled_dynamic_stack_spill,       sampled_operand_overlap_spill,
+    sampled_access_spill_fallback,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"

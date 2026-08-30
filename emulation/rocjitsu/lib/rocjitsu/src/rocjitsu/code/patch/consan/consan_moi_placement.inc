@@ -2636,48 +2636,29 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
       }
       site_point = std::move(owner_point);
     }
-    bool initial_sampled_spill_overlaps_guest = false;
+    bool initial_spill_overlaps_guest = false;
     if (plan.source == ConSanRegisterAllocationSource::SpillRequired && plan.scratch_vgpr) {
       std::vector<std::string> ignored_overlap_errors;
-      initial_sampled_spill_overlaps_guest = reject_candidate_scratch_range_overlap(
+      initial_spill_overlaps_guest = reject_candidate_scratch_range_overlap(
           candidate, *plan.scratch_vgpr, plan.scratch_vgpr_count, ignored_overlap_errors);
     }
-    if (sampled_access_supports_spill_backed_operand_recovery(request, candidate, state.arch) &&
-        ((plan.source == ConSanRegisterAllocationSource::Unsupported &&
-          plan.reason == ConSanRegisterPlanReason::NoLegalWindow) ||
-         initial_sampled_spill_overlaps_guest)) {
-      const uint16_t spill_scratch_count =
-          sampled_spill_backed_scratch_count(request, site_point, candidate, state.arch);
+    const bool no_ordinary_window = plan.source == ConSanRegisterAllocationSource::Unsupported &&
+                                    plan.reason == ConSanRegisterPlanReason::NoLegalWindow;
+    const auto fallback_planner = moi_mode_operations(request.moi_engine).access_spill_fallback;
+    const std::optional<uint16_t> spill_scratch_count =
+        fallback_planner
+            ? fallback_planner({request, site_point, candidate, state.arch, no_ordinary_window,
+                                plan.source == ConSanRegisterAllocationSource::SpillRequired,
+                                initial_spill_overlaps_guest})
+            : std::nullopt;
+    if (spill_scratch_count) {
       ConSanCandidateResourcePlan spill_plan = plan_moi_resource_site(
           state, request, debug, site_point, ConSanResourceSiteKind::Access, candidate_index,
-          candidate.anchor(), candidate.kernel_descriptor_file_offset, spill_scratch_count,
+          candidate.anchor(), candidate.kernel_descriptor_file_offset, *spill_scratch_count,
           &candidate, /*atomic_form=*/nullptr, /*require_spill=*/true);
       adopt_moi_resource_plan_fallback(
           plan, std::move(spill_plan),
-          ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery, spill_scratch_count);
-    }
-    if (request.moi_engine == ConSanMoiEngine::InlineShadow &&
-        (consan_uses_gfx9_cdna_encoding(state.arch)) && !candidate.is_flat() &&
-        moi_load_clobbers_address(candidate) &&
-        !candidate_requires_flat_address_materialization(candidate) &&
-        (plan.source == ConSanRegisterAllocationSource::SpillRequired ||
-         (plan.source == ConSanRegisterAllocationSource::Unsupported &&
-          plan.reason == ConSanRegisterPlanReason::NoLegalWindow))) {
-      const uint16_t spill_scratch_count =
-          inline_shadow_spill_backed_scratch_count(request, site_point, candidate, state.arch);
-      ConSanCandidateResourcePlan spill_plan = plan_moi_resource_site(
-          state, request, debug, site_point, ConSanResourceSiteKind::Access, candidate_index,
-          candidate.anchor(), candidate.kernel_descriptor_file_offset, spill_scratch_count,
-          &candidate, /*atomic_form=*/nullptr, /*require_spill=*/true);
-      // The reduced window omits the dedicated address snapshot. If it spills
-      // the clobbered address, emission recovers the value from its private
-      // slot. If it is disjoint, InlineShadow can consume the original address
-      // in place because the application load is deferred until after the
-      // instrumentation and spill restore. Both cases therefore fit the same
-      // compact transaction window.
-      adopt_moi_resource_plan_fallback(
-          plan, std::move(spill_plan),
-          ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery, spill_scratch_count);
+          ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery, *spill_scratch_count);
     }
     plans.push_back(std::move(plan));
   }

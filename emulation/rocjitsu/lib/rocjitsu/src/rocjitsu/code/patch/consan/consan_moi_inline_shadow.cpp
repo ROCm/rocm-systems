@@ -174,10 +174,26 @@ inline_shadow_operand_overlap_spill(const MoiOperandOverlapSpillContext &context
   return policy;
 }
 
+std::optional<uint16_t>
+inline_shadow_access_spill_fallback(const MoiAccessSpillFallbackContext &context) {
+  if (!consan_uses_gfx9_cdna_encoding(context.arch) || context.candidate.is_flat() ||
+      !moi_load_clobbers_address(context.candidate) ||
+      candidate_requires_flat_address_materialization(context.candidate) ||
+      (!context.spill_required && !context.no_ordinary_window)) {
+    return std::nullopt;
+  }
+  // The compact transaction omits a dedicated address snapshot. Emission
+  // either recovers a spilled address or consumes the original address before
+  // the deferred application load.
+  return inline_shadow_spill_backed_scratch_count(context.request, context.point, context.candidate,
+                                                  context.arch);
+}
+
 const MoiModeOperations kInlineShadowModeOperations = {
     plan_inline_shadow_object_mode,          apply_inline_shadow_mode_patches,
     inline_shadow_access_scratch_vgpr_count, plan_inline_shadow_persistent_state_demand,
     inline_shadow_dynamic_stack_spill,       inline_shadow_operand_overlap_spill,
+    inline_shadow_access_spill_fallback,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"

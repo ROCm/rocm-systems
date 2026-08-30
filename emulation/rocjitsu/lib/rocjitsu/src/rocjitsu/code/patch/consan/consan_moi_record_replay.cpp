@@ -190,9 +190,13 @@ record_replay_operand_overlap_spill(const MoiOperandOverlapSpillContext &context
 }
 
 const MoiModeOperations kRecordReplayModeOperations = {
-    plan_record_replay_object_mode,          apply_record_replay_mode_patches,
-    record_replay_access_scratch_vgpr_count, plan_record_replay_persistent_state_demand,
-    record_replay_dynamic_stack_spill,       record_replay_operand_overlap_spill,
+    plan_record_replay_object_mode,
+    apply_record_replay_mode_patches,
+    record_replay_access_scratch_vgpr_count,
+    plan_record_replay_persistent_state_demand,
+    record_replay_dynamic_stack_spill,
+    record_replay_operand_overlap_spill,
+    nullptr,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"

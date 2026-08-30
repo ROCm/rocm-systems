@@ -110,6 +110,18 @@ struct MoiOperandOverlapSpillContext {
   bool guest_replay_requires_disjoint_address_scratch = false;
 };
 
+/// Mode-owned request for a smaller spill-backed transaction after ordinary
+/// access placement. Common placement retries with the returned scratch size.
+struct MoiAccessSpillFallbackContext {
+  const ConSanRequest &request;
+  const ConSanMoiOperatingPoint &point;
+  const ConSanMoiCandidate &candidate;
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  bool no_ordinary_window = false;
+  bool spill_required = false;
+  bool initial_spill_overlaps_guest = false;
+};
+
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.
 [[nodiscard]] MoiPersistentStateDemand make_exact_workgroup_capture_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
@@ -160,6 +172,7 @@ struct MoiModeOperations {
                                                       const MoiPersistentStateFacts &);
   MoiDynamicStackSpillPolicy (*dynamic_stack_spill)(const MoiDynamicStackSpillFacts &);
   MoiOperandOverlapSpillPolicy (*operand_overlap_spill)(const MoiOperandOverlapSpillContext &);
+  std::optional<uint16_t> (*access_spill_fallback)(const MoiAccessSpillFallbackContext &);
 };
 
 extern const MoiModeOperations kRecordReplayModeOperations;
