@@ -4190,11 +4190,7 @@ moi_indirect_jump_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPo
   // libraries: their recovered CFG can conservatively expose a low window as
   // dead at every instrumented instruction even though compiler mask state in
   // one owner is not safely represented by that object-wide site union.
-  const bool supports_partial_owner_exec =
-      consan_is_capability_arch(arch) && (request.moi_engine == ConSanMoiEngine::RecordReplay ||
-                                          request.moi_engine == ConSanMoiEngine::InlineShadow ||
-                                          request.moi_engine == ConSanMoiEngine::Sampled);
-  if (supports_partial_owner_exec) {
+  if (consan_is_capability_arch(arch)) {
     const int32_t last_base = static_cast<int32_t>((ordinary_sgpr_limit - count) & ~1u);
     for (int32_t base = last_base; base >= 0; base -= 2) {
       const uint16_t candidate = static_cast<uint16_t>(base);
@@ -5259,62 +5255,24 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
       update.prologue_scratch_assignments;
   const std::span<const uint8_t> bytes = planning_state.bytes;
   const rj_code_arch_t arch = planning_state.arch;
-  const bool has_supported_sampled_sync =
-      request.moi_engine == ConSanMoiEngine::Sampled &&
-      std::ranges::any_of(resource_plans, [](const ConSanCandidateResourcePlan &plan) {
-        return (plan.site_kind == ConSanResourceSiteKind::Barrier ||
-                plan.site_kind == ConSanResourceSiteKind::Atomic) &&
-               plan.source != ConSanRegisterAllocationSource::Unsupported &&
-               !plan.owner_descriptor_file_offsets.empty();
-      });
-  // Runtime sampling is spatial: dispatch and workgroup identity select a
-  // bank, while the LDS cell selects an address. No per-workitem sequence is
-  // read by the emitted probes, so persistent Sampled state is only
-  // owner/epoch.
-  const bool needs_inline_workgroup_key =
-      request.moi_engine == ConSanMoiEngine::InlineShadow &&
-      std::ranges::any_of(resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-        // Operational resource plans have already filtered out semantically
-        // unsupported atomics, so they are the authoritative pre-placement
-        // signal here.
-        if (plan.source == ConSanRegisterAllocationSource::Unsupported ||
-            plan.owner_descriptor_file_offsets.empty())
-          return false;
-        if (plan.site_kind == ConSanResourceSiteKind::Atomic)
-          return true;
-        // Capture the full workgroup identity at kernel entry for every Inline
-        // access. CDNA ordinary entry SGPRs and RDNA-family TTMP launch inputs
-        // are both entry ABI values; probes must not rely on either remaining
-        // available after arbitrary guest code.
-        return plan.site_kind == ConSanResourceSiteKind::Access;
-      });
-  // Every Record/Replay layout publishes exact workgroup coordinates. Banking
-  // changes retention and scratch requirements, but a caller-owned single-bank
-  // probe executes under the same entry-state lifetime rule as an automatic
-  // probe.
-  const bool has_supported_record_replay_site =
-      std::ranges::any_of(resource_plans, [](const ConSanCandidateResourcePlan &plan) {
-        return plan.source != ConSanRegisterAllocationSource::Unsupported &&
-               !plan.owner_descriptor_file_offsets.empty() &&
-               (plan.site_kind == ConSanResourceSiteKind::Access ||
-                plan.site_kind == ConSanResourceSiteKind::Barrier ||
-                plan.site_kind == ConSanResourceSiteKind::Atomic ||
-                plan.site_kind == ConSanResourceSiteKind::Fence);
-      });
-  const bool needs_record_replay_workgroup_tuple =
-      record_replay_requires_entry_workgroup_capture(request.moi_engine) &&
-      has_supported_record_replay_site && !record_replay_has_entry_workgroup_capture(options);
+  MoiPersistentStateFacts persistent_facts;
+  for (const ConSanCandidateResourcePlan &plan : resource_plans) {
+    if (plan.source == ConSanRegisterAllocationSource::Unsupported ||
+        plan.owner_descriptor_file_offsets.empty()) {
+      continue;
+    }
+    persistent_facts.access_count += plan.site_kind == ConSanResourceSiteKind::Access;
+    persistent_facts.atomic_count += plan.site_kind == ConSanResourceSiteKind::Atomic;
+    persistent_facts.barrier_count += plan.site_kind == ConSanResourceSiteKind::Barrier;
+    persistent_facts.fence_count += plan.site_kind == ConSanResourceSiteKind::Fence;
+  }
+  const MoiPersistentStateDemand persistent_demand =
+      plan_moi_persistent_state_demand(request, resources, options, persistent_facts);
+  const bool needs_record_replay_workgroup_tuple = persistent_demand.needs_entry_workgroup_tuple;
   const bool needs_cluster_workgroup_id =
       needs_record_replay_workgroup_tuple && consan_arch_has_cluster_facilities(arch) &&
       std::ranges::any_of(program_inventory.kernels(), [](const ConSanKernelInfo &kernel) {
         return kernel.uses_cluster_workgroup_id;
-      });
-  const bool has_supported_record_replay_access =
-      request.moi_engine == ConSanMoiEngine::RecordReplay &&
-      std::ranges::any_of(resource_plans, [](const ConSanCandidateResourcePlan &plan) {
-        return plan.source != ConSanRegisterAllocationSource::Unsupported &&
-               !plan.owner_descriptor_file_offsets.empty() &&
-               plan.site_kind == ConSanResourceSiteKind::Access;
       });
   const bool is_rdna_dispatch_vgpr_arch = consan_uses_gfx11_or_gfx12_encoding(arch);
   const bool private_inline_dispatch_incompatible_with_dynamic_stack =
@@ -5330,11 +5288,9 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
                });
       });
   const bool needs_persistent_dispatch_vgprs =
-      (is_rdna_dispatch_vgpr_arch && has_supported_record_replay_access &&
-       record_replay_uses_automatic_banked_capture(request, resources) &&
-       !moi_has_runtime_hardware_dispatch_id(options)) ||
+      (is_rdna_dispatch_vgpr_arch && persistent_demand.needs_persistent_dispatch_capture) ||
       private_inline_dispatch_incompatible_with_dynamic_stack;
-  const bool needs_workgroup_key = needs_inline_workgroup_key;
+  const bool needs_workgroup_key = persistent_demand.needs_workgroup_key;
   const bool has_explicit_owner_epoch = options.moi_owner_vgpr && options.moi_epoch_vgpr;
   if (!record_replay_entry_workgroup_capture_is_unambiguous(options)) {
     update.rejection = ConSanMoiPlacementRejection::AmbiguousWorkgroupCapture;
@@ -5351,17 +5307,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
   if ((options.moi_workgroup_key_vgpr && !needs_record_replay_workgroup_tuple) ||
       (has_explicit_owner_epoch && !needs_record_replay_workgroup_tuple))
     return update;
-  // Sampled access probes execute after arbitrary guest instructions. Their
-  // owner must therefore come from entry-captured persistent state even when
-  // the code object has no semantically admitted synchronization site; v0 is
-  // only the ABI workitem ID at kernel entry and may be clobbered later.
-  const bool needs_persistent_state =
-      moi_initializes_owner_epoch(request, options) || needs_record_replay_workgroup_tuple ||
-      (request.moi_track_atomics && request.moi_engine != ConSanMoiEngine::RecordReplay) ||
-      (request.moi_engine == ConSanMoiEngine::Sampled &&
-       (request.moi_track_barriers || request.moi_runtime_sample_stride > 1u)) ||
-      request.moi_engine == ConSanMoiEngine::InlineShadow;
-  if (!needs_persistent_state)
+  if (!persistent_demand.needs_persistent_state)
     return update;
   if (!resources.moi_report_buffer_address)
     return update;
@@ -6112,36 +6058,6 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
                      plan.owner_descriptor_file_offsets.end();
         });
       });
-  const size_t record_replay_barrier_sites =
-      request.moi_engine == ConSanMoiEngine::RecordReplay && request.moi_track_barriers
-          ? std::ranges::count_if(resource_plans,
-                                  [](const ConSanCandidateResourcePlan &plan) {
-                                    return plan.site_kind == ConSanResourceSiteKind::Barrier &&
-                                           plan.source !=
-                                               ConSanRegisterAllocationSource::Unsupported &&
-                                           !plan.owner_descriptor_file_offsets.empty();
-                                  })
-          : 0u;
-  const size_t record_replay_access_sites =
-      request.moi_engine == ConSanMoiEngine::RecordReplay
-          ? std::ranges::count_if(resource_plans,
-                                  [](const ConSanCandidateResourcePlan &plan) {
-                                    return plan.site_kind == ConSanResourceSiteKind::Access &&
-                                           plan.source !=
-                                               ConSanRegisterAllocationSource::Unsupported &&
-                                           !plan.owner_descriptor_file_offsets.empty();
-                                  })
-          : 0u;
-  // This is an automatic operating-point choice, not a user-facing limit.
-  // Small barrier inventories benefit from compact persistent-epoch barriers;
-  // larger barrier-dense Record/Replay objects benefit more from private-epoch
-  // access coalescing. Qwen's 28 barrier sites and the access-heavy TP
-  // workloads avoid millions of dynamic barrier records.
-  constexpr size_t kCompactRecordReplayBarrierSiteLimit = 32u;
-  const bool prefer_compact_record_replay_barriers =
-      record_replay_barrier_sites > 0u &&
-      (record_replay_barrier_sites <= kCompactRecordReplayBarrierSiteLimit ||
-       record_replay_access_sites >= 2u * record_replay_barrier_sites);
   // Private epoch storage is address-free scratch and therefore cannot be
   // composed with a guest dynamic stack. If persistent state fits in the
   // architectural VGPR file, grow those owner descriptors instead. The
@@ -6152,13 +6068,6 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
   // workitem and barrier execution. That can turn a small static inventory
   // into millions of records. Prefer bounded descriptor growth so those
   // barriers use the compact inline-epoch path instead.
-  // A synchronization-aware Sampled probe must preserve one owner identity
-  // from kernel entry through both access and sync sites. Its private-epoch
-  // fallback otherwise derives the access owner from guest-reusable v0 and
-  // can publish the reserved owner zero on real compiler output. Access-only
-  // Sampled objects retain the cheaper private-state choice.
-  const bool sampled_requires_persistent_owner =
-      request.moi_engine == ConSanMoiEngine::Sampled && has_supported_sampled_sync;
   // InlineShadow reads owner state on every instrumented LDS access. A
   // scratch-backed owner made a complete multi-kernel CLIP invocation spend
   // more than a minute repeatedly loading that state, whereas two persistent
@@ -6169,14 +6078,12 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
   // VGPR-bank transitions, so entry-snapshotted private state avoids treating
   // a remapped tail VGPR as a different owner while retaining the same exact
   // shadow semantics.
-  const bool record_replay_private_tuple_supported =
-      needs_record_replay_workgroup_tuple &&
-      !record_replay_uses_automatic_banked_capture(request, resources);
   const bool prefer_private_epoch =
-      !has_dynamic_stack_owner && !prefer_compact_record_replay_barriers && !needs_workgroup_key &&
-      !has_explicit_owner_epoch &&
-      (!needs_record_replay_workgroup_tuple || record_replay_private_tuple_supported) &&
-      !sampled_requires_persistent_owner &&
+      !has_dynamic_stack_owner && !persistent_demand.prefer_compact_barriers &&
+      !needs_workgroup_key && !has_explicit_owner_epoch &&
+      (!needs_record_replay_workgroup_tuple ||
+       persistent_demand.private_workgroup_tuple_supported) &&
+      !persistent_demand.synchronization_requires_persistent_owner &&
       (has_dynamic_lds_owner ||
        (would_grow_descriptor && request.moi_engine != ConSanMoiEngine::InlineShadow));
   const bool rdna_needs_scalar_epoch = consan_uses_gfx11_or_gfx12_encoding(arch) &&

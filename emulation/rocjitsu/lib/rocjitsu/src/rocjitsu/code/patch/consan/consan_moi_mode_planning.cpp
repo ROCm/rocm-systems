@@ -3,7 +3,23 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 
+#include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
+
 namespace rocjitsu::consan_moi_impl {
+
+MoiPersistentStateDemand make_exact_workgroup_capture_demand(const ConSanRequest &request,
+                                                             const BoundRuntimeResources &resources,
+                                                             const ConSanMoiOperatingPoint &point,
+                                                             const MoiPersistentStateFacts &facts) {
+  MoiPersistentStateDemand demand;
+  demand.needs_entry_workgroup_tuple =
+      (facts.access_count || facts.atomic_count || facts.barrier_count || facts.fence_count) &&
+      !consan_moi_detail::record_replay_has_entry_workgroup_capture(point);
+  demand.private_workgroup_tuple_supported =
+      demand.needs_entry_workgroup_tuple &&
+      !consan_moi_detail::record_replay_uses_automatic_banked_capture(request, resources);
+  return demand;
+}
 
 MoiObjectModePlan make_moi_object_mode_plan(const ConSanRequest &request,
                                             const ConSanMoiOperatingPoint &point,
@@ -43,6 +59,14 @@ void apply_moi_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
                             const MoiObjectFacts &facts, ConSanTransformArtifacts &result) {
   moi_mode_operations(options.moi_engine)
       .apply(bytes, options, arch, resource_state, candidates, facts, result);
+}
+
+MoiPersistentStateDemand plan_moi_persistent_state_demand(const ConSanRequest &request,
+                                                          const BoundRuntimeResources &resources,
+                                                          const ConSanMoiOperatingPoint &point,
+                                                          const MoiPersistentStateFacts &facts) {
+  return moi_mode_operations(request.moi_engine)
+      .persistent_state_demand(request, resources, point, facts);
 }
 
 } // namespace rocjitsu::consan_moi_impl

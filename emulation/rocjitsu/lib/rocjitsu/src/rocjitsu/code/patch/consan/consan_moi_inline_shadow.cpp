@@ -145,10 +145,21 @@ uint16_t inline_shadow_access_scratch_vgpr_count(const ConSanRequest &request,
   return inline_shadow_scratch_count(request, point, candidate, arch);
 }
 
+MoiPersistentStateDemand
+plan_inline_shadow_persistent_state_demand(const ConSanRequest &, const BoundRuntimeResources &,
+                                           const ConSanMoiOperatingPoint &,
+                                           const MoiPersistentStateFacts &facts) {
+  return {
+      .needs_workgroup_key = facts.access_count || facts.atomic_count,
+      .needs_persistent_state = true,
+  };
+}
+
 const MoiModeOperations kInlineShadowModeOperations = {
     plan_inline_shadow_object_mode,
     apply_inline_shadow_mode_patches,
     inline_shadow_access_scratch_vgpr_count,
+    plan_inline_shadow_persistent_state_demand,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"

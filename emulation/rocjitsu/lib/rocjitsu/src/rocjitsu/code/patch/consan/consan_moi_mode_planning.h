@@ -46,6 +46,31 @@ struct MoiObjectModePlan {
   std::vector<std::string> errors;
 };
 
+/// Mode-neutral summary of operational sites that survived semantic admission
+/// and resource planning. Mode owners decide which persistent state those
+/// consumers require; common placement only solves the resulting demand.
+struct MoiPersistentStateFacts {
+  size_t access_count = 0;
+  size_t atomic_count = 0;
+  size_t barrier_count = 0;
+  size_t fence_count = 0;
+};
+
+struct MoiPersistentStateDemand {
+  bool needs_workgroup_key = false;
+  bool needs_entry_workgroup_tuple = false;
+  bool needs_persistent_state = false;
+  bool synchronization_requires_persistent_owner = false;
+  bool needs_persistent_dispatch_capture = false;
+  bool prefer_compact_barriers = false;
+  bool private_workgroup_tuple_supported = false;
+};
+
+/// Shared Record/Replay + Sampled entry-identity lifetime rule.
+[[nodiscard]] MoiPersistentStateDemand make_exact_workgroup_capture_demand(
+    const ConSanRequest &request, const BoundRuntimeResources &resources,
+    const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts);
+
 [[nodiscard]] MoiObjectModePlan
 make_moi_object_mode_plan(const ConSanRequest &request, const ConSanMoiOperatingPoint &point,
                           ConSanMoiOwnerSource automatic_owner_source);
@@ -66,6 +91,10 @@ void apply_moi_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
                             std::span<const ConSanMoiCandidate> candidates,
                             const MoiObjectFacts &facts, ConSanTransformArtifacts &result);
 
+[[nodiscard]] MoiPersistentStateDemand plan_moi_persistent_state_demand(
+    const ConSanRequest &request, const BoundRuntimeResources &resources,
+    const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts);
+
 struct MoiModeOperations {
   MoiObjectModePlan (*plan)(const ConSanRequest &, const ConSanMoiOperatingPoint &,
                             const MoiObjectFacts &, const ConSanObservationPlan &);
@@ -75,6 +104,10 @@ struct MoiModeOperations {
   uint16_t (*access_scratch_vgpr_count)(const ConSanRequest &, const BoundRuntimeResources &,
                                         const ConSanMoiOperatingPoint &, const ConSanMoiCandidate &,
                                         rj_code_arch_t);
+  MoiPersistentStateDemand (*persistent_state_demand)(const ConSanRequest &,
+                                                      const BoundRuntimeResources &,
+                                                      const ConSanMoiOperatingPoint &,
+                                                      const MoiPersistentStateFacts &);
 };
 
 extern const MoiModeOperations kRecordReplayModeOperations;

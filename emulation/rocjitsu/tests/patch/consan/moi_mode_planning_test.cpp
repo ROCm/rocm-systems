@@ -8,7 +8,9 @@ namespace rocjitsu {
 namespace {
 
 using consan_moi_impl::MoiObjectFacts;
+using consan_moi_impl::MoiPersistentStateFacts;
 using consan_moi_impl::plan_moi_object_mode;
+using consan_moi_impl::plan_moi_persistent_state_demand;
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsAutomaticOwnerDefault) {
   ConSanRequest request;
@@ -143,6 +145,38 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
   plan = plan_moi_object_mode(request, point, facts, observation);
   EXPECT_FALSE(plan.reserve_dynamic_stack_prologue_entry);
   EXPECT_TRUE(plan.prologue_requires_consumer);
+}
+
+TEST(ConSanMoiModePlanning, EachEngineOwnsPersistentStateDemand) {
+  ConSanRequest request;
+  BoundRuntimeResources resources;
+  ConSanMoiOperatingPoint point;
+  point.moi_initialize_owner_epoch = false;
+
+  request.moi_engine = ConSanMoiEngine::RecordReplay;
+  request.moi_track_barriers = true;
+  auto demand = plan_moi_persistent_state_demand(request, resources, point,
+                                                 {.access_count = 66u, .barrier_count = 33u});
+  EXPECT_TRUE(demand.needs_entry_workgroup_tuple);
+  EXPECT_TRUE(demand.needs_persistent_state);
+  EXPECT_TRUE(demand.prefer_compact_barriers);
+  EXPECT_TRUE(demand.private_workgroup_tuple_supported);
+
+  request.moi_engine = ConSanMoiEngine::Sampled;
+  request.moi_track_barriers = false;
+  demand = plan_moi_persistent_state_demand(request, resources, point, {});
+  EXPECT_FALSE(demand.needs_persistent_state);
+
+  demand = plan_moi_persistent_state_demand(request, resources, point, {.atomic_count = 1u});
+  EXPECT_TRUE(demand.needs_entry_workgroup_tuple);
+  EXPECT_TRUE(demand.needs_persistent_state);
+  EXPECT_TRUE(demand.synchronization_requires_persistent_owner);
+  EXPECT_TRUE(demand.private_workgroup_tuple_supported);
+
+  request.moi_engine = ConSanMoiEngine::InlineShadow;
+  demand = plan_moi_persistent_state_demand(request, resources, point, {.access_count = 1u});
+  EXPECT_TRUE(demand.needs_workgroup_key);
+  EXPECT_TRUE(demand.needs_persistent_state);
 }
 
 } // namespace

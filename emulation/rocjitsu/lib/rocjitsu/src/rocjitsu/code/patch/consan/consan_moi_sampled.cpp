@@ -160,10 +160,27 @@ uint16_t sampled_access_scratch_vgpr_count(const ConSanRequest &request,
   return direct_sampled_scratch_count(request, point, candidate, arch);
 }
 
+MoiPersistentStateDemand plan_sampled_persistent_state_demand(
+    const ConSanRequest &request, const BoundRuntimeResources &resources,
+    const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts) {
+  MoiPersistentStateDemand demand =
+      make_exact_workgroup_capture_demand(request, resources, point, facts);
+  // A synchronization-aware Sampled probe must preserve one owner identity
+  // from kernel entry through both access and sync sites. Access-only Sampled
+  // objects retain the cheaper private-state choice.
+  demand.needs_persistent_state = moi_initializes_owner_epoch(request, point) ||
+                                  demand.needs_entry_workgroup_tuple || request.moi_track_atomics ||
+                                  request.moi_track_barriers ||
+                                  request.moi_runtime_sample_stride > 1u;
+  demand.synchronization_requires_persistent_owner = facts.atomic_count || facts.barrier_count;
+  return demand;
+}
+
 const MoiModeOperations kSampledModeOperations = {
     plan_sampled_object_mode,
     apply_sampled_mode_patches,
     sampled_access_scratch_vgpr_count,
+    plan_sampled_persistent_state_demand,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"

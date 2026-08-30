@@ -150,10 +150,32 @@ uint16_t record_replay_access_scratch_vgpr_count(const ConSanRequest &request,
            : 0u));
 }
 
+MoiPersistentStateDemand plan_record_replay_persistent_state_demand(
+    const ConSanRequest &request, const BoundRuntimeResources &resources,
+    const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts) {
+  MoiPersistentStateDemand demand =
+      make_exact_workgroup_capture_demand(request, resources, point, facts);
+  demand.needs_persistent_state =
+      moi_initializes_owner_epoch(request, point) || demand.needs_entry_workgroup_tuple;
+  demand.needs_persistent_dispatch_capture =
+      facts.access_count && record_replay_uses_automatic_banked_capture(request, resources) &&
+      !consan_moi_detail::moi_has_runtime_hardware_dispatch_id(point);
+  // This is an automatic operating-point choice, not a user-facing limit.
+  // Small barrier inventories benefit from compact persistent-epoch barriers;
+  // larger barrier-dense objects benefit more from private-epoch access
+  // coalescing. The access-heavy case avoids millions of dynamic records.
+  constexpr size_t kCompactBarrierSiteLimit = 32u;
+  demand.prefer_compact_barriers = request.moi_track_barriers && facts.barrier_count &&
+                                   (facts.barrier_count <= kCompactBarrierSiteLimit ||
+                                    facts.access_count >= 2u * facts.barrier_count);
+  return demand;
+}
+
 const MoiModeOperations kRecordReplayModeOperations = {
     plan_record_replay_object_mode,
     apply_record_replay_mode_patches,
     record_replay_access_scratch_vgpr_count,
+    plan_record_replay_persistent_state_demand,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"
