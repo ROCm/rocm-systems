@@ -10,6 +10,7 @@ inline constexpr ConSanTargetProfile kConSanGfx1100TargetProfile = [] {
   profile.wait_counter_family = ConSanWaitCounterFamily::Gfx11;
   profile.address_free_private_limit_bytes = 0x1000u;
   profile.private_allocation_granularity_bytes = 16;
+  profile.atomic_address_materialization.flat_and_global = true;
   profile.supports_kernarg_preload_overflow_recovery = true;
   return profile;
 }();

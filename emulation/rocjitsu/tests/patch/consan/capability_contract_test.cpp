@@ -35,6 +35,7 @@ struct ExpectedTargetProfile {
   ConSanCodeTransportModel code_transport;
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
+  ConSanAtomicAddressMaterializationCapability atomic_address_materialization;
   bool supports_wave32;
   bool supports_wave64;
   uint8_t exec_register_width_bits;
@@ -88,6 +89,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .encoding = ConSanWorkgroupShadowClearEncoding::PackedB64,
                 .maximum_lanes = 32,
             },
+        .atomic_address_materialization = {.flat_and_global = true},
         .supports_wave32 = false,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -139,6 +141,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .encoding = ConSanWorkgroupShadowClearEncoding::SplitB32Pair,
                 .maximum_lanes = 32,
             },
+        .atomic_address_materialization = {.flat_and_global = true},
         .supports_wave32 = false,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -190,6 +193,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .encoding = ConSanWorkgroupShadowClearEncoding::PackedB64,
                 .maximum_lanes = 32,
             },
+        .atomic_address_materialization = {.flat_and_global = true},
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -240,6 +244,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
             {
                 .encoding = ConSanWorkgroupShadowClearEncoding::PackedB64,
                 .maximum_lanes = 32,
+            },
+        .atomic_address_materialization =
+            {
+                .flat_and_global = true,
+                .buffer_resource = true,
             },
         .supports_wave32 = true,
         .supports_wave64 = true,
@@ -292,6 +301,13 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .encoding = ConSanWorkgroupShadowClearEncoding::PackedB128,
                 .maximum_lanes = 64,
             },
+        .atomic_address_materialization =
+            {
+                .flat_and_global = true,
+                .buffer_resource = true,
+                .lds_byte_offset_token = true,
+                .scaled_vglobal = true,
+            },
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -342,6 +358,7 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.code_transport, expected.code_transport);
   EXPECT_EQ(actual.resident_wave_identity, expected.resident_wave_identity);
   EXPECT_EQ(actual.workgroup_shadow_clear, expected.workgroup_shadow_clear);
+  EXPECT_EQ(actual.atomic_address_materialization, expected.atomic_address_materialization);
   EXPECT_EQ(actual.supports_wave32, expected.supports_wave32);
   EXPECT_EQ(actual.supports_wave64, expected.supports_wave64);
   EXPECT_EQ(actual.exec_register_width_bits, expected.exec_register_width_bits);
@@ -435,6 +452,9 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
                  [](auto &profiles) { profiles[0].private_allocation_granularity_bytes = 0u; });
   expect_invalid("missing group segment limit",
                  [](auto &profiles) { profiles[0].max_group_segment_bytes = 0u; });
+  expect_invalid("missing ordinary atomic address materialization", [](auto &profiles) {
+    profiles[0].atomic_address_materialization.flat_and_global = false;
+  });
   expect_invalid("nonnegative minimum branch displacement",
                  [](auto &profiles) { profiles[0].direct_branch_min_displacement_bytes = 0; });
   expect_invalid("nonpositive maximum branch displacement",

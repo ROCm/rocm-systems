@@ -30,6 +30,12 @@ inline constexpr ConSanTargetProfile kConSanGfx1250TargetProfile = [] {
   profile.reserved_ordinary_sgpr_count = 4;
   profile.user_sgpr_initialization_limit = 32;
   profile.address_free_private_limit_bytes = 0x800000u;
+  profile.atomic_address_materialization = {
+      .flat_and_global = true,
+      .buffer_resource = true,
+      .lds_byte_offset_token = true,
+      .scaled_vglobal = true,
+  };
   profile.max_group_segment_bytes = static_cast<uint32_t>(ROCJITSU_GFX1250_LDS_SIZE_KB) * 1024u;
   profile.has_cluster_facilities = true;
   profile.has_selectable_vgpr_bank = true;

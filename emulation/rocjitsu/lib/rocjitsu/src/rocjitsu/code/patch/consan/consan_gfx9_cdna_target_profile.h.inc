@@ -13,6 +13,7 @@
   profile.address_free_private_limit_bytes = 0x1000u;
   profile.private_allocation_granularity_bytes = 16;
   profile.max_group_segment_bytes = 64u * 1024u;
+  profile.atomic_address_materialization.flat_and_global = true;
   profile.supports_kernarg_preload_overflow_recovery = true;
   profile.requires_even_vgpr_tuples = true;
   profile.semantic_form_mask = kConSanCdnaSemanticFormMask;

@@ -226,6 +226,11 @@ std::optional<std::vector<uint32_t>>
 build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan &plan,
                                                 uint16_t vcc_save_sgpr, uint16_t scc_save_sgpr,
                                                 rj_code_arch_t arch) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr)
+    return std::nullopt;
+  const ConSanAtomicAddressMaterializationCapability &capability =
+      target->atomic_address_materialization;
   if (!plan.supported())
     return std::nullopt;
   if (!plan.requires_materialization())
@@ -239,7 +244,7 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
       result_end > scratch_end)
     return std::nullopt;
   if (plan.kind == ConSanMoiAtomicAddressKind::LdsByteOffsetToken) {
-    if (arch != ROCJITSU_CODE_ARCH_CDNA5 || plan.input_address_vgpr_count != 1u ||
+    if (!capability.lds_byte_offset_token || plan.input_address_vgpr_count != 1u ||
         plan.result_address_vgpr_count != 2u || plan.result_address_vgpr >= 255u ||
         plan.signed_byte_offset < 0 || plan.signed_byte_offset > 0xff)
       return std::nullopt;
@@ -261,23 +266,16 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
     words.insert(words.end(), tag->begin(), tag->end());
     return words;
   }
-  const bool legacy_address_materialization =
-      (consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3) &&
-      (plan.kind == ConSanMoiAtomicAddressKind::FlatGuestPairMaterialized ||
-       plan.kind == ConSanMoiAtomicAddressKind::VglobalGuestPairMaterialized ||
-       plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized);
-  if (!consan_uses_gfx12_encoding(arch) && !legacy_address_materialization)
-    return std::nullopt;
   const bool buffer_resource = plan.kind == ConSanMoiAtomicAddressKind::BufferResourceMaterialized;
   const bool scalar_vector =
       plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized || buffer_resource;
   const bool vector_pair = plan.kind == ConSanMoiAtomicAddressKind::FlatGuestPairMaterialized ||
                            plan.kind == ConSanMoiAtomicAddressKind::VglobalGuestPairMaterialized;
   const bool supported_scaled_vglobal =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-      plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized &&
+      capability.scaled_vglobal && plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized &&
       (plan.input_address_scale == 4u || plan.input_address_scale == 8u);
-  if ((!scalar_vector && !vector_pair) ||
+  if ((!scalar_vector && !vector_pair) || !capability.flat_and_global ||
+      (buffer_resource && !capability.buffer_resource) ||
       plan.input_address_vgpr_count != (scalar_vector ? 1u : 2u) ||
       (plan.input_address_scale != 1u && !supported_scaled_vglobal) ||
       plan.result_address_vgpr_count != 2u || plan.result_address_vgpr >= 255u ||

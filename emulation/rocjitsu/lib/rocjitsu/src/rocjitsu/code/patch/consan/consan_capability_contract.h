@@ -254,6 +254,22 @@ struct ConSanResidentWaveIdentityEncoding {
   bool operator==(const ConSanResidentWaveIdentityEncoding &) const = default;
 };
 
+/// Normalized target support for address forms that ConSan may need to
+/// materialize before publishing atomic evidence.
+///
+/// The common materializer owns the shared instruction-building mechanism.
+/// Concrete targets own which already-normalized forms that mechanism may
+/// consume, so mode code and the common emitter do not infer support from a
+/// product name or encoding family.
+struct ConSanAtomicAddressMaterializationCapability {
+  bool flat_and_global = false;
+  bool buffer_resource = false;
+  bool lds_byte_offset_token = false;
+  bool scaled_vglobal = false;
+
+  bool operator==(const ConSanAtomicAddressMaterializationCapability &) const = default;
+};
+
 /// Describes the strength of the stable contract for one
 /// target/engine/capability-form combination.
 ///
@@ -306,6 +322,7 @@ struct ConSanTargetProfile {
   ConSanCodeTransportModel code_transport = ConSanCodeTransportModel::DirectCodeObject;
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
+  ConSanAtomicAddressMaterializationCapability atomic_address_materialization;
   bool supports_wave32 = false;
   bool supports_wave64 = true;
   uint8_t exec_register_width_bits = 64;
@@ -497,6 +514,7 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
             static_cast<uint8_t>(ConSanWorkgroupShadowClearEncoding::PackedB128) ||
         static_cast<uint8_t>(profile.code_transport) >
             static_cast<uint8_t>(ConSanCodeTransportModel::PerKernelOwnerTranslation) ||
+        !profile.atomic_address_materialization.flat_and_global ||
         (profile.workgroup_shadow_clear.maximum_lanes != 32u &&
          profile.workgroup_shadow_clear.maximum_lanes != 64u) ||
         (profile.semantic_form_mask & static_cast<uint16_t>(~all_form_bits)) != 0u ||
