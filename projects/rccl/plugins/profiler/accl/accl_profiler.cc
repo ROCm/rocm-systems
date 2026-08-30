@@ -498,22 +498,22 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
     if (ctx->collPoolUsed[i]) {
       struct acclCollInfo* coll = &ctx->collPool[i];
-      // Read the claim under the lock every writer uses, not under
-      // collPoolMutex. A claimed slot belongs to a thread between
+      // Take the claim under the lock every writer uses, not under
+      // collPoolMutex. A slot already claimed belongs to a thread between
       // acclShouldFinalize and acclFreeColl; it releases the slot and its
-      // reference itself, so touching it here double-releases both.
+      // reference itself, so touching it here double-releases both. Reading and
+      // setting in one critical section leaves no window for a writer to claim
+      // a slot this drain has decided to release.
       pthread_mutex_lock(&coll->mutex);
       int claimed = coll->finalized;
+      coll->finalized = 1;
       pthread_mutex_unlock(&coll->mutex);
       if (claimed) continue;
-      if (!coll->finalized) {
-        // Never reached its completion predicate — teardown skipped one or more
-        // of its kernel-channel events. Count it so the loss is visible; no
-        // record is emitted for it.
-        ctx->leakedCollectives++;
-        acclFreeCollProxyOps(ctx, coll);
-      }
-      coll->finalized = 1;
+      // Never reached its completion predicate — teardown skipped one or more of
+      // its kernel-channel events. Count it so the loss is visible; no record is
+      // emitted for it.
+      ctx->leakedCollectives++;
+      acclFreeCollProxyOps(ctx, coll);
       ctx->collPoolUsed[i] = 0;
       __atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
     }
