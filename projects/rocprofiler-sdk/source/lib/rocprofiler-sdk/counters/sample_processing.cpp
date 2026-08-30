@@ -167,18 +167,26 @@ callback_thread_get()
     static auto*& _v = common::static_object<callback_consumer_t>::construct(&process_completed_cb);
     return *CHECK_NOTNULL(_v);
 }
+
+// Reference count for the callback consumer thread. Incremented by callback_thread_start()
+// for each context that starts and decremented by callback_thread_stop() when each stops;
+// the thread is only joined when the count returns to zero.  Two dispatch-counting contexts
+// with disjoint agent sets may be active at the same time, so without the refcount stopping
+// either one would kill the consumer while the other still needs it.
+std::atomic<int> callback_thread_refcount{0};
 }  // namespace
 
 void
 callback_thread_start()
 {
+    ++callback_thread_refcount;
     callback_thread_get().start();
 }
 
 void
 callback_thread_stop()
 {
-    callback_thread_get().exit();
+    if(--callback_thread_refcount == 0) callback_thread_get().exit();
 }
 
 /**
