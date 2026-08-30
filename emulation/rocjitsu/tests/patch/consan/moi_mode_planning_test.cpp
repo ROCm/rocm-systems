@@ -14,6 +14,7 @@ using consan_moi_impl::plan_moi_dynamic_stack_spill;
 using consan_moi_impl::plan_moi_object_mode;
 using consan_moi_impl::plan_moi_operand_overlap_spill;
 using consan_moi_impl::plan_moi_persistent_state_demand;
+using consan_moi_impl::plan_moi_scalar_abi;
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsAutomaticOwnerDefault) {
   ConSanRequest request;
@@ -108,6 +109,51 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsDispatchIdentityPolicy) {
   EXPECT_FALSE(plan_moi_dispatch_identity(request, {.target_uses_gfx12_cdna_execution = true,
                                                     .has_access_or_atomic_consumer = true})
                    .needs_dispatch_id);
+}
+
+TEST(ConSanMoiModePlanning, EachEngineOwnsItsScalarAbiLayout) {
+  ConSanRequest request;
+  ConSanMoiOperatingPoint point;
+  point.moi_exec_save_sgpr = 20u;
+
+  request.moi_engine = ConSanMoiEngine::RecordReplay;
+  auto plan = plan_moi_scalar_abi(request, point);
+  EXPECT_EQ(plan.special_state, (consan_detail::MoiSpecialStateSgprs{22u, 24u}));
+  ASSERT_TRUE(plan.indirect_jump);
+  EXPECT_EQ(plan.indirect_jump->pc_sgpr, 20u);
+  EXPECT_EQ(plan.indirect_jump->scc_save_sgpr, 24u);
+  EXPECT_FALSE(plan.access_router_uses_dense_abi);
+
+  request.moi_engine = ConSanMoiEngine::Sampled;
+  plan = plan_moi_scalar_abi(request, point);
+  ASSERT_TRUE(plan.special_state);
+  EXPECT_EQ(plan.special_state->vcc_save_sgpr, 22u);
+  ASSERT_TRUE(plan.indirect_jump);
+  EXPECT_EQ(plan.indirect_jump->pc_sgpr, 20u);
+  EXPECT_EQ(plan.indirect_jump->scc_save_sgpr, 24u);
+
+  request.moi_engine = ConSanMoiEngine::InlineShadow;
+  plan = plan_moi_scalar_abi(request, point);
+  EXPECT_EQ(plan.special_state, (consan_detail::MoiSpecialStateSgprs{28u, 30u}));
+  ASSERT_TRUE(plan.indirect_jump);
+  EXPECT_EQ(plan.indirect_jump->pc_sgpr, 32u);
+  EXPECT_EQ(plan.indirect_jump->scc_save_sgpr, 30u);
+  EXPECT_TRUE(plan.access_router_uses_dense_abi);
+
+  point.automatic_moi_inline_sgpr_spill = true;
+  point.moi_inline_indirect_pc_sgpr = 40u;
+  point.moi_inline_indirect_scc_sgpr = 42u;
+  plan = plan_moi_scalar_abi(request, point);
+  ASSERT_TRUE(plan.indirect_jump);
+  EXPECT_EQ(plan.indirect_jump->pc_sgpr, 40u);
+  EXPECT_EQ(plan.indirect_jump->scc_save_sgpr, 42u);
+
+  point.moi_exec_save_sgpr.reset();
+  plan = plan_moi_scalar_abi(request, point);
+  EXPECT_FALSE(plan.special_state);
+  ASSERT_TRUE(plan.indirect_jump);
+  EXPECT_EQ(plan.indirect_jump->pc_sgpr, 40u);
+  EXPECT_EQ(plan.indirect_jump->scc_save_sgpr, 42u);
 }
 
 TEST(ConSanMoiModePlanning, RecordReplaySelectsDenseRoutingFromNormalizedTargetFacts) {

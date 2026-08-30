@@ -1530,9 +1530,6 @@ plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
   return assignments;
 }
 
-[[nodiscard]] std::optional<MoiIndirectJumpSgprs>
-moi_indirect_jump_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point);
-
 [[nodiscard]] std::optional<MoiInlineDenseRouterScalarAbi>
 moi_inline_dense_router_scalar_abi(const ConSanRequest &request,
                                    const ConSanMoiOperatingPoint &point, rj_code_arch_t arch) {
@@ -1615,7 +1612,8 @@ moi_inline_dense_router_scalar_abi(const ConSanRequest &request,
   if (!point.moi_exec_save_sgpr)
     return {};
   const uint16_t base = *point.moi_exec_save_sgpr;
-  if (request.moi_engine == ConSanMoiEngine::InlineShadow &&
+  const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(request, point);
+  if (scalar_abi.access_router_uses_dense_abi &&
       scalar_state == MoiRelocatableHostScalarState::AccessRouter) {
     const auto abi = moi_inline_dense_router_scalar_abi(request, point, arch);
     if (!abi)
@@ -1627,9 +1625,10 @@ moi_inline_dense_router_scalar_abi(const ConSanRequest &request,
       ranges.push_back({*abi->call_return_sgpr, 2u});
     return ranges;
   }
-  const uint16_t scc_offset = request.moi_engine == ConSanMoiEngine::InlineShadow ? 10u : 4u;
+  if (!scalar_abi.special_state)
+    return {};
   return {{base, 2u},
-          {static_cast<uint16_t>(base + scc_offset), 1u},
+          {scalar_abi.special_state->scc_save_sgpr, 1u},
           {static_cast<uint16_t>(base + 5u), 1u},
           {static_cast<uint16_t>(base + 6u), 2u}};
 }
@@ -3193,59 +3192,6 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
          overlaps(point.moi_dispatch_id_sgpr, kMoiDispatchStateSgprCount) ||
          overlaps_auxiliary_state ||
          std::ranges::any_of(allocation.owner_transient_sgprs, overlaps_assignment);
-}
-
-[[nodiscard]] std::optional<MoiSpecialStateSgprs>
-moi_special_state_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point) {
-  if (!point.moi_exec_save_sgpr)
-    return std::nullopt;
-  if (request.moi_engine == ConSanMoiEngine::Sampled) {
-    const auto publication = moi_sampled_publication_state_sgprs(request, point);
-    if (!publication)
-      return std::nullopt;
-    return MoiSpecialStateSgprs{
-        .vcc_save_sgpr = publication->selection_vcc_save_sgpr,
-        .scc_save_sgpr =
-            point.automatic_moi_record_replay_sgpr_spill && point.moi_inline_indirect_scc_sgpr
-                ? *point.moi_inline_indirect_scc_sgpr
-                : publication->publication_exec_save_sgpr,
-    };
-  }
-  const uint16_t vcc_offset = request.moi_engine == ConSanMoiEngine::InlineShadow ? 8u : 2u;
-  return MoiSpecialStateSgprs{
-      .vcc_save_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + vcc_offset),
-      .scc_save_sgpr =
-          point.automatic_moi_record_replay_sgpr_spill && point.moi_inline_indirect_scc_sgpr
-              ? *point.moi_inline_indirect_scc_sgpr
-              : static_cast<uint16_t>(*point.moi_exec_save_sgpr + vcc_offset + 2u),
-  };
-}
-
-[[nodiscard]] std::optional<MoiIndirectJumpSgprs>
-moi_indirect_jump_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point) {
-  if (point.automatic_moi_inline_sgpr_spill || point.automatic_moi_record_replay_sgpr_spill) {
-    if (!point.moi_inline_indirect_pc_sgpr || !point.moi_inline_indirect_scc_sgpr)
-      return std::nullopt;
-    return MoiIndirectJumpSgprs{.pc_sgpr = *point.moi_inline_indirect_pc_sgpr,
-                                .scc_save_sgpr = *point.moi_inline_indirect_scc_sgpr};
-  }
-  const auto special_state = moi_special_state_sgprs(request, point);
-  if (!point.moi_exec_save_sgpr || !special_state)
-    return std::nullopt;
-  if (request.moi_engine == ConSanMoiEngine::InlineShadow) {
-    return MoiIndirectJumpSgprs{
-        .pc_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 12u),
-        .scc_save_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 10u),
-    };
-  }
-  // Record/Replay's indirect island runs before the body snapshots
-  // EXEC/VCC/SCC, and its return runs after those snapshots have been
-  // restored, so the EXEC-save pair and SCC slot are free scratch at both
-  // boundaries. The wider automatic-access window remains body-local.
-  return MoiIndirectJumpSgprs{
-      .pc_sgpr = *point.moi_exec_save_sgpr,
-      .scc_save_sgpr = special_state->scc_save_sgpr,
-  };
 }
 
 [[nodiscard]] bool configure_automatic_moi_transient_sgpr_assignments(

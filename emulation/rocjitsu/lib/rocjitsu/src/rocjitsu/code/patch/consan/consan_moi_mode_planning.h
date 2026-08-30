@@ -135,6 +135,15 @@ struct MoiDispatchIdentityPlan {
   std::string_view fallback_diagnostic;
 };
 
+/// Complete scalar preservation ABI selected by one mode. The common builder
+/// handles spill-backed indirect state; modes supply their fixed layout or
+/// publication-derived special-state registers.
+struct MoiScalarAbiPlan {
+  std::optional<consan_detail::MoiSpecialStateSgprs> special_state;
+  std::optional<MoiIndirectJumpSgprs> indirect_jump;
+  bool access_router_uses_dense_abi = false;
+};
+
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.
 [[nodiscard]] MoiPersistentStateDemand make_exact_workgroup_capture_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
@@ -173,6 +182,14 @@ plan_moi_operand_overlap_spill(const MoiOperandOverlapSpillContext &context);
 [[nodiscard]] MoiDispatchIdentityPlan
 plan_moi_dispatch_identity(const ConSanRequest &request, const MoiDispatchIdentityFacts &facts);
 
+[[nodiscard]] MoiScalarAbiPlan
+make_moi_scalar_abi_plan(const ConSanMoiOperatingPoint &point,
+                         std::optional<consan_detail::MoiSpecialStateSgprs> special_state,
+                         uint16_t fixed_indirect_pc_offset, bool access_router_uses_dense_abi);
+
+[[nodiscard]] MoiScalarAbiPlan plan_moi_scalar_abi(const ConSanRequest &request,
+                                                   const ConSanMoiOperatingPoint &point);
+
 struct MoiModeOperations {
   MoiObjectModePlan (*plan)(const ConSanRequest &, const ConSanMoiOperatingPoint &,
                             const MoiObjectFacts &, const ConSanObservationPlan &);
@@ -192,6 +209,7 @@ struct MoiModeOperations {
   std::optional<uint16_t> (*access_spill_fallback)(const MoiAccessSpillFallbackContext &);
   MoiDispatchIdentityPlan (*dispatch_identity)(const ConSanRequest &,
                                                const MoiDispatchIdentityFacts &);
+  MoiScalarAbiPlan (*scalar_abi)(const ConSanRequest &, const ConSanMoiOperatingPoint &);
 };
 
 extern const MoiModeOperations kRecordReplayModeOperations;

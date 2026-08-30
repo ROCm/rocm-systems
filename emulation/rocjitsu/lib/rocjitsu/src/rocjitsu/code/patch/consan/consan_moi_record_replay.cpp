@@ -195,6 +195,22 @@ MoiDispatchIdentityPlan plan_record_replay_dispatch_identity(const ConSanRequest
   };
 }
 
+MoiScalarAbiPlan plan_record_replay_scalar_abi(const ConSanRequest &,
+                                               const ConSanMoiOperatingPoint &point) {
+  std::optional<consan_detail::MoiSpecialStateSgprs> special_state;
+  if (point.moi_exec_save_sgpr) {
+    const uint16_t base = *point.moi_exec_save_sgpr;
+    special_state = consan_detail::MoiSpecialStateSgprs{
+        .vcc_save_sgpr = static_cast<uint16_t>(base + 2u),
+        .scc_save_sgpr =
+            point.automatic_moi_record_replay_sgpr_spill && point.moi_inline_indirect_scc_sgpr
+                ? *point.moi_inline_indirect_scc_sgpr
+                : static_cast<uint16_t>(base + 4u),
+    };
+  }
+  return make_moi_scalar_abi_plan(point, special_state, 0u, false);
+}
+
 const MoiModeOperations kRecordReplayModeOperations = {
     plan_record_replay_object_mode,
     apply_record_replay_mode_patches,
@@ -205,6 +221,7 @@ const MoiModeOperations kRecordReplayModeOperations = {
     record_replay_operand_overlap_spill,
     nullptr,
     plan_record_replay_dispatch_identity,
+    plan_record_replay_scalar_abi,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"

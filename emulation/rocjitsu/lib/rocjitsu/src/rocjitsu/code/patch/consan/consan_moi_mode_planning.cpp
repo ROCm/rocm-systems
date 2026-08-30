@@ -89,4 +89,43 @@ MoiDispatchIdentityPlan plan_moi_dispatch_identity(const ConSanRequest &request,
   return moi_mode_operations(request.moi_engine).dispatch_identity(request, facts);
 }
 
+MoiScalarAbiPlan
+make_moi_scalar_abi_plan(const ConSanMoiOperatingPoint &point,
+                         std::optional<consan_detail::MoiSpecialStateSgprs> special_state,
+                         uint16_t fixed_indirect_pc_offset, bool access_router_uses_dense_abi) {
+  MoiScalarAbiPlan plan{.special_state = special_state,
+                        .indirect_jump = std::nullopt,
+                        .access_router_uses_dense_abi = access_router_uses_dense_abi};
+  if (point.automatic_moi_inline_sgpr_spill || point.automatic_moi_record_replay_sgpr_spill) {
+    if (point.moi_inline_indirect_pc_sgpr && point.moi_inline_indirect_scc_sgpr) {
+      plan.indirect_jump =
+          MoiIndirectJumpSgprs{.pc_sgpr = *point.moi_inline_indirect_pc_sgpr,
+                               .scc_save_sgpr = *point.moi_inline_indirect_scc_sgpr};
+    }
+    return plan;
+  }
+  if (!point.moi_exec_save_sgpr || !special_state)
+    return plan;
+  plan.indirect_jump = MoiIndirectJumpSgprs{
+      .pc_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + fixed_indirect_pc_offset),
+      .scc_save_sgpr = special_state->scc_save_sgpr,
+  };
+  return plan;
+}
+
+MoiScalarAbiPlan plan_moi_scalar_abi(const ConSanRequest &request,
+                                     const ConSanMoiOperatingPoint &point) {
+  return moi_mode_operations(request.moi_engine).scalar_abi(request, point);
+}
+
+std::optional<consan_detail::MoiSpecialStateSgprs>
+moi_special_state_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point) {
+  return plan_moi_scalar_abi(request, point).special_state;
+}
+
+std::optional<MoiIndirectJumpSgprs> moi_indirect_jump_sgprs(const ConSanRequest &request,
+                                                            const ConSanMoiOperatingPoint &point) {
+  return plan_moi_scalar_abi(request, point).indirect_jump;
+}
+
 } // namespace rocjitsu::consan_moi_impl

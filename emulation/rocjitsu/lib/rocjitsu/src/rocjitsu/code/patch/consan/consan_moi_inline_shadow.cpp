@@ -198,6 +198,19 @@ plan_inline_shadow_dispatch_identity(const ConSanRequest &request,
   };
 }
 
+MoiScalarAbiPlan plan_inline_shadow_scalar_abi(const ConSanRequest &,
+                                               const ConSanMoiOperatingPoint &point) {
+  std::optional<consan_detail::MoiSpecialStateSgprs> special_state;
+  if (point.moi_exec_save_sgpr) {
+    const uint16_t base = *point.moi_exec_save_sgpr;
+    special_state = consan_detail::MoiSpecialStateSgprs{
+        .vcc_save_sgpr = static_cast<uint16_t>(base + 8u),
+        .scc_save_sgpr = static_cast<uint16_t>(base + 10u),
+    };
+  }
+  return make_moi_scalar_abi_plan(point, special_state, 12u, true);
+}
+
 const MoiModeOperations kInlineShadowModeOperations = {
     plan_inline_shadow_object_mode,
     apply_inline_shadow_mode_patches,
@@ -208,6 +221,7 @@ const MoiModeOperations kInlineShadowModeOperations = {
     inline_shadow_operand_overlap_spill,
     inline_shadow_access_spill_fallback,
     plan_inline_shadow_dispatch_identity,
+    plan_inline_shadow_scalar_abi,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"
