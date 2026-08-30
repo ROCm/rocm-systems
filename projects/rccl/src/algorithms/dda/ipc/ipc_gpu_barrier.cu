@@ -20,7 +20,7 @@ namespace dda::common {
 
 __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
   : nBlocks_(nBlocks), flags_(static_cast<FlagType*>(flagsBuf)) {
-  // nRanks may be < NRANKS (2/4/8) when RCCL_DDA_NRANKS_RELAX is set; the flag
+  // nRanks may be < NRANKS (any 2..NRANKS) when RCCL_DDA_NRANKS_RELAX is set; the flag
   // buffer is always sized/strided for NRANKS so the layout is count-independent.
   assert(nRanks <= NRANKS);
   (void)nRanks;

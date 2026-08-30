@@ -45,7 +45,7 @@ static bool ddaNranksSupported(int nRanks) {
   if (!ncclDdaNranksRelaxEnabled()) {
     return false;
   }
-  return nRanks == 2 || nRanks == 4 || nRanks == 8;
+  return nRanks >= 2 && nRanks <= kDdaNranks;
 }
 
 template <typename T, int NRANKS>
@@ -95,16 +95,24 @@ static ncclResult_t ncclAllReduceDdaIpcLaunch(const void* sendbuff, void* recvbu
 }
 
 // Dispatch to the template instantiation for the active participant count.
-// ncclAllReduceDdaIpcEligible() guarantees comm->nRanks is 2, 4 or 8 (or exactly
-// kDdaNranks when RCCL_DDA_NRANKS_RELAX is off) before we get here.
+// ncclAllReduceDdaIpcEligible() guarantees comm->nRanks is in [2, kDdaNranks]
+// (exactly kDdaNranks when RCCL_DDA_NRANKS_RELAX is off) before we get here.
 template <typename T>
 static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
                                              cudaStream_t stream) {
   switch (comm->nRanks) {
   case 8:
     return ncclAllReduceDdaIpcLaunch<T, 8>(sendbuff, recvbuff, count, comm, stream);
+  case 7:
+    return ncclAllReduceDdaIpcLaunch<T, 7>(sendbuff, recvbuff, count, comm, stream);
+  case 6:
+    return ncclAllReduceDdaIpcLaunch<T, 6>(sendbuff, recvbuff, count, comm, stream);
+  case 5:
+    return ncclAllReduceDdaIpcLaunch<T, 5>(sendbuff, recvbuff, count, comm, stream);
   case 4:
     return ncclAllReduceDdaIpcLaunch<T, 4>(sendbuff, recvbuff, count, comm, stream);
+  case 3:
+    return ncclAllReduceDdaIpcLaunch<T, 3>(sendbuff, recvbuff, count, comm, stream);
   case 2:
     return ncclAllReduceDdaIpcLaunch<T, 2>(sendbuff, recvbuff, count, comm, stream);
   default:
@@ -123,7 +131,7 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
     return false;
   }
   // IPC path: requires its own handler + barrier state, a single node, and a
-  // supported participant count (kDdaNranks by default; 2/4/8 when
+  // supported participant count (kDdaNranks by default; any 2..kDdaNranks when
   // RCCL_DDA_NRANKS_RELAX=1). The IPC kernels fix the rank count at compile time.
   if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcBarrierState == nullptr) {
     return false;

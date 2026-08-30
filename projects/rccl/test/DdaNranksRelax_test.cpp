@@ -63,8 +63,9 @@ TEST_F(DdaNranksRelaxTest, TwoRanksRejectedWhenRelaxOff)
         mockComm_.get(), sendbuff_, recvbuff_, kCount, ncclFloat32, ncclSum));
 }
 
-// Non-power-of-two counts are never supported, relax or not.
-TEST_F(DdaNranksRelaxTest, ThreeRanksRejected)
+// With relax off (default), any count other than the full kDdaNranks clique is
+// rejected -- e.g. a 3-rank comm.
+TEST_F(DdaNranksRelaxTest, ThreeRanksRejectedWhenRelaxOff)
 {
     mockComm_.comm.nRanks = 3;
     EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
@@ -96,13 +97,14 @@ TEST_F(DdaNranksRelaxTest, MissingIpcResourcesRejected)
 // Relaxed path (RCCL_DDA_NRANKS_RELAX=1). RCCL_PARAM caches per-process and
 // NCCL_NO_CACHE is parsed once, so the relaxed value has to be set before any
 // param read: run in a fresh re-exec'd process with the env pre-set. This proves
-// the eligibility gate opens for 2/4-rank comms (and still rejects non-{2,4,8}
-// counts) when the operator opts in; end-to-end 2/4-rank GPU engagement is covered
-// by the rccl-tests AllReduce sweep with RCCL_DDA_NRANKS_RELAX=1.
-TEST(DdaNranksRelaxIsolatedTest, RelaxedPathAdmitsTwoAndFourRanks)
+// the eligibility gate opens for every single-node count in [2, kDdaNranks] (and
+// still rejects counts outside that range) when the operator opts in; end-to-end
+// low-rank GPU engagement is covered by the rccl-tests AllReduce sweep with
+// RCCL_DDA_NRANKS_RELAX=1.
+TEST(DdaNranksRelaxIsolatedTest, RelaxedPathAdmitsTwoThroughEightRanks)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
-        "RelaxedPathAdmitsTwoAndFourRanks",
+        "RelaxedPathAdmitsTwoThroughEightRanks",
         []()
         {
             void*                  sendbuff = reinterpret_cast<void*>(0x10);
@@ -112,22 +114,18 @@ TEST(DdaNranksRelaxIsolatedTest, RelaxedPathAdmitsTwoAndFourRanks)
 
             EXPECT_TRUE(ncclDdaNranksRelaxEnabled());
 
-            // 8-rank clique stays eligible.
-            mockComm.comm.nRanks = nccl_dda_detail::kDdaNranks;
-            EXPECT_TRUE(ncclAllReduceDdaIpcEligible(
-                mockComm.get(), sendbuff, recvbuff, count, ncclFloat32, ncclSum));
+            // With relax on, every single-node count in [2, kDdaNranks] is eligible
+            // (each has a template instantiation in the dispatch switch).
+            for (int nRanks = 2; nRanks <= nccl_dda_detail::kDdaNranks; ++nRanks)
+            {
+                mockComm.comm.nRanks = nRanks;
+                EXPECT_TRUE(ncclAllReduceDdaIpcEligible(
+                    mockComm.get(), sendbuff, recvbuff, count, ncclFloat32, ncclSum))
+                    << "nRanks=" << nRanks << " should be eligible with relax on";
+            }
 
-            // The relaxed path now admits 2- and 4-rank comms.
-            mockComm.comm.nRanks = 4;
-            EXPECT_TRUE(ncclAllReduceDdaIpcEligible(
-                mockComm.get(), sendbuff, recvbuff, count, ncclFloat32, ncclSum));
-            mockComm.comm.nRanks = 2;
-            EXPECT_TRUE(ncclAllReduceDdaIpcEligible(
-                mockComm.get(), sendbuff, recvbuff, count, ncclFloat32, ncclSum));
-
-            // Non-{2,4,8} participant counts remain ineligible even with relax on;
-            // only power-of-two counts up to kDdaNranks have a template instantiation.
-            for (int nRanks : {3, 5, 6, 7})
+            // Counts outside [2, kDdaNranks] stay ineligible (no instantiation).
+            for (int nRanks : {1, 9, 16})
             {
                 mockComm.comm.nRanks = nRanks;
                 EXPECT_FALSE(ncclAllReduceDdaIpcEligible(

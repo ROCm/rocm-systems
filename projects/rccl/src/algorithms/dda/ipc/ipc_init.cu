@@ -24,9 +24,9 @@ using nccl_dda_detail::kDdaNranks;
 
 // Relax the DDA IPC AllReduce eligibility beyond exactly kDdaNranks (8) ranks.
 // When 0 (default) the classic 8-rank-only gate is enforced and behaviour is
-// bit- and perf-identical to baseline. When 1, comms of 2/4/8 ranks are eligible
-// for the IPC path. Defined here alongside the DDA IPC comm-init gate so the
-// host init unit tests link it without pulling in the all-reduce compute TU.
+// bit- and perf-identical to baseline. When 1, any single-node comm of 2..kDdaNranks
+// ranks is eligible for the IPC path. Defined here alongside the DDA IPC comm-init
+// gate so the host init unit tests link it without pulling in the all-reduce compute TU.
 RCCL_PARAM(DdaNranksRelax, "DDA_NRANKS_RELAX", 0);
 
 bool ncclDdaNranksRelaxEnabled() {
@@ -48,7 +48,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   }
   // Skip DDA if:
   // - nRanks is not a supported DDA IPC participant count (kDdaNranks by default;
-  //   2/4/8 when RCCL_DDA_NRANKS_RELAX=1)
+  //   any 2..kDdaNranks when RCCL_DDA_NRANKS_RELAX=1)
   // - multi-node runs
   // - not using 1 process per GPU
   // - MNNVL (fabric-based P2P)
@@ -62,7 +62,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
   const bool nranksSupported =
     comm->nRanks == kDdaNranks ||
-    (ncclDdaNranksRelaxEnabled() && (comm->nRanks == 2 || comm->nRanks == 4 || comm->nRanks == 8));
+    (ncclDdaNranksRelaxEnabled() && comm->nRanks >= 2 && comm->nRanks <= kDdaNranks);
   if (!nranksSupported || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
       comm->MNNVL || !ddaArchSupported) {
     return ncclSuccess;

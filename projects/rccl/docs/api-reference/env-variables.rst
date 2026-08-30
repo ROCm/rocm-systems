@@ -432,13 +432,14 @@ intended for debugging and development purposes.
 
     * - | ``RCCL_DDA_NRANKS_RELAX``
         | Relaxes the DDA (direct data access) IPC AllReduce eligibility so that
-          2- and 4-rank single-node communicators can use the low-latency DDA
+          any single-node communicator of 2 to 8 ranks can use the low-latency DDA
           IPC path, which is otherwise restricted to the full 8-rank clique.
           Only affects ``gfx942``/``gfx950`` and only the IPC AllReduce path;
           the result is bit-identical to the default path. Benefits latency-bound
-          low-rank AllReduce and is neutral (falls back to the ring) at 8 ranks.
+          low-rank AllReduce (largest gains at odd/non-power-of-two rank counts,
+          where the ring is least efficient) and is neutral at 8 ranks.
       - | ``0``: 8-rank-only DDA (default).
-        | ``1``: allow 2/4/8-rank DDA IPC AllReduce.
+        | ``1``: allow 2..8-rank DDA IPC AllReduce.
 
 Multi-communicator ordering
 ===========================
