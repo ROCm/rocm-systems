@@ -158,6 +158,81 @@ foreach(_file IN LISTS _consan_sources)
     endif()
 endforeach()
 
+# Concrete target-profile data belongs to gfx-named owners. The common
+# capability contract may aggregate those immutable products, but it must not
+# grow another mixed table of raw product identities.
+set(
+    _target_profile_fragments
+    consan_gfx9_cdna_target_profile.h.inc
+    consan_rdna_target_profile.h.inc
+    consan_gfx942_target_profile.h.inc
+    consan_gfx950_target_profile.h.inc
+    consan_gfx1100_target_profile.h.inc
+    consan_gfx1201_target_profile.h.inc
+    consan_gfx1250_target_profile.h.inc
+)
+set(
+    _concrete_target_profile_fragments
+    consan_gfx942_target_profile.h.inc
+    consan_gfx950_target_profile.h.inc
+    consan_gfx1100_target_profile.h.inc
+    consan_gfx1201_target_profile.h.inc
+    consan_gfx1250_target_profile.h.inc
+)
+set(
+    _concrete_target_profile_ids
+    ROCJITSU_CODE_TARGET_GFX942
+    ROCJITSU_CODE_TARGET_GFX950
+    ROCJITSU_CODE_TARGET_GFX1100
+    ROCJITSU_CODE_TARGET_GFX1201
+    ROCJITSU_CODE_TARGET_GFX1250
+)
+set(
+    _concrete_target_profile_arches
+    ROCJITSU_CODE_ARCH_CDNA3
+    ROCJITSU_CODE_ARCH_CDNA4
+    ROCJITSU_CODE_ARCH_RDNA3
+    ROCJITSU_CODE_ARCH_RDNA4
+    ROCJITSU_CODE_ARCH_CDNA5
+)
+set(_capability_contract "${_consan_dir}/consan_capability_contract.h")
+_consan_assert_no_match(
+    "${_capability_contract}"
+    "ROCJITSU_CODE_TARGET_GFX|ROCJITSU_CODE_ARCH_(CDNA|RDNA)[0-9]"
+    "common capability contract must aggregate gfx-named target profiles"
+)
+file(READ "${_capability_contract}" _capability_contract_contents)
+foreach(_fragment IN LISTS _target_profile_fragments)
+    if(NOT EXISTS "${_consan_dir}/${_fragment}")
+        message(FATAL_ERROR "ConSan boundary check is missing ${_fragment}")
+    endif()
+    string(REGEX MATCHALL "#include[^\n]*${_fragment}" _profile_includes
+                          "${_capability_contract_contents}")
+    list(LENGTH _profile_includes _profile_include_count)
+    if(NOT _profile_include_count EQUAL 1)
+        message(
+            FATAL_ERROR
+            "ConSan target-profile owner ${_fragment} has "
+            "${_profile_include_count} imports in the common registry"
+        )
+    endif()
+endforeach()
+foreach(
+    _fragment _target _arch
+    IN ZIP_LISTS
+       _concrete_target_profile_fragments
+       _concrete_target_profile_ids
+       _concrete_target_profile_arches
+)
+    file(READ "${_consan_dir}/${_fragment}" _profile_contents)
+    if(NOT _profile_contents MATCHES "${_target}" OR NOT _profile_contents MATCHES "${_arch}")
+        message(
+            FATAL_ERROR
+            "ConSan target-profile owner ${_fragment} does not own ${_target}/${_arch}"
+        )
+    endif()
+endforeach()
+
 # The HSA hook consumes public pipeline/report/diagnostic projections only.
 file(GLOB _hook_sources "${_hook_dir}/*.cpp" "${_hook_dir}/*.h")
 foreach(_file IN LISTS _hook_sources)

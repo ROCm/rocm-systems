@@ -1014,3 +1014,88 @@ the initial pressure-point list into an unjustified destination design.
   production-code reduction target.
 - Detailed workstream gates and numerical thresholds under the completion bar.
 - Completion and handoff records.
+
+# Part III: execution record
+
+## 16. Baseline and convergence ledger
+
+### 16.1 Starting baseline
+
+Implementation began from commit `496fff6c619f` with the exact production
+scope used by the fourth-refactoring audit:
+
+- `lib/rocjitsu/src/rocjitsu/code/patch/consan/` and
+  `lib/rocjitsu/src/rocjitsu/hooks/consan/`;
+- production `*.cpp`, `*.h`, and `*.inc` files only;
+- tests, generated code, documentation, blank lines, and comment-only lines
+  excluded from the implementation count.
+
+The starting measurements are:
+
+| Signal | Starting value |
+| --- | ---: |
+| Production files | 229 |
+| Physical production lines | 104,975 |
+| Nonblank production lines | 99,083 |
+| Comment/blank-excluded production implementation lines | 91,450 |
+| `MoiOptions` references / files | 87 / 25 |
+| `ConSanTransformArtifacts` references / files | 276 / 57 |
+| `ConSanPatchInfo` references / files | 200 / 28 |
+| `ConSanMoiOperatingPoint` references / files | 290 / 51 |
+| ConSan tests | 5,345 |
+| Nonphysical tests | 4,710, including 2,908 simulated-device tests |
+| Physical gfx1201 tests | 635 |
+
+The initial gate passed all 4,710 nonphysical tests at `-j16` and all 635
+physical gfx1201 tests at `-j1`. The test inventory exactly matches the end of
+the fourth refactoring.
+
+The line counter is lexical only: it removes comments and blank lines from the
+declared production scope. It does not infer mode or architecture ownership
+from identifiers. Semantic ownership and interaction accounting continue to
+require the deep-read method described in Section 2.1.
+
+### 16.2 Convergence checkpoint 1: immutable target-profile ownership
+
+The first vertical slice traced the immutable `ConSanTargetProfile` product
+from its central definition through every lookup, capability projection,
+resource consumer, manifest generator, validator, and exact profile test. The
+five concrete profiles had one authority, but that authority was a single
+mixed table in the common capability header. It repeated gfx9-CDNA and RDNA
+facts and made extension of one target require editing a large common record.
+
+The converged ownership is now:
+
+- gfx942 and gfx950 publish concrete profiles from gfx-named owners and share
+  one gfx9-CDNA defaults owner;
+- gfx1100 and gfx1201 publish concrete profiles from gfx-named owners and share
+  one RDNA defaults owner;
+- gfx1250 publishes its distinct profile and semantic-form mask from its own
+  gfx-named owner; and
+- `consan_capability_contract.h` owns only the narrow five-product registry and
+  target-neutral lookup, validation, and capability projections.
+
+The five superseded central profile records and their repeated assignments were
+deleted. A structural regression rejects concrete target or architecture IDs
+in the common capability contract, requires every reviewed family/concrete
+profile owner to be imported exactly once, and verifies that every concrete
+owner declares its target/architecture pair.
+
+Checkpoint accounting relative to the starting baseline:
+
+| Signal | Checkpoint 1 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 236 | +7 locality owners |
+| Physical production lines | 104,875 | -100 |
+| Nonblank production lines | 98,974 | -109 |
+| Production implementation lines | 91,321 | **-129** |
+| Concrete product/architecture IDs in the common capability contract | 0 | -10 |
+| Broad-bus reference/file counts | unchanged | 0 |
+| Test inventory | 5,345 | 0 |
+
+Validation at the checkpoint includes a full `-j16` rebuild, all 15 exhaustive
+capability-contract tests, the generated capability-manifest comparison, and
+the architecture-boundary test. The pre-change full nonphysical and physical
+gates establish the behavioral baseline; the next periodic full gate will run
+against the converged source before the refactoring moves far beyond this
+checkpoint.
