@@ -387,8 +387,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);
       spill_backed_operand_recovery = spill_overlaps_guest_operands;
-    } else if (spill && sampled_access_can_emit_spill_over_guest_operands(
-                            candidate_options, candidate_options, candidate)) {
+    } else if (spill &&
+               sampled_access_can_emit_spill_over_guest_operands(candidate_options, candidate)) {
       std::vector<std::string> ignored_overlap_errors;
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);

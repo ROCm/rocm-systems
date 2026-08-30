@@ -24,6 +24,15 @@ moi_sampled_publication_state_sgprs(const ConSanRequest &request,
 [[nodiscard]] bool sampled_access_supports_spill_backed_operand_recovery(
     const ConSanRequest &request, const ConSanMoiCandidate &candidate, rj_code_arch_t arch);
 
+[[nodiscard]] bool
+sampled_access_can_emit_spill_over_guest_operands(const ConSanMoiOperatingPoint &point,
+                                                  const ConSanMoiCandidate &candidate);
+
+[[nodiscard]] bool
+sampled_access_can_plan_spill_over_guest_operands(const ConSanRequest &request,
+                                                  const ConSanMoiOperatingPoint &point,
+                                                  const ConSanMoiCandidate &candidate);
+
 [[nodiscard]] uint16_t direct_sampled_scratch_count(const ConSanRequest &request,
                                                     const ConSanMoiOperatingPoint &point,
                                                     const ConSanMoiCandidate &candidate,

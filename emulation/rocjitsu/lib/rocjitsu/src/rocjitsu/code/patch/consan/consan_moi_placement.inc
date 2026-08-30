@@ -457,49 +457,6 @@ moi_persistent_or_descriptor_workgroup_sources(
          (!point.moi_owner_sgpr || point.automatic_moi_owner_sgpr);
 }
 
-// A Sampled store executes its displaced guest instruction before the probe
-// uses ordinary scratch VGPRs. That ordering permits a spill-backed scratch
-// window to overlap the store's address or payload: the spill save preserves
-// the live values, the guest consumes them, and the final restore cannot erase
-// a guest result because stores have no destination VGPR. Keep the proof
-// deliberately narrow. Address materialization and scratch-backed owner state
-// both write the scratch window before the guest, while loads produce a value
-// that the final restore would overwrite.
-[[nodiscard]] bool
-sampled_access_can_emit_spill_over_guest_operands(const ConSanRequest &request,
-                                                  const ConSanMoiOperatingPoint &point,
-                                                  const ConSanMoiCandidate &candidate) {
-  return request.moi_engine == ConSanMoiEngine::Sampled && candidate.lowering.form &&
-         !candidate.lowering.form->destination_vgpr && !candidate.is_direct_to_lds() &&
-         point.moi_owner_vgpr && !point.automatic_moi_private_epoch &&
-         !point.moi_persistent_sgprs.complete() &&
-         !candidate_requires_flat_address_materialization(candidate);
-}
-
-[[nodiscard]] bool
-sampled_access_can_plan_spill_over_guest_operands(const ConSanRequest &request,
-                                                  const ConSanMoiOperatingPoint &point,
-                                                  const ConSanMoiCandidate &candidate) {
-  if (sampled_access_can_emit_spill_over_guest_operands(request, point, candidate))
-    return true;
-  if (request.moi_engine != ConSanMoiEngine::Sampled || !candidate.lowering.form ||
-      candidate.lowering.form->destination_vgpr || candidate.is_direct_to_lds() ||
-      point.automatic_moi_private_epoch || point.moi_persistent_sgprs.complete() ||
-      candidate_requires_flat_address_materialization(candidate)) {
-    return false;
-  }
-  // Automatic persistent-state placement runs after the first resource pass.
-  // Before that pass, v0 remains forbidden as the provisional workitem owner,
-  // which can hide an otherwise valid forced-spill window. Admit the store
-  // overlap provisionally when this transform requires entry-persistent
-  // owner state. The post-placement resource rebuild and emission predicate
-  // above still require a concrete persistent owner VGPR, so private/scalar
-  // fallbacks or failed placement cannot turn this planning allowance into
-  // generated code.
-  return moi_initializes_owner_epoch(request, point) || request.moi_track_atomics ||
-         request.moi_track_barriers || request.moi_runtime_sample_stride > 1u;
-}
-
 struct MoiKernelResourceContext {
   const ConSanKernelInfo *kernel = nullptr;
   KernelCfgScope scope;

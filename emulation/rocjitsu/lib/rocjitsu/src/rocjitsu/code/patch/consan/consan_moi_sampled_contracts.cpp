@@ -16,6 +16,34 @@ bool sampled_access_supports_spill_backed_operand_recovery(const ConSanRequest &
          !candidate_requires_flat_address_materialization(candidate);
 }
 
+bool sampled_access_can_emit_spill_over_guest_operands(const ConSanMoiOperatingPoint &point,
+                                                       const ConSanMoiCandidate &candidate) {
+  return candidate.lowering.form && !candidate.lowering.form->destination_vgpr &&
+         !candidate.is_direct_to_lds() && point.moi_owner_vgpr &&
+         !point.automatic_moi_private_epoch && !point.moi_persistent_sgprs.complete() &&
+         !candidate_requires_flat_address_materialization(candidate);
+}
+
+bool sampled_access_can_plan_spill_over_guest_operands(const ConSanRequest &request,
+                                                       const ConSanMoiOperatingPoint &point,
+                                                       const ConSanMoiCandidate &candidate) {
+  if (request.moi_engine != ConSanMoiEngine::Sampled)
+    return false;
+  if (sampled_access_can_emit_spill_over_guest_operands(point, candidate))
+    return true;
+  if (!candidate.lowering.form || candidate.lowering.form->destination_vgpr ||
+      candidate.is_direct_to_lds() || point.automatic_moi_private_epoch ||
+      point.moi_persistent_sgprs.complete() ||
+      candidate_requires_flat_address_materialization(candidate)) {
+    return false;
+  }
+  // Automatic persistent-state placement runs after the first resource pass.
+  // Admit the overlap provisionally when entry-persistent owner state will be
+  // resolved later; emission still requires a concrete persistent owner VGPR.
+  return moi_initializes_owner_epoch(request, point) || request.moi_track_atomics ||
+         request.moi_track_barriers || request.moi_runtime_sample_stride > 1u;
+}
+
 uint16_t direct_sampled_scratch_count(const ConSanRequest &request,
                                       const ConSanMoiOperatingPoint &point,
                                       const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {

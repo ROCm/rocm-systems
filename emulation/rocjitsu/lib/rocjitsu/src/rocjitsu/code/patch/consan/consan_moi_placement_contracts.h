@@ -467,11 +467,6 @@ moi_relocatable_host_scalar_ranges(const ConSanRequest &request,
     const MoiDenseRelayHostRequest &request,
     const std::function<bool(uint64_t, uint64_t)> &overlaps_reserved);
 
-[[nodiscard]] bool
-sampled_access_can_emit_spill_over_guest_operands(const ConSanRequest &request,
-                                                  const ConSanMoiOperatingPoint &point,
-                                                  const ConSanMoiCandidate &candidate);
-
 [[nodiscard]] std::optional<uint16_t>
 moi_sampled_access_return_scc_sgpr(const ConSanRequest &request,
                                    const ConSanMoiOperatingPoint &point);
