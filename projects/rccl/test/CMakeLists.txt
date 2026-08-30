@@ -1007,7 +1007,8 @@ if(BUILD_TESTS)
     # into the Fixtures binary so the executable satisfies those symbols when
     # the dynamic loader brings in librccl.so.
     if(ENABLE_ROCSHMEM_GIN AND GIN_ANVIL_UNIT_TESTS AND NOT ENABLE_ROCSHMEM
-       AND ROCSHMEM_INSTALL_DIR AND "${test_executable}" STREQUAL "rccl-UnitTestsFixtures")
+       AND ROCSHMEM_INSTALL_DIR AND ("${test_executable}" STREQUAL "rccl-UnitTestsFixtures"
+                                     OR "${test_executable}" STREQUAL "rccl-UnitTestsFixturesDebug"))
       set(_ROCSHMEM_FIXTURES_OFFLOAD_FLAGS "")
       foreach(_g IN LISTS GPU_TARGETS)
         if(_g)
