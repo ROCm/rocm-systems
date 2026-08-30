@@ -56,6 +56,8 @@
 #include "impl/wddm/device.h"
 #include "impl/wddm/queue.h"
 #include "impl/wddm/event.h"
+#include "impl/wddm/thunks.h"
+#include "impl/wddm/vram_budget.h"
 #include "util/os.h"
 
 namespace wsl {
@@ -336,6 +338,23 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
   uint64_t value = page_fence_value_.load();
   if (!CpuWait(&page_syncobj_, &value, 1, false))
     return HSA_STATUS_ERROR;
+
+  if (dxg_runtime->wddm_version < KMT_DRIVERVERSION_WDDM_3_1 && IsDgpu()) {
+    if (!d3dthunk::QueryVideoMemoryInfoAvailable())
+      return HSA_STATUS_ERROR;
+
+    D3DKMT_QUERYVIDEOMEMORYINFO info = {};
+    info.hAdapter = adapter_;
+    info.MemorySegmentGroup = D3DKMT_MEMORY_SEGMENT_GROUP_LOCAL;
+    info.PhysicalAdapterIndex = 0;
+
+    if (d3dthunk::QueryVideoMemoryInfo(&info) != ErrorCode::Success)
+      return HSA_STATUS_ERROR;
+
+    *available_bytes =
+        AvailableVramBudget(info.Budget, info.CurrentUsage, VramTotal());
+    return HSA_STATUS_SUCCESS;
+  }
 
   uint64_t used = 0;
   hsa_status_t ret = QueryVramUsage(&used);
