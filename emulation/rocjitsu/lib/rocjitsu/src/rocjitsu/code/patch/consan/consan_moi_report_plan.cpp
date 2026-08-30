@@ -5,6 +5,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "util/bit.h"
 
+#include <array>
 #include <bit>
 #include <limits>
 
@@ -33,22 +34,36 @@ namespace {
   return true;
 }
 
-void alias_unused_regions(ConSanMoiReportBufferLayout &layout, size_t offset) {
-  layout.record_replay_dispatch_tokens_offset = offset;
-  layout.access_records_offset = offset;
-  layout.barrier_records_offset = offset;
-  layout.atomic_records_offset = offset;
-  layout.fence_records_offset = offset;
-  layout.diagnostic_records_offset = offset;
-  layout.exact_shadow_entries_offset = offset;
-  layout.inline_atomic_release_slots_offset = offset;
-  layout.inline_acquired_epoch_token_slots_offset = offset;
-  layout.inline_causal_snapshots_offset = offset;
-  layout.inline_compact_token_mappings_offset = offset;
-  layout.sampled_watchpoints_offset = offset;
-  layout.sampled_causal_windows_offset = offset;
-  layout.sampled_sync_metadata_offset = offset;
-  layout.sampled_pending_acquires_offset = offset;
+[[nodiscard]] std::array<size_t *, 15> report_region_offsets(ConSanMoiReportBufferLayout &layout) {
+  return {&layout.record_replay_dispatch_tokens_offset,
+          &layout.access_records_offset,
+          &layout.barrier_records_offset,
+          &layout.atomic_records_offset,
+          &layout.fence_records_offset,
+          &layout.diagnostic_records_offset,
+          &layout.exact_shadow_entries_offset,
+          &layout.inline_atomic_release_slots_offset,
+          &layout.inline_acquired_epoch_token_slots_offset,
+          &layout.inline_causal_snapshots_offset,
+          &layout.inline_compact_token_mappings_offset,
+          &layout.sampled_watchpoints_offset,
+          &layout.sampled_causal_windows_offset,
+          &layout.sampled_sync_metadata_offset,
+          &layout.sampled_pending_acquires_offset};
+}
+
+constexpr size_t kUnplannedReportRegionOffset = std::numeric_limits<size_t>::max();
+
+void mark_report_regions_unplanned(ConSanMoiReportBufferLayout &layout) {
+  for (size_t *offset : report_region_offsets(layout))
+    *offset = kUnplannedReportRegionOffset;
+}
+
+void alias_unplanned_report_regions(ConSanMoiReportBufferLayout &layout, size_t alias) {
+  for (size_t *offset : report_region_offsets(layout)) {
+    if (*offset == kUnplannedReportRegionOffset)
+      *offset = alias;
+  }
 }
 
 [[nodiscard]] bool finalize_plan(ConSanMoiAutoReportPlan &plan, uint64_t cursor) {
@@ -829,7 +844,7 @@ ConSanMoiAutoReportPlan plan_consan_moi_auto_report(const ConSanMoiAutoReportInv
   const uint64_t engine_ceiling = consan_moi_auto_report_buffer_ceiling_bytes(inventory.engine);
   plan.ceiling_bytes =
       caller_ceiling_bytes == 0u ? engine_ceiling : std::min(caller_ceiling_bytes, engine_ceiling);
-  alias_unused_regions(plan.layout, sizeof(ConSanMoiReportHeader));
+  mark_report_regions_unplanned(plan.layout);
   uint64_t cursor = sizeof(ConSanMoiReportHeader);
 
   bool planned = false;
@@ -844,48 +859,16 @@ ConSanMoiAutoReportPlan plan_consan_moi_auto_report(const ConSanMoiAutoReportInv
     planned = plan_inline(inventory, plan, cursor);
     break;
   }
-  if (!planned)
+  if (!planned) {
+    alias_unplanned_report_regions(plan.layout, sizeof(ConSanMoiReportHeader));
     return plan;
-  if (!finalize_plan(plan, cursor))
-    return plan;
-
-  const size_t end = plan.layout.required_bytes;
-  switch (inventory.engine) {
-  case ConSanMoiEngine::RecordReplay:
-    plan.layout.exact_shadow_entries_offset = end;
-    plan.layout.inline_atomic_release_slots_offset = end;
-    plan.layout.inline_causal_snapshots_offset = end;
-    plan.layout.inline_compact_token_mappings_offset = end;
-    plan.layout.inline_acquired_epoch_token_slots_offset = end;
-    plan.layout.sampled_causal_windows_offset = end;
-    plan.layout.sampled_watchpoints_offset = end;
-    plan.layout.sampled_sync_metadata_offset = end;
-    plan.layout.sampled_pending_acquires_offset = end;
-    break;
-  case ConSanMoiEngine::Sampled:
-    plan.layout.record_replay_dispatch_tokens_offset = end;
-    plan.layout.access_records_offset = end;
-    plan.layout.barrier_records_offset = end;
-    plan.layout.atomic_records_offset = end;
-    plan.layout.fence_records_offset = end;
-    plan.layout.exact_shadow_entries_offset = end;
-    plan.layout.inline_atomic_release_slots_offset = end;
-    plan.layout.inline_causal_snapshots_offset = end;
-    plan.layout.inline_compact_token_mappings_offset = end;
-    plan.layout.inline_acquired_epoch_token_slots_offset = end;
-    break;
-  case ConSanMoiEngine::InlineShadow:
-    plan.layout.record_replay_dispatch_tokens_offset = end;
-    plan.layout.access_records_offset = end;
-    plan.layout.barrier_records_offset = end;
-    plan.layout.atomic_records_offset = end;
-    plan.layout.fence_records_offset = end;
-    plan.layout.sampled_causal_windows_offset = end;
-    plan.layout.sampled_watchpoints_offset = end;
-    plan.layout.sampled_sync_metadata_offset = end;
-    plan.layout.sampled_pending_acquires_offset = end;
-    break;
   }
+  if (!finalize_plan(plan, cursor)) {
+    alias_unplanned_report_regions(plan.layout, sizeof(ConSanMoiReportHeader));
+    return plan;
+  }
+
+  alias_unplanned_report_regions(plan.layout, plan.layout.required_bytes);
   return plan;
 }
 

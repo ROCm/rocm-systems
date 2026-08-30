@@ -497,7 +497,7 @@ _consan_assert_reviewed_mode_switch_budget(
     consan_moi.cpp 20 "top-level engine dispatch and result publication"
 )
 _consan_assert_reviewed_mode_switch_budget(
-    consan_moi_report_plan.cpp 18 "mode-specific report ABI selection"
+    consan_moi_report_plan.cpp 15 "mode-specific report ABI selection"
 )
 _consan_assert_reviewed_mode_switch_budget(
     consan_moi_barrier.inc 17 "named RecordReplay/Sampled/Inline barrier component"
