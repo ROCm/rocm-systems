@@ -8,6 +8,7 @@ namespace rocjitsu {
 namespace {
 
 using consan_moi_impl::moi_mode_operations;
+using consan_moi_impl::MoiCdnaPersistentOverflowStrategy;
 using consan_moi_impl::MoiObjectFacts;
 using consan_moi_impl::MoiPersistentStateFacts;
 using consan_moi_impl::plan_moi_dispatch_identity;
@@ -303,6 +304,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsPersistentStateDemand) {
   EXPECT_TRUE(demand.private_state_supported);
   EXPECT_TRUE(demand.scalar_state_required_for_private_or_overflow);
   EXPECT_TRUE(demand.prefer_private_epoch_for_descriptor_growth);
+  EXPECT_EQ(demand.cdna_overflow_strategy, MoiCdnaPersistentOverflowStrategy::ExactWorkgroupState);
 
   request.moi_engine = ConSanMoiEngine::Sampled;
   request.moi_track_barriers = false;
@@ -312,6 +314,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsPersistentStateDemand) {
   EXPECT_FALSE(demand.private_state_supported);
   EXPECT_FALSE(demand.scalar_state_required_for_private_or_overflow);
   EXPECT_TRUE(demand.prefer_private_epoch_for_descriptor_growth);
+  EXPECT_EQ(demand.cdna_overflow_strategy, MoiCdnaPersistentOverflowStrategy::OwnerSnapshot);
 
   demand = plan_moi_persistent_state_demand(request, resources, point, {.atomic_count = 1u});
   EXPECT_TRUE(demand.needs_entry_workgroup_tuple);
@@ -333,6 +336,8 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsPersistentStateDemand) {
   EXPECT_TRUE(demand.private_state_supported);
   EXPECT_TRUE(demand.scalar_state_required_for_private_or_overflow);
   EXPECT_FALSE(demand.prefer_private_epoch_for_descriptor_growth);
+  EXPECT_EQ(demand.cdna_overflow_strategy,
+            MoiCdnaPersistentOverflowStrategy::ResidentWavePrivateState);
 }
 
 } // namespace

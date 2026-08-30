@@ -158,6 +158,7 @@ plan_inline_shadow_persistent_state_demand(const ConSanRequest &, const BoundRun
       .scalar_state_supported = true,
       .private_state_supported = true,
       .scalar_state_required_for_private_or_overflow = facts.has_operational_dynamic_stack_owner,
+      .cdna_overflow_strategy = MoiCdnaPersistentOverflowStrategy::ResidentWavePrivateState,
   };
 }
 

@@ -195,6 +195,7 @@ MoiPersistentStateDemand plan_sampled_persistent_state_demand(
   demand.private_state_supported = request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
   demand.scalar_state_required_for_private_or_overflow = facts.has_operational_dynamic_stack_owner;
   demand.prefer_private_epoch_for_descriptor_growth = true;
+  demand.cdna_overflow_strategy = MoiCdnaPersistentOverflowStrategy::OwnerSnapshot;
   return demand;
 }
 

@@ -171,6 +171,7 @@ MoiPersistentStateDemand plan_record_replay_persistent_state_demand(
   demand.private_state_supported = true;
   demand.scalar_state_required_for_private_or_overflow = true;
   demand.prefer_private_epoch_for_descriptor_growth = true;
+  demand.cdna_overflow_strategy = MoiCdnaPersistentOverflowStrategy::ExactWorkgroupState;
   return demand;
 }
 

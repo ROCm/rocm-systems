@@ -491,7 +491,7 @@ function(_consan_assert_reviewed_mode_switch_budget source maximum reason)
     )
 endfunction()
 _consan_assert_reviewed_mode_switch_budget(
-    consan_moi_placement.inc 5 "shared immutable resource constraint solver"
+    consan_moi_placement.inc 2 "shared immutable resource constraint solver"
 )
 _consan_assert_reviewed_mode_switch_budget(
     consan_moi.cpp 20 "top-level engine dispatch and result publication"

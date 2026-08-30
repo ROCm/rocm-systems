@@ -59,6 +59,13 @@ struct MoiPersistentStateFacts {
   bool has_operational_dynamic_lds_owner = false;
 };
 
+enum class MoiCdnaPersistentOverflowStrategy : uint8_t {
+  Unsupported,
+  ExactWorkgroupState,
+  OwnerSnapshot,
+  ResidentWavePrivateState,
+};
+
 struct MoiPersistentStateDemand {
   bool needs_workgroup_key = false;
   bool needs_entry_workgroup_tuple = false;
@@ -73,6 +80,8 @@ struct MoiPersistentStateDemand {
   bool private_state_supported = false;
   bool scalar_state_required_for_private_or_overflow = false;
   bool prefer_private_epoch_for_descriptor_growth = false;
+  MoiCdnaPersistentOverflowStrategy cdna_overflow_strategy =
+      MoiCdnaPersistentOverflowStrategy::Unsupported;
 };
 
 /// Mode-owned contract for a site whose ordinary scratch allocation spills
