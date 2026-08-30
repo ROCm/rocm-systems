@@ -1944,3 +1944,93 @@ mode-planning, pipeline, and structural-boundary gate, followed by a broader
 Both are green. The immediately preceding checkpoint supplied the complete
 4,722-test nonphysical and 635-test physical gates, so the serialized physical
 matrix was not repeated for this target-neutral ownership-only slice.
+
+### 16.15 Convergence checkpoint 14: target-normalized proof and validation inventory
+
+This checkpoint, through commit `83dbe7622b`, follows the architecture and
+mode boundaries into independent encoded-mutation proof, report dispatch
+identity, descriptor allocation, and pristine validation inventory.
+
+On the target side, the common final validator no longer includes RDNA4
+machine structures to prove ordinary-global, atomic-address, or atomic-scope
+mutations. One typed `ConSanEncodedMutationKind` operation crosses the target
+boundary, and the gfx12 owner implements the exact raw-word and generated-type
+proof. Four former per-mutation facade functions, their internal declarations,
+and their registry wrappers collapsed into that operation. Address, scope, and
+DS-address comparisons share one set of exact proof primitives. The obsolete
+internal validation adapter remains only as the required inert filename
+tombstone, and structural checks prohibit the former facade names from
+returning.
+
+InlineShadow atomic admission likewise consumes target-normalized constraints
+instead of testing concrete target facts in the mode implementation. Descriptor
+placement consumes one `ConSanDescriptorVgprAllocation` product, so common
+placement no longer decodes the gfx9 `ACCUM_OFFSET` field or reconstructs the
+ordinary/accumulator boundary. These migrations retain one shared mechanism
+without copying target recipes into modes.
+
+On the mode/shared-mechanism side, a report dispatch identity is now one
+inseparable authorized source: an SGPR pair, a VGPR pair, or a 64-bit literal.
+Low-level emitters cannot independently reapply literal policy to its two
+words. Target-owned and externally bound source planners preserve the distinct
+authorities, while the shared runtime workgroup gate consumes its exact
+Record/Replay-versus-Sampled flavor rather than the global engine enum.
+
+The final slice traces pristine mutation and perturbation rederivation. The old
+APIs returned or embedded the complete mutable `ConSanTransformArtifacts` bus,
+although mutation proof consumed only program inventory and fault sites, and
+perturbation proof consumed only program inventory, candidates, and analysis
+success. A dedicated validation-inventory owner now publishes two exact
+immutable products and stops both lowerer calls immediately after semantic
+inventory, before unused fault or perturbation planning.
+
+The products deliberately remain distinct. A first attempted merge was
+falsified by the existing bounded-Qwen regression: mutation proof intentionally
+enables extended barrier pairing, whereas perturbation proof intentionally
+rederives ordinary synchronization semantics. The converged contract preserves
+that independent distinction rather than sharing analyses whose semantics are
+only superficially similar. The boundary gate rejects the mutable transaction
+and perturbation workspace in the public inventory contract, and requires both
+rederivations to stop at their reviewed semantic-inventory extent.
+
+| Signal | Checkpoint 14 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 261 | +32 |
+| Physical production lines | 105,360 | +385 |
+| Nonblank production lines | 99,157 | +74 |
+| Production implementation lines | 91,506 | **+56** |
+| `MoiOptions` references / files | 95 / 30 | +8 / +5 |
+| `ConSanTransformArtifacts` references / files | 243 / 58 | **-33 / +1** |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 305 / 53 | +15 / +2 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | **0** | **-95** |
+| Explicit mode-enum references in `consan_moi_report_plan.cpp` | **0** | **-18** |
+| Explicit mode-enum references in `consan_pipeline.cpp` | **0** | n/a |
+| Test inventory | 5,358 | +13 |
+
+The typed target-validation extraction and the subsequent sharing/deletion
+paybacks removed 59 physical production lines after the initial locality
+investment. Narrow pristine validation removes four more broad-transaction
+references and avoids unused planning, but its dedicated owner and exact
+products cost 18 implementation lines. Across the complete checkpoint,
+production is 99 implementation lines larger than checkpoint 13 and 56 lines
+above the fifth-refactoring baseline. This is durable locality and narrower
+dataflow, not the material shrinkage required by Section 14.
+
+The next convergence checkpoint must therefore harvest more implementation
+than this checkpoint added. It may exploit the new products and target
+operations, simplify the remaining broad transaction and operating point, or
+remove another repeated authority, but it must not make a second consecutive
+locality investment that defers the same size payoff. The core build graph,
+full physical locality of all target facets, broad transaction/operating-point
+surfaces, both extension exercises, and independent completion audit remain
+open.
+
+Validation includes repeated focused dispatch-identity, descriptor, target
+mutation, fault, perturbation, composite, and final-validation matrices; the
+124-test fault/perturbation/final-validation gate; and the structural boundary
+gate. The complete 4,723-test nonphysical matrix over all five simulated
+targets passed at `-j16` in 245.85 seconds. All 635 serialized physical
+gfx1201 tests passed at `-j1` in 110.16 seconds. The inventory increase is the
+dispatch-source planning regression.
