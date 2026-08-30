@@ -2,16 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 /// @file consan_validation_target_ops_internal.h
-/// @brief Family-owned encoded-mutation proofs behind final validation.
-
-#pragma once
-
-#include "rocjitsu/code/patch/consan/consan_validation_target_ops.h"
-
-namespace rocjitsu::consan_validation_target_detail {
-
-[[nodiscard]] ConSanEncodedMutationValidation
-validate_gfx12_encoded_mutation(ConSanEncodedMutationKind kind, std::span<const uint8_t> before,
-                                std::span<const uint8_t> after);
-
-} // namespace rocjitsu::consan_validation_target_detail
+/// @brief Retained tombstone; the one registry-private declaration now lives
+/// beside its sole caller, and target implementations consume the public
+/// semantic contract directly.

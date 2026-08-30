@@ -7,7 +7,12 @@
 #include "rocjitsu/code/patch/consan/consan_validation_target_ops.h"
 
 #include "rocjitsu/code/patch/consan/consan.h"
-#include "rocjitsu/code/patch/consan/consan_validation_target_ops_internal.h"
+
+namespace rocjitsu::consan_validation_target_detail {
+[[nodiscard]] ConSanEncodedMutationValidation
+validate_gfx12_encoded_mutation(ConSanEncodedMutationKind kind, std::span<const uint8_t> before,
+                                std::span<const uint8_t> after);
+}
 
 namespace rocjitsu {
 ConSanEncodedMutationValidation validate_consan_encoded_mutation(rj_code_arch_t arch,

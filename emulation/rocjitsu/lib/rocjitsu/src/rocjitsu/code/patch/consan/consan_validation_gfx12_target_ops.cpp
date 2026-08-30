@@ -4,7 +4,7 @@
 /// @file consan_validation_gfx12_target_ops.cpp
 /// @brief Independent GFX12 proofs for encoded fault mutations.
 
-#include "rocjitsu/code/patch/consan/consan_validation_target_ops_internal.h"
+#include "rocjitsu/code/patch/consan/consan_validation_target_ops.h"
 
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
