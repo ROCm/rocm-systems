@@ -179,7 +179,6 @@ set(
     _generated_header_owners
     consan_fault_gfx12_target_ops.cpp
     consan_fault_gfx9_target_ops.cpp
-    consan_final_validation.cpp
     consan_gfx1250_lds_target_ops.cpp
     consan_moi_gfx9_target_ops.cpp
     consan_program_analysis_gfx9_cdna_target_ops.cpp
@@ -190,6 +189,17 @@ set(
     consan_supercollider_gfx9_target_ops.cpp
     consan_supercollider_rdna3_target_ops.cpp
     consan_supercollider_rdna4_target_ops.cpp
+    consan_validation_gfx12_target_ops.cpp
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_final_validation.cpp"
+    "isa/arch/amdgpu/generated/|(cdna[0-9_]*|rdna[0-9_]*)::"
+    "common final validation must consume independent target validation operations"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_validation.inc"
+    "isa/arch/amdgpu/generated/|(cdna[0-9_]*|rdna[0-9_]*)::"
+    "common validation implementation must consume independent target validation operations"
 )
 file(
     GLOB _consan_sources

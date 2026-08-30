@@ -1913,23 +1913,19 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       }
       if (patch.kind == ConSanPatchKind::InlineOrdinaryAddressRewrite) {
         if (!patch.fault_companion_identity.empty() ||
-            patch.anchor_offset != target->site->text_offset ||
-            patch.original_size != sizeof(rdna4::VglobalMachineInst)) {
+            patch.anchor_offset != target->site->text_offset) {
           errors.emplace_back(
               "ConSan mutation proof found stale ordinary acquire address metadata");
           continue;
         }
-        std::array<uint32_t, 3> before{};
-        std::array<uint32_t, 3> after{};
-        std::memcpy(before.data(), original_text.data() + patch.anchor_offset, patch.original_size);
-        std::memcpy(after.data(), replacement_text.data() + patch.anchor_offset,
-                    patch.original_size);
-        const int32_t before_offset = sign_extend_24(before[2] >> 8u);
-        const int32_t after_offset = sign_extend_24(after[2] >> 8u);
-        const int64_t delta = static_cast<int64_t>(after_offset) - before_offset;
-        if (before[0] != after[0] || before[1] != after[1] ||
-            (before[2] & 0xffu) != (after[2] & 0xffu) || delta <= 0 || delta > 0x7fffff ||
-            delta % static_cast<int64_t>(sizeof(uint32_t)) != 0) {
+        const auto validation = validate_consan_ordinary_global_address_mutation(
+            arch, original_text.subspan(patch.anchor_offset, patch.original_size),
+            replacement_text.subspan(patch.anchor_offset, patch.original_size));
+        if (validation == ConSanEncodedMutationValidation::UnexpectedInstructionSize ||
+            validation == ConSanEncodedMutationValidation::UnsupportedInstructionEncoding) {
+          errors.emplace_back(
+              "ConSan mutation proof found stale ordinary acquire address metadata");
+        } else if (validation != ConSanEncodedMutationValidation::Valid) {
           errors.emplace_back(
               "ConSan mutation proof changed fields other than the ordinary load ioffset");
         }
@@ -1957,19 +1953,17 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       }
 
       if (!patch.fault_companion_identity.empty() ||
-          patch.anchor_offset != target->site->text_offset ||
-          patch.original_size != sizeof(rdna4::VglobalMachineInst)) {
+          patch.anchor_offset != target->site->text_offset) {
         errors.emplace_back("ConSan mutation proof found stale ordinary acquire scope metadata");
         continue;
       }
-      std::array<uint32_t, 3> before{};
-      std::array<uint32_t, 3> after{};
-      std::memcpy(before.data(), original_text.data() + patch.anchor_offset, patch.original_size);
-      std::memcpy(after.data(), replacement_text.data() + patch.anchor_offset, patch.original_size);
-      const uint32_t original_scope = (before[1] >> 18u) & 0x3u;
-      const uint32_t expected_scope_word = before[1] & ~(0x3u << 18u);
-      if ((original_scope != 2u && original_scope != 3u) || before[0] != after[0] ||
-          after[1] != expected_scope_word || before[2] != after[2]) {
+      const auto validation = validate_consan_ordinary_global_scope_mutation(
+          arch, original_text.subspan(patch.anchor_offset, patch.original_size),
+          replacement_text.subspan(patch.anchor_offset, patch.original_size));
+      if (validation == ConSanEncodedMutationValidation::UnexpectedInstructionSize ||
+          validation == ConSanEncodedMutationValidation::UnsupportedInstructionEncoding) {
+        errors.emplace_back("ConSan mutation proof found stale ordinary acquire scope metadata");
+      } else if (validation != ConSanEncodedMutationValidation::Valid) {
         errors.emplace_back(
             "ConSan mutation proof changed fields other than the exact ordinary load scope");
       }
@@ -2222,46 +2216,32 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       continue;
     }
 
-    if (patch.original_size != sizeof(rdna4::VdsMachineInst) &&
-        patch.original_size != sizeof(rdna4::VflatMachineInst)) {
-      errors.emplace_back("ConSan mutation proof found an unexpected atomic instruction size");
-      continue;
-    }
-    std::array<uint32_t, 3> before{};
-    std::array<uint32_t, 3> after{};
-    std::memcpy(before.data(), original_text.data() + patch.anchor_offset, patch.original_size);
     const auto staged = composed_atomic_bytes(patch);
     const std::span<const uint8_t> after_bytes =
         staged.value_or(replacement_text.subspan(patch.anchor_offset, patch.original_size));
-    std::memcpy(after.data(), after_bytes.data(), patch.original_size);
+    const std::span<const uint8_t> before_bytes =
+        original_text.subspan(patch.anchor_offset, patch.original_size);
     if (patch.kind == ConSanPatchKind::InlineAtomicAddressRewrite) {
-      bool valid_displacement = false;
-      if (patch.original_size == sizeof(rdna4::VdsMachineInst)) {
-        const int64_t delta = static_cast<int64_t>(after[0] & 0xffu) - (before[0] & 0xffu);
-        valid_displacement = (after[0] & ~0xffu) == (before[0] & ~0xffu) && after[1] == before[1] &&
-                             delta > 0 && delta <= 0xff &&
-                             delta % static_cast<int64_t>(sizeof(uint32_t)) == 0 &&
-                             (after[0] & 0xffu) % sizeof(uint32_t) == 0;
-      } else {
-        const int32_t before_offset = sign_extend_24(before[2] >> 8u);
-        const int32_t after_offset = sign_extend_24(after[2] >> 8u);
-        const int64_t delta = static_cast<int64_t>(after_offset) - before_offset;
-        valid_displacement = before[0] == after[0] && before[1] == after[1] &&
-                             (after[2] & 0xffu) == (before[2] & 0xffu) && delta > 0 &&
-                             delta <= 0x7fffff &&
-                             delta % static_cast<int64_t>(sizeof(uint32_t)) == 0;
-      }
-      if (!valid_displacement) {
+      const auto validation =
+          validate_consan_atomic_address_mutation(arch, before_bytes, after_bytes);
+      if (validation == ConSanEncodedMutationValidation::UnexpectedInstructionSize ||
+          validation == ConSanEncodedMutationValidation::UnsupportedInstructionEncoding) {
+        errors.emplace_back("ConSan mutation proof found an unexpected atomic instruction size");
+      } else if (validation != ConSanEncodedMutationValidation::Valid) {
         errors.emplace_back("ConSan mutation proof found the wrong atomic address displacement");
       }
     } else {
-      if (patch.original_size != sizeof(rdna4::VflatMachineInst)) {
+      const auto validation = validate_consan_atomic_scope_mutation(arch, before_bytes, after_bytes);
+      if (validation == ConSanEncodedMutationValidation::UnexpectedInstructionSize) {
+        errors.emplace_back("ConSan mutation proof found an unexpected atomic instruction size");
+        continue;
+      }
+      if (validation == ConSanEncodedMutationValidation::UnsupportedInstructionEncoding) {
         errors.emplace_back(
             "ConSan mutation proof found scope mutation on an unsupported atomic encoding");
         continue;
       }
-      const uint32_t expected_scope_word = before[1] & ~(0x3u << 18u);
-      if (after[0] != before[0] || after[1] != expected_scope_word || after[2] != before[2]) {
+      if (validation != ConSanEncodedMutationValidation::Valid) {
         errors.emplace_back(
             "ConSan mutation proof changed fields other than the selected atomic scope");
       }

@@ -95,4 +95,6 @@ target_sources(
         consan_supercollider_target_ops.cpp
         consan_supercollider_support.cpp
         consan_types.cpp
+        consan_validation_gfx12_target_ops.cpp
+        consan_validation_target_ops.cpp
 )
