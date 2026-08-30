@@ -54,7 +54,8 @@ namespace consan_moi_impl {
 
 MoiObjectModePlan plan_record_replay_object_mode(const ConSanRequest &request,
                                                  const ConSanMoiOperatingPoint &point,
-                                                 const MoiObjectFacts &facts) {
+                                                 const MoiObjectFacts &facts,
+                                                 const ConSanObservationPlan &) {
   MoiObjectModePlan plan =
       make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::WorkitemId);
   plan.atomic_or_fence_relevant =
@@ -122,6 +123,11 @@ void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, MoiOptions
   if (result.errors.empty())
     try_apply_fence_record_patch(bytes, options, arch, result);
 }
+
+const MoiModeOperations kRecordReplayModeOperations = {
+    plan_record_replay_object_mode,
+    apply_record_replay_mode_patches,
+};
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"
 

@@ -19,36 +19,30 @@ MoiObjectModePlan make_moi_object_mode_plan(const ConSanRequest &request,
   return plan;
 }
 
+[[nodiscard]] const MoiModeOperations &moi_mode_operations(ConSanMoiEngine engine) {
+  switch (engine) {
+  case ConSanMoiEngine::RecordReplay:
+    return kRecordReplayModeOperations;
+  case ConSanMoiEngine::Sampled:
+    return kSampledModeOperations;
+  case ConSanMoiEngine::InlineShadow:
+    return kInlineShadowModeOperations;
+  }
+}
+
 MoiObjectModePlan plan_moi_object_mode(const ConSanRequest &request,
                                        const ConSanMoiOperatingPoint &point,
                                        const MoiObjectFacts &facts,
                                        const ConSanObservationPlan &observation_plan) {
-  switch (request.moi_engine) {
-  case ConSanMoiEngine::RecordReplay:
-    return plan_record_replay_object_mode(request, point, facts);
-  case ConSanMoiEngine::Sampled:
-    return plan_sampled_object_mode(request, point, facts);
-  case ConSanMoiEngine::InlineShadow:
-    return plan_inline_shadow_object_mode(request, point, facts, observation_plan);
-  }
+  return moi_mode_operations(request.moi_engine).plan(request, point, facts, observation_plan);
 }
 
 void apply_moi_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
                             rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
                             std::span<const ConSanMoiCandidate> candidates,
                             const MoiObjectFacts &facts, ConSanTransformArtifacts &result) {
-  switch (options.moi_engine) {
-  case ConSanMoiEngine::RecordReplay:
-    apply_record_replay_mode_patches(bytes, options, arch, resource_state, candidates, facts,
-                                     result);
-    return;
-  case ConSanMoiEngine::Sampled:
-    apply_sampled_mode_patches(bytes, options, arch, resource_state, candidates, result);
-    return;
-  case ConSanMoiEngine::InlineShadow:
-    apply_inline_shadow_mode_patches(bytes, options, arch, resource_state, candidates, result);
-    return;
-  }
+  moi_mode_operations(options.moi_engine)
+      .apply(bytes, options, arch, resource_state, candidates, facts, result);
 }
 
 } // namespace rocjitsu::consan_moi_impl

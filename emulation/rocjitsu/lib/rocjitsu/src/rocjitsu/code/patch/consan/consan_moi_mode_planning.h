@@ -55,19 +55,6 @@ make_moi_object_mode_plan(const ConSanRequest &request, const ConSanMoiOperating
                                                      const MoiObjectFacts &facts,
                                                      const ConSanObservationPlan &observation_plan);
 
-[[nodiscard]] MoiObjectModePlan plan_record_replay_object_mode(const ConSanRequest &request,
-                                                               const ConSanMoiOperatingPoint &point,
-                                                               const MoiObjectFacts &facts);
-
-[[nodiscard]] MoiObjectModePlan plan_sampled_object_mode(const ConSanRequest &request,
-                                                         const ConSanMoiOperatingPoint &point,
-                                                         const MoiObjectFacts &facts);
-
-[[nodiscard]] MoiObjectModePlan
-plan_inline_shadow_object_mode(const ConSanRequest &request, const ConSanMoiOperatingPoint &point,
-                               const MoiObjectFacts &facts,
-                               const ConSanObservationPlan &observation_plan);
-
 /// Run the selected engine's lowering sequence. Shared placement has already
 /// accepted an operating point; the engine owns which access and sync
 /// consumers run, their order, and any mode-local post-placement cleanup.
@@ -76,20 +63,16 @@ void apply_moi_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
                             std::span<const ConSanMoiCandidate> candidates,
                             const MoiObjectFacts &facts, ConSanTransformArtifacts &result);
 
-void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
-                                      rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
-                                      std::span<const ConSanMoiCandidate> candidates,
-                                      const MoiObjectFacts &facts,
-                                      ConSanTransformArtifacts &result);
+struct MoiModeOperations {
+  MoiObjectModePlan (*plan)(const ConSanRequest &, const ConSanMoiOperatingPoint &,
+                            const MoiObjectFacts &, const ConSanObservationPlan &);
+  void (*apply)(std::span<const uint8_t>, MoiOptions &, rj_code_arch_t, MoiResourcePlanningState &,
+                std::span<const ConSanMoiCandidate>, const MoiObjectFacts &,
+                ConSanTransformArtifacts &);
+};
 
-void apply_sampled_mode_patches(std::span<const uint8_t> bytes, const MoiOptions &options,
-                                rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
-                                std::span<const ConSanMoiCandidate> candidates,
-                                ConSanTransformArtifacts &result);
-
-void apply_inline_shadow_mode_patches(std::span<const uint8_t> bytes, const MoiOptions &options,
-                                      rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
-                                      std::span<const ConSanMoiCandidate> candidates,
-                                      ConSanTransformArtifacts &result);
+extern const MoiModeOperations kRecordReplayModeOperations;
+extern const MoiModeOperations kSampledModeOperations;
+extern const MoiModeOperations kInlineShadowModeOperations;
 
 } // namespace rocjitsu::consan_moi_impl

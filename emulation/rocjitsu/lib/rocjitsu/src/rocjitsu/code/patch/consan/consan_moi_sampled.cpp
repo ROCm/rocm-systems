@@ -121,7 +121,8 @@ namespace consan_moi_impl {
 
 MoiObjectModePlan plan_sampled_object_mode(const ConSanRequest &request,
                                            const ConSanMoiOperatingPoint &point,
-                                           const MoiObjectFacts &facts) {
+                                           const MoiObjectFacts &facts,
+                                           const ConSanObservationPlan &) {
   MoiObjectModePlan plan =
       make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::WorkitemId);
   if (plan.track_atomics && !facts.has_access_candidate) {
@@ -136,10 +137,10 @@ MoiObjectModePlan plan_sampled_object_mode(const ConSanRequest &request,
   return plan;
 }
 
-void apply_sampled_mode_patches(std::span<const uint8_t> bytes, const MoiOptions &options,
+void apply_sampled_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
                                 rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
                                 std::span<const ConSanMoiCandidate> candidates,
-                                ConSanTransformArtifacts &result) {
+                                const MoiObjectFacts &, ConSanTransformArtifacts &result) {
   try_apply_direct_sampled_watchpoint_patch(bytes, options, arch, resource_state, candidates,
                                             result);
   if (result.errors.empty())
@@ -147,6 +148,11 @@ void apply_sampled_mode_patches(std::span<const uint8_t> bytes, const MoiOptions
   if (result.errors.empty())
     try_apply_sampled_barrier_sync_patch(bytes, options, arch, resource_state, candidates, result);
 }
+
+const MoiModeOperations kSampledModeOperations = {
+    plan_sampled_object_mode,
+    apply_sampled_mode_patches,
+};
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"
 
