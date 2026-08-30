@@ -1124,7 +1124,8 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
 }
 
 void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                        const ConSanOptions &options,
+                                        const ConSanFaultMutationPlan &plan,
+                                        const ConSanPatchedImageGrowthLimit &growth_limit,
                                         ConSanTransformArtifacts &result) {
   if (has_only_rocclr_runtime_kernels(result.program_inventory)) {
     result.warnings.emplace_back(
@@ -1134,75 +1135,61 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
   std::optional<BarrierSite> site;
+  const ConSanFaultSelectionView selection = fault_selection_view(result);
   const ConSanFaultSite *selected_inventory_site =
-      select_fault_site_for_plan(fault_selection_view(result), options,
-                                 ConSanFaultSiteKind::Barrier, options.fault_barrier_index);
+      find_fault_site_by_identity(selection, plan.primary_identity, ConSanFaultSiteKind::Barrier);
   if (selected_inventory_site != nullptr)
     site = barrier_site_from_inventory(*selected_inventory_site);
   if (!site) {
-    if (!options.fault_site_identity.empty()) {
-      result.warnings.emplace_back("ConSan barrier move fault found no site with exact identity '" +
-                                   options.fault_site_identity + "'");
-    } else {
-      result.warnings.emplace_back(
-          "ConSan barrier move fault found no patchable barrier at index " +
-          std::to_string(options.fault_barrier_index));
-    }
+    result.errors.emplace_back(
+        "ConSan barrier move fault plan no longer matches its pristine primary site");
     return;
   }
-  std::optional<BarrierSite> second_site;
-  const ConSanSyncSequence *selected_sequence = nullptr;
-  if (selected_inventory_site != nullptr && selected_inventory_site->sync_event_identity) {
-    selected_sequence = result.program_inventory.sync().find_unique_sequence_containing(
-        *selected_inventory_site->sync_event_identity);
-    if (selected_sequence == nullptr ||
-        !owned_by_requested_kernel(selected_sequence->execution_owners,
-                                   fault_selection_view(result), options) ||
-        selected_sequence->operation != ConSanSyncOperation::BarrierFull ||
-        !consan_sync_confidence_meets(selected_sequence->confidence,
-                                      ConSanSemanticConfidence::Conservative) ||
-        selected_sequence->member_event_identities.size() != 2u) {
-      result.warnings.emplace_back(
-          "ConSan barrier move fault selected no conservative logical barrier pair");
-      return;
-    }
-    const auto next =
-        std::ranges::find_if(result.fault_sites, [&](const ConSanFaultSite &candidate) {
-          return candidate.kind == ConSanFaultSiteKind::Barrier && candidate.sync_event_identity &&
-                 owned_by_requested_kernel(candidate.execution_owners, fault_selection_view(result),
-                                           options) &&
-                 candidate.identity != selected_inventory_site->identity &&
-                 std::ranges::find(selected_sequence->member_event_identities,
-                                   *candidate.sync_event_identity) !=
-                     selected_sequence->member_event_identities.end();
-        });
-    if (next != result.fault_sites.end())
-      second_site = barrier_site_from_inventory(*next);
-  }
-  if (!second_site) {
-    result.warnings.emplace_back("ConSan barrier move fault found no second barrier instruction");
+  const ConSanFaultSite *companion_inventory_site =
+      plan.companion_identity ? find_fault_site_by_identity(selection, *plan.companion_identity,
+                                                            ConSanFaultSiteKind::Barrier)
+                              : nullptr;
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  const auto sequence =
+      plan.selection_sequence_identity
+          ? std::ranges::find(sync.sync_sequences, *plan.selection_sequence_identity,
+                              &ConSanSyncSequence::identity)
+          : sync.sync_sequences.end();
+  const ConSanSyncSequence *selected_sequence =
+      sequence == sync.sync_sequences.end() ? nullptr : &*sequence;
+  const bool pair_matches_plan =
+      companion_inventory_site != nullptr && selected_inventory_site->sync_event_identity &&
+      companion_inventory_site->sync_event_identity && selected_sequence != nullptr &&
+      selected_sequence->operation == ConSanSyncOperation::BarrierFull &&
+      consan_sync_confidence_meets(selected_sequence->confidence,
+                                   ConSanSemanticConfidence::Conservative) &&
+      selected_sequence->member_event_identities == plan.ordered_member_identities &&
+      std::ranges::find(selected_sequence->member_event_identities,
+                        *selected_inventory_site->sync_event_identity) !=
+          selected_sequence->member_event_identities.end() &&
+      std::ranges::find(selected_sequence->member_event_identities,
+                        *companion_inventory_site->sync_event_identity) !=
+          selected_sequence->member_event_identities.end();
+  if (!pair_matches_plan) {
+    result.errors.emplace_back(
+        "ConSan barrier move fault plan no longer matches its pristine logical pair");
     return;
   }
+  const BarrierSite second_site = barrier_site_from_inventory(*companion_inventory_site);
 
-  if (options.fault_barrier_move_direction != ConSanBarrierMoveDirection::LegacyMarker) {
-    if (selected_sequence == nullptr || options.fault_barrier_destination_identity.empty()) {
+  if (plan.barrier_move_direction != ConSanBarrierMoveDirection::LegacyMarker) {
+    if (!plan.destination_identity) {
       result.warnings.emplace_back(
           "ConSan markerless barrier move requires an exact destination identity");
       return;
     }
-    const auto destination = std::ranges::find(result.barrier_move_destinations,
-                                               options.fault_barrier_destination_identity,
-                                               &ConSanBarrierMoveDestination::identity);
+    const auto destination =
+        std::ranges::find(result.barrier_move_destinations, *plan.destination_identity,
+                          &ConSanBarrierMoveDestination::identity);
     if (destination == result.barrier_move_destinations.end()) {
       result.warnings.emplace_back(
           "ConSan barrier move fault found no destination with exact identity '" +
-          options.fault_barrier_destination_identity + "'");
-      return;
-    }
-    if (!owned_by_requested_kernel(destination->execution_owners, fault_selection_view(result),
-                                   options)) {
-      result.warnings.emplace_back(
-          "ConSan barrier move fault rejected destination outside the requested dispatch owner");
+          *plan.destination_identity + "'");
       return;
     }
     if (!selected_sequence->basic_block_index ||
@@ -1215,7 +1202,16 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
     }
     const bool cross_block =
         destination->basic_block_index != *selected_sequence->basic_block_index;
-    if (cross_block && !consan_fault_admits_cross_block_barrier_move(*destination, options)) {
+    const bool destination_matches_cross_block_plan =
+        plan.barrier_move_direction == ConSanBarrierMoveDirection::Earlier &&
+        destination->cfg_contract == plan.barrier_move_cfg_contract &&
+        destination->structured_guard_block_index == plan.structured_guard_block_index &&
+        destination->basic_block_index == plan.structured_destination_block_index &&
+        destination->structured_source_block_index == plan.structured_source_block_index &&
+        destination->structured_guard_offset == plan.structured_guard_offset &&
+        destination->text_offset == plan.structured_destination_offset &&
+        destination->structured_source_offset == plan.structured_source_offset;
+    if (cross_block && !destination_matches_cross_block_plan) {
       result.warnings.emplace_back(
           "ConSan barrier move fault rejected control-flow or container boundary: cross-block "
           "destination lacks a matching proven completing or destructive structured diamond "
@@ -1235,14 +1231,14 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
                                        destination->issue, destination->issue_detail));
       return;
     }
-    if (options.fault_barrier_move_direction == ConSanBarrierMoveDirection::Earlier &&
+    if (plan.barrier_move_direction == ConSanBarrierMoveDirection::Earlier &&
         destination->text_offset + destination->size > selected_sequence->begin_text_offset) {
       result.warnings.emplace_back(
           "ConSan barrier move fault rejected a destination that is not earlier than the "
           "selected logical barrier");
       return;
     }
-    if (options.fault_barrier_move_direction == ConSanBarrierMoveDirection::Later &&
+    if (plan.barrier_move_direction == ConSanBarrierMoveDirection::Later &&
         destination->text_offset < selected_sequence->end_text_offset) {
       result.warnings.emplace_back(
           "ConSan barrier move fault rejected a destination that is not later than the selected "
@@ -1250,7 +1246,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
       return;
     }
 
-    std::array<BarrierSite, 2> ordered_sources = {*site, *second_site};
+    std::array<BarrierSite, 2> ordered_sources = {*site, second_site};
     std::ranges::sort(ordered_sources, {}, &BarrierSite::text_offset);
     if (ordered_sources[0].size != sizeof(uint32_t) ||
         ordered_sources[1].size != sizeof(uint32_t) ||
@@ -1317,7 +1313,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
 
     std::vector<uint32_t> cave_words;
     cave_words.reserve(2u + destination_words.size() + 1u);
-    if (options.fault_barrier_move_direction == ConSanBarrierMoveDirection::Earlier) {
+    if (plan.barrier_move_direction == ConSanBarrierMoveDirection::Earlier) {
       cave_words.insert(cave_words.end(), barrier_words.begin(), barrier_words.end());
       cave_words.insert(cave_words.end(), destination_words.begin(), destination_words.end());
     } else {
@@ -1345,7 +1341,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
       std::memcpy(new_text.data() + placement->body_offset, cave_words.data(),
                   cave_words.size() * sizeof(uint32_t));
     }
-    if (!replace_consan_text(patcher, new_text, options, "markerless barrier move", result)) {
+    if (!replace_consan_text(patcher, new_text, growth_limit, "markerless barrier move", result)) {
       return;
     }
     result.replacement = std::move(patcher).emit();
@@ -1357,7 +1353,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
       source_info.anchor_offset = source.text_offset;
       source_info.trampoline_offset = source.text_offset;
       source_info.original_size = source.size;
-      source_info.barrier_move_direction = options.fault_barrier_move_direction;
+      source_info.barrier_move_direction = plan.barrier_move_direction;
       result.patches.push_back(source_info);
     }
     ConSanPatchInfo target_info;
@@ -1367,7 +1363,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
     target_info.trampoline_offset = placement->body_offset;
     target_info.original_size = destination->size;
     target_info.trampoline_size = static_cast<uint32_t>(cave_words.size() * sizeof(uint32_t));
-    target_info.barrier_move_direction = options.fault_barrier_move_direction;
+    target_info.barrier_move_direction = plan.barrier_move_direction;
     if (cross_block) {
       target_info.barrier_move_cfg_contract = destination->cfg_contract;
       target_info.structured_guard_block_index = destination->structured_guard_block_index;
@@ -1381,9 +1377,8 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
     result.mark_modified();
     result.warnings.emplace_back(
         "ConSan barrier move fault relocated an adjacent logical pair " +
-        std::string(options.fault_barrier_move_direction == ConSanBarrierMoveDirection::Earlier
-                        ? "earlier"
-                        : "later") +
+        std::string(plan.barrier_move_direction == ConSanBarrierMoveDirection::Earlier ? "earlier"
+                                                                                       : "later") +
         " at " + destination->mnemonic + " in " + destination->container_name);
     return;
   }
@@ -1426,7 +1421,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
         std::to_string(marker_imm));
     return;
   }
-  if (*marker_file_offset <= second_site->file_offset ||
+  if (*marker_file_offset <= second_site.file_offset ||
       *second_marker_file_offset != *marker_file_offset + sizeof(uint32_t)) {
     result.errors.emplace_back("ConSan barrier move fault marker must follow the selected barrier");
     return;
@@ -1437,11 +1432,11 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
   uint32_t barrier_word = 0;
   uint32_t second_barrier_word = 0;
   std::memcpy(&barrier_word, original_bytes.data() + site->file_offset, sizeof(barrier_word));
-  std::memcpy(&second_barrier_word, original_bytes.data() + second_site->file_offset,
+  std::memcpy(&second_barrier_word, original_bytes.data() + second_site.file_offset,
               sizeof(second_barrier_word));
   const uint32_t nop = build_s_nop(0, arch);
   std::memcpy(result.replacement.data() + site->file_offset, &nop, sizeof(nop));
-  std::memcpy(result.replacement.data() + second_site->file_offset, &nop, sizeof(nop));
+  std::memcpy(result.replacement.data() + second_site.file_offset, &nop, sizeof(nop));
   std::memcpy(result.replacement.data() + *marker_file_offset, &barrier_word, sizeof(barrier_word));
   std::memcpy(result.replacement.data() + *second_marker_file_offset, &second_barrier_word,
               sizeof(second_barrier_word));
@@ -1453,9 +1448,9 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
   source_info.trampoline_offset = site->text_offset;
   source_info.original_size = site->size;
   result.patches.push_back(source_info);
-  source_info.anchor_offset = second_site->text_offset;
-  source_info.trampoline_offset = second_site->text_offset;
-  source_info.original_size = second_site->size;
+  source_info.anchor_offset = second_site.text_offset;
+  source_info.trampoline_offset = second_site.text_offset;
+  source_info.original_size = second_site.size;
   result.patches.push_back(source_info);
   ConSanPatchInfo target_info;
   target_info.phase = ConSanPatchPhase::Mutation;

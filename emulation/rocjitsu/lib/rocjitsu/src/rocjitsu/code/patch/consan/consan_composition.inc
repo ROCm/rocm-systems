@@ -360,17 +360,6 @@ void clear_fault_mutation_kinds(MutationRequest &request) {
   request.fault_ordinary_weaken_scope = false;
 }
 
-/// Build the private compatibility input used by the existing family
-/// emitters. All mutation selection state is removed; the caller then fills it
-/// exclusively from one or more retained `ConSanFaultMutationPlan` values.
-/// Non-mutation context, such as an exact dispatch-owner filter, remains
-/// available while those emitters are incrementally narrowed.
-[[nodiscard]] ConSanOptions make_fault_application_options(const ConSanOptions &context) {
-  ConSanOptions options = context;
-  static_cast<MutationRequest &>(options) = MutationRequest{};
-  return options;
-}
-
 [[nodiscard]] const ConSanFaultMutationPlan *
 find_fault_plan(std::span<const ConSanFaultMutationPlan> plans, ConSanFaultMutationKind kind) {
   const auto plan = std::ranges::find(plans, kind, &ConSanFaultMutationPlan::kind);
@@ -415,19 +404,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   if (const ConSanFaultMutationPlan *plan =
           find_fault_plan(plans, ConSanFaultMutationKind::MoveBarrierPair);
       plan != nullptr && result.errors.empty()) {
-    ConSanOptions options = make_fault_application_options(context);
-    options.fault_move_barrier = true;
-    options.fault_site_identity = plan->primary_identity;
-    options.fault_barrier_move_direction = plan->barrier_move_direction;
-    if (plan->destination_identity)
-      options.fault_barrier_destination_identity = *plan->destination_identity;
-    options.fault_allow_completing_conditional_barrier_move =
-        plan->barrier_move_cfg_contract ==
-        ConSanBarrierMoveCfgContract::CompletingStructuredDiamond;
-    options.fault_allow_destructive_divergent_barrier_move =
-        plan->barrier_move_cfg_contract ==
-        ConSanBarrierMoveCfgContract::DestructiveStructuredExecDiamond;
-    try_apply_barrier_move_fault_patch(code_object, arch, options, result);
+    try_apply_barrier_move_fault_patch(code_object, arch, *plan, context.patched_image_growth_limit,
+                                       result);
   }
   if (const ConSanFaultMutationPlan *plan =
           find_fault_plan(plans, ConSanFaultMutationKind::BarrierIdScope);

@@ -27,7 +27,8 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
                                                const ConSanFaultMutationPlan &plan,
                                                ConSanTransformArtifacts &result);
 void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                        const ConSanOptions &options,
+                                        const ConSanFaultMutationPlan &plan,
+                                        const ConSanPatchedImageGrowthLimit &growth_limit,
                                         ConSanTransformArtifacts &result);
 void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                   const ConSanFaultMutationPlan *address_plan,

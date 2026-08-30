@@ -34,7 +34,7 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
 /// malformed ELF or allocation failure is not mislabeled as a policy decision.
 [[nodiscard]] inline bool replace_consan_text(CodeObjectPatcher &patcher,
                                               std::span<const uint8_t> new_text,
-                                              const ConSanOptions &options,
+                                              const ConSanPatchedImageGrowthLimit &growth_limit,
                                               std::string_view operation,
                                               ConSanTransformArtifacts &result) {
   const size_t current_image_bytes = patcher.image_bytes().size();
@@ -46,10 +46,10 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
     return false;
   }
   const size_t input_image_bytes = static_cast<size_t>(input_id.byte_size);
-  const auto budget = consan_patched_image_growth_budget(options.patched_image_growth_limit,
-                                                         input_image_bytes, current_image_bytes);
-  const std::string policy = consan_patched_image_growth_policy_description(
-      options.patched_image_growth_limit, input_image_bytes);
+  const auto budget =
+      consan_patched_image_growth_budget(growth_limit, input_image_bytes, current_image_bytes);
+  const std::string policy =
+      consan_patched_image_growth_policy_description(growth_limit, input_image_bytes);
   if (!budget) {
     result.errors.emplace_back("ConSan " + std::string(operation) +
                                " has an invalid patched-image growth policy (" + policy + ")");
@@ -108,6 +108,15 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
   result.errors.emplace_back("ConSan " + std::string(operation) +
                              " could not replace executable text (" + detail + ")");
   return false;
+}
+
+[[nodiscard]] inline bool replace_consan_text(CodeObjectPatcher &patcher,
+                                              std::span<const uint8_t> new_text,
+                                              const ConSanOptions &options,
+                                              std::string_view operation,
+                                              ConSanTransformArtifacts &result) {
+  return replace_consan_text(patcher, new_text, options.patched_image_growth_limit, operation,
+                             result);
 }
 
 } // namespace rocjitsu
