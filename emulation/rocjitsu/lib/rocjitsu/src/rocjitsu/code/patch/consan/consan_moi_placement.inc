@@ -91,12 +91,10 @@ moi_reserved_access_sync_island_count(const ProgramInventory &program_inventory,
                 std::ranges::count_if(
                     observation_plan.barrier_site_decisions,
                     [&](const ConSanBarrierSiteDecision &decision) {
-                      if (request.moi_engine == ConSanMoiEngine::RecordReplay &&
-                          decision.reason == ConSanBarrierPolicyReason::RuntimeKernelExcluded) {
+                      if (decision.reason == ConSanBarrierPolicyReason::RuntimeKernelExcluded) {
                         return false;
                       }
-                      if (request.moi_engine != ConSanMoiEngine::RecordReplay ||
-                          !point.moi_record_replay_dense_barrier_router) {
+                      if (!point.moi_record_replay_dense_barrier_router) {
                         return true;
                       }
                       const ConSanSyncEvent *event = synchronization.find_unique_event(
@@ -107,7 +105,7 @@ moi_reserved_access_sync_island_count(const ProgramInventory &program_inventory,
                 policy.max_patches)
           : 0u;
   const uint64_t fence_count =
-      request.moi_engine == ConSanMoiEngine::RecordReplay && request.moi_track_atomics
+      request.moi_track_atomics
           ? std::min<uint64_t>(std::ranges::count(observation_plan.probe_intents,
                                                   ConSanProbeIntentKind::FenceRecord,
                                                   &ConSanProbeIntent::kind),
