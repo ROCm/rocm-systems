@@ -769,6 +769,204 @@ TEST(AcclProfilerLifecycle, ProxyStepIntervalsChargedToStateBeingLeft) {
 }
 
 // =========================================================================
+// Proxy decomposition denominators
+//
+// A send op only ever passes through the send-side states and a recv op only
+// through the recv-side ones, so averaging a one-sided total over n_proxy_ops
+// scales it by that class's share of the op mix.  Drive a 4-send/4-recv
+// collective with known per-op state durations and check each component lands
+// on its per-class mean; dividing by n_proxy_ops would halve all four.
+// =========================================================================
+
+// Returns the numeric value of `key` in the decomposition object, or -1.
+static double DecompValue(const std::string& line, const char* key) {
+    std::string needle = std::string("\"") + key + "\":";
+    size_t p = line.find(needle);
+    if (p == std::string::npos) return -1;
+    return atof(line.c_str() + p + needle.size());
+}
+
+// Mirrors how src/transport/net.cc drives a step: announce the state on ENTRY,
+// then spend the time in it. The interval is charged to the state being left,
+// so each sleep below lands in the bucket named just above it, and the last
+// sleep of each side is closed by the step stop.
+//
+// Send side: 4 ms SendGPUWait, 3 ms SendPeerWait, 1 ms SendWait.
+// Recv side: 0.5 ms RecvWait, 5 ms RecvFlushWait, 2 ms RecvGPUWait.
+static void DriveProxyOpWithTimings(void* ctx, void* coll, int isSend,
+                                    void** opOut) {
+    ncclProfilerEventDescr_v5_t od;
+    memset(&od, 0, sizeof(od));
+    od.type = ncclProfileProxyOp;
+    od.parentObj = coll;
+    od.proxyOp.channelId = 0;
+    od.proxyOp.peer = 1;
+    od.proxyOp.nSteps = 1;
+    od.proxyOp.isSend = isSend;
+    ASSERT_EQ(acclPluginStartEvent(ctx, opOut, &od), 0);
+
+    ncclProfilerEventDescr_v5_t sd;
+    memset(&sd, 0, sizeof(sd));
+    sd.type = ncclProfileProxyStep;
+    sd.parentObj = *opOut;
+    sd.proxyStep.step = 0;
+    void* step = nullptr;
+    ASSERT_EQ(acclPluginStartEvent(ctx, &step, &sd), 0);
+
+    if (isSend) {
+        ASSERT_EQ(acclPluginRecordEventState(
+            step, ncclProfilerProxyStepSendGPUWait, nullptr), 0);
+        usleep(4000);
+        ASSERT_EQ(acclPluginRecordEventState(
+            step, ncclProfilerProxyStepSendPeerWait_v4, nullptr), 0);
+        usleep(3000);
+        ASSERT_EQ(acclPluginRecordEventState(
+            step, ncclProfilerProxyStepSendWait, nullptr), 0);
+        usleep(1000);
+    } else {
+        ASSERT_EQ(acclPluginRecordEventState(
+            step, ncclProfilerProxyStepRecvWait, nullptr), 0);
+        usleep(500);
+        ASSERT_EQ(acclPluginRecordEventState(
+            step, ncclProfilerProxyStepRecvFlushWait, nullptr), 0);
+        usleep(5000);
+        ASSERT_EQ(acclPluginRecordEventState(
+            step, ncclProfilerProxyStepRecvGPUWait, nullptr), 0);
+        usleep(2000);
+    }
+    ASSERT_EQ(acclPluginStopEvent(step), 0);
+}
+
+TEST(AcclProfilerLifecycle, ProxyComponentsAveragedOverTheirOwnOpClass) {
+    ScopedProfilerDir dir("proxydenom");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.ProxyComponentsAveragedOverTheirOwnOpClass",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xD1D0, &mask, "denom_test",
+                                     1, 8, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, 1, 31, 256);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+
+            ncclProfilerEventDescr_v5_t kd;
+            memset(&kd, 0, sizeof(kd));
+            kd.type = ncclProfileKernelCh;
+            kd.parentObj = coll;
+            kd.kernelCh.channelId = 0;
+            kd.kernelCh.pTimer = 1000000;
+            void* kch = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
+
+            void* ops[8] = {nullptr};
+            for (int i = 0; i < 8; i++) {
+                DriveProxyOpWithTimings(ctx, coll, i < 4 ? 1 : 0, &ops[i]);
+                ASSERT_NE(ops[i], nullptr);
+            }
+
+            ASSERT_EQ(acclPluginStopEvent(coll), 0);
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 1010000;
+            ASSERT_EQ(acclPluginRecordEventState(
+                kch, ncclProfilerKernelChStop, &sa), 0);
+            ASSERT_EQ(acclPluginStopEvent(kch), 0);
+            for (int i = 0; i < 8; i++) {
+                ASSERT_EQ(acclPluginStopEvent(ops[i]), 0);
+            }
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string out = ReadProfilerOutput(dir.c_str(), "0xd1d0");
+            ASSERT_FALSE(out.empty());
+            std::string line = out.substr(0, out.find('\n'));
+
+            EXPECT_EQ(DecompValue(line, "n_proxy_ops"), 8);
+            EXPECT_EQ(DecompValue(line, "n_send_ops"), 4);
+            EXPECT_EQ(DecompValue(line, "n_recv_ops"), 4);
+
+            // usleep only guarantees a lower bound, so each window is
+            // [nominal, 2x nominal): wide enough for scheduling jitter, tight
+            // enough to exclude the halved /n_proxy_ops value.
+            struct { const char* key; double lo, hi; } expect[] = {
+                {"proxy_gpu_wait_us",      4000, 8000},
+                {"proxy_peer_wait_us",     3000, 6000},
+                {"proxy_flush_us",         5000, 10000},
+                {"proxy_gpu_recv_wait_us", 2000, 4000},
+                // One send op's network time plus one recv op's.
+                {"proxy_network_us",       1500, 3000},
+            };
+            for (auto& e : expect) {
+                double v = DecompValue(line, e.key);
+                EXPECT_GE(v, e.lo) << e.key
+                    << " is below one op class's mean, so it was averaged over"
+                       " every proxy op instead of over its own class";
+                EXPECT_LT(v, e.hi) << e.key << " far above expected";
+            }
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// A send-only collective has n_recv_ops == 0. The recv-side numerators are 0
+// too, so those fields must read 0 rather than NaN or inf.
+TEST(AcclProfilerLifecycle, SendOnlyCollectiveReportsZeroRecvComponents) {
+    ScopedProfilerDir dir("sendonly");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.SendOnlyCollectiveReportsZeroRecvComponents",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xD1D1, &mask, "sendonly_test",
+                                     1, 8, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, 1, 32, 256);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+
+            ncclProfilerEventDescr_v5_t kd;
+            memset(&kd, 0, sizeof(kd));
+            kd.type = ncclProfileKernelCh;
+            kd.parentObj = coll;
+            kd.kernelCh.channelId = 0;
+            kd.kernelCh.pTimer = 1000000;
+            void* kch = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
+
+            void* op = nullptr;
+            DriveProxyOpWithTimings(ctx, coll, 1, &op);
+            ASSERT_NE(op, nullptr);
+
+            ASSERT_EQ(acclPluginStopEvent(coll), 0);
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 1010000;
+            ASSERT_EQ(acclPluginRecordEventState(
+                kch, ncclProfilerKernelChStop, &sa), 0);
+            ASSERT_EQ(acclPluginStopEvent(kch), 0);
+            ASSERT_EQ(acclPluginStopEvent(op), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string out = ReadProfilerOutput(dir.c_str(), "0xd1d1");
+            ASSERT_FALSE(out.empty());
+            std::string line = out.substr(0, out.find('\n'));
+
+            EXPECT_EQ(DecompValue(line, "n_recv_ops"), 0);
+            EXPECT_EQ(line.find("nan"), std::string::npos)
+                << "a zero op count must not reach a division: " << line;
+            EXPECT_EQ(line.find("inf"), std::string::npos) << line;
+            EXPECT_DOUBLE_EQ(DecompValue(line, "proxy_flush_us"), 0.0);
+            EXPECT_DOUBLE_EQ(DecompValue(line, "proxy_gpu_recv_wait_us"), 0.0);
+            EXPECT_GE(DecompValue(line, "proxy_gpu_wait_us"), 4000);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
 // Channel bounds: absolute channelId above nChannels must be accepted
 // (RCCL uses a plan-wide cursor, so the second collective in a grouped
 // launch gets channelIds starting where the first left off)
