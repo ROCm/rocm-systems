@@ -110,6 +110,18 @@ class ScopedProfilerDir {
   bool owner_ = false;
 };
 
+// Tests that point ACCL_PROFILER_OUTPUT_DIR *below* the mkdtemp root cannot
+// recover that root from ScopedProfilerDir in the re-exec'd child, because there
+// it adopts ACCL_PROFILER_OUTPUT_DIR — the derived path, not the root. They pass
+// the root down in this variable instead.
+static const char kProfilerRootEnvVar[] = "ACCL_TEST_PROFILER_ROOT";
+
+// The mkdtemp root for the current process, parent or re-exec'd child.
+static std::string ProfilerDirRoot(const ScopedProfilerDir& dir) {
+    const char* inherited = getenv(kProfilerRootEnvVar);
+    return inherited ? std::string(inherited) : dir.path();
+}
+
 // Returns the plugin's whole JSONL output for `commHashHex`, or "" if absent.
 // Must be called inside the isolated child, since the filename embeds its pid.
 static std::string ReadProfilerOutput(const char* dir, const char* commHashHex) {
@@ -244,6 +256,88 @@ TEST(AcclProfilerInit, InitAndFinalize) {
             EXPECT_EQ(acclPluginFinalize(ctx), 0);
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// A multi-level ACCL_PROFILER_OUTPUT_DIR is what README.md documents, and a
+// plain mkdir() only ever creates the last component: with two levels missing
+// it fails ENOENT, fopen() then fails, and the whole run writes nothing while
+// the activation mask still drives the full event stream into the plugin.
+TEST(AcclProfilerInit, NestedOutputDirIsCreated) {
+    ScopedProfilerDir dir("nesteddir");
+    // The re-exec'd child's ScopedProfilerDir adopts ACCL_PROFILER_OUTPUT_DIR,
+    // which by then is already the nested path, so deriving `nested` from it a
+    // second time would nest twice. Carry the root in its own variable instead.
+    const std::string root = ProfilerDirRoot(dir);
+    // Two levels below the mkdtemp root: one mkdir() cannot reach this.
+    const std::string nested = root + "/a/b";
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerInit.NestedOutputDirIsCreated",
+        [&nested]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xD112, &mask, "nested_dir_test",
+                                     1, 1, 0, nullptr), 0);
+            ASSERT_NE(ctx, nullptr);
+            test_acclWriteDummyRecord(ctx);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            const std::string out = ReadProfilerOutput(nested.c_str(), "0xd112");
+            ASSERT_FALSE(out.empty())
+                << "no output file under " << nested
+                << ": the plugin did not create the nested directory";
+            EXPECT_NE(out.find("\"summary\""), std::string::npos);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", nested}, {kProfilerRootEnvVar, root}}
+    );
+}
+
+// An ACCL_PROFILER_OUTPUT_DIR long enough to truncate the assembled path must
+// be refused, not written to. Truncation cuts the rank/pid/hash suffix — and,
+// once the directory alone exceeds the buffer, the trailing path component too
+// — so the plugin used to silently create one mangled non-.jsonl file that
+// accl_report.py's *.jsonl glob can never find.
+TEST(AcclProfilerInit, OverlongOutputDirWritesNothing) {
+    ScopedProfilerDir dir("longdir");
+    const std::string root = ProfilerDirRoot(dir);
+    // 1024 is sizeof(acclCommContext::outputPath); build past it out of
+    // components each well under NAME_MAX so the directory itself is legal.
+    std::string deep = root;
+    for (int i = 0; deep.size() < 1100; i++) {
+        deep += "/" + std::string(200, static_cast<char>('a' + i));
+    }
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerInit.OverlongOutputDirWritesNothing",
+        [&root, &deep]() {
+            std::error_code ec;
+            // Create it here, not via the plugin: the point under test is the
+            // truncation, so the directory must already exist either way.
+            std::filesystem::create_directories(deep, ec);
+            ASSERT_FALSE(ec) << "could not create " << deep.size()
+                             << "-char directory: " << ec.message();
+
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xD1E7, &mask, "long_dir_test",
+                                     1, 1, 0, nullptr), 0);
+            ASSERT_NE(ctx, nullptr);
+            test_acclWriteDummyRecord(ctx);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            // Nothing anywhere under the temp root: a truncated path can land
+            // in any ancestor directory, not just the one that was requested.
+            std::vector<std::string> created;
+            for (const auto& e :
+                 std::filesystem::recursive_directory_iterator(root, ec)) {
+                if (e.is_regular_file()) {
+                    created.push_back(e.path().filename().string());
+                }
+            }
+            EXPECT_TRUE(created.empty())
+                << "an overlong output dir still produced " << created.size()
+                << " file(s), first: " << (created.empty() ? "" : created[0]);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", deep}, {kProfilerRootEnvVar, root}}
     );
 }
 

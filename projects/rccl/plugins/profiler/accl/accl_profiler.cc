@@ -28,6 +28,28 @@ static size_t gMinMsgSize = 0;  // ACCL_PROFILER_MIN_SIZE_BYTES
 
 static inline const char* safeStr(const char* s) { return s ? s : ""; }
 
+// mkdir -p for the output directory. Returns 0 on success, -1 with errno set.
+// A bare mkdir() only ever creates the last component, so the multi-level path
+// the README documents fails ENOENT whenever two or more levels are missing.
+static int acclMkdirRecursive(const char* path) {
+  if (!path || !path[0]) { errno = EINVAL; return -1; }
+  char buf[1024];
+  size_t len = strlen(path);
+  if (len >= sizeof(buf)) { errno = ENAMETOOLONG; return -1; }
+  memcpy(buf, path, len + 1);
+  // Trailing slashes would make the loop try to create the same level twice.
+  while (len > 1 && buf[len - 1] == '/') buf[--len] = '\0';
+  // Start at buf+1 so a leading '/' is never mkdir'd as the empty string.
+  for (char* p = buf + 1; *p; p++) {
+    if (*p != '/') continue;
+    *p = '\0';
+    if (mkdir(buf, 0755) != 0 && errno != EEXIST) return -1;
+    *p = '/';
+  }
+  if (mkdir(buf, 0755) != 0 && errno != EEXIST) return -1;
+  return 0;
+}
+
 // Forward declarations for cross-referenced pool functions
 static void acclFreeProxyOp(struct acclCommContext* ctx, struct acclProxyOpInfo* op);
 
@@ -517,14 +539,34 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   char hostname[256] = {0};
   gethostname(hostname, sizeof(hostname) - 1);
 
-  mkdir(outDir, 0755);
+  // fopen() below reports only ENOENT on the assembled filename, which does not
+  // say the directory is the problem, so keep this errno to name the real cause.
+  int dirErrno = (acclMkdirRecursive(outDir) == 0) ? 0 : errno;
 
-  snprintf(ctx->outputPath, sizeof(ctx->outputPath),
+  int pathLen = snprintf(ctx->outputPath, sizeof(ctx->outputPath),
     "%s/accl_profiler_rank%d_%s_pid%d_0x%lx.jsonl",
     outDir, rank, hostname, (int)getpid(), (unsigned long)commHash);
-  ctx->outputFile = fopen(ctx->outputPath, "w");
-  if (!ctx->outputFile) {
-    ACCL_WARN("ACCL Profiler: Failed to open %s: %s", ctx->outputPath, strerror(errno));
+  if (pathLen < 0 || (size_t)pathLen >= sizeof(ctx->outputPath)) {
+    // Truncation cuts the rank/pid/hash suffix, so every rank in the job would
+    // open one shared name and interleave records. Refuse the path instead.
+    ACCL_WARN("ACCL Profiler: ACCL_PROFILER_OUTPUT_DIR is too long: output path "
+              "needs %d bytes but only %zu are available. No profiling output "
+              "will be written.", pathLen, sizeof(ctx->outputPath));
+    ctx->outputPath[0] = '\0';
+    ctx->outputFile = NULL;
+  } else {
+    ctx->outputFile = fopen(ctx->outputPath, "w");
+    if (!ctx->outputFile) {
+      int openErrno = errno;
+      if (dirErrno != 0) {
+        ACCL_WARN("ACCL Profiler: cannot create output directory %s (from "
+                  "ACCL_PROFILER_OUTPUT_DIR): %s. No profiling output will be "
+                  "written.", outDir, strerror(dirErrno));
+      } else {
+        ACCL_WARN("ACCL Profiler: Failed to open %s: %s", ctx->outputPath,
+                  strerror(openErrno));
+      }
+    }
   }
 
   *context = ctx;
@@ -584,8 +626,13 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
     // A run is complete only if nothing was lost anywhere. Proxy loss leaves the
     // decomposition understated with no marker on the affected records, so it
     // has to clear this flag too.
+    // Records go out through fprintf/fflush whose results are discarded on the
+    // hot path; the stream's sticky error flag is the one place a write failure
+    // (ENOSPC, EIO) is still visible, so fold it into the verdict here rather
+    // than branching per record.
+    int writeError = ferror(ctx->outputFile) != 0;
     int complete = (ctx->droppedCollectives == 0 && ctx->leakedCollectives == 0 &&
-                    dOps == 0 && dSteps == 0 && oOps == 0);
+                    dOps == 0 && dSteps == 0 && oOps == 0 && !writeError);
     fprintf(ctx->outputFile,
       "{\"summary\":{\"dropped_collectives\":%lu,\"leaked_collectives\":%lu,"
       "\"dropped_proxy_ops\":%lu,\"dropped_proxy_steps\":%lu,"
@@ -607,6 +654,12 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
                 (unsigned long)ctx->leakedCollectives,
                 (unsigned long)dOps, (unsigned long)dSteps, (unsigned long)oOps,
                 ACCL_MAX_PROXY_OPS);
+    }
+    if (writeError) {
+      // Say it separately: when writes are failing the summary above may not
+      // reach disk at all, so the log is the only channel left.
+      ACCL_WARN("ACCL Profiler: rank=%d hit a write error on %s; the records on "
+                "disk are truncated", ctx->rank, ctx->outputPath);
     }
   }
   pthread_mutex_unlock(&ctx->outputMutex);
