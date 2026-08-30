@@ -80,7 +80,7 @@ bool moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWord
                                              ConSanMoiLiteralDispatchIdPolicy policy,
                                              rj_code_arch_t arch) {
   return source.sgpr || source.vgpr ||
-         policy == ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture ||
+         policy == ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed ||
          consan_arch_uses_literal_dispatch_identity(arch);
 }
 

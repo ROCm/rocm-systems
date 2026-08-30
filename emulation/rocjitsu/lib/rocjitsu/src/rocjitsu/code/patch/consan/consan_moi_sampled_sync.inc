@@ -208,7 +208,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
           !append_compare_moi_report_dispatch_id_word(
               words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
               value, expected, high_word, arch,
-              ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+              ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed)) {
         return false;
       }
       return narrow_current();

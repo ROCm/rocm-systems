@@ -91,6 +91,11 @@ _consan_assert_no_match(
     "shared MOI support must consume target-neutral mechanism operations"
 )
 _consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sync_emission.cpp"
+    "consan_uses_gfx9_cdna_encoding|RdnaFamilyOnly|AnyArchitecture"
+    "shared synchronization emission must consume normalized target facts and semantic literal policy"
+)
+_consan_assert_no_match(
     "${_consan_dir}/consan_moi_target_address.cpp"
     "ROCJITSU_CODE_ARCH_"
     "atomic-address materialization must consume typed target capabilities"

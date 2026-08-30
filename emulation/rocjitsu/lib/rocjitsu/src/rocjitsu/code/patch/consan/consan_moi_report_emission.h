@@ -42,7 +42,7 @@ struct ConSanMoiReportDispatchIdWordSource {
 
 using ConSanMoiReportDispatchIdSources = std::array<ConSanMoiReportDispatchIdWordSource, 2>;
 
-enum class ConSanMoiLiteralDispatchIdPolicy : uint8_t { RdnaFamilyOnly, AnyArchitecture };
+enum class ConSanMoiLiteralDispatchIdPolicy : uint8_t { TargetDeclared, ExternalBindingAllowed };
 
 [[nodiscard]] bool moi_permits_literal_dispatch_identity(ConSanMoiEngine engine,
                                                          rj_code_arch_t arch);

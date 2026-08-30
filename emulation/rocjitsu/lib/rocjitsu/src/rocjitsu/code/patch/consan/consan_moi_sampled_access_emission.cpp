@@ -206,7 +206,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
   }
   if (!append_moi_report_dispatch_id_pair(
           words, consan_moi_detail::moi_report_dispatch_id_sources(point, resources), bank_vgpr,
-          temporary_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+          temporary_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed)) {
     return false;
   }
   const auto mix = [&](uint16_t source) {
@@ -275,7 +275,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     uint16_t temporary_vgpr, uint16_t coordinate_vgpr, rj_code_arch_t arch) {
   if (!append_moi_report_dispatch_id_pair(
           words, consan_moi_detail::moi_report_dispatch_id_sources(point, resources), residue_vgpr,
-          temporary_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+          temporary_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed)) {
     return false;
   }
   const auto mix = [&](uint16_t source) {
@@ -842,7 +842,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
       !append_store_moi_report_dispatch_id_pair(
           record, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
           offsetof(ConSanMoiSampledCausalWindow, dispatch_id), arch,
-          ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
+          ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_x),
                               workgroup_sources->x,
                               ConSanMoiRecordEmitter::MissingWorkgroupSource::StoreZero) ||
@@ -999,7 +999,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
         !append_compare_moi_report_dispatch_id_word(
             words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
             low_vgpr, high_vgpr, high_word, arch,
-            ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+            ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed)) {
       return false;
     }
     return sequence.emit_branch(different_identity_label, InstructionSequence::BranchKind::VccZero);

@@ -177,7 +177,7 @@ using consan_moi_detail::kFenceRecordLayout;
       !append_dynamic_record_store_moi_report_dispatch_id_pair(
           record_words, kBarrierRecordLayout,
           barrier_record_base + offsetof(ConSanMoiBarrierRecord, generation), options, slot_vgpr,
-          *options.scratch_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
+          *options.scratch_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed) ||
       !append_dynamic_record_event_index_store(
           record_words, kBarrierRecordLayout, base + offsetof(ConSanMoiReportHeader, event_counter),
           barrier_record_base + offsetof(ConSanMoiBarrierRecord, event_index), slot_vgpr,
@@ -582,7 +582,7 @@ using consan_moi_detail::kFenceRecordLayout;
       !append_dynamic_record_store_moi_report_dispatch_id_pair(
           record_words, kAtomicRecordLayout,
           atomic_record_base + offsetof(ConSanMoiAtomicRecord, generation), options, slot_vgpr,
-          *options.scratch_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
+          *options.scratch_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed) ||
       !append_record_event_index() ||
       !append_dynamic_record_store_workgroup_source(
           record_words, kAtomicRecordLayout,
@@ -923,7 +923,8 @@ using consan_moi_detail::kFenceRecordLayout;
         !append_dynamic_record_store_moi_report_dispatch_id_pair(
             record_words, kFenceRecordLayout,
             record_base + offsetof(ConSanMoiFenceRecord, generation), options, slot_vgpr,
-            *options.scratch_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
+            *options.scratch_vgpr, arch,
+            ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed) ||
         !append_dynamic_record_store_workgroup_source(
             record_words, kFenceRecordLayout,
             record_base + offsetof(ConSanMoiFenceRecord, workgroup_x), workgroup_sources.x,

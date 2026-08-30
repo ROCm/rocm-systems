@@ -478,7 +478,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
             !append_compare_moi_report_dispatch_id_word(
                 words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
                 tmp_vgpr, source_version, high_word, arch,
-                ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
+                ConSanMoiLiteralDispatchIdPolicy::TargetDeclared)) {
           return false;
         }
         return narrow();
@@ -1505,7 +1505,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   if (!append_compare_moi_report_dispatch_id_word(
           words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
           prior_dispatch_low_vgpr, tmp_vgpr, /*high_word=*/false, arch,
-          ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
+          ConSanMoiLiteralDispatchIdPolicy::TargetDeclared)) {
     return false;
   }
   if (!narrow_vcc())
@@ -1517,7 +1517,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   if (!append_compare_moi_report_dispatch_id_word(
           words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
           prior_dispatch_high_vgpr, tmp_vgpr, /*high_word=*/true, arch,
-          ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly) ||
+          ConSanMoiLiteralDispatchIdPolicy::TargetDeclared) ||
       !save_same_dispatch || !restore_claimed_publishers) {
     return false;
   }
@@ -1554,7 +1554,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   if (!append_moi_report_dispatch_id_pair(
           words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
           current_low_vgpr, static_cast<uint16_t>(current_low_vgpr + 1u), arch,
-          ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly) ||
+          ConSanMoiLiteralDispatchIdPolicy::TargetDeclared) ||
       !append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
                                        offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id),
                                        current_low_vgpr, arch) ||
@@ -3162,7 +3162,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
       if (!append_moi_report_dispatch_id_word(
               copy_dispatch_id,
               consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), tmp_vgpr,
-              /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
+              /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared)) {
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode dispatch ID");
         return std::nullopt;
       }

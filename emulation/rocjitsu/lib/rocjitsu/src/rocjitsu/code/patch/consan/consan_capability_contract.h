@@ -347,6 +347,11 @@ struct ConSanTargetProfile {
   bool has_cluster_facilities = false;
   bool has_selectable_vgpr_bank = false;
   bool requires_even_vgpr_tuples = false;
+  /// Alignment of the encoded new/expected data pair for FLAT compare-swap.
+  /// This is distinct from general address/data tuple alignment: translated
+  /// targets may require even tuples elsewhere without using this legacy CAS
+  /// operand layout.
+  uint8_t flat_compare_swap_data_pair_alignment = 1;
   /// True when one encoded two-address LDS instruction must be split into two
   /// single-address instructions after relocation changes its address base.
   /// Targets whose encoding can replay the original instruction leave this
@@ -493,6 +498,8 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
     const ConSanTargetProfile &profile = profiles[lhs];
     if (profile.target == ROCJITSU_CODE_TARGET_INVALID ||
         profile.arch == ROCJITSU_CODE_ARCH_INVALID || !profile.supports_wave64 ||
+        (profile.flat_compare_swap_data_pair_alignment != 1u &&
+         profile.flat_compare_swap_data_pair_alignment != 2u) ||
         profile.exec_register_width_bits != 64u || profile.global_address_width_bits != 64u ||
         profile.lds_address_width_bits != 32u || profile.vgpr_allocation_granularity_wave64 == 0u ||
         (profile.supports_wave32 != (profile.vgpr_allocation_granularity_wave32 != 0u)) ||
@@ -736,6 +743,12 @@ consan_normalize_address_free_private_size(rj_code_arch_t arch, uint32_t request
 [[nodiscard]] constexpr bool consan_arch_has_selectable_vgpr_bank(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile && profile->has_selectable_vgpr_bank;
+}
+
+[[nodiscard]] constexpr bool
+consan_arch_requires_aligned_flat_compare_swap_data_pair(rj_code_arch_t arch) {
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  return profile && profile->flat_compare_swap_data_pair_alignment > 1u;
 }
 
 [[nodiscard]] constexpr bool

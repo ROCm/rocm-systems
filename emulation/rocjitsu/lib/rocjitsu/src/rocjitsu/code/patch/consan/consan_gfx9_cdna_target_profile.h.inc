@@ -16,6 +16,7 @@
   profile.atomic_address_materialization.flat_and_global = true;
   profile.supports_kernarg_preload_overflow_recovery = true;
   profile.requires_even_vgpr_tuples = true;
+  profile.flat_compare_swap_data_pair_alignment = 2;
   profile.semantic_form_mask = kConSanCdnaSemanticFormMask;
   profile.moi_dense_route_group_capacity = 31;
   profile.supports_moi_far_dense_atomic_route = true;

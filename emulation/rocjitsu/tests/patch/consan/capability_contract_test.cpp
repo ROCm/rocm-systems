@@ -59,6 +59,7 @@ struct ExpectedTargetProfile {
   bool has_cluster_facilities;
   bool has_selectable_vgpr_bank;
   bool requires_even_vgpr_tuples;
+  uint8_t flat_compare_swap_data_pair_alignment;
   bool requires_split_two_address_lds_relocation;
   uint16_t semantic_form_mask;
   uint8_t moi_dense_route_group_capacity;
@@ -113,6 +114,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .has_cluster_facilities = false,
         .has_selectable_vgpr_bank = false,
         .requires_even_vgpr_tuples = true,
+        .flat_compare_swap_data_pair_alignment = 2,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCdnaSemanticFormMask,
         .moi_dense_route_group_capacity = 31,
@@ -165,6 +167,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .has_cluster_facilities = false,
         .has_selectable_vgpr_bank = false,
         .requires_even_vgpr_tuples = true,
+        .flat_compare_swap_data_pair_alignment = 2,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCdnaSemanticFormMask,
         .moi_dense_route_group_capacity = 31,
@@ -217,6 +220,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .has_cluster_facilities = false,
         .has_selectable_vgpr_bank = false,
         .requires_even_vgpr_tuples = false,
+        .flat_compare_swap_data_pair_alignment = 1,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCommonSemanticFormMask,
         .moi_dense_route_group_capacity = 64,
@@ -273,6 +277,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .has_cluster_facilities = false,
         .has_selectable_vgpr_bank = false,
         .requires_even_vgpr_tuples = false,
+        .flat_compare_swap_data_pair_alignment = 1,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCommonSemanticFormMask,
         .moi_dense_route_group_capacity = 64,
@@ -331,6 +336,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .has_cluster_facilities = true,
         .has_selectable_vgpr_bank = true,
         .requires_even_vgpr_tuples = true,
+        .flat_compare_swap_data_pair_alignment = 1,
         .requires_split_two_address_lds_relocation = true,
         .semantic_form_mask = kConSanGfx1250SemanticFormMask,
         .moi_dense_route_group_capacity = 0,
@@ -386,6 +392,8 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.has_cluster_facilities, expected.has_cluster_facilities);
   EXPECT_EQ(actual.has_selectable_vgpr_bank, expected.has_selectable_vgpr_bank);
   EXPECT_EQ(actual.requires_even_vgpr_tuples, expected.requires_even_vgpr_tuples);
+  EXPECT_EQ(actual.flat_compare_swap_data_pair_alignment,
+            expected.flat_compare_swap_data_pair_alignment);
   EXPECT_EQ(actual.requires_split_two_address_lds_relocation,
             expected.requires_split_two_address_lds_relocation);
   EXPECT_EQ(actual.semantic_form_mask, expected.semantic_form_mask);
@@ -456,6 +464,8 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   expect_invalid("missing ordinary atomic address materialization", [](auto &profiles) {
     profiles[0].atomic_address_materialization.flat_and_global = false;
   });
+  expect_invalid("unsupported FLAT compare-swap data-pair alignment",
+                 [](auto &profiles) { profiles[0].flat_compare_swap_data_pair_alignment = 4u; });
   expect_invalid("nonnegative minimum branch displacement",
                  [](auto &profiles) { profiles[0].direct_branch_min_displacement_bytes = 0; });
   expect_invalid("nonpositive maximum branch displacement",

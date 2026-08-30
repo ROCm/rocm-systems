@@ -1039,7 +1039,7 @@ private:
               words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation),
               consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), slot_vgpr,
-              scratch_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
+              scratch_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed) ||
           !append_dynamic_record_event_index_store(
               words, kAccessRecordLayout, base + offsetof(ConSanMoiReportHeader, event_counter),
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, event_index), slot_vgpr,
@@ -1199,7 +1199,7 @@ private:
                                       uint16_t temporary_vgpr) {
     if (!append_moi_report_dispatch_id_pair(
             words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
-            low_vgpr, high_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture))
+            low_vgpr, high_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed))
       return false;
     const auto low_xor_literal = instrumentation::build_v_mov_b32_literal(
         temporary_vgpr, static_cast<uint32_t>(kConSanMoiRecordReplayClaimTokenXorMask), arch);
@@ -1508,7 +1508,7 @@ private:
         !append_moi_report_dispatch_id_word(
             words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
             record_compare_vgpr,
-            /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+            /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed)) {
       errors.emplace_back("ConSan MOI first-light probe could not compare a dispatch slot");
       return std::nullopt;
     }
@@ -1534,7 +1534,7 @@ private:
         !append_moi_report_dispatch_id_word(
             words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
             record_compare_vgpr,
-            /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+            /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed)) {
       errors.emplace_back("ConSan MOI first-light probe could not compare a dispatch slot");
       return std::nullopt;
     }
@@ -1778,7 +1778,7 @@ private:
         !append_store_moi_report_dispatch_id_pair(
             record, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
             offsetof(ConSanMoiAccessRecord, generation), arch,
-            ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
+            ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed) ||
         !record.store_workgroup(offsetof(ConSanMoiAccessRecord, workgroup_x),
                                 workgroup_sources.x) ||
         !record.store_workgroup(offsetof(ConSanMoiAccessRecord, workgroup_y),
@@ -1956,7 +1956,8 @@ private:
       if (!append_moi_report_dispatch_id_word(
               words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
               record_compare_vgpr,
-              /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+              /*high_word=*/false, arch,
+              ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed)) {
         return fail("ConSan MOI first-light probe could not materialize a dispatch low word");
       }
       const auto low_mismatch = instrumentation::build_v_cmp_ne_u32_vcc(
@@ -1984,7 +1985,7 @@ private:
       if (!append_moi_report_dispatch_id_word(
               words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
               record_compare_vgpr,
-              /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+              /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed)) {
         return fail("ConSan MOI first-light probe could not materialize a dispatch high word");
       }
       const auto high_mismatch = instrumentation::build_v_cmp_ne_u32_vcc(
@@ -2059,7 +2060,7 @@ private:
             !append_moi_report_dispatch_id_word(
                 words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
                 record_compare_vgpr, high_word, arch,
-                ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+                ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed)) {
           return false;
         }
         const auto mismatch = instrumentation::build_v_cmp_ne_u32_vcc(

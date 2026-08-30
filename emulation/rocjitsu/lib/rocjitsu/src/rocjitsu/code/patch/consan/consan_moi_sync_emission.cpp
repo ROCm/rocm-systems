@@ -499,10 +499,11 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
   // its causal snapshot, and transactionally publishes up to five full ABI-v6
   // tokens. Release-capable events use the same window for frontier capture.
   // Every target retains a stable copy of the guest atomic address across the
-  // guest RMW, predecessor import, and causal-snapshot scan. CDNA3/4 also keep
-  // token-transaction producer state and scalar persistent owner/epoch
-  // materialization ahead of that final aligned address pair.
-  return consan_uses_gfx9_cdna_encoding(arch) ? 28u : 26u;
+  // guest RMW, predecessor import, and causal-snapshot scan. Targets whose
+  // FLAT compare-swap data pair has legacy even alignment also keep producer
+  // state and scalar persistent owner/epoch materialization ahead of that
+  // final aligned address pair.
+  return consan_arch_requires_aligned_flat_compare_swap_data_pair(arch) ? 28u : 26u;
 }
 
 [[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
@@ -985,15 +986,12 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     uint16_t snapshot_epochs_vgpr, uint64_t token_table_base, uint32_t token_table_capacity,
     bool release_sequence, std::optional<uint16_t> inherited_first_exec, rj_code_arch_t arch) {
   const uint16_t base = scratch_vgpr;
-  // CDNA3/4 FLAT compare-swap encodes the new/expected operands as an aligned
-  // VGPR pair. Preserve the RDNA4 allocation, whose three-dword encoding does
-  // not have that constraint, and move the CDNA pair down by one register.
-  const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
-  const uint16_t value = static_cast<uint16_t>(base + (cdna ? 18u : 19u));
-  const uint16_t expected = static_cast<uint16_t>(base + (cdna ? 19u : 20u));
+  const bool aligned_cas_pair = consan_arch_requires_aligned_flat_compare_swap_data_pair(arch);
+  const uint16_t value = static_cast<uint16_t>(base + (aligned_cas_pair ? 18u : 19u));
+  const uint16_t expected = static_cast<uint16_t>(base + (aligned_cas_pair ? 19u : 20u));
   const uint16_t hash = static_cast<uint16_t>(base + 21u);
-  const uint16_t saved_direct_owner = static_cast<uint16_t>(base + (cdna ? 22u : 17u));
-  const uint16_t saved_direct_epoch = static_cast<uint16_t>(base + (cdna ? 23u : 18u));
+  const uint16_t saved_direct_owner = static_cast<uint16_t>(base + (aligned_cas_pair ? 22u : 17u));
+  const uint16_t saved_direct_epoch = static_cast<uint16_t>(base + (aligned_cas_pair ? 23u : 18u));
   const uint16_t saved_source_version = static_cast<uint16_t>(base + 8u);
   const uint16_t exec_base = *point.moi_exec_save_sgpr;
   const uint16_t winners = static_cast<uint16_t>(exec_base + 16u);
@@ -1247,7 +1245,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     if (!append_compare_moi_report_dispatch_id_word(
             words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), value,
             hash,
-            /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
+            /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared))
       return false;
     if (!narrow_vcc() ||
         !append_load_u32_vgpr_at_offset(
@@ -1258,7 +1256,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     if (!append_compare_moi_report_dispatch_id_word(
             words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), value,
             hash,
-            /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
+            /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared))
       return false;
     if (!narrow_vcc() ||
         !append_load_u32_vgpr_at_offset(
@@ -1385,7 +1383,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   if (!append_atomic_fetch_add_one_u32(words,
                                        *bound_resources.moi_report_buffer_address +
                                            offsetof(ConSanMoiReportHeader, inline_overflow_count),
-                                       value, cdna ? base : hash, arch))
+                                       value, aligned_cas_pair ? base : hash, arch))
     return false;
 
   // Roll back every journaled reservation for failed lanes. A CAS whose slot
@@ -1543,14 +1541,14 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       return false;
     if (!append_moi_report_dispatch_id_word(
             words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), value,
-            /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
+            /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared))
       return false;
     if (!append_store_u32_vgpr_at_offset(
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id), value, arch))
       return false;
     if (!append_moi_report_dispatch_id_word(
             words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), value,
-            /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
+            /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared))
       return false;
     if (!append_store_u32_vgpr_at_offset(
             words, base,
@@ -1744,7 +1742,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   if (!append_compare_moi_report_dispatch_id_word(
           words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
           value_vgpr, temporary_vgpr,
-          /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
+          /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared))
     return false;
   words.push_back(*narrow_if_valid);
   if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
@@ -1755,16 +1753,17 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   if (!append_compare_moi_report_dispatch_id_word(
           words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
           value_vgpr, temporary_vgpr,
-          /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly))
+          /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared))
     return false;
   words.push_back(*narrow_if_valid);
-  // CDNA3/4 FLAT memory instructions require an even-aligned address pair.
-  // Swap the address and temporary lifetimes within the existing register
-  // window; the token transaction reuses this space only after the snapshot
-  // loads have completed.
-  const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
-  const uint16_t snapshot_address = static_cast<uint16_t>(scratch_vgpr + (cdna ? 18u : 17u));
-  const uint16_t snapshot_temporary = static_cast<uint16_t>(scratch_vgpr + (cdna ? 17u : 19u));
+  // Swap address and temporary lifetimes when the target requires the address
+  // pair to remain even-aligned. The token transaction reuses this space only
+  // after the snapshot loads have completed.
+  const bool aligned_cas_pair = consan_arch_requires_aligned_flat_compare_swap_data_pair(arch);
+  const uint16_t snapshot_address =
+      static_cast<uint16_t>(scratch_vgpr + (aligned_cas_pair ? 18u : 17u));
+  const uint16_t snapshot_temporary =
+      static_cast<uint16_t>(scratch_vgpr + (aligned_cas_pair ? 17u : 19u));
   const uint16_t snapshot_hash = static_cast<uint16_t>(scratch_vgpr + 21u);
   const uint16_t snapshot_count = static_cast<uint16_t>(scratch_vgpr + 7u);
   // A claimed release journals its predecessor version in scratch + 8 before
@@ -2003,9 +2002,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       (snapshot_table_capacity & (snapshot_table_capacity - 1u)) != 0u)
     return false;
   const uint16_t base = scratch_vgpr;
-  const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
-  const uint16_t snapshot_address = static_cast<uint16_t>(base + (cdna ? 6u : 5u));
-  const uint16_t count = static_cast<uint16_t>(base + (cdna ? 5u : 7u));
+  const bool aligned_cas_pair = consan_arch_requires_aligned_flat_compare_swap_data_pair(arch);
+  const uint16_t snapshot_address = static_cast<uint16_t>(base + (aligned_cas_pair ? 6u : 5u));
+  const uint16_t count = static_cast<uint16_t>(base + (aligned_cas_pair ? 5u : 7u));
   const uint16_t flags = static_cast<uint16_t>(base + 8u);
   const uint16_t owners = static_cast<uint16_t>(base + 9u);
   const uint16_t epochs = static_cast<uint16_t>(base + 13u);
@@ -2272,7 +2271,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         !append_compare_moi_report_dispatch_id_word(
             words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
             temporary, version_before, high_word, arch,
-            ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
+            ConSanMoiLiteralDispatchIdPolicy::TargetDeclared)) {
       return false;
     }
     return narrow_vcc();
@@ -2514,13 +2513,12 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const uint16_t slot_address = base;
   const uint16_t prior_version = static_cast<uint16_t>(base + 2u);
   const uint16_t workgroup_key = static_cast<uint16_t>(base + 3u);
-  // CDNA3/4 FLAT compare-swap requires an even-aligned new/expected pair.
-  // These three registers are all recomputed after causal-snapshot capture,
-  // so rotating their allocation does not extend any live range.
-  const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
-  const uint16_t temporary = static_cast<uint16_t>(base + (cdna ? 6u : 4u));
-  const uint16_t cas_new = static_cast<uint16_t>(base + (cdna ? 4u : 5u));
-  const uint16_t cas_expected = static_cast<uint16_t>(base + (cdna ? 5u : 6u));
+  // These three registers are recomputed after causal-snapshot capture, so
+  // rotating them for a target's aligned CAS pair extends no live range.
+  const bool aligned_cas_pair = consan_arch_requires_aligned_flat_compare_swap_data_pair(arch);
+  const uint16_t temporary = static_cast<uint16_t>(base + (aligned_cas_pair ? 6u : 4u));
+  const uint16_t cas_new = static_cast<uint16_t>(base + (aligned_cas_pair ? 4u : 5u));
+  const uint16_t cas_expected = static_cast<uint16_t>(base + (aligned_cas_pair ? 5u : 6u));
   const uint16_t exec_base = *point.moi_exec_save_sgpr;
   const uint16_t narrow_save = exec_base;
   const uint16_t empty_exec = static_cast<uint16_t>(exec_base + 2u);
@@ -2588,7 +2586,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         !append_compare_moi_report_dispatch_id_word(
             words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
             temporary, cas_new, high_word, arch,
-            ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
+            ConSanMoiLiteralDispatchIdPolicy::TargetDeclared)) {
       return false;
     }
     return narrow_vcc();
@@ -3026,7 +3024,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   if (!append_moi_report_dispatch_id_word(
           words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
           temporary,
-          /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
+          /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared)) {
     errors.emplace_back("ConSan MOI inline release could not materialize dispatch ID low");
     return false;
   }
@@ -3037,7 +3035,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   if (!append_moi_report_dispatch_id_word(
           words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
           temporary,
-          /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::RdnaFamilyOnly)) {
+          /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared)) {
     errors.emplace_back("ConSan MOI inline release could not materialize dispatch ID high");
     return false;
   }

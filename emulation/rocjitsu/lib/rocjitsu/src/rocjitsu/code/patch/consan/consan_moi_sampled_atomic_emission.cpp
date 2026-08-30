@@ -473,7 +473,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       !append_store_moi_report_dispatch_id_pair(
           record, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
           offsetof(ConSanMoiSampledPendingAcquireSlot, dispatch_id), arch,
-          ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
+          ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_x),
                               workgroup_sources->x) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_y),
@@ -765,7 +765,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     if (!append_load_u32_vgpr_at_offset(words, base, offset, value, arch) ||
         !append_compare_moi_report_dispatch_id_word(
             words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), value,
-            expected, high_word, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+            expected, high_word, arch, ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed)) {
       return false;
     }
     const auto narrow =
