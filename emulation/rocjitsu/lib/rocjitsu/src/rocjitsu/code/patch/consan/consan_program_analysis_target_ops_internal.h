@@ -18,6 +18,11 @@ decode_gfx9_cdna_private_component(std::span<const uint8_t> instruction);
 decode_gfx9_cdna_lane_transfer(std::span<const uint8_t> instruction);
 [[nodiscard]] std::optional<ConSanAccvgprTransferEncoding>
 decode_gfx9_cdna_accvgpr_transfer(std::span<const uint8_t> instruction, bool write_accumulator);
+[[nodiscard]] bool decode_gfx9_cdna_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+                                                std::span<const uint8_t> instruction);
+
+[[nodiscard]] bool decode_gfx1100_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+                                              std::span<const uint8_t> instruction);
 
 [[nodiscard]] std::optional<ConSanScratchComponentEncoding>
 decode_gfx1201_scratch_component(std::span<const uint8_t> instruction);
@@ -25,10 +30,14 @@ decode_gfx1201_scratch_component(std::span<const uint8_t> instruction);
 decode_gfx1201_private_component(std::span<const uint8_t> instruction);
 [[nodiscard]] std::optional<ConSanLaneTransferEncoding>
 decode_gfx1201_lane_transfer(std::span<const uint8_t> instruction);
+[[nodiscard]] bool decode_gfx1201_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+                                              std::span<const uint8_t> instruction);
 
 [[nodiscard]] std::optional<ConSanScratchComponentEncoding>
 decode_gfx1250_scratch_component(std::span<const uint8_t> instruction);
 [[nodiscard]] std::optional<ConSanLaneTransferEncoding>
 decode_gfx1250_lane_transfer(std::span<const uint8_t> instruction);
+[[nodiscard]] bool decode_gfx1250_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+                                              std::span<const uint8_t> instruction);
 
 } // namespace rocjitsu::consan_program_analysis_target_detail

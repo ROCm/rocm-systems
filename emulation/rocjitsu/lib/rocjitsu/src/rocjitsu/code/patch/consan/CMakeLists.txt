@@ -70,6 +70,7 @@ target_sources(
         consan_placement.cpp
         consan_program_analysis.cpp
         consan_program_analysis_gfx9_cdna_target_ops.cpp
+        consan_program_analysis_gfx1100_target_ops.cpp
         consan_program_analysis_gfx1201_target_ops.cpp
         consan_program_analysis_gfx1250_target_ops.cpp
         consan_program_analysis_target_ops.cpp

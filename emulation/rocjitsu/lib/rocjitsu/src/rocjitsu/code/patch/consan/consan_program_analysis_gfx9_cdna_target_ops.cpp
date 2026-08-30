@@ -6,6 +6,8 @@
 
 #include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops_internal.h"
 
+#include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 
 #include <cstring>
@@ -68,6 +70,38 @@ decode_gfx9_cdna_accvgpr_transfer(std::span<const uint8_t> instruction, bool wri
   if (raw.src0 < 256u || raw.src0 >= 512u)
     return ConSanAccvgprTransferEncoding{.accumulator_vgpr = std::nullopt};
   return ConSanAccvgprTransferEncoding{.accumulator_vgpr = static_cast<uint16_t>(raw.src0 - 256u)};
+}
+
+template <typename Raw>
+void fill_gfx9_cdna_flat_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
+  site.raw_op = static_cast<uint32_t>(raw.op);
+  site.raw_saddr = static_cast<uint32_t>(raw.saddr);
+  site.raw_vaddr = static_cast<uint32_t>(raw.addr);
+  site.raw_vsrc = static_cast<uint32_t>(raw.data);
+  site.raw_vdst = static_cast<uint32_t>(raw.vdst);
+  site.raw_scope = 2u;
+  site.raw_th = static_cast<uint32_t>(raw.sc0) | (static_cast<uint32_t>(raw.sc1) << 1u);
+  site.returns_old_value = raw.sc0 != 0u;
+}
+
+bool decode_gfx9_cdna_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+                                  std::span<const uint8_t> instruction) {
+  if (mnemonic.starts_with("flat_atomic") && instruction.size() >= sizeof(cdna4::FlatMachineInst)) {
+    cdna4::FlatMachineInst raw{};
+    std::memcpy(&raw, instruction.data(), sizeof(raw));
+    fill_gfx9_cdna_flat_atomic_site(site, raw);
+    site.raw_ioffset = static_cast<int32_t>(raw.offset);
+    return true;
+  }
+  if (mnemonic.starts_with("global_atomic") &&
+      instruction.size() >= sizeof(cdna4::FlatGlblMachineInst)) {
+    cdna4::FlatGlblMachineInst raw{};
+    std::memcpy(&raw, instruction.data(), sizeof(raw));
+    fill_gfx9_cdna_flat_atomic_site(site, raw);
+    site.raw_ioffset = sign_extend_13_bit_offset(static_cast<uint32_t>(raw.offset));
+    return true;
+  }
+  return false;
 }
 
 } // namespace rocjitsu::consan_program_analysis_target_detail

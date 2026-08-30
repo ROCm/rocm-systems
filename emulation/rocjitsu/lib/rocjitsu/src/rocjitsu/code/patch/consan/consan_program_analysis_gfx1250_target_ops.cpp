@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops_internal.h"
 
+#include "rocjitsu/code/patch/consan/consan_program_analysis_gfx12_target_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 
 #include <cstring>
@@ -39,6 +40,45 @@ decode_gfx1250_lane_transfer(std::span<const uint8_t> instruction) {
       .lane_selector = static_cast<uint32_t>(raw.src1),
       .value_source_operand = 0,
   };
+}
+
+bool decode_gfx1250_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+                                std::span<const uint8_t> instruction) {
+  if (mnemonic.starts_with("ds_") && instruction.size() >= sizeof(cdna5::VdsMachineInst)) {
+    cdna5::VdsMachineInst raw{};
+    std::memcpy(&raw, instruction.data(), sizeof(raw));
+    fill_gfx12_ds_atomic_site(site, raw);
+    return true;
+  }
+  if (mnemonic.starts_with("flat_atomic") &&
+      instruction.size() >= sizeof(cdna5::VflatMachineInst)) {
+    cdna5::VflatMachineInst raw{};
+    std::memcpy(&raw, instruction.data(), sizeof(raw));
+    fill_gfx12_flat_atomic_site(site, raw);
+    return true;
+  }
+  if (mnemonic.starts_with("global_atomic") &&
+      instruction.size() >= sizeof(cdna5::VglobalMachineInst)) {
+    cdna5::VglobalMachineInst raw{};
+    std::memcpy(&raw, instruction.data(), sizeof(raw));
+    fill_gfx12_flat_atomic_site(site, raw);
+    return true;
+  }
+  if (mnemonic.starts_with("scratch_atomic") &&
+      instruction.size() >= sizeof(cdna5::VscratchMachineInst)) {
+    cdna5::VscratchMachineInst raw{};
+    std::memcpy(&raw, instruction.data(), sizeof(raw));
+    fill_gfx12_flat_atomic_site(site, raw);
+    return true;
+  }
+  if (mnemonic.starts_with("buffer_atomic") &&
+      instruction.size() >= sizeof(cdna5::VbufferMachineInst)) {
+    cdna5::VbufferMachineInst raw{};
+    std::memcpy(&raw, instruction.data(), sizeof(raw));
+    fill_gfx12_buffer_atomic_site(site, raw);
+    return true;
+  }
+  return false;
 }
 
 } // namespace rocjitsu::consan_program_analysis_target_detail

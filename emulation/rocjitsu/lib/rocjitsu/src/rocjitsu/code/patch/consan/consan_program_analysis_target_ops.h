@@ -11,8 +11,11 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string_view>
 
 namespace rocjitsu {
+
+struct ConSanAtomicSite;
 
 struct ConSanScratchComponentEncoding {
   uint16_t vector_address_vgpr = 0;
@@ -53,5 +56,13 @@ decode_consan_lane_transfer_encoding(std::span<const uint8_t> instruction, rj_co
 [[nodiscard]] std::optional<ConSanAccvgprTransferEncoding>
 decode_consan_accvgpr_transfer_index(std::span<const uint8_t> instruction, rj_code_arch_t arch,
                                      bool write_accumulator);
+
+/// Decode target-native atomic operands into the common atomic inventory
+/// product. Returns false when the target or encoded form is not represented;
+/// the caller retains its generic decoded operands in that case.
+[[nodiscard]] bool decode_consan_atomic_site_encoding(ConSanAtomicSite &site,
+                                                      std::string_view mnemonic,
+                                                      std::span<const uint8_t> instruction,
+                                                      rj_code_arch_t arch);
 
 } // namespace rocjitsu
