@@ -5265,6 +5265,13 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
     persistent_facts.atomic_count += plan.site_kind == ConSanResourceSiteKind::Atomic;
     persistent_facts.barrier_count += plan.site_kind == ConSanResourceSiteKind::Barrier;
     persistent_facts.fence_count += plan.site_kind == ConSanResourceSiteKind::Fence;
+    for (uint64_t owner : plan.owner_descriptor_file_offsets) {
+      const ConSanKernelInfo *kernel = program_inventory.find_kernel_by_descriptor(owner);
+      persistent_facts.has_operational_dynamic_stack_owner |=
+          kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
+      persistent_facts.has_operational_dynamic_lds_owner |=
+          kernel != nullptr && kernel->has_dynamic_lds;
+    }
   }
   const MoiPersistentStateDemand persistent_demand =
       plan_moi_persistent_state_demand(request, resources, options, persistent_facts);
@@ -5275,21 +5282,9 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
         return kernel.uses_cluster_workgroup_id;
       });
   const bool is_rdna_dispatch_vgpr_arch = consan_uses_gfx11_or_gfx12_encoding(arch);
-  const bool private_inline_dispatch_incompatible_with_dynamic_stack =
-      request.moi_engine == ConSanMoiEngine::InlineShadow &&
-      options.automatic_moi_private_dispatch_id &&
-      std::ranges::any_of(program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
-        return kernel.uses_dynamic_stack.value_or(false) &&
-               std::ranges::any_of(resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-                 return plan.source != ConSanRegisterAllocationSource::Unsupported &&
-                        std::ranges::find(plan.owner_descriptor_file_offsets,
-                                          kernel.descriptor_file_offset) !=
-                            plan.owner_descriptor_file_offsets.end();
-               });
-      });
   const bool needs_persistent_dispatch_vgprs =
       (is_rdna_dispatch_vgpr_arch && persistent_demand.needs_persistent_dispatch_capture) ||
-      private_inline_dispatch_incompatible_with_dynamic_stack;
+      persistent_demand.private_dispatch_incompatible_with_dynamic_stack;
   const bool needs_workgroup_key = persistent_demand.needs_workgroup_key;
   const bool has_explicit_owner_epoch = options.moi_owner_vgpr && options.moi_epoch_vgpr;
   if (!record_replay_entry_workgroup_capture_is_unambiguous(options)) {
@@ -6046,18 +6041,6 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
                persistent_end > plan.current_vgpr_count;
       });
   const bool has_dynamic_stack_owner = has_dynamic_stack_resource_owner();
-  const bool has_dynamic_lds_owner =
-      request.moi_engine == ConSanMoiEngine::InlineShadow &&
-      std::ranges::any_of(program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
-        if (!kernel.has_dynamic_lds)
-          return false;
-        return std::ranges::any_of(resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-          return plan.source != ConSanRegisterAllocationSource::Unsupported &&
-                 std::ranges::find(plan.owner_descriptor_file_offsets,
-                                   kernel.descriptor_file_offset) !=
-                     plan.owner_descriptor_file_offsets.end();
-        });
-      });
   // Private epoch storage is address-free scratch and therefore cannot be
   // composed with a guest dynamic stack. If persistent state fits in the
   // architectural VGPR file, grow those owner descriptors instead. The
@@ -6084,7 +6067,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
       (!needs_record_replay_workgroup_tuple ||
        persistent_demand.private_workgroup_tuple_supported) &&
       !persistent_demand.synchronization_requires_persistent_owner &&
-      (has_dynamic_lds_owner ||
+      (persistent_demand.prefer_private_epoch_for_dynamic_lds ||
        (would_grow_descriptor && request.moi_engine != ConSanMoiEngine::InlineShadow));
   const bool rdna_needs_scalar_epoch = consan_uses_gfx11_or_gfx12_encoding(arch) &&
                                        !debug.test_force_private_epoch &&

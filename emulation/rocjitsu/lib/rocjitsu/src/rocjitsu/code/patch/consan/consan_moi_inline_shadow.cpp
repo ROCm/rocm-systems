@@ -147,11 +147,14 @@ uint16_t inline_shadow_access_scratch_vgpr_count(const ConSanRequest &request,
 
 MoiPersistentStateDemand
 plan_inline_shadow_persistent_state_demand(const ConSanRequest &, const BoundRuntimeResources &,
-                                           const ConSanMoiOperatingPoint &,
+                                           const ConSanMoiOperatingPoint &point,
                                            const MoiPersistentStateFacts &facts) {
   return {
       .needs_workgroup_key = facts.access_count || facts.atomic_count,
       .needs_persistent_state = true,
+      .private_dispatch_incompatible_with_dynamic_stack =
+          point.automatic_moi_private_dispatch_id && facts.has_operational_dynamic_stack_owner,
+      .prefer_private_epoch_for_dynamic_lds = facts.has_operational_dynamic_lds_owner,
   };
 }
 

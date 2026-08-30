@@ -54,6 +54,8 @@ struct MoiPersistentStateFacts {
   size_t atomic_count = 0;
   size_t barrier_count = 0;
   size_t fence_count = 0;
+  bool has_operational_dynamic_stack_owner = false;
+  bool has_operational_dynamic_lds_owner = false;
 };
 
 struct MoiPersistentStateDemand {
@@ -64,6 +66,8 @@ struct MoiPersistentStateDemand {
   bool needs_persistent_dispatch_capture = false;
   bool prefer_compact_barriers = false;
   bool private_workgroup_tuple_supported = false;
+  bool private_dispatch_incompatible_with_dynamic_stack = false;
+  bool prefer_private_epoch_for_dynamic_lds = false;
 };
 
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.

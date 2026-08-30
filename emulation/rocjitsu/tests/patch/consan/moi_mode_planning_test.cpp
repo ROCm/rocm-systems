@@ -174,9 +174,15 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsPersistentStateDemand) {
   EXPECT_TRUE(demand.private_workgroup_tuple_supported);
 
   request.moi_engine = ConSanMoiEngine::InlineShadow;
-  demand = plan_moi_persistent_state_demand(request, resources, point, {.access_count = 1u});
+  point.automatic_moi_private_dispatch_id = true;
+  demand = plan_moi_persistent_state_demand(request, resources, point,
+                                            {.access_count = 1u,
+                                             .has_operational_dynamic_stack_owner = true,
+                                             .has_operational_dynamic_lds_owner = true});
   EXPECT_TRUE(demand.needs_workgroup_key);
   EXPECT_TRUE(demand.needs_persistent_state);
+  EXPECT_TRUE(demand.private_dispatch_incompatible_with_dynamic_stack);
+  EXPECT_TRUE(demand.prefer_private_epoch_for_dynamic_lds);
 }
 
 } // namespace
