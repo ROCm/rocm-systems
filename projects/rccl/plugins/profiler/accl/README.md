@@ -59,14 +59,22 @@ The last line of every file is a summary, written on every clean finalize:
 
 ```json
 {"summary": {"dropped_collectives": 0, "leaked_collectives": 0,
-             "pool_size": 256, "complete": true}}
+             "dropped_proxy_ops": 0, "dropped_proxy_steps": 0,
+             "overflow_proxy_ops": 0, "coll_pool_size": 256,
+             "proxy_op_pool_size": 1024, "proxy_step_pool_size": 4096,
+             "max_proxy_ops_per_coll": 256, "complete": true}}
 ```
 
 - `dropped_collectives` — never got a pool slot because the pool was full.
 - `leaked_collectives` — got a slot but never completed, because RCCL's teardown
   drain skipped some of their kernel-channel events; reclaimed at finalize.
-- `complete` — false if either counter is non-zero. **A file with no summary line
-  at all means the process did not reach finalize**, so its data is also suspect.
+- `dropped_proxy_ops` / `dropped_proxy_steps` — no free slot in the proxy op or
+  proxy step pool; the affected records understate the proxy decomposition.
+- `overflow_proxy_ops` — the op completed, but its collective already held
+  `max_proxy_ops_per_coll` ops, so its timings were discarded.
+- `complete` — false if any of the five counters is non-zero. **A file with no
+  summary line at all means the process did not reach finalize**, so its data is
+  also suspect.
   `accl_report.py` warns on stderr in both cases; do not compare an incomplete run
   against a full one.
 

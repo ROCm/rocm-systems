@@ -141,11 +141,24 @@ def print_drop_warnings(summaries: List[dict]):
         return
     total_dropped = sum(s.get('dropped_collectives', 0) for s in summaries)
     total_leaked = sum(s.get('leaked_collectives', 0) for s in summaries)
-    if total_dropped > 0 or total_leaked > 0:
-        print(f"\n*** WARNING: profiling data is INCOMPLETE — {total_dropped} collectives "
-              f"dropped (pool exhausted, pool_size={summaries[0].get('pool_size', '?')}), "
-              f"{total_leaked} slots leaked (teardown-skipped kernel events). "
-              f"Do not compare these numbers against a full run. ***\n", file=sys.stderr)
+    total_dropped_ops = sum(s.get('dropped_proxy_ops', 0) for s in summaries)
+    total_dropped_steps = sum(s.get('dropped_proxy_steps', 0) for s in summaries)
+    total_overflow_ops = sum(s.get('overflow_proxy_ops', 0) for s in summaries)
+    # `complete` is the plugin's own verdict and covers every counter it tracks,
+    # including any added later; trust it over the counters we happen to read.
+    # Pre-`complete` files have no flag, so absence must not read as incomplete.
+    any_incomplete = any(not s.get('complete', True) for s in summaries)
+    if not (any_incomplete or total_dropped or total_leaked
+            or total_dropped_ops or total_dropped_steps or total_overflow_ops):
+        return
+    print(f"\n*** WARNING: profiling data is INCOMPLETE — {total_dropped} collectives "
+          f"dropped (coll pool exhausted, "
+          f"coll_pool_size={summaries[0].get('coll_pool_size', '?')}), "
+          f"{total_leaked} slots leaked (teardown-skipped kernel events), "
+          f"{total_dropped_ops} proxy ops dropped, "
+          f"{total_dropped_steps} proxy steps dropped, "
+          f"{total_overflow_ops} proxy ops discarded (per-collective limit). "
+          f"Do not compare these numbers against a full run. ***\n", file=sys.stderr)
 
 
 def load_dir_or_file(path: str, warmup: int) -> List[Record]:
