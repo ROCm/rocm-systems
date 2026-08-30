@@ -2,8 +2,6 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
                                    rj_code_arch_t arch, ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics)
     return;
-  if (options.moi_engine != ConSanMoiEngine::RecordReplay)
-    return;
   if (consan_target_profile(arch) == nullptr) {
     result.warnings.emplace_back(
         "ConSan MOI atomic record patch does not support this architecture");

@@ -14,6 +14,7 @@
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_apply.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
+#include "rocjitsu/code/patch/consan/consan_moi_barrier.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
@@ -74,6 +75,52 @@ MoiObjectModePlan plan_record_replay_object_mode(const ConSanRequest &request,
         "with no admitted access, barrier, atomic, or fence sites");
   }
   return plan;
+}
+
+void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
+                                      rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+                                      std::span<const ConSanMoiCandidate> candidates,
+                                      const MoiObjectFacts &facts,
+                                      ConSanTransformArtifacts &result) {
+  MoiRecordReplayAccessOutput access_output;
+  if (const ConSanTargetProfile *target = consan_target_profile(arch)) {
+    try_apply_first_light_access_record_patch(bytes, options, *target, resource_state,
+                                              access_output, candidates, result);
+  } else if (options.moi_report_buffer_address) {
+    result.warnings.emplace_back("ConSan MOI first-light probe does not support this architecture");
+  }
+  if (!result.errors.empty())
+    return;
+
+  const bool emitted_access =
+      std::ranges::any_of(result.patches, [](const ConSanPatchLoweringProduct &patch) {
+        return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+               patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+      });
+  const bool atomic_or_fence_relevant =
+      options.moi_track_atomics && (facts.has_admitted_atomic || facts.has_admitted_fence);
+  if (!facts.has_explicit_persistent_state && !emitted_access && !facts.has_admitted_barrier &&
+      !atomic_or_fence_relevant) {
+    // Planning may admit access sites whose bodies all fail placement. Drop
+    // automatic state only when no standalone record can consume it.
+    options.moi_initialize_owner_epoch = false;
+    options.moi_owner_vgpr.reset();
+    options.moi_epoch_vgpr.reset();
+    options.moi_record_replay_workgroup_vgprs = {};
+    options.moi_persistent_sgprs.record_replay_workgroup = {};
+    options.moi_dispatch_id_vgpr.reset();
+    options.owner_persistent_vgprs.clear();
+    result.moi_operating_point = options;
+    result.warnings.emplace_back(
+        "ConSan MOI record/replay dropped unconsumed automatic state after all access probes "
+        "failed placement");
+  }
+  try_apply_atomic_record_patch(bytes, options, arch, result);
+  if (result.errors.empty())
+    try_apply_record_replay_barrier_patch(bytes, options, arch, resource_state, access_output,
+                                          result);
+  if (result.errors.empty())
+    try_apply_fence_record_patch(bytes, options, arch, result);
 }
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"

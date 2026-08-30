@@ -7,15 +7,11 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
-#include "rocjitsu/code/patch/consan/consan_moi_barrier.h"
 #include "rocjitsu/code/patch/consan/consan_moi_candidate_projection.h"
-#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_pipeline.h"
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
-#include "rocjitsu/code/patch/consan/consan_moi_record_replay.h"
-#include "rocjitsu/code/patch/consan/consan_moi_sampled.h"
 #include "rocjitsu/code/patch/consan/consan_vgpr_bank_state.h"
 
 #include <algorithm>
@@ -117,8 +113,6 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                        std::make_move_iterator(mode_plan.errors.end()));
   if (!result.errors.empty())
     return result;
-  const bool has_supported_barrier = object_facts.has_admitted_barrier;
-  const bool atomic_or_fence_relevant = mode_plan.atomic_or_fence_relevant;
   const bool explicit_persistent_state = object_facts.has_explicit_persistent_state;
   const bool inline_atomic_without_access = mode_plan.inline_atomic_without_access;
   // Register selection iterates as automatic persistent and transient state is
@@ -298,60 +292,9 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
           return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
         });
   }
-  if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::Sampled)
-    try_apply_direct_sampled_watchpoint_patch(code_object_bytes, effective_options, arch,
-                                              resource_planning_state, moi_candidates, result);
-  if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::Sampled)
-    try_apply_sampled_atomic_sync_patch(code_object_bytes, effective_options, arch,
-                                        resource_planning_state, result);
-  if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::Sampled)
-    try_apply_sampled_barrier_sync_patch(code_object_bytes, effective_options, arch,
-                                         resource_planning_state, moi_candidates, result);
-  if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::InlineShadow)
-    try_apply_inline_shadow_patch(code_object_bytes, effective_options, arch,
-                                  resource_planning_state, moi_candidates, result);
-  MoiRecordReplayAccessOutput record_replay_access_output;
-  if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay) {
-    if (const ConSanTargetProfile *target = consan_target_profile(arch)) {
-      try_apply_first_light_access_record_patch(
-          code_object_bytes, effective_options, *target, resource_planning_state,
-          record_replay_access_output, moi_candidates, result);
-    } else if (effective_options.moi_report_buffer_address) {
-      result.warnings.emplace_back(
-          "ConSan MOI first-light probe does not support this architecture");
-    }
-  }
-  if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-      !explicit_persistent_state &&
-      std::ranges::none_of(result.patches,
-                           [](const ConSanPatchLoweringProduct &patch) {
-                             return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
-                                    patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
-                           }) &&
-      !has_supported_barrier && !atomic_or_fence_relevant) {
-    // Planning may admit access sites whose bodies all fail placement. Drop
-    // automatic state only when no standalone record can consume it.
-    effective_options.moi_initialize_owner_epoch = false;
-    effective_options.moi_owner_vgpr.reset();
-    effective_options.moi_epoch_vgpr.reset();
-    effective_options.moi_record_replay_workgroup_vgprs = {};
-    effective_options.moi_persistent_sgprs.record_replay_workgroup = {};
-    effective_options.moi_dispatch_id_vgpr.reset();
-    effective_options.owner_persistent_vgprs.clear();
-    result.moi_operating_point = effective_options;
-    result.warnings.emplace_back(
-        "ConSan MOI record/replay dropped unconsumed automatic state after all access probes "
-        "failed placement");
-  }
-  if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay)
-    try_apply_atomic_record_patch(code_object_bytes, effective_options, arch, result);
   if (result.errors.empty())
-    try_apply_barrier_epoch_patch(code_object_bytes, effective_options, arch,
-                                  resource_planning_state, record_replay_access_output, result);
-  if (result.errors.empty())
-    try_apply_inline_atomic_ordering_patch(code_object_bytes, effective_options, arch, result);
-  if (result.errors.empty())
-    try_apply_fence_record_patch(code_object_bytes, effective_options, arch, result);
+    apply_moi_mode_patches(code_object_bytes, effective_options, arch, resource_planning_state,
+                           moi_candidates, object_facts, result);
   // Sampled and inline prologues only initialize state consumed by an emitted
   // access or sync probe. The automatic Record/Replay report-sizing pass also
   // has no buffer and therefore cannot emit a consumer yet; keep its semantic

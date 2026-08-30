@@ -20,9 +20,15 @@ build_moi_barrier_evidence_site_plans(const ConSanTransformArtifacts &result,
                                                            const BoundRuntimeResources &resources,
                                                            const ConSanMoiOperatingPoint &point);
 
-void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
-                                   rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
-                                   const MoiRecordReplayAccessOutput &access_output,
-                                   ConSanTransformArtifacts &result);
+void try_apply_inline_shadow_barrier_patch(std::span<const uint8_t> bytes,
+                                           const MoiOptions &options, rj_code_arch_t arch,
+                                           MoiResourcePlanningState &resource_state,
+                                           ConSanTransformArtifacts &result);
+
+void try_apply_record_replay_barrier_patch(std::span<const uint8_t> bytes,
+                                           const MoiOptions &options, rj_code_arch_t arch,
+                                           MoiResourcePlanningState &resource_state,
+                                           const MoiRecordReplayAccessOutput &access_output,
+                                           ConSanTransformArtifacts &result);
 
 } // namespace rocjitsu::consan_moi_impl

@@ -33,4 +33,22 @@ MoiObjectModePlan plan_moi_object_mode(const ConSanRequest &request,
   }
 }
 
+void apply_moi_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
+                            rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+                            std::span<const ConSanMoiCandidate> candidates,
+                            const MoiObjectFacts &facts, ConSanTransformArtifacts &result) {
+  switch (options.moi_engine) {
+  case ConSanMoiEngine::RecordReplay:
+    apply_record_replay_mode_patches(bytes, options, arch, resource_state, candidates, facts,
+                                     result);
+    return;
+  case ConSanMoiEngine::Sampled:
+    apply_sampled_mode_patches(bytes, options, arch, resource_state, candidates, result);
+    return;
+  case ConSanMoiEngine::InlineShadow:
+    apply_inline_shadow_mode_patches(bytes, options, arch, resource_state, candidates, result);
+    return;
+  }
+}
+
 } // namespace rocjitsu::consan_moi_impl

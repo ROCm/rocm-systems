@@ -2192,20 +2192,26 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
                                                   std::vector<std::string> &warnings,
                                                   ConSanTransformArtifacts &result);
 
-void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
-                                   rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
-                                   const MoiRecordReplayAccessOutput &access_output,
-                                   ConSanTransformArtifacts &result) {
-  if (!options.moi_track_barriers || options.moi_engine == ConSanMoiEngine::Sampled)
+void try_apply_inline_shadow_barrier_patch(std::span<const uint8_t> bytes,
+                                           const MoiOptions &options, rj_code_arch_t arch,
+                                           MoiResourcePlanningState &resource_state,
+                                           ConSanTransformArtifacts &result) {
+  if (!options.moi_track_barriers)
     return;
-  if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
-    MoiOptions barrier_options = options;
-    if (barrier_options.automatic_moi_inline_sgpr_spill)
-      barrier_options.moi_exec_save_sgpr.reset();
-    try_apply_inline_shadow_barrier_epoch_patch(bytes, barrier_options, arch, resource_state,
-                                                access_output, result);
+  MoiOptions barrier_options = options;
+  if (barrier_options.automatic_moi_inline_sgpr_spill)
+    barrier_options.moi_exec_save_sgpr.reset();
+  try_apply_inline_shadow_barrier_epoch_patch(bytes, barrier_options, arch, resource_state, {},
+                                              result);
+}
+
+void try_apply_record_replay_barrier_patch(std::span<const uint8_t> bytes,
+                                           const MoiOptions &options, rj_code_arch_t arch,
+                                           MoiResourcePlanningState &resource_state,
+                                           const MoiRecordReplayAccessOutput &access_output,
+                                           ConSanTransformArtifacts &result) {
+  if (!options.moi_track_barriers)
     return;
-  }
 
   std::vector<std::string> record_warnings;
   try_apply_record_replay_barrier_record_patch(bytes, options, arch, access_output, record_warnings,

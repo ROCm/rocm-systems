@@ -1,7 +1,7 @@
 void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                             const MoiOptions &options, rj_code_arch_t arch,
                                             ConSanTransformArtifacts &result) {
-  if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::InlineShadow)
+  if (!options.moi_track_atomics)
     return;
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr) {

@@ -124,6 +124,18 @@ MoiObjectModePlan plan_inline_shadow_object_mode(const ConSanRequest &request,
   return plan;
 }
 
+void apply_inline_shadow_mode_patches(std::span<const uint8_t> bytes, const MoiOptions &options,
+                                      rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+                                      std::span<const ConSanMoiCandidate> candidates,
+                                      ConSanTransformArtifacts &result) {
+  try_apply_inline_shadow_patch(bytes, options, arch, resource_state, candidates, result);
+  if (!result.errors.empty())
+    return;
+  try_apply_inline_shadow_barrier_patch(bytes, options, arch, resource_state, result);
+  if (result.errors.empty())
+    try_apply_inline_atomic_ordering_patch(bytes, options, arch, result);
+}
+
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_atomic.inc"

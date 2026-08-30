@@ -1,6 +1,6 @@
 void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
                                   rj_code_arch_t arch, ConSanTransformArtifacts &result) {
-  if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::RecordReplay)
+  if (!options.moi_track_atomics)
     return;
   if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back(

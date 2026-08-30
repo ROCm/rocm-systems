@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 
 #include <cstddef>
 #include <string>
@@ -67,5 +67,29 @@ make_moi_object_mode_plan(const ConSanRequest &request, const ConSanMoiOperating
 plan_inline_shadow_object_mode(const ConSanRequest &request, const ConSanMoiOperatingPoint &point,
                                const MoiObjectFacts &facts,
                                const ConSanObservationPlan &observation_plan);
+
+/// Run the selected engine's lowering sequence. Shared placement has already
+/// accepted an operating point; the engine owns which access and sync
+/// consumers run, their order, and any mode-local post-placement cleanup.
+void apply_moi_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
+                            rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+                            std::span<const ConSanMoiCandidate> candidates,
+                            const MoiObjectFacts &facts, ConSanTransformArtifacts &result);
+
+void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
+                                      rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+                                      std::span<const ConSanMoiCandidate> candidates,
+                                      const MoiObjectFacts &facts,
+                                      ConSanTransformArtifacts &result);
+
+void apply_sampled_mode_patches(std::span<const uint8_t> bytes, const MoiOptions &options,
+                                rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+                                std::span<const ConSanMoiCandidate> candidates,
+                                ConSanTransformArtifacts &result);
+
+void apply_inline_shadow_mode_patches(std::span<const uint8_t> bytes, const MoiOptions &options,
+                                      rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+                                      std::span<const ConSanMoiCandidate> candidates,
+                                      ConSanTransformArtifacts &result);
 
 } // namespace rocjitsu::consan_moi_impl

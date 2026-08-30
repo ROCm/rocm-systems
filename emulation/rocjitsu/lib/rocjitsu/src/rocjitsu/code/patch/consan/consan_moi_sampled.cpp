@@ -136,6 +136,18 @@ MoiObjectModePlan plan_sampled_object_mode(const ConSanRequest &request,
   return plan;
 }
 
+void apply_sampled_mode_patches(std::span<const uint8_t> bytes, const MoiOptions &options,
+                                rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+                                std::span<const ConSanMoiCandidate> candidates,
+                                ConSanTransformArtifacts &result) {
+  try_apply_direct_sampled_watchpoint_patch(bytes, options, arch, resource_state, candidates,
+                                            result);
+  if (result.errors.empty())
+    try_apply_sampled_atomic_sync_patch(bytes, options, arch, resource_state, result);
+  if (result.errors.empty())
+    try_apply_sampled_barrier_sync_patch(bytes, options, arch, resource_state, candidates, result);
+}
+
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_sync.inc"
