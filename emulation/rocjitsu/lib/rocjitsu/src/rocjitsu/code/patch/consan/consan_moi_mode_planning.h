@@ -91,6 +91,25 @@ struct MoiDynamicStackSpillPolicy {
   bool operator==(const MoiDynamicStackSpillPolicy &) const = default;
 };
 
+/// Mode-owned permission to retry an otherwise unplaceable site by spilling a
+/// scratch window that overlaps short-lived guest operands. Common placement
+/// executes the retry; the selected mode owns whether its emission ordering
+/// can recover the operands and which guest result must remain disjoint.
+struct MoiOperandOverlapSpillPolicy {
+  bool supported = false;
+  std::optional<uint16_t> protected_vgpr;
+  uint8_t protected_vgpr_count = 0;
+};
+
+struct MoiOperandOverlapSpillContext {
+  const ConSanRequest &request;
+  const ConSanMoiOperatingPoint &point;
+  const ConSanMoiCandidate *access_candidate = nullptr;
+  ConSanResourceSiteKind site_kind = ConSanResourceSiteKind::Access;
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  bool guest_replay_requires_disjoint_address_scratch = false;
+};
+
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.
 [[nodiscard]] MoiPersistentStateDemand make_exact_workgroup_capture_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
@@ -123,6 +142,9 @@ void apply_moi_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
 [[nodiscard]] MoiDynamicStackSpillPolicy plan_moi_dynamic_stack_spill(ConSanMoiEngine engine,
                                                                       rj_code_arch_t arch);
 
+[[nodiscard]] MoiOperandOverlapSpillPolicy
+plan_moi_operand_overlap_spill(const MoiOperandOverlapSpillContext &context);
+
 struct MoiModeOperations {
   MoiObjectModePlan (*plan)(const ConSanRequest &, const ConSanMoiOperatingPoint &,
                             const MoiObjectFacts &, const ConSanObservationPlan &);
@@ -137,6 +159,7 @@ struct MoiModeOperations {
                                                       const ConSanMoiOperatingPoint &,
                                                       const MoiPersistentStateFacts &);
   MoiDynamicStackSpillPolicy (*dynamic_stack_spill)(const MoiDynamicStackSpillFacts &);
+  MoiOperandOverlapSpillPolicy (*operand_overlap_spill)(const MoiOperandOverlapSpillContext &);
 };
 
 extern const MoiModeOperations kRecordReplayModeOperations;

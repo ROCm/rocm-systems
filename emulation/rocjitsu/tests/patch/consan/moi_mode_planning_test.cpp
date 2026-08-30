@@ -11,6 +11,7 @@ using consan_moi_impl::MoiObjectFacts;
 using consan_moi_impl::MoiPersistentStateFacts;
 using consan_moi_impl::plan_moi_dynamic_stack_spill;
 using consan_moi_impl::plan_moi_object_mode;
+using consan_moi_impl::plan_moi_operand_overlap_spill;
 using consan_moi_impl::plan_moi_persistent_state_demand;
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsAutomaticOwnerDefault) {
@@ -53,6 +54,31 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsDynamicStackSpillPolicy) {
   EXPECT_TRUE(record_unsupported.requires_every_owner_dynamic);
   EXPECT_TRUE(inline_unsupported.backend_supported);
   EXPECT_FALSE(inline_unsupported.requires_every_owner_dynamic);
+}
+
+TEST(ConSanMoiModePlanning, EachEngineOwnsItsOperandOverlapSpillPolicy) {
+  ConSanRequest request;
+  const ConSanMoiOperatingPoint point;
+  const ConSanMoiCandidate candidate;
+  const auto plan = [&](ConSanResourceSiteKind kind, rj_code_arch_t arch, bool disjoint,
+                        const ConSanMoiCandidate *access) {
+    return plan_moi_operand_overlap_spill({request, point, access, kind, arch, disjoint});
+  };
+
+  request.moi_engine = ConSanMoiEngine::RecordReplay;
+  EXPECT_TRUE(
+      plan(ConSanResourceSiteKind::Access, ROCJITSU_CODE_ARCH_RDNA4, false, &candidate).supported);
+  request.moi_dynamic_access_records = true;
+  EXPECT_FALSE(
+      plan(ConSanResourceSiteKind::Access, ROCJITSU_CODE_ARCH_RDNA4, false, &candidate).supported);
+
+  request.moi_engine = ConSanMoiEngine::InlineShadow;
+  EXPECT_FALSE(
+      plan(ConSanResourceSiteKind::Access, ROCJITSU_CODE_ARCH_RDNA4, true, &candidate).supported);
+
+  request.moi_engine = ConSanMoiEngine::Sampled;
+  EXPECT_TRUE(
+      plan(ConSanResourceSiteKind::Atomic, ROCJITSU_CODE_ARCH_CDNA5, false, nullptr).supported);
 }
 
 TEST(ConSanMoiModePlanning, RecordReplaySelectsDenseRoutingFromNormalizedTargetFacts) {

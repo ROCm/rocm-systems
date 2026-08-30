@@ -202,10 +202,38 @@ MoiDynamicStackSpillPolicy sampled_dynamic_stack_spill(const MoiDynamicStackSpil
   return {.backend_supported = facts.target_has_backend, .requires_every_owner_dynamic = true};
 }
 
+MoiOperandOverlapSpillPolicy
+sampled_operand_overlap_spill(const MoiOperandOverlapSpillContext &context) {
+  if (!consan_is_capability_arch(context.arch))
+    return {};
+  if (context.site_kind == ConSanResourceSiteKind::Atomic) {
+    MoiOperandOverlapSpillPolicy policy;
+    policy.supported = true;
+    return policy;
+  }
+  if (context.site_kind != ConSanResourceSiteKind::Access || context.access_candidate == nullptr ||
+      context.guest_replay_requires_disjoint_address_scratch) {
+    return {};
+  }
+  const ConSanMoiCandidate &candidate = *context.access_candidate;
+  const bool spill_backed_recovery = sampled_access_supports_spill_backed_operand_recovery(
+      context.request, candidate, context.arch);
+  MoiOperandOverlapSpillPolicy policy;
+  policy.supported = sampled_access_can_plan_spill_over_guest_operands(context.request,
+                                                                       context.point, candidate) ||
+                     spill_backed_recovery;
+  if (spill_backed_recovery && candidate.lowering.form &&
+      candidate.lowering.form->destination_vgpr) {
+    policy.protected_vgpr = candidate.lowering.form->destination_vgpr;
+    policy.protected_vgpr_count = static_cast<uint8_t>(candidate_payload_vgpr_count(candidate));
+  }
+  return policy;
+}
+
 const MoiModeOperations kSampledModeOperations = {
     plan_sampled_object_mode,          apply_sampled_mode_patches,
     sampled_access_scratch_vgpr_count, plan_sampled_persistent_state_demand,
-    sampled_dynamic_stack_spill,
+    sampled_dynamic_stack_spill,       sampled_operand_overlap_spill,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"

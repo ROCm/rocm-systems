@@ -179,10 +179,20 @@ record_replay_dynamic_stack_spill(const MoiDynamicStackSpillFacts &facts) {
   return {.backend_supported = facts.target_has_backend, .requires_every_owner_dynamic = true};
 }
 
+MoiOperandOverlapSpillPolicy
+record_replay_operand_overlap_spill(const MoiOperandOverlapSpillContext &context) {
+  MoiOperandOverlapSpillPolicy policy;
+  policy.supported =
+      context.access_candidate != nullptr && context.site_kind == ConSanResourceSiteKind::Access &&
+      consan_is_capability_arch(context.arch) && !context.request.moi_dynamic_access_records &&
+      !context.guest_replay_requires_disjoint_address_scratch;
+  return policy;
+}
+
 const MoiModeOperations kRecordReplayModeOperations = {
     plan_record_replay_object_mode,          apply_record_replay_mode_patches,
     record_replay_access_scratch_vgpr_count, plan_record_replay_persistent_state_demand,
-    record_replay_dynamic_stack_spill,
+    record_replay_dynamic_stack_spill,       record_replay_operand_overlap_spill,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"

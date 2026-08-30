@@ -77,4 +77,9 @@ MoiDynamicStackSpillPolicy plan_moi_dynamic_stack_spill(ConSanMoiEngine engine,
   return moi_mode_operations(engine).dynamic_stack_spill(facts);
 }
 
+MoiOperandOverlapSpillPolicy
+plan_moi_operand_overlap_spill(const MoiOperandOverlapSpillContext &context) {
+  return moi_mode_operations(context.request.moi_engine).operand_overlap_spill(context);
+}
+
 } // namespace rocjitsu::consan_moi_impl

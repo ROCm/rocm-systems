@@ -165,10 +165,19 @@ MoiDynamicStackSpillPolicy inline_shadow_dynamic_stack_spill(const MoiDynamicSta
   return {.backend_supported = true, .requires_every_owner_dynamic = false};
 }
 
+MoiOperandOverlapSpillPolicy
+inline_shadow_operand_overlap_spill(const MoiOperandOverlapSpillContext &context) {
+  MoiOperandOverlapSpillPolicy policy;
+  policy.supported = context.access_candidate != nullptr &&
+                     context.site_kind == ConSanResourceSiteKind::Access &&
+                     !context.guest_replay_requires_disjoint_address_scratch;
+  return policy;
+}
+
 const MoiModeOperations kInlineShadowModeOperations = {
     plan_inline_shadow_object_mode,          apply_inline_shadow_mode_patches,
     inline_shadow_access_scratch_vgpr_count, plan_inline_shadow_persistent_state_demand,
-    inline_shadow_dynamic_stack_spill,
+    inline_shadow_dynamic_stack_spill,       inline_shadow_operand_overlap_spill,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"

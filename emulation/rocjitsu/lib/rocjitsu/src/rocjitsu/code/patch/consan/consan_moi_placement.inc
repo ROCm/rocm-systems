@@ -2490,27 +2490,17 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
       access_candidate != nullptr && consan_arch_has_selectable_vgpr_bank(state.arch) &&
       access_candidate->is_native_two_range() &&
       access_candidate->encoded_offset_scale_bytes() > 8u;
-  const bool supports_access_operand_overlap_spill =
-      (semantic_request.moi_engine == ConSanMoiEngine::InlineShadow &&
-       !guest_replay_needs_disjoint_address_scratch) ||
-      (consan_is_capability_arch(state.arch) &&
-       ((semantic_request.moi_engine == ConSanMoiEngine::RecordReplay &&
-         !semantic_request.moi_dynamic_access_records &&
-         !guest_replay_needs_disjoint_address_scratch) ||
-        (access_candidate != nullptr && !guest_replay_needs_disjoint_address_scratch &&
-         (sampled_access_can_plan_spill_over_guest_operands(semantic_request, point,
-                                                            *access_candidate) ||
-          sampled_access_supports_spill_backed_operand_recovery(semantic_request, *access_candidate,
-                                                                state.arch)))));
-  const bool supports_sampled_atomic_operand_overlap_spill =
-      consan_is_capability_arch(state.arch) &&
-      semantic_request.moi_engine == ConSanMoiEngine::Sampled &&
-      site_kind == ConSanResourceSiteKind::Atomic;
+  const MoiOperandOverlapSpillPolicy operand_overlap_spill = plan_moi_operand_overlap_spill({
+      semantic_request,
+      point,
+      access_candidate,
+      site_kind,
+      state.arch,
+      guest_replay_needs_disjoint_address_scratch,
+  });
   if (register_plan.source == ConSanRegisterAllocationSource::Unsupported &&
       register_plan.reason == ConSanRegisterPlanReason::NoLegalWindow &&
-      ((supports_access_operand_overlap_spill && site_kind == ConSanResourceSiteKind::Access) ||
-       supports_sampled_atomic_operand_overlap_spill) &&
-      !request.explicit_base) {
+      operand_overlap_spill.supported && !request.explicit_base) {
     // These appended-cave bodies preserve guest operands even when no
     // disjoint ordinary-VGPR window exists. Sampled atomics and the admitted
     // Sampled stores execute the guest before clobbering an overlapping saved
@@ -2560,13 +2550,9 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
           spill_request.forbidden.expand({RegClass::VGPR, *reg, 1});
       }
     }
-    if (semantic_request.moi_engine == ConSanMoiEngine::Sampled && access_candidate != nullptr &&
-        sampled_access_supports_spill_backed_operand_recovery(semantic_request, *access_candidate,
-                                                              state.arch) &&
-        access_candidate->lowering.form && access_candidate->lowering.form->destination_vgpr) {
-      spill_request.forbidden.expand(
-          {RegClass::VGPR, *access_candidate->lowering.form->destination_vgpr,
-           static_cast<uint8_t>(candidate_payload_vgpr_count(*access_candidate))});
+    if (operand_overlap_spill.protected_vgpr) {
+      spill_request.forbidden.expand({RegClass::VGPR, *operand_overlap_spill.protected_vgpr,
+                                      operand_overlap_spill.protected_vgpr_count});
     }
     register_plan = plan_consan_registers(spill_request, live_before_all_owners);
     plan.alternatives.push_back({
