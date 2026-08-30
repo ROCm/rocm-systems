@@ -298,6 +298,17 @@ struct ConSanMoiPrologueScratchVgprAssignment {
   auto operator<=>(const ConSanMoiPrologueScratchVgprAssignment &) const = default;
 };
 
+/// Scalar key and return pair retained across one generated router call.
+/// These registers are selected and consumed together; representing them as
+/// one allocation prevents accepted operating points from carrying a partial
+/// mode-specific routing ABI.
+struct ConSanMoiRouterCallSgprs {
+  uint16_t dispatch_key_sgpr = 0;
+  uint16_t call_return_sgpr = 0;
+
+  auto operator<=>(const ConSanMoiRouterCallSgprs &) const = default;
+};
+
 /// Probe-local scalar state selected for one connected set of owning kernels.
 /// A shared helper connects its callers because its single instruction stream
 /// cannot use a different transient window for each caller.
@@ -314,8 +325,7 @@ struct ConSanMoiTransientSgprAssignment {
   bool spill_backed = false;
   std::optional<uint16_t> indirect_pc_sgpr;
   std::optional<uint16_t> indirect_scc_sgpr;
-  std::optional<uint16_t> dispatch_key_sgpr;
-  std::optional<uint16_t> call_return_sgpr;
+  std::optional<ConSanMoiRouterCallSgprs> router_call;
   std::optional<uint16_t> visible_evidence_sgpr;
   /// The complete scalar window is preserved in private memory and control
   /// reaches the appended body through branch-only relays. This avoids any
@@ -852,8 +862,7 @@ struct ConSanMoiOperatingPoint {
   /// Record/Replay, and Sampled rather than separate mode-owned state.
   std::optional<uint16_t> moi_router_indirect_pc_sgpr;
   std::optional<uint16_t> moi_router_indirect_scc_sgpr;
-  std::optional<uint16_t> moi_router_dispatch_key_sgpr;
-  std::optional<uint16_t> moi_router_call_return_sgpr;
+  std::optional<ConSanMoiRouterCallSgprs> moi_router_call;
   /// Inline-only visible evidence temporary within that shared router ABI.
   std::optional<uint16_t> moi_inline_visible_evidence_sgpr;
   /// Internal proof marker for an Inline component whose saved scalar window
@@ -901,8 +910,8 @@ struct ConSanMoiOperatingPoint {
   template <typename Visitor> void for_each_auxiliary_sgpr_range(Visitor &&visit) const {
     visit(moi_router_indirect_pc_sgpr, 2u);
     visit(moi_router_indirect_scc_sgpr, 1u);
-    visit(moi_router_dispatch_key_sgpr, 1u);
-    visit(moi_router_call_return_sgpr, 2u);
+    visit(moi_router_call ? std::optional{moi_router_call->dispatch_key_sgpr} : std::nullopt, 1u);
+    visit(moi_router_call ? std::optional{moi_router_call->call_return_sgpr} : std::nullopt, 2u);
     visit(moi_inline_visible_evidence_sgpr, 1u);
     visit(moi_inline_dynamic_stack_borrowed_sgpr, 2u);
   }

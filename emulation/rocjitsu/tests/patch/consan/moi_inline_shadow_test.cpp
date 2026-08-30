@@ -1175,8 +1175,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   options.moi_exec_save_sgpr = 4u;
   options.moi_router_indirect_pc_sgpr = 48u;
   options.moi_router_indirect_scc_sgpr = 50u;
-  options.moi_router_dispatch_key_sgpr = 50u;
-  options.moi_router_call_return_sgpr = 48u;
+  options.moi_router_call = ConSanMoiRouterCallSgprs{50u, 48u};
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   const ConSanMoiTransientSgprAssignment seed_assignment{
@@ -1187,8 +1186,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       .spill_backed = true,
       .indirect_pc_sgpr = 48u,
       .indirect_scc_sgpr = 50u,
-      .dispatch_key_sgpr = 50u,
-      .call_return_sgpr = 48u,
+      .router_call = ConSanMoiRouterCallSgprs{50u, 48u},
       .visible_evidence_sgpr = std::nullopt,
       .branch_only_scalar_spill = false,
       .dynamic_stack_borrowed_sgpr = std::nullopt,
@@ -1399,8 +1397,7 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
   options.moi_exec_save_sgpr = 4u;
   options.moi_router_indirect_pc_sgpr = 48u;
   options.moi_router_indirect_scc_sgpr = 50u;
-  options.moi_router_dispatch_key_sgpr = 50u;
-  options.moi_router_call_return_sgpr = 48u;
+  options.moi_router_call = ConSanMoiRouterCallSgprs{50u, 48u};
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   const ConSanMoiTransientSgprAssignment seed_assignment{
@@ -1411,8 +1408,7 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
       .spill_backed = true,
       .indirect_pc_sgpr = 48u,
       .indirect_scc_sgpr = 50u,
-      .dispatch_key_sgpr = 50u,
-      .call_return_sgpr = 48u,
+      .router_call = ConSanMoiRouterCallSgprs{50u, 48u},
       .visible_evidence_sgpr = std::nullopt,
       .branch_only_scalar_spill = false,
       .dynamic_stack_borrowed_sgpr = std::nullopt,
@@ -3303,8 +3299,7 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   ASSERT_TRUE(assignment.dynamic_stack_borrowed_sgpr);
   EXPECT_FALSE(assignment.indirect_pc_sgpr);
   EXPECT_FALSE(assignment.indirect_scc_sgpr);
-  EXPECT_FALSE(assignment.dispatch_key_sgpr);
-  EXPECT_FALSE(assignment.call_return_sgpr);
+  EXPECT_FALSE(assignment.router_call);
 
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
@@ -3433,8 +3428,7 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
   EXPECT_FALSE(assignment.dynamic_stack_borrowed_sgpr);
   EXPECT_FALSE(assignment.indirect_pc_sgpr);
   EXPECT_FALSE(assignment.indirect_scc_sgpr);
-  EXPECT_FALSE(assignment.dispatch_key_sgpr);
-  EXPECT_FALSE(assignment.call_return_sgpr);
+  EXPECT_FALSE(assignment.router_call);
 
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
@@ -3544,8 +3538,7 @@ void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
   EXPECT_TRUE(assignment.branch_only_scalar_spill);
   EXPECT_FALSE(assignment.indirect_pc_sgpr);
   EXPECT_FALSE(assignment.indirect_scc_sgpr);
-  EXPECT_FALSE(assignment.dispatch_key_sgpr);
-  EXPECT_FALSE(assignment.call_return_sgpr);
+  EXPECT_FALSE(assignment.router_call);
   EXPECT_EQ(std::ranges::count(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
             8u);
   const auto prologue = std::ranges::find(
@@ -6379,7 +6372,6 @@ TEST(ConSanMoi, Gfx1250DenseCallReturnRejectsArchitecturalAliases) {
   options.moi_exec_save_sgpr = 60u;
   options.moi_router_indirect_pc_sgpr = 88u;
   options.moi_router_indirect_scc_sgpr = 90u;
-  options.moi_router_dispatch_key_sgpr = 91u;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = false;
@@ -6392,7 +6384,7 @@ TEST(ConSanMoi, Gfx1250DenseCallReturnRejectsArchitecturalAliases) {
     // These encodable scalar pairs alias FLAT_SCRATCH and XNACK_MASK. An
     // s_call_i64 return in either pair corrupts architectural state rather
     // than an ordinary guest register.
-    options.moi_router_call_return_sgpr = call_return;
+    options.moi_router_call = ConSanMoiRouterCallSgprs{91u, call_return};
     const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     EXPECT_FALSE(result.modified());
@@ -6645,8 +6637,7 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
   options.moi_exec_save_sgpr = 4u;
   options.moi_router_indirect_pc_sgpr = kIndirectPcSgpr;
   options.moi_router_indirect_scc_sgpr = kKeyAndSccSgpr;
-  options.moi_router_dispatch_key_sgpr = kKeyAndSccSgpr;
-  options.moi_router_call_return_sgpr = kIndirectPcSgpr;
+  options.moi_router_call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr};
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   const ConSanMoiTransientSgprAssignment seed_assignment{
@@ -6657,8 +6648,7 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
       .spill_backed = true,
       .indirect_pc_sgpr = kIndirectPcSgpr,
       .indirect_scc_sgpr = kKeyAndSccSgpr,
-      .dispatch_key_sgpr = kKeyAndSccSgpr,
-      .call_return_sgpr = kIndirectPcSgpr,
+      .router_call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr},
       .visible_evidence_sgpr = std::nullopt,
       .branch_only_scalar_spill = false,
       .dynamic_stack_borrowed_sgpr = std::nullopt,
@@ -7185,8 +7175,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
   options.moi_router_indirect_pc_sgpr = 30;
-  options.moi_router_call_return_sgpr = 26;
-  options.moi_router_dispatch_key_sgpr = 25;
+  options.moi_router_call = ConSanMoiRouterCallSgprs{25, 26};
   options.moi_router_indirect_scc_sgpr = 29;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -7304,8 +7293,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarrierReusesAccessDispatcherWhenItFits)
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
   options.moi_router_indirect_pc_sgpr = 30;
-  options.moi_router_call_return_sgpr = 26;
-  options.moi_router_dispatch_key_sgpr = 25;
+  options.moi_router_call = ConSanMoiRouterCallSgprs{25, 26};
   options.moi_router_indirect_scc_sgpr = 29;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -7417,8 +7405,7 @@ TEST(ConSanMoi, Gfx1250DenseBarrierFallsBackWhenAccessDispatcherReservationIsFul
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
   options.moi_router_indirect_pc_sgpr = 30;
-  options.moi_router_call_return_sgpr = 26;
-  options.moi_router_dispatch_key_sgpr = 25;
+  options.moi_router_call = ConSanMoiRouterCallSgprs{25, 26};
   options.moi_router_indirect_scc_sgpr = 29;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -7507,8 +7494,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersPartitionRelayWindowsAcrossLarge
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
   options.moi_router_indirect_pc_sgpr = 30;
-  options.moi_router_call_return_sgpr = 26;
-  options.moi_router_dispatch_key_sgpr = 25;
+  options.moi_router_call = ConSanMoiRouterCallSgprs{25, 26};
   options.moi_router_indirect_scc_sgpr = 29;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -7631,8 +7617,7 @@ TEST(ConSanMoi, Gfx1250InlineUsesComponentLocalScalarSpillForMixedPressureOwners
   EXPECT_FALSE(assignment.visible_evidence_sgpr);
   EXPECT_FALSE(assignment.indirect_pc_sgpr);
   EXPECT_FALSE(assignment.indirect_scc_sgpr);
-  EXPECT_FALSE(assignment.dispatch_key_sgpr);
-  EXPECT_FALSE(assignment.call_return_sgpr);
+  EXPECT_FALSE(assignment.router_call);
   const auto aliases_architectural_state = [](uint16_t base, uint16_t width) {
     return base < 106u && 102u < static_cast<uint32_t>(base) + width;
   };
@@ -7821,8 +7806,7 @@ TEST(ConSanMoi, Cdna4InlineUsesComponentLocalScalarSpillOutsidePreloadsAndPhysic
   ASSERT_TRUE(assignment.visible_evidence_sgpr);
   ASSERT_TRUE(assignment.indirect_pc_sgpr);
   ASSERT_TRUE(assignment.indirect_scc_sgpr);
-  ASSERT_TRUE(assignment.dispatch_key_sgpr);
-  ASSERT_TRUE(assignment.call_return_sgpr);
+  ASSERT_TRUE(assignment.router_call);
 
   constexpr uint16_t kInitializedEnd = 8u;
   constexpr uint16_t kOriginalPhysicalVcc = 90u;
@@ -7832,8 +7816,8 @@ TEST(ConSanMoi, Cdna4InlineUsesComponentLocalScalarSpillOutsidePreloadsAndPhysic
       std::pair{*assignment.visible_evidence_sgpr, uint16_t{1u}},
       std::pair{*assignment.indirect_pc_sgpr, uint16_t{2u}},
       std::pair{*assignment.indirect_scc_sgpr, uint16_t{1u}},
-      std::pair{*assignment.dispatch_key_sgpr, uint16_t{1u}},
-      std::pair{*assignment.call_return_sgpr, uint16_t{2u}},
+      std::pair{assignment.router_call->dispatch_key_sgpr, uint16_t{1u}},
+      std::pair{assignment.router_call->call_return_sgpr, uint16_t{2u}},
   };
   for (const auto &[base, width] : ranges) {
     EXPECT_GE(base, kInitializedEnd);
@@ -7928,8 +7912,9 @@ TEST(ConSanMoi, Cdna4InlineSpillsMixedVgprSourcesThroughDynamicStackFrames) {
   EXPECT_FALSE(assignment.visible_evidence_sgpr);
   ASSERT_TRUE(assignment.indirect_pc_sgpr);
   ASSERT_TRUE(assignment.indirect_scc_sgpr);
-  EXPECT_EQ(assignment.dispatch_key_sgpr, assignment.indirect_scc_sgpr);
-  EXPECT_EQ(assignment.call_return_sgpr, assignment.indirect_pc_sgpr);
+  ASSERT_TRUE(assignment.router_call);
+  EXPECT_EQ(assignment.router_call->dispatch_key_sgpr, *assignment.indirect_scc_sgpr);
+  EXPECT_EQ(assignment.router_call->call_return_sgpr, *assignment.indirect_pc_sgpr);
   const auto overlaps_dynamic_stack = [](uint16_t base, uint16_t width) {
     return base < 34u && 32u < static_cast<uint32_t>(base) + width;
   };

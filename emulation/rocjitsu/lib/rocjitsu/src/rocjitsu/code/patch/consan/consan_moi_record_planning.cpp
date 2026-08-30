@@ -26,8 +26,7 @@ using consan_moi_detail::moi_bound_dispatch_id_sources;
                                  &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
            return assignment != allocation.owner_transient_sgprs.end() &&
                   assignment->branch_only_scalar_spill && assignment->indirect_pc_sgpr &&
-                  assignment->indirect_scc_sgpr && !assignment->dispatch_key_sgpr &&
-                  !assignment->call_return_sgpr;
+                  assignment->indirect_scc_sgpr && !assignment->router_call;
          });
 }
 
@@ -82,8 +81,12 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
       .moi_persistent_sgprs = point.moi_persistent_sgprs,
       .moi_report_buffer_address = bound_resources.moi_report_buffer_address,
       .automatic_moi_record_replay_sgpr_spill = point.has_compact_moi_scalar_spill(),
-      .moi_router_dispatch_key_sgpr = point.moi_router_dispatch_key_sgpr,
-      .moi_router_call_return_sgpr = point.moi_router_call_return_sgpr,
+      .router_dispatch_key_sgpr = point.moi_router_call
+                                      ? std::optional{point.moi_router_call->dispatch_key_sgpr}
+                                      : std::nullopt,
+      .router_call_return_sgpr = point.moi_router_call
+                                     ? std::optional{point.moi_router_call->call_return_sgpr}
+                                     : std::nullopt,
       .workgroup_sources = *workgroup_sources,
       .special_state = *special_state,
       .dispatch_id_sources = moi_bound_dispatch_id_sources({point, bound_resources}),

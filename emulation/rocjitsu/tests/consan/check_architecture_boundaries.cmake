@@ -192,13 +192,14 @@ if(NOT _target_extension_test MATCHES
 endif()
 
 # Dispatch-key and call-return registers belong to one shared scalar-router
-# mechanism. Do not restore mode-prefixed copies in the broad operating point.
+# allocation. Do not restore mode-prefixed copies or independently optional
+# mechanism-owned fields in the broad operating point.
 file(GLOB _consan_production_files "${_consan_dir}/*.cpp" "${_consan_dir}/*.h" "${_consan_dir}/*.inc")
 foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_file}"
-        "moi_(inline|record_replay)_(indirect_(pc|scc)|dispatch_key|call_return)_sgpr"
-        "scalar-router ABI state must retain one mechanism-owned spelling"
+        "moi_(inline|record_replay)_(indirect_(pc|scc)|dispatch_key|call_return)_sgpr|moi_router_(dispatch_key|call_return)_sgpr"
+        "scalar-router call state must remain one shared typed allocation"
     )
 endforeach()
 

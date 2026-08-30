@@ -1190,7 +1190,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                                displaced_tail_words.end());
             const uint16_t call_return_sgpr =
                 candidate_options.has_inline_moi_scalar_spill()
-                    ? *candidate_options.moi_router_call_return_sgpr
+                    ? candidate_options.moi_router_call->call_return_sgpr
                     : static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 28u);
             cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));
           } else {

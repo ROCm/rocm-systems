@@ -1150,9 +1150,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       const auto indirect_state = moi_indirect_jump_sgprs(group_options, group_options);
       const bool spill_backed_router = group_options.has_compact_moi_scalar_spill();
       if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
-          !indirect_state ||
-          (spill_backed_router && (!group_options.moi_router_dispatch_key_sgpr ||
-                                   !group_options.moi_router_call_return_sgpr))) {
+          !indirect_state || (spill_backed_router && !group_options.moi_router_call)) {
         result.warnings.emplace_back("ConSan MOI sampled barrier sync skipped dense relay in " +
                                      std::string(container_name) +
                                      ": incomplete scalar router state");
@@ -1163,10 +1161,10 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       const uint16_t saved_scc_sgpr =
           spill_backed_router ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
       const uint16_t key_sgpr = spill_backed_router
-                                    ? *group_options.moi_router_dispatch_key_sgpr
+                                    ? group_options.moi_router_call->dispatch_key_sgpr
                                     : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 5u);
       const uint16_t call_return_sgpr =
-          spill_backed_router ? *group_options.moi_router_call_return_sgpr
+          spill_backed_router ? group_options.moi_router_call->call_return_sgpr
                               : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
       // The S_CALL_I64 route uses an explicit key in a clone-local entry stub.
       // S_CALL_B64 routes retain the call-return-derived entry key when their
@@ -2223,9 +2221,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       auto special_state = moi_special_state_sgprs(group_options, group_options);
       auto indirect_state = moi_indirect_jump_sgprs(group_options, group_options);
       if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
-          !indirect_state ||
-          (spill_backed_router && (!group_options.moi_router_dispatch_key_sgpr ||
-                                   !group_options.moi_router_call_return_sgpr))) {
+          !indirect_state || (spill_backed_router && !group_options.moi_router_call)) {
         result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped dense relay in " +
                                      container + ": incomplete scalar router state");
         continue;
@@ -2288,10 +2284,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       uint16_t saved_scc_sgpr =
           spill_backed_router ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
       uint16_t key_sgpr = spill_backed_router
-                              ? *group_options.moi_router_dispatch_key_sgpr
+                              ? group_options.moi_router_call->dispatch_key_sgpr
                               : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 5u);
       uint16_t call_return_sgpr =
-          spill_backed_router ? *group_options.moi_router_call_return_sgpr
+          spill_backed_router ? group_options.moi_router_call->call_return_sgpr
                               : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
       if (spill_backed_router &&
           !tuple_is_safe(jump_pc_sgpr, saved_scc_sgpr, key_sgpr, call_return_sgpr)) {
@@ -2319,8 +2315,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                 key_sgpr = candidate_key;
                 group_options.moi_router_indirect_pc_sgpr = jump_pc_sgpr;
                 group_options.moi_router_indirect_scc_sgpr = saved_scc_sgpr;
-                group_options.moi_router_dispatch_key_sgpr = key_sgpr;
-                group_options.moi_router_call_return_sgpr = call_return_sgpr;
+                group_options.moi_router_call =
+                    ConSanMoiRouterCallSgprs{key_sgpr, call_return_sgpr};
                 special_state = moi_special_state_sgprs(group_options, group_options);
                 indirect_state = moi_indirect_jump_sgprs(group_options, group_options);
                 found = special_state.has_value() && indirect_state.has_value();

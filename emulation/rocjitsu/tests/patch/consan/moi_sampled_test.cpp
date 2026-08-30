@@ -2847,8 +2847,7 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverridePreservesPriorOwnerLocalExecWindow) 
       .spill_backed = false,
       .indirect_pc_sgpr = std::nullopt,
       .indirect_scc_sgpr = std::nullopt,
-      .dispatch_key_sgpr = std::nullopt,
-      .call_return_sgpr = std::nullopt,
+      .router_call = std::nullopt,
       .visible_evidence_sgpr = std::nullopt,
       .branch_only_scalar_spill = false,
       .dynamic_stack_borrowed_sgpr = std::nullopt,
@@ -2935,8 +2934,9 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
     EXPECT_TRUE(assignment.spill_backed);
     EXPECT_EQ(assignment.indirect_pc_sgpr, 0u);
     EXPECT_EQ(assignment.indirect_scc_sgpr, 4u);
-    EXPECT_EQ(assignment.dispatch_key_sgpr, 6u);
-    EXPECT_EQ(assignment.call_return_sgpr, assignment.indirect_pc_sgpr);
+    ASSERT_TRUE(assignment.router_call);
+    EXPECT_EQ(assignment.router_call->dispatch_key_sgpr, 6u);
+    EXPECT_EQ(assignment.router_call->call_return_sgpr, *assignment.indirect_pc_sgpr);
     EXPECT_EQ(std::ranges::count(result.patches,
                                  ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                  &ConSanPatchInfo::kind),
@@ -3114,20 +3114,21 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   ASSERT_TRUE(assignment.spill_backed);
   ASSERT_TRUE(assignment.indirect_pc_sgpr);
   ASSERT_TRUE(assignment.indirect_scc_sgpr);
-  ASSERT_TRUE(assignment.dispatch_key_sgpr);
-  ASSERT_TRUE(assignment.call_return_sgpr);
+  ASSERT_TRUE(assignment.router_call);
   // The dense router's call-return pair must be separately proven dead and
   // disjoint from the spill-backed EXEC/VCC save window.
-  EXPECT_TRUE(static_cast<uint32_t>(*assignment.call_return_sgpr) + kCallReturnPairWidth <=
+  EXPECT_TRUE(static_cast<uint32_t>(assignment.router_call->call_return_sgpr) +
+                      kCallReturnPairWidth <=
                   assignment.exec_save_sgpr ||
               static_cast<uint32_t>(assignment.exec_save_sgpr) + kExecSaveWindowWidth <=
-                  *assignment.call_return_sgpr)
-      << "call_return_sgpr=" << *assignment.call_return_sgpr
+                  assignment.router_call->call_return_sgpr)
+      << "call_return_sgpr=" << assignment.router_call->call_return_sgpr
       << " exec_save_sgpr=" << assignment.exec_save_sgpr;
   const std::optional<uint32_t> call_opcode =
       arch == ROCJITSU_CODE_ARCH_CDNA5
-          ? instrumentation::build_s_call_i64(*assignment.call_return_sgpr, 0, arch)
-          : std::optional<uint32_t>(build_s_call_b64(*assignment.call_return_sgpr, 0, arch));
+          ? instrumentation::build_s_call_i64(assignment.router_call->call_return_sgpr, 0, arch)
+          : std::optional<uint32_t>(
+                build_s_call_b64(assignment.router_call->call_return_sgpr, 0, arch));
   ASSERT_TRUE(call_opcode);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -3147,8 +3148,8 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
     for (uint16_t route_id = 0u; route_id <= kBarrierCount; ++route_id) {
       const size_t mov_index = 2u * route_id;
       EXPECT_EQ(entry_island[mov_index],
-                build_s_mov_b32(*assignment.dispatch_key_sgpr, scalar_positive_inline_u32(route_id),
-                                arch));
+                build_s_mov_b32(assignment.router_call->dispatch_key_sgpr,
+                                scalar_positive_inline_u32(route_id), arch));
       const uint64_t branch_offset = island_offset + (mov_index + 1u) * sizeof(uint32_t);
       const auto branch_delta = compute_sopp_branch_simm16(branch_offset, common_entry_offset);
       ASSERT_TRUE(branch_delta);
@@ -3158,9 +3159,9 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   const auto save_scc = instrumentation::build_s_cselect_b32(*assignment.indirect_scc_sgpr,
                                                              scalar_positive_inline_u32(1),
                                                              scalar_positive_inline_u32(0), arch);
-  const auto subtract_pc =
-      instrumentation::build_s_sub_u32(*assignment.dispatch_key_sgpr, *assignment.dispatch_key_sgpr,
-                                       *assignment.indirect_pc_sgpr, arch);
+  const auto subtract_pc = instrumentation::build_s_sub_u32(
+      assignment.router_call->dispatch_key_sgpr, assignment.router_call->dispatch_key_sgpr,
+      *assignment.indirect_pc_sgpr, arch);
   const auto restore_scc = instrumentation::build_s_cmp_lg_u32(*assignment.indirect_scc_sgpr,
                                                                scalar_positive_inline_u32(0), arch);
   ASSERT_TRUE(save_scc);
@@ -3168,13 +3169,13 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   ASSERT_TRUE(restore_scc);
   if (arch != ROCJITSU_CODE_ARCH_CDNA5) {
     EXPECT_EQ(entry_island[0], *save_scc);
-    EXPECT_EQ(entry_island[1],
-              build_s_mov_b32(*assignment.dispatch_key_sgpr, *assignment.call_return_sgpr, arch));
+    EXPECT_EQ(entry_island[1], build_s_mov_b32(assignment.router_call->dispatch_key_sgpr,
+                                               assignment.router_call->call_return_sgpr, arch));
     EXPECT_EQ(entry_island[2], build_s_getpc_b64(*assignment.indirect_pc_sgpr, arch));
     EXPECT_EQ(entry_island[3], *subtract_pc);
-    EXPECT_EQ(entry_island[4],
-              build_s_add_u32(*assignment.dispatch_key_sgpr, *assignment.dispatch_key_sgpr,
-                              /*literal=*/255u, arch));
+    EXPECT_EQ(entry_island[4], build_s_add_u32(assignment.router_call->dispatch_key_sgpr,
+                                               assignment.router_call->dispatch_key_sgpr,
+                                               /*literal=*/255u, arch));
     EXPECT_EQ(entry_island[5], 3u * sizeof(uint32_t))
         << "the entry key must correct from PC-after-getpc back to the island base";
     EXPECT_EQ(entry_island[10], *restore_scc);
@@ -3208,13 +3209,13 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   ASSERT_NE(dispatcher, result.patches.end());
   const std::vector<uint32_t> dispatcher_words =
       text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
-  const auto compare_key =
-      instrumentation::build_s_cmp_eq_u32(*assignment.dispatch_key_sgpr, /*literal=*/255u, arch);
+  const auto compare_key = instrumentation::build_s_cmp_eq_u32(
+      assignment.router_call->dispatch_key_sgpr, /*literal=*/255u, arch);
   ASSERT_TRUE(compare_key);
   if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     for (uint16_t route_id = 0u; route_id <= kBarrierCount; ++route_id) {
       const auto explicit_compare = instrumentation::build_s_cmp_eq_u32(
-          *assignment.dispatch_key_sgpr, scalar_positive_inline_u32(route_id), arch);
+          assignment.router_call->dispatch_key_sgpr, scalar_positive_inline_u32(route_id), arch);
       ASSERT_TRUE(explicit_compare);
       EXPECT_EQ(std::ranges::count(dispatcher_words, *explicit_compare), 1u);
     }
@@ -3332,9 +3333,8 @@ TEST(ConSanMoi, Gfx1250SampledSpillBackedDenseDispatcherMatchesCapturedCallKey) 
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
   ASSERT_TRUE(assignment.indirect_pc_sgpr);
-  ASSERT_TRUE(assignment.dispatch_key_sgpr);
-  ASSERT_TRUE(assignment.call_return_sgpr);
-  ASSERT_EQ(assignment.call_return_sgpr, assignment.indirect_pc_sgpr);
+  ASSERT_TRUE(assignment.router_call);
+  ASSERT_EQ(assignment.router_call->call_return_sgpr, *assignment.indirect_pc_sgpr);
   const auto dense_host = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
            patch.original_size != 0u;
@@ -3352,7 +3352,7 @@ TEST(ConSanMoi, Gfx1250SampledSpillBackedDenseDispatcherMatchesCapturedCallKey) 
   const std::vector<uint32_t> dispatcher_words =
       text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
   const auto captured_key_compare = instrumentation::build_s_cmp_eq_u32(
-      *assignment.dispatch_key_sgpr, *assignment.indirect_pc_sgpr, kArch);
+      assignment.router_call->dispatch_key_sgpr, *assignment.indirect_pc_sgpr, kArch);
   const auto tautological_pc_compare = instrumentation::build_s_cmp_eq_u32(
       *assignment.indirect_pc_sgpr, *assignment.indirect_pc_sgpr, kArch);
   ASSERT_TRUE(captured_key_compare);
@@ -3409,16 +3409,15 @@ TEST(ConSanMoi, Cdna4SampledSpillsFullPressureStateThroughDynamicStackFrame) {
   ASSERT_TRUE(assignment.spill_backed);
   ASSERT_TRUE(assignment.indirect_pc_sgpr);
   ASSERT_TRUE(assignment.indirect_scc_sgpr);
-  ASSERT_TRUE(assignment.dispatch_key_sgpr);
-  ASSERT_TRUE(assignment.call_return_sgpr);
+  ASSERT_TRUE(assignment.router_call);
   const auto overlaps_dynamic_stack = [](uint16_t base, uint16_t width) {
     return base < 34u && 32u < static_cast<uint32_t>(base) + width;
   };
   EXPECT_FALSE(overlaps_dynamic_stack(assignment.exec_save_sgpr, 8u));
   EXPECT_FALSE(overlaps_dynamic_stack(*assignment.indirect_pc_sgpr, 2u));
   EXPECT_FALSE(overlaps_dynamic_stack(*assignment.indirect_scc_sgpr, 1u));
-  EXPECT_FALSE(overlaps_dynamic_stack(*assignment.dispatch_key_sgpr, 1u));
-  EXPECT_FALSE(overlaps_dynamic_stack(*assignment.call_return_sgpr, 2u));
+  EXPECT_FALSE(overlaps_dynamic_stack(assignment.router_call->dispatch_key_sgpr, 1u));
+  EXPECT_FALSE(overlaps_dynamic_stack(assignment.router_call->call_return_sgpr, 2u));
 
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
@@ -7286,9 +7285,8 @@ TEST(ConSanMoi, Cdna4SampledSpillBackedDenseRouterPreservesExplicitKey) {
   ASSERT_TRUE(assignment.spill_backed);
   ASSERT_TRUE(assignment.indirect_pc_sgpr);
   ASSERT_TRUE(assignment.indirect_scc_sgpr);
-  ASSERT_TRUE(assignment.dispatch_key_sgpr);
-  ASSERT_TRUE(assignment.call_return_sgpr);
-  EXPECT_EQ(assignment.call_return_sgpr, assignment.indirect_pc_sgpr);
+  ASSERT_TRUE(assignment.router_call);
+  EXPECT_EQ(assignment.router_call->call_return_sgpr, *assignment.indirect_pc_sgpr);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             kAccessCount)
@@ -7306,7 +7304,7 @@ TEST(ConSanMoi, Cdna4SampledSpillBackedDenseRouterPreservesExplicitKey) {
   const std::vector<uint32_t> island = text_words_at_offset(
       patched, dense_host->anchor_offset + sizeof(uint32_t), entry_island_words * sizeof(uint32_t));
   ASSERT_EQ(island.size(), entry_island_words);
-  EXPECT_EQ(std::ranges::count(island, build_s_mov_b32(*assignment.dispatch_key_sgpr,
+  EXPECT_EQ(std::ranges::count(island, build_s_mov_b32(assignment.router_call->dispatch_key_sgpr,
                                                        *assignment.indirect_pc_sgpr, kArch)),
             0u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -7619,8 +7617,7 @@ TEST(ConSanMoi, Cdna4SampledFarBarrierUsesOwnerLocalScalarRoute) {
       .spill_backed = true,
       .indirect_pc_sgpr = kLocalIndirectPcSgpr,
       .indirect_scc_sgpr = kLocalIndirectSccSgpr,
-      .dispatch_key_sgpr = 5u,
-      .call_return_sgpr = kLocalIndirectPcSgpr,
+      .router_call = ConSanMoiRouterCallSgprs{5u, kLocalIndirectPcSgpr},
       .visible_evidence_sgpr = std::nullopt,
       .branch_only_scalar_spill = false,
       .dynamic_stack_borrowed_sgpr = std::nullopt,

@@ -1370,8 +1370,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         const bool has_spill_backed_record_replay_router =
             candidate_options.has_compact_moi_scalar_spill() &&
             moi_indirect_jump_sgprs(candidate_options, candidate_options) &&
-            candidate_options.moi_router_dispatch_key_sgpr &&
-            candidate_options.moi_router_call_return_sgpr;
+            candidate_options.moi_router_call;
         const bool has_spill_backed_dense_router =
             has_spill_backed_inline_router || has_spill_backed_record_replay_router;
         const bool has_dense_router =
@@ -1802,8 +1801,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           spill_backed_inline_router || spill_backed_record_replay_router;
       if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
           !indirect_state || (spill_backed_inline_router && !inline_dense_abi) ||
-          (spill_backed_record_replay_router && (!group_options.moi_router_dispatch_key_sgpr ||
-                                                 !group_options.moi_router_call_return_sgpr))) {
+          (spill_backed_record_replay_router && !group_options.moi_router_call)) {
         result.errors.emplace_back(
             "ConSan MOI dense barrier relay requires scalar special-state storage");
         return;
@@ -1818,8 +1816,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         key_sgpr = inline_dense_abi->dispatch_key_sgpr;
         call_return_sgpr = jump_pc_sgpr;
       } else if (spill_backed_record_replay_router) {
-        key_sgpr = *group_options.moi_router_dispatch_key_sgpr;
-        call_return_sgpr = *group_options.moi_router_call_return_sgpr;
+        key_sgpr = group_options.moi_router_call->dispatch_key_sgpr;
+        call_return_sgpr = group_options.moi_router_call->call_return_sgpr;
       }
       const bool derive_key_at_entry = spill_backed_router;
       const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
