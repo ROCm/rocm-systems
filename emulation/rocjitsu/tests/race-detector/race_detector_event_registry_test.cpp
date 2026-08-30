@@ -37,7 +37,9 @@ TEST(RaceDetector, EventRegistry_TrimmedWaveLocalEventsAreNotBarrierQueued) {
   for (int i = 0; i < N; ++i) {
     wave.registerEvent(/*pc=*/static_cast<uint64_t>(i), MemoryEventType::GLOBAL_TO_VGPR,
                        std::vector<uint32_t>{0}, /*execMask=*/1);
-    wave.dispatch(PendingWaitCount{/*vmcnt=*/0, /*lgkmcnt=*/-1});
+    PendingWaitCount wait;
+    wait.add(rocjitsu::amdgpu::WaitCounterType::VMCNT, 0);
+    wave.dispatch(wait);
   }
 
   EXPECT_GT(detector.events().trimmedCount(), 0);

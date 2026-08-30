@@ -1583,9 +1583,9 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
                         entry.num_named_barriers);
     register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
 
-    plugin_group_->onAmdgpuWorkgroupDispatched(entry.dispatch_id, global_wg_id,
-                                               cu->vgpr_allocation_block_size(), entry.sgprs_per_wf,
-                                               std::span<Wavefront *>(wg_wavefronts));
+    plugin_group_->onAmdgpuWorkgroupDispatched(
+        entry.dispatch_id, global_wg_id, cu->vgpr_allocation_block_size(),
+        cu->sgpr_allocation_block_size(), std::span<Wavefront *>(wg_wavefronts));
     for (auto *wf : wg_wavefronts)
       plugin_group_->onAmdgpuWavefrontDispatched(*wf);
 

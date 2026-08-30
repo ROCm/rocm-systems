@@ -179,10 +179,24 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm*, int* gdrSupport) {
   if (gdrSupport) *gdrSupport = g_gdrSupportValue;
   return ncclSuccess;
 }
-// fillInfo MLOPart PCI-function fallback (init.cc ~1093): empty class keeps
-// isGpu=0 so existing tests' default busId=0 path stays a no-op.
-ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* /*busId*/, char* deviceClass, size_t maxLen) {
-  if (deviceClass && maxLen > 0) deviceClass[0] = '\0';
+// fillInfo MLOPart PCI-function fallback (init.cc ~1093). The default models what sysfs actually
+// reports for a GPU's own BDF -- an accelerator class -- rather than an empty string. An empty
+// default is what let the mloPart=0 stamp on non-partitioned GPUs ship green: with it, isGpu is 0
+// for every test that does not set comm->busId, so the fn==0 arm of the fallback was unreachable and
+// InitTransportsRank_NoPeerWithMloPart_LeavesHasMloPartUnset could not see the stamp on its own rank.
+// A test that wants the HIP-alias shape (BDF absent from sysfs) must now ask for "" explicitly.
+// Duplicates PCI_ACCELERATOR_CLASS (src/graph/xml.h), which this TU does not include.
+static const char* const kDefaultPciDeviceClass = "0x120000";
+std::string g_pciDeviceClass = kDefaultPciDeviceClass;
+int g_pciDeviceClassCalls = 0;
+std::string g_lastPciDeviceClassBusId;
+ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass, size_t maxLen) {
+  ++g_pciDeviceClassCalls;
+  g_lastPciDeviceClassBusId = busId ? busId : "";
+  if (deviceClass && maxLen > 0) {
+    std::strncpy(deviceClass, g_pciDeviceClass.c_str(), maxLen - 1);
+    deviceClass[maxLen - 1] = '\0';
+  }
   return ncclSuccess;
 }
 ncclResult_t rocmLibraryInit(void) { return ncclSuccess; }
@@ -333,6 +347,9 @@ void ResetInitFakes() {
   g_firmwareVersion = 0;
   g_gdrSupportValue = 0;
   g_gdrSupportCalls = 0;
+  g_pciDeviceClass = kDefaultPciDeviceClass;
+  g_pciDeviceClassCalls = 0;
+  g_lastPciDeviceClassBusId.clear();
   pfn_hsa_amd_portable_export_dmabuf = nullptr;
   g_ncclNetInitResult = ncclSuccess;
   g_ncclGinInitResult = ncclSuccess;

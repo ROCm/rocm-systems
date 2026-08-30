@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/mtype.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu::amdgpu {
 class Wavefront;
@@ -35,8 +36,8 @@ BufferResource decode_buffer_resource(uint32_t srd0, uint32_t srd1, uint32_t srd
 /// @brief Sign-extend a CDNA5 24-bit IOFFSET field.
 inline int32_t signed_ioffset(uint32_t ioffset) { return static_cast<int32_t>(ioffset << 8) >> 8; }
 
-uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
-                                uint32_t access_size_bytes);
+std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
+                                               uint32_t access_size_bytes);
 
 void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d);
