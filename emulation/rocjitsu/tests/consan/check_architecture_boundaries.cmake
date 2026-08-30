@@ -211,6 +211,27 @@ _consan_assert_no_match(
     "isa/arch/amdgpu/generated/|(cdna[0-9_]*|rdna[0-9_]*)::"
     "common validation implementation must consume independent target validation operations"
 )
+file(READ "${_consan_dir}/consan_validation.inc" _final_validation_owner)
+if(NOT _final_validation_owner MATCHES "struct FinalValidationEnvironment" OR
+   NOT _final_validation_owner MATCHES "struct ValidationText")
+    message(FATAL_ERROR "ConSan final proof passes lost their immutable validation environment")
+endif()
+string(REGEX MATCHALL "Decoder::create" _final_validation_decoders "${_final_validation_owner}")
+list(LENGTH _final_validation_decoders _final_validation_decoder_count)
+string(
+    REGEX MATCHALL
+    "FinalValidationEnvironment environment"
+    _final_validation_environments
+    "${_final_validation_owner}"
+)
+list(LENGTH _final_validation_environments _final_validation_environment_count)
+if(NOT _final_validation_decoder_count EQUAL 1 OR
+   NOT _final_validation_environment_count EQUAL 1)
+    message(
+        FATAL_ERROR
+        "ConSan final proof passes must share exactly one parse/target/decoder environment"
+    )
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_validation_target_ops.h"
     "validate_consan_(ordinary_global|atomic)"

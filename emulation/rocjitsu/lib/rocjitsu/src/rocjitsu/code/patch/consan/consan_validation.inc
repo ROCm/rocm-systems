@@ -200,6 +200,72 @@ text_section_identities(const AmdGpuCodeObject &code_object) {
   return identities;
 }
 
+/// Immutable executable bytes used by every independent proof pass.
+struct ValidationText {
+  std::span<const uint8_t> bytes;
+  bool available = false;
+
+  [[nodiscard]] static ValidationText from(const AmdGpuCodeObject &code_object) {
+    if (code_object.text_sections().size() != 1u)
+      return {};
+    const Section *section = code_object.text_sections().front();
+    return {
+        .bytes = {reinterpret_cast<const uint8_t *>(section->data()), section->size()},
+        .available = true,
+    };
+  }
+
+  [[nodiscard]] std::optional<uint32_t> word(uint64_t offset) const {
+    if (offset > bytes.size() || sizeof(uint32_t) > bytes.size() - offset)
+      return std::nullopt;
+    uint32_t result = 0;
+    std::memcpy(&result, bytes.data() + offset, sizeof(result));
+    return result;
+  }
+
+  [[nodiscard]] bool matches(uint64_t offset, std::span<const uint32_t> words) const {
+    const uint64_t size = words.size() * sizeof(uint32_t);
+    return offset <= bytes.size() && size <= bytes.size() - offset &&
+           std::memcmp(bytes.data() + offset, words.data(), size) == 0;
+  }
+};
+
+/// One immutable parse/target environment shared by independent validators.
+/// It contains only universal proof prerequisites, never construction policy
+/// or mutable transformation state.
+struct FinalValidationEnvironment {
+  const AmdGpuCodeObject &original;
+  const AmdGpuCodeObject &replacement;
+  ValidationText original_text;
+  ValidationText replacement_text;
+  const ConSanTargetProfile *target_profile = nullptr;
+  std::unique_ptr<Decoder> decoder;
+
+  FinalValidationEnvironment(const AmdGpuCodeObject &original, const AmdGpuCodeObject &replacement)
+      : original(original), replacement(replacement), original_text(ValidationText::from(original)),
+        replacement_text(ValidationText::from(replacement)),
+        target_profile(consan_target_profile(replacement.target_id())),
+        decoder(target_profile ? Decoder::create(target_profile->arch) : nullptr) {}
+
+  [[nodiscard]] rj_code_arch_t arch() const {
+    return target_profile ? target_profile->arch : ROCJITSU_CODE_ARCH_INVALID;
+  }
+
+  [[nodiscard]] bool require_target(std::vector<std::string> &errors,
+                                    std::string_view profile_error,
+                                    std::string_view decoder_error = {}) const {
+    if (target_profile == nullptr) {
+      errors.emplace_back(profile_error);
+      return false;
+    }
+    if (!decoder_error.empty() && !decoder) {
+      errors.emplace_back(decoder_error);
+      return false;
+    }
+    return true;
+  }
+};
+
 struct InventoryRange {
   ValidationByteRange bytes;
   ConSanPatchPhase phase = ConSanPatchPhase::Instrumentation;
@@ -211,22 +277,17 @@ struct InventoryRange {
   uint64_t source_trampoline = 0;
 };
 
-[[nodiscard]] std::vector<std::string>
-validate_patch_byte_accounting(const AmdGpuCodeObject &original,
-                               const AmdGpuCodeObject &replacement,
-                               const ConSanTransformArtifacts &result) {
-  std::vector<std::string> errors;
-  if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1) {
+void validate_patch_byte_accounting(const FinalValidationEnvironment &environment,
+                                    const ConSanTransformArtifacts &result,
+                                    std::vector<std::string> &errors) {
+  const size_t initial_error_count = errors.size();
+  if (!environment.original_text.available || !environment.replacement_text.available) {
     errors.emplace_back(
         "ConSan final validation cannot map patch inventory across multiple text sections");
-    return errors;
+    return;
   }
-  const Section *original_text = original.text_sections().front();
-  const Section *replacement_text = replacement.text_sections().front();
-  const auto original_bytes = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(original_text->data()), original_text->size());
-  const auto replacement_bytes = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(replacement_text->data()), replacement_text->size());
+  const std::span<const uint8_t> original_bytes = environment.original_text.bytes;
+  const std::span<const uint8_t> replacement_bytes = environment.replacement_text.bytes;
   std::vector<InventoryRange> ranges;
   std::vector<bool> accounted(replacement_bytes.size(), false);
 
@@ -234,7 +295,7 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
                              ConSanPatchKind kind, bool must_be_original, bool is_trampoline,
                              size_t patch_index, uint64_t source_anchor,
                              uint64_t source_trampoline) {
-    if (!errors.empty())
+    if (errors.size() != initial_error_count)
       return;
     if (size == 0)
       return;
@@ -262,8 +323,8 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
               /*must_be_original=*/false, /*is_trampoline=*/true, patch_index, patch.anchor_offset,
               patch.trampoline_offset);
   }
-  if (!errors.empty())
-    return errors;
+  if (errors.size() != initial_error_count)
+    return;
 
   std::ranges::sort(ranges, [](const InventoryRange &lhs, const InventoryRange &rhs) {
     if (lhs.bytes.begin != rhs.bytes.begin)
@@ -287,7 +348,7 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
          size > original_bytes.size() - next.bytes.begin) &&
         !nested_in_mutation) {
       errors.emplace_back("ConSan final validation found a stale or unaligned patch range");
-      return errors;
+      return;
     }
     for (const InventoryRange *existing : active) {
       if (!validation_ranges_overlap(existing->bytes, next.bytes))
@@ -358,7 +419,7 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
             " role=" + (next.is_trampoline ? "trampoline" : "anchor") + " patch=" +
             std::to_string(next.patch_index) + " source=" + std::to_string(next.source_anchor) +
             "->" + std::to_string(next.source_trampoline));
-        return errors;
+        return;
       }
     }
     active.push_back(&next);
@@ -382,11 +443,11 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
           std::to_string(i) + " from " + std::to_string(original_bytes[i]) + " to " +
           std::to_string(replacement_bytes[i]) + " between ranges ending at " +
           std::to_string(previous_end) + " and beginning at " + std::to_string(next_begin));
-      return errors;
+      return;
     }
   }
 
-  const uint32_t padding_nop = build_s_nop(0, consan_arch_for_target(replacement.target_id()));
+  const uint32_t padding_nop = build_s_nop(0, environment.arch());
   size_t offset = original_bytes.size();
   while (offset < replacement_bytes.size()) {
     if (accounted[offset]) {
@@ -395,7 +456,7 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
     }
     if (offset % sizeof(uint32_t) != 0 || sizeof(uint32_t) > replacement_bytes.size() - offset) {
       errors.emplace_back("ConSan final validation found unaccounted appended text bytes");
-      return errors;
+      return;
     }
     uint32_t word = 0;
     std::memcpy(&word, replacement_bytes.data() + offset, sizeof(word));
@@ -436,11 +497,11 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
           " and beginning at " + std::to_string(next_begin) +
           (next_range ? " kind " + std::to_string(static_cast<unsigned>(next_range->kind)) : "") +
           " samples " + samples);
-      return errors;
+      return;
     }
     offset += sizeof(uint32_t);
   }
-  return errors;
+  return;
 }
 
 [[nodiscard]] bool decode_inventory_range(std::span<const uint8_t> text, uint64_t begin,
@@ -486,58 +547,42 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
   return true;
 }
 
-[[nodiscard]] std::vector<std::string>
-validate_patch_decoding(const AmdGpuCodeObject &replacement,
-                        const ConSanTransformArtifacts &result) {
-  std::vector<std::string> errors;
-  if (replacement.text_sections().size() != 1)
-    return errors;
-  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
-  if (target_profile == nullptr) {
-    errors.emplace_back("ConSan final validation found no target profile while decoding patches");
-    return errors;
-  }
-  const rj_code_arch_t arch = target_profile->arch;
-  std::unique_ptr<Decoder> decoder = Decoder::create(arch);
-  if (!decoder) {
-    errors.emplace_back("ConSan final validation could not create a replacement decoder");
-    return errors;
-  }
-  const Section *text_section = replacement.text_sections().front();
-  const auto text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(text_section->data()), text_section->size());
+void validate_patch_decoding(const FinalValidationEnvironment &environment,
+                             const ConSanTransformArtifacts &result,
+                             std::vector<std::string> &errors) {
+  if (!environment.replacement_text.available)
+    return;
+  if (!environment.require_target(
+          errors, "ConSan final validation found no target profile while decoding patches",
+          "ConSan final validation could not create a replacement decoder"))
+    return;
+  const std::span<const uint8_t> text = environment.replacement_text.bytes;
   for (const ConSanPatchInfo &patch : result.patches) {
     std::string error;
-    if (!decode_inventory_range(text, patch.anchor_offset, patch.original_size, *decoder, error)) {
+    if (!decode_inventory_range(text, patch.anchor_offset, patch.original_size,
+                                *environment.decoder, error)) {
       errors.emplace_back("ConSan final validation could not re-decode patch anchor: " + error);
-      return errors;
+      return;
     }
-    if (!decode_inventory_range(text, patch.trampoline_offset, patch.trampoline_size, *decoder,
-                                error)) {
+    if (!decode_inventory_range(text, patch.trampoline_offset, patch.trampoline_size,
+                                *environment.decoder, error)) {
       errors.emplace_back("ConSan final validation could not re-decode generated body at " +
                           std::to_string(patch.trampoline_offset) + " (size " +
                           std::to_string(patch.trampoline_size) + ", anchor " +
                           std::to_string(patch.anchor_offset) + "): " + error);
-      return errors;
+      return;
     }
   }
-  return errors;
+  return;
 }
 
-[[nodiscard]] std::vector<std::string>
-validate_sc_indirect_island_semantics(const AmdGpuCodeObject &replacement,
-                                      const ConSanTransformArtifacts &result) {
-  std::vector<std::string> errors;
-  if (replacement.text_sections().size() != 1)
-    return errors;
-  const auto replacement_text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
-      replacement.text_sections().front()->size());
-  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
-  if (target_profile == nullptr) {
-    errors.emplace_back("ConSan indirect-island proof found no target profile");
-    return errors;
-  }
+void validate_sc_indirect_island_semantics(const FinalValidationEnvironment &environment,
+                                           const ConSanTransformArtifacts &result,
+                                           std::vector<std::string> &errors) {
+  if (!environment.replacement_text.available)
+    return;
+  if (!environment.require_target(errors, "ConSan indirect-island proof found no target profile"))
+    return;
   for (const ConSanPatchInfo &island : result.patches) {
     if (island.kind != ConSanPatchKind::TrampolineScIndirectBranchIsland)
       continue;
@@ -558,8 +603,9 @@ validate_sc_indirect_island_semantics(const AmdGpuCodeObject &replacement,
     const uint16_t vcc_save = *body->indirect_saved_vcc_sgpr;
     const bool is_flat_body = body->kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
                               body->kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap;
-    const bool gfx9_cdna = target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-                           target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
+    const bool gfx9_cdna =
+        environment.target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
+        environment.target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
     const uint16_t vcc_save_width = is_flat_body || gfx9_cdna ? 2u : 1u;
     const auto ranges_overlap = [](uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
                                    uint16_t rhs_width) {
@@ -577,60 +623,38 @@ validate_sc_indirect_island_semantics(const AmdGpuCodeObject &replacement,
     const bool encoded =
         append_lds_check_trap_indirect_jump(expected_entry, island.trampoline_offset,
                                             body->trampoline_offset, pc, scc_save,
-                                            *target_profile) &&
+                                            *environment.target_profile) &&
         append_lds_check_trap_indirect_return(expected_return, *body->indirect_return_offset,
                                               body->anchor_offset + body->original_size, pc,
-                                              scc_save, *target_profile);
-    const auto matches = [&](uint64_t offset, std::span<const uint32_t> words) {
-      const uint64_t size = words.size() * sizeof(uint32_t);
-      return offset <= replacement_text.size() && size <= replacement_text.size() - offset &&
-             std::memcmp(replacement_text.data() + offset, words.data(), size) == 0;
-    };
+                                              scc_save, *environment.target_profile);
     if (!disjoint || body->indirect_required_sgpr_count < required || !encoded ||
         expected_entry.size() != kLdsCheckTrapIndirectJumpWords ||
         expected_return.size() != kLdsCheckTrapIndirectJumpWords ||
-        !matches(island.trampoline_offset, expected_entry) ||
-        !matches(*body->indirect_return_offset, expected_return)) {
+        !environment.replacement_text.matches(island.trampoline_offset, expected_entry) ||
+        !environment.replacement_text.matches(*body->indirect_return_offset, expected_return)) {
       errors.emplace_back(
           "ConSan indirect-island proof found corrupted SCC preservation or scalar resources");
     }
   }
-  return errors;
+  return;
 }
 
-[[nodiscard]] std::vector<std::string>
-validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
-                                            const AmdGpuCodeObject &replacement,
-                                            const ConSanTransformArtifacts &result) {
-  std::vector<std::string> errors;
+void validate_branch_only_continuation_semantics(const FinalValidationEnvironment &environment,
+                                                 const ConSanTransformArtifacts &result,
+                                                 std::vector<std::string> &errors) {
   const bool has_branch_only = std::ranges::any_of(
       result.patches, [](const ConSanPatchInfo &patch) { return patch.branch_only_continuation; });
   if (!has_branch_only)
-    return errors;
-  if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1) {
+    return;
+  if (!environment.original_text.available || !environment.replacement_text.available) {
     errors.emplace_back("ConSan branch-only continuation proof requires one executable section");
-    return errors;
+    return;
   }
-  const auto original_text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(original.text_sections().front()->data()),
-      original.text_sections().front()->size());
-  const auto text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
-      replacement.text_sections().front()->size());
-  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
-  if (target_profile == nullptr) {
-    errors.emplace_back("ConSan branch-only continuation proof found no target profile");
-    return errors;
-  }
-  const rj_code_arch_t arch = target_profile->arch;
-  const auto read_word = [](std::span<const uint8_t> bytes,
-                            uint64_t offset) -> std::optional<uint32_t> {
-    if (offset > bytes.size() || sizeof(uint32_t) > bytes.size() - offset)
-      return std::nullopt;
-    uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + offset, sizeof(word));
-    return word;
-  };
+  const std::span<const uint8_t> text = environment.replacement_text.bytes;
+  if (!environment.require_target(errors,
+                                  "ConSan branch-only continuation proof found no target profile"))
+    return;
+  const rj_code_arch_t arch = environment.arch();
 
   std::unordered_set<uint64_t> owned_relay_slots;
   std::unordered_set<uint64_t> nop_relay_slots;
@@ -688,7 +712,7 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
       }
     }
     if (patch.kind == ConSanPatchKind::TrampolineNopBranchRelay) {
-      const auto pristine_word = read_word(original_text, patch.anchor_offset);
+      const auto pristine_word = environment.original_text.word(patch.anchor_offset);
       if (patch.phase != ConSanPatchPhase::Instrumentation ||
           patch.anchor_offset != patch.trampoline_offset ||
           patch.original_size != sizeof(uint32_t) || patch.trampoline_size != sizeof(uint32_t) ||
@@ -696,7 +720,7 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
           !nop_relay_slots.insert(patch.anchor_offset).second) {
         errors.emplace_back(
             "ConSan branch-only continuation proof found invalid original-NOP relay provenance");
-        return errors;
+        return;
       }
       owned_relay_slots.insert(patch.anchor_offset);
     }
@@ -704,7 +728,7 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
   std::unordered_set<uint64_t> used_relay_slots;
   const auto validate_hop = [&](uint64_t source, uint64_t target) {
     const auto delta = compute_sopp_branch_simm16(source, target);
-    const auto word = read_word(text, source);
+    const auto word = environment.replacement_text.word(source);
     return delta && word && *word == build_s_branch(*delta, arch);
   };
   const auto validate_borrowed_indirect_entry = [&](const ConSanPatchInfo &patch) {
@@ -719,11 +743,6 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
       return false;
     }
 
-    const auto matches = [&](uint64_t offset, std::span<const uint32_t> words) {
-      const uint64_t size = words.size() * sizeof(uint32_t);
-      return offset <= text.size() && size <= text.size() - offset &&
-             std::memcmp(text.data() + offset, words.data(), size) == 0;
-    };
     const std::array<uint16_t, 3> borrowed = {
         *patch.indirect_pc_sgpr,
         static_cast<uint16_t>(*patch.indirect_pc_sgpr + 1u),
@@ -758,7 +777,7 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
             static_cast<int64_t>(patch.trampoline_offset) - static_cast<int64_t>(pc_after_getpc),
             /*minimum_words=*/3u,
             /*prefer_literal64=*/
-            target_profile->direct_call_form == ConSanDirectCallForm::SCallI64)) {
+            environment.target_profile->direct_call_form == ConSanDirectCallForm::SCallI64)) {
       return false;
     }
     const auto restore_scc = instrumentation::build_s_cmp_lg_u32(
@@ -772,8 +791,8 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
     expected_entry.resize(patch.original_size / sizeof(uint32_t), build_s_nop(0u, arch));
 
     expected_restore.push_back(*restore_wait);
-    if (!matches(patch.anchor_offset, expected_entry) ||
-        !matches(patch.trampoline_offset, expected_restore)) {
+    if (!environment.replacement_text.matches(patch.anchor_offset, expected_entry) ||
+        !environment.replacement_text.matches(patch.trampoline_offset, expected_restore)) {
       return false;
     }
     if (patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord)
@@ -789,7 +808,7 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
     const auto guard =
         guard_delta ? instrumentation::build_s_cbranch_execz(*guard_delta, arch) : std::nullopt;
     return continuation_offset > guard_offset && continuation_offset <= return_source && guard &&
-           read_word(text, guard_offset) == *guard;
+           environment.replacement_text.word(guard_offset) == *guard;
   };
 
   for (const ConSanPatchInfo &patch : result.patches) {
@@ -803,7 +822,7 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
       if (has_route_metadata) {
         errors.emplace_back(
             "ConSan branch-only continuation proof found route metadata on another patch");
-        return errors;
+        return;
       }
       continue;
     }
@@ -828,7 +847,7 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
         patch.trampoline_size < sizeof(uint32_t) || patch.trampoline_offset > text.size() ||
         patch.trampoline_size > text.size() - patch.trampoline_offset) {
       errors.emplace_back("ConSan branch-only continuation proof found invalid geometry");
-      return errors;
+      return;
     }
 
     const auto validate_route = [&](uint64_t source, std::span<const uint64_t> relays,
@@ -867,49 +886,35 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
                                               patch.anchor_offset + patch.original_size)) {
       errors.emplace_back(
           "ConSan branch-only continuation proof found a stale, shared, or corrupted route");
-      return errors;
+      return;
     }
   }
   if (std::ranges::any_of(nop_relay_slots,
                           [&](uint64_t relay) { return !used_relay_slots.contains(relay); })) {
     errors.emplace_back("ConSan branch-only continuation proof found an unused original-NOP relay");
   }
-  return errors;
+  return;
 }
 
-[[nodiscard]] std::vector<std::string>
-validate_sc_dense_call_semantics(const AmdGpuCodeObject &original,
-                                 const AmdGpuCodeObject &replacement,
-                                 const ConSanTransformArtifacts &result) {
-  std::vector<std::string> errors;
+void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environment,
+                                      const ConSanTransformArtifacts &result,
+                                      std::vector<std::string> &errors) {
   const bool has_dense = std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineScDenseCallDispatcher ||
            patch.kind == ConSanPatchKind::TrampolineScDenseEntryHost;
   });
   if (!has_dense)
-    return errors;
-  if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1) {
+    return;
+  if (!environment.original_text.available || !environment.replacement_text.available) {
     errors.emplace_back("ConSan dense-call proof requires one executable text section");
-    return errors;
+    return;
   }
-  const auto original_text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(original.text_sections().front()->data()),
-      original.text_sections().front()->size());
-  const auto replacement_text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
-      replacement.text_sections().front()->size());
-  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
-  if (target_profile == nullptr) {
-    errors.emplace_back("ConSan dense-call proof found no target profile");
-    return errors;
-  }
-  const rj_code_arch_t arch = target_profile->arch;
+  const std::span<const uint8_t> original_text = environment.original_text.bytes;
+  const std::span<const uint8_t> replacement_text = environment.replacement_text.bytes;
+  if (!environment.require_target(errors, "ConSan dense-call proof found no target profile"))
+    return;
+  const rj_code_arch_t arch = environment.arch();
   const uint32_t nop = build_s_nop(0, arch);
-  const auto matches = [&](uint64_t offset, std::span<const uint32_t> words) {
-    const uint64_t size = words.size() * sizeof(uint32_t);
-    return offset <= replacement_text.size() && size <= replacement_text.size() - offset &&
-           std::memcmp(replacement_text.data() + offset, words.data(), size) == 0;
-  };
 
   for (const ConSanPatchInfo &dispatcher : result.patches) {
     if (dispatcher.kind != ConSanPatchKind::TrampolineScDenseCallDispatcher)
@@ -978,7 +983,7 @@ validate_sc_dense_call_semantics(const AmdGpuCodeObject &original,
     if (!host_entry ||
         !append_lds_check_trap_indirect_jump(island_words, island_offset,
                                              dispatcher.trampoline_offset, jump_pc, saved_scc,
-                                             *target_profile) ||
+                                             *environment.target_profile) ||
         island_words.size() != kLdsCheckTrapIndirectJumpWords) {
       errors.emplace_back("ConSan dense-call proof could not reconstruct its entry host");
       continue;
@@ -986,7 +991,7 @@ validate_sc_dense_call_semantics(const AmdGpuCodeObject &original,
     std::vector<uint32_t> expected_host_anchor = {*host_entry};
     expected_host_anchor.insert(expected_host_anchor.end(), island_words.begin(),
                                 island_words.end());
-    if (!matches(host->anchor_offset, expected_host_anchor)) {
+    if (!environment.replacement_text.matches(host->anchor_offset, expected_host_anchor)) {
       errors.emplace_back("ConSan dense-call proof found a corrupted entry host");
       continue;
     }
@@ -996,8 +1001,8 @@ validate_sc_dense_call_semantics(const AmdGpuCodeObject &original,
                 host->original_size);
     if (!append_lds_check_trap_indirect_jump(expected_host_body, host->trampoline_offset,
                                              host->anchor_offset + host->original_size, jump_pc,
-                                             saved_scc, *target_profile) ||
-        !matches(host->trampoline_offset, expected_host_body)) {
+                                             saved_scc, *environment.target_profile) ||
+        !environment.replacement_text.matches(host->trampoline_offset, expected_host_body)) {
       errors.emplace_back("ConSan dense-call proof found a corrupted relocated entry host");
       continue;
     }
@@ -1027,7 +1032,7 @@ validate_sc_dense_call_semantics(const AmdGpuCodeObject &original,
       const uint64_t matched_offset =
           dispatcher.trampoline_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
       if (!append_lds_check_trap_indirect_return(matched, matched_offset, target, jump_pc,
-                                                 saved_scc, *target_profile))
+                                                 saved_scc, *environment.target_profile))
         return false;
       const auto skip =
           instrumentation::build_s_cbranch_scc0(static_cast<int16_t>(matched.size()), arch);
@@ -1058,31 +1063,31 @@ validate_sc_dense_call_semantics(const AmdGpuCodeObject &original,
           anchor = std::array<uint32_t, 2>{*call, nop};
       }
       std::vector<uint32_t> expected_return;
-      valid &= anchor.has_value() && matches(body->anchor_offset, *anchor) &&
-               body->indirect_return_offset &&
-               append_lds_check_trap_indirect_return(expected_return, *body->indirect_return_offset,
-                                                     body->anchor_offset + body->original_size,
-                                                     jump_pc, saved_scc, *target_profile) &&
-               matches(*body->indirect_return_offset, expected_return) &&
-               append_target(explicit_key ? static_cast<uint32_t>(body_index + 1u)
-                                          : static_cast<uint32_t>(body->anchor_offset +
-                                                                  sizeof(uint32_t) - island_offset),
-                             body->trampoline_offset);
+      valid &=
+          anchor.has_value() &&
+          environment.replacement_text.matches(body->anchor_offset, *anchor) &&
+          body->indirect_return_offset &&
+          append_lds_check_trap_indirect_return(expected_return, *body->indirect_return_offset,
+                                                body->anchor_offset + body->original_size, jump_pc,
+                                                saved_scc, *environment.target_profile) &&
+          environment.replacement_text.matches(*body->indirect_return_offset, expected_return) &&
+          append_target(explicit_key ? static_cast<uint32_t>(body_index + 1u)
+                                     : static_cast<uint32_t>(body->anchor_offset +
+                                                             sizeof(uint32_t) - island_offset),
+                        body->trampoline_offset);
     }
     dispatcher_words.push_back(build_s_endpgm(arch));
     valid &= dispatcher.trampoline_size == dispatcher_words.size() * sizeof(uint32_t) &&
-             matches(dispatcher.trampoline_offset, dispatcher_words);
+             environment.replacement_text.matches(dispatcher.trampoline_offset, dispatcher_words);
     if (!valid)
       errors.emplace_back("ConSan dense-call proof found corrupted call or dispatch geometry");
   }
-  return errors;
+  return;
 }
 
-[[nodiscard]] std::vector<std::string>
-validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
-                                      const AmdGpuCodeObject &replacement,
-                                      const ConSanTransformArtifacts &result) {
-  std::vector<std::string> errors;
+void validate_branch_relay_donor_semantics(const FinalValidationEnvironment &environment,
+                                           const ConSanTransformArtifacts &result,
+                                           std::vector<std::string> &errors) {
   std::vector<const ConSanPatchInfo *> anchors;
   std::vector<const ConSanPatchInfo *> hosts;
   for (const ConSanPatchInfo &patch : result.patches) {
@@ -1090,7 +1095,7 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
       continue;
     if (patch.phase != ConSanPatchPhase::Instrumentation) {
       errors.emplace_back("ConSan relay donor proof found a non-instrumentation donor");
-      return errors;
+      return;
     }
     if (patch.original_size == 2u * sizeof(uint32_t) &&
         patch.trampoline_size == 3u * sizeof(uint32_t)) {
@@ -1101,43 +1106,24 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
       hosts.push_back(&patch);
     } else {
       errors.emplace_back("ConSan relay donor proof found an unknown donor geometry");
-      return errors;
+      return;
     }
   }
   if (anchors.empty() && hosts.empty())
-    return errors;
-  if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1 ||
+    return;
+  if (!environment.original_text.available || !environment.replacement_text.available ||
       anchors.size() != hosts.size()) {
     errors.emplace_back("ConSan relay donor proof found an incomplete wide-donor pairing");
-    return errors;
+    return;
   }
-  const auto original_text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(original.text_sections().front()->data()),
-      original.text_sections().front()->size());
-  const auto replacement_text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
-      replacement.text_sections().front()->size());
-  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
-  if (target_profile == nullptr) {
-    errors.emplace_back("ConSan relay donor proof found no target profile");
-    return errors;
-  }
-  const rj_code_arch_t arch = target_profile->arch;
-  std::unique_ptr<Decoder> decoder = Decoder::create(arch);
-  if (!decoder) {
-    errors.emplace_back("ConSan relay donor proof could not create a pristine decoder");
-    return errors;
-  }
+  const std::span<const uint8_t> original_text = environment.original_text.bytes;
+  const std::span<const uint8_t> replacement_text = environment.replacement_text.bytes;
+  if (!environment.require_target(errors, "ConSan relay donor proof found no target profile",
+                                  "ConSan relay donor proof could not create a pristine decoder"))
+    return;
+  const rj_code_arch_t arch = environment.arch();
   const uint32_t nop = build_s_nop(0, arch);
   const uint32_t branch_opcode = build_s_branch(0, arch) & 0xffff0000u;
-  const auto read_word = [](std::span<const uint8_t> bytes,
-                            uint64_t offset) -> std::optional<uint32_t> {
-    if (offset > bytes.size() || sizeof(uint32_t) > bytes.size() - offset)
-      return std::nullopt;
-    uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + offset, sizeof(word));
-    return word;
-  };
 
   std::unordered_set<uint64_t> relay_vertices;
   std::unordered_set<uint64_t> island_vertices;
@@ -1183,7 +1169,7 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
     }
   }
   const auto valid_relay_payload = [&](uint64_t offset) {
-    const auto word = read_word(replacement_text, offset);
+    const auto word = environment.replacement_text.word(offset);
     if (!word)
       return false;
     if (*word == nop)
@@ -1206,7 +1192,7 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
     });
     if (host_it == hosts.end() || !paired_hosts.insert(*host_it).second) {
       errors.emplace_back("ConSan relay donor proof found an ambiguous wide-donor pairing");
-      return errors;
+      return;
     }
     const ConSanPatchInfo &host = **host_it;
     if (anchor->anchor_offset > original_text.size() ||
@@ -1216,14 +1202,14 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
         host.trampoline_offset > replacement_text.size() ||
         host.trampoline_size > replacement_text.size() - host.trampoline_offset) {
       errors.emplace_back("ConSan relay donor proof found a stale donor range");
-      return errors;
+      return;
     }
 
     std::array<uint32_t, 4> anchor_words{};
     std::memcpy(anchor_words.data(), original_text.data() + anchor->anchor_offset,
                 anchor->original_size);
     std::unique_ptr<Instruction> anchor_instruction = decode_bounded_instruction(
-        *decoder,
+        *environment.decoder,
         std::span<const uint32_t>(anchor_words).first(anchor->original_size / sizeof(uint32_t)),
         anchor->anchor_offset);
     if (!anchor_instruction ||
@@ -1231,7 +1217,7 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
         std::string_view(anchor_instruction->mnemonic()).starts_with("ds_") ||
         !is_relocatable_anchor(*anchor_instruction, anchor->anchor_offset, original_text, arch)) {
       errors.emplace_back("ConSan relay donor proof rejected its pristine anchor semantics");
-      return errors;
+      return;
     }
     uint32_t host_cursor = 0;
     while (host_cursor < host.original_size) {
@@ -1240,14 +1226,14 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
       std::memcpy(words.data(), original_text.data() + host.anchor_offset + host_cursor,
                   std::min<uint32_t>(remaining, words.size() * sizeof(uint32_t)));
       std::unique_ptr<Instruction> instruction =
-          decode_bounded_instruction(*decoder,
+          decode_bounded_instruction(*environment.decoder,
                                      std::span<const uint32_t>(words).first(std::min<size_t>(
                                          words.size(), remaining / sizeof(uint32_t))),
                                      host.anchor_offset + host_cursor);
       if (!instruction || instruction->size() <= 0 ||
           static_cast<uint32_t>(instruction->size()) > host.original_size - host_cursor) {
         errors.emplace_back("ConSan relay donor proof could not decode its pristine host");
-        return errors;
+        return;
       }
       const std::string_view mnemonic = instruction->mnemonic();
       const bool valid =
@@ -1258,7 +1244,7 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
                     *instruction, host.anchor_offset + host_cursor, original_text, arch);
       if (!valid) {
         errors.emplace_back("ConSan relay donor proof rejected its pristine host semantics");
-        return errors;
+        return;
       }
       host_cursor += static_cast<uint32_t>(instruction->size());
     }
@@ -1281,7 +1267,7 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
     if (!std::ranges::equal(
             pristine_host, std::span<const uint32_t>(relocated_host).first(pristine_host.size()))) {
       errors.emplace_back("ConSan relay donor proof found a corrupted displaced host sequence");
-      return errors;
+      return;
     }
     if (!std::ranges::equal(pristine_anchor,
                             std::span<const uint32_t>(rewritten_host).subspan(1u, 2u))) {
@@ -1291,7 +1277,7 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
           std::to_string(host.anchor_offset) + "; pristine=" + std::to_string(pristine_anchor[0]) +
           "," + std::to_string(pristine_anchor[1]) + " relocated=" +
           std::to_string(rewritten_host[1]) + "," + std::to_string(rewritten_host[2]));
-      return errors;
+      return;
     }
     const auto anchor_to_host =
         compute_sopp_branch_simm16(anchor->anchor_offset, anchor->trampoline_offset);
@@ -1307,7 +1293,7 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
         rewritten_host[3] != build_s_branch(*anchor_return, arch) ||
         relocated_host.back() != build_s_branch(*host_return, arch)) {
       errors.emplace_back("ConSan relay donor proof found a corrupted normal execution path");
-      return errors;
+      return;
     }
     std::vector<uint64_t> payload_offsets = {anchor->anchor_offset + sizeof(uint32_t)};
     for (uint64_t offset = host.anchor_offset + 4u * sizeof(uint32_t);
@@ -1315,26 +1301,24 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
       payload_offsets.push_back(offset);
     bool has_used_payload = false;
     for (uint64_t payload_offset : payload_offsets) {
-      const auto payload_word = read_word(replacement_text, payload_offset);
+      const auto payload_word = environment.replacement_text.word(payload_offset);
       if (!payload_word || !valid_relay_payload(payload_offset)) {
         errors.emplace_back("ConSan relay donor proof found an invalid relay payload");
-        return errors;
+        return;
       }
       has_used_payload |= *payload_word != nop;
     }
     if (!has_used_payload) {
       errors.emplace_back("ConSan relay donor proof found an unused wide donor");
-      return errors;
+      return;
     }
   }
-  return errors;
+  return;
 }
 
-[[nodiscard]] std::vector<std::string>
-validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
-                                          const AmdGpuCodeObject &replacement,
-                                          const ConSanTransformArtifacts &result) {
-  std::vector<std::string> errors;
+void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment &environment,
+                                               const ConSanTransformArtifacts &result,
+                                               std::vector<std::string> &errors) {
   std::vector<const ConSanPatchInfo *> reservoirs;
   for (const ConSanPatchInfo &patch : result.patches) {
     for (uint64_t offset : patch.branch_relay_offsets) {
@@ -1344,39 +1328,31 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
                                  offset - patch.trampoline_offset < patch.trampoline_size;
       if ((!in_anchor && !in_trampoline) || offset % sizeof(uint32_t) != 0) {
         errors.emplace_back("ConSan relay reservoir proof found stale branch-relay provenance");
-        return errors;
+        return;
       }
     }
     if (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir)
       reservoirs.push_back(&patch);
   }
   if (reservoirs.empty())
-    return errors;
-  if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1) {
+    return;
+  if (!environment.original_text.available || !environment.replacement_text.available) {
     errors.emplace_back("ConSan relay reservoir proof requires one executable text section");
-    return errors;
+    return;
   }
-  const auto original_text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(original.text_sections().front()->data()),
-      original.text_sections().front()->size());
-  const auto replacement_text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
-      replacement.text_sections().front()->size());
-  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
-  if (target_profile == nullptr) {
-    errors.emplace_back("ConSan relay reservoir proof found no target profile");
-    return errors;
-  }
-  const rj_code_arch_t arch = target_profile->arch;
-  std::unique_ptr<Decoder> decoder = Decoder::create(arch);
-  if (!decoder) {
-    errors.emplace_back("ConSan relay reservoir proof could not create a pristine decoder");
-    return errors;
-  }
+  const std::span<const uint8_t> original_text = environment.original_text.bytes;
+  const std::span<const uint8_t> replacement_text = environment.replacement_text.bytes;
+  if (!environment.require_target(
+          errors, "ConSan relay reservoir proof found no target profile",
+          "ConSan relay reservoir proof could not create a pristine decoder"))
+    return;
+  const rj_code_arch_t arch = environment.arch();
 
   const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
-      original, result.program_inventory.kernels(), result.program_inventory.functions());
-  auto blocks = BasicBlock::build(original, *decoder, arch, cfg.leaders, cfg.code_ranges);
+      environment.original, result.program_inventory.kernels(),
+      result.program_inventory.functions());
+  auto blocks = BasicBlock::build(environment.original, *environment.decoder, arch, cfg.leaders,
+                                  cfg.code_ranges);
   std::vector<BasicBlock *> blocks_by_offset;
   blocks_by_offset.reserve(blocks.size());
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
@@ -1388,14 +1364,6 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
   });
   const uint32_t nop = build_s_nop(0, arch);
   const uint32_t branch_opcode = build_s_branch(0, arch) & 0xffff0000u;
-  const auto read_word = [](std::span<const uint8_t> bytes,
-                            uint64_t offset) -> std::optional<uint32_t> {
-    if (offset > bytes.size() || sizeof(uint32_t) > bytes.size() - offset)
-      return std::nullopt;
-    uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + offset, sizeof(word));
-    return word;
-  };
 
   std::unordered_set<uint64_t> relay_vertices;
   std::unordered_set<uint64_t> island_vertices;
@@ -1471,7 +1439,7 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
                                           uint64_t report_offset, uint64_t report_size) {
     bool has_used_payload = false;
     for (uint64_t offset = begin; offset < end; offset += sizeof(uint32_t)) {
-      const auto word = read_word(replacement_text, offset);
+      const auto word = environment.replacement_text.word(offset);
       if (!word) {
         errors.emplace_back("ConSan relay reservoir proof found a missing payload word");
         return false;
@@ -1509,12 +1477,12 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
           patch->trampoline_offset > replacement_text.size() ||
           patch->trampoline_size > replacement_text.size() - patch->trampoline_offset) {
         errors.emplace_back("ConSan relay reservoir proof found invalid generated-bank geometry");
-        return errors;
+        return;
       }
       if (!validate_relay_payload(patch->trampoline_offset,
                                   patch->trampoline_offset + patch->trampoline_size, "generated",
                                   patch->trampoline_offset, patch->trampoline_size)) {
-        return errors;
+        return;
       }
       continue;
     }
@@ -1534,7 +1502,7 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
         patch->original_size % sizeof(uint32_t) != 0 ||
         (!valid_direct_geometry && !valid_indirect_geometry)) {
       errors.emplace_back("ConSan relay reservoir proof found invalid geometry or phase");
-      return errors;
+      return;
     }
     if (patch->anchor_offset > original_text.size() ||
         patch->original_size > original_text.size() - patch->anchor_offset ||
@@ -1543,7 +1511,7 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
         patch->trampoline_offset > replacement_text.size() ||
         patch->trampoline_size > replacement_text.size() - patch->trampoline_offset) {
       errors.emplace_back("ConSan relay reservoir proof found a stale range");
-      return errors;
+      return;
     }
 
     bool found_pristine_block = false;
@@ -1587,7 +1555,7 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
     if (!found_pristine_block) {
       errors.emplace_back(
           "ConSan relay reservoir proof rejected its pristine straight-line sequence");
-      return errors;
+      return;
     }
     if (shape == BranchRelayReservoirShape::DirectInstruction) {
       const uint64_t entry_target =
@@ -1602,18 +1570,19 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
               : patch->anchor_offset + patch->original_size;
       const auto return_delta = compute_sopp_branch_simm16(return_source, return_target);
       if (!entry_delta || !return_delta ||
-          read_word(replacement_text, patch->anchor_offset) != build_s_branch(*entry_delta, arch) ||
+          environment.replacement_text.word(patch->anchor_offset) !=
+              build_s_branch(*entry_delta, arch) ||
           !std::ranges::equal(
               original_text.subspan(patch->anchor_offset, patch->original_size),
               replacement_text.subspan(patch->trampoline_offset, patch->original_size)) ||
-          read_word(replacement_text, return_source) != build_s_branch(*return_delta, arch)) {
+          environment.replacement_text.word(return_source) != build_s_branch(*return_delta, arch)) {
         errors.emplace_back("ConSan relay reservoir proof found a corrupted direct execution path");
-        return errors;
+        return;
       }
       if (!validate_relay_payload(patch->anchor_offset + sizeof(uint32_t),
                                   patch->anchor_offset + patch->original_size, "direct",
                                   patch->anchor_offset, patch->original_size)) {
-        return errors;
+        return;
       }
       continue;
     }
@@ -1621,7 +1590,7 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
                             replacement_text.subspan(patch->trampoline_offset + sizeof(uint32_t),
                                                      patch->original_size))) {
       errors.emplace_back("ConSan relay reservoir proof found a corrupted displaced sequence");
-      return errors;
+      return;
     }
     std::vector<uint32_t> expected_entry;
     std::vector<uint32_t> expected_return;
@@ -1635,37 +1604,38 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
     if (!append_lds_check_trap_indirect_jump(
             expected_entry, patch->anchor_offset, patch->trampoline_offset,
             *patch->indirect_pc_sgpr, wave32_vcc ? kRdna4ExecHi : *patch->indirect_saved_scc_sgpr,
-            *target_profile) ||
+            *environment.target_profile) ||
         !append_lds_check_trap_indirect_jump(
             expected_return, patch->trampoline_offset + sizeof(uint32_t) + patch->original_size,
             patch->anchor_offset + patch->original_size -
                 kScRelayTailRestoreWords * sizeof(uint32_t),
             *patch->indirect_return_pc_sgpr,
-            wave32_vcc ? kRdna4ExecHi : *patch->indirect_return_saved_scc_sgpr, *target_profile) ||
+            wave32_vcc ? kRdna4ExecHi : *patch->indirect_return_saved_scc_sgpr,
+            *environment.target_profile) ||
         std::memcmp(expected_entry.data(), replacement_text.data() + patch->anchor_offset,
                     expected_entry.size() * sizeof(uint32_t)) != 0 ||
-        read_word(replacement_text, patch->trampoline_offset) !=
+        environment.replacement_text.word(patch->trampoline_offset) !=
             (wave32_vcc ? build_s_mov_b32(kRdna4VccLo, *patch->indirect_saved_vcc_sgpr, arch)
                         : build_s_nop(0, arch)) ||
         std::memcmp(expected_return.data(),
                     replacement_text.data() + patch->trampoline_offset + sizeof(uint32_t) +
                         patch->original_size,
                     expected_return.size() * sizeof(uint32_t)) != 0 ||
-        read_word(replacement_text,
-                  patch->anchor_offset + patch->original_size - sizeof(uint32_t)) !=
+        environment.replacement_text.word(patch->anchor_offset + patch->original_size -
+                                          sizeof(uint32_t)) !=
             (wave32_vcc ? build_s_mov_b32(kRdna4VccLo, *patch->indirect_return_saved_vcc_sgpr, arch)
                         : build_s_nop(0, arch))) {
       errors.emplace_back("ConSan relay reservoir proof found a corrupted normal execution path");
-      return errors;
+      return;
     }
     if (!validate_relay_payload(patch->anchor_offset + kScRelayEntryWords * sizeof(uint32_t),
                                 patch->anchor_offset + patch->original_size -
                                     kScRelayTailRestoreWords * sizeof(uint32_t),
                                 "displaced", patch->anchor_offset, patch->original_size)) {
-      return errors;
+      return;
     }
   }
-  return errors;
+  return;
 }
 
 [[nodiscard]] bool decodes_as_barrier(std::span<const uint8_t> text, uint64_t offset,
@@ -1689,41 +1659,30 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
   return std::ranges::find(result.patches, phase, &ConSanPatchInfo::phase) != result.patches.end();
 }
 
-[[nodiscard]] std::vector<std::string>
-validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeObject &replacement,
-                            const ConSanTransformArtifacts &result) {
-  std::vector<std::string> errors;
+void validate_mutation_semantics(const FinalValidationEnvironment &environment,
+                                 const ConSanTransformArtifacts &result,
+                                 std::vector<std::string> &errors) {
   // Instrumentation-only transforms have no mutation semantics to rederive.
   // Avoid rebuilding the entire pristine synchronization/CFG inventory here:
   // final validation calls this function once internally and callers may
   // independently validate the same result again. On large code objects that
   // otherwise turned one transform into three identical whole-image analyses.
   if (!has_consan_patch_phase(result, ConSanPatchPhase::Mutation)) {
-    return errors;
+    return;
   }
   const bool staged_composition = has_consan_patch_phase(result, ConSanPatchPhase::Instrumentation);
-  if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1)
-    return errors;
-  const auto original_text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(original.text_sections().front()->data()),
-      original.text_sections().front()->size());
-  const auto replacement_text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
-      replacement.text_sections().front()->size());
-  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
-  if (target_profile == nullptr) {
-    errors.emplace_back("ConSan mutation proof found no target profile");
-    return errors;
-  }
-  const rj_code_arch_t arch = target_profile->arch;
-  std::unique_ptr<Decoder> decoder = Decoder::create(arch);
-  if (!decoder) {
-    errors.emplace_back("ConSan mutation proof could not create a replacement decoder");
-    return errors;
-  }
+  if (!environment.original_text.available || !environment.replacement_text.available)
+    return;
+  const std::span<const uint8_t> original_text = environment.original_text.bytes;
+  const std::span<const uint8_t> replacement_text = environment.replacement_text.bytes;
+  if (!environment.require_target(errors, "ConSan mutation proof found no target profile",
+                                  "ConSan mutation proof could not create a replacement decoder"))
+    return;
+  const rj_code_arch_t arch = environment.arch();
   const uint32_t nop = build_s_nop(0, arch);
-  const auto original_image = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(original.image_data()), original.image_size());
+  const auto original_image =
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(environment.original.image_data()),
+                               environment.original.image_size());
   const ConSanMutationValidationInventory pristine_inventory =
       rederive_consan_mutation_validation_inventory(original_image);
   const ConSanFaultSelectionView pristine_faults = pristine_inventory.fault_selection();
@@ -1831,7 +1790,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
     const uint64_t trampoline_end = match->trampoline_offset + match->trampoline_size;
     const uint64_t relocated = *match->relocated_guest_instruction_offset;
     return relocated >= match->trampoline_offset && relocated < trampoline_end &&
-           decodes_as_barrier(replacement_text, relocated, *decoder);
+           decodes_as_barrier(replacement_text, relocated, *environment.decoder);
   };
 
   for (const ConSanPatchInfo &patch : result.patches) {
@@ -1856,7 +1815,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       uint32_t replacement_word = 0;
       std::memcpy(&replacement_word, replacement_text.data() + patch.anchor_offset,
                   sizeof(replacement_word));
-      if (!decodes_as_barrier(original_text, patch.anchor_offset, *decoder) ||
+      if (!decodes_as_barrier(original_text, patch.anchor_offset, *environment.decoder) ||
           replacement_word != nop) {
         errors.emplace_back(
             "ConSan mutation proof did not replace the selected barrier with s_nop 0 at text "
@@ -1876,7 +1835,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
         }
         continue;
       }
-      if (!decodes_as_barrier(replacement_text, patch.anchor_offset, *decoder) &&
+      if (!decodes_as_barrier(replacement_text, patch.anchor_offset, *environment.decoder) &&
           !composed_inline_barrier(patch)) {
         errors.emplace_back(
             "ConSan mutation proof did not place a barrier at the relocation target");
@@ -2060,12 +2019,13 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       std::unique_ptr<Instruction> setup_instruction;
       std::unique_ptr<Instruction> init_instruction;
       std::array<uint32_t, 2> setup_words{before_setup, before_literal};
-      setup_instruction = decode_bounded_instruction(*decoder, setup_words, patch.anchor_offset);
+      setup_instruction =
+          decode_bounded_instruction(*environment.decoder, setup_words, patch.anchor_offset);
       if (init_offset + sizeof(uint32_t) <= original_text.size()) {
         uint32_t init_word = 0;
         std::memcpy(&init_word, original_text.data() + init_offset, sizeof(init_word));
         init_instruction = decode_bounded_instruction(
-            *decoder, std::span<const uint32_t>(&init_word, 1), init_offset);
+            *environment.decoder, std::span<const uint32_t>(&init_word, 1), init_offset);
       }
       if (!setup_instruction || !init_instruction) {
         errors.emplace_back("ConSan mutation proof could not decode participant-count setup");
@@ -2092,7 +2052,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       std::memcpy(after_words.data(), replacement_text.data() + patch.anchor_offset,
                   patch.original_size);
       std::unique_ptr<Instruction> before_instruction = decode_bounded_instruction(
-          *decoder,
+          *environment.decoder,
           std::span<const uint32_t>(before_words).first(patch.original_size / sizeof(uint32_t)),
           patch.anchor_offset);
       std::unique_ptr<Instruction> after_instruction;
@@ -2132,7 +2092,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
         continue;
       }
       after_instruction = decode_bounded_instruction(
-          *decoder,
+          *environment.decoder,
           std::span<const uint32_t>(after_words).first(patch.original_size / sizeof(uint32_t)),
           patch.anchor_offset);
       if (!after_instruction) {
@@ -2319,7 +2279,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           std::array<uint32_t, 4> leave_words{};
           std::memcpy(leave_words.data(), original_text.data() + leave_offset, sizeof(uint32_t));
           std::unique_ptr<Instruction> leave_instruction = decode_bounded_instruction(
-              *decoder, std::span<const uint32_t>(leave_words).first(1), leave_offset);
+              *environment.decoder, std::span<const uint32_t>(leave_words).first(1), leave_offset);
           uint32_t original_leave = 0;
           uint32_t replacement_leave = 0;
           std::memcpy(&original_leave, original_text.data() + leave_offset, sizeof(original_leave));
@@ -2334,7 +2294,8 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
                            candidate.anchor_offset + candidate.original_size &&
                        candidate.relocated_guest_instruction_offset &&
                        decodes_as_barrier(replacement_text,
-                                          *candidate.relocated_guest_instruction_offset, *decoder);
+                                          *candidate.relocated_guest_instruction_offset,
+                                          *environment.decoder);
               });
           if (!leave_instruction || leave_instruction->mnemonic() != "s_barrier_leave" ||
               leave_instruction->size() != static_cast<int>(sizeof(uint32_t)) ||
@@ -2445,7 +2406,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
          *markerless_target->barrier_move_direction != ConSanBarrierMoveDirection::Later)) {
       errors.emplace_back(
           "ConSan mutation proof found an incomplete markerless barrier relocation record");
-      return errors;
+      return;
     }
     std::ranges::sort(markerless_sources, {}, &ConSanPatchInfo::anchor_offset);
     const ConSanPatchInfo &first = *markerless_sources[0];
@@ -2455,11 +2416,11 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
         first.anchor_offset + sizeof(uint32_t) != second.anchor_offset) {
       errors.emplace_back(
           "ConSan mutation proof did not identify an adjacent ordered barrier pair");
-      return errors;
+      return;
     }
     if (target.original_size == 0 || target.original_size % sizeof(uint32_t) != 0) {
       errors.emplace_back("ConSan mutation proof found an unsupported displaced destination size");
-      return errors;
+      return;
     }
     const uint32_t expected_trampoline_size =
         2u * sizeof(uint32_t) + target.original_size + sizeof(uint32_t);
@@ -2468,7 +2429,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
         target.trampoline_size > replacement_text.size() - target.trampoline_offset) {
       errors.emplace_back(
           "ConSan mutation proof found incorrect whole-pair trampoline byte accounting");
-      return errors;
+      return;
     }
 
     const ConSanBarrierMoveDirection direction = *target.barrier_move_direction;
@@ -2478,7 +2439,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
          target.anchor_offset < second.anchor_offset + second.original_size)) {
       errors.emplace_back(
           "ConSan mutation proof found the relocation target on the wrong side of the pair");
-      return errors;
+      return;
     }
     const bool has_structured_proof =
         target.barrier_move_cfg_contract != ConSanBarrierMoveCfgContract::SameBlock ||
@@ -2488,7 +2449,8 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
         target.structured_guard_offset.has_value() ||
         target.structured_destination_offset.has_value() ||
         target.structured_source_offset.has_value();
-    auto original_blocks = build_original_proof_basic_blocks(original, *decoder, arch);
+    auto original_blocks =
+        build_original_proof_basic_blocks(environment.original, *environment.decoder, arch);
     const auto containing_block_index = [&](uint64_t offset) -> std::optional<uint32_t> {
       for (size_t i = 0; i < original_blocks.size(); ++i) {
         const BasicBlock *block = original_blocks[i].get();
@@ -2501,13 +2463,13 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
     const auto original_destination_block = containing_block_index(target.anchor_offset);
     if (!original_source_block || !original_destination_block) {
       errors.emplace_back("ConSan mutation proof could not locate barrier relocation CFG blocks");
-      return errors;
+      return;
     }
     if (*original_source_block != *original_destination_block && !has_structured_proof) {
       errors.emplace_back(
           "ConSan mutation proof found a cross-block move without a structured CFG contract and "
           "metadata");
-      return errors;
+      return;
     }
     if (has_structured_proof) {
       if (!target.structured_guard_block_index || !target.structured_destination_block_index ||
@@ -2517,14 +2479,14 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           *target.structured_destination_offset != target.anchor_offset ||
           *target.structured_source_block_index == *target.structured_destination_block_index) {
         errors.emplace_back("ConSan mutation proof found incomplete structured CFG metadata");
-        return errors;
+        return;
       }
       if (*original_source_block != *target.structured_source_block_index ||
           *original_destination_block != *target.structured_destination_block_index) {
         errors.emplace_back(
             "ConSan mutation proof found structured CFG block metadata that does not "
             "contain the selected relocation instructions");
-        return errors;
+        return;
       }
       std::optional<StructuredExecDiamondProof> rederived;
       if (target.barrier_move_cfg_contract ==
@@ -2544,7 +2506,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           rederived->guard_offset != *target.structured_guard_offset ||
           rederived->source_offset != *target.structured_source_offset) {
         errors.emplace_back("ConSan mutation proof could not rederive its structured CFG contract");
-        return errors;
+        return;
       }
     }
     const auto forward = compute_sopp_branch_simm16(target.anchor_offset, target.trampoline_offset);
@@ -2554,7 +2516,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
     if (!forward || replacement_anchor != build_s_branch(*forward, arch)) {
       errors.emplace_back(
           "ConSan mutation proof found an invalid branch to the whole-pair trampoline");
-      return errors;
+      return;
     }
     for (uint32_t offset = sizeof(uint32_t); offset < target.original_size;
          offset += sizeof(uint32_t)) {
@@ -2564,7 +2526,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       if (anchor_tail != nop) {
         errors.emplace_back(
             "ConSan mutation proof did not fully replace the displaced destination anchor");
-        return errors;
+        return;
       }
     }
 
@@ -2591,7 +2553,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
     // entry-branch checks above and rely on both recorded stage proofs for the
     // nested rewrite.
     if (body_reinstrumented && staged_composition)
-      return errors;
+      return;
     const uint64_t barrier_body_offset =
         direction == ConSanBarrierMoveDirection::Earlier ? 0u : target.original_size;
     const uint64_t destination_body_offset =
@@ -2602,13 +2564,13 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       errors.emplace_back(
           "ConSan mutation proof did not preserve an adjacent byte-identical ordered barrier "
           "pair");
-      return errors;
+      return;
     }
     if (std::memcmp(body + destination_body_offset, original_text.data() + target.anchor_offset,
                     target.original_size) != 0) {
       errors.emplace_back(
           "ConSan mutation proof did not preserve the displaced destination semantics");
-      return errors;
+      return;
     }
 
     // The body is exactly pair + destination + return, and the two
@@ -2624,15 +2586,15 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       errors.emplace_back("ConSan mutation proof found an invalid whole-pair trampoline return");
     }
   }
-  return errors;
+  return;
 }
 
-[[nodiscard]] std::vector<std::string> validate_sc_perturbation_semantics(
-    std::span<const uint8_t> original_image, const AmdGpuCodeObject &original,
-    const AmdGpuCodeObject &replacement, const ConSanTransformArtifacts &result,
-    bool validating_carried_composite_stage,
-    const ConSanPerturbationPlanningState *carried_perturbation) {
-  std::vector<std::string> errors;
+void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
+                                        const FinalValidationEnvironment &environment,
+                                        const ConSanTransformArtifacts &result,
+                                        bool validating_carried_composite_stage,
+                                        const ConSanPerturbationPlanningState *carried_perturbation,
+                                        std::vector<std::string> &errors) {
   const size_t perturbation_patch_count = static_cast<size_t>(std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind));
   const bool composite = has_consan_patch_phase(result, ConSanPatchPhase::Mutation);
@@ -2655,11 +2617,11 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
     errors.emplace_back("ConSan SC perturbation proof found inconsistent applied patch count");
   }
   if (perturbation_patch_count == 0u)
-    return errors;
-  if (original.text_sections().size() != 1u || replacement.text_sections().size() != 1u) {
+    return;
+  if (!environment.original_text.available || !environment.replacement_text.available) {
     errors.emplace_back(
         "ConSan SC perturbation proof requires one original and replacement text section");
-    return errors;
+    return;
   }
 
   const ConSanPerturbationValidationInventory pristine =
@@ -2667,20 +2629,16 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
   if (!validating_carried_composite_stage && !pristine.analysis_succeeded) {
     errors.emplace_back(
         "ConSan SC perturbation proof could not rederive pristine synchronization semantics");
-    return errors;
+    return;
   }
   if (validating_carried_composite_stage && carried_perturbation == nullptr) {
     errors.emplace_back("ConSan SC perturbation proof is missing carried planning evidence");
-    return errors;
+    return;
   }
 
-  const auto original_text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(original.text_sections().front()->data()),
-      original.text_sections().front()->size());
-  const auto replacement_text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(replacement.text_sections().front()->data()),
-      replacement.text_sections().front()->size());
-  const rj_code_arch_t arch = consan_arch_for_target(original.target_id());
+  const std::span<const uint8_t> original_text = environment.original_text.bytes;
+  const std::span<const uint8_t> replacement_text = environment.replacement_text.bytes;
+  const rj_code_arch_t arch = environment.arch();
   const uint32_t nop = build_s_nop(0, arch);
   std::unordered_set<std::string> proven_edges;
   const SyncEventSemanticIndex pristine_events =
@@ -2891,7 +2849,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       errors.emplace_back("ConSan SC perturbation proof found an invalid exact boundary return");
     }
   }
-  return errors;
+  return;
 }
 
 struct DescriptorRequirement {
@@ -2910,17 +2868,13 @@ struct DescriptorRequirement {
   uint32_t required_group_bytes = 0;
 };
 
-[[nodiscard]] std::vector<std::string>
-validate_entry_scalar_backup_semantics(const AmdGpuCodeObject &original,
-                                       const AmdGpuCodeObject &replacement,
-                                       const ConSanTransformArtifacts &result) {
-  std::vector<std::string> errors;
-  if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1)
-    return errors;
-  const auto *replacement_section = replacement.text_sections().front();
-  const std::span<const uint8_t> replacement_text(
-      reinterpret_cast<const uint8_t *>(replacement_section->data()), replacement_section->size());
-  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
+void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &environment,
+                                            const ConSanTransformArtifacts &result,
+                                            std::vector<std::string> &errors) {
+  if (!environment.original_text.available || !environment.replacement_text.available)
+    return;
+  const std::span<const uint8_t> replacement_text = environment.replacement_text.bytes;
+  const rj_code_arch_t arch = environment.arch();
 
   for (const ConSanPatchInfo &patch : result.patches) {
     const bool has_vgpr = patch.entry_scalar_backup_vgpr.has_value();
@@ -2943,17 +2897,18 @@ validate_entry_scalar_backup_semantics(const AmdGpuCodeObject &original,
     }
 
     const auto owner =
-        std::ranges::find_if(original.kernels(), [&](const AmdGpuKernelInfo &kernel) {
+        std::ranges::find_if(environment.original.kernels(), [&](const AmdGpuKernelInfo &kernel) {
           return kernel.entry_text_offset == patch.anchor_offset;
         });
-    if (owner == original.kernels().end()) {
+    if (owner == environment.original.kernels().end()) {
       errors.emplace_back("ConSan final validation could not resolve an entry scalar backup owner");
       continue;
     }
-    const auto descriptor = read_kernel_descriptor(
-        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(original.image_data()),
-                                 original.image_size()),
-        owner->descriptor_file_offset);
+    const auto descriptor =
+        read_kernel_descriptor(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(
+                                                            environment.original.image_data()),
+                                                        environment.original.image_size()),
+                               owner->descriptor_file_offset);
     if (!descriptor) {
       errors.emplace_back("ConSan final validation could not resolve an entry scalar backup owner");
       continue;
@@ -3022,20 +2977,16 @@ validate_entry_scalar_backup_semantics(const AmdGpuCodeObject &original,
       }
     }
   }
-  return errors;
+  return;
 }
 
-[[nodiscard]] std::vector<std::string>
-validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
-                                        const AmdGpuCodeObject &replacement,
-                                        const ConSanTransformArtifacts &result) {
-  std::vector<std::string> errors;
-  if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1)
-    return errors;
-  const auto *replacement_section = replacement.text_sections().front();
-  const std::span<const uint8_t> replacement_text(
-      reinterpret_cast<const uint8_t *>(replacement_section->data()), replacement_section->size());
-  const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
+void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &environment,
+                                             const ConSanTransformArtifacts &result,
+                                             std::vector<std::string> &errors) {
+  if (!environment.original_text.available || !environment.replacement_text.available)
+    return;
+  const std::span<const uint8_t> replacement_text = environment.replacement_text.bytes;
+  const rj_code_arch_t arch = environment.arch();
   const auto validate_entry = [&](const ConSanPatchInfo &patch, uint64_t entry_offset,
                                   std::string_view kernel_name,
                                   bool has_semantic_system_sgpr_restore) {
@@ -3193,10 +3144,10 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
     if (!patch.dispatch_id_capture_sgpr && !patch.dispatch_id_capture_vgpr)
       continue;
     const auto owner =
-        std::ranges::find_if(original.kernels(), [&](const AmdGpuKernelInfo &kernel) {
+        std::ranges::find_if(environment.original.kernels(), [&](const AmdGpuKernelInfo &kernel) {
           return kernel.entry_text_offset == patch.anchor_offset;
         });
-    if (owner == original.kernels().end()) {
+    if (owner == environment.original.kernels().end()) {
       errors.emplace_back("ConSan final validation could not resolve a dispatch-ID prologue owner");
       continue;
     }
@@ -3206,10 +3157,11 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
     validate_entry(patch,
                    patch.dispatch_id_primary_prologue_offset.value_or(patch.trampoline_offset),
                    owner->name, has_semantic_system_sgpr_restore);
-    const auto descriptor = read_kernel_descriptor(
-        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(original.image_data()),
-                                 original.image_size()),
-        owner->descriptor_file_offset);
+    const auto descriptor =
+        read_kernel_descriptor(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(
+                                                            environment.original.image_data()),
+                                                        environment.original.image_size()),
+                               owner->descriptor_file_offset);
     if (!descriptor) {
       errors.emplace_back("ConSan final validation could not read a dispatch-ID prologue owner");
       continue;
@@ -3223,20 +3175,19 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
           owner->name, has_semantic_system_sgpr_restore);
     }
   }
-  return errors;
+  return;
 }
 
-[[nodiscard]] std::vector<std::string>
-validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
-                                       const ConSanTransformArtifacts &result,
-                                       uint64_t expected_moi_report_dispatch_id) {
-  std::vector<std::string> errors;
+void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &environment,
+                                            const ConSanTransformArtifacts &result,
+                                            uint64_t expected_moi_report_dispatch_id,
+                                            std::vector<std::string> &errors) {
   const auto is_exact_patch = [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
            patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   };
   if (!std::ranges::any_of(result.patches, is_exact_patch))
-    return errors;
+    return;
   const auto owner_local_dispatch_vgpr = [&](const ConSanPatchInfo &patch) {
     std::optional<uint16_t> common;
     for (uint64_t owner : patch.owner_descriptor_file_offsets) {
@@ -3253,12 +3204,9 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
     }
     return common;
   };
-  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
-  if (target_profile == nullptr) {
-    errors.emplace_back("ConSan exact-shadow proof found no target profile");
-    return errors;
-  }
-  const rj_code_arch_t arch = target_profile->arch;
+  if (!environment.require_target(errors, "ConSan exact-shadow proof found no target profile"))
+    return;
+  const rj_code_arch_t arch = environment.arch();
   const bool has_exact_patch_without_dispatch =
       std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
         return is_exact_patch(patch) && patch.workgroup_shadow_size == 0u &&
@@ -3266,23 +3214,21 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
                !result.moi_operating_point.moi_dispatch_id_sgpr &&
                !result.moi_operating_point.moi_dispatch_id_vgpr &&
                !owner_local_dispatch_vgpr(patch) &&
-               target_profile->dispatch_identity != ConSanDispatchIdentitySource::CodeObjectLiteral;
+               environment.target_profile->dispatch_identity !=
+                   ConSanDispatchIdentitySource::CodeObjectLiteral;
       });
-  if (replacement.text_sections().size() != 1 || has_exact_patch_without_dispatch) {
+  if (!environment.replacement_text.available || has_exact_patch_without_dispatch) {
     errors.emplace_back(
         "ConSan final validation found exact-shadow publication without dispatch-ID state");
-    return errors;
+    return;
   }
 
-  std::unique_ptr<Decoder> decoder = Decoder::create(arch);
-  if (!decoder) {
+  if (!environment.decoder) {
     errors.emplace_back(
         "ConSan final validation could not create an exact-shadow semantic decoder");
-    return errors;
+    return;
   }
-  const Section *section = replacement.text_sections().front();
-  const std::span<const uint8_t> text(reinterpret_cast<const uint8_t *>(section->data()),
-                                      section->size());
+  const std::span<const uint8_t> text = environment.replacement_text.bytes;
 
   for (const ConSanPatchInfo &patch : result.patches) {
     if (!is_exact_patch(patch))
@@ -3312,7 +3258,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       std::memcpy(words.data(), body.data() + cursor,
                   std::min(words.size() * sizeof(uint32_t), body.size() - cursor));
       std::unique_ptr<Instruction> instruction =
-          decode_bounded_instruction(*decoder,
+          decode_bounded_instruction(*environment.decoder,
                                      std::span<const uint32_t>(words).first(std::min(
                                          words.size(), (body.size() - cursor) / sizeof(uint32_t))),
                                      body_offset + cursor);
@@ -3390,7 +3336,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       const size_t minimum_backward_loop_count =
           (bitmap_backed_lazy_shadow ? decoded_local_exchange_cell_count : 0u) +
           (needs_compact_loop ? 1u : 0u);
-      const bool cdna = validation_uses_gfx9_cdna_encoding(*target_profile);
+      const bool cdna = validation_uses_gfx9_cdna_encoding(*environment.target_profile);
       const uint16_t old_value_offset = cdna ? 6u : 5u;
       const auto expected_local_exchange_b32 = instrumentation::build_ds_storexchg_rtn_b32(
           static_cast<uint16_t>(scratch + old_value_offset), scratch,
@@ -3598,14 +3544,13 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
           " legacy_swap=" + std::to_string(decoded_legacy_swap));
     }
   }
-  return errors;
+  return;
 }
 
-[[nodiscard]] std::vector<std::string>
-validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacement,
-                                              const ConSanTransformArtifacts &result) {
+void validate_inline_release_transaction_semantics(const FinalValidationEnvironment &environment,
+                                                   const ConSanTransformArtifacts &result,
+                                                   std::vector<std::string> &errors) {
   constexpr uint16_t kVccLo = 106u;
-  std::vector<std::string> errors;
   const auto is_release_transaction = [&](const ConSanPatchInfo &patch) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiInlineAtomicOrdering)
       return false;
@@ -3624,28 +3569,19 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
             sequence->memory_role == ConSanSyncMemoryRole::SequentiallyConsistent);
   };
   if (!std::ranges::any_of(result.patches, is_release_transaction))
-    return errors;
-  if (replacement.text_sections().size() != 1) {
+    return;
+  if (!environment.replacement_text.available) {
     errors.emplace_back(
         "ConSan final validation found release transaction without executable text");
-    return errors;
+    return;
   }
 
-  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
-  if (target_profile == nullptr) {
-    errors.emplace_back("ConSan release-transaction proof found no target profile");
-    return errors;
-  }
-  const rj_code_arch_t arch = target_profile->arch;
-  std::unique_ptr<Decoder> decoder = Decoder::create(arch);
-  if (!decoder) {
-    errors.emplace_back(
-        "ConSan final validation could not create a release-transaction semantic decoder");
-    return errors;
-  }
-  const Section *section = replacement.text_sections().front();
-  const std::span<const uint8_t> text(reinterpret_cast<const uint8_t *>(section->data()),
-                                      section->size());
+  if (!environment.require_target(
+          errors, "ConSan release-transaction proof found no target profile",
+          "ConSan final validation could not create a release-transaction semantic decoder"))
+    return;
+  const rj_code_arch_t arch = environment.arch();
+  const std::span<const uint8_t> text = environment.replacement_text.bytes;
 
   const auto atomic_site_for = [&](uint64_t text_offset) -> const ConSanAtomicSite * {
     for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
@@ -3683,7 +3619,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       std::memcpy(words.data(), body.data() + cursor,
                   std::min(words.size() * sizeof(uint32_t), body.size() - cursor));
       std::unique_ptr<Instruction> instruction =
-          decode_bounded_instruction(*decoder,
+          decode_bounded_instruction(*environment.decoder,
                                      std::span<const uint32_t>(words).first(std::min(
                                          words.size(), (body.size() - cursor) / sizeof(uint32_t))),
                                      patch.trampoline_offset + cursor);
@@ -3717,7 +3653,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       return result_positions;
     };
     const uint16_t scratch = *patch.scratch_vgpr;
-    const bool cdna = validation_uses_gfx9_cdna_encoding(*target_profile);
+    const bool cdna = validation_uses_gfx9_cdna_encoding(*environment.target_profile);
     const uint16_t snapshot_address = static_cast<uint16_t>(scratch + (cdna ? 6u : 5u));
     const uint16_t temporary = static_cast<uint16_t>(scratch + 20u);
     const uint16_t version_cas_value = static_cast<uint16_t>(scratch + (cdna ? 4u : 5u));
@@ -3884,23 +3820,21 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
                           " waits=" + std::to_string(wait_store_count) + ")");
     }
   }
-  return errors;
+  return;
 }
 
-[[nodiscard]] std::vector<std::string>
-validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
-                                      const AmdGpuCodeObject &replacement,
-                                      const ConSanTransformArtifacts &result) {
+void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &environment,
+                                           const ConSanTransformArtifacts &result,
+                                           std::vector<std::string> &errors) {
   using KernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
-  std::vector<std::string> errors;
-  if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1)
-    return errors;
-  const ConSanTargetProfile *target_profile = consan_target_profile(replacement.target_id());
-  if (target_profile == nullptr) {
-    errors.emplace_back("ConSan resource validation found no target profile");
-    return errors;
-  }
-  const rj_code_arch_t arch = target_profile->arch;
+  const size_t initial_error_count = errors.size();
+  if (!environment.original_text.available || !environment.replacement_text.available)
+    return;
+  const AmdGpuCodeObject &original = environment.original;
+  const AmdGpuCodeObject &replacement = environment.replacement;
+  if (!environment.require_target(errors, "ConSan resource validation found no target profile"))
+    return;
+  const rj_code_arch_t arch = environment.arch();
   std::unordered_map<uint64_t, std::string> owner_names;
   for (const AmdGpuKernelInfo &kernel : original.kernels())
     owner_names.emplace(kernel.descriptor_file_offset, kernel.name);
@@ -4134,8 +4068,8 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
       });
     }
   }
-  if (!errors.empty())
-    return errors;
+  if (errors.size() != initial_error_count)
+    return;
 
   uint16_t unscoped_required_vgprs = 0;
   uint32_t unscoped_required_private_bytes = 0;
@@ -4205,7 +4139,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
           std::max(requirement.required_private_bytes, unscoped_required_private_bytes);
     }
     KernelDescriptor normalized = replacement_descriptor;
-    const bool cdna = validation_uses_gfx9_cdna_encoding(*target_profile);
+    const bool cdna = validation_uses_gfx9_cdna_encoding(*environment.target_profile);
     const bool requires_full_workgroup_id = requirement.require_full_workgroup_id;
     const auto normalize_workgroup_id_payload = [&](uint32_t &rsrc2) {
       AMDHSA_BITS_SET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
@@ -4345,7 +4279,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     if (requirement.allow_resource_delta || has_unscoped_resource_growth) {
       normalized.compute_pgm_rsrc1 = original_descriptor.compute_pgm_rsrc1;
       normalized.compute_pgm_rsrc2 = original_descriptor.compute_pgm_rsrc2;
-      if (validation_uses_gfx9_cdna_encoding(*target_profile)) {
+      if (validation_uses_gfx9_cdna_encoding(*environment.target_profile)) {
         AMDHSA_BITS_SET(normalized.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
                         AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc3,
                                         kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET));
@@ -4407,16 +4341,16 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
           std::to_string(replacement_descriptor.private_segment_fixed_size) + ")");
     }
   }
-  return errors;
+  return;
 }
 
 [[nodiscard]] std::vector<std::string> validate_final_consan_elf(
     std::span<const uint8_t> original_bytes, const ConSanTransformArtifacts &result,
     uint64_t expected_moi_report_dispatch_id, bool validating_carried_composite_stage = false,
     const ConSanPerturbationPlanningState *carried_perturbation = nullptr) {
+  std::vector<std::string> errors;
   const major_image_ownership::ScopedPhase validation_phase(
       major_image_ownership::Phase::FinalValidation, /*only_if_none=*/true);
-  std::vector<std::string> errors;
   AmdGpuCodeObject original(original_bytes.data(), original_bytes.size());
   AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
   if (!original.is_valid() || !replacement.is_valid()) {
@@ -4477,62 +4411,24 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     errors.emplace_back(
         "ConSan final validation found runtime static mapping outside committed lowering");
   }
-  std::vector<std::string> accounting_errors =
-      validate_patch_byte_accounting(original, replacement, result);
-  errors.insert(errors.end(), std::make_move_iterator(accounting_errors.begin()),
-                std::make_move_iterator(accounting_errors.end()));
-  std::vector<std::string> decoding_errors = validate_patch_decoding(replacement, result);
-  errors.insert(errors.end(), std::make_move_iterator(decoding_errors.begin()),
-                std::make_move_iterator(decoding_errors.end()));
-  std::vector<std::string> indirect_island_errors =
-      validate_sc_indirect_island_semantics(replacement, result);
-  errors.insert(errors.end(), std::make_move_iterator(indirect_island_errors.begin()),
-                std::make_move_iterator(indirect_island_errors.end()));
-  std::vector<std::string> branch_only_errors =
-      validate_branch_only_continuation_semantics(original, replacement, result);
-  errors.insert(errors.end(), std::make_move_iterator(branch_only_errors.begin()),
-                std::make_move_iterator(branch_only_errors.end()));
-  std::vector<std::string> dense_call_errors =
-      validate_sc_dense_call_semantics(original, replacement, result);
-  errors.insert(errors.end(), std::make_move_iterator(dense_call_errors.begin()),
-                std::make_move_iterator(dense_call_errors.end()));
-  std::vector<std::string> relay_donor_errors =
-      validate_branch_relay_donor_semantics(original, replacement, result);
-  errors.insert(errors.end(), std::make_move_iterator(relay_donor_errors.begin()),
-                std::make_move_iterator(relay_donor_errors.end()));
-  std::vector<std::string> relay_reservoir_errors =
-      validate_branch_relay_reservoir_semantics(original, replacement, result);
-  errors.insert(errors.end(), std::make_move_iterator(relay_reservoir_errors.begin()),
-                std::make_move_iterator(relay_reservoir_errors.end()));
-  std::vector<std::string> mutation_errors =
-      validate_mutation_semantics(original, replacement, result);
-  errors.insert(errors.end(), std::make_move_iterator(mutation_errors.begin()),
-                std::make_move_iterator(mutation_errors.end()));
-  std::vector<std::string> perturbation_errors =
-      validate_sc_perturbation_semantics(original_bytes, original, replacement, result,
-                                         validating_carried_composite_stage, carried_perturbation);
-  errors.insert(errors.end(), std::make_move_iterator(perturbation_errors.begin()),
-                std::make_move_iterator(perturbation_errors.end()));
-  std::vector<std::string> resource_errors =
-      validate_resource_and_metadata_deltas(original, replacement, result);
-  errors.insert(errors.end(), std::make_move_iterator(resource_errors.begin()),
-                std::make_move_iterator(resource_errors.end()));
-  std::vector<std::string> entry_scalar_backup_errors =
-      validate_entry_scalar_backup_semantics(original, replacement, result);
-  errors.insert(errors.end(), std::make_move_iterator(entry_scalar_backup_errors.begin()),
-                std::make_move_iterator(entry_scalar_backup_errors.end()));
-  std::vector<std::string> dispatch_errors =
-      validate_dispatch_id_prologue_semantics(original, replacement, result);
-  errors.insert(errors.end(), std::make_move_iterator(dispatch_errors.begin()),
-                std::make_move_iterator(dispatch_errors.end()));
-  std::vector<std::string> exact_shadow_errors =
-      validate_inline_exact_shadow_semantics(replacement, result, expected_moi_report_dispatch_id);
-  errors.insert(errors.end(), std::make_move_iterator(exact_shadow_errors.begin()),
-                std::make_move_iterator(exact_shadow_errors.end()));
-  std::vector<std::string> release_transaction_errors =
-      validate_inline_release_transaction_semantics(replacement, result);
-  errors.insert(errors.end(), std::make_move_iterator(release_transaction_errors.begin()),
-                std::make_move_iterator(release_transaction_errors.end()));
+  FinalValidationEnvironment environment(original, replacement);
+  validate_patch_byte_accounting(environment, result, errors);
+  validate_patch_decoding(environment, result, errors);
+  validate_sc_indirect_island_semantics(environment, result, errors);
+  validate_branch_only_continuation_semantics(environment, result, errors);
+  validate_sc_dense_call_semantics(environment, result, errors);
+  validate_branch_relay_donor_semantics(environment, result, errors);
+  validate_branch_relay_reservoir_semantics(environment, result, errors);
+  validate_mutation_semantics(environment, result, errors);
+  validate_sc_perturbation_semantics(original_bytes, environment, result,
+                                     validating_carried_composite_stage, carried_perturbation,
+                                     errors);
+  validate_resource_and_metadata_deltas(environment, result, errors);
+  validate_entry_scalar_backup_semantics(environment, result, errors);
+  validate_dispatch_id_prologue_semantics(environment, result, errors);
+  validate_inline_exact_shadow_semantics(environment, result, expected_moi_report_dispatch_id,
+                                         errors);
+  validate_inline_release_transaction_semantics(environment, result, errors);
   return errors;
 }
 
