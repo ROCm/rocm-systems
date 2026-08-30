@@ -760,7 +760,7 @@ void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch
 }
 
 void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                        const ConSanOptions &options,
+                                        const ConSanFaultMutationPlan &plan,
                                         ConSanTransformArtifacts &result) {
   if (has_only_rocclr_runtime_kernels(result.program_inventory)) {
     result.warnings.emplace_back("ConSan barrier fault skipped ROCclr runtime helper code object");
@@ -770,22 +770,32 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
 
-  if (!options.fault_barrier_sequence_identity.empty() ||
-      !options.fault_barrier_companion_site_identity.empty() ||
-      !options.fault_barrier_companion_sequence_identity.empty()) {
-    const bool grouped = !options.fault_barrier_companion_site_identity.empty() ||
-                         !options.fault_barrier_companion_sequence_identity.empty();
+  if (plan.selection_sequence_identity) {
+    const bool grouped = plan.companion_selection_sequence_identity.has_value();
+    const ConSanFaultSelection selection = {
+        .primary_site_identity = plan.primary_identity,
+        .primary_sequence_identity = *plan.selection_sequence_identity,
+        .companion_site_identity = plan.companion_identity
+                                       ? std::string_view(*plan.companion_identity)
+                                       : std::string_view{},
+        .companion_sequence_identity =
+            plan.companion_selection_sequence_identity
+                ? std::string_view(*plan.companion_selection_sequence_identity)
+                : std::string_view{},
+        .kernel_name_filter = {},
+        .ordinal = 0,
+    };
     std::optional<ExactBarrierDropGroup> group;
     std::optional<ExactBarrierDropPair> pair;
     std::string reason;
     if (grouped) {
       const auto resolution =
-          resolve_exact_barrier_drop_group(fault_selection_view(result), options);
+          resolve_exact_barrier_drop_group(fault_selection_view(result), selection);
       group = resolution.group;
       reason = exact_barrier_drop_group_issue_message(resolution.issue, resolution.member_issue);
     } else {
       const auto resolution =
-          resolve_exact_barrier_drop_pair(fault_selection_view(result), options);
+          resolve_exact_barrier_drop_pair(fault_selection_view(result), selection);
       pair = resolution.pair;
       reason = exact_barrier_drop_pair_issue_message(resolution.issue);
     }
@@ -840,26 +850,16 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
     return;
   }
 
-  std::optional<BarrierSite> site;
-  const ConSanFaultSite *selected_inventory_site =
-      select_fault_site_for_plan(fault_selection_view(result), options,
-                                 ConSanFaultSiteKind::Barrier, options.fault_barrier_index);
-  if (selected_inventory_site != nullptr)
-    site = barrier_site_from_inventory(*selected_inventory_site);
-  if (!site) {
-    if (!options.fault_site_identity.empty()) {
-      result.warnings.emplace_back("ConSan barrier fault found no site with exact identity '" +
-                                   options.fault_site_identity + "'");
-    } else {
-      result.warnings.emplace_back("ConSan barrier fault found no patchable barrier at index " +
-                                   std::to_string(options.fault_barrier_index));
-    }
+  const ConSanFaultSite *selected_inventory_site = find_fault_site_by_identity(
+      fault_selection_view(result), plan.primary_identity, ConSanFaultSiteKind::Barrier);
+  if (selected_inventory_site == nullptr) {
+    result.errors.emplace_back("ConSan barrier fault plan no longer matches its pristine site");
     return;
   }
-  if (selected_inventory_site != nullptr &&
-      is_member_of_qualified_logical_barrier_pair(fault_selection_view(result),
+  const BarrierSite site = barrier_site_from_inventory(*selected_inventory_site);
+  if (is_member_of_qualified_logical_barrier_pair(fault_selection_view(result),
                                                   *selected_inventory_site) &&
-      !options.fault_allow_destructive_incomplete_barrier_drop) {
+      !plan.destructive_incomplete_barrier_drop) {
     result.warnings.emplace_back(
         "ConSan barrier fault rejected dropping one half of a qualified logical barrier pair; "
         "set explicit destructive incomplete-drop mode only in a contained run");
@@ -870,27 +870,27 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
     result.replacement.assign(original_bytes.begin(), original_bytes.end());
 
   const uint32_t replacement_nop = build_s_nop(0, arch);
-  if (site->file_offset > result.replacement.size() ||
-      sizeof(replacement_nop) > result.replacement.size() - site->file_offset) {
+  if (site.file_offset > result.replacement.size() ||
+      sizeof(replacement_nop) > result.replacement.size() - site.file_offset) {
     result.errors.emplace_back("ConSan barrier fault offset is outside ELF bytes");
     if (!result.modified())
       result.replacement.clear();
     return;
   }
 
-  std::memcpy(result.replacement.data() + site->file_offset, &replacement_nop,
+  std::memcpy(result.replacement.data() + site.file_offset, &replacement_nop,
               sizeof(replacement_nop));
 
   ConSanPatchInfo info;
   info.phase = ConSanPatchPhase::Mutation;
   info.kind = ConSanPatchKind::InlineBarrierNopRewrite;
-  info.anchor_offset = site->text_offset;
-  info.trampoline_offset = site->text_offset;
-  info.original_size = site->size;
+  info.anchor_offset = site.text_offset;
+  info.trampoline_offset = site.text_offset;
+  info.original_size = site.size;
   result.patches.push_back(info);
   result.mark_modified();
-  result.warnings.emplace_back("ConSan barrier fault rewrote " + site->mnemonic + " in " +
-                               site->range_name);
+  result.warnings.emplace_back("ConSan barrier fault rewrote " + site.mnemonic + " in " +
+                               site.range_name);
 }
 
 [[nodiscard]] std::optional<uint8_t> inline_barrier_selector_for_id(int32_t barrier_id) {

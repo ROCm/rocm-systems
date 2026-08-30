@@ -291,6 +291,7 @@ file(READ "${_consan_dir}/consan_fault_injection.h" _fault_application_contract)
 foreach(
     _typed_fault_application
     IN ITEMS
+       try_apply_barrier_drop_fault_patch
        try_apply_barrier_id_scope_fault_patch
        try_apply_barrier_participant_fault_patch
        try_apply_atomic_fault_patch

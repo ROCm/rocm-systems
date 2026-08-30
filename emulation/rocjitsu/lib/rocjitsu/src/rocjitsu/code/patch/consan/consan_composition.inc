@@ -410,19 +410,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 
   if (const ConSanFaultMutationPlan *plan =
           find_fault_plan(plans, ConSanFaultMutationKind::DropBarrier)) {
-    ConSanOptions options = make_fault_application_options(context);
-    options.fault_drop_barrier = true;
-    options.fault_site_identity = plan->primary_identity;
-    options.fault_allow_destructive_incomplete_barrier_drop =
-        plan->destructive_incomplete_barrier_drop;
-    if (plan->selection_sequence_identity)
-      options.fault_barrier_sequence_identity = *plan->selection_sequence_identity;
-    if (plan->companion_selection_sequence_identity) {
-      options.fault_barrier_companion_site_identity = *plan->companion_identity;
-      options.fault_barrier_companion_sequence_identity =
-          *plan->companion_selection_sequence_identity;
-    }
-    try_apply_barrier_drop_fault_patch(code_object, arch, options, result);
+    try_apply_barrier_drop_fault_patch(code_object, arch, *plan, result);
   }
   if (const ConSanFaultMutationPlan *plan =
           find_fault_plan(plans, ConSanFaultMutationKind::MoveBarrierPair);

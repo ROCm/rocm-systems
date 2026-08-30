@@ -18,7 +18,7 @@ class AmdGpuCodeObject;
 [[nodiscard]] size_t applied_fault_mutation_count(const ConSanTransformArtifacts &result);
 
 void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                        const ConSanOptions &options,
+                                        const ConSanFaultMutationPlan &plan,
                                         ConSanTransformArtifacts &result);
 void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
                                             const ConSanFaultMutationPlan &plan,
