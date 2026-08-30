@@ -197,12 +197,9 @@ completion path becomes an application hang rather than data loss.
 
 ## 6. Known gaps
 
-1. Thread trace, PC sampling and device counter collection still use the registry, so
-   `Queue::_callbacks`, `Queue::get_notifiers()` and `QueueController::add_callback` cannot be
-   deleted yet. `client_ids.hpp` already reserves tags for thread trace and PC sampling.
-2. Several in-flight PRs edit the same `no_real_consumers` expression in `hsa/queue.cpp`.
+1. Several in-flight PRs edit the same `no_real_consumers` expression in `hsa/queue.cpp`.
    Consolidating the predicate into one `needs_interception(queue)` helper would remove the
    recurring conflict.
-3. `counters::is_any_active()` forces `should_batch_packets = false` for every dispatch while any
+2. `counters::is_any_active()` forces `should_batch_packets = false` for every dispatch while any
    counter context is active. The performance effect of that, combined with kernel replay's own
    gate, has not been measured.

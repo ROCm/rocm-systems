@@ -158,22 +158,8 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session, packet);
         kernel_dispatch::dispatch_complete(queue_info_session, packet, dispatch_time);
 
-        // Calls our internal callbacks to callers who need to be notified post
-        // kernel execution.
-        queue_info_session.queue.signal_callback([&](const auto& map) {
-            for(const auto& [client_id, cb_data] : map)
-            {
-                cb_data.signal_completion(queue_info_session.queue,
-                                          packet.kernel_packet,
-                                          _session,
-                                          packet,
-                                          packet.instrumentation_packets,
-                                          dispatch_time);
-            }
-        });
+        // Notify the services that need to run after kernel execution.
 
-        // Counter collection, thread trace, PC sampling and SPM completion are migrated off the
-        // callback registry (see WriteInterceptor); invoke their hooks explicitly here.
         counters::kernel_dispatch_phase_exit_hook(queue_info_session.queue,
                                                   packet.kernel_packet,
                                                   _session,
@@ -339,11 +325,10 @@ WriteInterceptor(const void* packets,
     const bool counters_active     = counters::is_any_active();
     const bool thread_trace_active = thread_trace::is_any_active();
     const bool spm_active          = spm::is_any_active();
-    // None of the migrated services registers a queue-controller callback any more, so none of
-    // them counts toward get_notifiers(); detect each explicitly so a run driven by only one of
+    // Every per-dispatch service is now interrogated directly, so a run driven by only one of
     // them still enters the interceptor.
     const bool no_real_consumers =
-        (queue.get_notifiers() == 0 && !counters_active && !thread_trace_active && !spm_active &&
+        (!counters_active && !thread_trace_active && !spm_active &&
          !pc_sampling::is_configured_on_agent(queue.get_agent().get_rocp_agent()->id) &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
@@ -630,33 +615,8 @@ WriteInterceptor(const void* packets,
                 thr_id,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
 
-            // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
-            // along with an ID of the client we got the packet from (this will be returned via
-            // completed_cb_t)
-
-            // Signal callbacks that a kernel_packet is being enqueued
-            queue.signal_callback([&](const auto& map) {
-                for(const auto& [client_id, cb_data] : map)
-                {
-                    // NOTE: if map.size() > 1, multiple callbacks will be sharing the same user
-                    // data. This needs to be fixed. (bewelton)
-                    auto [packet, bSerial] = cb_data.write_interceptor(
-                        queue,
-                        kernel_packet,
-                        kernel_id,
-                        dispatch_id,
-                        &_packet_data.user_data,
-                        _packet_data.tracing_data.external_correlation_ids,
-                        corr_id);
-                    _packet_data.is_serialized |= bSerial;
-                    if(packet)
-                        _packet_data.instrumentation_packets.push_back(
-                            std::make_pair(std::move(packet), client_id));
-                }
-            });
-
-            // These services are migrated off the per-queue callback registry: call their hooks
-            // explicitly (anything still registered flows through signal_callback above).
+            // Each service appends its own instrumentation packets, tagged with the client id
+            // that identifies it again on the completion path.
             counters::kernel_dispatch_phase_enter_hook(
                 queue,
                 kernel_packet,
@@ -810,20 +770,8 @@ WriteInterceptor(const void* packets,
         _writer(std::move(transformed_packets));
     };
 
-    bool should_batch_packets = true;
-    queue.signal_callback([&should_batch_packets](const auto& map) {
-        for(const auto& [_, cb_data] : map)
-        {
-            if(!cb_data.batch_packets())
-            {
-                should_batch_packets = false;
-                break;
-            }
-        }
-    });
-
-    // These services require per-packet mode; none of them participates in the registry above.
-    if(counters_active || thread_trace_active || spm_active) should_batch_packets = false;
+    // These services require per-packet mode.
+    bool should_batch_packets = !(counters_active || thread_trace_active || spm_active);
 
     if(should_batch_packets)
     {
@@ -1105,24 +1053,6 @@ Queue::sync() const
         ROCP_WARNING_IF(_value != 0)
             << fmt::format("Timeout while waiting for queue sync: {} kernels still active", _value);
     }
-}
-
-void
-Queue::register_callback(ClientID id, queue_callbacks_t callbacks)
-{
-    _callbacks.wlock([&](auto& map) {
-        ROCP_FATAL_IF(rocprofiler::common::get_val(map, id)) << "ID already exists!";
-        _notifiers++;
-        map[id] = std::move(callbacks);
-    });
-}
-
-void
-Queue::remove_callback(ClientID id)
-{
-    _callbacks.wlock([&](auto& map) {
-        if(map.erase(id) == 1) _notifiers--;
-    });
 }
 
 queue_state

@@ -73,31 +73,6 @@ struct write_packet_t
 
 class Queue;
 
-using queue_batch_packets_callback_t = std::function<bool()>;
-
-using queue_write_callback_t =
-    std::function<write_packet_t(const Queue&,
-                                 const rocprofiler_packet&,
-                                 rocprofiler_kernel_id_t,
-                                 rocprofiler_dispatch_id_t,
-                                 rocprofiler_user_data_t*,
-                                 const queue_info_session_t::external_corr_id_map_t&,
-                                 const context::correlation_id*)>;
-
-using queue_completion_callback_t = std::function<void(const Queue&,
-                                                       const rocprofiler_packet&,
-                                                       std::shared_ptr<queue_info_session_t>&,
-                                                       packet_data_t&,
-                                                       inst_pkt_t&,
-                                                       kernel_dispatch::profiling_time)>;
-
-struct queue_callbacks_t
-{
-    queue_batch_packets_callback_t batch_packets     = {};
-    queue_write_callback_t         write_interceptor = {};
-    queue_completion_callback_t    signal_completion = {};
-};
-
 // Interceptor for a single specific queue
 class Queue
 {
@@ -112,10 +87,6 @@ public:
     // Pair first: An AQL packet can be returned that will be injected into the queue.
     // Pair second: Boolean flag indicating the dispatch needs to be serialized.
     using should_serialize_cb_t = std::function<bool(const Queue&)>;
-
-    using write_cb_t     = queue_write_callback_t;
-    using completed_cb_t = queue_completion_callback_t;
-    using callback_map_t = std::unordered_map<ClientID, queue_callbacks_t>;
 
     // Used when creating a Queue from a previously created intercept queue.
     // When the constructor with this parameter type is called, the provided function will be called
@@ -151,15 +122,9 @@ public:
     static void             destroy_signal(pooled_signal_t* signal);
 
     template <typename FuncT>
-    void signal_callback(FuncT&& func) const;
-
-    template <typename FuncT>
     void lock_queue(FuncT&& func);
 
     virtual rocprofiler_queue_id_t get_id() const;
-
-    // Fast check to see if we have any callbacks we need to notify
-    int get_notifiers() const { return _notifiers; }
 
     // Tracks the number of in flight kernel executions we
     // are waiting on. We cannot destroy Queue until all kernels
@@ -172,9 +137,6 @@ public:
     }
 
     void sync() const;
-
-    void register_callback(ClientID id, queue_callbacks_t callbacks);
-    void remove_callback(ClientID id);
 
     const CoreApiTable& core_api() const { return _core_api; }
     const AmdExtTable&  ext_api() const { return _ext_api; }
@@ -191,16 +153,14 @@ public:
     hsa_signal_t                    ready_signal    = {.handle = 0};
 
 private:
-    std::atomic<int>                     _notifiers            = {0};
-    std::atomic<int64_t>                 _active_async_packets = {0};
-    CoreApiTable                         _core_api             = {};
-    AmdExtTable                          _ext_api              = {};
-    const AgentCache&                    _agent;
-    common::Synchronized<callback_map_t> _callbacks       = {};
-    hsa_queue_t*                         _intercept_queue = nullptr;
-    queue_state                          _state           = queue_state::normal;
-    std::mutex                           _lock_queue      = {};
-    hsa_signal_t                         _active_kernels  = {.handle = 0};
+    std::atomic<int64_t> _active_async_packets = {0};
+    CoreApiTable         _core_api             = {};
+    AmdExtTable          _ext_api              = {};
+    const AgentCache&    _agent;
+    hsa_queue_t*         _intercept_queue = nullptr;
+    queue_state          _state           = queue_state::normal;
+    std::mutex           _lock_queue      = {};
+    hsa_signal_t         _active_kernels  = {.handle = 0};
 };
 
 inline rocprofiler_queue_id_t
@@ -208,15 +168,6 @@ Queue::get_id() const
 {
     return {.handle = intercept_queue()->id};
 };
-
-template <typename FuncT>
-inline void
-Queue::signal_callback(FuncT&& func) const
-{
-    static_assert(std::is_invocable<FuncT, const callback_map_t&>::value,
-                  "FuncT must be invocable with const callback_map_t&");
-    _callbacks.rlock([&func](const auto& data) { func(data); });
-}
 
 template <typename FuncT>
 void
