@@ -36,7 +36,6 @@ using consan_moi_detail::append_atomic_fetch_add_one_u32;
 using consan_moi_detail::append_compare_moi_report_dispatch_id_word;
 using consan_moi_detail::append_load_u32_vgpr_at_offset;
 using consan_moi_detail::append_store_moi_report_dispatch_id_pair;
-using consan_moi_detail::ConSanMoiLiteralDispatchIdPolicy;
 using consan_moi_detail::ConSanMoiRecordEmitter;
 using consan_moi_detail::moi_permits_literal_dispatch_identity;
 
@@ -205,8 +204,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     return true;
   }
   if (!append_moi_report_dispatch_id_pair(
-          words, consan_moi_detail::moi_report_dispatch_id_sources(point, resources), bank_vgpr,
-          temporary_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed)) {
+          words, consan_moi_detail::moi_bound_dispatch_id_sources({point, resources}), bank_vgpr,
+          temporary_vgpr, arch)) {
     return false;
   }
   const auto mix = [&](uint16_t source) {
@@ -274,8 +273,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     const ConSanMoiWorkgroupSources &workgroup_sources, uint16_t residue_vgpr,
     uint16_t temporary_vgpr, uint16_t coordinate_vgpr, rj_code_arch_t arch) {
   if (!append_moi_report_dispatch_id_pair(
-          words, consan_moi_detail::moi_report_dispatch_id_sources(point, resources), residue_vgpr,
-          temporary_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed)) {
+          words, consan_moi_detail::moi_bound_dispatch_id_sources({point, resources}), residue_vgpr,
+          temporary_vgpr, arch)) {
     return false;
   }
   const auto mix = [&](uint16_t source) {
@@ -840,9 +839,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
       !record.store_literal(offsetof(ConSanMoiSampledCausalWindow, generation) + 4u,
                             static_cast<uint32_t>(bound_resources.moi_report_generation >> 32u)) ||
       !append_store_moi_report_dispatch_id_pair(
-          record, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
-          offsetof(ConSanMoiSampledCausalWindow, dispatch_id), arch,
-          ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed) ||
+          record, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
+          offsetof(ConSanMoiSampledCausalWindow, dispatch_id)) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_x),
                               workgroup_sources->x,
                               ConSanMoiRecordEmitter::MissingWorkgroupSource::StoreZero) ||
@@ -997,9 +995,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
   const auto reject_unless_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
     if (!record.load(offset, low_vgpr) ||
         !append_compare_moi_report_dispatch_id_word(
-            words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
-            low_vgpr, high_vgpr, high_word, arch,
-            ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed)) {
+            words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
+            low_vgpr, high_vgpr, high_word, arch)) {
       return false;
     }
     return sequence.emit_branch(different_identity_label, InstructionSequence::BranchKind::VccZero);

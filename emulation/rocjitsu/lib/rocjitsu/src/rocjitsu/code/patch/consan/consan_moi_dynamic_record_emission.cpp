@@ -159,10 +159,10 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
 [[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
     std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
     const ConSanMoiReportDispatchIdSources &sources, uint16_t slot_vgpr, uint16_t scratch_vgpr,
-    rj_code_arch_t arch, ConSanMoiLiteralDispatchIdPolicy policy) {
+    rj_code_arch_t arch) {
   for (const bool high_word : {false, true}) {
     const ConSanMoiReportDispatchIdWordSource &source = sources[high_word ? 1u : 0u];
-    if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
+    if (!source.is_well_formed())
       return false;
     const uint64_t field_address = low_field_address + (high_word ? sizeof(uint32_t) : 0u);
     const bool stored =
@@ -171,7 +171,7 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
         : source.vgpr
             ? append_dynamic_record_store_u32_vgpr(words, layout, field_address, *source.vgpr,
                                                    slot_vgpr, scratch_vgpr, arch)
-            : append_dynamic_record_store_u32_literal(words, layout, field_address, source.literal,
+            : append_dynamic_record_store_u32_literal(words, layout, field_address, *source.literal,
                                                       slot_vgpr, scratch_vgpr, arch);
     if (!stored)
       return false;

@@ -29,7 +29,6 @@ using consan_moi_detail::append_atomic_fetch_add_one_u32;
 using consan_moi_detail::append_load_u32_vgpr_at_offset;
 using consan_moi_detail::append_moi_prepare_scc_preserving_indirect_jump;
 using consan_moi_detail::append_store_u32_vgpr_at_offset;
-using consan_moi_detail::ConSanMoiLiteralDispatchIdPolicy;
 using consan_moi_detail::ConSanMoiRecordEmitter;
 
 std::optional<ConSanMoiSampledSyncRole> sampled_atomic_role(ConSanMoiAtomicEventKind kind,
@@ -471,9 +470,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       !record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, generation) + 4u,
                             static_cast<uint32_t>(bound_resources.moi_report_generation >> 32u)) ||
       !append_store_moi_report_dispatch_id_pair(
-          record, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
-          offsetof(ConSanMoiSampledPendingAcquireSlot, dispatch_id), arch,
-          ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed) ||
+          record, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
+          offsetof(ConSanMoiSampledPendingAcquireSlot, dispatch_id)) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_x),
                               workgroup_sources->x) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledPendingAcquireSlot, workgroup_y),
@@ -764,8 +762,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto narrow_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
     if (!append_load_u32_vgpr_at_offset(words, base, offset, value, arch) ||
         !append_compare_moi_report_dispatch_id_word(
-            words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), value,
-            expected, high_word, arch, ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed)) {
+            words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
+            value, expected, high_word, arch)) {
       return false;
     }
     const auto narrow =

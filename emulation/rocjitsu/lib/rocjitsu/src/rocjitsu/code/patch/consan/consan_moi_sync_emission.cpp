@@ -49,7 +49,6 @@ using consan_moi_detail::append_atomic_load_u32;
 using consan_moi_detail::append_compare_moi_report_dispatch_id_word;
 using consan_moi_detail::append_load_u32_vgpr_at_offset;
 using consan_moi_detail::append_store_u32_vgpr_at_offset;
-using consan_moi_detail::ConSanMoiLiteralDispatchIdPolicy;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 
 namespace consan_moi_impl {
@@ -1243,9 +1242,10 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // Slot derivation is complete. `hash` is dead here and its next use
     // overwrites it with the source-version parity bit.
     if (!append_compare_moi_report_dispatch_id_word(
-            words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), value,
-            hash,
-            /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared))
+            words,
+            consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
+            value, hash,
+            /*high_word=*/false, arch))
       return false;
     if (!narrow_vcc() ||
         !append_load_u32_vgpr_at_offset(
@@ -1254,9 +1254,10 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
             arch))
       return false;
     if (!append_compare_moi_report_dispatch_id_word(
-            words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), value,
-            hash,
-            /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared))
+            words,
+            consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
+            value, hash,
+            /*high_word=*/true, arch))
       return false;
     if (!narrow_vcc() ||
         !append_load_u32_vgpr_at_offset(
@@ -1540,15 +1541,19 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
             value, arch))
       return false;
     if (!append_moi_report_dispatch_id_word(
-            words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), value,
-            /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared))
+            words,
+            consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
+            value,
+            /*high_word=*/false, arch))
       return false;
     if (!append_store_u32_vgpr_at_offset(
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id), value, arch))
       return false;
     if (!append_moi_report_dispatch_id_word(
-            words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), value,
-            /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared))
+            words,
+            consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
+            value,
+            /*high_word=*/true, arch))
       return false;
     if (!append_store_u32_vgpr_at_offset(
             words, base,
@@ -1740,9 +1745,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   // Release-slot addressing is complete. `temporary_vgpr` is dead here and
   // the later snapshot construction overwrites it before any read.
   if (!append_compare_moi_report_dispatch_id_word(
-          words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
+          words, consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
           value_vgpr, temporary_vgpr,
-          /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared))
+          /*high_word=*/false, arch))
     return false;
   words.push_back(*narrow_if_valid);
   if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
@@ -1751,9 +1756,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                       value_vgpr, arch))
     return false;
   if (!append_compare_moi_report_dispatch_id_word(
-          words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
+          words, consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
           value_vgpr, temporary_vgpr,
-          /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared))
+          /*high_word=*/true, arch))
     return false;
   words.push_back(*narrow_if_valid);
   // Swap address and temporary lifetimes when the target requires the address
@@ -2269,9 +2274,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // the next scan iteration reloads it before use.
     if (!append_load_u32_vgpr_at_offset(words, snapshot_address, offset, temporary, arch) ||
         !append_compare_moi_report_dispatch_id_word(
-            words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
-            temporary, version_before, high_word, arch,
-            ConSanMoiLiteralDispatchIdPolicy::TargetDeclared)) {
+            words,
+            consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
+            temporary, version_before, high_word, arch)) {
       return false;
     }
     return narrow_vcc();
@@ -2584,9 +2589,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // overwrites it before the first use of the compare-swap operand.
     if (!append_load_u32_vgpr_at_offset(words, slot_address, offset, temporary, arch) ||
         !append_compare_moi_report_dispatch_id_word(
-            words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
-            temporary, cas_new, high_word, arch,
-            ConSanMoiLiteralDispatchIdPolicy::TargetDeclared)) {
+            words,
+            consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
+            temporary, cas_new, high_word, arch)) {
       return false;
     }
     return narrow_vcc();
@@ -3022,9 +3027,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                        static_cast<uint16_t>(stable_guest_address + 1u), arch))
     return false;
   if (!append_moi_report_dispatch_id_word(
-          words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
+          words, consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
           temporary,
-          /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared)) {
+          /*high_word=*/false, arch)) {
     errors.emplace_back("ConSan MOI inline release could not materialize dispatch ID low");
     return false;
   }
@@ -3033,9 +3038,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                        temporary, arch))
     return false;
   if (!append_moi_report_dispatch_id_word(
-          words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
+          words, consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
           temporary,
-          /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared)) {
+          /*high_word=*/true, arch)) {
     errors.emplace_back("ConSan MOI inline release could not materialize dispatch ID high");
     return false;
   }

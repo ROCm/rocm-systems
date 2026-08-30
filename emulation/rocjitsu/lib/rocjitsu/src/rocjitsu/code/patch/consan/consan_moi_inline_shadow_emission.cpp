@@ -47,7 +47,6 @@ using consan_moi_detail::append_publish_visible_evidence_if_zero;
 using consan_moi_detail::append_store_u32_sgpr;
 using consan_moi_detail::append_store_u32_vgpr;
 using consan_moi_detail::append_store_u32_vgpr_at_offset;
-using consan_moi_detail::ConSanMoiLiteralDispatchIdPolicy;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 
 std::optional<uint16_t> inline_shadow_visible_evidence_sgpr(const ConSanRequest &request,
@@ -476,9 +475,9 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
       const auto require_dispatch_equal = [&](size_t offset, bool high_word) {
         if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch) ||
             !append_compare_moi_report_dispatch_id_word(
-                words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
-                tmp_vgpr, source_version, high_word, arch,
-                ConSanMoiLiteralDispatchIdPolicy::TargetDeclared)) {
+                words,
+                consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
+                tmp_vgpr, source_version, high_word, arch)) {
           return false;
         }
         return narrow();
@@ -1503,9 +1502,8 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     return false;
   words.push_back(*save_claimed_publishers);
   if (!append_compare_moi_report_dispatch_id_word(
-          words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
-          prior_dispatch_low_vgpr, tmp_vgpr, /*high_word=*/false, arch,
-          ConSanMoiLiteralDispatchIdPolicy::TargetDeclared)) {
+          words, consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
+          prior_dispatch_low_vgpr, tmp_vgpr, /*high_word=*/false, arch)) {
     return false;
   }
   if (!narrow_vcc())
@@ -1515,9 +1513,8 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const auto restore_claimed_publishers =
       instrumentation::build_s_mov_b64(kRdna4ExecLo, committed_exec_sgpr, arch);
   if (!append_compare_moi_report_dispatch_id_word(
-          words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
-          prior_dispatch_high_vgpr, tmp_vgpr, /*high_word=*/true, arch,
-          ConSanMoiLiteralDispatchIdPolicy::TargetDeclared) ||
+          words, consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
+          prior_dispatch_high_vgpr, tmp_vgpr, /*high_word=*/true, arch) ||
       !save_same_dispatch || !restore_claimed_publishers) {
     return false;
   }
@@ -1552,9 +1549,8 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     return false;
   }
   if (!append_moi_report_dispatch_id_pair(
-          words, consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources),
-          current_low_vgpr, static_cast<uint16_t>(current_low_vgpr + 1u), arch,
-          ConSanMoiLiteralDispatchIdPolicy::TargetDeclared) ||
+          words, consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
+          current_low_vgpr, static_cast<uint16_t>(current_low_vgpr + 1u), arch) ||
       !append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
                                        offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id),
                                        current_low_vgpr, arch) ||
@@ -3161,8 +3157,9 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
       std::vector<uint32_t> copy_dispatch_id;
       if (!append_moi_report_dispatch_id_word(
               copy_dispatch_id,
-              consan_moi_detail::moi_report_dispatch_id_sources(point, bound_resources), tmp_vgpr,
-              /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::TargetDeclared)) {
+              consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
+              tmp_vgpr,
+              /*high_word=*/false, arch)) {
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode dispatch ID");
         return std::nullopt;
       }

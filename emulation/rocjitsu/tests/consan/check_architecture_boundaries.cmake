@@ -92,8 +92,8 @@ _consan_assert_no_match(
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_sync_emission.cpp"
-    "consan_uses_gfx9_cdna_encoding|RdnaFamilyOnly|AnyArchitecture"
-    "shared synchronization emission must consume normalized target facts and semantic literal policy"
+    "consan_uses_gfx9_cdna_encoding|ConSanMoiLiteralDispatchIdPolicy|moi_report_dispatch_id_source_permitted"
+    "shared synchronization emission must consume normalized target facts and authorized dispatch sources"
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_target_address.cpp"
@@ -212,6 +212,13 @@ file(
     "${_consan_dir}/*.h"
     "${_consan_dir}/*.inc"
 )
+foreach(_file IN LISTS _consan_sources)
+    _consan_assert_no_match(
+        "${_file}"
+        "ConSanMoiLiteralDispatchIdPolicy|moi_report_dispatch_id_sources|moi_report_dispatch_id_source_permitted"
+        "dispatch identity must be authorized once in its source-planning product"
+    )
+endforeach()
 foreach(_file IN LISTS _consan_sources)
     file(STRINGS "${_file}" _generated_includes REGEX "isa/arch/amdgpu/generated/")
     if(NOT _generated_includes)

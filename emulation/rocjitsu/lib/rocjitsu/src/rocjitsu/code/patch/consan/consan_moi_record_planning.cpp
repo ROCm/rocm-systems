@@ -14,7 +14,7 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-using consan_moi_detail::moi_report_dispatch_id_sources;
+using consan_moi_detail::moi_bound_dispatch_id_sources;
 
 [[nodiscard]] bool moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
     const ConSanRequest &request, const ConSanMoiOperatingPoint &allocation,
@@ -85,7 +85,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
       .moi_record_replay_call_return_sgpr = point.moi_record_replay_call_return_sgpr,
       .workgroup_sources = *workgroup_sources,
       .special_state = *special_state,
-      .dispatch_id_sources = moi_report_dispatch_id_sources(point, bound_resources),
+      .dispatch_id_sources = moi_bound_dispatch_id_sources({point, bound_resources}),
       .runtime_workgroup_gate = runtime_workgroup_gate,
       .indirect_jump = moi_indirect_jump_sgprs(request, point),
   };

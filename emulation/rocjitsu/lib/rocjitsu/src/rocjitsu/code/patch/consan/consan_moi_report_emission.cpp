@@ -59,38 +59,44 @@ bool moi_permits_literal_dispatch_identity(ConSanMoiEngine engine, rj_code_arch_
   return consan_arch_uses_literal_dispatch_identity(arch) || engine == ConSanMoiEngine::Sampled;
 }
 
+namespace {
+
 ConSanMoiReportDispatchIdSources
-moi_report_dispatch_id_sources(const ConSanMoiOperatingPoint &point,
-                               const BoundRuntimeResources &resources) {
+plan_dispatch_id_sources(const ConSanMoiReportDispatchIdPlanningContext &context,
+                         bool literal_permitted) {
   ConSanMoiReportDispatchIdSources sources;
   for (size_t index = 0; index < sources.size(); ++index) {
-    if (point.moi_dispatch_id_sgpr) {
-      sources[index].sgpr = static_cast<uint16_t>(*point.moi_dispatch_id_sgpr + index);
-    } else if (point.moi_dispatch_id_vgpr) {
-      sources[index].vgpr = static_cast<uint16_t>(*point.moi_dispatch_id_vgpr + index);
-    } else {
+    if (context.point.moi_dispatch_id_sgpr) {
+      sources[index].sgpr = static_cast<uint16_t>(*context.point.moi_dispatch_id_sgpr + index);
+    } else if (context.point.moi_dispatch_id_vgpr) {
+      sources[index].vgpr = static_cast<uint16_t>(*context.point.moi_dispatch_id_vgpr + index);
+    } else if (literal_permitted) {
       sources[index].literal =
-          static_cast<uint32_t>(resources.moi_report_dispatch_id >> (index * 32u));
+          static_cast<uint32_t>(context.resources.moi_report_dispatch_id >> (index * 32u));
     }
   }
   return sources;
 }
 
-bool moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSource &source,
-                                             ConSanMoiLiteralDispatchIdPolicy policy,
-                                             rj_code_arch_t arch) {
-  return source.sgpr || source.vgpr ||
-         policy == ConSanMoiLiteralDispatchIdPolicy::ExternalBindingAllowed ||
-         consan_arch_uses_literal_dispatch_identity(arch);
+} // namespace
+
+ConSanMoiReportDispatchIdSources
+moi_target_dispatch_id_sources(const ConSanMoiReportDispatchIdPlanningContext &context,
+                               rj_code_arch_t arch) {
+  return plan_dispatch_id_sources(context, consan_arch_uses_literal_dispatch_identity(arch));
+}
+
+ConSanMoiReportDispatchIdSources
+moi_bound_dispatch_id_sources(const ConSanMoiReportDispatchIdPlanningContext &context) {
+  return plan_dispatch_id_sources(context, true);
 }
 
 bool append_moi_report_dispatch_id_word(std::vector<uint32_t> &words,
                                         const ConSanMoiReportDispatchIdSources &sources,
                                         uint16_t destination_vgpr, bool high_word,
-                                        rj_code_arch_t arch,
-                                        ConSanMoiLiteralDispatchIdPolicy policy) {
+                                        rj_code_arch_t arch) {
   const ConSanMoiReportDispatchIdWordSource &source = sources[high_word ? 1u : 0u];
-  if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
+  if (!source.is_well_formed())
     return false;
   if (source.sgpr) {
     words.push_back(build_v_mov_b32_e32(destination_vgpr, *source.sgpr, arch));
@@ -101,7 +107,7 @@ bool append_moi_report_dispatch_id_word(std::vector<uint32_t> &words,
     return true;
   }
   const auto materialize =
-      instrumentation::build_v_mov_b32_literal(destination_vgpr, source.literal, arch);
+      instrumentation::build_v_mov_b32_literal(destination_vgpr, *source.literal, arch);
   if (!materialize)
     return false;
   words.insert(words.end(), materialize->begin(), materialize->end());
@@ -110,22 +116,21 @@ bool append_moi_report_dispatch_id_word(std::vector<uint32_t> &words,
 
 bool append_moi_report_dispatch_id_pair(std::vector<uint32_t> &words,
                                         const ConSanMoiReportDispatchIdSources &sources,
-                                        uint16_t low_vgpr, uint16_t high_vgpr, rj_code_arch_t arch,
-                                        ConSanMoiLiteralDispatchIdPolicy policy) {
+                                        uint16_t low_vgpr, uint16_t high_vgpr,
+                                        rj_code_arch_t arch) {
   return append_moi_report_dispatch_id_word(words, sources, low_vgpr,
-                                            /*high_word=*/false, arch, policy) &&
+                                            /*high_word=*/false, arch) &&
          append_moi_report_dispatch_id_word(words, sources, high_vgpr,
-                                            /*high_word=*/true, arch, policy);
+                                            /*high_word=*/true, arch);
 }
 
 bool append_compare_moi_report_dispatch_id_word(std::vector<uint32_t> &words,
                                                 const ConSanMoiReportDispatchIdSources &sources,
                                                 uint16_t value_vgpr,
                                                 uint16_t clobberable_literal_temporary_vgpr,
-                                                bool high_word, rj_code_arch_t arch,
-                                                ConSanMoiLiteralDispatchIdPolicy policy) {
+                                                bool high_word, rj_code_arch_t arch) {
   const ConSanMoiReportDispatchIdWordSource &source = sources[high_word ? 1u : 0u];
-  if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
+  if (!source.is_well_formed())
     return false;
   uint16_t expected = 0u;
   if (source.sgpr) {
@@ -136,7 +141,7 @@ bool append_compare_moi_report_dispatch_id_word(std::vector<uint32_t> &words,
     assert(clobberable_literal_temporary_vgpr != value_vgpr);
     if (clobberable_literal_temporary_vgpr == value_vgpr ||
         !append_moi_report_dispatch_id_word(words, sources, clobberable_literal_temporary_vgpr,
-                                            high_word, arch, policy)) {
+                                            high_word, arch)) {
       return false;
     }
     expected = vector_source_vgpr(clobberable_literal_temporary_vgpr);
@@ -150,16 +155,15 @@ bool append_compare_moi_report_dispatch_id_word(std::vector<uint32_t> &words,
 
 bool append_store_moi_report_dispatch_id_pair(ConSanMoiRecordEmitter &record,
                                               const ConSanMoiReportDispatchIdSources &sources,
-                                              uint32_t low_offset, rj_code_arch_t arch,
-                                              ConSanMoiLiteralDispatchIdPolicy policy) {
+                                              uint32_t low_offset) {
   for (const bool high_word : {false, true}) {
     const ConSanMoiReportDispatchIdWordSource &source = sources[high_word ? 1u : 0u];
-    if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
+    if (!source.is_well_formed())
       return false;
     const uint32_t offset = low_offset + (high_word ? sizeof(uint32_t) : 0u);
     if (source.sgpr   ? !record.store_sgpr(offset, *source.sgpr)
         : source.vgpr ? !record.store_vgpr(offset, *source.vgpr)
-                      : !record.store_literal(offset, source.literal)) {
+                      : !record.store_literal(offset, *source.literal)) {
       return false;
     }
   }

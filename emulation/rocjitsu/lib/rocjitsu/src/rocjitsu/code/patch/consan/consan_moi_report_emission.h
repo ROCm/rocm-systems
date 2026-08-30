@@ -37,38 +37,44 @@ private:
 struct ConSanMoiReportDispatchIdWordSource {
   std::optional<uint16_t> sgpr;
   std::optional<uint16_t> vgpr;
-  uint32_t literal = 0;
+  std::optional<uint32_t> literal;
+
+  [[nodiscard]] bool is_well_formed() const {
+    return static_cast<uint8_t>(sgpr.has_value()) + static_cast<uint8_t>(vgpr.has_value()) +
+               static_cast<uint8_t>(literal.has_value()) ==
+           1u;
+  }
 };
 
 using ConSanMoiReportDispatchIdSources = std::array<ConSanMoiReportDispatchIdWordSource, 2>;
 
-enum class ConSanMoiLiteralDispatchIdPolicy : uint8_t { TargetDeclared, ExternalBindingAllowed };
+struct ConSanMoiReportDispatchIdPlanningContext {
+  const ConSanMoiOperatingPoint &point;
+  const BoundRuntimeResources &resources;
+};
 
 [[nodiscard]] bool moi_permits_literal_dispatch_identity(ConSanMoiEngine engine,
                                                          rj_code_arch_t arch);
 [[nodiscard]] ConSanMoiReportDispatchIdSources
-moi_report_dispatch_id_sources(const ConSanMoiOperatingPoint &point,
-                               const BoundRuntimeResources &resources);
-[[nodiscard]] bool
-moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSource &source,
-                                        ConSanMoiLiteralDispatchIdPolicy policy,
-                                        rj_code_arch_t arch);
+moi_target_dispatch_id_sources(const ConSanMoiReportDispatchIdPlanningContext &context,
+                               rj_code_arch_t arch);
+[[nodiscard]] ConSanMoiReportDispatchIdSources
+moi_bound_dispatch_id_sources(const ConSanMoiReportDispatchIdPlanningContext &context);
 [[nodiscard]] bool
 append_moi_report_dispatch_id_word(std::vector<uint32_t> &words,
                                    const ConSanMoiReportDispatchIdSources &sources,
-                                   uint16_t destination_vgpr, bool high_word, rj_code_arch_t arch,
-                                   ConSanMoiLiteralDispatchIdPolicy policy);
+                                   uint16_t destination_vgpr, bool high_word, rj_code_arch_t arch);
 [[nodiscard]] bool
 append_moi_report_dispatch_id_pair(std::vector<uint32_t> &words,
                                    const ConSanMoiReportDispatchIdSources &sources,
-                                   uint16_t low_vgpr, uint16_t high_vgpr, rj_code_arch_t arch,
-                                   ConSanMoiLiteralDispatchIdPolicy policy);
+                                   uint16_t low_vgpr, uint16_t high_vgpr, rj_code_arch_t arch);
 [[nodiscard]] bool append_compare_moi_report_dispatch_id_word(
     std::vector<uint32_t> &words, const ConSanMoiReportDispatchIdSources &sources,
     uint16_t value_vgpr, uint16_t clobberable_literal_temporary_vgpr, bool high_word,
-    rj_code_arch_t arch, ConSanMoiLiteralDispatchIdPolicy policy);
-[[nodiscard]] bool append_store_moi_report_dispatch_id_pair(
-    ConSanMoiRecordEmitter &record, const ConSanMoiReportDispatchIdSources &sources,
-    uint32_t low_offset, rj_code_arch_t arch, ConSanMoiLiteralDispatchIdPolicy policy);
+    rj_code_arch_t arch);
+[[nodiscard]] bool
+append_store_moi_report_dispatch_id_pair(ConSanMoiRecordEmitter &record,
+                                         const ConSanMoiReportDispatchIdSources &sources,
+                                         uint32_t low_offset);
 
 } // namespace rocjitsu::consan_moi_detail

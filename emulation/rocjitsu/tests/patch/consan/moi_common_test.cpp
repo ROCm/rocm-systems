@@ -5,6 +5,7 @@
 #include "rocjitsu/code/patch/consan/consan_cfg.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_apply.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
@@ -19,6 +20,39 @@
 
 namespace rocjitsu {
 namespace {
+
+TEST(ConSanMoi, DispatchIdSourcePlanningAuthorizesLiteralsAtTheModeBoundary) {
+  ConSanMoiOperatingPoint point;
+  BoundRuntimeResources resources;
+  resources.moi_report_dispatch_id = 0x1234567887654321ull;
+
+  const auto bound = consan_moi_detail::moi_bound_dispatch_id_sources({point, resources});
+  ASSERT_TRUE(bound[0].is_well_formed());
+  ASSERT_TRUE(bound[1].is_well_formed());
+  EXPECT_EQ(bound[0].literal, 0x87654321u);
+  EXPECT_EQ(bound[1].literal, 0x12345678u);
+
+  const auto target_literal = consan_moi_detail::moi_target_dispatch_id_sources(
+      {point, resources}, ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_TRUE(target_literal[0].is_well_formed());
+  EXPECT_EQ(target_literal[0].literal, bound[0].literal);
+
+  const auto target_without_literal = consan_moi_detail::moi_target_dispatch_id_sources(
+      {point, resources}, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_FALSE(target_without_literal[0].is_well_formed());
+  EXPECT_FALSE(target_without_literal[1].is_well_formed());
+
+  point.moi_dispatch_id_sgpr = 40u;
+  const auto scalar = consan_moi_detail::moi_target_dispatch_id_sources({point, resources},
+                                                                        ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(scalar[0].sgpr, 40u);
+  EXPECT_EQ(scalar[1].sgpr, 41u);
+  EXPECT_FALSE(scalar[0].literal);
+
+  auto malformed = scalar[0];
+  malformed.literal = 1u;
+  EXPECT_FALSE(malformed.is_well_formed());
+}
 
 TEST(ConSanMoi, AppendedBodyVgprBankTransitionsConsumeTargetCapabilities) {
   using namespace consan_moi_impl;

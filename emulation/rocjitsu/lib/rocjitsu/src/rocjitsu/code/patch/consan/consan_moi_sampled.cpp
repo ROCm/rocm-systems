@@ -101,7 +101,6 @@ using consan_moi_detail::append_store_u32_vgpr;
 using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::append_words_bytes;
-using consan_moi_detail::ConSanMoiLiteralDispatchIdPolicy;
 using consan_moi_detail::ConSanMoiRecordEmitter;
 using consan_moi_detail::ConSanMoiReportDispatchIdWordSource;
 using consan_moi_detail::count_nop_padding;
@@ -114,7 +113,6 @@ using consan_moi_detail::kDiagnosticRecordLayout;
 using consan_moi_detail::kFenceRecordLayout;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 using consan_moi_detail::moi_permits_literal_dispatch_identity;
-using consan_moi_detail::moi_report_dispatch_id_source_permitted;
 using consan_moi_detail::note_moi_persistent_vgpr_state;
 using consan_moi_detail::resolve_moi_report_layout;
 
