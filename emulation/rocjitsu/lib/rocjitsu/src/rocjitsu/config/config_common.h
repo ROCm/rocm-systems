@@ -8,6 +8,7 @@
 #define ROCJITSU_CONFIG_CONFIG_COMMON_H_
 
 #include "rocjitsu/config/kfd_device_config.h"
+#include "rocjitsu/config/pci_device_config.h"
 
 #include "flatbuffers/idl.h"
 #include "simulation_config_generated.h"
@@ -53,6 +54,24 @@ with_parsed_simulation_config_json(const std::string &json, const std::string &s
   const fb::SimulationConfig *config =
       flatbuffers::GetRoot<fb::SimulationConfig>(parser.builder_.GetBufferPointer());
   return std::forward<Callback>(callback)(config);
+}
+
+/// @brief Convert a FlatBuffers PCI bus table into the runtime config form.
+///
+/// @details A config that says nothing about the bus gets the defaults, which
+/// describe a compute GPU with apertures big enough for the driver to work with.
+inline PciDeviceConfig pci_device_from_fb(const fb::PciDeviceInfo *pci) {
+  PciDeviceConfig config;
+  if (pci == nullptr)
+    return config;
+
+  config.class_code = pci->class_code();
+  config.subsystem_vendor_id = pci->subsystem_vendor_id();
+  config.subsystem_id = pci->subsystem_id();
+  config.vram_aperture_bytes = pci->vram_aperture_bytes();
+  config.doorbell_aperture_bytes = pci->doorbell_aperture_bytes();
+  config.register_aperture_bytes = pci->register_aperture_bytes();
+  return config;
 }
 
 /// @brief Convert a FlatBuffers KFD identity table into the runtime config form.
