@@ -38,6 +38,8 @@ extern "C" {
   int  test_acclRefCount(void* ctx);
   void test_acclMarkFinalized(void* coll);
   void test_acclFreeColl(void* ctx, void* coll);
+  int  test_acclProxyOpSlot(void* ctx, void* op);
+  int  test_acclProxyOpMutexDestroyed(void* ctx, int slot);
   void test_acclWriteDummyRecord(void* ctx);
 }
 extern ncclResult_t acclPluginInit(void**, uint64_t, int*, const char*,
@@ -1479,6 +1481,81 @@ TEST(AcclProfilerSummary, CleanRunStillReportsComplete) {
             EXPECT_NE(s.find("\"complete\":true"), std::string::npos)
                 << "a clean run must still report complete: " << s;
             EXPECT_NE(s.find("\"dropped_proxy_ops\":0"), std::string::npos) << s;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// A proxy op's mutex must outlive every tenancy of its pool slot.
+//
+// The ProxyStep stop path locks step->parentObj->mutex, and a step handle can
+// still be live after its parent op's slot has been released — the plugin frees
+// ops from three places that a step knows nothing about. Destroying the mutex
+// per free therefore leaves that lock aimed at a destroyed mutex as soon as the
+// slot is reissued, and the reissued op's accumulators take the stray step's
+// timings.
+//
+// The invariant is checked directly: glibc marks a destroyed mutex with
+// __kind == -1, so a freed slot whose mutex reads -1 has been destroyed. Both
+// halves matter — after the free and after the slot has been handed out again.
+// =========================================================================
+TEST(AcclProfilerLifecycle, ProxyOpMutexSurvivesSlotRelease) {
+    ScopedProfilerDir dir("opmutex");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.ProxyOpMutexSurvivesSlotRelease",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x4B02, &mask, "opmutex",
+                                     1, 1, 0, nullptr), 0);
+
+            // A proxy op with no parent collective is freed by its own stop
+            // event, which is the shortest path through acclFreeProxyOp.
+            ncclProfilerEventDescr_v5_t od;
+            memset(&od, 0, sizeof(od));
+            od.type = ncclProfileProxyOp;
+            od.proxyOp.channelId = 0;
+            od.proxyOp.nSteps = 2;
+            od.proxyOp.isSend = 1;
+            void* op = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &op, &od), 0);
+            ASSERT_NE(op, nullptr);
+            int slot = test_acclProxyOpSlot(ctx, op);
+            ASSERT_GE(slot, 0);
+            EXPECT_EQ(test_acclProxyOpMutexDestroyed(ctx, slot), 0)
+                << "a live proxy op must have a live mutex";
+
+            // A step that is still outstanding when the op is released. This is
+            // the handle that later reaches pthread_mutex_lock(&op->mutex).
+            ncclProfilerEventDescr_v5_t sd;
+            memset(&sd, 0, sizeof(sd));
+            sd.type = ncclProfileProxyStep;
+            sd.parentObj = op;
+            sd.proxyStep.step = 0;
+            void* step = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &step, &sd), 0);
+            ASSERT_NE(step, nullptr);
+
+            ASSERT_EQ(acclPluginStopEvent(op), 0);   // releases the slot
+            EXPECT_EQ(test_acclProxyOpMutexDestroyed(ctx, slot), 0)
+                << "acclFreeProxyOp destroyed the slot mutex; the outstanding "
+                   "ProxyStep stop now locks a destroyed mutex";
+
+            // Reissue the slot, then let the stale step stop. The mutex must
+            // still be live for the new tenant too.
+            void* op2 = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &op2, &od), 0);
+            ASSERT_EQ(test_acclProxyOpSlot(ctx, op2), slot)
+                << "expected the freed slot to be handed out again";
+            EXPECT_EQ(test_acclProxyOpMutexDestroyed(ctx, slot), 0)
+                << "reissued proxy op slot has a destroyed mutex";
+
+            ASSERT_EQ(acclPluginStopEvent(step), 0);
+            ASSERT_EQ(acclPluginStopEvent(op2), 0);
+            EXPECT_EQ(test_acclProxyOpMutexDestroyed(ctx, slot), 0);
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
