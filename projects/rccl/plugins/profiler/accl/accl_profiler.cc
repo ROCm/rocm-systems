@@ -817,6 +817,12 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
 
     struct acclCollInfo* coll = (struct acclCollInfo*)eDescr->parentObj;
     uint8_t chId = eDescr->kernelCh.channelId;
+    // Unreachable at the current bound, and the compiler says so: ACCL_MAX_CHANNELS is 256,
+    // exactly the range of the v5/v6 ABI's uint8_t channelId. Kept as the only bound on the
+    // kernelCh[] index below. Widening chId would not make it live -- the descriptor field
+    // stays uint8_t -- it would only hide the warning. Nor is shrinking ACCL_MAX_CHANNELS a
+    // way to reclaim kernelCh[]'s 3.5 MB: MAXCHANNELS is 256 and NCCL_MAX_NCHANNELS=256 is a
+    // supported setting, so every channel at or above a smaller bound would be dropped here.
     if (chId >= ACCL_MAX_CHANNELS) {
       *eHandle = NULL;
       return ncclSuccess;
