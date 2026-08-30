@@ -39,6 +39,7 @@
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
@@ -170,8 +171,8 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             }
         });
 
-        // Counter collection and thread trace completion are migrated off the callback registry
-        // (see WriteInterceptor); invoke their hooks explicitly here.
+        // Counter collection, thread trace and PC sampling completion are migrated off the
+        // callback registry (see WriteInterceptor); invoke their hooks explicitly here.
         counters::kernel_dispatch_phase_exit_hook(queue_info_session.queue,
                                                   packet.kernel_packet,
                                                   _session,
@@ -185,6 +186,13 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                              packet,
                                              packet.instrumentation_packets,
                                              dispatch_time);
+
+        pc_sampling::signal_completion_hook(queue_info_session.queue,
+                                            packet.kernel_packet,
+                                            _session,
+                                            packet,
+                                            packet.instrumentation_packets,
+                                            dispatch_time);
 
         CHECK_NOTNULL(hsa::get_queue_controller())
             ->serializer(&queue_info_session.queue)
@@ -327,6 +335,7 @@ WriteInterceptor(const void* packets,
     // ATT-only run still enters the interceptor.
     const bool no_real_consumers =
         (queue.get_notifiers() == 0 && !counters_active && !thread_trace_active &&
+         !pc_sampling::is_configured_on_agent(queue.get_agent().get_rocp_agent()->id) &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
     if(pkt_count == 0 || (no_real_consumers && !graph_launch_active))
