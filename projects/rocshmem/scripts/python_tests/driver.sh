@@ -35,7 +35,7 @@
 #                                  (runs on torch-less hosts)
 #                    - basic:      single-PE tensor API tests  (require torch)
 #                    - collective: multi-PE tensor API tests   (require torch)
-#                    - all:        raw + basic + collective
+#                    - all:        pytest discovery over tests/ (auto-picks new files)
 #   log_dir        : Directory for test output logs
 #   hostfile       : (optional) MPI hostfile for multi-node
 #
@@ -106,7 +106,7 @@ ExecPythonTest() {
         ${TIMEOUT:+--timeout "$TIMEOUT"}
         ${HOSTFILE:+--hostfile "$HOSTFILE"}
         --map-by numa
-        # DEBUG (drop before merge): -s disables pytest capture so prints/tracebacks
+        # DEBUG: -s disables pytest capture so prints/tracebacks
         # reach the console before prterun kills peers; --tb=long for full frames.
         pytest $TEST_FILES -v -s --tb=long -rA --color=no
       )
@@ -138,7 +138,9 @@ TestRaw() {
 }
 
 TestAll() {
-  ExecPythonTest "all" 2 "$PYTHON_SRC_DIR/tests/test_smoke.py $PYTHON_SRC_DIR/tests/test_basic.py $PYTHON_SRC_DIR/tests/test_collective.py"
+  # Use pytest discovery instead of a hardcoded file list so newly added
+  # test_*.py files are automatically included in CI.
+  ExecPythonTest "all" 2 "$PYTHON_SRC_DIR/tests"
 }
 
 # --- Main ---

@@ -32,12 +32,15 @@ subtrees:
     - file: how-to/using-pc-sampling
     - file: how-to/cdna3-cdna4-pc-sampling
     - file: how-to/using-thread-trace
+    - file: how-to/using-spm
     - file: how-to/samples
       title: Samples
   - caption: API reference
     entries:
     - file: api-reference/tool_library
       title: Tool library
+    - file: api-reference/tool_library_environment
+      title: Tool library environment variables
     - file: api-reference/intercept_table
       title: Runtime intercept tables
     - file: api-reference/process_attachment
@@ -52,6 +55,8 @@ subtrees:
       title: PC sampling
     - file: api-reference/thread_trace
       title: Thread trace and ROCprof Trace Decoder
+    - file: api-reference/spm
+      title: Streaming Performance Monitor (SPM)
     - file: api-reference/rocprofiler-sdk_api_reference
       subtrees:
       - entries:

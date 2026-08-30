@@ -152,7 +152,8 @@ class HostQueue : public CommandQueue {
 
     //! Create a new thread
     Thread()
-        : amd::Thread("Command Queue Thread", CQ_THREAD_STACK_SIZE, !AMD_DIRECT_DISPATCH),
+        : amd::Thread("Command Queue Thread", 0 /* use the system default stack size */,
+                      !AMD_DIRECT_DISPATCH),
           acceptingCommands_(false),
           virtualDevice_(nullptr) {}
 
@@ -176,7 +177,11 @@ class HostQueue : public CommandQueue {
       }
     }
 
-    void Release() const { virtualDevice_->release(); }
+    void Release() const {
+      if (virtualDevice_ != nullptr) {
+        virtualDevice_->release();
+      }
+    }
 
     //! Get virtual device for the current thread
     device::VirtualDevice* vdev() const { return virtualDevice_; }

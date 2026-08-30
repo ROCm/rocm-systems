@@ -10,9 +10,10 @@
 
 #include <timemory/timemory.hpp>
 
-#include <timemory/environment/declaration.hpp>
+#include "common/environment.hpp"
 #include <timemory/utility/types.hpp>
 
+#include "common/env_vars.hpp"
 #include "logger/debug.hpp"
 
 #include <cstdint>
@@ -194,7 +195,7 @@ inline void         set_size(std::int32_t, comm_t = comm_world_v);
 inline bool&
 use_mpi_thread()
 {
-    static bool _instance = tim::get_env("ROCPROFSYS_MPI_THREAD", true);
+    static bool _instance = rocprofsys::get_env(env_vars::MPI_THREAD, true);
     return _instance;
 }
 
@@ -204,7 +205,7 @@ inline std::string&
 use_mpi_thread_type()
 {
     static std::string _instance =
-        tim::get_env<std::string>("ROCPROFSYS_MPI_THREAD_TYPE", "");
+        rocprofsys::get_env<std::string>(env_vars::MPI_THREAD_TYPE, "");
     return _instance;
 }
 
@@ -213,7 +214,7 @@ use_mpi_thread_type()
 inline bool&
 fail_on_error()
 {
-    static bool _instance = tim::get_env("ROCPROFSYS_MPI_FAIL_ON_ERROR", false);
+    static bool _instance = rocprofsys::get_env(env_vars::MPI_FAIL_ON_ERROR, false);
     return _instance;
 }
 
@@ -222,7 +223,7 @@ fail_on_error()
 inline bool&
 quiet()
 {
-    static bool _instance = tim::get_env("ROCPROFSYS_MPI_QUIET", false);
+    static bool _instance = rocprofsys::get_env(env_vars::MPI_QUIET, false);
     return _instance;
 }
 
@@ -302,11 +303,16 @@ inline std::function<bool()>&
 is_initialized_callback()
 {
     static std::function<bool()> _v = []() -> bool {
-        std::int32_t _init = 0;
 #if defined(ROCPROFSYS_USE_MPI)
-        if(!is_finalized()) PMPI_Initialized(&_init);
+        std::int32_t init = 0;
+        if(!is_finalized())
+        {
+            PMPI_Initialized(&init);
+        }
+        return init != 0;
+#else
+        return false;
 #endif
-        return (_init != 0) ? true : false;
     };
     return _v;
 }

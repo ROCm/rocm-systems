@@ -6,7 +6,9 @@ This document outlines coding conventions and best practices for Python developm
 
 - [Function Length](#function-length)
 - [Naming Conventions](#naming-conventions)
+- [Python 3.8 Compatible Syntax](#python-38-compatible-syntax)
 - [I/O and Computation Separation](#io-and-computation-separation)
+- [File I/O Encoding](#file-io-encoding)
 - [Nested Functions](#nested-functions)
 - [When to Use Helper Functions](#when-to-use-helper-functions)
 - [When NOT to Extract Helper Functions](#when-not-to-extract-helper-functions)
@@ -14,6 +16,7 @@ This document outlines coding conventions and best practices for Python developm
 - [Levels of Abstraction](#levels-of-abstraction)
 - [Avoiding Deep Nesting](#avoiding-deep-nesting)
 - [Code Organization](#code-organization)
+- [Testing Conventions](#testing-conventions)
 - [Key Principles Summary](#key-principles-summary)
 
 ## Function Length
@@ -118,6 +121,54 @@ def resolve_library_path(library_path: Optional[str]) -> Optional[str]:
     # This makes the function hard to test and understand.
 ```
 
+## Python 3.8 Compatible Syntax
+
+Profile mode runs on Python 3.8, so every module must parse and execute there.
+`from __future__ import annotations` makes newer syntax appear to work by
+deferring annotation evaluation, which hides 3.8 breakage until a runtime that
+actually evaluates the annotation reaches it. Write the 3.8 form directly
+instead, so the syntax a module uses is the syntax it supports.
+
+### Rules
+
+- Never add `from __future__ import annotations`, or any other `__future__` import.
+- Use `typing.List`, `typing.Dict`, `typing.Tuple`, and `typing.Set` for annotations, not the builtin generics `list[...]`, `dict[...]`, `tuple[...]`, `set[...]`.
+- Use `typing.Optional[X]` and `typing.Union[X, Y]`, not `X | None` or `X | Y`.
+- Do not use 3.9+ library additions such as `dict` merge with `|`, `str.removeprefix`, or `str.removesuffix`.
+
+### Example
+
+**Good:** Annotations a 3.8 interpreter evaluates without help
+
+```python
+from pathlib import Path
+from typing import List, Optional
+
+
+def find_csvs(directory: Path, pattern: str) -> List[Path]:
+    ...
+
+
+def resolve_csv(path: Optional[Path]) -> Path:
+    ...
+```
+
+**Bad:** Builtin generics propped up by a `__future__` import
+
+```python
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def find_csvs(directory: Path, pattern: str) -> list[Path]:
+    ...
+
+
+def resolve_csv(path: Path | None) -> Path:
+    ...
+```
+
 ## I/O and Computation Separation
 
 I/O — reading files, sockets, environment variables, or command-line arguments — depends on external state and is hard to test in isolation. Computation transforms inputs into outputs deterministically. Mixing the two in one function makes the computation impossible to reuse without paying the I/O cost, and impossible to verify without staging external state.
@@ -154,6 +205,31 @@ def hash_file(filepath: Path) -> str:
         for chunk in iter(lambda: f.read(4096), b""):
             md5.update(chunk)
     return md5.hexdigest()
+```
+
+## File I/O Encoding
+
+Text-mode file I/O should be deterministic across machines. Bare `open()` picks an encoding from the runtime locale, which varies between systems and produces silent corruption or hard decode errors when a file's bytes don't match. Declare the encoding at every call site so the behavior is the same everywhere.
+
+### Rules
+
+- Always pass `encoding="utf-8"` to `open()` for text-mode reads and writes.
+- Keep committed configuration files (YAML, JSON, INI) ASCII-only. Use plain ASCII substitutes for typographic glyphs: `x` or `*` for multiplication, straight quotes for smart quotes, and `--` for em dashes.
+
+### Example
+
+**Good:** Encoding declared explicitly
+
+```python
+with open(config_path, encoding="utf-8") as f:
+    data = yaml.safe_load(f)
+```
+
+**Bad:** Encoding inherited from the runtime locale
+
+```python
+with open(config_path) as f:
+    data = yaml.safe_load(f)
 ```
 
 ## Nested Functions
@@ -352,17 +428,17 @@ Each function should do **ONE** thing well. If you use "and" to describe what it
 
 ```python
 def create_df_pmc(
-    raw_data_root_dir: str,
-    nodes: Optional[list[str]],
-    spatial_multiplexing: bool,
+    raw_data_dir: str,
     kernel_verbose: int,
     verbose: int,
-    config_dict: dict[str, Any],
 ) -> pd.DataFrame:
     """Load all raw pmc counters and join into one dataframe."""
-    # Single responsibility: create and return a DataFrame.
-    # Delegates the details to a focused helper.
-    return _create_single_df_pmc(...)
+    # Single responsibility: load counters into a DataFrame and return it.
+    df = pd.read_csv(Path(raw_data_dir) / "pmc_perf.csv")
+    if {"Counter_Name", "Counter_Value"}.issubset(df.columns):
+        df = utils_analysis.process_rocpd_csv(df)
+    kernel_name_shortener(df, kernel_verbose)
+    return df
 ```
 
 **Bad:** Multiple responsibilities
@@ -401,9 +477,11 @@ def pre_processing(self) -> None:
         # Each operation delegated to a focused helper
         workload.raw_pmc = file_io.create_df_pmc(...)
 
-        if args.spatial_multiplexing:
-            workload.raw_pmc = self.spatial_multiplex_merge_counters(
-                workload.raw_pmc
+        if self._profiling_config.get("iteration_multiplexing") is not None:
+            workload.raw_pmc = self.iteration_multiplex_impute_counters(
+                workload.raw_pmc,
+                policy=self._profiling_config["iteration_multiplexing"],
+                workload_dir=Path(path_info[0]),
             )
 
         file_io.create_df_kernel_top_stats(...)
@@ -426,9 +504,9 @@ def pre_processing(self) -> None:
         for csv_file in Path(path_info[0]).rglob("*.csv"):
             # ... lots of processing
 
-        # 30 lines of inline merge logic
-        if args.spatial_multiplexing:
-            # ... complex merging
+        # 30 lines of inline imputation logic
+        if self._profiling_config.get("iteration_multiplexing"):
+            # ... complex counter imputation
 
         # 40 lines of inline stats creation
         # ... more processing
@@ -630,7 +708,7 @@ def create_filtered_stats(df_in, filter_nodes, ...) -> None:
 ### Rules
 
 - Module structure order: docstring → imports (stdlib → third-party → local, sorted within each group) → constants → public functions → private helpers → classes.
-- Public functions appear **before** private helpers in every file.
+- Public functions appear **before** private helpers in every file, except when a private helper is used as a decorator on those public functions. Python evaluates decorators at module load, so the helper must precede the functions it decorates.
 - The `_` prefix marks privacy for module-level helpers and class members only — do not use it for helpers in test files (`test_*.py`). Test modules are imported only by pytest for collection and should not import each other (use `conftest.py` for shared fixtures), so there is no internal API to mark private.
 - Use `is None` / `is not None` — never `== None` or `!= None`.
 
@@ -702,8 +780,6 @@ Usage:
     python hash_manager.py --compute-all <configs_dir>
 """
 
-from __future__ import annotations
-
 import argparse
 import hashlib
 import json
@@ -752,6 +828,17 @@ def compute_hash():
 def _other_helper():
     pass
 ```
+
+## Testing Conventions
+
+Before adding or modifying tests, read the existing test modules to understand the project's conventions for class-vs-function grouping, marker usage, import style, and helper naming. Identify whether the change calls for a unit test or an integration test and place it in the appropriate module — do not mix the two in the same file.
+
+### Rules
+
+- Unit test module names must correspond 1:1 with the source file's leaf name (e.g. source `parser.py` maps to test file `test_parser.py`).
+- Integration test modules are named after the user-facing feature or workflow they exercise end-to-end (e.g. `test_roofline_workflow.py`, `test_profile_export.py`), not after a single source file. The name should tell a reader what scenario is being validated without opening the file.
+- Prefer `monkeypatch` (pytest fixture) over `unittest.mock.Mock` / `MagicMock` — `monkeypatch` integrates with pytest's fixture lifecycle and is the dominant pattern in this project. Reserve `Mock` / `MagicMock` for cases that genuinely need call tracking or attribute auto-creation.
+- Use `types.SimpleNamespace` or `argparse.Namespace` for plain attribute bags instead of mock objects.
 
 ## Key Principles Summary
 

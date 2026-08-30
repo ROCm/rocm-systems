@@ -5,7 +5,6 @@
  */
 
 #include <hip_test_common.hh>
-#include "hipMallocManagedCommon.hh"
 #include <atomic>
 
 
@@ -84,7 +83,7 @@ static void LaunchKrnl2(int* Hmm, size_t NumElms, int InitVal, int HmmMem) {
   }
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < (isQuickLevel() ? 1 : 2); ++i) {
     KrnlWth2MemTypes<<<dimGrid, dimBlock, 0, strm>>>(ptr, Hmm, NumElms);
   }
   HIPCHECK(hipStreamSynchronize(strm));
@@ -104,13 +103,10 @@ static void LaunchKrnl2(int* Hmm, size_t NumElms, int InitVal, int HmmMem) {
       }
     }
   }
-  if (DataMismatch != 0) {
-    INFO("Data Mismatch observed at line: " << __LINE__);
-    REQUIRE(false);
-  }
+  REQUIRE_THREAD(DataMismatch == 0);
 
-  HIP_CHECK(hipFree(ptr));
-  HIP_CHECK(hipStreamDestroy(strm));
+  HIP_CHECK_THREAD(hipFree(ptr));
+  HIP_CHECK_THREAD(hipStreamDestroy(strm));
 }
 
 static void LaunchKrnl3(int* Dptr, size_t NumElms, int InitVal) {
@@ -120,7 +116,7 @@ static void LaunchKrnl3(int* Dptr, size_t NumElms, int InitVal) {
   HIPCHECK(hipMallocManaged(&Hmm, (sizeof(int) * NumElms)));
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < (isQuickLevel() ? 1 : 2); ++i) {
     KrnlWth2MemTypes<<<dimGrid, dimBlock, 0, strm>>>(Hmm, Dptr, NumElms);
   }
   HIPCHECK(hipStreamSynchronize(strm));
@@ -131,13 +127,10 @@ static void LaunchKrnl3(int* Dptr, size_t NumElms, int InitVal) {
       DataMismatch++;
     }
   }
-  if (DataMismatch != 0) {
-    INFO("Data Mismatch observed at line: " << __LINE__);
-    REQUIRE(false);
-  }
+  REQUIRE_THREAD(DataMismatch == 0);
 
-  HIP_CHECK(hipFree(Hmm));
-  HIP_CHECK(hipStreamDestroy(strm));
+  HIP_CHECK_THREAD(hipFree(Hmm));
+  HIP_CHECK_THREAD(hipStreamDestroy(strm));
 }
 
 
@@ -148,7 +141,7 @@ static void LaunchKrnl5(int* Hmm1, size_t NumElms, int InitVal, int KerneltoLaun
   HIPCHECK(hipMallocManaged(&Hmm2, (sizeof(int) * NumElms)));
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < (isQuickLevel() ? 1 : 2); ++i) {
     if (KerneltoLaunch == 0) {
       KrnlWth2MemTypes<<<dimGrid, dimBlock, 0, strm>>>(Hmm2, Hmm1, NumElms);
     } else {
@@ -171,13 +164,10 @@ static void LaunchKrnl5(int* Hmm1, size_t NumElms, int InitVal, int KerneltoLaun
       }
     }
   }
-  if (DataMismatch != 0) {
-    INFO("Data Mismatch observed at line: " << __LINE__);
-    REQUIRE(false);
-  }
+  REQUIRE_THREAD(DataMismatch == 0);
 
-  HIP_CHECK(hipFree(Hmm2));
-  HIP_CHECK(hipStreamDestroy(strm));
+  HIP_CHECK_THREAD(hipFree(Hmm2));
+  HIP_CHECK_THREAD(hipStreamDestroy(strm));
 }
 
 
@@ -283,10 +273,7 @@ static void AllocateHmmMemory(int flag, int device) {
 }
 
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiThread) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   IfTestPassed = true;
   int NumDevs = 0, ATTACH_GLOBAL = 0, ATTACH_HOST = 1;
@@ -336,10 +323,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThread) {
 // The following test checks what happens when same Hmm memory is used to
 // launch multiple threads over multiple gpus
 HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   IfTestPassed = true;
   int Ngpus = 0;
@@ -377,10 +361,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
 // The following test checks what happens when multiple kernels are launched
 // with same Hmm memory
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   IfTestPassed = true;
 
@@ -403,6 +384,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
       thr.join();
     }
   }
+  HIP_CHECK_THREAD_FINALIZE();
   delete[] HstPtr;
   HIP_CHECK(hipFree(Hmm));
 }
@@ -411,10 +393,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
 // The following test checks what happens when multiple kernels are launched
 // with same hipMalloc() memory
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   IfTestPassed = true;
   int InitVal = 123, *Dptr = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 8, TotThrds = 2;
@@ -434,6 +413,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
       thr.join();
     }
   }
+  HIP_CHECK_THREAD_FINALIZE();
   delete[] HstPtr;
   HIP_CHECK(hipFree(Dptr));
 }
@@ -441,10 +421,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
 //  The following section tests the scenario wherein multiple threads use their
 //  own stream to launch kernel on common Hmm memory
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   IfTestPassed = true;
 
@@ -467,6 +444,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
     }
   }
 
+  HIP_CHECK_THREAD_FINALIZE();
   HIP_CHECK(hipFree(Hmm1));
 }
 
@@ -474,10 +452,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
 //  The following section tests the scenario wherein two threads each use
 //  different kernel but common HMM memory
 HIP_TEST_CASE(Unit_hipMallocManaged_TwoKrnlsComnHmmMem) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   IfTestPassed = true;
   int InitVal = 123, *Dptr = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 4, TotThrds = 2;
@@ -497,6 +472,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_TwoKrnlsComnHmmMem) {
       thr.join();
     }
   }
+  HIP_CHECK_THREAD_FINALIZE();
   delete[] HstPtr;
   HIP_CHECK(hipFree(Dptr));
 }

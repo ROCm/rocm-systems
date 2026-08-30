@@ -5,8 +5,11 @@
  */
 
 #include "hip_comgr_helper.hpp"
+#include <atomic>
 #if defined(_WIN32)
-#include <io.h>
+#include <process.h>
+#else
+#include <unistd.h>
 #endif
 #include "../src/amd_hsa_elf.hpp"
 
@@ -243,9 +246,7 @@ bool extractByteCodeBinary(const comgr_helper::ComgrDataSetUniqueHandle& inDataS
     binary[binarySize] = '\0';
   }
 
-  std::vector<char> temp_bin;
-  temp_bin.assign(binary, binary + binarySize);
-  bin = std::move(temp_bin);
+  bin.assign(binary, binary + binarySize);
   delete[] binary;
 
   return true;
@@ -340,11 +341,18 @@ bool compileToExecutable(const comgr_helper::ComgrDataSetUniqueHandle& compileIn
   return true;
 }
 
-bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
-                      const std::string& isa, const std::vector<std::string>& compileOptions,
-                      std::string& buildLog, std::vector<char>& LLVMBitcode) {
+bool compileToIR(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
+                 const std::string& isa, const std::vector<std::string>& compileOptions,
+                 std::string& buildLog, std::vector<char>& ir, amd_comgr_data_kind_t ir_kind) {
   amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_HIP;
   comgr_helper::ComgrActionInfoUniqueHandle compileAction;
+  amd_comgr_action_kind_t action_kind = AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC;
+  amd_comgr_data_kind_t data_kind = AMD_COMGR_DATA_KIND_BC;
+  // if IR kind is SPIRV, use the new action and data kind
+  if (ir_kind == AMD_COMGR_DATA_KIND_SPIRV) {
+    action_kind = AMD_COMGR_ACTION_COMPILE_SOURCE_TO_SPIRV;
+    data_kind = AMD_COMGR_DATA_KIND_SPIRV;
+  }
 
   comgr_helper::ComgrDataSetUniqueHandle output;
   if (output.Create() != AMD_COMGR_STATUS_SUCCESS) {
@@ -355,9 +363,8 @@ bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInput
     return false;
   }
 
-  if (amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC,
-                            compileAction.get(), compileInputs.get(),
-                            output.get()) != AMD_COMGR_STATUS_SUCCESS) {
+  if (amd::Comgr::do_action(action_kind, compileAction.get(),
+                            compileInputs.get(), output.get()) != AMD_COMGR_STATUS_SUCCESS) {
     extractBuildLog(output, buildLog);
     return false;
   }
@@ -366,7 +373,7 @@ bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInput
     return false;
   }
 
-  if (!extractByteCodeBinary(output, AMD_COMGR_DATA_KIND_BC, LLVMBitcode)) {
+  if (!extractByteCodeBinary(output, data_kind, ir)) {
     return false;
   }
 
@@ -462,28 +469,19 @@ bool linkLLVMBitcode(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
 
 bool convertSPIRVToLLVMBC(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
                           const std::string& isa, const std::vector<std::string>& linkOptions,
-                          std::string& buildLog, std::vector<char>& LinkedLLVMBitcode) {
+                          std::string& buildLog, comgr_helper::ComgrDataSetUniqueHandle& linkOutputs) {
   comgr_helper::ComgrActionInfoUniqueHandle action;
 
   if (!createAction(action, linkOptions, isa, AMD_COMGR_LANGUAGE_NONE)) {
     return false;
   }
 
-  comgr_helper::ComgrDataSetUniqueHandle output;
-  if (output.Create() != AMD_COMGR_STATUS_SUCCESS) {
-    return false;
-  }
-
   if (amd::Comgr::do_action(AMD_COMGR_ACTION_TRANSLATE_SPIRV_TO_BC, action.get(), linkInputs.get(),
-                            output.get()) != AMD_COMGR_STATUS_SUCCESS) {
+                            linkOutputs.get()) != AMD_COMGR_STATUS_SUCCESS) {
     return false;
   }
 
-  if (!extractBuildLog(output, buildLog)) {
-    return false;
-  }
-
-  if (!extractByteCodeBinary(output, AMD_COMGR_DATA_KIND_BC, LinkedLLVMBitcode)) {
+  if (!extractBuildLog(linkOutputs, buildLog)) {
     return false;
   }
 
@@ -553,20 +551,24 @@ bool createExecutable(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
 }
 
 void GenerateUniqueFileName(std::string& name) {
-#if !defined(_WIN32)
-  char* name_template = const_cast<char*>(name.c_str());
-  int temp_fd = mkstemp(name_template);
+  // Generate the unique Comgr label in memory (pid + atomic counter) instead of
+  // mkstemp, which created/unlinked a temp file in the CWD at scale (ROCM-29636).
+  static std::atomic<uint64_t> counter{0};
+#if defined(_WIN32)
+  const auto pid = _getpid();
 #else
-  char* name_template = new char[name.length() + 1];
-  strcpy_s(name_template, name.length() + 1, name.data());
-  int sizeinchars = strnlen(name_template, 20) + 1;
-  _mktemp_s(name_template, sizeinchars);
+  const auto pid = getpid();
 #endif
-  name = name_template;
-#if !defined(_WIN32)
-  unlink(name_template);
-  close(temp_fd);
-#endif
+  // Strip only an exact trailing mkstemp-style "XXXXXX" template, then append a
+  // process-unique suffix (e.g. "CompileSourceXXXXXX" -> "CompileSource1234_0").
+  static constexpr char kTemplate[] = "XXXXXX";
+  static constexpr size_t kTemplateLen = sizeof(kTemplate) - 1;
+  if (name.size() >= kTemplateLen &&
+      name.compare(name.size() - kTemplateLen, kTemplateLen, kTemplate) == 0) {
+    name.resize(name.size() - kTemplateLen);
+  }
+  name += std::to_string(static_cast<int64_t>(pid)) + "_" +
+          std::to_string(counter.fetch_add(1, std::memory_order_relaxed));
 }
 
 bool demangleName(const std::string& mangledName, std::string& demangledName) {
@@ -1043,6 +1045,22 @@ bool LinkProgram::AddLinkerDataImpl(std::string_view link_data, hipJitInputType 
     }
     llvm_code_object_view =
         std::string_view(llvm_code_object_storage.data(), llvm_code_object_storage.size());
+  } else if (is_bundled_ && input_type == hipJitInputLLVMBundledBitcode) {
+    if (!findIsa()) {
+      return false;
+    }
+    std::string bundle_entry_id = "hip-" + isa_;
+    const char* bundleEntryIDs[] = {bundle_entry_id.c_str()};
+    size_t bundleEntryIDsCount = 1;
+    if (!helpers::UnbundleUsingComgr(link_data, isa_, link_options_, build_log_,
+                                     llvm_code_object_storage, bundleEntryIDs,
+                                     bundleEntryIDsCount)) {
+      LogError("Error in hip Linker: Unable to unbundle LLVM Bundled Bitcode using COMGR");
+      return false;
+    }
+    llvm_code_object_view =
+        std::string_view(llvm_code_object_storage.data(), llvm_code_object_storage.size());
+    input_type = hipJitInputLLVMBitcode;
   }
 
   if ((data_kind_ = GetCOMGRDataKind(input_type)) == AMD_COMGR_DATA_KIND_UNDEF) {
@@ -1091,27 +1109,25 @@ bool LinkProgram::LinkComplete(void** bin_out, size_t* size_out) {
   if (!findIsa()) {
     return false;
   }
-
+ 
+  hip::comgr_helper::ComgrDataSetUniqueHandle link_output;
+  if (link_output.Create() != AMD_COMGR_STATUS_SUCCESS) {
+    return false;
+  }
   if (data_kind_ == AMD_COMGR_DATA_KIND_SPIRV) {
     // Convert SPIRV Unbundled code object to LLVM Bitcode
-    std::vector<char> llvmbc_from_spirv;
     if (!helpers::convertSPIRVToLLVMBC(link_input_, isa_, link_options_, build_log_,
-                                       llvmbc_from_spirv)) {
+                                       link_output)) {
       LogError("Error in hip Linker: unable to convert SPIRV to BC");
       return false;
     }
 
-    std::string linkedFileName = "LLVMBitcodeFromSPIRV.bc";
-    std::string_view llvmbc_from_spirv_view(llvmbc_from_spirv.data(), llvmbc_from_spirv.size());
-    if (!helpers::addCodeObjData(link_input_, llvmbc_from_spirv_view, linkedFileName,
-                                 AMD_COMGR_DATA_KIND_BC)) {
-      LogError("Error in hip Linker: unable to add linked LLVM bitcode");
-      return false;
-    }
   }
 
+  const auto& bc_input = data_kind_ == AMD_COMGR_DATA_KIND_SPIRV ? link_output : link_input_;
+
   std::vector<char> llvm_bitcode;
-  if (!helpers::linkLLVMBitcode(link_input_, isa_, link_options_, build_log_, llvm_bitcode)) {
+  if (!helpers::linkLLVMBitcode(bc_input, isa_, link_options_, build_log_, llvm_bitcode)) {
     LogError("Error in hip linker: unable to add device libs to linked bitcode");
     return false;
   }

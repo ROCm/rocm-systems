@@ -1,80 +1,310 @@
----
-Checks: "-*,\
-bugprone-*,\
--bugprone-easily-swappable-parameters,\
-cert-*,\
--cert-dcl37-c,\
--cert-dcl51-cpp,\
--cert-err58-cpp,\
-concurrency-*,\
-cppcoreguidelines-*,\
--cppcoreguidelines-avoid-do-while,\
--cppcoreguidelines-avoid-non-const-global-variables,\
--cppcoreguidelines-macro-usage,\
--cppcoreguidelines-non-private-member-variables-in-classes,\
--cppcoreguidelines-owning-memory,\
--cppcoreguidelines-pro-bounds-array-to-pointer-decay,\
--cppcoreguidelines-pro-bounds-constant-array-index,\
--cppcoreguidelines-pro-bounds-pointer-arithmetic,\
--cppcoreguidelines-pro-type-reinterpret-cast,\
--cppcoreguidelines-pro-type-union-access,\
--cppcoreguidelines-pro-type-vararg,\
-google-*,\
--google-objc-*,\
--google-readability-todo,\
-misc-*,\
--misc-no-recursion,\
--misc-non-private-member-variables-in-classes,\
-modernize-*,\
--modernize-use-trailing-return-type,\
-performance-*,\
-readability-*,\
--readability-function-size,\
--readability-redundant-access-specifiers,\
--readability-redundant-member-init,\
-"
+HeaderFilterRegex: "/rocprofiler-systems/source/"
+
+# Deliberately not enabled:
+#   bugprone-exception-escape: nice to have, but too slow on current tree.
+Checks: >
+  -*,
+  bugprone-assignment-in-if-condition,
+  bugprone-assignment-in-selection-statement,
+  bugprone-bool-pointer-implicit-conversion,
+  bugprone-branch-clone,
+  bugprone-capturing-this-in-member-variable,
+  bugprone-chained-comparison,
+  bugprone-compare-pointer-to-member-virtual-function,
+  bugprone-copy-constructor-init,
+  bugprone-dangling-handle,
+  bugprone-derived-method-shadowing-base-method,
+  bugprone-dynamic-static-initializers,
+  bugprone-empty-catch,
+  bugprone-exception-copy-constructor-throws,
+  bugprone-float-loop-counter,
+  bugprone-fold-init-type,
+  bugprone-implicit-widening-of-multiplication-result,
+  bugprone-inaccurate-erase,
+  bugprone-inc-dec-in-conditions,
+  bugprone-incorrect-roundings,
+  bugprone-infinite-loop,
+  bugprone-integer-division,
+  bugprone-invalid-enum-default-initialization,
+  bugprone-lambda-function-name,
+  bugprone-macro-parentheses,
+  bugprone-misplaced-widening-cast,
+  bugprone-missing-end-comparison,
+  bugprone-move-forwarding-reference,
+  bugprone-multi-level-implicit-pointer-conversion,
+  bugprone-narrowing-conversions,
+  bugprone-non-zero-enum-to-bool-conversion,
+  bugprone-optional-value-conversion,
+  bugprone-pointer-arithmetic-on-polymorphic-object,
+  bugprone-raw-memory-call-on-non-trivial-type,
+  bugprone-redundant-branch-condition,
+  bugprone-signed-char-misuse,
+  bugprone-sizeof-container,
+  bugprone-sizeof-expression,
+  bugprone-standalone-empty,
+  bugprone-std-exception-baseclass,
+  bugprone-std-namespace-modification,
+  bugprone-string-constructor,
+  bugprone-string-integer-assignment,
+  bugprone-stringview-nullptr,
+  bugprone-suspicious-include,
+  bugprone-suspicious-memset-usage,
+  bugprone-suspicious-semicolon,
+  bugprone-swapped-arguments,
+  bugprone-switch-missing-default-case,
+  bugprone-terminating-continue,
+  bugprone-throw-keyword-missing,
+  bugprone-throwing-static-initialization,
+  bugprone-too-small-loop-variable,
+  bugprone-unchecked-optional-access,
+  bugprone-unchecked-string-to-number-conversion,
+  bugprone-undefined-memory-manipulation,
+  bugprone-unhandled-code-paths,
+  bugprone-unhandled-exception-at-new,
+  bugprone-unsafe-to-allow-exceptions,
+  bugprone-unused-raii,
+  bugprone-use-after-move,
+  cppcoreguidelines-no-malloc,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-use-enum-class,
+  cppcoreguidelines-virtual-class-destructor,
+  misc-anonymous-namespace-in-header,
+  misc-const-correctness,
+  misc-definitions-in-headers,
+  misc-explicit-constructor,
+  misc-include-cleaner,
+  misc-non-copyable-objects,
+  misc-redundant-expression,
+  misc-static-assert,
+  misc-throw-by-value-catch-by-reference,
+  misc-unused-alias-decls,
+  misc-unused-parameters,
+  misc-unused-using-decls,
+  modernize-avoid-c-arrays,
+  modernize-avoid-c-style-cast,
+  modernize-concat-nested-namespaces,
+  modernize-make-shared,
+  modernize-make-unique,
+  modernize-use-bool-literals,
+  modernize-use-constraints,
+  modernize-use-default-member-init,
+  modernize-use-designated-initializers,
+  modernize-use-nodiscard,
+  modernize-use-noexcept,
+  modernize-use-ranges,
+  modernize-use-starts-ends-with,
+  modernize-use-string-view,
+  modernize-use-structured-binding,
+  modernize-use-using,
+  performance-for-range-copy,
+  performance-implicit-conversion-in-loop,
+  performance-inefficient-algorithm,
+  performance-inefficient-string-concatenation,
+  performance-inefficient-vector-operation,
+  performance-move-const-arg,
+  performance-noexcept-destructor,
+  performance-noexcept-move-constructor,
+  readability-avoid-nested-conditional-operator,
+  readability-braces-around-statements,
+  readability-const-return-type,
+  readability-container-contains,
+  readability-container-data-pointer,
+  readability-container-size-empty,
+  readability-delete-null-pointer,
+  readability-duplicate-include,
+  readability-else-after-return,
+  readability-function-cognitive-complexity,
+  readability-function-size,
+  readability-identifier-length,
+  readability-identifier-naming,
+  readability-magic-numbers,
+  readability-misleading-indentation,
+  readability-redundant-declaration,
+  readability-redundant-function-ptr-dereference,
+  readability-redundant-inline-specifier,
+  readability-redundant-member-init,
+  readability-redundant-nested-if,
+  readability-redundant-parentheses,
+  readability-redundant-preprocessor,
+  readability-redundant-qualified-alias,
+  readability-redundant-smartptr-get,
+  readability-redundant-string-cstr,
+  readability-redundant-string-init,
+  readability-redundant-typename,
+  readability-redundant-zero-initializer,
+  readability-reference-to-constructed-temporary,
+  readability-simplify-boolean-expr,
+  readability-string-compare,
+  readability-use-anyofallof,
+  readability-use-std-min-max,
+
 CheckOptions:
-  - key:             readability-braces-around-statements.ShortStatementLines
-    value:           '1'
-  - key:             readability-implicit-bool-conversion.AllowPointerConditions
-    value:           '1'
-  - key:             cppcoreguidelines-init-variables.IncludeStyle
-    value:           llvm
-  - key:             readability-identifier-naming.ClassCase
-    value:           lower_case
-  - key:             readability-identifier-naming.StructCase
-    value:           lower_case
-  - key:             readability-identifier-naming.UnionCase
-    value:           lower_case
-  - key:             readability-identifier-naming.EnumCase
-    value:           lower_case
-  - key:             readability-identifier-naming.EnumConstantCase
-    value:           UPPER_CASE
-  - key:             readability-identifier-naming.FunctionCase
-    value:           lower_case
-  - key:             readability-identifier-naming.MethodCase
-    value:           lower_case
-  - key:             readability-identifier-naming.VariableCase
-    value:           lower_case
-  - key:             readability-identifier-naming.ParameterCase
-    value:           lower_case
-  - key:             readability-identifier-naming.MemberCase
-    value:           lower_case
-  - key:             readability-identifier-naming.PrivateMemberPrefix
-    value:           m_
-  - key:             readability-identifier-naming.ProtectedMemberPrefix
-    value:           m_
-  - key:             readability-identifier-naming.PublicMemberPrefix
-    value:           m_
-  - key:             readability-identifier-naming.GlobalConstantCase
-    value:           UPPER_CASE
-  - key:             readability-identifier-naming.MacroDefinitionCase
-    value:           UPPER_CASE
-  - key:             readability-identifier-naming.TemplateParameterCase
-    value:           CamelCase
-  - key:             readability-identifier-naming.NamespaceCase
-    value:           lower_case
-  - key:             readability-identifier-naming.TypeAliasCase
-    value:           lower_case
-  - key:             readability-identifier-naming.TypedefCase
-    value:           lower_case
+  - key: readability-function-size.LineThreshold
+    value: "100"
+  - key: readability-function-size.StatementThreshold
+    value: "50"
+  - key: readability-function-size.BranchThreshold
+    value: "10"
+  - key: readability-function-size.NestingThreshold
+    value: "3"
+  - key: readability-function-size.ParameterThreshold
+    value: "4"
+
+  # --- Namespaces
+  - key: readability-identifier-naming.NamespaceCase
+    value: lower_case
+  - key: readability-identifier-naming.InlineNamespaceCase
+    value: lower_case
+
+  # --- Types: class / struct / union / enum
+  - key: readability-identifier-naming.ClassCase
+    value: lower_case
+  - key: readability-identifier-naming.StructCase
+    value: lower_case
+  - key: readability-identifier-naming.UnionCase
+    value: lower_case
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumConstantCase
+    value: CamelCase
+  - key: readability-identifier-naming.ScopedEnumConstantCase
+    value: CamelCase
+  - key: readability-identifier-naming.TypeAliasCase
+    value: lower_case
+  - key: readability-identifier-naming.TypedefCase
+    value: lower_case
+
+  # --- Abstract/interface classes: require an "_interface" suffix
+  - key: readability-identifier-naming.AbstractClassCase
+    value: lower_case
+  - key: readability-identifier-naming.AbstractClassSuffix
+    value: "_interface"
+
+  # --- Functions / methods
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.MethodCase
+    value: lower_case
+  - key: readability-identifier-naming.VirtualMethodCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstexprFunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.PublicMethodCase
+    value: lower_case
+  - key: readability-identifier-naming.ProtectedMethodCase
+    value: lower_case
+  - key: readability-identifier-naming.PrivateMethodCase
+    value: lower_case
+  - key: readability-identifier-naming.ClassMethodCase
+    value: lower_case
+
+  # --- Parameters
+  - key: readability-identifier-naming.ParameterCase
+    value: lower_case
+  - key: readability-identifier-naming.ParameterPackCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstantParameterCase
+    value: lower_case
+  - key: readability-identifier-naming.PointerParameterCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstantPointerParameterCase
+    value: lower_case
+
+  # --- Member variables
+  - key: readability-identifier-naming.MemberCase
+    value: lower_case
+  - key: readability-identifier-naming.PrivateMemberPrefix
+    value: "m_"
+  - key: readability-identifier-naming.ProtectedMemberPrefix
+    value: "m_"
+  - key: readability-identifier-naming.PublicMemberCase
+    value: lower_case
+  - key: readability-identifier-naming.ClassConstantCase
+    value: lower_case
+  - key: readability-identifier-naming.ClassConstantPrefix
+    value: "k_"
+  # NOTE: ClassMemberCase/Prefix applies to ALL static data members
+  # regardless of access specifier (public/protected/private) -- clang-tidy
+  # has no PrivateStaticMember/ProtectedStaticMember/PublicStaticMember
+  # split, so a per-visibility static prefix isn't expressible. No prefix
+  # is used here on purpose.
+  - key: readability-identifier-naming.ClassMemberCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstantMemberCase
+    value: lower_case
+
+  # --- Local variables / constants
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.LocalVariableCase
+    value: lower_case
+  - key: readability-identifier-naming.LocalConstantCase
+    value: lower_case
+  - key: readability-identifier-naming.LocalConstantPointerCase
+    value: lower_case
+  - key: readability-identifier-naming.LocalPointerCase
+    value: lower_case
+
+  # --- Static / global variables
+  - key: readability-identifier-naming.StaticVariableCase
+    value: lower_case
+  - key: readability-identifier-naming.StaticVariablePrefix
+    value: "s_"
+  - key: readability-identifier-naming.StaticConstantCase
+    value: lower_case
+  - key: readability-identifier-naming.StaticConstantPrefix
+    value: "k_"
+  - key: readability-identifier-naming.GlobalVariableCase
+    value: lower_case
+  - key: readability-identifier-naming.GlobalVariablePrefix
+    value: "g_"
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.GlobalConstantPointerCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.GlobalPointerCase
+    value: lower_case
+  - key: readability-identifier-naming.GlobalPointerPrefix
+    value: "g_"
+  - key: readability-identifier-naming.GlobalFunctionCase
+    value: lower_case
+
+  # --- Constants (fallback bucket, e.g. free-standing constexpr)
+  - key: readability-identifier-naming.ConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.ConstexprVariableCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstexprVariablePrefix
+    value: "k_"
+
+  # --- Templates
+  - key: readability-identifier-naming.TemplateParameterCase
+    value: CamelCase
+  - key: readability-identifier-naming.TypeTemplateParameterCase
+    value: CamelCase
+  - key: readability-identifier-naming.ValueTemplateParameterCase
+    value: CamelCase
+  - key: readability-identifier-naming.TemplateTemplateParameterCase
+    value: CamelCase
+  - key: readability-identifier-naming.TemplateParameterIgnoredRegexp
+    value: "expr-type|::type|^_.*"
+
+  # --- Macros
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+
+  # --- Misc: ignore main-like functions (main, wmain, ...)
+  - key: readability-identifier-naming.IgnoreMainLikeFunctions
+    value: "1"
+
+  # --- identifier length
+  - key: readability-identifier-length.MinimumBindingNameLength
+    value: "3"
+  - key: readability-identifier-length.MinimumExceptionNameLength
+    value: "3"
+  - key: readability-identifier-length.MinimumLoopCounterNameLength
+    value: "3"
+
+  # include ignore
+  - key: misc-include-cleaner.IgnoreHeaders
+    value: "compare$;string_view$;concepts$"

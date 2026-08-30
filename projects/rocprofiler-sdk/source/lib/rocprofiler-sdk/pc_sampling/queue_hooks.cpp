@@ -1,3 +1,25 @@
+// MIT License
+//
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 
 #include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
@@ -22,29 +44,6 @@ is_configured_on_agent(rocprofiler_agent_id_t agent_id)
 #endif
 }
 
-std::optional<::rocprofiler::hsa::rocprofiler_packet>
-maybe_marker_packet(
-    const ::rocprofiler::hsa::Queue&                                        queue,
-    rocprofiler_dispatch_id_t                                               dispatch_id,
-    const ::rocprofiler::hsa::queue_info_session_t::external_corr_id_map_t& ext_corr_ids,
-    const context::correlation_id*                                          correlation_id)
-{
-#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-    auto agent_id = queue.get_agent().get_rocp_agent()->id;
-    if(!is_configured_on_agent(agent_id)) return std::nullopt;
-    // generate_marker_packet_for_kernel takes correlation_id* non-const
-    // (calls add_ref_count); our signature is const-correct for callers.
-    return pc_sampling::hsa::generate_marker_packet_for_kernel(
-        const_cast<context::correlation_id*>(correlation_id), ext_corr_ids, dispatch_id);
-#else
-    (void) queue;
-    (void) dispatch_id;
-    (void) ext_corr_ids;
-    (void) correlation_id;
-    return std::nullopt;
-#endif
-}
-
 void
 signal_completion_hook(const ::rocprofiler::hsa::Queue&                           queue,
                        const ::rocprofiler::hsa::rocprofiler_packet&              kernel_packet,
@@ -55,11 +54,10 @@ signal_completion_hook(const ::rocprofiler::hsa::Queue&                         
 {
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     if(!session) return;
-    // kernel_completion_cb takes a non-const packet& (legacy signature; unused).
-    pc_sampling::hsa::kernel_completion_cb(
-        queue.get_agent().get_rocp_agent(),
-        const_cast<::rocprofiler::hsa::rocprofiler_packet&>(kernel_packet),
-        *session);
+    // kernel_completion_cb takes a mutable reference to the kernel packet even
+    // though it does not modify it; copy to bind a non-const lvalue.
+    auto kern_pkt = kernel_packet;
+    hsa::kernel_completion_cb(queue.get_agent().get_rocp_agent(), kern_pkt, *session);
 #else
     (void) queue;
     (void) kernel_packet;

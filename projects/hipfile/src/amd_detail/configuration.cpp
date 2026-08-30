@@ -7,6 +7,7 @@
 #include "environment.h"
 #include "hip.h"
 
+#include <cstdio>
 #include <optional>
 
 using namespace hipFile;
@@ -29,7 +30,18 @@ Configuration::fastpath(bool enabled) noexcept
 bool
 Configuration::fallback() const noexcept
 {
-    static bool fallback_env{Environment::allow_compat_mode().value_or(true)};
+    static bool fallback_env{[] {
+        bool force_compat = Environment::force_compat_mode().value_or(false);
+        bool allow_compat = Environment::allow_compat_mode().value_or(true);
+        if (force_compat && !allow_compat) {
+            // TODO: replace with logging
+            fprintf(stderr, "hipFile: HIPFILE_FORCE_COMPAT_MODE=true and HIPFILE_ALLOW_COMPAT_MODE=false "
+                            "would disable all I/O backends; enabling the fallback path to avoid "
+                            "failing all I/O.\n");
+            return true;
+        }
+        return allow_compat;
+    }()};
     return m_fallback_override.value_or(fallback_env);
 }
 

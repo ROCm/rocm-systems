@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "utility.hpp"
-#include <cstdint>
 
+#include "common/delimit.hpp"
 #include "logger/debug.hpp"
+
+#include <cstdint>
 
 namespace rocprofsys
 {
@@ -13,26 +15,23 @@ namespace utility
 namespace
 {
 template <typename ContainerT, typename Arg>
-auto
-emplace_impl(ContainerT& _targ, Arg&& _v,
-             int) -> decltype(_targ.emplace(std::forward<Arg>(_v)))
+concept has_emplace =
+    requires(ContainerT& _targ, Arg&& _v) { _targ.emplace(std::forward<Arg>(_v)); };
+
+template <typename ContainerT, typename Arg>
+    requires has_emplace<ContainerT, Arg>
+decltype(auto)
+emplace(ContainerT& _targ, Arg&& _v)
 {
     return _targ.emplace(std::forward<Arg>(_v));
 }
 
 template <typename ContainerT, typename Arg>
-auto
-emplace_impl(ContainerT& _targ, Arg&& _v,
-             long) -> decltype(_targ.emplace_back(std::forward<Arg>(_v)))
-{
-    return _targ.emplace_back(std::forward<Arg>(_v));
-}
-
-template <typename ContainerT, typename Arg>
+    requires(!has_emplace<ContainerT, Arg>)
 decltype(auto)
 emplace(ContainerT& _targ, Arg&& _v)
 {
-    return emplace_impl(_targ, std::forward<Arg>(_v), 0);
+    return _targ.emplace_back(std::forward<Arg>(_v));
 }
 }  // namespace
 
@@ -50,7 +49,7 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
     for(auto& itr : _input_string)
         itr = tolower(itr);
     auto _result = ContainerT{};
-    for(auto _v : tim::delimit(_input_string, ",; \t\n\r"))
+    for(auto _v : rocprofsys::delimit(_input_string, ",; \t\n\r"))
     {
         if(_v.find_first_not_of("0123456789-:") != std::string::npos)
         {
@@ -73,16 +72,39 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
 
         if(_v.find('-') != std::string::npos)
         {
-            auto _vv = tim::delimit(_v, "-");
+            // tim::delimit collapses consecutive '-' and drops empty fields, so
+            // "5--7", "-1", and "5-" would otherwise sneak past the size check
+            // below; reject leading/trailing/consecutive dashes explicitly.
+            if(_v.front() == '-' || _v.back() == '-' ||
+               _v.find("--") != std::string::npos)
+            {
+                LOG_WARNING("Invalid {} range specification: {}. Leading, trailing, or "
+                            "consecutive '-' not permitted; required format N-M, "
+                            "e.g. 0-4. Ignoring {}...",
+                            _label, _v, _v);
+                continue;
+            }
+
+            // split the string into two parts at the '-' character and check if the
+            // result is valid
+            auto _vv = rocprofsys::delimit(_v, "-");
             if(_vv.size() != 2)
             {
-                throw std::runtime_error(fmt::format(
-                    "Invalid {} range specification: {}. Required format N-M, e.g. 0-4",
-                    _label, _v));
+                LOG_WARNING("Invalid {} range specification: {}. Required format N-M, "
+                            "e.g. 0-4. Ignoring {}...",
+                            _label, _v, _v);
+                continue;
             }
 
             Tp _vn = _get_value(_vv.at(0));
             Tp _vN = _get_value(_vv.at(1));
+            if(_vn > _vN)
+            {
+                LOG_WARNING("Invalid {} range specification: {}. Start exceeds end; "
+                            "required format N-M with N <= M, e.g. 0-4. Ignoring {}...",
+                            _label, _v, _v);
+                continue;
+            }
             do
             {
                 emplace(_result, _vn);

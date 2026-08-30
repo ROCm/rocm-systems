@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include <dirent.h>
 #include <sys/stat.h>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <algorithm>
 #include <unordered_map>
@@ -40,6 +41,9 @@ THE SOFTWARE.
 #include <va/va.h>
 #include <va/va_drm.h>
 #include <va/va_drmcommon.h>
+#ifdef ROCDECODE_USE_DLOPEN_VA
+#include "vaapi_loader.h"
+#endif
 #include "../../commons.h"
 #include "../../../api/rocdecode/rocdecode.h"
 
@@ -72,6 +76,7 @@ typedef enum {
 typedef struct {
     int device_id;
     std::string gpu_uuid;
+    std::string gpu_pci_bdf;
     int drm_fd;
     VADisplay va_display;
     hipDeviceProp_t hip_dev_prop;
@@ -145,21 +150,39 @@ private:
     std::mutex mutex;
     /**
      * @brief A map that associates GPU UUIDs with their corresponding render node indices.
-     * 
-     * This unordered map uses GPU UUIDs as keys (std::string) and maps them to their 
-     * respective render node indices (int). It provides a fast lookup mechanism to 
+     *
+     * This unordered map uses GPU UUIDs as keys (std::string) and maps them to their
+     * respective render node indices (int). It provides a fast lookup mechanism to
      * retrieve the render node index for a given GPU UUID.
      */
     std::unordered_map<std::string, int> gpu_uuids_to_render_nodes_map_;
     std::unordered_map<std::string, ComputePartition> gpu_uuids_to_compute_partition_map_;
+
+    // GPU PCI BDF -> render node index / compute partition (primary match key).
+    std::unordered_map<std::string, int> gpu_pci_bdf_to_render_nodes_map_;
+    std::unordered_map<std::string, ComputePartition> gpu_pci_bdf_to_compute_partition_map_;
+
     VaContext();
     VaContext(const VaContext&) = delete;
     VaContext& operator = (const VaContext) = delete;
     ~VaContext();
+
+#ifdef ROCDECODE_USE_DLOPEN_VA
+    // Exclusively owns the dlopen handle and VA function pointer table.
+    // VaContext is a singleton so there is exactly one instance; unique_ptr
+    // is correct here. Outlives all VADisplay handles.
+    std::unique_ptr<VaapiLoader> va_loader_;
+#endif
 
     rocDecStatus InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop);
     rocDecStatus InitVAAPI(int va_ctx_idx, std::string drm_node);
     void GetVisibleDevices(std::vector<int>& visible_devices_vetor);
     void GetDrmNodeOffset(std::string device_name, uint8_t device_id, std::vector<int>& visible_devices, ComputePartition current_compute_partition, int &offset);
     void GetGpuUuids();
+
+    // Returns the lowercased PCI BDF (function suffix stripped) for a render node, or "" if not a PCI device.
+    std::string GetRenderNodeBusId(const std::string& render_node_name);
+
+    // Returns the lowest-numbered /dev/dri/renderD* node, or "" if none.
+    std::string GetFirstAvailableDrmNode();
 };

@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -79,6 +80,10 @@ public:
   /// @returns String table index.
   virtual uint32_t sectionHeaderNameIdx() const = 0;
 
+  /// @brief Index of this section in its owning ELF section-header table.
+  /// @returns Section index when the section is backed by ELF metadata.
+  virtual std::optional<size_t> sectionHeaderIndex() const { return std::nullopt; }
+
   /// @brief File offset of this section in the ELF image.
   /// @returns Byte offset from the start of the file.
   virtual uint64_t sectionOffset() const = 0;
@@ -106,15 +111,12 @@ public:
   /// @returns Vector of pointers to .text sections.
   const std::vector<const Section *> &text_sections() const { return text_sections_; }
 
-  /// @brief Executable code sections in parsed section-header order.
-  ///
-  /// @details ELF does not require section headers to be sorted by load address.
-  /// For DBT-emitted objects, `.rj_translations` is inserted immediately after
-  /// `.text` in the file/image and its section header is appended after the
-  /// existing headers, so the parser observes original `.text` before the DBT
-  /// cave. Use `text_sections()` when offsets must remain relative to the
-  /// original `.text` section.
-  const std::vector<const Section *> &code_sections() const { return code_sections_; }
+  /// @brief Runtime-loaded ranges declared executable by ELF metadata.
+  /// @returns Sections carrying both SHF_ALLOC and SHF_EXECINSTR, including
+  ///          unmaterialized SHT_NOBITS ranges used for layout validation.
+  const std::vector<const Section *> &allocated_executable_sections() const {
+    return allocated_executable_sections_;
+  }
 
   /// @brief .rodata sections containing read-only data.
   /// @returns Vector of pointers to .rodata sections.
@@ -199,7 +201,7 @@ protected:
   std::unique_ptr<Header> header_;
   std::vector<std::unique_ptr<Section>> sections_;
   std::vector<const Section *> text_sections_;
-  std::vector<const Section *> code_sections_;
+  std::vector<const Section *> allocated_executable_sections_;
   std::vector<const Section *> rodata_sections_;
 };
 

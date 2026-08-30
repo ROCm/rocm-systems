@@ -152,8 +152,8 @@ rm -rf rocprof-sys-build
 cmake -B rocprof-sys-build -S .                                                  \
        -D CMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems                          \
        -D ROCPROFSYS_USE_PYTHON=ON      -D ROCPROFSYS_BUILD_DYNINST=ON           \
-       -D ROCPROFSYS_BUILD_TBB=ON       -D ROCPROFSYS_BUILD_BOOST=ON             \
-       -D ROCPROFSYS_BUILD_ELFUTILS=ON  -D ROCPROFSYS_BUILD_LIBIBERTY=ON         \
+       -D ROCPROFSYS_BUILD_TBB=ON       -D ROCPROFSYS_BUILD_ELFUTILS=ON          \
+       -D ROCPROFSYS_BUILD_LIBIBERTY=ON -D ROCPROFSYS_BUILD_EXAMPLES=ON          \
        -D ROCPROFSYS_BUILD_TESTING=ON
 cmake --build rocprof-sys-build --target all --parallel 8
 cmake --build rocprof-sys-build --target install
@@ -428,8 +428,6 @@ for `foo` via the direct call within `spam`. There will be no entries for `bar` 
 ![rocprof-sys-rocm](docs/data/rocprof-sys-rocm.png)
 
 ![rocprof-sys-rocm-flow](docs/data/rocprof-sys-rocm-flow.png)
-
-![rocprof-sys-user-api](docs/data/rocprof-sys-user-api.png)
 
 ## Using Perfetto tracing with system backend
 

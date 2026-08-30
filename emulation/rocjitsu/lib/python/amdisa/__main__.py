@@ -4,15 +4,19 @@
 """CLI entry point: ``python -m amdisa``."""
 
 import argparse
+import re
 import sys
+from tempfile import TemporaryDirectory
 import xml.etree.ElementTree as elem_tree
 
 from amdisa import (
     Cdna1Profile,
     Cdna2Profile,
+    Cdna4Profile,
     CdnaProfile,
     CodegenConfig,
     CodeGenerator,
+    Cdna5Profile,
     Parser,
     Rdna1Profile,
     Rdna2Profile,
@@ -22,9 +26,13 @@ from amdisa import (
 )
 from amdisa import xml_schema as xs
 from amdisa.cross_isa import CrossIsaAnalyzer
-from amdisa.encoding_translator_codegen import generate_encoding_fields, generate_encoding_translators
+from amdisa.encoding_translator_codegen import (
+    generate_encoding_fields,
+    generate_encoding_translators,
+)
 from amdisa.legalization import LegalizationGenerator
 from amdisa.legalization_codegen import emit_all as emit_legalization
+from amdisa.isa_properties_codegen import emit_isa_properties
 from amdisa.semantics import derive_all_semantics
 
 _ENCODING_TRANSLATOR_PAIRS = [
@@ -38,13 +46,72 @@ _PROFILES = {
     'cdna1': Cdna1Profile,
     'cdna2': Cdna2Profile,
     'cdna3': CdnaProfile,
-    'cdna4': CdnaProfile,
+    'cdna4': Cdna4Profile,
     'rdna1': Rdna1Profile,
     'rdna2': Rdna2Profile,
     'rdna3': Rdna3Profile,
     'rdna3.5': Rdna3_5Profile,
     'rdna4': Rdna4Profile,
+    'cdna5': Cdna5Profile,
 }
+
+_PROFILE_ALIASES = {
+    'rdna3_5': 'rdna3.5',
+}
+
+
+def _collect_shared_execute_body_variants(specs, plan):
+    """Collect candidate shared execute bodies from each ISA.
+
+    The cross-ISA analyzer proves structural compatibility, but the final
+    generated body can still depend on architecture-specific lowering choices.
+    This preflight keeps those generated bodies visible before the real output
+    pass decides which keys can remain shared.
+    """
+    variants: dict[tuple[str, str], dict[str, tuple]] = {}
+    with TemporaryDirectory(prefix='amdisa-shared-preflight-') as out_dir:
+        config = CodegenConfig()
+        for name, spec, sem in specs:
+            code_gen = CodeGenerator(
+                spec, out_dir, sem, config=config, shared_plan=plan
+            )
+            code_gen.gen_all()
+            for key, data in code_gen._shared_execute_bodies.items():
+                variants.setdefault(key, {})[name] = data
+    return variants
+
+
+def _unshared_execute_keys_from_variants(
+    variants: dict[tuple[str, str], dict[str, tuple]],
+) -> frozenset[tuple[str, str]]:
+    """Return keys whose generated shared bodies differ between ISAs."""
+    divergent = set()
+    for key, by_isa in variants.items():
+        bodies = {data[2] for data in by_isa.values()}
+        if len(bodies) > 1:
+            divergent.add(key)
+    return frozenset(divergent)
+
+
+def _merge_shared_execute_body(
+    merged: dict[tuple[str, str], tuple],
+    key: tuple[str, str],
+    data: tuple,
+    isa_name: str,
+) -> None:
+    """Merge a final shared body and reject unexpected divergence."""
+    existing = merged.get(key)
+    if existing is None:
+        merged[key] = data
+        return
+    if existing[2] != data[2]:
+        raise AssertionError(
+            'shared execute body collision after divergence preflight: '
+            f'isa={isa_name!r} mnemonic={key[0]!r} enc={key[1]!r} produced '
+            'a different body for a key that was still marked shareable.'
+            f'\n--- first writer body ---\n{existing[2]}'
+            f'\n--- this writer body ---\n{data[2]}'
+        )
 
 
 def _detect_profile(isa_xml: str) -> str:
@@ -78,63 +145,143 @@ def _detect_profile(isa_xml: str) -> str:
     return 'cdna'
 
 
-def _run_multi(args) -> None:
-    """Multi-ISA mode: parse all XMLs, run CrossIsaAnalyzer, generate shared + per-ISA."""
+def _normalize_codegen_identity(name: str) -> str:
+    """Normalize and validate an explicit generated directory and namespace."""
+    identity = name.replace('.', '_')
+    if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', identity) is None:
+        raise ValueError(f'invalid ISA name {name!r}: expected a single C++ identifier')
+    return identity
+
+
+def _parse_isa_arg(value: str) -> tuple[str | None, str, str]:
+    """Parse ``[NAME:]XML`` and resolve its ISA profile."""
+    if ':' in value:
+        name, xml_path = value.split(':', 1)
+        _normalize_codegen_identity(name)
+    else:
+        name, xml_path = None, value
+
+    profile_key = _PROFILE_ALIASES.get(name, name) if name else None
+    if profile_key not in _PROFILES:
+        profile_key = _detect_profile(xml_path)
+    return name, xml_path, profile_key
+
+
+def _apply_codegen_identity(spec, name: str | None) -> None:
+    """Use an explicit CLI name for generated paths and C++ namespaces."""
+    if name is None:
+        return
+    identity = _normalize_codegen_identity(name)
+    spec.generated_dir_name = identity
+    spec.cpp_namespace = identity
+
+
+def _codegen_config(
+    isa_output: str | None,
+    *,
+    include_root: str | None = None,
+    use_shared_execute_helpers: bool = True,
+) -> CodegenConfig:
+    if isa_output is None:
+        return CodegenConfig(use_shared_execute_helpers=use_shared_execute_helpers)
+    return CodegenConfig.for_output(
+        isa_output,
+        include_root=include_root,
+        use_shared_execute_helpers=use_shared_execute_helpers,
+    )
+
+
+def _run(args) -> None:
+    """Parse the input XMLs and generate the requested outputs."""
     specs = []
-    for entry in args.multi:
-        if ':' not in entry:
-            print(f'error: --multi entry must be name:xml_path, got: {entry}', file=sys.stderr)
-            sys.exit(1)
-        name, xml_path = entry.split(':', 1)
-        profile_key = name.replace('.', '_')
-        if profile_key not in _PROFILES:
-            profile_key = _detect_profile(xml_path)
+    for entry in args.isafiles:
+        name, xml_path, profile_key = _parse_isa_arg(entry)
         profile = _PROFILES[profile_key]()
         spec = Parser(xml_path, profile).parse()
+        _apply_codegen_identity(spec, name)
         sem = derive_all_semantics(spec)
-        specs.append((name, spec, sem))
+        specs.append((spec.arch_name, spec, sem))
 
     analyzer = CrossIsaAnalyzer()
     plan = analyzer.analyze(specs)
 
-    print(f'Cross-ISA analysis: {plan.total_universal} universal, '
-          f'{plan.total_family_shared} family-shared, '
-          f'{plan.total_exclusive} exclusive', file=sys.stderr)
-
-    config = CodegenConfig()
+    print(
+        f'Cross-ISA analysis: {plan.total_universal} universal, '
+        f'{plan.total_family_shared} family-shared, '
+        f'{plan.total_exclusive} exclusive',
+        file=sys.stderr,
+    )
+    config = _codegen_config(
+        args.isa_output,
+        include_root=getattr(args, 'include_root', None),
+        use_shared_execute_helpers=len(specs) > 1,
+    )
 
     # Generate per-ISA files, accumulating shared execute bodies.
     if args.gen_isas:
+        emit_isa_properties(args.isa_output, specs)
+        body_variants = _collect_shared_execute_body_variants(specs, plan)
+        unshared_keys = _unshared_execute_keys_from_variants(body_variants)
+        config.unshared_execute_keys = unshared_keys
+        if unshared_keys:
+            print(
+                f'Keeping {len(unshared_keys)} arch-dependent shared execute '
+                f'keys ISA-local after body preflight',
+                file=sys.stderr,
+            )
+
         all_shared_bodies: dict[tuple[str, str], tuple] = {}
         for name, spec, sem in specs:
-            code_gen = CodeGenerator(spec, args.isa_output, sem, config=config,
-                                     shared_plan=plan)
+            code_gen = CodeGenerator(
+                spec, args.isa_output, sem, config=config, shared_plan=plan
+            )
             code_gen.gen_all()
             for key, data in code_gen._shared_execute_bodies.items():
-                if key not in all_shared_bodies:
-                    all_shared_bodies[key] = data
+                _merge_shared_execute_body(all_shared_bodies, key, data, name)
 
         if all_shared_bodies:
             first_spec = specs[0][1]
             first_sem = specs[0][2]
-            writer = CodeGenerator(first_spec, args.isa_output, first_sem,
-                                   config=config, shared_plan=plan)
+            writer = CodeGenerator(
+                first_spec, args.isa_output, first_sem, config=config, shared_plan=plan
+            )
             writer._shared_execute_bodies = all_shared_bodies
             writer._write_shared_execute_templates()
 
     # DBT legalization tables and encoding translators.
     if args.gen_dbt:
-        dbt_output = args.dbt_output or args.isa_output or '.'
+        if len(specs) < 2:
+            print(
+                'Skipping DBT generation: at least two ISAs are required.',
+                file=sys.stderr,
+            )
+            return
+        dbt_output = args.dbt_output or args.isa_output
+        if not dbt_output:
+            print(
+                'error: --dbt-output or --isa-output is required when '
+                'generating DBT tables',
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
         leg_gen = LegalizationGenerator(specs)
         results = leg_gen.generate_all()
         generated = emit_legalization(dbt_output, results)
         for src, dst, entries in results:
             counts = leg_gen.summary(entries)
-            print(f'  {src} -> {dst}: {len(entries)} entries '
-                  f'({counts["identity"]} identity, {counts["substitute"]} substitute, '
-                  f'{counts["lower"]} lower, {counts["expand"]} expand, '
-                  f'{counts["illegal"]} illegal)', file=sys.stderr)
+            identity = counts['identity']
+            substitute = counts['substitute']
+            lower = counts['lower']
+            expand = counts['expand']
+            illegal = counts['illegal']
+            print(
+                f'  {src} -> {dst}: {len(entries)} entries '
+                f'({identity} identity, {substitute} substitute, '
+                f'{lower} lower, {expand} expand, '
+                f'{illegal} illegal)',
+                file=sys.stderr,
+            )
         print(f'Generated {len(generated)} files in {dbt_output}', file=sys.stderr)
 
         generate_encoding_fields(specs, dbt_output)
@@ -144,58 +291,55 @@ def _run_multi(args) -> None:
                 src_spec, _ = spec_map[src_n]
                 dst_spec, _ = spec_map[dst_n]
                 generate_encoding_translators(
-                    src_spec, dst_spec, src_n, dst_n, dbt_output)
+                    src_spec,
+                    dst_spec,
+                    src_n,
+                    dst_n,
+                    dbt_output,
+                    config=config,
+                )
 
 
 def main() -> None:
     """Parse an AMD GPU ISA XML spec and generate C++ sources."""
     arg_parser = argparse.ArgumentParser(
-        description="Parse a machine-readable AMD GPU ISA specification and generate C++ sources"
+        description='Parse a machine-readable AMD GPU ISA specification and generate C++ sources'
     )
     arg_parser.add_argument(
-        "isafile", nargs='?', default=None,
-        help="XML file with machine-readable AMD GPU ISA specification"
+        'isafiles',
+        nargs='+',
+        metavar='[NAME:]XML',
+        help='Machine-readable AMD GPU ISA XML specifications. Each path may '
+        'have a generated identity prefix (e.g., cdna1:/path/to/cdna1.xml).',
     )
     arg_parser.add_argument(
-        "--multi", nargs='+', metavar='NAME:XML',
-        help="Multi-ISA mode: parse all XMLs and generate shared execute() templates. "
-             "Each argument is name:xml_path (e.g., cdna1:/path/to/cdna1.xml)."
+        '--gen-isas',
+        action='store_true',
+        help='Generate ISA C++ files (decoders, encodings, execute bodies).',
     )
     arg_parser.add_argument(
-        "--gen-isas", action="store_true", default=True,
-        help="Generate ISA C++ files (decoders, encodings, execute bodies). Default.",
+        '--gen-dbt',
+        action='store_true',
+        help='Generate DBT legalization tables and encoding translators.',
     )
     arg_parser.add_argument(
-        "--gen-dbt", action="store_true", default=True,
-        help="Generate DBT legalization tables and encoding translators. Default.",
+        '--isa-output', help='Output path for generated ISA C++ files'
     )
     arg_parser.add_argument(
-        "--isa-output", help="Output path for generated ISA C++ files"
+        '--include-root',
+        help='Compiler include root used to spell generated include paths. '
+        'Absolute paths are emitted when omitted.',
     )
     arg_parser.add_argument(
-        "--dbt-output",
-        metavar="DIR",
-        help="Output directory for DBT tables (defaults to --isa-output).",
+        '--dbt-output',
+        metavar='DIR',
+        help='Output directory for DBT tables (defaults to --isa-output).',
     )
     args = arg_parser.parse_args()
-
-    # Multi-ISA mode.
-    if args.multi:
-        _run_multi(args)
-        return
-
-    if not args.isafile:
-        print('error: isafile required in single-ISA mode', file=sys.stderr)
-        sys.exit(1)
-
-    profile_key = _detect_profile(args.isafile)
-    profile = _PROFILES[profile_key]()
-    isa = Parser(args.isafile, profile).parse()
-    semantics = derive_all_semantics(isa)
-    config = CodegenConfig()
-    if args.gen_isas:
-        code_gen = CodeGenerator(isa, args.isa_output, semantics, config=config)
-        code_gen.gen_all()
+    if not args.gen_isas and not args.gen_dbt:
+        args.gen_isas = True
+        args.gen_dbt = True
+    _run(args)
 
 
 if __name__ == '__main__':

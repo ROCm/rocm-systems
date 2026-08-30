@@ -30,17 +30,22 @@
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
+#include "lib/rocprofiler-sdk/spm/core.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/cxx/hash.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace rocprofiler
 {
@@ -77,14 +82,56 @@ struct buffer_tracing_service
 struct dispatch_counter_collection_service
 {
     // Contains a vector of counter collection instances associated with this context.
-    // Each instance is assocated with an agent and a counter collection profile.
+    // Each instance is associated with an agent and a counter collection profile.
     // Contains callback information along with other data needed to collect/process
     // counters.
     std::vector<std::shared_ptr<counters::counter_callback_info>> callbacks{};
-    // A flag to state wether or not the counter set is currently enabled. This is primarily
+    // GPU agents this context collects on. An empty set means every GPU agent, which is what a
+    // plain configure_{buffer,callback}_dispatch call produces;
+    // rocprofiler_dispatch_counting_service_set_agents narrows it. The set is read on the
+    // dispatch path and when scoping serialization, so it is fixed at configure time and never
+    // mutated once the context is started.
+    std::unordered_set<rocprofiler_agent_id_t> agents{};
+    // A flag to state whether or not the counter set is currently enabled. This is primarily
     // to protect against multithreaded calls to enable a context (and enabling already enabled
     // counters).
     common::Synchronized<bool> enabled{false};
+
+    // An empty agent set means "all GPU agents", so an unrestricted context keeps behaving
+    // exactly as it did before per-agent scoping existed.
+    bool collects_on(rocprofiler_agent_id_t agent_id) const
+    {
+        return agents.empty() || agents.count(agent_id) > 0;
+    }
+
+    // Two counter-collection contexts can coexist as long as they do not both want the same
+    // GPU. An unrestricted context claims every agent, so it intersects with everything.
+    bool intersects(const dispatch_counter_collection_service& rhs) const;
+};
+
+struct spm_dispatch_counter_collection_service
+{
+    // Contains a SPM collection instance associated with this context.
+    // Contains callback information along with other data needed to collect/process
+    // SPM counters.
+    std::vector<std::shared_ptr<spm::spm_counter_callback_info>> callbacks{};
+    // GPU agents this context collects on. An empty set means every GPU agent, which is what a
+    // plain configure_{buffer,callback}_dispatch call produces;
+    // rocprofiler_spm_dispatch_counting_service_set_agents narrows it. The set is read on the
+    // dispatch path and when scoping serialization, so it is fixed at configure time and never
+    // mutated once the context is started.
+    std::unordered_set<rocprofiler_agent_id_t> agents{};
+    // A flag to state whether or not the counter set is currently enabled. This is primarily
+    // to protect against multithreaded calls to enable a context (and enabling already enabled
+    // counters).
+    common::Synchronized<bool> enabled{false};
+
+    bool collects_on(rocprofiler_agent_id_t agent_id) const
+    {
+        return agents.empty() || agents.count(agent_id) > 0;
+    }
+
+    bool intersects(const spm_dispatch_counter_collection_service& rhs) const;
 };
 
 struct device_counting_service
@@ -133,6 +180,8 @@ struct context
     std::unique_ptr<pc_sampling_service>                 pc_sampler                  = {};
     std::unique_ptr<thread_trace::DispatchThreadTracer>  dispatch_thread_trace       = {};
     std::unique_ptr<thread_trace::DeviceThreadTracer>    device_thread_trace         = {};
+
+    std::unique_ptr<spm_dispatch_counter_collection_service> dispatch_spm = {};
 
     template <typename KindT>
     bool is_tracing(KindT _kind) const;
@@ -226,6 +275,11 @@ deactivate_client_contexts(rocprofiler_client_id_t id);
 // should only be called if the client failed to initialize
 void
 deregister_client_contexts(rocprofiler_client_id_t id);
+
+// The mutex that serialises start_context / stop_context and any mutation that must be
+// atomic with activation state (e.g. setting the agent restriction on a context).
+std::mutex&
+get_contexts_mutex();
 
 inline bool
 default_context_filter(const context* val)

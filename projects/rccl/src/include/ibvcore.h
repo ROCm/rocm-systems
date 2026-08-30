@@ -1,3 +1,41 @@
+/*
+ * Copyright (c) 2004, 2005 Topspin Communications.  All rights reserved.
+ * Copyright (c) 2004, 2011-2012 Intel Corporation.  All rights reserved.
+ * Copyright (c) 2005, 2006, 2007 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2005 PathScale, Inc.  All rights reserved.
+ *
+ * This software is available to you under the OpenIB.org BSD license below:
+ *
+ *     Redistribution and use in source and binary forms, with or
+ *     without modification, are permitted provided that the following
+ *     conditions are met:
+ *
+ *      - Redistributions of source code must retain the above
+ *        copyright notice, this list of conditions and the following
+ *        disclaimer.
+ *
+ *      - Redistributions in binary form must reproduce the above
+ *        copyright notice, this list of conditions and the following
+ *        disclaimer in the documentation and/or other materials
+ *        provided with the distribution.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0 and BSD-3
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
 #ifndef NCCL_IBV_CORE_H_
 #define NCCL_IBV_CORE_H_
 
@@ -188,6 +226,10 @@ enum ibv_port_cap_flags {
 	IBV_PORT_IP_BASED_GIDS			= 1 << 26,
 };
 
+enum ibv_query_port_flags {
+	IBV_QPF_GRH_REQUIRED = 1 << 0,
+};
+
 struct ibv_port_attr {
 	enum ibv_port_state	state;
 	enum ibv_mtu		max_mtu;
@@ -234,6 +276,8 @@ enum ibv_event_type {
 	IBV_EVENT_QP_LAST_WQE_REACHED,
 	IBV_EVENT_CLIENT_REREGISTER,
 	IBV_EVENT_GID_CHANGE,
+	IBV_EVENT_WQ_FATAL,
+	IBV_EVENT_DEVICE_SPEED_CHANGE,
 
 	/* new experimental events start here leaving enough
 	 * room for 14 events which should be enough

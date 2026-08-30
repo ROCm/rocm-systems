@@ -74,6 +74,8 @@ add_subdirectory(roctx)
 add_subdirectory(rccl)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
+add_subdirectory(hipfile)
+add_subdirectory(rocshmem)
 add_subdirectory(rocprofiler)
 
 #
@@ -131,7 +133,7 @@ function(rocp_register_test_executable _NAME)
     cmake_parse_arguments(
         RRTE
         "" # options
-        "SECURE;${_SV_ARGS}" # single value args
+        "SECURE;${_SV_ARGS};LOG_LEVEL" # single value args
         "SOURCES;LIBRARIES" # multiple value args
         ${ARGN})
 
@@ -146,6 +148,9 @@ function(rocp_register_test_executable _NAME)
             set(_LABELS "secure")
         else()
             set(_LABELS "insecure")
+        endif()
+        if(RRTE_LOG_LEVEL)
+            list(APPEND _ENV "ROCPROFILER_REGISTER_LOG_LEVEL=${RRTE_LOG_LEVEL}")
         endif()
         add_test(
             NAME ${_TEST_NAME}
@@ -170,9 +175,8 @@ function(rocp_register_test_executable _NAME)
         set(_BASE_PRELOAD "${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}")
     endif()
 
-    rocp_register_add_test(
-        ${_NAME} ${_NAME} "${_BASE_PRELOAD}"
-        "${RRTE_CORE_PASS_REGEX}" "${RRTE_CORE_FAIL_REGEX}")
+    rocp_register_add_test(${_NAME} ${_NAME} "${_BASE_PRELOAD}" "${RRTE_CORE_PASS_REGEX}"
+                           "${RRTE_CORE_FAIL_REGEX}")
 
     # Build LD_PRELOAD list for -preload tests
     set(_PRELOAD_LIBS "librocprofiler-register.so" "libgeneric-tool.so")
@@ -181,10 +185,8 @@ function(rocp_register_test_executable _NAME)
     endif()
     list(JOIN _PRELOAD_LIBS ":" _PRELOAD_STRING)
 
-    rocp_register_add_test(
-        ${_NAME}-preload ${_NAME}
-        "LD_PRELOAD=${_PRELOAD_STRING}"
-        "${RRTE_PRELOAD_PASS_REGEX}" "${RRTE_PRELOAD_FAIL_REGEX}")
+    rocp_register_add_test(${_NAME}-preload ${_NAME} "LD_PRELOAD=${_PRELOAD_STRING}"
+                           "${RRTE_PRELOAD_PASS_REGEX}" "${RRTE_PRELOAD_FAIL_REGEX}")
 
     rocp_register_add_test(
         ${_NAME}-env
@@ -194,16 +196,16 @@ function(rocp_register_test_executable _NAME)
         "${RRTE_PRELOAD_FAIL_REGEX}")
 
     rocp_register_add_test(
-        ${_NAME}-wrap ${_NAME}
+        ${_NAME}-wrap
+        ${_NAME}
         "LD_PRELOAD=librocprofiler-register.so;ROCP_REG_TEST_WRAP=1;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
-        "${RRTE_WRAP_PASS_REGEX}" "${RRTE_WRAP_FAIL_REGEX}")
+        "${RRTE_WRAP_PASS_REGEX}"
+        "${RRTE_WRAP_FAIL_REGEX}")
 
     rocp_register_add_test(
-        ${_NAME}-preload-wrap
-        ${_NAME}
+        ${_NAME}-preload-wrap ${_NAME}
         "LD_PRELOAD=${_PRELOAD_STRING};ROCP_REG_TEST_WRAP=1"
-        "${RRTE_PRELOAD_WRAP_PASS_REGEX}"
-        "${RRTE_PRELOAD_WRAP_FAIL_REGEX}")
+        "${RRTE_PRELOAD_WRAP_PASS_REGEX}" "${RRTE_PRELOAD_WRAP_FAIL_REGEX}")
 
     rocp_register_add_test(
         ${_NAME}-env-wrap
@@ -223,11 +225,11 @@ rocp_register_test_executable(
     CORE_PASS_REGEX
         ".hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     PRELOAD_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     WRAP_PASS_REGEX
         ".hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
     )
 
 rocp_register_test_executable(
@@ -237,12 +239,12 @@ rocp_register_test_executable(
     CORE_PASS_REGEX
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     PRELOAD_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     WRAP_PASS_REGEX
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
-    )
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+    LOG_LEVEL "fatal")
 
 rocp_register_test_executable(
     test-amdhip-roctx-tool
@@ -250,13 +252,13 @@ rocp_register_test_executable(
     LIBRARIES rocprofiler-register::tests-strong amdhip::amdhip roctx::roctx
               rocprofiler-register::tests-tool
     CORE_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     PRELOAD_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     WRAP_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
     )
 
 rocp_register_test_executable(
@@ -265,13 +267,13 @@ rocp_register_test_executable(
     LIBRARIES rocprofiler-register::tests-strong amdhip::amdhip roctx::roctx
               rocprofiler-register::tests-rocp
     CORE_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     PRELOAD_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     WRAP_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
     )
 
 rocp_register_test_executable(
@@ -279,13 +281,13 @@ rocp_register_test_executable(
     SOURCES test-amdhip-roctx.cpp
     LIBRARIES rocprofiler-register::tests-weak rocprofiler-register::tests-tool
     CORE_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     PRELOAD_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
     )
 
 rocp_register_test_executable(
@@ -293,13 +295,38 @@ rocp_register_test_executable(
     SOURCES test-amdhip-roctx.cpp
     LIBRARIES rocprofiler-register::tests-weak rocprofiler-register::tests-rocp
     CORE_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     PRELOAD_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+    )
+
+rocp_register_test_executable(
+    test-hipfile
+    SECURE ON
+    SOURCES test-hipfile.cpp
+    LIBRARIES rocprofiler-register::tests-strong hipfile::hipfile
+    CORE_PASS_REGEX ".hipfile.cpp. hipFileGetVersion\n"
+    PRELOAD_PASS_REGEX
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hipFile :: 200 :: 0 :: 1\n.hipfile.cpp. hipFile identifier 48\n.hipfile.cpp. hipFileGetVersion\n"
+    WRAP_PASS_REGEX ".hipfile.cpp. hipFileGetVersion\n"
+    PRELOAD_WRAP_PASS_REGEX
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hipFile :: 200 :: 0 :: 1\n.hipfile.cpp. hipFile identifier 48\n.rocprofiler.cpp. hipFileGetVersion\n"
+    )
+
+rocp_register_test_executable(
+    test-hipfile-weak
+    SOURCES test-hipfile.cpp
+    LIBRARIES rocprofiler-register::tests-weak
+    CORE_PASS_REGEX ".fwd.hpp. dlopen libhipfile.so, 1\n.hipfile.cpp. hipFileGetVersion\n"
+    PRELOAD_PASS_REGEX
+        ".fwd.hpp. dlopen libhipfile.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hipFile :: 200 :: 0 :: 1\n.hipfile.cpp. hipFile identifier 48\n.hipfile.cpp. hipFileGetVersion\n"
+    WRAP_PASS_REGEX ".fwd.hpp. dlopen libhipfile.so, 1\n.hipfile.cpp. hipFileGetVersion\n"
+    PRELOAD_WRAP_PASS_REGEX
+        ".fwd.hpp. dlopen libhipfile.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hipFile :: 200 :: 0 :: 1\n.hipfile.cpp. hipFile identifier 48\n.rocprofiler.cpp. hipFileGetVersion\n"
     )
 
 # multithreaded
@@ -310,11 +337,11 @@ rocp_register_test_executable(
     CORE_PASS_REGEX
         ".hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
     PRELOAD_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
     WRAP_PASS_REGEX
         ".hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n"
     )
 
 rocp_register_test_executable(
@@ -324,12 +351,12 @@ rocp_register_test_executable(
     CORE_PASS_REGEX
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
     PRELOAD_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
     WRAP_PASS_REGEX
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n"
-    )
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n"
+    LOG_LEVEL "fatal")
 
 rocp_register_test_executable(
     test-amdhip-roctx-mt-rocp
@@ -337,13 +364,13 @@ rocp_register_test_executable(
     LIBRARIES rocprofiler-register::tests-strong amdhip::amdhip roctx::roctx
               rocprofiler-register::tests-rocp
     CORE_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
     PRELOAD_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
     WRAP_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n"
     )
 
 # 29
@@ -352,13 +379,13 @@ rocp_register_test_executable(
     SOURCES test-amdhip-roctx-mt.cpp
     LIBRARIES rocprofiler-register::tests-weak rocprofiler-register::tests-rocp
     CORE_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
     PRELOAD_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
     WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n"
     )
 
 # constructor
@@ -369,11 +396,11 @@ rocp_register_test_executable(
     CORE_PASS_REGEX
         ".hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n"
     PRELOAD_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n"
     WRAP_PASS_REGEX
         ".hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n"
     )
 
 rocp_register_test_executable(
@@ -383,12 +410,12 @@ rocp_register_test_executable(
     CORE_PASS_REGEX
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n"
     PRELOAD_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n"
     WRAP_PASS_REGEX
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n"
-    )
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n"
+    LOG_LEVEL "fatal")
 
 # 41
 rocp_register_test_executable(
@@ -397,13 +424,13 @@ rocp_register_test_executable(
     LIBRARIES rocprofiler-register::tests-strong amdhip::amdhip
               rocprofiler-register::tests-rocp
     CORE_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n"
     PRELOAD_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n"
     WRAP_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n"
     )
 
 rocp_register_test_executable(
@@ -411,13 +438,13 @@ rocp_register_test_executable(
     SOURCES test-amdhip-ctor.cpp
     LIBRARIES rocprofiler-register::tests-weak rocprofiler-register::tests-rocp
     CORE_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n"
     PRELOAD_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n"
     WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n"
     )
 
 # constructor + mt
@@ -428,11 +455,11 @@ rocp_register_test_executable(
     CORE_PASS_REGEX
         ".hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
     PRELOAD_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
     WRAP_PASS_REGEX
         ".hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n"
     )
 
 rocp_register_test_executable(
@@ -442,12 +469,12 @@ rocp_register_test_executable(
     CORE_PASS_REGEX
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
     PRELOAD_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
     WRAP_PASS_REGEX
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n"
-    )
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n"
+    LOG_LEVEL "fatal")
 
 rocp_register_test_executable(
     test-amdhip-ctor-mt-rocp
@@ -455,13 +482,13 @@ rocp_register_test_executable(
     LIBRARIES rocprofiler-register::tests-strong amdhip::amdhip
               rocprofiler-register::tests-rocp
     CORE_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
     PRELOAD_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
     WRAP_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n"
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n"
     )
 
 rocp_register_test_executable(
@@ -469,13 +496,13 @@ rocp_register_test_executable(
     SOURCES test-amdhip-ctor-mt.cpp
     LIBRARIES rocprofiler-register::tests-weak rocprofiler-register::tests-rocp
     CORE_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
     PRELOAD_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
     WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n"
     PRELOAD_WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libamdhip64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n"
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n"
     )
 
 add_executable(test-invalid-hsa-runtime)

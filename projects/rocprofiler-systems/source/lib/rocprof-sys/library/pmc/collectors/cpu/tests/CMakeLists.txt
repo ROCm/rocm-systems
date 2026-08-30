@@ -16,7 +16,7 @@ target_link_libraries(
         rocprofiler-systems-googletest-library
         rocprofiler-systems-logger
         rocprofiler-systems-common-library
-        rocprofiler-systems-user-library
+        rocprofiler-systems::rocprofiler-systems-headers
 )
 
 target_include_directories(

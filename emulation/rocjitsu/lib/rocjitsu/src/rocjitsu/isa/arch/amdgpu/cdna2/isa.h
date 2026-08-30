@@ -4,14 +4,18 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA2_ISA_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_CDNA2_ISA_H_
 
-#include "rocjitsu/isa/arch/amdgpu/cdna2/decoder.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna2/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/decoder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/cdna_isa_base.h"
 #include "rocjitsu/isa/isa_traits.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
+namespace amdgpu {
+class Wavefront;
+}
 namespace cdna2 {
 
 /// @brief CDNA2 ISA traits (GFX90a, Wave64, separate AccVGPR file, GFX9 S_WAITCNT).
@@ -31,6 +35,13 @@ struct Isa : amdgpu::CdnaIsaBase {
   using MachineInst = cdna2::MachineInst;
   using OperandType = cdna2::OperandType;
   using StatusReg = amdgpu::CdnaStatusReg;
+
+  // SIMD fast-path traits — consumed by AmdgpuIsaOperand<Isa> in
+  // rocjitsu/isa/isa_operand_simd_inl.h. Definitions live in this arch's
+  // operand.cpp; bodies forward to the anonymous-namespace helpers.
+  static std::optional<uint32_t> resolved_vgpr_offset(OperandType opr_type, int ev);
+  static bool simd_capable_value(OperandType opr_type, int ev);
+  static uint32_t simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev);
 };
 
 } // namespace cdna2

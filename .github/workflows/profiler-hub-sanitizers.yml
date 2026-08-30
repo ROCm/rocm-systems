@@ -1,0 +1,137 @@
+name: profiler-hub Sanitizers
+run-name: profiler-hub-sanitizers
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/profiler-hub-sanitizers.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
+      - '!profilers/profiler-hub/README.md'
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/profiler-hub-sanitizers.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
+      - '!profilers/profiler-hub/README.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  sanitizer:
+    name: ${{ matrix.sanitizer.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SUPPRESSIONS_DIR: ${{ github.workspace }}/profilers/profiler-hub/.sanitizer-suppressions
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer:
+          # ASan/UBSan run at -O0 (Debug default); stack traces are usable as-is.
+          # Note: detect_leaks=1 + halt_on_error=1 means a leaking but otherwise-passing
+          # test will still fail the job. Leaks are reported at process exit.
+          - name: asan-ubsan
+            cflags: '-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all'
+            ldflags: '-fsanitize=address,undefined'
+            test_wrap: ''
+          # TSan runs at -O1: at -O0 the compiler does not reorder enough to expose
+          # races that production builds will hit. -O1 keeps stack traces readable.
+          - name: tsan
+            cflags: '-fsanitize=thread -fno-omit-frame-pointer -O1'
+            ldflags: '-fsanitize=thread'
+            test_wrap: 'setarch $(uname -m) -R'
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            profilers/profiler-hub
+            .github/workflows
+
+      # cmake, gcc/g++, util-linux are preinstalled on ubuntu-24.04 runners.
+      # The sqlite3/spdlog/fmt/nlohmann_json system packages are intentionally
+      # omitted: the project's cmake/{sqlite3,spdlog,nlohmann_json}.cmake fall
+      # back to FetchContent when find_package fails, so deps build with the
+      # sanitizer flags applied. System libs built without -fsanitize would
+      # produce false-positive reports.
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtest-dev libgmock-dev libbenchmark-dev
+
+      - name: Cache ccache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ matrix.sanitizer.name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ matrix.sanitizer.name }}-
+
+      - name: Setup ccache
+        run: |
+          sudo apt-get install -y ccache
+          ccache --max-size=1G
+          ccache --zero-stats
+
+      - name: Configure
+        working-directory: profilers/profiler-hub
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          cmake --version
+          ${CXX} --version
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DPROFILER_HUB_BUILD_TESTS=ON \
+            -DPROFILER_HUB_BUILD_BENCHMARKS=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_FLAGS="${{ matrix.sanitizer.cflags }}" \
+            -DCMAKE_CXX_FLAGS="${{ matrix.sanitizer.cflags }}" \
+            -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.sanitizer.ldflags }}" \
+            -DCMAKE_SHARED_LINKER_FLAGS="${{ matrix.sanitizer.ldflags }}"
+
+      - name: Build
+        working-directory: profilers/profiler-hub
+        run: cmake --build build --parallel $(nproc)
+
+      - name: ccache stats
+        run: ccache --show-stats
+
+      - name: Test (ASan + UBSan)
+        if: matrix.sanitizer.name == 'asan-ubsan'
+        working-directory: profilers/profiler-hub/build
+        env:
+          ASAN_OPTIONS: 'detect_leaks=1:abort_on_error=0:halt_on_error=1:print_summary=1:suppressions=${{ env.SUPPRESSIONS_DIR }}/asan.supp'
+          LSAN_OPTIONS: 'suppressions=${{ env.SUPPRESSIONS_DIR }}/lsan.supp'
+          UBSAN_OPTIONS: 'print_stacktrace=1:halt_on_error=1:print_summary=1:suppressions=${{ env.SUPPRESSIONS_DIR }}/ubsan.supp'
+        run: ctest --output-on-failure --output-junit test-results.xml
+
+      - name: Test (TSan)
+        if: matrix.sanitizer.name == 'tsan'
+        working-directory: profilers/profiler-hub/build
+        env:
+          TSAN_OPTIONS: 'halt_on_error=1:second_deadlock_stack=1:print_summary=1:suppressions=${{ env.SUPPRESSIONS_DIR }}/tsan.supp'
+        run: ${{ matrix.sanitizer.test_wrap }} ctest --output-on-failure --output-junit test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sanitizer-results-${{ matrix.sanitizer.name }}
+          path: profilers/profiler-hub/build/test-results.xml
+          if-no-files-found: warn

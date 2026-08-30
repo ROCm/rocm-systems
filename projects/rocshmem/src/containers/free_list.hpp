@@ -260,14 +260,14 @@ class FreeList {
 template <typename TYPE>
 class FreeListProxy {
   using FreeListT = FreeList<TYPE>;
-  using ProxyT = DeviceProxy<HIPAllocator, FreeListT>;
+  using ProxyT = DeviceProxy<FreeListT>;
 
  public:
   __host__ __device__ FreeListT* get() { return proxy_.get(); }
 
   explicit FreeListProxy(const MemoryAllocator& alloc = HIPAllocator(),
                          size_t num_elems = 1)
-      : allocator_{alloc}, proxy_{num_elems} {
+      : allocator_{alloc}, proxy_{num_elems, allocator_} {
     new (proxy_.get()) FreeListT(allocator_);
   }
 

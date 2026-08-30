@@ -2,10 +2,6 @@ defaults:
   numbered: False
 root: index
 subtrees:
-- entries:
-  - file: what-is-rocDecode.rst
-    title: What is rocDecode?
-
 - caption: Install
   entries:
   - file: install/rocDecode-install.rst
@@ -15,8 +11,8 @@ subtrees:
 
 - caption: Conceptual
   entries:
-  - file: conceptual/video-decoding-pipeline.rst
-    title: Video decoding pipeline
+  - file: conceptual/rocDecode-decoding-pipelines.rst
+    title: Decoding pipeline
   - file: conceptual/rocDecode-memory-types.rst
     title: Surface memory locations
 

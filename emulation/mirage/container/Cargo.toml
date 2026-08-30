@@ -1,0 +1,18 @@
+[package]
+name = "mirage_container"
+version.workspace = true
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+mirage_core = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

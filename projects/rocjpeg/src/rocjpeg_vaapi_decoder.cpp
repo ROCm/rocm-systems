@@ -22,6 +22,52 @@ THE SOFTWARE.
 
 #include "rocjpeg_vaapi_decoder.h"
 
+#include <algorithm>
+#include <atomic>
+#include <cctype>
+#include <stdlib.h>
+
+#ifdef ROCJPEG_USE_DLOPEN_VA
+// ---------------------------------------------------------------------------
+// VA-API call redirection through the process-wide shared dlopen vtable.
+// All va*() calls in this translation unit are macro-redirected through
+// g_va_loader.load()->fn.*, resolving to the isolated librocm_sysdeps_va.so.2
+// loaded with RTLD_LOCAL | RTLD_DEEPBIND.  This prevents system libva.so.2
+// (e.g. loaded by libavcodec) from intercepting rocjpeg's VA calls.
+//
+// g_va_loader is std::atomic to make concurrent decoder construction/destruction
+// safe: all writes use release ordering and the destructor uses compare_exchange
+// to avoid clobbering a pointer already updated by a concurrent constructor.
+// ---------------------------------------------------------------------------
+static std::atomic<RocJpegVaapiLoader *> g_va_loader{nullptr};
+
+// clang-format off
+#define vaGetDisplayDRM(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaGetDisplayDRM(__VA_ARGS__))
+#define vaInitialize(...)             (g_va_loader.load(std::memory_order_acquire)->fn.vaInitialize(__VA_ARGS__))
+#define vaTerminate(...)              (g_va_loader.load(std::memory_order_acquire)->fn.vaTerminate(__VA_ARGS__))
+#define vaSetInfoCallback(...)        (g_va_loader.load(std::memory_order_acquire)->fn.vaSetInfoCallback(__VA_ARGS__))
+#define vaQueryVendorString(...)      (g_va_loader.load(std::memory_order_acquire)->fn.vaQueryVendorString(__VA_ARGS__))
+#define vaErrorStr(...)               (g_va_loader.load(std::memory_order_acquire)->fn.vaErrorStr(__VA_ARGS__))
+#define vaMaxNumEntrypoints(...)      (g_va_loader.load(std::memory_order_acquire)->fn.vaMaxNumEntrypoints(__VA_ARGS__))
+#define vaQueryConfigEntrypoints(...) (g_va_loader.load(std::memory_order_acquire)->fn.vaQueryConfigEntrypoints(__VA_ARGS__))
+#define vaGetConfigAttributes(...)    (g_va_loader.load(std::memory_order_acquire)->fn.vaGetConfigAttributes(__VA_ARGS__))
+#define vaCreateConfig(...)           (g_va_loader.load(std::memory_order_acquire)->fn.vaCreateConfig(__VA_ARGS__))
+#define vaDestroyConfig(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaDestroyConfig(__VA_ARGS__))
+#define vaQuerySurfaceAttributes(...) (g_va_loader.load(std::memory_order_acquire)->fn.vaQuerySurfaceAttributes(__VA_ARGS__))
+#define vaCreateSurfaces(...)         (g_va_loader.load(std::memory_order_acquire)->fn.vaCreateSurfaces(__VA_ARGS__))
+#define vaDestroySurfaces(...)        (g_va_loader.load(std::memory_order_acquire)->fn.vaDestroySurfaces(__VA_ARGS__))
+#define vaCreateContext(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaCreateContext(__VA_ARGS__))
+#define vaDestroyContext(...)         (g_va_loader.load(std::memory_order_acquire)->fn.vaDestroyContext(__VA_ARGS__))
+#define vaCreateBuffer(...)           (g_va_loader.load(std::memory_order_acquire)->fn.vaCreateBuffer(__VA_ARGS__))
+#define vaDestroyBuffer(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaDestroyBuffer(__VA_ARGS__))
+#define vaBeginPicture(...)           (g_va_loader.load(std::memory_order_acquire)->fn.vaBeginPicture(__VA_ARGS__))
+#define vaRenderPicture(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaRenderPicture(__VA_ARGS__))
+#define vaEndPicture(...)             (g_va_loader.load(std::memory_order_acquire)->fn.vaEndPicture(__VA_ARGS__))
+#define vaSyncSurface(...)            (g_va_loader.load(std::memory_order_acquire)->fn.vaSyncSurface(__VA_ARGS__))
+#define vaExportSurfaceHandle(...)    (g_va_loader.load(std::memory_order_acquire)->fn.vaExportSurfaceHandle(__VA_ARGS__))
+// clang-format on
+#endif // ROCJPEG_USE_DLOPEN_VA
+
 /**
  * @brief Default constructor for RocJpegVaapiMemoryPool class.
  *
@@ -49,6 +95,7 @@ RocJpegVaapiMemoryPool::RocJpegVaapiMemoryPool() {
  * Finally, it resets the HIP interop structure for each entry in the memory pool.
  */
 void RocJpegVaapiMemoryPool::ReleaseResources() {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     VAStatus va_status;
     hipError_t hip_status;
     for (auto& pair : mem_pool_) {
@@ -155,6 +202,7 @@ bool RocJpegVaapiMemoryPool::DeleteIdleEntry() {
  * @return The status of the operation. Returns ROCJPEG_STATUS_SUCCESS if the operation is successful.
  */
 RocJpegStatus RocJpegVaapiMemoryPool::AddPoolEntry(uint32_t surface_format, const RocJpegVaapiMemPoolEntry& pool_entry) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     size_t total_mem_pool_size = GetTotalMemPoolSize();
     auto& entries = mem_pool_[surface_format];
     if (total_mem_pool_size < max_pool_size_) {
@@ -180,6 +228,7 @@ RocJpegStatus RocJpegVaapiMemoryPool::AddPoolEntry(uint32_t surface_format, cons
  * @return The matching `RocJpegVaapiMemPoolEntry` if found, or a default-initialized entry if not found.
  */
 RocJpegVaapiMemPoolEntry RocJpegVaapiMemoryPool::GetEntry(uint32_t surface_format, uint32_t image_width, uint32_t image_height, uint32_t num_surfaces) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     for (auto& entry : mem_pool_[surface_format]) {
         if (entry.image_width >= image_width && entry.image_height >= image_height && entry.va_surface_ids.size() == num_surfaces && entry.entry_status == kIdle) {
             entry.entry_status = kBusy;
@@ -190,6 +239,7 @@ RocJpegVaapiMemPoolEntry RocJpegVaapiMemoryPool::GetEntry(uint32_t surface_forma
 }
 
 bool RocJpegVaapiMemoryPool::FindSurfaceId(VASurfaceID surface_id) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     for (auto& pair : mem_pool_) {
         for (auto& entry : pair.second) {
             if (std::find(entry.va_surface_ids.begin(), entry.va_surface_ids.end(), surface_id) != entry.va_surface_ids.end()) {
@@ -217,6 +267,7 @@ bool RocJpegVaapiMemoryPool::FindSurfaceId(VASurfaceID surface_id) {
  *         ROCJPEG_STATUS_INVALID_PARAMETER if the requested surface_id is not found in the memory pool.
  */
 RocJpegStatus RocJpegVaapiMemoryPool::GetHipInteropMem(VASurfaceID surface_id, HipInteropDeviceMem& hip_interop) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     for (auto& pair : mem_pool_) {
         auto& entries = pair.second;
         auto it = std::find_if(entries.begin(), entries.end(),
@@ -315,6 +366,7 @@ RocJpegStatus RocJpegVaapiMemoryPool::GetHipInteropMem(VASurfaceID surface_id, H
 }
 
 bool RocJpegVaapiMemoryPool::SetSurfaceAsIdle(VASurfaceID surface_id) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     for (auto& pair : mem_pool_) {
         for (auto& entry : pair.second) {
             if (std::find(entry.va_surface_ids.begin(), entry.va_surface_ids.end(), surface_id) != entry.va_surface_ids.end()) {
@@ -336,7 +388,12 @@ bool RocJpegVaapiMemoryPool::SetSurfaceAsIdle(VASurfaceID surface_id) {
 RocJpegVappiDecoder::RocJpegVappiDecoder(int device_id) : device_id_{device_id}, drm_fd_{-1}, min_picture_width_{64}, min_picture_height_{64},
     max_picture_width_{4096}, max_picture_height_{4096}, default_surface_width_{3840}, default_surface_height_{2160}, supports_modifiers_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_{VAProfileJPEGBaseline},
     vaapi_mem_pool_(std::make_unique<RocJpegVaapiMemoryPool>()), current_vcn_jpeg_spec_{}, va_picture_parameter_buf_id_{0}, va_quantization_matrix_buf_id_{0}, va_huffmantable_buf_id_{0},
-    va_slice_param_buf_id_{0}, va_slice_data_buf_id_{0} {};
+    va_slice_param_buf_id_{0}, va_slice_data_buf_id_{0} {
+#ifdef ROCJPEG_USE_DLOPEN_VA
+    va_loader_ = RocJpegVaapiLoader::GetShared();
+    g_va_loader.store(va_loader_.get(), std::memory_order_release);
+#endif
+};
 
 /**
  * @brief Destructor for the RocJpegVappiDecoder class.
@@ -376,6 +433,21 @@ RocJpegVappiDecoder::~RocJpegVappiDecoder() {
         }
 
     }
+#ifdef ROCJPEG_USE_DLOPEN_VA
+    // Only null the global when this is the last live decoder (use_count == 1).
+    // This prevents nulling g_va_loader while another decoder is still alive
+    // and making VA calls through it.
+    // The CAS adds a guard for the narrow race where a concurrent constructor
+    // has called GetShared() (incrementing use_count to 2 after our check, so
+    // our check was stale) and already stored its pointer to g_va_loader: in
+    // that case the CAS fails because g_va_loader no longer matches our
+    // expected value, and we leave the valid pointer untouched.
+    if (va_loader_.use_count() == 1) {
+        RocJpegVaapiLoader *expected = va_loader_.get();
+        g_va_loader.compare_exchange_strong(expected, nullptr, std::memory_order_release);
+    }
+    va_loader_.reset();
+#endif
 }
 
 /**
@@ -386,35 +458,84 @@ RocJpegVappiDecoder::~RocJpegVappiDecoder() {
  *
  * @param device_name The name of the device.
  * @param device_id The ID of the device.
- * @param gpu_uuid The UUID of the GPU.
+ * @param gpu_uuid The GPU UUID (fallback match).
+ * @param gpu_pci_bdf The GPU PCI BDF (primary match).
  * @return The status of the initialization process.
  */
-RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(std::string device_name, int device_id, std::string& gpu_uuid) {
+RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(const std::string& device_name, int device_id, const std::string& gpu_uuid, const std::string& gpu_pci_bdf) {
     device_id_ = device_id;
     std::vector<int> visible_devices;
     GetVisibleDevices(visible_devices);
     GetGpuUuids();
 
+    // Match by PCI BDF (consistent between HIP and sysfs), with unique_id as fallback.
+    std::string gpu_pci_bdf_lower = gpu_pci_bdf;
+    std::transform(gpu_pci_bdf_lower.begin(), gpu_pci_bdf_lower.end(), gpu_pci_bdf_lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    // Drop the PCI function suffix so partition children match their base BDF (offset picks the child).
+    size_t gpu_pci_bdf_dot_pos = gpu_pci_bdf_lower.find_last_of('.');
+    if (gpu_pci_bdf_dot_pos != std::string::npos) {
+        gpu_pci_bdf_lower = gpu_pci_bdf_lower.substr(0, gpu_pci_bdf_dot_pos);
+    }
+
     int offset = 0;
-    ComputePartition current_compute_partition = (gpu_uuids_to_compute_partition_map_.find(gpu_uuid) != gpu_uuids_to_compute_partition_map_.end()) ? gpu_uuids_to_compute_partition_map_[gpu_uuid] : kSpx;
+    ComputePartition current_compute_partition = kSpx;
+    auto bdf_partition_it = gpu_pci_bdf_to_compute_partition_map_.find(gpu_pci_bdf_lower);
+    if (bdf_partition_it != gpu_pci_bdf_to_compute_partition_map_.end()) {
+        current_compute_partition = bdf_partition_it->second;
+    } else {
+        auto uuid_partition_it = gpu_uuids_to_compute_partition_map_.find(gpu_uuid);
+        if (uuid_partition_it != gpu_uuids_to_compute_partition_map_.end()) {
+            current_compute_partition = uuid_partition_it->second;
+        }
+    }
     GetDrmNodeOffset(device_name, device_id_, visible_devices, current_compute_partition, offset);
 
-    std::string drm_node = "/dev/dri/renderD";
-    int render_node_id = (gpu_uuids_to_render_nodes_map_.find(gpu_uuid) != gpu_uuids_to_render_nodes_map_.end()) ? gpu_uuids_to_render_nodes_map_[gpu_uuid] : 128;
-    drm_node += std::to_string(render_node_id + offset);
+    int render_node_id = -1;
+    auto bdf_render_it = gpu_pci_bdf_to_render_nodes_map_.find(gpu_pci_bdf_lower);
+    if (bdf_render_it != gpu_pci_bdf_to_render_nodes_map_.end()) {
+        render_node_id = bdf_render_it->second;
+    } else {
+        auto uuid_render_it = gpu_uuids_to_render_nodes_map_.find(gpu_uuid);
+        if (uuid_render_it != gpu_uuids_to_render_nodes_map_.end()) {
+            render_node_id = uuid_render_it->second;
+        }
+    }
+
+    std::string drm_node;
+    if (render_node_id >= 0) {
+        drm_node = "/dev/dri/renderD" + std::to_string(render_node_id + offset);
+    } else {
+        drm_node = GetFirstAvailableDrmNode();
+        if (drm_node.empty()) {
+            drm_node = "/dev/dri/renderD128";
+        }
+    }
 
     if (g_rocjpeg_logger.GetLogLevel() >= kRocJpegLogInfo) {
-        std::ostringstream oss;
-        oss << '{';
-        bool first = true;
+        InfoLog(g_rocjpeg_logger, "gpu_uuids_to_render_nodes_map_:");
         for (const auto& entry : gpu_uuids_to_render_nodes_map_) {
-            if (!first) oss << ", ";
-            oss << entry.first << ": " << entry.second;
-            first = false;
+            InfoLog(g_rocjpeg_logger, "  " + entry.first + " -> renderD" + std::to_string(entry.second));
         }
-        oss << '}';
-        InfoLog(g_rocjpeg_logger, "gpu_uuids_to_render_nodes_map_: " + oss.str());
+        InfoLog(g_rocjpeg_logger, "gpu_pci_bdf_to_render_nodes_map_:");
+        for (const auto& entry : gpu_pci_bdf_to_render_nodes_map_) {
+            InfoLog(g_rocjpeg_logger, "  " + entry.first + " -> renderD" + std::to_string(entry.second));
+        }
+
+        auto partition_name = [](ComputePartition p) -> const char* {
+            switch (p) {
+                case kSpx: return "SPX";
+                case kDpx: return "DPX";
+                case kTpx: return "TPX";
+                case kQpx: return "QPX";
+                case kCpx: return "CPX";
+                default:   return "unknown";
+            }
+        };
         InfoLog(g_rocjpeg_logger, "Selected GPU UUID: " + gpu_uuid);
+        InfoLog(g_rocjpeg_logger, "Selected GPU BDF: " + gpu_pci_bdf_lower);
+        InfoLog(g_rocjpeg_logger, "Selected compute partition: " + std::string(partition_name(current_compute_partition)));
+        InfoLog(g_rocjpeg_logger, "Selected DRM node: " + drm_node);
     }
 
     CHECK_ROCJPEG(InitVAAPI(drm_node));
@@ -824,6 +945,8 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
                     break;
             }
         }
+        jpeg_stream_key.width = jpeg_stream_key.width > default_surface_width_ ? jpeg_stream_key.width : default_surface_width_;
+        jpeg_stream_key.height = jpeg_stream_key.height > default_surface_height_ ? jpeg_stream_key.height : default_surface_height_;
         jpeg_stream_groups[jpeg_stream_key].push_back(i);
     }
 
@@ -1019,11 +1142,19 @@ void RocJpegVappiDecoder::GetDrmNodeOffset(std::string device_name, uint8_t devi
             // Instead, use the device name to identify MI300A, etc.
             std::string mi300a = "MI300A";
             size_t found_mi300a = device_name.find(mi300a);
+            std::string mi308 = "MI308";
+            size_t found_mi308 = device_name.find(mi308);
             if (found_mi300a != std::string::npos) {
                 if (device_id < visible_devices.size()) {
                     offset = (visible_devices[device_id] % 6);
                 } else {
                     offset = (device_id % 6);
+                }
+            } else if (found_mi308 != std::string::npos) {
+                if (device_id < visible_devices.size()) {
+                    offset = (visible_devices[device_id] % 4);
+                } else {
+                    offset = (device_id % 4);
                 }
             } else {
                 if (device_id < visible_devices.size()) {
@@ -1077,6 +1208,10 @@ void RocJpegVappiDecoder::GetGpuUuids() {
                 std::string sys_device_path = "/sys/class/drm/" + filename + "/device";
                 struct stat info;
                 if (stat(sys_device_path.c_str(), &info) == 0) {
+                    std::string bus_id = GetRenderNodeBusId(filename);
+                    if (!bus_id.empty()) {
+                        gpu_pci_bdf_to_render_nodes_map_[bus_id] = render_id;
+                    }
                     std::string unique_id_path = sys_device_path + "/unique_id";
                     std::ifstream unique_id_file(unique_id_path);
                     std::string unique_id;
@@ -1107,6 +1242,9 @@ void RocJpegVappiDecoder::GetGpuUuids() {
                                 }
                                 // Map the unique GPU UUID to the compute partition
                                 gpu_uuids_to_compute_partition_map_[unique_id] = current_compute_partition;
+                                if (!bus_id.empty()) {
+                                    gpu_pci_bdf_to_compute_partition_map_[bus_id] = current_compute_partition;
+                                }
                             }
                         }
                         partition_file.close();
@@ -1116,4 +1254,55 @@ void RocJpegVappiDecoder::GetGpuUuids() {
         }
         closedir(dir);
     }
+}
+
+// Returns the lowercased PCI BDF (function suffix stripped) for a render node, or "" if not a PCI device.
+std::string RocJpegVappiDecoder::GetRenderNodeBusId(const std::string& render_node_name) {
+    std::string device_link = "/sys/class/drm/" + render_node_name + "/device";
+    char* resolved = realpath(device_link.c_str(), nullptr);
+    if (resolved == nullptr) {
+        return "";
+    }
+    std::string path(resolved);
+    free(resolved);
+    size_t pos = path.find_last_of('/');
+    std::string bus_id = (pos == std::string::npos) ? path : path.substr(pos + 1);
+    if (bus_id.find(':') == std::string::npos || bus_id.find('.') == std::string::npos) {
+        return "";
+    }
+    std::transform(bus_id.begin(), bus_id.end(), bus_id.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    size_t dot_pos = bus_id.find_last_of('.');
+    if (dot_pos != std::string::npos) {
+        bus_id = bus_id.substr(0, dot_pos);
+    }
+    return bus_id;
+}
+
+// Returns the lowest-numbered /dev/dri/renderD* node, or "" if none.
+std::string RocJpegVappiDecoder::GetFirstAvailableDrmNode() {
+    std::string dri_path = "/dev/dri";
+    DIR* dir = opendir(dri_path.c_str());
+    if (!dir) {
+        return "";
+    }
+    int min_render_id = -1;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string filename = entry->d_name;
+        if (filename.find("renderD") == 0 && filename.size() > 7) {
+            try {
+                int render_id = std::stoi(filename.substr(7));
+                if (min_render_id < 0 || render_id < min_render_id) {
+                    min_render_id = render_id;
+                }
+            } catch (...) {
+            }
+        }
+    }
+    closedir(dir);
+    if (min_render_id < 0) {
+        return "";
+    }
+    return "/dev/dri/renderD" + std::to_string(min_render_id);
 }

@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 29
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 33
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -141,6 +141,8 @@ typedef hipError_t (*t_hipDeviceGetDefaultMemPool)(hipMemPool_t* mem_pool, int d
 typedef hipError_t (*t_hipDeviceGetGraphMemAttribute)(int device, hipGraphMemAttributeType attr,
                                                       void* value);
 typedef hipError_t (*t_hipDeviceGetLimit)(size_t* pValue, enum hipLimit_t limit);
+typedef hipError_t (*t_hipDeviceGetLuid)(char* luid, unsigned int* deviceNodeMask,
+                                         hipDevice_t device);
 typedef hipError_t (*t_hipDeviceGetMemPool)(hipMemPool_t* mem_pool, int device);
 typedef hipError_t (*t_hipDeviceGetName)(char* name, int len, hipDevice_t device);
 typedef hipError_t (*t_hipDeviceGetP2PAttribute)(int* value, hipDeviceP2PAttr attr, int srcDevice,
@@ -431,6 +433,7 @@ typedef hipError_t (*t_hipImportExternalMemory)(hipExternalMemory_t* extMem_out,
 typedef hipError_t (*t_hipImportExternalSemaphore)(
     hipExternalSemaphore_t* extSem_out, const hipExternalSemaphoreHandleDesc* semHandleDesc);
 typedef hipError_t (*t_hipInit)(unsigned int flags);
+typedef hipError_t (*t_hipInitDevice)(int device, unsigned int deviceFlags, unsigned int flags);
 typedef hipError_t (*t_hipIpcCloseMemHandle)(void* devPtr);
 typedef hipError_t (*t_hipIpcGetEventHandle)(hipIpcEventHandle_t* handle, hipEvent_t event);
 typedef hipError_t (*t_hipIpcGetMemHandle)(hipIpcMemHandle_t* handle, void* devPtr);
@@ -530,6 +533,24 @@ typedef hipError_t (*t_hipMemPrefetchBatchAsync)(void** dev_ptrs, size_t* sizes,
                                                 hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
                                                 size_t num_prefetch_locs, unsigned long long flags,
                                                 hipStream_t stream);
+typedef hipError_t (*t_hipMemDiscardBatchAsync)(void** dev_ptrs, size_t* sizes, size_t count,
+                                                unsigned long long flags, hipStream_t stream);
+typedef hipError_t (*t_hipDrvMemDiscardBatchAsync)(hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+                                                   unsigned long long flags, hipStream_t stream);
+typedef hipError_t (*t_hipMemDiscardAndPrefetchBatchAsync)(void** dptrs, size_t* sizes,
+                                                           size_t count,
+                                                           hipMemLocation* prefetchLocs,
+                                                           size_t* prefetchLocIdxs,
+                                                           size_t numPrefetchLocs,
+                                                           unsigned long long flags,
+                                                           hipStream_t stream);
+typedef hipError_t (*t_hipDrvMemDiscardAndPrefetchBatchAsync)(hipDeviceptr_t* dptrs, size_t* sizes,
+                                                              size_t count,
+                                                              hipMemLocation* prefetchLocs,
+                                                              size_t* prefetchLocIdxs,
+                                                              size_t numPrefetchLocs,
+                                                              unsigned long long flags,
+                                                              hipStream_t stream);
 typedef hipError_t (*t_hipMemPtrGetInfo)(void* ptr, size_t* size);
 typedef hipError_t (*t_hipMemRangeGetAttribute)(void* data, size_t data_size,
                                                 hipMemRangeAttribute attribute, const void* dev_ptr,
@@ -1160,6 +1181,8 @@ typedef hipError_t (*t_hipExecutionCtxRecordEvent)(hipExecutionCtx_t ctx, hipEve
 typedef hipError_t (*t_hipExecutionCtxSynchronize)(hipExecutionCtx_t ctx);
 typedef hipError_t (*t_hipExecutionCtxWaitEvent)(hipExecutionCtx_t ctx, hipEvent_t event);
 
+typedef hipError_t (*t_hipMemGetDefaultMemPool)(hipMemPool_t* memPool, hipMemLocation* location,
+                                                hipMemAllocationType type);
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -1798,8 +1821,23 @@ struct HipDispatchTable {
   t_hipLibraryGetGlobal hipLibraryGetGlobal_fn;
   t_hipLibraryGetManaged hipLibraryGetManaged_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 30
+  t_hipMemDiscardBatchAsync hipMemDiscardBatchAsync_fn;
+  t_hipDrvMemDiscardBatchAsync hipDrvMemDiscardBatchAsync_fn;
+  t_hipMemDiscardAndPrefetchBatchAsync hipMemDiscardAndPrefetchBatchAsync_fn;
+  t_hipDrvMemDiscardAndPrefetchBatchAsync hipDrvMemDiscardAndPrefetchBatchAsync_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 31
+  t_hipMemGetDefaultMemPool hipMemGetDefaultMemPool_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 32
+  t_hipDeviceGetLuid hipDeviceGetLuid_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 33
+  t_hipInitDevice hipInitDevice_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 34
 
   // ******************************************************************************************* //
   //

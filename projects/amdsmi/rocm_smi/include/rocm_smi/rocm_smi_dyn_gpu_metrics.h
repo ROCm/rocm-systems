@@ -1,24 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #ifndef ROCM_SMI_ROCM_SMI_DYN_GPU_METRICS_H_
 #define ROCM_SMI_ROCM_SMI_DYN_GPU_METRICS_H_
 
@@ -159,6 +141,59 @@ enum class AMDGpuMetricAttributeId_t {
   TEMPERATURE_MID,
   TEMPERATURE_AID,
   TEMPERATURE_XCD,
+  LABEL_VERSION,
+  NODE_ID,
+  NODE_TEMP_RETIMER,
+  NODE_TEMP_IBC,
+  NODE_TEMP_IBC_2,
+  NODE_TEMP_VDD18_VR,
+  NODE_TEMP_04_HBM_B_VR,
+  NODE_TEMP_04_HBM_D_VR,
+  VR_TEMP_VDDCR_SOCIO_A,
+  VR_TEMP_VDDCR_SOCIO_C,
+  VR_TEMP_VDDCR_X0,
+  VR_TEMP_VDDCR_X1,
+  VR_TEMP_VDDIO_HBM_B,
+  VR_TEMP_VDDIO_HBM_D,
+  VR_TEMP_VDDIO_04_HBM_B,
+  VR_TEMP_VDDIO_04_HBM_D,
+  VR_TEMP_VDDCR_HBM_B,
+  VR_TEMP_VDDCR_HBM_D,
+  VR_TEMP_VDDCR_075_HBM_B,
+  VR_TEMP_VDDCR_075_HBM_D,
+  VR_TEMP_VDDIO_11_GTA_A,
+  VR_TEMP_VDDIO_11_GTA_C,
+  VR_TEMP_VDDAN_075_GTA_A,
+  VR_TEMP_VDDAN_075_GTA_C,
+  VR_TEMP_VDDCR_075_UCIE,
+  VR_TEMP_VDDIO_065_UCIEAA,
+  VR_TEMP_VDDIO_065_UCIEAM_A,
+  VR_TEMP_VDDIO_065_UCIEAM_C,
+  VR_TEMP_VDDAN_075,
+  SYSTEM_TEMP_UBB_FPGA,
+  SYSTEM_TEMP_UBB_FRONT,
+  SYSTEM_TEMP_UBB_BACK,
+  SYSTEM_TEMP_UBB_OAM7,
+  SYSTEM_TEMP_UBB_IBC,
+  SYSTEM_TEMP_UBB_UFPGA,
+  SYSTEM_TEMP_UBB_OAM1,
+  SYSTEM_TEMP_OAM_0_1_HSC,
+  SYSTEM_TEMP_OAM_2_3_HSC,
+  SYSTEM_TEMP_OAM_4_5_HSC,
+  SYSTEM_TEMP_OAM_6_7_HSC,
+  SYSTEM_TEMP_UBB_FPGA_0V72_VR,
+  SYSTEM_TEMP_UBB_FPGA_3V3_VR,
+  SYSTEM_TEMP_RETIMER_0_1_2_3_1V2_VR,
+  SYSTEM_TEMP_RETIMER_4_5_6_7_1V2_VR,
+  SYSTEM_TEMP_RETIMER_0_1_0V9_VR,
+  SYSTEM_TEMP_RETIMER_4_5_0V9_VR,
+  SYSTEM_TEMP_RETIMER_2_3_0V9_VR,
+  SYSTEM_TEMP_RETIMER_6_7_0V9_VR,
+  SYSTEM_TEMP_OAM_0_1_2_3_3V3_VR,
+  SYSTEM_TEMP_OAM_4_5_6_7_3V3_VR,
+  SYSTEM_TEMP_IBC_HSC,
+  SYSTEM_TEMP_IBC,
+  MAX,
 };
 
 struct AMDGpuDynamicTranslationTextInfo_t {
@@ -841,7 +876,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "GFX Activity Accumulator", "Accumulator for GFX activity percentage",
              details::AMDGpuMetricAttributeId_t::GFX_ACTIVITY_ACC,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::PERCENT),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
@@ -850,7 +885,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "Memory Activity Accumulator", "Accumulator for memory activity percentage",
              details::AMDGpuMetricAttributeId_t::MEM_ACTIVITY_ACC,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::PERCENT),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
@@ -904,7 +939,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "PCIe NAK Sent Count Accumulator", "Accumulator for PCIe NAK sent count",
              details::AMDGpuMetricAttributeId_t::PCIE_NAK_SENT_COUNT_ACC,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::COUNT_ACCUMULATOR),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
@@ -913,7 +948,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "PCIe NAK Received Count Accumulator", "Accumulator for PCIe NAK received count",
              details::AMDGpuMetricAttributeId_t::PCIE_NAK_RCVD_COUNT_ACC,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::COUNT_ACCUMULATOR),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
@@ -1008,7 +1043,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "PCIe LC Perf Other End Recovery", "PCIe link control performance other end recovery",
              details::AMDGpuMetricAttributeId_t::PCIE_LC_PERF_OTHER_END_RECOVERY,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::COUNT_ACCUMULATOR),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 

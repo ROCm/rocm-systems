@@ -45,6 +45,7 @@
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -74,7 +75,10 @@ struct thread_trace_parameter_pack
     uint64_t buffer_size        = DEFAULT_BUFFER_SIZE;
     uint64_t perf_exclude_mask  = 0;
     bool     no_detail_simd     = false;
-    bool     triple_buffering   = false;
+    /// Number of CPU staging buffers in the producer/consumer pipeline.
+    /// 1 = single buffer (synchronous, no async copy).
+    /// Values >= 3 enable the async copy pipeline. 2 is rejected at the API layer.
+    size_t num_buffers = 1;
 
     bool bSerialize = false;
 
@@ -133,7 +137,7 @@ private:
     std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
 
-    std::thread                       consumer{};
+    std::vector<std::thread>          consumers{};
     std::thread                       producer{};
     std::shared_ptr<std::atomic<int>> worker_flag{nullptr};
 };
@@ -154,6 +158,9 @@ public:
     void resource_init();
     void resource_deinit();
 
+    bool collects_on(rocprofiler_agent_id_t agent_id) const;
+    bool intersects(const DispatchThreadTracer& rhs) const;
+
     void add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack)
     {
         auto lk       = std::unique_lock{agents_map_mut};
@@ -171,12 +178,15 @@ public:
                                  const hsa::packet_data_t&        packet_data);
     const auto& get_agents() const { return agents; }
 
+    std::unordered_set<rocprofiler_agent_id_t> configured_agents() const;
+
 private:
     std::unordered_map<hsa_agent_t, std::unique_ptr<ThreadTracerAgent>>     agents{};
     std::unordered_map<rocprofiler_agent_id_t, thread_trace_parameter_pack> params{};
 
-    std::shared_mutex agents_map_mut{};
-    std::atomic<int>  post_move_data{0};
+    mutable std::shared_mutex agents_map_mut{};
+    std::atomic<int>          post_move_data{0};
+    std::atomic<bool>         enabled{false};
 };
 
 class DeviceThreadTracer
@@ -201,6 +211,13 @@ public:
         std::unique_lock<std::mutex> lk(agent_mut);
         return params.find(id) != params.end();
     }
+    bool requires_queue_intercept()
+    {
+        std::unique_lock<std::mutex> lk(agent_mut);
+        for(const auto& [_, pack] : params)
+            if(pack.perfcounter_ctrl != 0 && !pack.perfcounters.empty()) return true;
+        return false;
+    }
 
     const auto& get_agents() const { return agents; }
 
@@ -214,9 +231,16 @@ private:
     std::shared_ptr<std::atomic<int>> worker_flag{nullptr};
 };
 
-/// Install the thread trace service for newly created contexts.
+/// Install the thread trace service for newly created contexts (builds per-agent
+/// resources; does not program hardware).
 void
 initialize(HsaApiTable* table);
+
+/// Replay start_context() for device thread trace contexts requested before
+/// hsa_init(). Must be called after the HSA queue infrastructure is initialized
+/// (see registration.cpp), not from initialize().
+void
+start_active_contexts();
 
 /// Tear down shared resources when the runtime shuts down.
 void

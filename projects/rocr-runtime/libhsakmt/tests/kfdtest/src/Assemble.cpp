@@ -73,6 +73,17 @@
 #include "llvm/Support/ManagedStatic.h"
 #endif
 
+/* MCContext and createMCAsmParser switched to reference parameters in LLVM 23.
+ * LLVM_MAIN_REVISION is AMD-private and absent from upstream builds, so only
+ * consult it when defined. 578913 is the revision the last of the three API
+ * commits landed under; 577912 predates all of them.
+ */
+#if defined(LLVM_MAIN_REVISION)
+#define KFD_LLVM_MC_REF_API (LLVM_MAIN_REVISION >= 578913)
+#else
+#define KFD_LLVM_MC_REF_API (LLVM_VERSION_MAJOR >= 23)
+#endif
+
 #include <linux/elf.h>
 #include "OSWrapper.hpp"
 #include "Assemble.hpp"
@@ -349,7 +360,11 @@ int Assembler::RunAssemble(const char* const AssemblySource) {
 
     // Set up the MCContext for creating symbols and MCExpr's
 #if LLVM_VERSION_MAJOR > 12
+#if KFD_LLVM_MC_REF_API
+    MCContext Ctx(TheTriple, *MAI, *MRI, *STI, &SrcMgr, &MCOptions);
+#else
     MCContext Ctx(TheTriple, MAI.get(), MRI.get(), STI.get(), &SrcMgr, &MCOptions);
+#endif
 #else
     MCObjectFileInfo MOFI;
     MCContext Ctx(MAI.get(), MRI.get(), &MOFI, &SrcMgr, &MCOptions);
@@ -391,8 +406,13 @@ int Assembler::RunAssemble(const char* const AssemblySource) {
             createMCAsmParser(SrcMgr, Ctx, *Streamer, *MAI));
 
     // Set parser to target parser and run
+#if KFD_LLVM_MC_REF_API
+    std::unique_ptr<MCTargetAsmParser> TAP(
+            TheTarget->createMCAsmParser(*STI, *Parser, *MCII));
+#else
     std::unique_ptr<MCTargetAsmParser> TAP(
             TheTarget->createMCAsmParser(*STI, *Parser, *MCII, MCOptions));
+#endif
     if (!TAP) {
         outs() << "ASM Error: no assembly parsing support for target " << MCPU << "\n";
         return -1;

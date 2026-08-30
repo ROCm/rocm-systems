@@ -44,7 +44,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
@@ -149,7 +149,7 @@ buffered_callback(rocprofiler_context_id_t,
     // /**
     //  * Specific counters default to a size of 128 even if they have less data (primarily
     //  * TCP). This is a known quirk on AQL profile's end where it will allocate for 128 entries
-    //  * but return less (and the data may be duplicated across entries). Skip these entires for
+    //  * but return less (and the data may be duplicated across entries). Skip these entries for
     //  * testing purposes since we cannot determine what mock data will be in the return (and its
     //  * arch dependent).
     //  */
@@ -537,6 +537,8 @@ TEST(core, start_stop_buffered_ctx)
     ASSERT_TRUE(ctx.dispatch_counter_collection->callbacks.at(0)->buffer);
     EXPECT_EQ(*ctx.dispatch_counter_collection->callbacks.at(0)->buffer, opt_buff_id);
 
+    // Counter collection no longer registers a per-queue callback; activeness is observable via
+    // the context enabled flag (and counters::is_any_active()).
     bool found = false;
     ctx.dispatch_counter_collection->enabled.rlock([&](const auto& data) { found = data; });
     EXPECT_TRUE(found);
@@ -595,6 +597,8 @@ TEST(core, start_stop_callback_ctx)
               (void*) 0x54321);
     EXPECT_EQ(ctx.dispatch_counter_collection->callbacks.at(0)->context, get_client_ctx());
 
+    // Counter collection no longer registers a per-queue callback; activeness is observable via
+    // the context enabled flag (and counters::is_any_active()).
     bool found = false;
     ctx.dispatch_counter_collection->enabled.rlock([&](const auto& data) { found = data; });
     EXPECT_TRUE(found);
@@ -759,6 +763,7 @@ rocprofiler-sdk:
           - gfx12
           - gfx1200
           - gfx1201
+          - gfx1250
           expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM
     )";
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
@@ -815,6 +820,7 @@ rocprofiler-sdk:
           - gfx12
           - gfx1200
           - gfx1201
+          - gfx1250
           block: GRBM
           event: 2
     - name: TEST_YAML_LOAD
@@ -844,6 +850,7 @@ rocprofiler-sdk:
           - gfx12
           - gfx1200
           - gfx1201
+          - gfx1250
           expression: reduce(GRBM_GUI_ACTIVE,max)
     )";
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);

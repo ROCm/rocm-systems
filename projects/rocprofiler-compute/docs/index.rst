@@ -1,6 +1,7 @@
 .. meta::
    :description: ROCm Compute Profiler documentation and reference
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, GPUs, accelerator, AMD
+   :keywords: Omniperf, ROCm, profiler, tool, Instinct, GPUs, accelerator, AMD,
+              ROCm Optiq, graphical analysis
 
 *******************************************
 ROCm Compute Profiler (rocprofiler-compute)
@@ -58,6 +59,8 @@ in practice.
 
         * :doc:`how-to/analyze/tui`
 
+        * :doc:`how-to/analyze/optiq`
+
    .. grid-item-card:: Conceptual
 
       * :doc:`conceptual/performance-model`
@@ -78,17 +81,23 @@ in practice.
 
           * :doc:`conceptual/rdna/system-speed-of-light`
 
-          * :doc:`conceptual/rdna/wgp`
+          * :doc:`conceptual/rdna/shader-engine`
 
-          * :doc:`conceptual/rdna/tcp-cache`
+            * :doc:`conceptual/rdna/spi`
 
-          * :doc:`conceptual/rdna/gl1-cache`
+            * :doc:`conceptual/rdna/wgp`
+
+            * :doc:`conceptual/rdna/gl0-cache`
+
+            * :doc:`conceptual/rdna/gl1-cache`
 
           * :doc:`conceptual/rdna/gl2-cache`
 
-          * :doc:`conceptual/rdna/shader-engine`
+          * :doc:`conceptual/rdna/gcea`
 
           * :doc:`conceptual/rdna/command-processor`
+
+          * :doc:`conceptual/rdna/grbm`
 
           * :doc:`conceptual/rdna/references`
 

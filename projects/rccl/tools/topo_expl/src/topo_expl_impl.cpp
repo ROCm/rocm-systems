@@ -697,12 +697,12 @@ ncclResult_t ncclTransportCollNetFree(struct ncclComm* comm) {
       if (ncclAtomicRefCountDecrement(&peer->refCount) == 0) {
         for (int b=0; b<NCCL_MAX_CONNS; b++) {
           struct ncclConnector* send = peer->send + b;
-          if (send->transportResources && send->transportComm) NCCLCHECK(send->transportComm->free(send));
+          if (send->transportResources && send->transportComm) NCCLCHECK(send->transportComm->free(comm, send));
           send->transportResources = NULL; // avoid double free
         }
         for (int b=0; b<NCCL_MAX_CONNS; b++) {
           struct ncclConnector* recv = peer->recv + b;
-          if (recv->transportResources && recv->transportComm) NCCLCHECK(recv->transportComm->free(recv));
+          if (recv->transportResources && recv->transportComm) NCCLCHECK(recv->transportComm->free(comm, recv));
           recv->transportResources = NULL; // avoid double free
         }
       }
@@ -933,7 +933,7 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
   // AllGather3 - begin
   //NCCLCHECKGOTO(ncclCalloc(&allGather3Data, nranks), ret, fail);
   int idx;
-  NCCLCHECK(ncclTopoIdToIndex(comm->topo, GPU, comm->busId, &idx));
+  NCCLCHECK(ncclTopoRankToIndex(comm->topo, rank, &idx, /*showWarn=*/true));
   allGather3Data[rank].nc = 2;
   if (comm->topo->nodes[GPU].count == comm->topo->nRanks &&
       IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx906") && allXgmi)

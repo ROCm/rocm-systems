@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "amd_smi/impl/amd_smi_drm.h"
 
@@ -32,7 +13,6 @@
 
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/xf86drm.h"
-#include "config/amd_smi_config.h"
 #include "impl/scoped_fd.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
@@ -58,7 +38,7 @@ std::string AMDSmiDrm::find_file_in_folder(const std::string& folder, const std:
 }
 
 amdsmi_status_t AMDSmiDrm::init() {
-  amdsmi_status_t status = lib_loader_.load(LIBDRM_AMDGPU_SONAME);
+  amdsmi_status_t status = lib_loader_.load(libdrm_amdgpu_sonames());
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
@@ -128,10 +108,12 @@ amdsmi_status_t AMDSmiDrm::init() {
     drm_paths_.push_back(render_name);
 
     std::string name = "/dev/dri/" + render_name;
-    ScopedFD fd(name.c_str(), O_RDWR | O_CLOEXEC);
+    ScopedFD fd(name.c_str(), O_RDWR | O_CLOEXEC | O_NONBLOCK);
 
     amdsmi_bdf_t bdf;
     if (fd.valid()) {
+      // Clear O_NONBLOCK now that open() succeeded so ioctls behave normally
+      fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
       auto version = drm_get_version(fd);
       if (drm_get_device(fd, &device) == 0) {
         vendor_id = device->deviceinfo.pci->vendor_id;

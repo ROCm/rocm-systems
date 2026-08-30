@@ -50,7 +50,7 @@ template <> hipError_t HandleException<hipError_t>() {
 }  // namespace hip
 
 #define TRY try {
-#define CATCH } catch(...) { return hip::HandleException<hipError_t>(); }
+#define CATCH } catch(...) { HIP_RETURN(hip::HandleException<hipError_t>()); }
 #define CATCHRET(RETURN_TYPE) } catch(...) { return hip::HandleException<RETURN_TYPE>(); }
 
 extern "C" hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem,
@@ -400,6 +400,11 @@ hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPrio
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
   TRY;
   return hip::GetHipDispatchTable()->hipDeviceGetUuid_fn(uuid, device);
+  CATCH;
+}
+hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDeviceGetLuid_fn(luid, deviceNodeMask, device);
   CATCH;
 }
 hipError_t hipDeviceGraphMemTrim(int device) {
@@ -1316,6 +1321,11 @@ hipError_t hipInit(unsigned int flags) {
   return hip::GetHipDispatchTable()->hipInit_fn(flags);
   CATCH;
 }
+hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipInitDevice_fn(device, deviceFlags, flags);
+  CATCH;
+}
 hipError_t hipIpcCloseMemHandle(void* devPtr) {
   TRY;
   return hip::GetHipDispatchTable()->hipIpcCloseMemHandle_fn(devPtr);
@@ -1614,6 +1624,40 @@ hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
   TRY;
   return hip::GetHipDispatchTable()->hipMemPrefetchBatchAsync_fn(
       dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs, num_prefetch_locs, flags, stream);
+  CATCH;
+}
+hipError_t hipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                   unsigned long long flags, hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemDiscardBatchAsync_fn(
+      dev_ptrs, sizes, count, flags, stream);
+  CATCH;
+}
+hipError_t hipDrvMemDiscardBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+                                      unsigned long long flags, hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDrvMemDiscardBatchAsync_fn(
+      dptrs, sizes, count, flags, stream);
+  CATCH;
+}
+hipError_t hipMemDiscardAndPrefetchBatchAsync(void** dptrs, size_t* sizes, size_t count,
+                                              hipMemLocation* prefetchLocs,
+                                              size_t* prefetchLocIdxs,
+                                              size_t numPrefetchLocs,
+                                              unsigned long long flags, hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemDiscardAndPrefetchBatchAsync_fn(
+      dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
+  CATCH;
+}
+hipError_t hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+                                                 hipMemLocation* prefetchLocs,
+                                                 size_t* prefetchLocIdxs,
+                                                 size_t numPrefetchLocs,
+                                                 unsigned long long flags, hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDrvMemDiscardAndPrefetchBatchAsync_fn(
+      dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
   CATCH;
 }
 hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
@@ -3311,5 +3355,11 @@ hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx) {
 hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
   TRY;
   return hip::GetHipDispatchTable()->hipExecutionCtxWaitEvent_fn(ctx, event);
+  CATCH;
+}
+hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                   hipMemAllocationType type) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemGetDefaultMemPool_fn(memPool, location, type);
   CATCH;
 }

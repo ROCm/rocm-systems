@@ -6,9 +6,14 @@
 #include "defines.hpp"
 #include "info_type.hpp"
 
+#include "common/delimit.hpp"
+#include "common/env_vars.hpp"
+#include "common/environment.hpp"
 #include "common/json_config.hpp"
+#include "common/path.hpp"
 
 #include <nlohmann/json.hpp>
+#include <spdlog/fmt/fmt.h>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/settings.hpp>
@@ -54,10 +59,10 @@ ignore_setting(const Tp& _v, const format_options& fmt_opts)
     if(!category_view.empty())
     {
         bool _found = false;
-        for(auto& itr : _v->get_categories())
+        for(auto& category : _v->get_categories())
         {
-            if(category_view.count(itr) > 0 ||
-               category_view.count(TIMEMORY_JOIN("::", "settings", itr)) > 0)
+            if(category_view.count(category) > 0 ||
+               category_view.count(fmt::format("settings::{}", category)) > 0)
             {
                 _found = true;
                 break;
@@ -184,10 +189,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     _settings->find("suppress_config")->second->reset();
     _settings->find("suppress_parsing")->second->reset();
 
-    _config_file   = settings::format(_config_file, _settings->get_tag());
-    bool _absolute = _config_file.at(0) == '/';
-    auto _dirs     = tim::delimit(_config_file, "/\\/");
-    _config_file   = _dirs.back();
+    _config_file         = settings::format(_config_file, _settings->get_tag());
+    const bool _absolute = _config_file.at(0) == '/';
+    auto       _dirs     = rocprofsys::delimit(_config_file, "/\\/");
+    _config_file         = _dirs.back();
     _dirs.pop_back();
 
     std::string _output_dir = ".";
@@ -195,14 +200,16 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     {
         _output_dir = std::string{ (_absolute) ? "/" : "" } + _dirs.front();
         _dirs.erase(_dirs.begin());
-        for(const auto& itr : _dirs)
-            _output_dir = TIMEMORY_JOIN('/', _output_dir, itr);
+        for(const auto& dir : _dirs)
+        {
+            _output_dir += '/' + dir;
+        }
     }
     _output_dir += "/";
 
     auto        _fmts    = std::set<std::string>{};
     std::string _txt_ext = ".cfg";
-    for(std::string itr : { ".cfg", ".txt", ".json", ".xml" })
+    for(const std::string itr : { ".cfg", ".txt", ".json", ".xml" })
     {
         if(_config_file.length() <= itr.length()) continue;
         auto _pos = _config_file.rfind(itr);
@@ -245,7 +252,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     auto _open = [&_nout, &fmt_opts](std::ofstream& _ofs, const std::string& _fname,
                                      const std::string& _type) -> std::ofstream& {
         ++_nout;
-        if(file_exists(_fname))
+        if(rocprofsys::path::is_regular_file(_fname))
         {
             if(fmt_opts.force_config)
             {
@@ -259,7 +266,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                           << "' exists. Overwrite? " << std::flush;
                 std::string _response = {};
                 std::cin >> _response;
-                if(!tim::get_bool(_response, false)) std::exit(EXIT_FAILURE);
+                if(!rocprofsys::to_bool(_response, false))
+                {
+                    std::exit(EXIT_FAILURE);
+                }
             }
         }
 
@@ -272,7 +282,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         else
         {
             throw std::runtime_error(
-                TIMEMORY_JOIN(" ", "Error opening", _type, "output file:", _fname));
+                fmt::format("Error opening {} output file: {}", _type, _fname));
         }
         return _ofs;
     };
@@ -352,13 +362,13 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                 auto _romni = _rhs->get_categories().count("rocprofsys") > 0;
                 if(_lomni && !_romni) return true;
                 if(_romni && !_lomni) return false;
+                namespace env_vars = rocprofsys::env_vars;
                 for(const auto* itr :
-                    { "ROCPROFSYS_CONFIG", "ROCPROFSYS_MODE", "ROCPROFSYS_TRACE",
-                      "ROCPROFSYS_TRACE_LEGACY", "ROCPROFSYS_PROFILE",
-                      "ROCPROFSYS_USE_SAMPLING", "ROCPROFSYS_USE_PROCESS_SAMPLING",
-                      "ROCPROFSYS_USE_AMD_SMI", "ROCPROFSYS_USE_AINIC",
-                      "ROCPROFSYS_USE_KOKKOSP", "ROCPROFSYS_USE_OMPT", "ROCPROFSYS_USE",
-                      "ROCPROFSYS_OUTPUT" })
+                    { env_vars::CONFIG, env_vars::MODE, env_vars::TRACE,
+                      env_vars::TRACE_LEGACY, env_vars::PROFILE, env_vars::USE_SAMPLING,
+                      env_vars::USE_PROCESS_SAMPLING, env_vars::USE_AMD_SMI,
+                      env_vars::USE_AINIC, env_vars::USE_KOKKOSP, env_vars::USE_OMPT,
+                      "ROCPROFSYS_USE", env_vars::OUTPUT })
                 {
                     if(_lhs->get_env_name().find(itr) == 0 &&
                        _rhs->get_env_name().find(itr) != 0)
@@ -368,7 +378,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                         return false;
                 }
                 for(const auto* itr :
-                    { "ROCPROFSYS_SUPPRESS_PARSING", "ROCPROFSYS_SUPPRESS_CONFIG" })
+                    { env_vars::SUPPRESS_PARSING, env_vars::SUPPRESS_CONFIG })
                 {
                     if(_lhs->get_env_name().find(itr) == 0 &&
                        _rhs->get_env_name().find(itr) != 0)
@@ -398,7 +408,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             if(_options[DESC] || fmt_opts.all_info)
             {
                 _ss << "# description:\n";
-                auto              _desc = tim::delimit(itr->get_description(), " \n");
+                auto _desc = rocprofsys::delimit(itr->get_description(), " \n");
                 std::stringstream _line{};
                 _line << "#   ";
                 auto _write = [&_line, &_ss, _w](std::string_view _str) {
@@ -423,10 +433,16 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             }
             if((_options[VAL] || fmt_opts.all_info) && !itr->get_choices().empty())
             {
-                _ss << "# choices:\n";
-                for(const auto& iitr : itr->get_choices())
-                    _ss << "#    " << iitr << "\n";
-                _ss << "#\n";
+                auto _choices = itr->get_choices();
+                filter_operations(itr->get_env_name(), _choices);
+
+                if(!_choices.empty())
+                {
+                    _ss << "# choices:\n";
+                    for(const auto& iitr : _choices)
+                        _ss << "#    " << iitr << "\n";
+                    _ss << "#\n";
+                }
             }
             if(_has_info) _ss << "\n";
             _ss << std::left << std::setw(_w + 10) << itr->get_env_name() << " = ";
@@ -483,6 +499,6 @@ update_choices(const std::shared_ptr<settings>& _settings)
     if(_settings->get_verbose() >= 2 || _settings->get_debug())
         printf("[rocprof-sys-avail] # of component choices: %zu\n",
                _component_choices.size());
-    _settings->find("ROCPROFSYS_TIMEMORY_COMPONENTS")
+    _settings->find(std::string{ rocprofsys::env_vars::TIMEMORY_COMPONENTS })
         ->second->set_choices(_component_choices);
 }

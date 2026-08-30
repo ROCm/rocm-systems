@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -238,6 +238,9 @@ generate_stats(const output_config& /*cfg*/,
     return get_stats(rccl_stats);
 }
 
+// NOTE: OMPT, rocSHMEM, and hipFILE do not produce direct stats/CSV output; they are exported
+// via `rocpd convert`, so there is intentionally no generate_stats() overload for any of them.
+
 stats_entry_t
 generate_stats(const output_config& /*cfg*/,
                const metadata& tool_metadata,
@@ -272,6 +275,14 @@ generate_stats(const output_config& /*cfg*/,
     }
 
     return get_stats(rocjpeg_stats);
+}
+
+stats_entry_t
+generate_stats(const output_config& /*cfg*/,
+               const metadata& /*tool_metadata*/,
+               const generator<tool_spm_counter_record_t>& /*data*/)
+{
+    return stats_entry_t{};
 }
 
 namespace
@@ -479,6 +490,24 @@ generate_stats(const output_config& /* cfg*/,
 {
     // TODO: sames TODOS from the function above applies here.
     return stats_entry_t{};
+}
+
+stats_entry_t
+generate_stats(const output_config& /*cfg*/,
+               const metadata& /*tool_metadata*/,
+               const generator<rocprofiler_buffer_tracing_hip_graph_record_t>& data)
+{
+    auto graph_launch_stats = stats_map_t{};
+    for(auto ditr : data)
+    {
+        for(auto record : data.get(ditr))
+        {
+            graph_launch_stats["Graph Execution"] +=
+                (record.end_timestamp - record.start_timestamp);
+        }
+    }
+
+    return get_stats(graph_launch_stats);
 }
 
 }  // namespace tool

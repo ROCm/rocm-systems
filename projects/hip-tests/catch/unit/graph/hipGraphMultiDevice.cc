@@ -54,6 +54,14 @@ HIP_TEST_CASE(Unit_hipGraphMultiDevice) {
   if (nGpus < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
+  int can_access_peer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 1, 0));
+  if (!can_access_peer) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
+
   hipStream_t streamdev1, streamdev2;
   hipEvent_t eventdev1, eventdev2;
   hipGraph_t graph = nullptr;
@@ -89,14 +97,15 @@ HIP_TEST_CASE(Unit_hipGraphMultiDevice) {
   HipTest::vector_square<int>
       <<<grid_size, block_size, 0, streamdev1>>>(buf_d1, buf_d1, buffer_size);
   HIP_CHECK(hipEventRecord(eventdev1, streamdev1));
-  HIP_CHECK(hipStreamWaitEvent(streamdev2, eventdev1));
+  HIP_CHECK(hipStreamWaitEvent(streamdev2, eventdev1, 0));
 
   HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipMemcpyDtoDAsync(buf_d2, buf_d1, sizeof(int) * buffer_size, streamdev2));
+  HIP_CHECK(
+      hipMemcpyAsync(buf_d2, buf_d1, sizeof(int) * buffer_size, hipMemcpyDeviceToDevice, streamdev2));
   HipTest::vector_square<int>
       <<<grid_size, block_size, 0, streamdev2>>>(buf_d2, buf_d2, buffer_size);
   HIP_CHECK(hipEventRecord(eventdev2, streamdev2));
-  HIP_CHECK(hipStreamWaitEvent(streamdev1, eventdev2));
+  HIP_CHECK(hipStreamWaitEvent(streamdev1, eventdev2, 0));
 
   HIP_CHECK(hipStreamEndCapture(streamdev1, &graph));
 
@@ -106,7 +115,7 @@ HIP_TEST_CASE(Unit_hipGraphMultiDevice) {
   HIP_CHECK(hipStreamSynchronize(streamdev1));
 
   HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipMemcpy(outbuf_h, buf_d2, sizeof(int) * buffer_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(outbuf_h, buf_d2, sizeof(int) * buffer_size, hipMemcpyDeviceToHost));
   check_output(ibuf_h, outbuf_h, buffer_size);
 
   HIP_CHECK(hipGraphExecDestroy(graph_exec));

@@ -25,6 +25,7 @@
 
 #include "auxv.hpp"
 
+#include <fstream>
 #include <vector>
 
 namespace fs = rocprofiler::common::filesystem;
@@ -77,7 +78,7 @@ get_auxv_entry(int pid, void*& entry_addr)
 
     if(entry_addr == nullptr)
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Unexpected mising AT_ENTRY for " << filename;
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Unexpected missing AT_ENTRY for " << filename;
         return ROCATTACH_STATUS_ERROR;
     }
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Entry address found to be " << entry_addr << " from "

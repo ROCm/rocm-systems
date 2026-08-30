@@ -3576,6 +3576,70 @@ typedef union rocprofiler_hip_api_args_t
         const char*  name;
     } hipLibraryGetManaged;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 30
+    struct
+    {
+        void**             dev_ptrs;
+        size_t*            sizes;
+        size_t             count;
+        unsigned long long flags;
+        hipStream_t        stream;
+    } hipMemDiscardBatchAsync;
+    struct
+    {
+        hipDeviceptr_t*    dptrs;
+        size_t*            sizes;
+        size_t             count;
+        unsigned long long flags;
+        hipStream_t        stream;
+    } hipDrvMemDiscardBatchAsync;
+    struct
+    {
+        void**             dptrs;
+        size_t*            sizes;
+        size_t             count;
+        hipMemLocation*    prefetchLocs;
+        size_t*            prefetchLocIdxs;
+        size_t             numPrefetchLocs;
+        unsigned long long flags;
+        hipStream_t        stream;
+    } hipMemDiscardAndPrefetchBatchAsync;
+    struct
+    {
+        hipDeviceptr_t*    dptrs;
+        size_t*            sizes;
+        size_t             count;
+        hipMemLocation*    prefetchLocs;
+        size_t*            prefetchLocIdxs;
+        size_t             numPrefetchLocs;
+        unsigned long long flags;
+        hipStream_t        stream;
+    } hipDrvMemDiscardAndPrefetchBatchAsync;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 31
+    struct
+    {
+        hipMemPool_t*        memPool;
+        hipMemLocation*      location;
+        hipMemAllocationType type;
+    } hipMemGetDefaultMemPool;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 32
+    struct
+    {
+        char*         luid;
+        unsigned int* deviceNodeMask;
+        hipDevice_t   device;
+    } hipDeviceGetLuid;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 33
+    struct
+    {
+        int          device;
+        unsigned int deviceFlags;
+        unsigned int flags;
+    } hipInitDevice;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

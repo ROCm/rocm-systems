@@ -98,8 +98,7 @@ rocprof-sys-causal -- ./lulesh-rocprofsys -i 35 -s 50 -p
 For MPI runs:
 
 ```bash
-mpirun -np 8 rocprof-sys-run \
-    -e ROCPROFSYS_USE_MPIP=ON \
-    -e ROCPROFSYS_TRACE=true \
-    -- ./lulesh -i 35 -s 30 -p
+ROCPROFSYS_USE_MPIP=ON \
+ROCPROFSYS_TRACE=true \
+mpirun -np 8 rocprof-sys-run -- ./lulesh -i 35 -s 30 -p
 ```

@@ -11,23 +11,36 @@
 #include "rccl_float8.h"
 #include <hip/hip_bfloat16.h>
 #include "common.h"
-#include <pthread.h>
+#include <algorithm>
 #include <cstdio>
 #include <type_traits>
 #include <limits>
-#include <getopt.h>
-#include <libgen.h>
 #include <string.h>
 #include <ctype.h>
-#include "cuda.h"
+#include <mutex>
+#include <condition_variable>
+#include <thread>
 #include <vector>
+#include "cuda.h"
 #include <utility>
-#include <errno.h>     /* program_invocation_short_name */
 #include <dlfcn.h>
 //#define DEBUG_PRINT
 
 #include "verifiable.h"
 #include "util.h"
+#include "gin_sdma_devtime_host.h"
+
+#if defined(NCCL_OS_LINUX)
+extern char **environ;
+#endif
+
+#if defined(NCCL_OS_LINUX)
+#pragma weak ncclCommWindowRegister
+#pragma weak ncclCommWindowDeregister
+#pragma weak ncclDevCommCreate
+#pragma weak ncclDevCommDestroy
+#pragma weak ncclCommQueryProperties
+#endif
 
 #define DIVUP(x, y) \
     (((x)+(y)-1)/(y))
@@ -39,19 +52,18 @@ size_t cache_bytes = 192 * 1024 * 1024; // Use 192MB
 rcclTestsGetAlgoInfo_t rcclTestsGetAlgoInfo = NULL;
 rcclTestsGetProtocolName_t rcclTestsGetProtocolName = NULL;
 rcclTestsGetAlgoName_t rcclTestsGetAlgoName= NULL;
+rcclTestsGetSymkInfo_t rcclTestsGetSymkInfo = NULL;
+rcclTestsGetCollImplInfo_t rcclTestsGetCollImplInfo = NULL;
+
 static void loadRcclSyms() {
-  static void* handle = NULL;
-  const char* libname = "librccl.so";
-  if (!handle) {
-    handle = dlopen(libname, RTLD_LAZY | RTLD_LOCAL);
-      if (!handle) {
-        fprintf(stderr, "dlopen failed: %s\n", dlerror());
-        return;
-      }
-  }
-  rcclTestsGetAlgoInfo      = (rcclTestsGetAlgoInfo_t)     dlsym(handle, "rcclGetAlgoInfo");
-  rcclTestsGetAlgoName      = (rcclTestsGetAlgoName_t)     dlsym(handle,  "rcclGetAlgoName");
-  rcclTestsGetProtocolName  = (rcclTestsGetProtocolName_t) dlsym(handle,  "rcclGetProtocolName");
+  // Resolve optional RCCL symbols from the already-loaded librccl.so.1 (via DT_NEEDED).
+  // Avoid dlopen("librccl.so") which can double-load in build trees with non-symlinked libs.
+  rcclTestsGetAlgoInfo      = (rcclTestsGetAlgoInfo_t)     dlsym(RTLD_DEFAULT, "rcclGetAlgoInfo");
+  rcclTestsGetAlgoName      = (rcclTestsGetAlgoName_t)     dlsym(RTLD_DEFAULT, "rcclGetAlgoName");
+  rcclTestsGetProtocolName  = (rcclTestsGetProtocolName_t) dlsym(RTLD_DEFAULT, "rcclGetProtocolName");
+  rcclTestsGetSymkInfo      = (rcclTestsGetSymkInfo_t)     dlsym(RTLD_DEFAULT, "rcclSymKGetInfo");
+  // Optional (newer librccl). Left NULL on older libs -> reporting falls back.
+  rcclTestsGetCollImplInfo  = (rcclTestsGetCollImplInfo_t) dlsym(RTLD_DEFAULT, "rcclGetCollImplInfo");
 }
 
 // RCCL_FLOAT8 support
@@ -104,12 +116,17 @@ bool IsArchMatch(char const* arch, char const* target) {
 const char *test_memorytypes[nccl_NUM_MTYPES] = {"coarse", "fine", "host", "managed"};
 
 // For libnccl's < 2.13
+#if defined(NCCL_OS_LINUX)
 extern "C" __attribute__((weak)) char const* ncclGetLastError(ncclComm_t comm) {
   return "";
 }
+#elif defined(NCCL_OS_WINDOWS)
+extern "C" char const* ncclGetLastError(ncclComm_t comm);
+#endif
 
 int is_main_proc = 0;
 thread_local int is_main_thread = 0;
+static const char* programName = nullptr;
 
 // Command line parameter defaults
 int nThreads = 1;
@@ -128,6 +145,8 @@ static int nccltype = ncclFloat;
 static int ncclroot = 0;
 int parallel_init = 0;
 int blocking_coll = 0;
+int per_iter_timing = 0;
+int per_iter_skip = 0;
 static int streamnull = 0;
 static int timeout = 0;
 int cudaGraphLaunches = 0;
@@ -138,7 +157,16 @@ std::string rccl_output_file;
 std::string rccl_output_format;
 static int report_cputime = 0;
 static int report_timestamps = 0;
-static int deviceImpl = 0;
+int deviceImpl = 0;  // non-static: per-collective device-timing hooks read this to pick the matching timed kernel
+int deviceTimingMode = 0;
+int devtimeLoop = 10;
+int devtimeSkip = 10;
+int devtimeLoopMid = 0;
+int devtimeLoopLarge = 0;
+int devtimeSkipMid = -1;
+int devtimeSkipLarge = -1;
+int devtimeCheck = 0;
+int unalign = 0;
 int memory_report = 0;
 
 int deviceCtaCount = 16; // Default number of CTAs for device implementation
@@ -338,7 +366,7 @@ static const char *getExtension(const char *path) {
 
 static output_file_type_t classifyOutputFile(const char *filename) {
   const char *extension = getExtension(filename);
-  if (extension != nullptr && strcasecmp(extension, "json") == 0) {
+  if (extension != nullptr && ncclTestStrcasecmp(extension, "json") == 0) {
     return JSON_FILE_OUTPUT;
   }
 
@@ -378,6 +406,8 @@ testResult_t initComms(ncclComm_t* comms, int nComms, int firstRank, int nRanks,
   config.nvlinkCentricSched = 1;
 #endif
 #endif
+  if (ncclTestEngine.initCommConfig)
+    ncclTestEngine.initCommConfig(&config);
 #endif
 
   NCCLCHECK(ncclGroupStart());
@@ -486,28 +516,28 @@ testResult_t InitData(void* data, const size_t count, size_t offset, ncclDataTyp
 
 void Barrier(struct threadArgs *args) {
   thread_local int epoch = 0;
-  static pthread_mutex_t lock[2] = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER};
-  static pthread_cond_t cond[2] = {PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER};
+  static std::mutex lock[2];
+  static std::condition_variable cond[2];
   static int counter[2] = {0, 0};
 
-  pthread_mutex_lock(&lock[epoch]);
+  std::unique_lock<std::mutex> ul(lock[epoch]);
   if(++counter[epoch] == args->nThreads)
-    pthread_cond_broadcast(&cond[epoch]);
+    cond[epoch].notify_all();
 
   if(args->thread+1 == args->nThreads) {
     while(counter[epoch] != args->nThreads)
-      pthread_cond_wait(&cond[epoch], &lock[epoch]);
+      cond[epoch].wait(ul);
     #ifdef MPI_SUPPORT
       MPI_Barrier(MPI_COMM_WORLD);
     #endif
     counter[epoch] = 0;
-    pthread_cond_broadcast(&cond[epoch]);
+    cond[epoch].notify_all();
   }
   else {
     while(counter[epoch] != 0)
-      pthread_cond_wait(&cond[epoch], &lock[epoch]);
+      cond[epoch].wait(ul);
   }
-  pthread_mutex_unlock(&lock[epoch]);
+  ul.unlock();
   epoch ^= 1;
 }
 
@@ -517,12 +547,12 @@ void Barrier(struct threadArgs *args) {
 template<typename T>
 void Allreduce(struct threadArgs* args, T* value, int average) {
   thread_local int epoch = 0;
-  static pthread_mutex_t lock[2] = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER};
-  static pthread_cond_t cond[2] = {PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER};
+  static std::mutex lock[2];
+  static std::condition_variable cond[2];
   static T accumulator[2];
   static int counter[2] = {0, 0};
 
-  pthread_mutex_lock(&lock[epoch]);
+  std::unique_lock<std::mutex> ul(lock[epoch]);
   if(counter[epoch] == 0) {
     if(average != 0 || args->thread == 0) accumulator[epoch] = *value;
   } else {
@@ -536,11 +566,11 @@ void Allreduce(struct threadArgs* args, T* value, int average) {
   }
 
   if(++counter[epoch] == args->nThreads)
-    pthread_cond_broadcast(&cond[epoch]);
+    cond[epoch].notify_all();
 
   if(args->thread+1 == args->nThreads) {
     while(counter[epoch] != args->nThreads)
-      pthread_cond_wait(&cond[epoch], &lock[epoch]);
+      cond[epoch].wait(ul);
 
     #ifdef MPI_SUPPORT
     if(average != 0) {
@@ -558,18 +588,92 @@ void Allreduce(struct threadArgs* args, T* value, int average) {
 
     if(average == 1) accumulator[epoch] /= args->totalProcs*args->nThreads;
     counter[epoch] = 0;
-    pthread_cond_broadcast(&cond[epoch]);
+    cond[epoch].notify_all();
   }
   else {
     while(counter[epoch] != 0)
-      pthread_cond_wait(&cond[epoch], &lock[epoch]);
+      cond[epoch].wait(ul);
   }
-  pthread_mutex_unlock(&lock[epoch]);
+  ul.unlock();
 
   *value = accumulator[epoch];
   epoch ^= 1;
 }
 
+// Reduce per-thread iteration times to a process-local max, then gather one row
+// per MPI process.
+void GatherProcessMaxIterTimes(struct threadArgs* args, double* localTimes, int nIters, double* recvBuf) {
+  thread_local int epoch = 0;
+  static std::mutex lock[2];
+  static std::condition_variable cond[2];
+  static double* sendBuf[2] = {NULL, NULL};
+  static int sendBufIters[2] = {0, 0};
+  static double* recvPtr[2];
+  static int counter[2] = {0, 0};
+
+  std::unique_lock<std::mutex> ul(lock[epoch]);
+
+  if (sendBufIters[epoch] < nIters) {
+    sendBuf[epoch] = (double*)realloc(sendBuf[epoch], nIters * sizeof(double));
+    sendBufIters[epoch] = nIters;
+  }
+
+  if (counter[epoch] == 0) {
+    memcpy(sendBuf[epoch], localTimes, nIters * sizeof(double));
+  } else {
+    for (int i = 0; i < nIters; i++)
+      sendBuf[epoch][i] = std::max(sendBuf[epoch][i], localTimes[i]);
+  }
+
+  if (args->thread == 0) {
+    recvPtr[epoch] = recvBuf;
+  }
+
+  if(++counter[epoch] == args->nThreads)
+    cond[epoch].notify_all();
+
+  if(args->thread+1 == args->nThreads) {
+    while(counter[epoch] != args->nThreads)
+      cond[epoch].wait(ul);
+
+    #ifdef MPI_SUPPORT
+    if (args->totalProcs > 1) {
+      MPI_Gather(sendBuf[epoch], nIters, MPI_DOUBLE,
+                 recvPtr[epoch], nIters, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD);
+    }
+    #else
+    if (recvPtr[epoch])
+      memcpy(recvPtr[epoch], sendBuf[epoch], nIters * sizeof(double));
+    #endif
+
+    memcpy(localTimes, sendBuf[epoch], nIters * sizeof(double));
+    counter[epoch] = 0;
+    cond[epoch].notify_all();
+  }
+  else {
+    while(counter[epoch] != 0)
+      cond[epoch].wait(ul);
+    memcpy(localTimes, sendBuf[epoch], nIters * sizeof(double));
+  }
+  ul.unlock();
+  epoch ^= 1;
+}
+
+void ReduceProcessMaxIterTimes(double* iterTimes, const double* allProcessTimes,
+                               int nProcs, int nIters) {
+  for (int i = 0; i < nIters; i++) {
+    double maxSec = allProcessTimes[i];
+    for (int p = 1; p < nProcs; p++)
+      maxSec = std::max(maxSec, allProcessTimes[p * nIters + i]);
+    iterTimes[i] = maxSec;
+  }
+}
+
+// Explicit instantiations so other TUs (e.g. gin_sdma_devtime.h via alltoall.cu)
+// can call Allreduce through the common.h declaration.
+template void Allreduce<double>(struct threadArgs* args, double* value, int average);
+template void Allreduce<long long>(struct threadArgs* args, long long* value, int average);
 testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, int64_t *wrongElts) {
   int nranks = args->nProcs*args->nGpus*args->nThreads;
   size_t count = args->expectedBytes/wordSize(type);
@@ -669,7 +773,7 @@ testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t*
    }
 
    // We might want to let other threads (including NCCL threads) use the CPU.
-   if (idle) sched_yield();
+   if (idle) std::this_thread::yield();
   }
   free(done);
   return testSuccess;
@@ -697,7 +801,7 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
     char* recvBuff = ((char*)args->recvbuffs[i]) + shift;
     char* sendBuff = ((char*)args->sendbuffs[i]) + shift;
-    char* bias = ((char*)args->bias[i]) + shift;
+    char* bias = test_bias ? ((char*)args->bias[i]) + shift : nullptr;
     ncclRedOp_t op;
 
     if(opIndex < ncclNumOps) {
@@ -771,14 +875,72 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     // Complete op before returning
     TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
   }
-  if (blocking_coll) Barrier(args);
+  if (blocking_coll == 1) Barrier(args);
   return testSuccess;
 }
 
 testResult_t completeColl(struct threadArgs* args) {
-  if (blocking_coll) return testSuccess;
+  if (blocking_coll && agg_iters <= 1) return testSuccess;
 
   TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
+  return testSuccess;
+}
+
+static int getEventCount(int eventIters) {
+  return blocking_coll == 3 ? eventIters*2 : eventIters + 1;
+}
+
+testResult_t getElapsedTimes(struct threadArgs* args, int eventIters, int aggIters) {
+  args->ms = (float*) malloc(sizeof(float)*args->nGpus*eventIters);
+  int pairedEvents = blocking_coll == 3;
+  int eventCount = getEventCount(eventIters);
+  // Get timings
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    for (int j = 0; j < eventIters; j++) {
+      int startEvent = pairedEvents ? 2*j : j;
+      int stopEvent = pairedEvents ? 2*j + 1 : j + 1;
+      CUDACHECK(cudaEventElapsedTime(&args->ms[i*(eventIters) + j], args->events[i*eventCount + startEvent], args->events[i*eventCount + stopEvent]));
+
+      // This elapsed time is for iterations equal to agg_iters.
+      // We need to divide by aggIters
+      args->ms[i*(eventIters)+j] /= aggIters;
+    }
+  }
+  return testSuccess;
+}
+
+testResult_t recordEvents(struct threadArgs* args, int iterations, int iteration, int stopEvent = 0) {
+  int pairedEvents = blocking_coll == 3;
+  int eventCount = getEventCount(iterations);
+  int eventIndex = pairedEvents ? 2*iteration + stopEvent : iteration;
+  for(int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    CUDACHECK(cudaEventRecord(args->events[i*eventCount + eventIndex], args->streams[i]));
+  }
+  return testSuccess;
+}
+
+testResult_t initEvents(struct threadArgs* args, int eventIters) {
+  int eventCount = getEventCount(eventIters);
+  // Normal timing shares boundary events; z3 uses start/stop pairs to exclude barriers.
+  args->events = (cudaEvent_t*) malloc(sizeof(cudaEvent_t)*args->nGpus*eventCount);
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    for (int j = 0; j < eventCount; j++) {
+      CUDACHECK(cudaEventCreate(&args->events[(i*eventCount + j)]));
+    }
+  }
+  return testSuccess;
+}
+
+testResult_t destroyEvents(struct threadArgs* args, int eventIters) {
+  int eventCount = getEventCount(eventIters);
+  for (int i = 0; i < args->nGpus; i++) {
+    for (int j = 0; j < eventCount; j++)
+      CUDACHECK(cudaEventDestroy(args->events[i*eventCount+j]));
+  }
+  free(args->events);
   return testSuccess;
 }
 
@@ -797,10 +959,21 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   Barrier(args);
 
+  // Device-time-only mode (--device_timing=2): for collectives that provide a
+  // device-timing hook, skip the host/graph timed loop entirely and report the
+  // in-kernel wall_clock64 measurement as the metric. Warmup and datacheck still
+  // run (correctness). Mode 1 keeps the normal timed loop and augments with an
+  // extra line; mode 0 is off.
+  const int devTimeMode =
+      (deviceImpl != 0 && args->collTest->deviceTime != nullptr) ? deviceTimingMode : 0;
+  // Device-time-only applies to the out-of-place pass (the reported metric). The
+  // in-place pass keeps normal timing so its column stays valid.
+  const bool deviceOnly = (devTimeMode == 2) && (in_place == 0);
+
 #if HIP_VERSION >= 50221310
   std::vector<cudaGraph_t> graphs(args->nGpus);
   std::vector<cudaGraphExec_t> graphExec(args->nGpus);
-  if (cudaGraphLaunches >= 1) {
+  if (cudaGraphLaunches >= 1 && !deviceOnly) {
     // Begin cuda graph capture
     for (int i=0; i<args->nGpus; i++) {
       // Thread local mdoe is needed for:
@@ -812,18 +985,34 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 #endif
 
+  int record = per_iter_timing && !deviceOnly;
+  if (record) TESTCHECK(initEvents(args, iters));
+
   // Performance Benchmark
+  double collOnlySec = 0;
+  int pairedEvents = record && blocking_coll == 3;
   timer tim;
-  for (int iter = 0; iter < iters; iter++) {
-    if (agg_iters>1) NCCLCHECK(ncclGroupStart());
-    for (int aiter = 0; aiter < agg_iters; aiter++) {
-      TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
+  if (!deviceOnly) {
+    for (int iter = 0; iter < iters; iter++) {
+      double t0 = tim.elapsed();
+      if (agg_iters>1) NCCLCHECK(ncclGroupStart());
+      if (record) TESTCHECK(recordEvents(args, iters, iter));
+      for (int aiter = 0; aiter < agg_iters; aiter++) {
+        TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
+      }
+      if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
+      if (blocking_coll == 3) {
+        TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
+        if (pairedEvents) TESTCHECK(recordEvents(args, iters, iter, 1));
+        collOnlySec += tim.elapsed() - t0;
+        Barrier(args);
+      }
     }
-    if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
   }
+  if (record && !pairedEvents) TESTCHECK(recordEvents(args, iters, iters));
 
 #if HIP_VERSION >= 50221310
-  if (cudaGraphLaunches >= 1) {
+  if (cudaGraphLaunches >= 1 && !deviceOnly) {
     // HIP (and CUDA) graph limitation: in single-process multi-GPU mode (-g N),
     // graph nodes are associated with the calling thread's current device at
     // capture time, not the stream's device. RCCL internally calls cudaSetDevice()
@@ -878,16 +1067,93 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 #endif
 
-  double cputimeSec = tim.elapsed()/(iters*agg_iters);
+  double cputimeSec = blocking_coll == 3 ? collOnlySec : tim.elapsed();
+  cputimeSec = rccl_tests_devtime::normalizeElapsedPerIter(cputimeSec, iters, agg_iters);
   TESTCHECK(completeColl(args));
 
-  double deltaSec = tim.elapsed();
-  deltaSec = deltaSec/(iters*agg_iters);
-  if (cudaGraphLaunches >= 1) deltaSec = deltaSec/cudaGraphLaunches;
-  Allreduce(args, &deltaSec, average);
+  // Exclude per-iteration result processing from the reported time.
+  double deltaSec = blocking_coll == 3 ? collOnlySec : tim.elapsed();
+  deltaSec = rccl_tests_devtime::normalizeElapsedPerIter(deltaSec, iters, agg_iters);
+  deltaSec = rccl_tests_devtime::applyCudaGraphLaunchesScale(deltaSec, cudaGraphLaunches);
+
+  if (record) {
+    // completeColl skips the stream sync in blocking mode with a single aggregated iteration.
+    if (blocking_coll && agg_iters <= 1)
+      TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
+    TESTCHECK(getElapsedTimes(args, iters, agg_iters));
+    TESTCHECK(destroyEvents(args, iters));
+  }
+
+  if (!deviceOnly) Allreduce(args, &deltaSec, average);
+
+  bool skipMetricRow = false;
+
+  if (deviceOnly) {
+    // The reported metric is the in-kernel wall_clock64 device latency
+    // (per iteration, max across ranks), measured by the collective's hook.
+    // Note: the datacheck loop below re-inits buffers and re-runs the PRODUCTION
+    // kernel via startColl before CheckData, so it validates the production path,
+    // not the timed kernel (whose output is overwritten first). By default the
+    // *TimedKernel bodies call the same __device__ collective functions as the
+    // production kernels, so collective correctness is covered; only the timing-only
+    // loop/skip/stamp wrapper around them is not exercised by that datacheck.
+    // deviceTime() leaves this negative when the timing hook produced no
+    // measurement -- the timed kernel never ran (non-GIN impl, unsupported op/type,
+    // count == 0, or loop < 1). Reporting that as the metric would divide by zero in
+    // getBw (0.00 us / inf GB/s), and the DEVTIME_CHECK below would validate a stale
+    // buffer -- the warmup/production result (false pass), or raw init scratch under
+    // -w 0 (false fail) -- for a kernel that never executed. So WARN once and skip
+    // the metric for this row rather than emit a bogus metric or a misleading check
+    // verdict; datacheck still runs below.
+    // -H 1: zero recvbuff first so the check below observes the timed kernel's
+    // writes rather than the warmup's identical output already sitting there.
+    if (devtimeCheck && datacheck) {
+      for (int i = 0; i < args->nGpus; i++) {
+        CUDACHECK(cudaSetDevice(args->gpus[i]));
+        CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
+      }
+    }
+    double deviceDeltaSec = -1.0;
+    TESTCHECK(args->collTest->deviceTime(args, type, op, root, in_place, &deviceDeltaSec));
+    if (deviceDeltaSec <= 0.0) {
+      if (args->proc == 0 && args->thread == 0) {
+        fprintf(stderr, "# WARN --device_timing=2: no in-kernel device-time "
+                        "measurement for this size (timed kernel did not run: non-GIN impl, "
+                        "unsupported op/type, count==0, or loop<1); skipping row "
+                        "(size %ld bytes)\n", args->expectedBytes);
+      }
+      skipMetricRow = true;
+    } else {
+      deltaSec = deviceDeltaSec;
+      cputimeSec = deviceDeltaSec;
+
+      // Opt-in validation of the TIMED path itself (--devtime_check=1).
+      // Reached only when the timed kernel actually ran (deviceDeltaSec > 0 above), so
+      // recvbuff holds the timed kernel's output -- not a stale warmup/production
+      // buffer. The hook just ran skip+loop back-to-back collectives into recvbuff;
+      // each iteration is a full deterministic collective over the unchanged sendbuff,
+      // so the final recvbuff equals `expected` from initData. Validate it HERE -- the
+      // only point the timed kernel's output is live, before the datacheck loop below
+      // re-inits buffers and overwrites it with the production path. Needs datacheck on
+      // (that is what populates `expected`). Combines wrong-element counts across
+      // threads/ranks so any rank's mismatch fails the run.
+      if (devtimeCheck && datacheck) {
+        int64_t timedWrong = 0;
+        TESTCHECK(CheckData(args, type, op, root, in_place, &timedWrong));
+        long long timedWrong1 = timedWrong;
+        Allreduce(args, &timedWrong1, /*sum*/4);
+        if (timedWrong1) {
+          fprintf(stderr, "\nERROR: --devtime_check: timed-kernel output datacheck "
+                          "failed with %lld wrong elements (size %ld bytes)\n",
+                          timedWrong1, args->expectedBytes);
+          return testInternalError;
+        }
+      }
+    }
+  }
 
 #if HIP_VERSION >= 50221310
-  if (cudaGraphLaunches >= 1) {
+  if (cudaGraphLaunches >= 1 && !deviceOnly) {
     //destroy cuda graph
     for (int i=0; i<args->nGpus; i++) {
 #ifdef __HIP_PLATFORM_AMD__
@@ -899,13 +1165,29 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 #endif
 
-  double algBw, busBw;
-  args->collTest->getBw(count, wordSize(type), deltaSec, &algBw, &busBw, args->nProcs*args->nThreads*args->nGpus);
+  // Host-timed path can also yield zero elapsed (timer resolution, fast
+  // collectives, or platform quirks). getBw divides by sec; skip the metric for
+  // this row rather than SIGFPE or emit inf GB/s -- same rationale as the
+  // --device_timing=2 guard. Datacheck still runs below.
+  if (!skipMetricRow && rccl_tests_devtime::shouldSkipBenchTimeRow(deltaSec)) {
+    if (args->proc == 0 && args->thread == 0) {
+      fprintf(stderr, "# WARN: zero or negative elapsed time (deltaSec=%g); "
+                      "skipping row (size %ld bytes)\n", deltaSec, args->expectedBytes);
+    }
+    skipMetricRow = true;
+  }
+
+  double algBw = 0.0, busBw = 0.0;
+  if (!skipMetricRow) {
+    args->collTest->getBw(count, wordSize(type), deltaSec, &algBw, &busBw, args->nProcs*args->nThreads*args->nGpus);
+  } else if (in_place == 0) {
+    writeBenchMarkLineNullBody();
+  }
 
   Barrier(args);
 
   int64_t wrongElts = 0;
-  static __thread int rep = 0;
+  static thread_local int rep = 0;
   rep++;
   for (int c = 0; c < datacheck; c++) {
       // Initialize sendbuffs, recvbuffs and expected
@@ -974,20 +1256,68 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       if (wrongElts) break;
   }
 
-  double timeUsec = (report_cputime ? cputimeSec : deltaSec)*1.0E6;
-  writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, report_cputime, report_timestamps, in_place==0);
+  double timeUsec = 0.0;
+  if (!skipMetricRow) {
+    timeUsec = (report_cputime ? cputimeSec : deltaSec)*1.0E6;
+    writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, report_cputime, report_timestamps, in_place==0);
 
-  auto largestMessageSize = std::max(args->sendBytes, args->expectedBytes);
-  if (args->reporter) {
-    if (args->reportErrors) {
-      args->reporter->addResult((args->nThreads * args->nGpus), args->nProcs, args->totalProcs, largestMessageSize, in_place, timeUsec, algBw, busBw, wrongElts);
-    } else {
-      args->reporter->addResult((args->nThreads * args->nGpus), args->nProcs, args->totalProcs, largestMessageSize, in_place, timeUsec, algBw, busBw);
+    auto largestMessageSize = std::max(args->sendBytes, args->expectedBytes);
+    if (args->reporter) {
+      if (args->reportErrors) {
+        args->reporter->addResult((args->nThreads * args->nGpus), args->nProcs, args->totalProcs, largestMessageSize, in_place, timeUsec, algBw, busBw, wrongElts);
+      } else {
+        args->reporter->addResult((args->nThreads * args->nGpus), args->nProcs, args->totalProcs, largestMessageSize, in_place, timeUsec, algBw, busBw);
+      }
     }
   }
 
-  args->bw[0] += busBw;
-  args->bw_count[0]++;
+  if (!skipMetricRow && record && args->ms) {
+    // Extract max-across-GPUs per iteration (convert ms to seconds)
+    double* iterTimes = (double*)calloc(iters, sizeof(double));
+    for (int iter = 0; iter < iters; iter++) {
+      double maxSec = 0;
+      for (int i = 0; i < args->nGpus; i++) {
+        double sec = (double)args->ms[i * iters + iter] * 1e-3;
+        if (sec > maxSec) maxSec = sec;
+      }
+      iterTimes[iter] = maxSec;
+    }
+
+    double* allProcessTimes = NULL;
+    int nProcessRows = args->totalProcs;
+    if (nProcessRows > 1) {
+      if (is_main_thread)
+        allProcessTimes = (double*)malloc(nProcessRows * iters * sizeof(double));
+    }
+    GatherProcessMaxIterTimes(args, iterTimes, iters, allProcessTimes);
+    if (allProcessTimes && nProcessRows > 1)
+      ReduceProcessMaxIterTimes(iterTimes, allProcessTimes, nProcessRows, iters);
+
+    if (rccl_tests_devtime::shouldComputeIterStats(iters, per_iter_skip)) {
+      const int summaryIters = iters - per_iter_skip;
+      struct IterStats stats;
+      computeIterStats(iterTimes + per_iter_skip, summaryIters, &stats);
+      writePerIterReport(&stats, iterTimes, iters, per_iter_skip, in_place==0, allProcessTimes, nProcessRows);
+    }
+
+    if (in_place && report_timestamps) writeTimestamp();
+
+    free(allProcessTimes);
+    free(iterTimes);
+    free(args->ms);
+  }
+
+  if (!skipMetricRow) {
+    args->bw[0] += busBw;
+    args->bw_count[0]++;
+  }
+
+  // Mode 1 (augment): print an extra device-only line alongside the normal
+  // graph/hipEvent numbers above. Mode 2 already reported device time as THE
+  // metric before getBw, so no extra line here.
+  if (in_place == 0 && devTimeMode == 1) {
+    TESTCHECK(args->collTest->deviceTime(args, type, op, root, in_place, nullptr));
+  }
   return testSuccess;
 }
 
@@ -1008,6 +1338,12 @@ void setupArgs(size_t size, ncclDataType_t type, struct threadArgs* args) {
 testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName, int root) {
   // Sync to avoid first-call timeout
   Barrier(args);
+
+  // Add forced misalignment
+  for (int i = 0; i < args->nGpus; i++) {
+    args->sendbuffs[i] = (char*)args->sendbuffs[i] + unalign * wordSize(type);
+    args->recvbuffs[i] = (char*)args->recvbuffs[i] + unalign * wordSize(type);
+  }
 
   // Warm-up for all sizes (using a stepfactor of 2)
   for (size_t size = args->minbytes; size <= args->maxbytes; size = size * 2) {
@@ -1086,6 +1422,9 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
     }
     for (size_t size = args->minbytes; size<=args->maxbytes; size = ((args->stepfactor > 1) ? size*args->stepfactor : size+args->stepbytes)) {
       setupArgs(size, type, args);
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+      args->devtimeAugmentLine[0] = '\0';
+#endif
       writeBenchmarkLinePreamble(std::max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, root);
       if (enable_out_of_place) {
         TESTCHECK(BenchTime(args, type, op, root, 0));
@@ -1098,20 +1437,59 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
           int algo, proto, nchannels;
           const char* algoName = NULL;
           const char* protoName = NULL;
-          TESTCHECK(args->collTest->getAlgoProtoChannels(args->comms[0], args->nbytes / wordSize(type), type, &algo, &proto, &nchannels));
-          NCCLCHECK(rcclTestsGetAlgoName(algo, &algoName));
-          NCCLCHECK(rcclTestsGetProtocolName(proto, &protoName));
-          PRINT("%8s  %8s  %10d", algoName, protoName, nchannels);
+          bool haveInfo = false;
+          // Preferred reporter: reports the backend actually dispatched (CE / DDA /
+          // symmetric / kernel), op/buffer/graph aware. It already covers the
+          // symmetric case for every symmetric-capable collective, so getSymkInfo
+          // is only a fallback for older librccl that lacks this symbol.
+          if (rcclTestsGetCollImplInfo && args->collTest->getCollImplInfo) {
+            int graphCapturing = (cudaGraphLaunches >= 1) ? 1 : 0;
+            if (args->collTest->getCollImplInfo(args->comms[0], args->nbytes / wordSize(type), type, op,
+                                                args->sendbuffs[0], args->recvbuffs[0], graphCapturing,
+                                                &algo, &proto, &nchannels) == testSuccess) {
+              haveInfo = true;
+            }
+          }
+          // Fallback symk reporter for older librccl without rcclGetCollImplInfo.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+          if (!haveInfo && test_ncclVersion >= NCCL_VERSION(2,28,0) && local_register == SYMMETRIC_REGISTER && ctaPolicy != NCCL_CTA_POLICY_ZERO && rcclTestsGetSymkInfo) {
+            if (args->collTest->getSymkInfo) {
+              TESTCHECK(args->collTest->getSymkInfo(args->comms[0], args->nbytes / wordSize(type), type, op, &algo, &proto, &nchannels));
+              haveInfo = true;
+            }
+          }
+#endif
+          if (!haveInfo) {
+            TESTCHECK(args->collTest->getAlgoProtoChannels(args->comms[0], args->nbytes / wordSize(type), type, &algo, &proto, &nchannels));
+          }
+          if (rcclTestsGetAlgoName && rcclTestsGetProtocolName) {
+            NCCLCHECK(rcclTestsGetAlgoName(algo, &algoName));
+            NCCLCHECK(rcclTestsGetProtocolName(proto, &protoName));
+            PRINT("%8s  %8s  %10d", algoName, protoName, nchannels);
+          } else {
+            PRINT("%8s  %8s  %10s", "N/A", "N/A", "N/A");
+          }
         } else {
           PRINT("%8s  %8s  %10s","N/A", "N/A", "N/A");
         }
       }
       writeBenchmarkLineTerminator(iters, "");
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+      if (args->devtimeAugmentLine[0] != '\0') {
+        PRINT("%s", args->devtimeAugmentLine);
+        args->devtimeAugmentLine[0] = '\0';
+      }
+#endif
     }
     --repeat;
     ++iter;
   } while(repeat != 0);
 
+  // Revert forced misalignment
+  for (int i = 0; i < args->nGpus; i++) {
+    args->sendbuffs[i] = (char*)args->sendbuffs[i] - unalign * wordSize(type);
+    args->recvbuffs[i] = (char*)args->recvbuffs[i] - unalign * wordSize(type);
+  }
   return testSuccess;
 }
 
@@ -1293,6 +1671,16 @@ testResult_t threadInit(struct threadArgs* args) {
   int firstRank = args->proc*args->nThreads*args->nGpus + args->thread*args->nGpus;
   TESTCHECK(initComms(args->comms, args->nGpus, firstRank, nranks, args->gpus, args->ncclId));
 
+  /* Allocate buffers for each GPU (parallel_init: each thread allocates its own) */
+  size_t sendBytes, recvBytes;
+  ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)args->maxbytes, (size_t)nranks);
+  NCCLCHECK(ncclGroupStart());
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    TESTCHECK(AllocateBuffs(args->sendbuffs + i, sendBytes, args->recvbuffs + i, recvBytes, args->expected + i, (size_t)args->maxbytes, test_bias ? args->bias + i : NULL));
+  }
+  NCCLCHECK(ncclGroupEnd());
+
   // Capture the memory used by the GPUs after initializing the NCCL communicators
   for (int g = 0; g < args->nGpus; ++g) {
     CUDACHECK(cudaSetDevice(args->gpus[g]));
@@ -1321,7 +1709,7 @@ testResult_t threadInit(struct threadArgs* args) {
   for (int g = 0; g < args->nGpus; ++g) {
     CUDACHECK(cudaSetDevice(args->gpus[g]));
     getGPUMemoryInfo(nullptr, &initFreeGpuMem[g + args->nGpus*2]);
-    args->bufferMemory[args->thread] = std::max(args->bufferMemory[args->thread], initFreeGpuMem[g + args->nGpus] - initFreeGpuMem[g + args->nGpus*2]);
+    *args->bufferMemory = std::max(*args->bufferMemory, initFreeGpuMem[g + args->nGpus] - initFreeGpuMem[g + args->nGpus*2]);
   }
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   /* Create device communicators based on test-specific requirements */
@@ -1339,9 +1727,7 @@ testResult_t threadInit(struct threadArgs* args) {
       fprintf(stderr, "Device implementation %d is not supported by this test\n", deviceImpl);
       return testNotImplemented;
     }
-    ncclCommProperties commProperties = NCCL_COMM_PROPERTIES_INITIALIZER;
-    NCCLCHECK(ncclCommQueryProperties(args->comms[0], &commProperties));
-    TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs, &commProperties));
+    TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs, args->comms[0]));
 #else
     if (test_ncclVersion >= NCCL_VERSION(2,29,0)) {
       fprintf(stderr, "Incompatible NCCL versions. nccl-tests was compiled with NCCL 2.28, but is running with NCCL %d. "
@@ -1392,23 +1778,27 @@ testResult_t threadInit(struct threadArgs* args) {
       if (local_register && test_bias) NCCLCHECK(ncclCommDeregister(args->comms[i], args->biasRegHandles[i]));
     }
 #endif
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+    if (deviceImpl) {
+      NCCLCHECK(ncclDevCommDestroy(args->comms[i], args->devComms+i));
+    }
+#endif
     NCCLCHECK(ncclCommDestroy(args->comms[i]));
   }
 
   return testSuccess;
 }
 
-void* threadLauncher(void* thread_) {
-  struct testThread* thread = (struct testThread*)thread_;
+static void threadLauncher(struct testThread* thread) {
   thread->ret = thread->func(&thread->args);
-  return NULL;
 }
 testResult_t threadLaunch(struct testThread* thread) {
-  pthread_create(&thread->thread, NULL, threadLauncher, thread);
+  thread->thread = std::thread(threadLauncher, thread);
   return testSuccess;
 }
 
 testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes, void **expected, size_t nbytes, void **bias) {
+  nbytes += 8*unalign; // pad with size of max datatype in case all datatypes selected; applies to all memory_type branches
   if(enable_rotating_tensor) {
     recvBytes = recvBytes + cache_bytes;
     nbytes = nbytes + cache_bytes;
@@ -1472,7 +1862,18 @@ testResult_t run(); // Main function
 
 int main(int argc, char* argv[], char **envp) {
   // Make sure everyline is flushed so that we see the progress of the test
-  setlinebuf(stdout);
+  ncclTestSetlinebuf(stdout);
+  const char* slash = strrchr(argv[0], '/');
+  const char* backslash = strrchr(argv[0], '\\');
+  const char* sep = nullptr;
+  if (slash && backslash) {
+    sep = slash > backslash ? slash : backslash;
+  } else if (slash) {
+    sep = slash;
+  } else {
+    sep = backslash;
+  }
+  programName = sep ? sep + 1 : argv[0];
 
   #if NCCL_VERSION_CODE >= NCCL_VERSION(2,4,0)
     ncclGetVersion(&test_ncclVersion);
@@ -1534,9 +1935,11 @@ int main(int argc, char* argv[], char **envp) {
     {"cta_policy", required_argument, 0, 'x'},
     {"device_implementation", required_argument, 0, 'D'},
     {"device_cta_count", required_argument, 0, 'V'},
-    {"memory_report", required_argument, 0, 'M'},
+    {"memory", required_argument, 0, 'M'},
+    {"memory_report", required_argument, 0, 'M'},                   // Backward-compatible RCCL alias
+    {"unalign", required_argument, 0, 'u'},
     {"memory_type", required_argument, 0, 'Y'},                     //RCCL
-    {"cumask", required_argument, 0, 'u'},                          //RCCL
+    {"cumask", required_argument, 0, 'U'},                          //RCCL
     {"out_of_place", required_argument, 0, 'O'},                    //RCCL
     {"delay_inout_place", required_argument, 0, 'q'},               //RCCL
     {"cache_flush", required_argument, 0, 'F'},                     //RCCL
@@ -1544,13 +1947,23 @@ int main(int argc, char* argv[], char **envp) {
     {"rccl_output_format", required_argument, 0, 'Z'},              //RCCL
     {"rccl_output_file", required_argument, 0, 'X'},                //RCCL (output file for Reporter class)
     {"output_algo_proto_channels", required_argument, 0, 'A'},      //RCCL (changed from M)
+    {"per_iter_timing", required_argument, 0, 'I'},
+    {"per_iter_skip", required_argument, 0, 'K'},
+    {"device_timing", required_argument, 0, 'B'},
+    {"devtime_loop", required_argument, 0, 'L'},
+    {"devtime_skip", required_argument, 0, 'P'},
+    {"devtime_loop_mid", required_argument, 0, 'W'},
+    {"devtime_loop_large", required_argument, 0, 'Q'},
+    {"devtime_skip_mid", required_argument, 0, 'j'},
+    {"devtime_skip_large", required_argument, 0, 'k'},
+    {"devtime_check", required_argument, 0, 'H'},
     {"help", no_argument, 0, 'h'},
     {}
   };
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:Y:u:O:q:F:E:Z:X:A:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:I:K:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:u:Y:U:O:q:F:E:Z:X:A:B:L:P:W:Q:H:j:k:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -1662,7 +2075,7 @@ int main(int argc, char* argv[], char **envp) {
       case 'Y':
         memorytype = ncclstringtomtype(optarg);
         break;
-      case 'u':
+      case 'U':
         {
           int nmasks = 0;
           char *mask = strtok(optarg, ",");
@@ -1698,10 +2111,15 @@ int main(int argc, char* argv[], char **envp) {
         break;
       case 'A':
         output_algo_proto_channels = strtol(optarg, NULL, 0);
-        if(rcclTestsGetAlgoInfo == NULL || rcclTestsGetAlgoName == NULL || rcclTestsGetProtocolName == NULL) output_algo_proto_channels = 0;
         break;
       case 'M':
         memory_report = (int)strtol(optarg, NULL, 0);
+        break;
+      case 'I':
+        per_iter_timing = (int)strtol(optarg, NULL, 0);
+        break;
+      case 'K':
+        per_iter_skip = (int)strtol(optarg, NULL, 0);
         break;
       case 'x':
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
@@ -1735,6 +2153,38 @@ int main(int argc, char* argv[], char **envp) {
           return -1;
         }
         break;
+      case 'B':
+        deviceTimingMode = (int)strtol(optarg, NULL, 0);
+        if (deviceTimingMode < 0 || deviceTimingMode > 2) {
+          fprintf(stderr, "device_timing (-B) must be 0 (off), 1 (augment), or 2 (device-only), got %d\n",
+                  deviceTimingMode);
+          return -1;
+        }
+        break;
+      case 'L':
+        devtimeLoop = (int)strtol(optarg, NULL, 0);
+        break;
+      case 'P':
+        devtimeSkip = (int)strtol(optarg, NULL, 0);
+        break;
+      case 'W':
+        devtimeLoopMid = (int)strtol(optarg, NULL, 0);
+        break;
+      case 'Q':
+        devtimeLoopLarge = (int)strtol(optarg, NULL, 0);
+        break;
+      case 'j':
+        devtimeSkipMid = (int)strtol(optarg, NULL, 0);
+        break;
+      case 'k':
+        devtimeSkipLarge = (int)strtol(optarg, NULL, 0);
+        break;
+      case 'H':
+        devtimeCheck = (int)strtol(optarg, NULL, 0);
+        break;
+      case 'u':
+        unalign = (int)strtol(optarg, NULL, 0);
+        break;
       case 'h':
       default:
         if (c != 'h') printf("invalid option '%c'\n", c);
@@ -1760,7 +2210,7 @@ int main(int argc, char* argv[], char **envp) {
 #endif
             "[-d,--datatype <nccltype/all>] \n\t"
             "[-r,--root <root/all>] \n\t"
-            "[-z,--blocking <0/1>] \n\t"
+            "[-z,--blocking <0/1/2/3> 1=barrier after each inner iter (-m), 2=no barrier, 3=wait and barrier after each outer iter (-n)] \n\t"
             "[-y,--stream_null <0/1>] \n\t"
             "[-T,--timeout <time in seconds>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
@@ -1772,9 +2222,10 @@ int main(int argc, char* argv[], char **envp) {
             "[-x,--cta_policy <0/1/2> set CTA policy (NCCL_CTA_POLICY_DEFAULT (0), NCCL_CTA_POLICY_EFFICIENCY (1), NCCL_CTA_POLICY_ZERO (2)) (default: do not set)] \n\t"
             "[-D,--device_implementation <implementation number> enable device implementation (default: 0, use NCCL implementation; requires -R 2 if > 0)] \n\t"
             "[-V,--device_cta_count <number> set number of CTAs for device implementation (default: 16)] \n\t"
-            "[-M,--memory_report <0/1> enable memory usage report (default: 0)] \n\t"
+            "[-M,--memory <0/1> enable memory usage report (default: 0)] \n\t"
+            "[-u,--unalign <index of first element> Misalign source and destination buffers (default: 0)] \n\t"
             "[-Y,--memory_type <coarse/fine/host/managed>] \n\t"                                                    //RCCL
-            "[-u,--cumask <d0,d1,d2,d3>] \n\t"                                                                      //RCCL
+            "[-U,--cumask <d0,d1,d2,d3>] \n\t"                                                                      //RCCL
             "[-O,--out_of_place <0/1>] \n\t"                                                                        //RCCL
             "[-q,--delay_inout_place <delay between out-of-place and in-place in microseconds>] \n\t"               //RCCL
             "[-F,--cache_flush <number of iterations between instruction cache flush>] \n\t"                        //RCCL
@@ -1782,11 +2233,44 @@ int main(int argc, char* argv[], char **envp) {
             "[-Z,--rccl_output_format <output format <csv|json>] \n\t"                                              //RCCL
             "[-X,--rccl_output_file <file> RCCL Reporter output file for csv/json (used with -Z)] \n\t"             //RCCL
             "[-A,--output_algo_proto_channels <0/1> enable algorithm/protocol/channels output (default: 0)] \n\t"   //RCCL
+            "[-I,--per_iter_timing <0/1> per-iteration HIP event timing\n\t"
+            "    (best with -z 0, -z 2, or -z 3; with -z 1 includes barrier wait;\n\t"
+            "    i_p99 uses nearest-rank percentile and may equal i_max\n\t"
+            "    with <100 samples) (default: 0)] \n\t"
+            "[-K,--per_iter_skip <count> exclude leading samples from -I summary stats (default: 0)] \n\t"
+            "[-B,--device_timing <0/1/2> in-kernel device timing: 0=off, 1=augment (extra line), 2=device-only metric (default: 0)] \n\t"
+            "[-L,--devtime_loop <count> timed-kernel loop iterations (default: 10)] \n\t"
+            "[-P,--devtime_skip <count> timed-kernel warmup skip iterations (default: 10)] \n\t"
+            "[-W,--devtime_loop_mid <count> loop at per-peer >= 8 MiB (0=use -L; default: 0)] \n\t"
+            "[-Q,--devtime_loop_large <count> loop at per-peer >= 64 MiB (0=use tier below; default: 0)] \n\t"
+            "[-j,--devtime_skip_mid <count> skip at mid tier (-1=min(-P,2); default: -1)] \n\t"
+            "[-k,--devtime_skip_large <count> skip at large tier (-1=min(-P,1); default: -1)] \n\t"
+            "[-H,--devtime_check <0/1> validate timed-kernel output before datacheck (default: 0)] \n\t"
             "[-h,--help]\n",
-          basename(argv[0]));
+          programName);
         return 0;
     }
   }
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+  if (output_algo_proto_channels) {
+    const bool haveSymk = (rcclTestsGetSymkInfo != NULL);
+    const bool haveAlgo = (rcclTestsGetAlgoInfo != NULL && rcclTestsGetAlgoName != NULL && rcclTestsGetProtocolName != NULL);
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+    if (!haveAlgo && !(local_register == SYMMETRIC_REGISTER && haveSymk)) {
+      output_algo_proto_channels = 0;
+    }
+#else
+    (void)haveSymk;
+    if (!haveAlgo) output_algo_proto_channels = 0;
+#endif
+  }
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+  if (output_algo_proto_channels) {
+    if (rcclTestsGetAlgoInfo == NULL || rcclTestsGetAlgoName == NULL || rcclTestsGetProtocolName == NULL)
+      output_algo_proto_channels = 0;
+  }
+#endif
 
   CUDACHECK(cudaGetDeviceCount(&numDevices));
 #ifndef MPI_SUPPORT
@@ -1812,13 +2296,37 @@ int main(int argc, char* argv[], char **envp) {
     fprintf(stderr, "device implementation (-D > 0) requires enabling symmetric memory registration (-R 2)\n");
     return -1;
   }
+  if (per_iter_timing != 0 && per_iter_timing != 1) {
+    fprintf(stderr, "per-iteration timing (-I) only supports 0=off or 1=on. Disabling.\n");
+    per_iter_timing = 0;
+  }
+  if (per_iter_timing && cudaGraphLaunches >= 1) {
+    fprintf(stderr, "per-iteration timing (-I) is incompatible with HIP graph mode (-G). Disabling.\n");
+    per_iter_timing = 0;
+  }
+  if (blocking_coll == 3 && cudaGraphLaunches >= 1) {
+    fprintf(stderr, "blocking mode (-z 3) is incompatible with HIP graph mode (-G). Disabling.\n");
+    blocking_coll = 0;
+  }
+  if (per_iter_skip < 0 || per_iter_skip >= iters) {
+    fprintf(stderr, "per-iteration skip (-K) must be between 0 and %d. Disabling.\n", iters - 1);
+    per_iter_skip = 0;
+  }
+  if (per_iter_skip && !per_iter_timing) {
+    fprintf(stderr, "per-iteration skip (-K) requires per-iteration timing (-I 1). Disabling.\n");
+    per_iter_skip = 0;
+  }
 
 #ifdef MPI_SUPPORT
   MPI_Init(&argc, &argv);
 #endif
 
   const output_file_type_t output_file_type = classifyOutputFile(output_file);
-  outputFileInit(output_file_type, output_file, argc, argv, envp);
+  char **output_envp = envp;
+#if defined(NCCL_OS_LINUX)
+  output_envp = environ;
+#endif
+  outputFileInit(output_file_type, output_file, argc, argv, output_envp);
 
   if(output_file) {
     free(output_file);
@@ -1843,7 +2351,7 @@ static bool parseInt(char *s, int *num) {
   while (*s && isspace(*s)) ++s;
   if (!*s) return false;
 
-  if (strncasecmp(s, "0b", 2) == 0)
+  if (ncclTestStrncasecmp(s, "0b", 2) == 0)
     *num = (int)strtoul(s + 2, &p, 2);
   else
     *num = (int)strtoul(s, &p, 0);
@@ -1884,23 +2392,23 @@ testResult_t run() {
     color = proc & strtoul(splitMaskEnv, NULL, 16);
   } else if ((splitMaskEnv = getenv("NCCL_TESTS_SPLIT"))) {
     if (
-      (strncasecmp(splitMaskEnv, "AND", strlen("AND")) == 0 && parseInt(splitMaskEnv + strlen("AND"), &color)) ||
-      (strncasecmp(splitMaskEnv, "&", strlen("&")) == 0 && parseInt(splitMaskEnv + strlen("&"), &color))
+      (ncclTestStrncasecmp(splitMaskEnv, "AND", strlen("AND")) == 0 && parseInt(splitMaskEnv + strlen("AND"), &color)) ||
+      (ncclTestStrncasecmp(splitMaskEnv, "&", strlen("&")) == 0 && parseInt(splitMaskEnv + strlen("&"), &color))
     )
         color = proc & color;
     if (
-      (strncasecmp(splitMaskEnv, "OR", strlen("OR")) == 0 && parseInt(splitMaskEnv + strlen("OR"), &color)) ||
-      (strncasecmp(splitMaskEnv, "|", strlen("|")) == 0 && parseInt(splitMaskEnv + strlen("|"), &color))
+      (ncclTestStrncasecmp(splitMaskEnv, "OR", strlen("OR")) == 0 && parseInt(splitMaskEnv + strlen("OR"), &color)) ||
+      (ncclTestStrncasecmp(splitMaskEnv, "|", strlen("|")) == 0 && parseInt(splitMaskEnv + strlen("|"), &color))
     )
         color = proc | color;
     if (
-      (strncasecmp(splitMaskEnv, "MOD", strlen("MOD")) == 0 && parseInt(splitMaskEnv + strlen("MOD"), &color)) ||
-      (strncasecmp(splitMaskEnv, "%", strlen("%")) == 0 && parseInt(splitMaskEnv + strlen("%"), &color))
+      (ncclTestStrncasecmp(splitMaskEnv, "MOD", strlen("MOD")) == 0 && parseInt(splitMaskEnv + strlen("MOD"), &color)) ||
+      (ncclTestStrncasecmp(splitMaskEnv, "%", strlen("%")) == 0 && parseInt(splitMaskEnv + strlen("%"), &color))
     )
         color = proc % color;
     if (
-      (strncasecmp(splitMaskEnv, "DIV", strlen("DIV")) == 0 && parseInt(splitMaskEnv + strlen("DIV"), &color)) ||
-      (strncasecmp(splitMaskEnv, "/", strlen("/")) == 0 && parseInt(splitMaskEnv + strlen("/"), &color))
+      (ncclTestStrncasecmp(splitMaskEnv, "DIV", strlen("DIV")) == 0 && parseInt(splitMaskEnv + strlen("DIV"), &color)) ||
+      (ncclTestStrncasecmp(splitMaskEnv, "/", strlen("/")) == 0 && parseInt(splitMaskEnv + strlen("/"), &color))
     )
         color = proc / color;
   }
@@ -1924,7 +2432,7 @@ testResult_t run() {
   jsonIdentifyWriter(is_main_thread);
 
   size_t maxMem = ~0;
-  testResult_t report_result = writeDeviceReport(&maxMem, localRank, proc, totalProcs, color, hostname, program_invocation_short_name);
+  testResult_t report_result = writeDeviceReport(&maxMem, localRank, proc, totalProcs, color, hostname, programName);
   if(report_result != testSuccess) {
     return report_result;
   }
@@ -1933,7 +2441,7 @@ testResult_t run() {
   const size_t GB = (1ULL << 30);
   size_t reserveMem =  std::min(DIVUP(maxMem, 16*GB) * 1*GB, 4*GB);
   // If the program is all_reduce_bias, enable bias
-  if (strcmp(program_invocation_short_name, "all_reduce_bias_perf") == 0) test_bias = 1;
+  if (strcmp(programName, "all_reduce_bias_perf") == 0) test_bias = 1;
   // We need sendbuff, recvbuff, expected (when datacheck enabled), bias (when bias enabled), plus 1G for the rest.
   size_t memMaxBytes = (maxMem - reserveMem - 1*GB) / (datacheck ? (test_bias ? 4 : 3) : (test_bias ? 3 : 2));
   if (maxBytes > memMaxBytes) {
@@ -1950,7 +2458,6 @@ testResult_t run() {
   MPI_Bcast(&ncclId, sizeof(ncclId), MPI_BYTE, 0, mpi_comm);
   MPI_Barrier(MPI_COMM_WORLD); // Ensure Bcast is complete for HCOLL
 #endif
-
   std::vector<int> gpus(nGpus*nThreads);
   std::vector<cudaStream_t> streams(nGpus*nThreads);
   std::vector<void*> sendbuffs(nGpus*nThreads);
@@ -1966,13 +2473,6 @@ testResult_t run() {
   for (int i=0; i<nGpus*nThreads; i++) {
     gpus[i] = ((gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i)%numDevices;
     CUDACHECK(cudaSetDevice(gpus[i]));
-    if (parallel_init) {
-      if (test_bias) {
-        TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, bias.data()+i));
-      } else {
-        TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, NULL));
-      }
-    }
     if (streamnull) {
       streams[i] = NULL;
     }
@@ -2085,9 +2585,7 @@ testResult_t run() {
         fprintf(stderr, "Device implementation %d is not supported by this test\n", deviceImpl);
         return testNotImplemented;
       }
-      ncclCommProperties commProperties = NCCL_COMM_PROPERTIES_INITIALIZER;
-      NCCLCHECK(ncclCommQueryProperties(comms[0], &commProperties));
-      TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs, &commProperties));
+      TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs, comms[0]));
 #else
       if (test_ncclVersion >= NCCL_VERSION(2,29,0)) {
         fprintf(stderr, "Incompatible NCCL versions. nccl-tests was compiled with NCCL 2.28, but is running with NCCL %d. "
@@ -2125,8 +2623,6 @@ testResult_t run() {
   std::vector<int> errors(nThreads);
   std::vector<double> bw(nThreads);
   std::vector<int64_t> devMemUsed(nThreads);
-  double* delta;
-  CUDACHECK(hipHostMalloc(&delta, sizeof(double)*nThreads*NUM_BLOCKS, cudaHostAllocPortable | cudaHostAllocMapped));
   std::vector<int> bw_count(nThreads);
   for (int t=0; t<nThreads; t++) {
     bw[t] = 0.0;
@@ -2135,15 +2631,14 @@ testResult_t run() {
   }
 
   fflush(stdout);
-  
+
   // RCCL: Call NCCL's refactored header function with RCCL-specific parameters
   writeResultHeader(report_cputime, report_timestamps, enable_out_of_place, enable_in_place, output_algo_proto_channels);
-  
+
   // RCCL: Initialize Reporter for file output (-Z flag)
   Reporter reporter(rccl_output_file, rccl_output_format);
 
   std::vector<testThread> threads(nThreads);
-  memset(threads.data(), 0, sizeof(struct testThread)*nThreads);
 
   for (int t=nThreads-1; t>=0; t--) {
     threads[t].args.minbytes=minBytes;
@@ -2197,7 +2692,7 @@ testResult_t run() {
 
   // Wait for other threads and accumulate stats and errors
   for (int t=nThreads-1; t>=0; t--) {
-    if (t) pthread_join(threads[t].thread, NULL);
+    if (t) threads[t].thread.join();
     TESTCHECK(threads[t].ret);
     if (t) {
       errors[0] += errors[t];
@@ -2231,6 +2726,11 @@ testResult_t run() {
         if (local_register && test_bias) NCCLCHECK(ncclCommDeregister(comms[i], biasRegHandles[i]));
       }
 #endif
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+      if (deviceImpl) {
+        NCCLCHECK(ncclDevCommDestroy(comms[i], devComms.data()+i));
+      }
+#endif
       NCCLCHECK(ncclCommDestroy(comms[i]));
     }
   }
@@ -2250,12 +2750,13 @@ testResult_t run() {
     if (datacheck) CUDACHECK(cudaFree(expected[i]));
 #endif
   }
-  CUDACHECK(cudaFreeHost(delta));
   envstr = getenv("NCCL_TESTS_MIN_BW");
   const double check_avg_bw = envstr ? atof(envstr) : -1;
-  bw[0] /= bw_count[0];
+  if (bw_count[0] > 0) {
+    bw[0] /= bw_count[0];
+  }
 
-  writeResultFooter(errors.data(), bw.data(), check_avg_bw, program_invocation_short_name);
+  writeResultFooter(errors.data(), bw.data(), check_avg_bw, programName);
   if (memory_report) {
     memInfo_t memInfos[3];
     memInfos[0] = { initGpuMem[0], "Initialization" };

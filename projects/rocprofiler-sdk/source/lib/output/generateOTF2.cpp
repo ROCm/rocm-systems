@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -210,6 +210,13 @@ get_locations()
     return _v;
 }
 
+void
+reset_archive_state()
+{
+    get_locations().clear();
+    location_data::index_counter = 0;
+}
+
 const location_data*
 get_location(const location_base& _location, bool _init = false)
 {
@@ -293,8 +300,12 @@ setup(const output_config& cfg)
     auto _filepath = fs::path{_filename};
     auto _name     = _filepath.filename().string();
     auto _path     = _filepath.parent_path().string();
+    auto _anchor   = fs::path{fmt::format("{}.otf2", _filename)};
+    auto _def      = fs::path{fmt::format("{}.def", _filename)};
 
     if(fs::exists(_filepath)) fs::remove_all(_filepath);
+    if(fs::exists(_anchor)) fs::remove(_anchor);
+    if(fs::exists(_def)) fs::remove(_def);
 
     constexpr uint64_t evt_chunk_size = 2 * common::units::MB;
     constexpr uint64_t def_chunk_size = 8 * common::units::MB;
@@ -319,6 +330,8 @@ void
 shutdown()
 {
     OTF2_CHECK(OTF2_Archive_Close(archive));
+    archive = nullptr;
+    reset_archive_state();
 }
 
 struct event_info
@@ -582,8 +595,9 @@ write_otf2(const output_config&                                          cfg,
                     continue;
 
                 using value_type = common::mpl::unqualified_type_t<decltype(itr)>;
-                auto name        = buffer_names.at(itr.kind, itr.operation);
-                auto paradigm    = OTF2_PARADIGM_HIP;
+
+                auto name     = buffer_names.at(itr.kind, itr.operation);
+                auto paradigm = OTF2_PARADIGM_HIP;
                 if constexpr(std::is_same<value_type,
                                           rocprofiler_buffer_tracing_marker_api_record_t>::value)
                 {

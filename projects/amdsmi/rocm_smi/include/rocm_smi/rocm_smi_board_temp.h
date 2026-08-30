@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef ROCM_SMI_INCLUDE_ROCM_SMI_ROCM_SMI_BOARD_TEMP_H_
 #define ROCM_SMI_INCLUDE_ROCM_SMI_ROCM_SMI_BOARD_TEMP_H_
@@ -100,6 +81,22 @@ struct amdgpu_baseboard_temp_metrics_v1_0 {
   uint32_t system_temp[AMDGPU_SYSTEM_MAX_TEMP_ENTRIES];
 };
 
+struct gpu_metrics_attr {
+  uint64_t encoded_attr;
+};
+
+struct amdgpu_gpuboard_temp_metrics_v1_1 {
+  struct metrics_table_header_t common_header;
+  uint32_t attr_count;
+  struct gpu_metrics_attr metrics_attrs[];
+};
+
+struct amdgpu_baseboard_temp_metrics_v1_1 {
+  struct metrics_table_header_t common_header;
+  uint32_t attr_count;
+  struct gpu_metrics_attr metrics_attrs[];
+};
+
 rsmi_status_t read_gpuboard_temp_metrics(const char* filename,
                                          amdgpu_gpuboard_temp_metrics_v1_0& metrics);
 rsmi_status_t read_baseboard_temp_metrics(const char* filename,
@@ -110,5 +107,13 @@ rsmi_status_t get_baseboard_temp_value(const amdgpu_baseboard_temp_metrics_v1_0&
 
 rsmi_status_t get_gpuboard_temp_value(const amdgpu_gpuboard_temp_metrics_v1_0& metrics,
                                       rsmi_temperature_type_t temperature_type, int64_t* value);
+
+rsmi_status_t get_gpuboard_temp_value_dynamic(const char* filename,
+                                              rsmi_temperature_type_t temperature_type,
+                                              int64_t* value);
+
+rsmi_status_t get_baseboard_temp_value_dynamic(const char* filename,
+                                               rsmi_temperature_type_t temperature_type,
+                                               int64_t* value);
 }  // namespace amd::smi
 #endif  // ROCM_SMI_INCLUDE_ROCM_SMI_ROCM_SMI_BOARD_TEMP_H_

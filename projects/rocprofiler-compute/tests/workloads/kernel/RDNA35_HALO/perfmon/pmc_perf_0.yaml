@@ -1,0 +1,30 @@
+jobs:
+- pmc:
+  - SQ_BUSY_CYCLES_avr
+  - SQ_WAVES
+  - SQ_WAVE_CYCLES_sum
+  - SQ_BUSY_CYCLES_sum
+  - SQ_INSTS_ALL_sum
+  - SQ_INSTS_INTERNAL_sum
+  - SQ_INSTS_VALU_sum
+  - SQ_WAIT_INST_ANY
+  - GRBM_GUI_ACTIVE
+  - GRBM_COUNT
+  - CPC_ALWAYS_COUNT
+  - CPC_STAT_BUSY
+  - GCEA_ALWAYS_COUNT_sum
+  - GCEA_SARB_BUSY_sum
+  - TCP_GL1_REQ_READ_sum
+  - TCP_GL1_REQ_WRITE_sum
+  - TCP_REQ_MISS_sum
+  - TCP_REQ_sum
+  - SPI_CSN_WAVE
+  - SPI_BUSY
+  - GL1C_REQ_MISS_sum
+  - GL1C_REQ_sum
+  - GL1C_BUSY_sum
+  - GL1C_CYCLE_sum
+  - GL2C_EA_RDREQ_128B_sum
+  - GL2C_EA_RDREQ_32B_sum
+  - GL2C_EA_RDREQ_64B_sum
+  - GL2C_EA_RDREQ_96B_sum

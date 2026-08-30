@@ -1,9 +1,11 @@
 /*************************************************************************
- * Copyright (c) 2023, Google LLC.  All rights reserved.
- * Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023 Google LLC.  All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0 and BSD-3
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
 #ifndef NET_DEVICE_UNPACK_DEFS_H
 #define NET_DEVICE_UNPACK_DEFS_H
 
@@ -28,8 +30,7 @@ static_assert(sizeof(union loadMeta) == 16, "Must be 16-byte aligned");
 #define NET_UNPACK_MAX_QUEUE_DEPTH 16  // MAX_REQUESTS
 #define NET_UNPACK_MAX_SLICE_SIZE 4194304  // 4MB per Irecv call
 #define SLICE_PAGE_SIZE 4096
-#define NET_UNPACK_MAX_SLICE_PAGES \
-  (NET_UNPACK_MAX_SLICE_SIZE / SLICE_PAGE_SIZE * 2)  // * 2 for slack, wasteful..
+#define NET_UNPACK_MAX_SLICE_PAGES (NET_UNPACK_MAX_SLICE_SIZE / SLICE_PAGE_SIZE * 2)  // * 2 for slack, wasteful..
 
 struct netUnpackMeta {
   loadMeta mem[NCCL_NET_DEVICE_UNPACK_MAX_QUEUE_DEPTH][NET_UNPACK_MAX_SLICE_PAGES];
@@ -37,7 +38,7 @@ struct netUnpackMeta {
 };
 
 struct unpackNetDeviceHandle {
-  struct netUnpackMeta *meta;  // mapped
+  struct netUnpackMeta* meta;  // mapped
   void* bounce_buf;
   uint64_t head;
 };

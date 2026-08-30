@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
@@ -86,6 +86,32 @@ set_tests_properties(
     counter-collection-buffer-device-serialization
     PROPERTIES TIMEOUT 120 LABELS "samples" ENVIRONMENT
                "${counter-collection-buffer-device-serialization-env}"
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+set(counter-collection-buffer-finalize-at-exit-env
+    ${counter-collection-buffer-device-serialization-env}
+    "ROCPROFILER_QUEUE_INTERPOSITION=0" "ROCPROFILER_LOG_LEVEL=INFO")
+
+add_test(NAME counter-collection-buffer-finalize-at-exit
+         COMMAND $<TARGET_FILE:counter-collection-buffer-device-serialization>)
+
+set_tests_properties(
+    counter-collection-buffer-finalize-at-exit
+    PROPERTIES TIMEOUT 120 LABELS "samples;repro" ENVIRONMENT
+               "${counter-collection-buffer-finalize-at-exit-env}"
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+set(counter-collection-buffer-finalize-at-exit-forced-inline-env
+    ${counter-collection-buffer-device-serialization-env}
+    "ROCPROFILER_QUEUE_INTERPOSITION=1" "ROCPROFILER_LOG_LEVEL=INFO")
+
+add_test(NAME counter-collection-buffer-finalize-at-exit-forced-inline
+         COMMAND $<TARGET_FILE:counter-collection-buffer-device-serialization>)
+
+set_tests_properties(
+    counter-collection-buffer-finalize-at-exit-forced-inline
+    PROPERTIES TIMEOUT 120 LABELS "samples;repro" ENVIRONMENT
+               "${counter-collection-buffer-finalize-at-exit-forced-inline-env}"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_library(counter-collection-callback-client SHARED)

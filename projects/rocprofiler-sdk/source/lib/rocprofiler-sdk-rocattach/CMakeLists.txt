@@ -47,6 +47,7 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
             rocprofiler-sdk::rocprofiler-sdk-headers
             rocprofiler-sdk::rocprofiler-sdk-build-flags
+            rocprofiler-sdk::rocprofiler-sdk-memcheck
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-cereal)
 

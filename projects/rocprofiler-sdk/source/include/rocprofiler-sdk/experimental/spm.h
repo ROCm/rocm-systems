@@ -172,10 +172,11 @@ rocprofiler_spm_destroy_counter_config(rocprofiler_counter_config_id_t config_id
  **/
 typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_record_flag_t
 {
-    ROCPROFILER_SPM_RECORD_FLAG_NONE      = 0,       ///< flag value none
-    ROCPROFILER_SPM_RECORD_FLAG_DATA      = 1 << 0,  ///< records with data
-    ROCPROFILER_SPM_RECORD_FLAG_DATA_LOSS = 1 << 1,  ///< records with data loss
-    ROCPROFILER_SPM_RECORD_FLAG_LAST      = 1 << 2,
+    ROCPROFILER_SPM_RECORD_FLAG_NONE         = 0,       ///< flag value none
+    ROCPROFILER_SPM_RECORD_FLAG_DATA         = 1 << 0,  ///< records with data
+    ROCPROFILER_SPM_RECORD_FLAG_DATA_LOSS    = 1 << 1,  ///< records with data loss
+    ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END = 1 << 2,  ///< dispatch complete, no records
+    ROCPROFILER_SPM_RECORD_FLAG_LAST         = 1 << 3,
 } rocprofiler_spm_record_flag_t;
 
 /**
@@ -313,5 +314,27 @@ rocprofiler_spm_configure_buffer_dispatch_service(
     rocprofiler_buffer_id_t                        buffer_id,
     rocprofiler_spm_dispatch_counting_service_cb_t callback,
     void* callback_data_args) ROCPROFILER_API ROCPROFILER_NONNULL(3);
+
+/**
+ * @brief (experimental) Restrict an SPM dispatch counting service to a set of GPU agents.
+ *
+ *        By default an SPM dispatch service applies to every GPU agent. This function narrows
+ *        the service so that agents outside @p agents are neither instrumented nor serialized.
+ *        Restricting the agent set also relaxes the SPM context conflict: two contexts may each
+ *        configure an SPM dispatch service and be active at the same time provided their agent
+ *        sets are disjoint.
+ *
+ *        Must be called after an SPM dispatch service has been configured on @p context_id and
+ *        before the context is started. Passing @p num_agents of zero restores all agents.
+ *
+ * @param [in] context_id context id with a configured SPM dispatch service
+ * @param [in] agents array of GPU agent ids to restrict collection to
+ * @param [in] num_agents number of entries in @p agents
+ * @return ::rocprofiler_status_t
+ */
+ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
+rocprofiler_spm_dispatch_counting_service_set_agents(rocprofiler_context_id_t      context_id,
+                                                     const rocprofiler_agent_id_t* agents,
+                                                     size_t num_agents) ROCPROFILER_API;
 
 ROCPROFILER_EXTERN_C_FINI

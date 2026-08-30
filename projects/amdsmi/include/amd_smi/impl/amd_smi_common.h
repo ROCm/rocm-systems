@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef AMD_SMI_INCLUDE_AMD_SMI_COMMON_H_
 #define AMD_SMI_INCLUDE_AMD_SMI_COMMON_H_
@@ -37,7 +18,7 @@ extern "C" {
 #endif
 
 extern "C" {
-#include <amdsmi_unified/interface/smi_nic_interface.h>
+#include "amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h"
 }
 namespace amd::smi {
 
@@ -125,6 +106,31 @@ const std::map<smi_nic_status_t, amdsmi_status_t> ainic_status_map = {
     {SMI_NIC_STATUS_DRIVER_NOT_LOADED, AMDSMI_STATUS_DRIVER_NOT_LOADED}};
 amdsmi_status_t ainic_to_amdsmi_status(smi_nic_status_t status);
 
+/**
+ *  AMDSMI Library init reference count (amdsmi_init / amdsmi_shut_down)
+ *      - Lives in amd_smi_common.cc
+ */
+bool amdsmi_library_initialized();
+void amdsmi_library_init_ref_acquire();
+
+/**
+ *  AMDSMI Decrements init ref; should run (count reached zero).
+ *      - Returns true if AMDSmiSystem::cleanup()
+ *
+ */
+
+bool amdsmi_library_init_ref_release();
+
 }  // namespace amd::smi
+
+// Verifies AMD SMI is initialized; returns AMDSMI_STATUS_NOT_INIT from the enclosing function.
+#ifndef AMDSMI_CHECK_INIT
+#define AMDSMI_CHECK_INIT()                        \
+  do {                                             \
+    if (!amd::smi::amdsmi_library_initialized()) { \
+      return AMDSMI_STATUS_NOT_INIT;               \
+    }                                              \
+  } while (0)
+#endif
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_COMMON_H_

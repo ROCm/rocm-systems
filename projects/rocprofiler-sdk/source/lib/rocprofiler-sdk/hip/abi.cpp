@@ -678,6 +678,25 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLibraryGetGlobal_fn, 535);
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLibraryGetManaged_fn, 536);
 #endif
 
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 30
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipMemDiscardBatchAsync_fn, 537);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipDrvMemDiscardBatchAsync_fn, 538);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipMemDiscardAndPrefetchBatchAsync_fn, 539);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipDrvMemDiscardAndPrefetchBatchAsync_fn, 540);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 31
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipMemGetDefaultMemPool_fn, 541);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 32
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipDeviceGetLuid_fn, 542);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 33
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipInitDevice_fn, 543);
+#endif
+
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION == 0
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 442)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 1
@@ -738,6 +757,14 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 520)
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 535)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 29
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 537)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 30
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 541)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 31
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 542)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 32
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 543)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 33
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 544)
 #else
 INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 0)
 #endif

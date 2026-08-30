@@ -465,9 +465,9 @@ void KFDQMTest::SdmaConcurrentCopies(int gpuNode) {
         }
 
         for (unsigned j = 0; j < NPACKETS; j++)
-            queue.PlacePacket(
+            ASSERT_NO_FATAL_FAILURE(queue.PlacePacket(
                 SDMACopyDataPacket(queue.GetFamilyId(), dstBuf.As<char *>()+COPY_SIZE*j,
-                                   srcBuf.As<char *>()+COPY_SIZE*j, COPY_SIZE));
+                                   srcBuf.As<char *>()+COPY_SIZE*j, COPY_SIZE)));
         queue.SubmitPacket();
 
         /* Waste a variable amount of time. Submission timing
@@ -481,12 +481,12 @@ void KFDQMTest::SdmaConcurrentCopies(int gpuNode) {
          * run concurrently for a bit without getting too far ahead
          */
         if ((i & 0x7) == 0)
-            queue.Wait4PacketConsumption();
+            ASSERT_NO_FATAL_FAILURE(queue.Wait4PacketConsumption());
     }
     log << "Done." << std::endl;
 
-    queue.PlaceAndSubmitPacket(SDMAWriteDataPacket(queue.GetFamilyId(), srcBuf.As<unsigned *>(), 0x02020202));
-    queue.Wait4PacketConsumption();
+    ASSERT_NO_FATAL_FAILURE(queue.PlaceAndSubmitPacket(SDMAWriteDataPacket(queue.GetFamilyId(), srcBuf.As<unsigned *>(), 0x02020202)));
+    ASSERT_NO_FATAL_FAILURE(queue.Wait4PacketConsumption());
     EXPECT_TRUE_GPU(WaitOnValue(srcBuf.As<unsigned int*>(), 0x02020202), gpuNode);
 
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
@@ -2419,7 +2419,6 @@ TEST_F(KFDQMTest, P2PTest) {
     HSAuint32 *sysBuf;
     HSAuint32 size = 16ULL<<20;  // bigger than 16MB to test non-contiguous memory
     HsaMemFlags memFlags = {0};
-    HsaMemMapFlags mapFlags = {0};
     memFlags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
     memFlags.ui32.HostAccess = 0;
     memFlags.ui32.NonPaged = 1;
@@ -2430,7 +2429,7 @@ TEST_F(KFDQMTest, P2PTest) {
     EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, 0, size, m_MemoryFlags,
                                      reinterpret_cast<void **>(&sysBuf)));
     EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, sysBuf, size, NULL,
-                                             mapFlags, nodes.size(), (HSAuint32 *)&nodes[0]));
+                                             memFlags, nodes.size(), (HSAuint32 *)&nodes[0]));
 #define MAGIC_NUM 0xdeadbeaf
 
     /* First GPU fills mem with MAGIC_NUM */

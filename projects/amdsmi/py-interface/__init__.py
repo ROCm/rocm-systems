@@ -1,24 +1,8 @@
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-# ``
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 # Library Version is the tool/amdsmi_interface version
-from ._version import __version__
+from ._version import __commit__, __version__
 
 # Library Initialization
 from .amdsmi_interface import amdsmi_init
@@ -38,7 +22,6 @@ from .amdsmi_interface import amdsmi_get_npm_info
 # ESMI Dependent Functions
 try:
     from .amdsmi_interface import amdsmi_get_cpu_handles
-    from .amdsmi_interface import amdsmi_get_cpusocket_handles  # Deprecate in 8.0
     from .amdsmi_interface import amdsmi_get_cpucore_handles
     from .amdsmi_interface import amdsmi_get_cpu_hsmp_proto_ver
     from .amdsmi_interface import amdsmi_get_cpu_smu_fw_version
@@ -117,6 +100,7 @@ except AttributeError:
 from .amdsmi_interface import amdsmi_get_processor_handle_from_bdf
 from .amdsmi_interface import amdsmi_get_gpu_device_bdf
 from .amdsmi_interface import amdsmi_get_gpu_device_uuid
+from .amdsmi_interface import amdsmi_get_gpu_device_cuid
 from .amdsmi_interface import amdsmi_get_gpu_enumeration_info
 
 # # Functions not dependent on ESMI library
@@ -146,6 +130,7 @@ from .amdsmi_interface import amdsmi_get_gpu_vram_usage
 from .amdsmi_interface import amdsmi_get_power_info
 from .amdsmi_interface import amdsmi_get_clock_info
 from .amdsmi_interface import amdsmi_get_gpu_busy_percent
+from .amdsmi_interface import amdsmi_get_vcn_busy_percent
 
 from .amdsmi_interface import amdsmi_get_pcie_info
 from .amdsmi_interface import amdsmi_get_gpu_bad_page_info
@@ -161,6 +146,7 @@ from .amdsmi_interface import amdsmi_stop_gpu_event_notification
 
 # # Process Information
 from .amdsmi_interface import amdsmi_get_gpu_process_list
+from .amdsmi_interface import amdsmi_get_gpu_process_list_by_pid
 
 # # ECC Error Information
 from .amdsmi_interface import amdsmi_get_gpu_total_ecc_count
@@ -179,14 +165,12 @@ from .amdsmi_interface import amdsmi_gpu_validate_ras_eeprom
 from .amdsmi_interface import amdsmi_set_gpu_pci_bandwidth
 from .amdsmi_interface import amdsmi_set_power_cap
 from .amdsmi_interface import amdsmi_set_gpu_power_profile
-from .amdsmi_interface import amdsmi_set_gpu_clk_range
 from .amdsmi_interface import amdsmi_set_gpu_clk_limit
 from .amdsmi_interface import amdsmi_set_gpu_od_clk_info
 from .amdsmi_interface import amdsmi_set_gpu_od_volt_info
 from .amdsmi_interface import amdsmi_set_gpu_perf_level
 from .amdsmi_interface import amdsmi_get_gpu_power_profile_presets
 from .amdsmi_interface import amdsmi_reset_gpu
-from .amdsmi_interface import amdsmi_gpu_driver_reload
 from .amdsmi_interface import amdsmi_set_gpu_perf_determinism_mode
 from .amdsmi_interface import amdsmi_set_gpu_fan_speed
 from .amdsmi_interface import amdsmi_reset_gpu_fan
@@ -281,13 +265,17 @@ from .amdsmi_interface import amdsmi_get_link_topology_nearest
 # # Partition Functions
 from .amdsmi_interface import amdsmi_get_gpu_compute_partition
 from .amdsmi_interface import amdsmi_set_gpu_compute_partition
+from .amdsmi_interface import amdsmi_get_gpu_compute_partition_mem_alloc_mode
+from .amdsmi_interface import amdsmi_set_gpu_compute_partition_mem_alloc_mode
+from .amdsmi_interface import amdsmi_get_gpu_accelerator_partition_mem_alloc_mode
+from .amdsmi_interface import amdsmi_set_gpu_accelerator_partition_mem_alloc_mode
 from .amdsmi_interface import amdsmi_get_gpu_memory_partition
 from .amdsmi_interface import amdsmi_set_gpu_memory_partition
+from .amdsmi_interface import amdsmi_set_gpu_memory_partition_mode
 from .amdsmi_interface import amdsmi_get_gpu_accelerator_partition_profile
 from .amdsmi_interface import amdsmi_get_gpu_accelerator_partition_profile_config
 from .amdsmi_interface import amdsmi_get_gpu_memory_partition_config
 from .amdsmi_interface import amdsmi_set_gpu_accelerator_partition_profile
-from .amdsmi_interface import amdsmi_set_gpu_memory_partition_mode
 
 # # Individual GPU Metrics Functions
 from .amdsmi_interface import amdsmi_get_gpu_metrics_header_info
@@ -329,6 +317,8 @@ from .amdsmi_interface import AmdSmiTemperatureMetric
 from .amdsmi_interface import AmdSmiVoltageMetric
 from .amdsmi_interface import AmdSmiVoltageType
 from .amdsmi_interface import AmdSmiComputePartitionType
+from .amdsmi_interface import AmdSmiComputePartitionMemAllocModeType
+from .amdsmi_interface import AmdSmiAcceleratorPartitionMemAllocModeType
 from .amdsmi_interface import AmdSmiMemoryPartitionType
 from .amdsmi_interface import AmdSmiPowerProfilePresetMasks
 from .amdsmi_interface import AmdSmiGpuBlock
@@ -350,6 +340,10 @@ from .amdsmi_interface import amdsmi_set_gpu_uma_carveout
 from .amdsmi_interface import amdsmi_get_ttm_info
 from .amdsmi_interface import amdsmi_set_ttm_pages_limit
 from .amdsmi_interface import amdsmi_reset_ttm_pages_limit
+
+# # Fabric (IFoE/UALoE) Information
+from .amdsmi_interface import amdsmi_get_fabric_telemetry_data
+from .amdsmi_interface import amdsmi_get_gpu_fabric_info
 
 # Exceptions
 from .amdsmi_exception import AmdSmiLibraryException

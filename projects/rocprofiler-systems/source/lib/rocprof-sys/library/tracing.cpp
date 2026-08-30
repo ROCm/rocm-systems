@@ -2,15 +2,22 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/tracing.hpp"
+#include "common/env_vars.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/perfetto/emitter.hpp"
+#include "core/perfetto/engine.hpp"
 #include "core/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include <cstdint>
+#include <mutex>
+#include <unordered_map>
 
 #include <timemory/hash/types.hpp>
 #include <timemory/process/threading.hpp>
+
+#include <unistd.h>
 
 #include "logger/debug.hpp"
 
@@ -39,24 +46,9 @@ get_timemory_hash_aliases(std::int64_t _tid)
 }
 }  // namespace
 
-bool debug_push = tim::get_env("ROCPROFSYS_DEBUG_PUSH", false) || get_debug_env();
-bool debug_pop  = tim::get_env("ROCPROFSYS_DEBUG_POP", false) || get_debug_env();
-bool debug_mark = tim::get_env("ROCPROFSYS_DEBUG_MARK", false) || get_debug_env();
-bool debug_user = tim::get_env("ROCPROFSYS_DEBUG_USER_REGIONS", false) || get_debug_env();
-
-std::unordered_map<hash_value_t, std::string>&
-get_perfetto_track_uuids()
-{
-    static auto _v = std::unordered_map<hash_value_t, std::string>{};
-    return _v;
-}
-
-std::mutex&
-get_perfetto_track_uuids_mutex()
-{
-    static auto _mtx = std::mutex{};
-    return _mtx;
-}
+bool debug_push = rocprofsys::get_env(env_vars::DEBUG_PUSH, false) || get_debug_env();
+bool debug_pop  = rocprofsys::get_env(env_vars::DEBUG_POP, false) || get_debug_env();
+bool debug_mark = rocprofsys::get_env(env_vars::DEBUG_MARK, false) || get_debug_env();
 
 void
 copy_timemory_hash_ids()
@@ -122,7 +114,7 @@ copy_timemory_hash_ids()
 
     // distribute the contents of that combined container to each thread-specific
     // container before finalizing
-    if(get_state() == State::Finalized)
+    if(state::process::get() == state::process::Finalized)
     {
         if(hash_storage)
         {
@@ -158,17 +150,18 @@ record_thread_start_time()
 {
     static thread_local std::once_flag _once{};
     std::call_once(_once, []() {
-        thread_info::set_start(comp::wall_clock::record(), get_mode() != Mode::Sampling);
+        thread_info::set_start(comp::wall_clock::record(),
+                               get_mode() != state::process::Mode::Sampling);
     });
 }
 
 void
 thread_init()
 {
-    if(get_thread_state() == ThreadState::Disabled) return;
+    if(state::thread::get() == state::thread::Disabled) return;
 
     static thread_local auto _thread_dtor = scope::destructor{ []() {
-        if(get_state() != State::Finalized)
+        if(state::process::get() != state::process::Finalized)
         {
             if(get_use_causal())
                 causal::sampling::shutdown();
@@ -181,7 +174,7 @@ thread_init()
         }
     } };
 
-    if(get_thread_state() == ThreadState::Disabled) return;
+    if(state::thread::get() == state::thread::Disabled) return;
 
     static thread_local auto _thread_setup = []() {
         const auto& _tinfo = thread_info::init();
@@ -221,7 +214,7 @@ thread_init()
         return true;
     }();
 
-    if(get_thread_state() == ThreadState::Disabled) return;
+    if(state::thread::get() == state::thread::Disabled) return;
 
     static thread_local auto _sample_setup = []() {
         auto _idx = utility::get_thread_index();

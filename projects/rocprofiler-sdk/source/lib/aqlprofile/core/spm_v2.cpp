@@ -11,6 +11,7 @@
 #include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
 #include "lib/common/static_object.hpp"
+#include "lib/common/environment.hpp"
 
 #include <thread>
 #include <condition_variable>
@@ -61,6 +62,7 @@ struct spm_state_t : public spm_set_dest_buffer_args
     std::mutex                work_mutex{};
     std::condition_variable   work_cond{};
     std::atomic<bool>         data_ready{};
+    std::atomic<bool>         cons_buf_free{true};
 
     std::atomic<int>   signal_data_loss{};
     std::atomic<bool>  stop_prod_thread{};
@@ -177,8 +179,9 @@ is_virtualization_enabled()
 bool
 is_agent_supported_for_spm(const AgentInfo* agentInfo)
 {
-    const char* env_val = getenv("AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK");
-    if(env_val && *env_val != '0' && *env_val != '\0') return true;
+    // Check value, not just presence (must be non-empty and non-zero to override)
+    auto env_val = rocprofiler::common::get_env_optional("AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK");
+    if(env_val && !env_val->empty() && env_val->front() != '0') return true;
 
     // if the device is gfx90a, then spm is not supported
     if(strncmp(agentInfo->gfxip, "gfx90a", 6) == 0)
@@ -484,7 +487,8 @@ aqlprofile_spm_stop(aqlprofile_handle_t handle)
 PUBLIC_API void
 aqlprofile_spm_delete_packets(aqlprofile_handle_t handle)
 {
-    aqlprofile::spm::spm_state_map()->remove(handle);
+    if(auto* map = rocprofiler::common::static_object<aqlprofile::spm::SpmStateMap>::get())
+        map->remove(handle);
 }
 
 struct consumer_thread_handle_t
@@ -493,6 +497,7 @@ struct consumer_thread_handle_t
     : s(std::move(_s)){};
     ~consumer_thread_handle_t()
     {
+        std::unique_lock<std::mutex> lock(s->work_mutex);
         s->stop_cons_thread = true;
         s->work_cond.notify_one();
     }
@@ -520,7 +525,7 @@ producer(std::shared_ptr<spm_state_t> s)
         args.size_copied = 0;
         args.dest_buf    = s->prod_buf;
         // s->stop_prod_thread should be set after SPM End() sequence is submitted, this is the
-        // handshake protocal between app/library and aqlprofile.
+        // handshake protocol between app/library and aqlprofile.
         // If s->stop_prod_thread is set in current loop, producer thread will exit after all
         // SPM counters are drained (args.size_copied == 0) which could be at least one
         // HsaSpmSetDestBuffer() call or maybe more than one.
@@ -537,6 +542,11 @@ producer(std::shared_ptr<spm_state_t> s)
 
         {
             std::unique_lock<std::mutex> lock(s->work_mutex);
+
+            // Wait until consumer has finished reading cons_buf
+            // before rotating, so we don't overwrite data it is still processing.
+            s->work_cond.wait(lock, [&s]() { return s->cons_buf_free || s->stop_cons_thread; });
+
             s->dest_buf = s->prod_buf.exchange(s->cons_buf.exchange(s->dest_buf));
 
             // In the initial XCC SPM design, 'size_copied' and 'is_data_loss' are stored in
@@ -556,6 +566,7 @@ producer(std::shared_ptr<spm_state_t> s)
             }
             s->signal_data_loss.fetch_or(s->is_data_loss);
 
+            s->cons_buf_free = false;
             consumer_handle.notify();
         }
 
@@ -586,12 +597,16 @@ consumer(std::shared_ptr<spm_state_t> s, aqlprofile_spm_data_callback_t callback
     while(true)
     {
         std::unique_lock<std::mutex> lock(s->work_mutex);
+        // Wait for data or producer shutdown; do not wait on data_ready alone (see spm_data.cpp).
         s->work_cond.wait(lock, [&s]() { return s->data_ready || s->stop_cons_thread; });
+        // Producer destructor set stop_cons_thread; exit without processing stale work.
         if(!s->data_ready) return;
         s->data_ready = false;
 
         char* base  = (char*) s->cons_buf.load();
         int   flags = s->signal_data_loss.exchange(0) << AQLPROFILE_SPM_DATA_FLAGS_DATA_LOSS;
+
+        lock.unlock();
 
         for(int i = 0; i < s->num_xcc; i++)
         {
@@ -601,6 +616,13 @@ consumer(std::shared_ptr<spm_state_t> s, aqlprofile_spm_data_callback_t callback
 
             base += s->buf_size_xcc;
         }
+
+        // Signal producer that cons_buf is now free for rotation
+        {
+            std::lock_guard<std::mutex> lk(s->work_mutex);
+            s->cons_buf_free = true;
+        }
+        s->work_cond.notify_one();
     }
 }
 

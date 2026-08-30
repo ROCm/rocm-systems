@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "perfetto.hpp"
+#include "common/env_vars.hpp"
+#include "common/path.hpp"
+#include "common/units.hpp"
 #include "config.hpp"
 #include "library/runtime.hpp"
 #include "output_file_registry.hpp"
@@ -117,8 +120,8 @@ start()
     }
 
     LOG_DEBUG("Setup perfetto...");
-    int   _fd = (_tmp_file) ? _tmp_file->fd : -1;
-    auto& cfg = get_config();
+    const int _fd = (_tmp_file) ? _tmp_file->fd : -1;
+    auto&     cfg = get_config();
     tracing_session->SetOnErrorCallback([](::perfetto::TracingError _err) {
         if(_err.code == ::perfetto::TracingError::kTracingFailed)
             LOG_WARNING("Perfetto encountered a tracing error: {}", _err.message);
@@ -244,9 +247,9 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
             if(config::get_verbose() >= 0)
                 _fom(_filename, std::string{ "perfetto" },
                      " (%.2f KB / %.2f MB / %.2f GB)... ",
-                     static_cast<double>(trace_data.size()) / units::KB,
-                     static_cast<double>(trace_data.size()) / units::MB,
-                     static_cast<double>(trace_data.size()) / units::GB);
+                     static_cast<double>(trace_data.size()) / units::kilobyte,
+                     static_cast<double>(trace_data.size()) / units::megabyte,
+                     static_cast<double>(trace_data.size()) / units::gigabyte);
             std::ofstream ofs{};
             if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
             {
@@ -271,12 +274,13 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
         }
     }
 
-    // Merge the output files, if rank 0
-    if(dmp::rank() == 0)
+    // Merge the output files, if rank 0 and output is enabled for this rank
+    if(dmp::rank() == 0 &&
+       config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
-        auto _output_folder = filepath::dirname(_filename);
+        auto _output_folder = path::parent_path(_filename);
         auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
-        auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
+        auto _script_dir    = get_env(env_vars::SCRIPT_PATH, std::string{});
 
         if(!_script_dir.empty())
         {
@@ -284,7 +288,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
         }
 
         // Test that the script exists
-        if(!filepath::exists(_script_path))
+        if(!path::is_regular_file(_script_path))
         {
             LOG_WARNING("Script not found: {}", _script_path);
         }
@@ -293,7 +297,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
             auto _command = _script_path + " '" + _output_folder + "'";
 
             // Execute the merge script
-            int result = system(_command.c_str());
+            const int result = system(_command.c_str());
 
             if(result != 0)
             {

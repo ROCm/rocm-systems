@@ -11,6 +11,38 @@
 #include "common_cast.h"
 #include "ibvwrap.h"
 
+enum ncclIbCommState {
+  ncclIbCommStateStart = 0,
+  ncclIbCommStateConnect = 1,
+  ncclIbCommStateAccept = 3,
+  ncclIbCommStateSend = 4,
+  ncclIbCommStateRecv = 5,
+  ncclIbCommStateConnecting = 6,
+  ncclIbCommStateConnected = 7,
+  ncclIbCommStatePendingReady = 8,
+  ncclIbCommStateSendDevList = 9,
+  ncclIbCommStateRecvDevList = 10,
+};
+
+struct ncclIbCommStage {
+  enum ncclIbCommState state;
+  int offset;
+  void* buffer;
+  void* comm;
+};
+
+struct ncclIbHandle {
+  union ncclSocketAddress connectAddr; // Filled by the target
+  uint64_t magic; // random number to help debugging
+  int isP2p;
+  bool isRMA;
+  // GIDs of the listener's device PFs, used by the connector to find a local
+  // NIC on the same subnet (for multi-subnet RoCE direct-connect topologies).
+  // Zero-valued slots are ignored (validGid() returns false).
+  union ibv_gid listenGids[2];
+  struct ncclIbCommStage stage; // Used by the other side when connecting
+};
+
 struct ncclIbQpCreateAttr {
   void* qpContext;
   enum ibv_qp_type type;
@@ -24,6 +56,7 @@ struct ncclIbQpCreateAttr {
   int8_t ctsQpSlot;
   int channelId;
   int ibDevN;
+  bool useIonic;
 };
 
 // Per-QP connection metatdata
@@ -71,9 +104,11 @@ struct ncclIbConnectionMetadata {
   int tc;
   int sl;
   int isP2p;
+  bool isRMA;
 };
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
+void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out);
 ncclResult_t IbCastQpInit(struct ncclIbQp* qp);
 ncclResult_t IbCastQpRtr(struct ncclIbQp* qp);
 ncclResult_t IbCastQpRts(struct ncclIbQp* qp);

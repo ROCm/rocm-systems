@@ -89,6 +89,11 @@ configure_callback_dispatch(rocprofiler_context_id_t                   context_i
                             void*                                      record_callback_args);
 
 rocprofiler_status_t
+set_dispatch_agents(rocprofiler_context_id_t      context_id,
+                    const rocprofiler_agent_id_t* agents,
+                    size_t                        num_agents);
+
+rocprofiler_status_t
 configure_agent_collection(rocprofiler_context_id_t                 context_id,
                            rocprofiler_buffer_id_t                  buffer_id,
                            rocprofiler_agent_id_t                   agent_id,

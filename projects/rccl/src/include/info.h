@@ -12,6 +12,7 @@
 #include "collectives.h"
 #include "core.h"
 #include "utils.h"
+#include "rccl_decision.h"
 
 // Used to pass NCCL call information between functions
 struct ncclInfo {
@@ -30,14 +31,25 @@ struct ncclInfo {
   int chunkSteps;
   int sliceSteps;
   const void* acc;
-#ifdef ENABLE_ROCSHMEM
-  // Optional per-operation metadata for rocSHMEM collectives.
+
+  // Optional per-operation metadata (e.g., rocSHMEM collectives, CE AlltoAllv).
   size_t* sizes;
-#endif
-  // When true and coll == ncclFuncAllGather, taskAppend posts the AG as an
-  // A2A-style fan of per-peer Send/Recv P2P tasks (Direct AllGather path)
-  // instead of routing through collTaskAppend (ring/PAT/etc.).
+
   bool useDirect;
+  // One-sided ops
+  size_t peerWinOffset;
+  ncclWindow_t peerWin;
+  int sigIdx;
+  int ctx;
+  unsigned int flags;
+  int nDesc;
+  ncclWaitSignalDesc_t* signalDescs;
+  // Implementation decision precomputed by ncclAllReduce_impl() via
+  // rcclSelectAllReduce() and consumed by taskAppend() to avoid recomputing the
+  // CE-vs-kernel choice and graph-capture state. Valid only when decisionValid
+  // is true (false for non-AllReduce collectives and the WithBias path).
+  struct rcclCollDecision decision;
+  bool decisionValid;
 };
 
 #endif

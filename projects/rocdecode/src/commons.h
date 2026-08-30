@@ -30,12 +30,23 @@ THE SOFTWARE.
 #include <cstdlib>
 #include <ctime>
 #include <time.h>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <process.h>
+#include <windows.h>
+#else
 #include <unistd.h>
+#include <sys/syscall.h>
+#endif
 #include <stdint.h>
 #include <thread>
 #include <sstream>
 #include <iomanip>
-#include <sys/syscall.h>
 
 #define MSG(X) std::clog << X << std::endl;
 #define MSG_NO_NEWLINE(X) std::clog << X;
@@ -53,11 +64,25 @@ enum RocDecLogLevel {
     kRocDecLogLevelMax       = 4
 };
 
+#ifdef _WIN32
+#define GET_TIME_NS() ([]() -> uint64_t { \
+    static const LARGE_INTEGER freq = []() { LARGE_INTEGER f{}; QueryPerformanceFrequency(&f); return f; }(); \
+    LARGE_INTEGER cnt{}; QueryPerformanceCounter(&cnt); \
+    if (freq.QuadPart <= 0) return 0ULL; \
+    const uint64_t sec = static_cast<uint64_t>(cnt.QuadPart / freq.QuadPart); \
+    const uint64_t rem = static_cast<uint64_t>(cnt.QuadPart % freq.QuadPart); \
+    return sec * 1000000000ULL + (rem * 1000000000ULL) / static_cast<uint64_t>(freq.QuadPart); }())
+#define FILENAME_ONLY (strrchr(__FILE__, '\\') ? strrchr(__FILE__, '\\') + 1 : (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__))
+#define GET_THREAD_ID() (static_cast<uint32_t>(GetCurrentThreadId()))
+#define GET_PID() (_getpid())
+#else
 #define GET_TIME_NS() ([]() -> uint64_t { struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); return static_cast<uint64_t>(ts_.tv_sec) * 1000000000LL + ts_.tv_nsec; }())
 #define FILENAME_ONLY (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
-#define GET_HASHED_THREAD_ID() ([]() -> std::string { std::ostringstream oss; oss << "0x" << std::hex << std::setw(5) << std::setfill('0') << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); return oss.str(); }())
 #define GET_THREAD_ID() (static_cast<pid_t>(syscall(SYS_gettid)))
-#define MakeMsg(msg) ROCDEC_STR(FILENAME_ONLY) + ":" + ROCDEC_TOSTR(__LINE__) + ": " + ROCDEC_TOSTR(GET_TIME_NS() / 1000ULL) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(getpid()) + ROCDEC_STR(" tid:") + ROCDEC_TOSTR(GET_THREAD_ID()) + ROCDEC_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCDEC_STR("] ") + ROCDEC_STR(__func__) + "(): " + msg
+#define GET_PID() (getpid())
+#endif
+#define GET_HASHED_THREAD_ID() ([]() -> std::string { std::ostringstream oss; oss << "0x" << std::hex << std::setw(5) << std::setfill('0') << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); return oss.str(); }())
+#define MakeMsg(msg) ROCDEC_STR(FILENAME_ONLY) + ":" + ROCDEC_TOSTR(__LINE__) + ": " + ROCDEC_TOSTR(GET_TIME_NS() / 1000ULL) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(GET_PID()) + ROCDEC_STR(" tid:") + ROCDEC_TOSTR(GET_THREAD_ID()) + ROCDEC_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCDEC_STR("] ") + ROCDEC_STR(__func__) + "(): " + msg
 
 #define OutputMsg(msg) std::cout << msg << std::endl
 #define OutputErrMsg(msg) std::cerr << msg << std::endl
@@ -96,22 +121,24 @@ inline RocDecLogger& RocDecGetLogger() {
 // safe for nested calls and concurrent threads sharing the same logger.
 class RocDecFuncScopeLog {
 public:
-    RocDecFuncScopeLog(RocDecLogger& logger, const char* filename, int line, const char* func)
-        : logger_(logger), filename_(filename), line_(line), func_(func), start_time_(0) {
+    RocDecFuncScopeLog(RocDecLogger& logger, const char* filename, int line, const char* func,
+                       const std::string& args = "")
+        : logger_(logger), filename_(filename), line_(line), func_(func), args_(args), start_time_(0) {
         if (logger_.GetLogLevel() >= kRocDecLogInfo) {
             start_time_ = GET_TIME_NS() / 1000ULL;
             OutputMsg("[" + ROCDEC_TOSTR(kRocDecLogInfo) + ", Info] " + ROCDEC_STR(filename_) + ":" + ROCDEC_TOSTR(line_) + ": " +
-                      ROCDEC_TOSTR(start_time_) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(getpid()) + ROCDEC_STR(" tid:") +
-                      ROCDEC_TOSTR(GET_THREAD_ID()) + ROCDEC_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCDEC_STR("] ") + ROCDEC_STR(func_) + "(): entry ...");
+                      ROCDEC_TOSTR(start_time_) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(GET_PID()) + ROCDEC_STR(" tid:") +
+                      ROCDEC_TOSTR(GET_THREAD_ID()) + ROCDEC_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCDEC_STR("] ") + ROCDEC_STR(func_) +
+                      "( " + args_ + " ): entry ...");
         }
     }
     ~RocDecFuncScopeLog() {
-        if (logger_.GetLogLevel() >= kRocDecLogInfo) {
+        if (start_time_ != 0 && logger_.GetLogLevel() >= kRocDecLogInfo) {
             uint64_t end_time = GET_TIME_NS() / 1000ULL;
             OutputMsg("[" + ROCDEC_TOSTR(kRocDecLogInfo) + ", Info] " + ROCDEC_STR(filename_) + ":" + ROCDEC_TOSTR(line_) + ": " +
-                      ROCDEC_TOSTR(end_time) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(getpid()) + ROCDEC_STR(" tid:") +
-                      ROCDEC_TOSTR(GET_THREAD_ID()) + ROCDEC_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCDEC_STR("] ") + ROCDEC_STR(func_) + "(): exit (" +
-                      ROCDEC_TOSTR(end_time - start_time_) + " us) ...");
+                      ROCDEC_TOSTR(end_time) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(GET_PID()) + ROCDEC_STR(" tid:") +
+                      ROCDEC_TOSTR(GET_THREAD_ID()) + ROCDEC_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCDEC_STR("] ") + ROCDEC_STR(func_) +
+                      "( " + args_ + " ): exit (" + ROCDEC_TOSTR(end_time - start_time_) + " us) ...");
         }
     }
     RocDecFuncScopeLog(const RocDecFuncScopeLog&) = delete;
@@ -123,6 +150,7 @@ private:
     const char* filename_;
     int line_;
     const char* func_;
+    std::string args_;
     uint64_t start_time_;
 };
 
@@ -161,8 +189,24 @@ private:
         } \
     } while (0)
 
+// Format a pointer argument as hex for API argument logging.
+template<typename T>
+static inline std::string RocDecFmtPtr(T* p) {
+    if (p == nullptr) return "nullptr";
+    std::ostringstream oss;
+    oss << "0x" << std::hex << reinterpret_cast<uintptr_t>(p);
+    return oss.str();
+}
+
 #define FunctionEntryLog(logger) \
     RocDecFuncScopeLog _rocdec_func_scope_log_(logger, FILENAME_ONLY, __LINE__, __func__)
+
+// Use this variant at API boundaries to include argument values in the entry log line.
+// Pass a string built with RocDecFmtPtr() / ROCDEC_TOSTR() for each argument, e.g.:
+//   FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(handle) + ", " + RocDecFmtPtr(pic_params))
+#define FunctionEntryLogWithArgs(logger, args) \
+    RocDecFuncScopeLog _rocdec_func_scope_log_(logger, FILENAME_ONLY, __LINE__, __func__, \
+        ((logger).GetLogLevel() >= kRocDecLogInfo) ? std::string(args) : std::string())
 
 // FunctionExitLog is a no-op: exit is logged automatically when the
 // RocDecFuncScopeLog RAII object created by FunctionEntryLog goes out of scope.

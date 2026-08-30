@@ -586,9 +586,15 @@ TEST_F(DeviceTypeTestFixture, ParseNicMergeLevelKnown) {
 }
 
 TEST_F(DeviceTypeTestFixture, ParseNicMergeLevelUnknown) {
+  // Skip this test if warning logging is disabled (e.g., ROCSHMEM_DEBUG_LEVEL < WARN or includes :nowarn)
+  if (!rocshmem::envvar::log_flags.show_warn) {
+    GTEST_SKIP() << "Skipping test because warning logging is disabled (ROCSHMEM_DEBUG_LEVEL < WARN or contains :nowarn)";
+  }
+
   testing::internal::CaptureStderr();
   auto result = ParseNicMergeLevel("INVALID");
   std::string err = testing::internal::GetCapturedStderr();
+
   EXPECT_EQ(result, NIC_PATH_SYS);
   EXPECT_TRUE(err.find("unknown") != std::string::npos ||
               err.find("defaulting") != std::string::npos);

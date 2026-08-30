@@ -1,65 +1,58 @@
+// MIT License
+//
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
-
-#include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/rocprofiler-sdk/hsa/tests/fake_queue.hpp"
-
-#include <rocprofiler-sdk/fwd.h>
-
-#include <hsa/hsa.h>
-#include <hsa/hsa_api_trace.h>
 
 #include <gtest/gtest.h>
 
 namespace
 {
-void
-test_init()
+// is_configured_on_agent replaces the queue.get_notifiers() signal that the old
+// per-queue callback registration used to provide to the HSA write interceptor
+// gate. With no PC sampling service configured, any agent id must report as not
+// configured. This is always linkable regardless of HSA PC sampling support and
+// requires no GPU / HSA runtime.
+TEST(pc_sampling_queue_hooks, is_configured_on_agent_unconfigured)
 {
-    HsaApiTable table;
-    table.amd_ext_ = &rocprofiler::counters::test_constants::get_ext_table();
-    table.core_    = &rocprofiler::counters::test_constants::get_api_table();
-    rocprofiler::agent::construct_agent_cache(&table);
-    ASSERT_TRUE(rocprofiler::hsa::get_queue_controller() != nullptr);
-    rocprofiler::hsa::get_queue_controller()->init(
-        rocprofiler::counters::test_constants::get_api_table(),
-        rocprofiler::counters::test_constants::get_ext_table());
+    rocprofiler_agent_id_t agent_id;
+    agent_id.handle = 123456;
+    EXPECT_FALSE(rocprofiler::pc_sampling::is_configured_on_agent(agent_id));
 }
 
-TEST(PCSamplingQueueHooks, IsConfiguredOnAgentReturnsFalseWithoutConfiguredAgent)
+TEST(pc_sampling_queue_hooks, signal_completion_hook_null_session_is_noop)
 {
-    rocprofiler_agent_id_t fake_agent{.handle = 0};
-    EXPECT_FALSE(rocprofiler::pc_sampling::is_configured_on_agent(fake_agent));
-}
+    rocprofiler::hsa::rocprofiler_packet kern_pkt{};
+    std::shared_ptr<rocprofiler::hsa::queue_info_session_t> null_session;
+    rocprofiler::hsa::packet_data_t                         packet{};
+    rocprofiler::hsa::inst_pkt_t                            inst_pkt{};
 
-// Link-sanity: both queue_hooks symbols must resolve in both
-// ROCPROFILER_SDK_HSA_PC_SAMPLING==0 and ==1 builds.
-TEST(PCSamplingQueueHooks, SymbolsExist)
-{
-    rocprofiler_agent_id_t fake_agent{.handle = 0};
-    EXPECT_FALSE(rocprofiler::pc_sampling::is_configured_on_agent(fake_agent));
+    rocprofiler::pc_sampling::signal_completion_hook(
+        *reinterpret_cast<rocprofiler::hsa::Queue*>(nullptr),
+        kern_pkt,
+        null_session,
+        packet,
+        inst_pkt,
+        rocprofiler::kernel_dispatch::profiling_time{});
 
-    auto* marker_fn_ptr = &rocprofiler::pc_sampling::maybe_marker_packet;
-    EXPECT_NE(marker_fn_ptr, nullptr);
-}
-
-TEST(PCSamplingQueueHooks, MaybeMarkerReturnsNulloptWithoutConfiguredAgent)
-{
-    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-    test_init();
-
-    ASSERT_TRUE(rocprofiler::hsa::get_queue_controller() != nullptr);
-    auto agents = rocprofiler::hsa::get_queue_controller()->get_supported_agents();
-    ASSERT_GT(agents.size(), 0);
-
-    const auto&            agent = agents.begin()->second;
-    rocprofiler::hsa::FakeQueue fq(agent, rocprofiler_queue_id_t{.handle = 0});
-
-    rocprofiler::hsa::queue_info_session_t::external_corr_id_map_t extern_ids{};
-    auto result = rocprofiler::pc_sampling::maybe_marker_packet(
-        fq, /*dispatch_id*/ 0, extern_ids, /*correlation_id*/ nullptr);
-
-    EXPECT_FALSE(result.has_value());
+    SUCCEED();
 }
 }  // namespace

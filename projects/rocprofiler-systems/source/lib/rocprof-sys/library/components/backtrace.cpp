@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/env_vars.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -29,9 +30,7 @@
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/operations.hpp>
 #include <timemory/storage.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
 
@@ -61,8 +60,8 @@ backtrace::get() const
     if(size() == 0) return _v;
 
     {
-        static auto _cache = cache_type{ get_sampling_include_inlines() };
-        auto_lock_t _lk{ type_mutex<backtrace>() };
+        static auto       _cache = cache_type{ get_sampling_include_inlines() };
+        const auto_lock_t _lk{ type_mutex<backtrace>() };
         _v = m_data.get(&_cache, false);
     }
 
@@ -96,7 +95,7 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
     // check whether the call-stack entry should be used. -1 means break, 0 means continue
     auto _use_label = [](std::string_view _lbl) -> short {
         // debugging feature
-        bool       _keep_internal = get_sampling_keep_internal();
+        const bool _keep_internal = get_sampling_keep_internal();
         const auto _npos          = std::string::npos;
         if(_keep_internal) return 1;
         if(_lbl.find("rocprofsys_main") != _npos) return 0;
@@ -112,8 +111,8 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
         return 1;
     };
 
-    static bool _keep_suffix = tim::get_env<bool>(
-        "ROCPROFSYS_SAMPLING_KEEP_DYNINST_SUFFIX", get_debug_sampling());
+    static const bool _keep_suffix = rocprofsys::get_env<bool>(
+        env_vars::SAMPLING_KEEP_DYNINST_SUFFIX, get_debug_sampling());
 
     // in the dyninst binary rewrite runtime, instrumented functions are appended with
     // "_dyninst", i.e. "main" will show up as "main_dyninst" in the backtrace.
@@ -168,7 +167,7 @@ backtrace::sample(int signo)
     if(signo == get_sampling_overflow_signal()) return;
 
     // on RedHat, the unw_step within get_unw_stack involves a mutex lock
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     using namespace tim::backtrace;
     constexpr bool   with_signal_frame = false;

@@ -354,6 +354,11 @@ void init() {}
 
 void create_decoder(DecoderInfo& dec_info) {
     RocDecoderCreateInfo create_info = {};
+    if (dec_info.dec_device_id < 0 || dec_info.dec_device_id > 255) {
+        std::cerr << "Invalid device id: " << dec_info.dec_device_id << " (expected 0-255)" << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+    create_info.device_id = static_cast<uint8_t>(dec_info.dec_device_id);
     create_info.codec_type = dec_info.rocdec_codec_id;     // user specified codec_type for raw files
     create_info.max_width = DEFAULT_WIDTH;
     create_info.max_height = DEFAULT_HEIGHT;
@@ -686,15 +691,26 @@ std::string getLastPart(const std::string& str, char delimiter) {
 
 // helper function for sort
 int extractNumber(const std::string& filename) {
+    // Operate on basename only to avoid picking up digits from directory path
+    auto sep = filename.find_last_of("/\\");
+    std::string base = (sep == std::string::npos) ? filename : filename.substr(sep + 1);
+    // Strip extension so digits in ".265" are not picked up.
+    // Only treat a dot as an extension separator if it is not the leading character
+    // (a leading dot marks a hidden file, not an extension).
+    auto dot = base.find_last_of('.');
+    if (dot != std::string::npos && dot != 0) base = base.substr(0, dot);
+    // Find the last contiguous digit sequence in the stem
     std::string numStr;
-    for (char c : filename) {
-        if (std::isdigit(c)) {
-            numStr += c;
+    for (auto it = base.rbegin(); it != base.rend(); ++it) {
+        if (std::isdigit(static_cast<unsigned char>(*it))) {
+            numStr += *it;
         } else if (!numStr.empty()) {
-            break; // Stop at first non-digit after a digit sequence
+            break;
         }
     }
-    return numStr.empty() ? 0 : std::stoi(numStr);
+    if (numStr.empty()) return 0;
+    std::reverse(numStr.begin(), numStr.end());
+    return std::stoi(numStr);
 }
 
 // helper function for sort
@@ -852,6 +868,10 @@ int main(int argc, char** argv) {
     }
     auto input_frames = read_frames(input_file_names);
     std::cout << "Read " << input_file_names.size() << " frames from disk." << std::endl;
+    if (input_frames.empty()) {
+        std::cerr << "Error: No input frames were read!" << std::endl;
+        return EXIT_FAILURE;
+    }
     auto start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < num_iterations; i++) {
         decode_frames(dec_info, input_frames);

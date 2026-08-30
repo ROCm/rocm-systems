@@ -9,6 +9,7 @@ COMMAND="clang-format"
 
 DIRS=(
     "examples"
+    "include"
     "src"
     "test"
     "tools"

@@ -47,7 +47,11 @@
 /// Implementation of utility functions used by RocR applications
 #include "common/common.h"
 #include "common/env_config.h"
+#include "common/platform_filter.h"
+#include "gtest/gtest.h"
 #include <assert.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <sstream>
 #include <string>
 #include <memory>
@@ -100,6 +104,42 @@ bool isEmuModeEnabled() {
   }
 
   return emu_mode;
+}
+
+bool isWslEnvironment() {
+  static bool checked = false;
+  static bool is_wsl = false;
+
+  if (!checked) {
+    // Mirror ROCr's own WSL/DXG detection (ThunkLoader::whoami): the DXG backend
+    // is used when /dev/dxg is present, which is what breaks these tests.
+    int fd = open("/dev/dxg", O_RDWR);
+    if (fd >= 0) {
+      close(fd);
+      is_wsl = true;
+    }
+    checked = true;
+  }
+
+  return is_wsl;
+}
+
+bool SkipOnWsl(const char* reason) {
+  if (!isWslEnvironment()) return false;
+
+  // This gtest predates GTEST_SKIP(), so register the skip with the rocrtst
+  // SkippedTestTracker (shown in the end-of-run summary) rather than silently
+  // returning green.
+  std::string test_name = "unknown";
+  const ::testing::TestInfo* info =
+      ::testing::UnitTest::GetInstance()->current_test_info();
+  if (info != nullptr) {
+    test_name = std::string(info->test_case_name()) + "." + info->name();
+  }
+
+  SkippedTestTracker::getInstance().recordSkip(test_name, reason);
+  std::cout << "[ SKIPPED ] " << test_name << " : " << reason << std::endl;
+  return true;
 }
 
 bool PlatformDetector::isFFMEnvironment() {
@@ -201,8 +241,6 @@ hsa_status_t IterateCPUAgents(hsa_agent_t agent, void *data) {
   return status;
 }
 
-
-
 // Find GPU Agents
 hsa_status_t IterateGPUAgents(hsa_agent_t agent, void *data) {
   hsa_status_t status;
@@ -216,6 +254,23 @@ hsa_status_t IterateGPUAgents(hsa_agent_t agent, void *data) {
   RET_IF_HSA_COMMON_ERR(status);
   if (HSA_STATUS_SUCCESS == status && HSA_DEVICE_TYPE_GPU == device_type) {
     gpus->push_back(agent);
+  }
+  return status;
+}
+
+// Find AIE Agents
+hsa_status_t IterateAIEAgents(hsa_agent_t agent, void* data) {
+  hsa_status_t status;
+  assert(data != nullptr);
+  if (data == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  std::vector<hsa_agent_t>* aies = static_cast<std::vector<hsa_agent_t>*>(data);
+  hsa_device_type_t device_type;
+  status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
+  RET_IF_HSA_COMMON_ERR(status);
+  if (HSA_STATUS_SUCCESS == status && HSA_DEVICE_TYPE_AIE == device_type) {
+    aies->push_back(agent);
   }
   return status;
 }

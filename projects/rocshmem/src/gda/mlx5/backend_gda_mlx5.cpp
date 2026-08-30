@@ -32,9 +32,9 @@ namespace rocshmem {
 
 void* GDABackend::mlx5_dv_dlopen() {
   void* dv_handle{nullptr};
-  dv_handle = dlopen("libmlx5.so", RTLD_LAZY);
+  dv_handle = dlopen("libmlx5.so.1", RTLD_LAZY);
   if (!dv_handle) {
-    LOG_TRACE("Could not open libmlx5.so. Returning");
+    LOG_TRACE("Could not open libmlx5.so.1. Returning");
   }
   return dv_handle;
 }
@@ -114,8 +114,8 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   int pe = conn_num % num_pes;
   int nic_idx = nic_idx_for_qp(conn_num);
   NicDevice &nic = nic_for_qp(conn_num);
-  gpu_qp->rkey = htobe32(heap_rkey[pe * num_nics_ + nic_idx]);
-  gpu_qp->lkey = htobe32(nic.heap_mr->lkey);
+  gpu_qp->rkey = heap_rkey[pe * num_nics_ + nic_idx];
+  gpu_qp->lkey = nic.heap_mr->lkey;
   gpu_qp->qp_num = qp.qpn;
   gpu_qp->inline_threshold = inline_threshold;
 

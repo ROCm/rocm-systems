@@ -3,6 +3,7 @@
 
 #include "library/coverage.hpp"
 #include "api.hpp"
+#include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "library/coverage/impl.hpp"
 #include "library/thread_data.hpp"
@@ -204,8 +205,8 @@ post_process()
         return _b.value_or(true);
     };
 
-    auto _text_output = _get_setting("ROCPROFSYS_TEXT_OUTPUT");
-    auto _json_output = _get_setting("ROCPROFSYS_JSON_OUTPUT");
+    auto _text_output = _get_setting(std::string{ env_vars::TEXT_OUTPUT });
+    auto _json_output = _get_setting(std::string{ env_vars::JSON_OUTPUT });
 
     if(_text_output)
     {
@@ -311,10 +312,10 @@ extern "C" void
 rocprofsys_register_coverage_hidden(const char* file, const char* func, size_t address)
 {
     if(coverage::get_post_processed()) return;
-    if(rocprofsys::get_state() < rocprofsys::State::Active &&
+    if(rocprofsys::state::process::get() < rocprofsys::state::process::Active &&
        !rocprofsys_init_tooling_hidden())
         return;
-    else if(rocprofsys::get_state() >= rocprofsys::State::Finalized)
+    else if(rocprofsys::state::process::get() >= rocprofsys::state::process::Finalized)
         return;
 
     (*coverage::get_coverage_count())[file][func][address] += 1;

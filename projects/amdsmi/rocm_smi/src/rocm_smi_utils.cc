@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #define _GNU_SOURCE \
   1  // REQUIRED: to utilize some GNU features/functions, see
@@ -354,22 +335,6 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
   }
 }
 
-rsmi_status_t SysfsWriteErrnoToRsmiStatus(int err) {
-  switch (err) {
-    case 0:
-      return RSMI_STATUS_SUCCESS;
-    case EACCES:
-    case EPERM:
-      return RSMI_STATUS_PERMISSION;
-    case ENOENT:
-      return RSMI_STATUS_NOT_SUPPORTED;
-    case EINVAL:
-      return RSMI_STATUS_INVALID_ARGS;
-    default:
-      return RSMI_STATUS_FILE_ERROR;
-  }
-}
-
 // Helper function to read multi-line sysfs file into vector of strings
 static int ReadSysfsLines(const std::string& path, std::vector<std::string>* lines) {
   auto is_regular_file_result = isRegularFile(path, nullptr);
@@ -488,13 +453,13 @@ int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm) {
 rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value) {
   int write_ret = WriteSysfsStr(path, value);
   if (write_ret != 0) {
-    return SysfsWriteErrnoToRsmiStatus(write_ret);
+    return ErrnoToRsmiStatus(write_ret);
   }
 
   // Commit by writing 'c'
   write_ret = WriteSysfsStr(path, "c");
   if (write_ret != 0) {
-    return SysfsWriteErrnoToRsmiStatus(write_ret);
+    return ErrnoToRsmiStatus(write_ret);
   }
   return RSMI_STATUS_SUCCESS;
 }
@@ -606,39 +571,6 @@ std::string removeString(const std::string origStr, const std::string& removeMe)
     modifiedStr.erase(i, l);
   }
   return modifiedStr;
-}
-
-// defaults to trim stdOut
-std::pair<bool, std::string> executeCommand(std::string command, bool stdOut) {
-  char buffer[128];
-  std::string stdoutAndErr;
-  bool successfulRun = true;
-  command = "stdbuf -i0 -o0 -e0 " + command;  // remove stdOut and err buffering
-
-  FILE* pipe = popen(command.c_str(), "r");
-  if (!pipe) {
-    stdoutAndErr = "[ERROR] popen failed to call " + command;
-    successfulRun = false;
-  } else {
-    // read until end of process
-    while (!feof(pipe)) {
-      // use buffer to read and add to stdoutAndErr
-      if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        stdoutAndErr += buffer;
-      }
-    }
-  }
-
-  // any return code other than 0, is a failed execution
-  if (pipe && pclose(pipe) != 0) {
-    successfulRun = false;
-  }
-
-  if (stdOut) {
-    // remove leading and trailing spaces of output and new lines
-    stdoutAndErr = trim(stdoutAndErr);
-  }
-  return std::make_pair(successfulRun, stdoutAndErr);
 }
 
 // originalString - string to search for substring

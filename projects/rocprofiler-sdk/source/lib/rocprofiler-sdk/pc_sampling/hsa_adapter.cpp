@@ -122,10 +122,14 @@ amd_intercept_marker_handler_callback(const struct amd_aql_intercept_marker_s* p
 
     parser->newDispatch(dispatch_pkt);
 }
+
 }  // namespace
 
-// Called on kernel completion. Declared in hsa_adapter.hpp; the queue_hooks
-// shim invokes it from the completion path.
+/**
+ * Callback called by HSA interceptor when the kernel has completed. Declared in
+ * hsa_adapter.hpp and invoked from pc_sampling::signal_completion_hook (see
+ * pc_sampling/queue_hooks.cpp), so it lives outside the anonymous namespace.
+ */
 void
 kernel_completion_cb(const rocprofiler_agent_t* rocp_agent,
                      rocprofiler::hsa::rocprofiler_packet& /*kernel_pkt*/,
@@ -346,6 +350,12 @@ pc_sampling_service_finish_configuration(context::pc_sampling_service* service)
             std::runtime_error("PCS parser does not accept buffer");
         }
     }
+
+    // PC sampling no longer registers a per-queue callback with the HSA queue
+    // controller. Kernel completion is delivered explicitly via
+    // pc_sampling::signal_completion_hook, called from the HSA async signal
+    // handler (see hsa/queue.cpp). The marker packet is still injected directly
+    // in the write interceptor, gated by pc_sampling::is_configured_on_agent.
 }
 
 rocprofiler_status_t

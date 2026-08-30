@@ -11,16 +11,15 @@ This directory contains example applications demonstrating various profiling sce
 | [transpose](transpose/) | Tiled matrix transpose on GPU with multi-threaded stream execution | HIP |
 | [unified-memory](unified-memory/) | Managed-memory workload that triggers KFD page fault and migration events and emits unified-memory profiling reports | HIP, XNACK-capable AMD GPU |
 | [scratch-memory](scratch-memory/) | GPU scratch memory allocation stress test across primary and overflow slots | HIP, HSA |
-| [sdma_test](sdma_test/) | SDMA engine bandwidth benchmark for H2D, D2D, and D2H transfers | HIP |
+| [sdma-test](sdma-test/) | SDMA engine bandwidth benchmark for H2D, D2D, and D2H transfers | HIP |
 | [transferBench](transferBench/) | All-to-all transfer benchmark across CPU, GPU, SDMA, and NIC executors | HIP, HSA |
 
 ### Profiler API
 
 | Example | Description | Dependencies |
 | --------- | ------------- | -------------- |
-| [user-api](user-api/) | User API for named regions, annotations, and selective thread tracing | rocprofiler-systems user library |
 | [roctx](roctx/) | ROCTx range/marker API with thread naming, pause/resume, and device labeling | rocprofiler-sdk-roctx, HIP |
-| [causal](causal/) | Causal profiling with slow/fast parallel workloads and progress point tracking | rocprofiler-systems user library |
+| [causal](causal/) | Causal profiling with slow/fast parallel workloads and progress point tracking | rocprofiler-systems causal API library |
 | [rewrite-caller](rewrite-caller/) | Minimal call chain for binary rewrite instrumentation testing | None |
 | [trace-time-window](trace-time-window/) | Mixed CPU-bound and sleep workload for time-windowed trace analysis | None |
 
@@ -53,6 +52,7 @@ This directory contains example applications demonstrating various profiling sce
 | --------- | ------------- | -------------- |
 | [jpegdecode](jpegdecode/) | Batch JPEG decoding performance benchmark using rocJPEG | HIP, rocJPEG |
 | [videodecode](videodecode/) | Batch video decoding benchmark using ROCDecode with VCN hardware | HIP, ROCDecode, FFmpeg |
+| [hipfile](hipfile/) | hipFILE (GPU-direct storage) API tracing demo | HIP, hipFILE, ROCProfiler-SDK 1.3.5+ |
 
 ### HPC
 
@@ -123,9 +123,9 @@ rocprofiler-systems supports several instrumentation modes:
 
 | Variable | Description | Default |
 | ---------- | ------------- | --------- |
-| `ROCPROFSYS_TRACE` | Enable Perfetto trace output | `true` |
-| `ROCPROFSYS_PROFILE` | Enable call-stack profile output | `true` |
-| `ROCPROFSYS_USE_ROCPD` | Generate `rocpd` database output | `false` |
+| `ROCPROFSYS_TRACE` | Enable Perfetto trace output | `false` |
+| `ROCPROFSYS_PROFILE` | Enable call-stack profile output | `false` |
+| `ROCPROFSYS_USE_ROCPD` | Generate `rocpd` database output | `true` |
 | `ROCPROFSYS_USE_SAMPLING` | Enable statistical sampling | `false` |
 | `ROCPROFSYS_SAMPLING_FREQ` | Sampling frequency (interrupts/sec) | `50` |
 | `ROCPROFSYS_USE_PROCESS_SAMPLING` | Enable process-level resource sampling | `true` |

@@ -3,17 +3,19 @@
 
 #pragma once
 
+#include "common/env_vars.hpp"
 #include "core/config.hpp"
+#include "core/gpu_visibility.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
-#include <cstdint>
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -85,10 +87,30 @@ struct settings_policy
         return result;
     }
 
+    /**
+     * @brief Get the GPU device filter from ROCPROFSYS_SAMPLING_GPUS.
+     */
+    static device_filter get_gpu_device_filter()
+    {
+        return get_device_filter(rocprofsys::get_sampling_gpus());
+    }
+
+    /**
+     * @brief PCIe BDFs of the GPUs the ROCm runtime exposes.
+     *
+     * Honors ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES. Returns std::nullopt when
+     * visibility could not be determined; see rocprofsys::gpu::get_visible_gpu_bdfs.
+     */
+    static std::optional<std::set<std::string>> get_visible_gpu_bdfs()
+    {
+        return rocprofsys::gpu::get_visible_gpu_bdfs();
+    }
+
     static gpu::enabled_metrics get_enabled_metrics() noexcept
     {
         static auto _enabled_metrics = []() {
-            auto setting   = get_setting_value<std::string>("ROCPROFSYS_AMD_SMI_METRICS");
+            auto setting =
+                get_setting_value<std::string>(std::string{ env_vars::AMD_SMI_METRICS });
             auto value_str = setting.has_value() ? setting.value() : "all";
             auto result    = parse_enabled_metrics(value_str);
             return result;
@@ -106,7 +128,8 @@ struct settings_policy
      */
     static nic::nic_device_filter get_nic_device_filter() noexcept
     {
-        auto filter = get_setting_value<std::string>("ROCPROFSYS_SAMPLING_AINICS");
+        auto filter =
+            get_setting_value<std::string>(std::string{ env_vars::SAMPLING_AINICS });
         if(!filter.has_value())
         {
             // NIC sampling disabled by default
@@ -140,7 +163,7 @@ struct settings_policy
     /**
      * @brief Get NIC enabled metrics.
      *
-     * For NIC, all 6 RDMA metrics are enabled when NIC sampling is active.
+     * For NIC, all RDMA metrics are enabled when NIC sampling is active.
      */
     static nic::enabled_metrics get_nic_enabled_metrics() noexcept
     {
@@ -158,7 +181,8 @@ struct settings_policy
     static cpu::enabled_metrics get_cpu_enabled_metrics()
     {
         static auto _result = []() {
-            auto       setting = get_setting_value<std::string>("ROCPROFSYS_CPU_METRICS");
+            auto setting =
+                get_setting_value<std::string>(std::string{ env_vars::CPU_METRICS });
             const auto value_str = setting.has_value() ? setting.value() : "all";
             return parse_cpu_enabled_metrics(value_str);
         }();
@@ -272,9 +296,9 @@ private:
         cpu::enabled_metrics metrics;
         metrics.value = DISABLE_ALL_METRICS;
 
-        std::regex           tokenizer{ R"(\w+)" };
-        std::sregex_iterator it(trimmed.begin(), trimmed.end(), tokenizer);
-        std::sregex_iterator end;
+        const std::regex           tokenizer{ R"(\w+)" };
+        std::sregex_iterator       it(trimmed.begin(), trimmed.end(), tokenizer);
+        const std::sregex_iterator end;
 
         for(; it != end; ++it)
         {
@@ -316,7 +340,7 @@ private:
             return result;
         }
 
-        std::regex validator{
+        const std::regex validator{
             R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock)"
             R"()(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock))*$)"
         };
@@ -357,10 +381,10 @@ private:
 
         gpu::enabled_metrics metrics;
         metrics.value = DISABLE_ALL_METRICS;
-        std::regex           tokenizer{ R"(\w+)" };
-        std::sregex_iterator it(settings_trimmed.begin(), settings_trimmed.end(),
-                                tokenizer);
-        std::sregex_iterator end;
+        const std::regex           tokenizer{ R"(\w+)" };
+        std::sregex_iterator       it(settings_trimmed.begin(), settings_trimmed.end(),
+                                      tokenizer);
+        const std::sregex_iterator end;
 
         for(; it != end; ++it)
         {
@@ -386,9 +410,9 @@ private:
             return result;
         }
 
-        std::regex           tokenizer{ R"(\d+(?:[-:]\d+)*)" };
-        std::sregex_iterator it(input_range.begin(), input_range.end(), tokenizer);
-        std::sregex_iterator end;
+        const std::regex           tokenizer{ R"(\d+(?:[-:]\d+)*)" };
+        std::sregex_iterator       it(input_range.begin(), input_range.end(), tokenizer);
+        const std::sregex_iterator end;
 
         for(; it != end; ++it)
         {

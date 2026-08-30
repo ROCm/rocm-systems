@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
@@ -66,6 +66,66 @@ set_tests_properties(
                "samples"
                ENVIRONMENT
                "${external-correlation-id-request-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${IS_DISABLED}")
+
+set(external-correlation-id-request-inline-stress-env
+    ${external-correlation-id-request-env} "ROCPROFILER_QUEUE_INTERPOSITION=1"
+    "ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS=1")
+
+add_test(NAME external-correlation-id-request-inline-stress
+         COMMAND $<TARGET_FILE:external-correlation-id-request> 2 500 10)
+
+set_tests_properties(
+    external-correlation-id-request-inline-stress
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "samples;repro"
+               ENVIRONMENT
+               "${external-correlation-id-request-inline-stress-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${IS_DISABLED}")
+
+set(external-correlation-id-request-inline-async-delay-env
+    ${external-correlation-id-request-inline-stress-env}
+    "ROCPROFILER_TEST_INLINE_ASYNC_DELAY_US=100")
+
+add_test(NAME external-correlation-id-request-inline-async-delay
+         COMMAND $<TARGET_FILE:external-correlation-id-request> 2 100 10)
+
+set_tests_properties(
+    external-correlation-id-request-inline-async-delay
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "samples;repro"
+               ENVIRONMENT
+               "${external-correlation-id-request-inline-async-delay-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${IS_DISABLED}")
+
+set(external-correlation-id-request-kernel-map-unload-race-env
+    ${external-correlation-id-request-inline-stress-env}
+    "ROCPROFILER_TEST_INLINE_ASYNC_DELAY_US=100")
+
+add_test(NAME external-correlation-id-request-kernel-map-unload-race
+         COMMAND $<TARGET_FILE:external-correlation-id-request> 2 500 500)
+
+set_tests_properties(
+    external-correlation-id-request-kernel-map-unload-race
+    PROPERTIES TIMEOUT
+               180
+               LABELS
+               "samples;repro"
+               ENVIRONMENT
+               "${external-correlation-id-request-kernel-map-unload-race-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED

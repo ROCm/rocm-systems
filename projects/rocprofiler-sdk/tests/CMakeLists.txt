@@ -1,7 +1,7 @@
 #
 # Integration tests
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(COMMAND rocprofiler_deactivate_clang_tidy)
     rocprofiler_deactivate_clang_tidy()
@@ -76,6 +76,7 @@ add_subdirectory(bin)
 # validation tests
 add_subdirectory(kernel-tracing)
 add_subdirectory(async-copy-tracing)
+add_subdirectory(rocshmem-trace)
 add_subdirectory(hsa-memory-allocation)
 add_subdirectory(scratch-memory-tracing)
 add_subdirectory(c-tool)
@@ -83,14 +84,24 @@ add_subdirectory(thread-trace)
 add_subdirectory(pc_sampling)
 add_subdirectory(hip-graph-tracing)
 add_subdirectory(counter-collection)
+add_subdirectory(counter-collection-per-agent)
+add_subdirectory(queue-hooks-perf)
 add_subdirectory(openmp-tools)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
+add_subdirectory(hipfile)
 add_subdirectory(hip-host-tracing)
 add_subdirectory(code-object-multi-threaded)
+add_subdirectory(code-object-host-symbols)
+add_subdirectory(spm)
+
+# environment variable tests
+add_subdirectory(environment)
 
 # rocpd validation tests
 add_subdirectory(rocpd)
+add_subdirectory(rocpd-api)
+add_subdirectory(rocpd-back-compat)
 
 # rocattach validation tests
 add_subdirectory(rocattach)
@@ -100,6 +111,12 @@ add_subdirectory(rocprofv3)
 
 # late-start tracing validation tests
 add_subdirectory(late-start-tracing)
+
+# multiple anytime tool configuration validation tests
+add_subdirectory(multi-tool-test)
+
+# anytime tool configuration (force_configure) validation tests
+add_subdirectory(anytime-tool-config)
 
 # python bindings
 add_subdirectory(python-bindings)

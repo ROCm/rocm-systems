@@ -36,8 +36,8 @@ HIPAllocator *default_allocator_{nullptr};
 
 SingleHeap::SingleHeap() {
 
-  HIPAllocator *allocator = get_default_allocator();
-  heap_mem_ = new HeapMemoryType(*allocator, envvar::heap_size.get_value());
+  allocator_ = get_default_allocator();
+  heap_mem_ = new HeapMemoryType(*allocator_, envvar::heap_size.get_value());
   assert(heap_mem_ != nullptr);
 
   strat_ = new DLAllocatorStrategy<HeapMemoryType>(static_cast<HeapMemoryType *>(heap_mem_));
@@ -70,7 +70,9 @@ __device__ void SingleHeap::free([[maybe_unused]] void* ptr) {}
 
 void* SingleHeap::realloc([[maybe_unused]] void* ptr, [[maybe_unused]] size_t size) { return nullptr; }
 
-void* SingleHeap::malign([[maybe_unused]] size_t alignment, [[maybe_unused]] size_t size) { return nullptr; }
+void SingleHeap::malign(void** ptr, size_t alignment, size_t size) {
+  strat_->align(reinterpret_cast<char**>(ptr), alignment, size);
+}
 
 char* SingleHeap::get_base_ptr() { return heap_mem_->get_ptr(); }
 
@@ -79,5 +81,11 @@ size_t SingleHeap::get_size() { return heap_mem_->get_size(); }
 size_t SingleHeap::get_used() { return strat_->get_used(); }
 
 size_t SingleHeap::get_avail() { return get_size() - get_used(); }
+
+AllocatorType SingleHeap::get_type() { return heap_mem_->type_; }
+
+size_t SingleHeap::get_granularity() { return heap_mem_->granularity_; }
+
+HIPAllocator *SingleHeap::get_allocator() { return allocator_; }
 
 }  // namespace rocshmem

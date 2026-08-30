@@ -12,15 +12,15 @@ endif()
 
 set(CMAKE_BUILD_TYPE "Release")
 find_package(Threads REQUIRED)
-if(NOT TARGET rocprofiler-systems::rocprofiler-systems-user-library)
-    find_package(rocprofiler-systems REQUIRED COMPONENTS user)
+if(NOT TARGET rocprofiler-systems::rocprofiler-systems-causal-api-library)
+    find_package(rocprofiler-systems REQUIRED COMPONENTS causal-api)
 endif()
 
 add_library(causal-interface-library INTERFACE)
 target_compile_options(causal-interface-library INTERFACE -g3 -fno-omit-frame-pointer)
 target_link_libraries(
     causal-interface-library
-    INTERFACE Threads::Threads ${CMAKE_DL_LIBS}
+    INTERFACE Threads::Threads pthread ${CMAKE_DL_LIBS}
 )
 
 rocprofiler_systems_causal_example_executable(
