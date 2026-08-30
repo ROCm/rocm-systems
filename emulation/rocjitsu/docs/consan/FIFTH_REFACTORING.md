@@ -1,6 +1,7 @@
 # ConSan fifth refactoring: deepen the component architecture
 
-This document is the initial working charter for ConSan's fifth refactoring.
+This document is the working charter and execution record for ConSan's fifth
+refactoring.
 It begins with a post-fourth-refactoring deep read of the production code. That
 assessment is deliberately separated from the mandate and possible directions
 for the next refactoring: the current-state sections describe what the code is,
@@ -16,10 +17,9 @@ the conceptual architecture. The fifth refactoring starts from that distinction
 rather than either dismissing the gains or accepting the prior completion audit
 uncritically.
 
-No destination class diagram, stage sequence, or small fixed list of mechanical
-extractions is established here yet. This document is intended to absorb
-additional investigative angles and a substantially more ambitious mandate
-before implementation stages are chosen.
+No destination class diagram or fixed list of mechanical extractions is
+prescribed. The destination remains discoverable, but the direction of travel,
+iteration discipline, and evidence required for completion are binding.
 
 # Part I: post-fourth-refactoring assessment of the existing code
 
@@ -366,11 +366,30 @@ composition, and coordinator paths still consume it. Likewise, the production
 component table is useful documentation, but separate translation units in one
 library do not constitute a directed build graph.
 
-# Part II: open charter for the fifth refactoring
+# Part II: executable charter for the fifth refactoring
 
 ## 10. Goal and mandate
 
-### 10.1 The goal
+### 10.1 The executable `/goal`
+
+The fifth refactoring should be run under this goal:
+
+> Complete the ConSan fifth refactoring by repeatedly migrating the
+> highest-leverage mode/architecture/component interaction through a complete
+> vertical slice: establish its rightful owner, replace broad or reverse
+> dependencies with narrow forward typed contracts, converge every applicable
+> production consumer, enforce the resulting boundary, and delete the
+> superseded implementation. Preserve and extend behavioral evidence, commit
+> each reviewable convergence step locally, and continue until the independent
+> deep-read completion audit in Section 14 proves every required property
+> across all existing modes and architectures. Do not push.
+
+This is a convergence goal, not a task list. It intentionally specifies how
+the code must improve and what evidence ends the work without assuming the
+final class hierarchy, directory tree, solver organization, or migration
+sequence.
+
+The expanded architectural objective behind that operational statement is:
 
 **Re-architect ConSan so concrete gfx mechanics and mode-specific behavior are
 separately local, common mechanisms are implemented once, and the production
@@ -459,6 +478,10 @@ The exact boundary may move as evidence accumulates. The direction may not:
 ownership becomes more local, products become narrower and more forward-only,
 dependencies become more enforceable, sharing becomes more explicit, and
 legacy implementation decreases.
+
+Refactoring activity that does not produce one or more of those durable
+changes is investigation or migration overhead, not convergence. It must
+either enable a named near-term convergence step or be removed.
 
 ### 10.3 Create deletion opportunities and reap them
 
@@ -564,6 +587,68 @@ temporarily add a contract or adapter. It must identify the metric it will pay
 back and the convergence checkpoint that removes the temporary path. Two
 successive convergence checkpoints may not both defer the same promised
 payback. Test inventory and validated behavior never decrease.
+
+### 10.6 How to choose the next slice
+
+At each checkpoint, choose the next interaction by **convergence leverage**,
+not by convenience or file proximity. Prefer work that has several of these
+properties:
+
+- it is a mode-by-target knot or a high-fanout broad-bus dependency;
+- it contains duplicated authority or enough legacy machinery to delete;
+- resolving it makes a later mode or target extension more additive;
+- it establishes a boundary that can be mechanically enforced;
+- it exercises the emerging design on an additional mode, target family, or
+  pipeline stage rather than polishing one exemplar; and
+- it unlocks subsequent slices while leaving the tree bisectable and tested.
+
+Use deep tracing to rank candidates. Line counts, token searches, and file size
+may locate pressure, but they do not establish leverage or ownership. When two
+candidates are comparable, prefer the one that simultaneously reduces
+cross-axis knowledge, broad-state fanout, duplicated implementation, and
+unenforced dependency surface.
+
+This rule prevents wandering among equally attractive cleanups. A lower-value
+cleanup may be taken when it is required to complete the current vertical
+slice, pay back temporary migration growth, fix a discovered bug, or restore a
+test gate; otherwise the highest-leverage unresolved interaction remains the
+next task.
+
+### 10.7 Anti-circling and continuation rules
+
+The refactoring must accumulate irreversible architectural evidence rather
+than repeatedly redescribing or rearranging the same code:
+
+- Do not revisit a settled boundary merely to try a different aesthetic. A
+  revision requires new implementation evidence: a failed extension exercise,
+  an unavoidable forbidden dependency, surviving duplication, an invalidated
+  semantic assumption, or a measurable inability to converge consumers.
+- Do not count renaming, file movement, facade insertion, or a new product as
+  progress by itself. Count the consumers converged, forbidden edges removed,
+  old fields and branches deleted, boundaries enforced, and matrix behavior
+  retained.
+- Do not leave an attractive exemplar. A pattern demonstrated on one mode or
+  target must be migrated across the applicable production set, or explicitly
+  remain an incomplete slice in the ledger.
+- Do not open several speculative architectures at once. Finish or falsify the
+  current vertical slice, remove abandoned scaffolding, and record the
+  evidence before pursuing the next hypothesis.
+- Do not let two consecutive convergence checkpoints defer the same promised
+  deletion, broad-bus reduction, or boundary enforcement. Pay back the
+  migration or revise the approach.
+
+Autonomous iteration continues while any Section 14 property lacks evidence or
+the deep read still exposes a major broad bus, cross-axis knot, parallel
+authority, scattered architecture/mode implementation, or material unharvested
+deletion opportunity on the main production path. Exhausting the exploration
+map, passing the existing tests, reaching the old line-count baseline, or
+finishing one component family is not a stopping condition.
+
+The work ends only after a fresh independent deep read, the extension
+exercises, the quantitative accounting, and the full nonphysical and physical
+test gates all support Section 14. If progress is genuinely blocked, record the
+exact missing authority or external fact and stop as blocked; do not reinterpret
+a local optimum as completion.
 
 ## 11. Design freedom and discovery
 
@@ -896,9 +981,9 @@ It is expected to grow substantially.
 
 ## 13. Operating invariants
 
-The detailed work plan and convergence gates will be added only after the
-charter has absorbed the next investigative requests. The following invariants
-already carry forward:
+The vertical-slice loop supplies the work plan; the next slice is selected from
+current implementation evidence rather than frozen in advance. The following
+invariants apply throughout execution:
 
 1. All existing ConSan tests must continue to pass at periodic convergence
    points, with focused tests between full gates and serialized physical-GPU
@@ -999,21 +1084,21 @@ cross-axis implementation knot, parallel authority, or unharvested deletion
 opportunity on the main production path, the goal remains active even if the
 provisional workstreams are exhausted.
 
-## 15. Sections intentionally left open
+## 15. What remains deliberately open
 
-The following sections will be developed after further investigation and user
-direction. Their omission is deliberate; prematurely filling them would turn
-the initial pressure-point list into an unjustified destination design.
+The goal is precise; the destination design is not. Additional audit angles,
+revised component hypotheses, alternative architectures, experiments, slice
+ordering, and detailed workstream thresholds remain open to implementation
+evidence. They belong in the execution record as they are discovered rather
+than being guessed upfront.
 
-- Additional audit angles and revised component hypotheses.
-- Alternative destination architectures.
-- Experiments and vertical slices used to choose among them.
-- Migration workstreams and stage ordering.
-- Component-level and full-matrix test strategy.
-- Exact quantitative baseline, recurring measurements, and the final
-  production-code reduction target.
-- Detailed workstream gates and numerical thresholds under the completion bar.
-- Completion and handoff records.
+That freedom cannot weaken the direction or completion bar. A newly discovered
+design may change component boundaries and invalidate an earlier hypothesis,
+but it must still improve the monotonic scorecard, converge all applicable
+consumers, delete its abandoned and superseded machinery, and satisfy the same
+Section 14 audit. Open design questions are permission to discover a better
+route, not permission to postpone convergence or redefine completion around
+the work already performed.
 
 # Part III: execution record
 
