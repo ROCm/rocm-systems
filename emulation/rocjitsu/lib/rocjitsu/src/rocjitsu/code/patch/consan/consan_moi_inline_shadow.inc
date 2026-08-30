@@ -1342,7 +1342,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
             }))
       return;
 
-    if (!replace_consan_text(patcher, new_text, options, "MOI inline-shadow probe", result)) {
+    if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                             "MOI inline-shadow probe", result)) {
       return;
     }
     result.replacement = std::move(patcher).emit();

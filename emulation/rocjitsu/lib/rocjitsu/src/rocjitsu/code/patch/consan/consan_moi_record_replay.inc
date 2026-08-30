@@ -274,8 +274,7 @@ void try_apply_first_light_access_record_patch(
   }
   for (const auto &[begin, end] : synchronization_ranges)
     borrowed_entry_protected_ranges.push_back({begin, end, nullptr});
-  for (const ConSanPreappliedReservedRange &range :
-       moi_resource_reserved_ranges(resource_state)) {
+  for (const ConSanPreappliedReservedRange &range : moi_resource_reserved_ranges(resource_state)) {
     borrowed_entry_protected_ranges.push_back(
         {range.text_offset, range.text_offset + range.size, nullptr});
   }
@@ -300,8 +299,8 @@ void try_apply_first_light_access_record_patch(
       displaced_words.insert(displaced_words.end(), decoded->begin(), decoded->end());
     }
     const uint64_t displaced_end = candidate->anchor() + displaced_words.size() * sizeof(uint32_t);
-    if (!moi_resource_entry_window_is_single_entry(
-            resource_state, candidate->anchor(), displaced_words.size() * sizeof(uint32_t))) {
+    if (!moi_resource_entry_window_is_single_entry(resource_state, candidate->anchor(),
+                                                   displaced_words.size() * sizeof(uint32_t))) {
       return std::nullopt;
     }
     auto protected_range =
@@ -1512,7 +1511,8 @@ void try_apply_first_light_access_record_patch(
             }))
       return;
 
-    if (!replace_consan_text(patcher, new_text, options, "MOI first-light probe", result)) {
+    if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                             "MOI first-light probe", result)) {
       return;
     }
     result.replacement = std::move(patcher).emit();

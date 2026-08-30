@@ -4,8 +4,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                          ConSanTransformArtifacts &result) {
   const rj_code_arch_t arch = target.arch;
 
-  const auto delay_words = consan_sc_delay_instruction_word_count(
-      options, result.errors, "ConSan LDS check/trap proof");
+  const auto delay_words =
+      consan_sc_delay_instruction_word_count(options, result.errors, "ConSan LDS check/trap proof");
   if (!delay_words)
     return;
 
@@ -3853,8 +3853,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                     host_words.size() * sizeof(uint32_t));
         append_consan_patch_words(new_text, donor.host_original_words);
         const uint32_t host_return_word = build_s_branch(*host_return, arch);
-        append_consan_patch_words(new_text,
-                                  std::span<const uint32_t>(&host_return_word, 1));
+        append_consan_patch_words(new_text, std::span<const uint32_t>(&host_return_word, 1));
 
         ConSanPatchInfo anchor_info;
         anchor_info.kind = ConSanPatchKind::TrampolineScBranchRelayDonor;
@@ -4183,8 +4182,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
             result.patches.clear();
             return;
           }
-          append_consan_patch_words(new_text,
-                                    std::span<const uint32_t>(&padding_nop, 1));
+          append_consan_patch_words(new_text, std::span<const uint32_t>(&padding_nop, 1));
         }
       } else {
         std::memcpy(new_text.data() + site.physical_id.original_text_offset, planned.words.data(),
@@ -4242,7 +4240,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
       std::memcpy(new_text.data() + relay_offset, &relay_word, sizeof(relay_word));
     }
-    if (!replace_consan_text(patcher, new_text, options, "LDS check/trap proof", result)) {
+    if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                             "LDS check/trap proof", result)) {
       result.patches.clear();
       return;
     }

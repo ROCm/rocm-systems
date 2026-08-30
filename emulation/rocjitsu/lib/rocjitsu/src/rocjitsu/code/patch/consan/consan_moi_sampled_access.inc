@@ -1078,7 +1078,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             [](const MoiDenseEntryHost &, std::vector<uint32_t> &) { return true; }))
       return;
 
-    if (!replace_consan_text(patcher, new_text, options, "MOI sampled probe", result)) {
+    if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                             "MOI sampled probe", result)) {
       return;
     }
     result.replacement = std::move(patcher).emit();

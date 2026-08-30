@@ -407,7 +407,8 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
                   trampoline_size);
     }
   }
-  if (!replace_consan_text(patcher, new_text, options, "SC perturbation", result)) {
+  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit, "SC perturbation",
+                           result)) {
     return;
   }
   result.replacement = std::move(patcher).emit();

@@ -2173,8 +2173,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                            visible_evidence_private_requirements, result.errors) ||
       !apply_sgpr_descriptor_requirements(patcher, result, code_object,
                                           visible_evidence_sgpr_requirements, result.errors) ||
-      !replace_consan_text(patcher, new_text, options, "MOI inline-shadow barrier epoch patch",
-                           result)) {
+      !replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                           "MOI inline-shadow barrier epoch patch", result)) {
     return;
   }
   if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),
@@ -2777,8 +2777,8 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   if (patches.empty()) {
     result.warnings.emplace_back("ConSan MOI barrier record patch found no patchable barriers");
     if (pruned_provisional_reservoirs) {
-      if (!replace_consan_text(patcher, new_text, options, "MOI barrier reservoir cleanup",
-                               result)) {
+      if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                               "MOI barrier reservoir cleanup", result)) {
         return;
       }
       result.replacement = std::move(patcher).emit();
@@ -2794,7 +2794,8 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
                                           result.errors)) {
     return;
   }
-  if (!replace_consan_text(patcher, new_text, options, "MOI barrier record patch", result)) {
+  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                           "MOI barrier record patch", result)) {
     return;
   }
   if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),

@@ -796,7 +796,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     result.warnings.emplace_back("ConSan MOI inline atomic patch found no patchable atomics");
     return;
   }
-  if (!replace_consan_text(patcher, new_text, options, "MOI inline atomic patch", result)) {
+  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                           "MOI inline atomic patch", result)) {
     return;
   }
   if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),

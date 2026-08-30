@@ -272,7 +272,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
     ++record_index;
   }
 
-  if (!replace_consan_text(patcher, new_text, options, "MOI atomic record patch", result)) {
+  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                           "MOI atomic record patch", result)) {
     return;
   }
   if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),

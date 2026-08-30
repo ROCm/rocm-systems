@@ -307,6 +307,14 @@ foreach(
     endif()
 endforeach()
 
+file(READ "${_consan_dir}/consan_growth_policy.h" _growth_policy_contract)
+if(_growth_policy_contract MATCHES "ConSanOptions" OR
+   NOT _growth_policy_contract MATCHES "ConSanPatchedImageGrowthLimit")
+    message(FATAL_ERROR
+        "ConSan image-growth policy must consume its narrow policy value, not the broad options bus"
+    )
+endif()
+
 # Native emission and target-operation components accept narrow operation
 # contracts, not the broad mutable MoiOptions bus.
 file(

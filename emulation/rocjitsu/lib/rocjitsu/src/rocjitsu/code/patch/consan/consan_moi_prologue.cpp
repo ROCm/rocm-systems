@@ -2285,7 +2285,8 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
     patches.push_back(info);
   }
 
-  if (!replace_consan_text(patcher, new_text, options, "MOI private-epoch prologue", result)) {
+  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                           "MOI private-epoch prologue", result)) {
     return;
   }
   result.replacement = std::move(patcher).emit();
@@ -3254,7 +3255,8 @@ void try_apply_owner_epoch_prologue_patch(
     result.warnings.emplace_back("ConSan MOI owner/epoch prologue found no patchable kernels");
     return;
   }
-  if (!replace_consan_text(patcher, new_text, options, "MOI owner/epoch prologue", result)) {
+  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                           "MOI owner/epoch prologue", result)) {
     return;
   }
 

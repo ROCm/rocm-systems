@@ -1456,7 +1456,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
         patches.push_back(std::move(info));
       }
     }
-    if (!replace_consan_text(patcher, new_text, options, "MOI sampled barrier sync", result)) {
+    if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                             "MOI sampled barrier sync", result)) {
       return;
     }
     if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),
@@ -1471,7 +1472,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
     if (!try_emit_direct_barrier(barrier_index, /*allow_local_island=*/true))
       return;
   }
-  if (!replace_consan_text(patcher, new_text, options, "MOI sampled barrier sync", result)) {
+  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                           "MOI sampled barrier sync", result)) {
     return;
   }
   if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),
@@ -2746,7 +2748,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                              preserve_guest_at_anchor))
       return;
   }
-  if (!replace_consan_text(patcher, new_text, options, "MOI sampled atomic sync", result)) {
+  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                           "MOI sampled atomic sync", result)) {
     return;
   }
   if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),

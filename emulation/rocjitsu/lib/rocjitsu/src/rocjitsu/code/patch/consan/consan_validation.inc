@@ -5,8 +5,7 @@ struct ValidationByteRange {
   uint64_t end = 0;
 };
 
-[[nodiscard]] bool validation_ranges_overlap(ValidationByteRange lhs,
-                                              ValidationByteRange rhs) {
+[[nodiscard]] bool validation_ranges_overlap(ValidationByteRange lhs, ValidationByteRange rhs) {
   return lhs.begin < rhs.end && rhs.begin < lhs.end;
 }
 
@@ -152,7 +151,8 @@ void try_apply_unmatched_barrier_wait_abort_impl(std::span<const uint8_t> origin
       patch.owner_descriptor_file_offsets.push_back(*wait.owner_descriptor_file_offset);
     patches.push_back(std::move(patch));
   }
-  if (!replace_consan_text(patcher, new_text, options, "unmatched barrier abort", result)) {
+  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                           "unmatched barrier abort", result)) {
     return;
   }
   result.replacement = std::move(patcher).emit();
@@ -4603,13 +4603,11 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
   return errors;
 }
 
-[[nodiscard]] ConSanTransformArtifacts
-finalize_consan_result_impl(ConSanTransformArtifacts result,
-                            std::span<const uint8_t> original_bytes,
-                            uint64_t expected_moi_report_dispatch_id,
-                            bool validating_carried_composite_stage,
-                            const ConSanPerturbationPlanningState *carried_perturbation,
-                            ConSanLoweringExecution *execution) {
+[[nodiscard]] ConSanTransformArtifacts finalize_consan_result_impl(
+    ConSanTransformArtifacts result, std::span<const uint8_t> original_bytes,
+    uint64_t expected_moi_report_dispatch_id, bool validating_carried_composite_stage,
+    const ConSanPerturbationPlanningState *carried_perturbation,
+    ConSanLoweringExecution *execution) {
   if (execution != nullptr)
     execution->note_final_validation();
   const major_image_ownership::ScopedOwner result_owner(

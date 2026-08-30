@@ -110,13 +110,4 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
   return false;
 }
 
-[[nodiscard]] inline bool replace_consan_text(CodeObjectPatcher &patcher,
-                                              std::span<const uint8_t> new_text,
-                                              const ConSanOptions &options,
-                                              std::string_view operation,
-                                              ConSanTransformArtifacts &result) {
-  return replace_consan_text(patcher, new_text, options.patched_image_growth_limit, operation,
-                             result);
-}
-
 } // namespace rocjitsu
