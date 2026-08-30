@@ -434,10 +434,9 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
   return true;
 }
 
-[[nodiscard]] std::optional<MoiBorrowedRecordReplayEntry>
-build_moi_borrowed_record_replay_entry(uint64_t island_text_offset, uint64_t body_text_offset,
-                                       uint16_t backup_vgpr, const MoiIndirectJumpSgprs &jump_sgprs,
-                                       uint32_t island_word_count, rj_code_arch_t arch) {
+[[nodiscard]] std::optional<MoiBorrowedRecordReplayEntry> build_moi_borrowed_record_replay_entry(
+    uint64_t island_text_offset, uint64_t body_text_offset, uint16_t backup_vgpr,
+    const ConSanMoiIndirectJumpSgprs &jump_sgprs, uint32_t island_word_count, rj_code_arch_t arch) {
   if (jump_sgprs.scc_save_sgpr == jump_sgprs.pc_sgpr ||
       jump_sgprs.scc_save_sgpr == static_cast<uint16_t>(jump_sgprs.pc_sgpr + 1u)) {
     return std::nullopt;
@@ -524,7 +523,7 @@ append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave
 [[nodiscard]] bool
 emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island_text_offset,
                                      uint64_t cave_text_offset, uint64_t anchor_text_offset,
-                                     const MoiIndirectJumpSgprs &jump_sgprs,
+                                     const ConSanMoiIndirectJumpSgprs &jump_sgprs,
                                      std::span<const uint64_t> owner_descriptor_file_offsets,
                                      rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches,
                                      std::vector<std::string> &errors, std::string_view context) {

@@ -1173,8 +1173,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.test_force_vgpr_spill = true;
   options.moi_exec_save_sgpr = 4u;
-  options.moi_router_indirect_pc_sgpr = 48u;
-  options.moi_router_indirect_scc_sgpr = 50u;
+  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{48u, 50u};
   options.moi_router_call = ConSanMoiRouterCallSgprs{50u, 48u};
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
@@ -1184,8 +1183,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       .owner_sgpr = 4u,
       .dispatch_id_sgpr = std::nullopt,
       .spill_backed = true,
-      .indirect_pc_sgpr = 48u,
-      .indirect_scc_sgpr = 50u,
+      .router_jump = ConSanMoiIndirectJumpSgprs{48u, 50u},
       .router_call = ConSanMoiRouterCallSgprs{50u, 48u},
       .visible_evidence_sgpr = std::nullopt,
       .branch_only_scalar_spill = false,
@@ -1218,7 +1216,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       test_moi_transient_sgpr_assignment(result, full_kernel->descriptor_file_offset);
   ASSERT_TRUE(full_assignment);
   EXPECT_FALSE(full_assignment->dispatch_id_sgpr);
-  ASSERT_TRUE(full_assignment->indirect_pc_sgpr);
+  ASSERT_TRUE(full_assignment->router_jump);
 
   const auto owns = [](const ConSanPatchInfo &patch, uint64_t descriptor_offset) {
     return std::ranges::find(patch.owner_descriptor_file_offsets, descriptor_offset) !=
@@ -1274,7 +1272,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   const uint64_t empty_exec_continuation_word =
       static_cast<uint64_t>(encoded_empty_exec_distance) + 1u;
   ASSERT_LT(empty_exec_continuation_word, relocated_guest_word);
-  const auto return_getpc = build_s_getpc_b64(*full_assignment->indirect_pc_sgpr, kArch);
+  const auto return_getpc = build_s_getpc_b64(full_assignment->router_jump->pc_sgpr, kArch);
   ASSERT_LT(empty_exec_continuation_word, access_words.size());
   EXPECT_EQ(access_words[empty_exec_continuation_word], return_getpc);
   const uint64_t empty_exec_guard_distance = empty_exec_continuation_word - 1u;
@@ -1291,9 +1289,9 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       static_cast<uint16_t>(*full_access->scratch_vgpr + 1u),
       *full_access->persistent_dispatch_id_private_offset + SpillManager::kSlotBytes, kArch);
   const auto read_low = instrumentation::build_v_readfirstlane_b32(
-      *full_assignment->indirect_pc_sgpr, *full_access->scratch_vgpr, kArch);
+      full_assignment->router_jump->pc_sgpr, *full_access->scratch_vgpr, kArch);
   const auto read_high = instrumentation::build_v_readfirstlane_b32(
-      static_cast<uint16_t>(*full_assignment->indirect_pc_sgpr + 1u),
+      static_cast<uint16_t>(full_assignment->router_jump->pc_sgpr + 1u),
       static_cast<uint16_t>(*full_access->scratch_vgpr + 1u), kArch);
   ASSERT_TRUE(load_low && load_high && read_low && read_high);
   EXPECT_TRUE(contains_subsequence(access_words, *load_low));
@@ -1395,8 +1393,7 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.test_force_vgpr_spill = true;
   options.moi_exec_save_sgpr = 4u;
-  options.moi_router_indirect_pc_sgpr = 48u;
-  options.moi_router_indirect_scc_sgpr = 50u;
+  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{48u, 50u};
   options.moi_router_call = ConSanMoiRouterCallSgprs{50u, 48u};
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
@@ -1406,8 +1403,7 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
       .owner_sgpr = 4u,
       .dispatch_id_sgpr = std::nullopt,
       .spill_backed = true,
-      .indirect_pc_sgpr = 48u,
-      .indirect_scc_sgpr = 50u,
+      .router_jump = ConSanMoiIndirectJumpSgprs{48u, 50u},
       .router_call = ConSanMoiRouterCallSgprs{50u, 48u},
       .visible_evidence_sgpr = std::nullopt,
       .branch_only_scalar_spill = false,
@@ -3297,8 +3293,7 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   ASSERT_TRUE(assignment.spill_backed);
   ASSERT_TRUE(assignment.branch_only_scalar_spill);
   ASSERT_TRUE(assignment.dynamic_stack_borrowed_sgpr);
-  EXPECT_FALSE(assignment.indirect_pc_sgpr);
-  EXPECT_FALSE(assignment.indirect_scc_sgpr);
+  EXPECT_FALSE(assignment.router_jump);
   EXPECT_FALSE(assignment.router_call);
 
   const auto prologue = std::ranges::find(
@@ -3426,8 +3421,7 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
   ASSERT_TRUE(assignment.spill_backed);
   ASSERT_TRUE(assignment.branch_only_scalar_spill);
   EXPECT_FALSE(assignment.dynamic_stack_borrowed_sgpr);
-  EXPECT_FALSE(assignment.indirect_pc_sgpr);
-  EXPECT_FALSE(assignment.indirect_scc_sgpr);
+  EXPECT_FALSE(assignment.router_jump);
   EXPECT_FALSE(assignment.router_call);
 
   const auto prologue = std::ranges::find(
@@ -3536,8 +3530,7 @@ void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
   EXPECT_TRUE(assignment.branch_only_scalar_spill);
-  EXPECT_FALSE(assignment.indirect_pc_sgpr);
-  EXPECT_FALSE(assignment.indirect_scc_sgpr);
+  EXPECT_FALSE(assignment.router_jump);
   EXPECT_FALSE(assignment.router_call);
   EXPECT_EQ(std::ranges::count(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
             8u);
@@ -4663,7 +4656,7 @@ TEST(ConSanMoi, Cdna4InlineValidatorResolvesDerivedPrivateDispatchReloadsPerOwne
   ASSERT_NE(fixed_assignment, allocation.owner_transient_sgprs.end());
   fixed_assignment->exec_save_sgpr = *allocation.moi_exec_save_sgpr;
   fixed_assignment->spill_backed = false;
-  fixed_assignment->indirect_pc_sgpr.reset();
+  fixed_assignment->router_jump.reset();
   const std::vector<std::string> component_validation_errors =
       validate_consan_modified_elf(bytes, with_component_assignment);
   EXPECT_TRUE(std::ranges::none_of(component_validation_errors, [](const std::string &error) {
@@ -6370,8 +6363,7 @@ TEST(ConSanMoi, Gfx1250DenseCallReturnRejectsArchitecturalAliases) {
   options.moi_owner_vgpr = 80u;
   options.moi_epoch_vgpr = 81u;
   options.moi_exec_save_sgpr = 60u;
-  options.moi_router_indirect_pc_sgpr = 88u;
-  options.moi_router_indirect_scc_sgpr = 90u;
+  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{88u, 90u};
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = false;
@@ -6635,8 +6627,7 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
   options.moi_owner_vgpr = 80u;
   options.moi_epoch_vgpr = 81u;
   options.moi_exec_save_sgpr = 4u;
-  options.moi_router_indirect_pc_sgpr = kIndirectPcSgpr;
-  options.moi_router_indirect_scc_sgpr = kKeyAndSccSgpr;
+  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr};
   options.moi_router_call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr};
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
@@ -6646,8 +6637,7 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
       .owner_sgpr = std::nullopt,
       .dispatch_id_sgpr = std::nullopt,
       .spill_backed = true,
-      .indirect_pc_sgpr = kIndirectPcSgpr,
-      .indirect_scc_sgpr = kKeyAndSccSgpr,
+      .router_jump = ConSanMoiIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr},
       .router_call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr},
       .visible_evidence_sgpr = std::nullopt,
       .branch_only_scalar_spill = false,
@@ -7174,9 +7164,8 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
   options.moi_exec_save_sgpr = 60;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
-  options.moi_router_indirect_pc_sgpr = 30;
+  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{30, 29};
   options.moi_router_call = ConSanMoiRouterCallSgprs{25, 26};
-  options.moi_router_indirect_scc_sgpr = 29;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = true;
@@ -7292,9 +7281,8 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarrierReusesAccessDispatcherWhenItFits)
   options.moi_exec_save_sgpr = 60;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
-  options.moi_router_indirect_pc_sgpr = 30;
+  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{30, 29};
   options.moi_router_call = ConSanMoiRouterCallSgprs{25, 26};
-  options.moi_router_indirect_scc_sgpr = 29;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = true;
@@ -7404,9 +7392,8 @@ TEST(ConSanMoi, Gfx1250DenseBarrierFallsBackWhenAccessDispatcherReservationIsFul
   options.moi_exec_save_sgpr = 60;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
-  options.moi_router_indirect_pc_sgpr = 30;
+  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{30, 29};
   options.moi_router_call = ConSanMoiRouterCallSgprs{25, 26};
-  options.moi_router_indirect_scc_sgpr = 29;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = true;
@@ -7493,9 +7480,8 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersPartitionRelayWindowsAcrossLarge
   options.moi_exec_save_sgpr = 60;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
-  options.moi_router_indirect_pc_sgpr = 30;
+  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{30, 29};
   options.moi_router_call = ConSanMoiRouterCallSgprs{25, 26};
-  options.moi_router_indirect_scc_sgpr = 29;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = true;
@@ -7615,8 +7601,7 @@ TEST(ConSanMoi, Gfx1250InlineUsesComponentLocalScalarSpillForMixedPressureOwners
   EXPECT_TRUE(assignment.spill_backed);
   EXPECT_TRUE(assignment.branch_only_scalar_spill);
   EXPECT_FALSE(assignment.visible_evidence_sgpr);
-  EXPECT_FALSE(assignment.indirect_pc_sgpr);
-  EXPECT_FALSE(assignment.indirect_scc_sgpr);
+  EXPECT_FALSE(assignment.router_jump);
   EXPECT_FALSE(assignment.router_call);
   const auto aliases_architectural_state = [](uint16_t base, uint16_t width) {
     return base < 106u && 102u < static_cast<uint32_t>(base) + width;
@@ -7804,8 +7789,7 @@ TEST(ConSanMoi, Cdna4InlineUsesComponentLocalScalarSpillOutsidePreloadsAndPhysic
   ASSERT_TRUE(assignment.dispatch_id_sgpr);
   EXPECT_EQ(assignment.dispatch_id_sgpr, test_moi_dispatch_id_sgpr(result));
   ASSERT_TRUE(assignment.visible_evidence_sgpr);
-  ASSERT_TRUE(assignment.indirect_pc_sgpr);
-  ASSERT_TRUE(assignment.indirect_scc_sgpr);
+  ASSERT_TRUE(assignment.router_jump);
   ASSERT_TRUE(assignment.router_call);
 
   constexpr uint16_t kInitializedEnd = 8u;
@@ -7814,8 +7798,8 @@ TEST(ConSanMoi, Cdna4InlineUsesComponentLocalScalarSpillOutsidePreloadsAndPhysic
   const std::array ranges = {
       std::pair{assignment.exec_save_sgpr, kConSanMoiInlineExecSaveSgprCount},
       std::pair{*assignment.visible_evidence_sgpr, uint16_t{1u}},
-      std::pair{*assignment.indirect_pc_sgpr, uint16_t{2u}},
-      std::pair{*assignment.indirect_scc_sgpr, uint16_t{1u}},
+      std::pair{assignment.router_jump->pc_sgpr, uint16_t{2u}},
+      std::pair{assignment.router_jump->scc_save_sgpr, uint16_t{1u}},
       std::pair{assignment.router_call->dispatch_key_sgpr, uint16_t{1u}},
       std::pair{assignment.router_call->call_return_sgpr, uint16_t{2u}},
   };
@@ -7910,18 +7894,17 @@ TEST(ConSanMoi, Cdna4InlineSpillsMixedVgprSourcesThroughDynamicStackFrames) {
       test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
   EXPECT_FALSE(assignment.visible_evidence_sgpr);
-  ASSERT_TRUE(assignment.indirect_pc_sgpr);
-  ASSERT_TRUE(assignment.indirect_scc_sgpr);
+  ASSERT_TRUE(assignment.router_jump);
   ASSERT_TRUE(assignment.router_call);
-  EXPECT_EQ(assignment.router_call->dispatch_key_sgpr, *assignment.indirect_scc_sgpr);
-  EXPECT_EQ(assignment.router_call->call_return_sgpr, *assignment.indirect_pc_sgpr);
+  EXPECT_EQ(assignment.router_call->dispatch_key_sgpr, assignment.router_jump->scc_save_sgpr);
+  EXPECT_EQ(assignment.router_call->call_return_sgpr, assignment.router_jump->pc_sgpr);
   const auto overlaps_dynamic_stack = [](uint16_t base, uint16_t width) {
     return base < 34u && 32u < static_cast<uint32_t>(base) + width;
   };
   EXPECT_FALSE(
       overlaps_dynamic_stack(assignment.exec_save_sgpr, kConSanMoiInlineExecSaveSgprCount));
-  EXPECT_FALSE(overlaps_dynamic_stack(*assignment.indirect_pc_sgpr, 2u));
-  EXPECT_FALSE(overlaps_dynamic_stack(*assignment.indirect_scc_sgpr, 1u));
+  EXPECT_FALSE(overlaps_dynamic_stack(assignment.router_jump->pc_sgpr, 2u));
+  EXPECT_FALSE(overlaps_dynamic_stack(assignment.router_jump->scc_save_sgpr, 1u));
 
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
@@ -7943,7 +7926,7 @@ TEST(ConSanMoi, Cdna4InlineSpillsMixedVgprSourcesThroughDynamicStackFrames) {
   const std::vector<uint32_t> access_cave =
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
   EXPECT_NE(
-      std::ranges::find(access_cave, build_s_mov_b32(*assignment.indirect_pc_sgpr,
+      std::ranges::find(access_cave, build_s_mov_b32(assignment.router_jump->pc_sgpr,
                                                      /*frame base=*/33u, ROCJITSU_CODE_ARCH_CDNA4)),
       access_cave.end());
   const uint32_t scalar_slot = access->spilled_vgpr_count * sizeof(uint32_t);

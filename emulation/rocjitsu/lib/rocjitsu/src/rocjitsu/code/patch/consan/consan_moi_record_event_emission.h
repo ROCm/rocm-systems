@@ -35,7 +35,7 @@ struct MoiRecordEventEmissionPlan {
   consan_detail::MoiSpecialStateSgprs special_state;
   consan_moi_detail::ConSanMoiReportDispatchIdSource dispatch_id_sources;
   std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
-  std::optional<MoiIndirectJumpSgprs> indirect_jump;
+  std::optional<ConSanMoiIndirectJumpSgprs> indirect_jump;
   uint16_t required_sgpr_count = 0;
 };
 
@@ -44,7 +44,7 @@ moi_special_state_sgprs(const MoiRecordEventEmissionPlan &plan) {
   return plan.special_state;
 }
 
-[[nodiscard]] inline std::optional<MoiIndirectJumpSgprs>
+[[nodiscard]] inline std::optional<ConSanMoiIndirectJumpSgprs>
 moi_indirect_jump_sgprs(const MoiRecordEventEmissionPlan &plan) {
   return plan.indirect_jump;
 }

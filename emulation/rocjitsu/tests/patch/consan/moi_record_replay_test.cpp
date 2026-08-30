@@ -1231,6 +1231,7 @@ TEST(ConSanMoi, Gfx1100RecordReplayRouteKeyDoesNotAliasPersistentEpoch) {
   ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u);
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
+  ASSERT_TRUE(assignment.router_jump);
   ASSERT_TRUE(assignment.router_call);
 
   const uint16_t persistent_begin = *test_moi_persistent_sgpr_state(result).owner;
@@ -1242,8 +1243,8 @@ TEST(ConSanMoi, Gfx1100RecordReplayRouteKeyDoesNotAliasPersistentEpoch) {
   EXPECT_FALSE(persistent_overlaps(assignment.exec_save_sgpr, 4u));
   EXPECT_FALSE(persistent_overlaps(assignment.owner_sgpr));
   EXPECT_FALSE(persistent_overlaps(assignment.dispatch_id_sgpr, 2u));
-  EXPECT_FALSE(persistent_overlaps(assignment.indirect_pc_sgpr, 2u));
-  EXPECT_FALSE(persistent_overlaps(assignment.indirect_scc_sgpr));
+  EXPECT_FALSE(persistent_overlaps(assignment.router_jump->pc_sgpr, 2u));
+  EXPECT_FALSE(persistent_overlaps(assignment.router_jump->scc_save_sgpr));
   EXPECT_FALSE(persistent_overlaps(assignment.router_call->dispatch_key_sgpr));
   EXPECT_FALSE(persistent_overlaps(assignment.router_call->call_return_sgpr, 2u));
   EXPECT_FALSE(persistent_overlaps(assignment.visible_evidence_sgpr));
@@ -5433,8 +5434,7 @@ TEST(ConSanMoi, Gfx1250SparseRecordReplaySpillSkipsUninitializedScalarWindow) {
       test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
   ASSERT_FALSE(assignment.branch_only_scalar_spill);
-  ASSERT_TRUE(assignment.indirect_pc_sgpr);
-  ASSERT_TRUE(assignment.indirect_scc_sgpr);
+  ASSERT_TRUE(assignment.router_jump);
   ASSERT_TRUE(assignment.router_call);
 
   const auto prologue = std::ranges::find(
@@ -5496,8 +5496,7 @@ TEST(ConSanMoi, SparseRecordReplaySpillSkipsUninitializedEntryHashWindowAcrossTa
     options.moi_init_owner_epoch = true;
     options.moi_exec_save_sgpr = kExecSaveSgpr;
     options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
-    options.moi_router_indirect_pc_sgpr = 70u;
-    options.moi_router_indirect_scc_sgpr = 72u;
+    options.moi_router_jump = ConSanMoiIndirectJumpSgprs{70u, 72u};
     options.moi_dispatch_id_sgpr = 60u;
     options.moi_persistent_sgprs.record_replay_workgroup = {.x = 50u, .y = 51u, .z = 52u};
     options.moi_runtime_sample_stride = 65'536u;
@@ -5652,8 +5651,7 @@ TEST(ConSanMoi, RecordReplaySharedHelperUsesOneSpillBackedWindowAcrossOwners) {
     ASSERT_TRUE(assignment);
     EXPECT_TRUE(assignment->spill_backed);
     EXPECT_TRUE(assignment->branch_only_scalar_spill);
-    EXPECT_TRUE(assignment->indirect_pc_sgpr);
-    EXPECT_TRUE(assignment->indirect_scc_sgpr);
+    EXPECT_TRUE(assignment->router_jump);
     if (common_exec_save_sgpr)
       EXPECT_EQ(assignment->exec_save_sgpr, *common_exec_save_sgpr);
     else
@@ -5724,11 +5722,12 @@ TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnRdna) {
       const ConSanMoiTransientSgprAssignment assignment =
           test_moi_transient_sgpr_assignments(result).front();
       EXPECT_TRUE(assignment.spill_backed);
-      EXPECT_EQ(assignment.indirect_pc_sgpr, 0u);
-      EXPECT_EQ(assignment.indirect_scc_sgpr, 4u);
+      ASSERT_TRUE(assignment.router_jump);
+      EXPECT_EQ(assignment.router_jump->pc_sgpr, 0u);
+      EXPECT_EQ(assignment.router_jump->scc_save_sgpr, 4u);
       ASSERT_TRUE(assignment.router_call);
       EXPECT_EQ(assignment.router_call->dispatch_key_sgpr, 6u);
-      EXPECT_EQ(assignment.router_call->call_return_sgpr, *assignment.indirect_pc_sgpr);
+      EXPECT_EQ(assignment.router_call->call_return_sgpr, assignment.router_jump->pc_sgpr);
       EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                    &ConSanPatchInfo::kind),
                 access_count);
@@ -6080,14 +6079,13 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(assignment.indirect_pc_sgpr);
-  ASSERT_TRUE(assignment.indirect_scc_sgpr);
+  ASSERT_TRUE(assignment.router_jump);
   ASSERT_TRUE(assignment.router_call);
   const auto avoids_physical_vcc = [](uint16_t base, uint16_t width) {
     return static_cast<uint32_t>(base) + width <= 98u || base >= 100u;
   };
-  EXPECT_TRUE(avoids_physical_vcc(*assignment.indirect_pc_sgpr, 2u));
-  EXPECT_TRUE(avoids_physical_vcc(*assignment.indirect_scc_sgpr, 1u));
+  EXPECT_TRUE(avoids_physical_vcc(assignment.router_jump->pc_sgpr, 2u));
+  EXPECT_TRUE(avoids_physical_vcc(assignment.router_jump->scc_save_sgpr, 1u));
   EXPECT_TRUE(avoids_physical_vcc(assignment.router_call->dispatch_key_sgpr, 1u));
 
   for (ConSanPatchKind kind : {ConSanPatchKind::TrampolineMoiAccessRecordStore,
@@ -6146,7 +6144,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
     expect_lane_backed_scalar_spill(dense_result, patched, *patch, dense_assignment.exec_save_sgpr,
                                     kArch);
   }
-  ASSERT_TRUE(dense_assignment.indirect_pc_sgpr);
+  ASSERT_TRUE(dense_assignment.router_jump);
   const auto indirect_barrier = std::ranges::find_if(dense_result.patches, [&](const auto &patch) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiBarrierRecord)
       return false;
@@ -6169,7 +6167,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
   ASSERT_GE(island_words.size(), 2u);
   // The local relay runs before the scalar spill body. It must use the
   // descriptor-local dead PC pair, not the unrelated root fallback.
-  EXPECT_EQ(island_words[1], build_s_getpc_b64(*dense_assignment.indirect_pc_sgpr, kArch));
+  EXPECT_EQ(island_words[1], build_s_getpc_b64(dense_assignment.router_jump->pc_sgpr, kArch));
 }
 
 TEST(ConSanMoi, RecordReplayUsesBranchOnlySpillWithoutDeadRouterScalars) {
@@ -6205,8 +6203,7 @@ TEST(ConSanMoi, RecordReplayUsesBranchOnlySpillWithoutDeadRouterScalars) {
         test_moi_transient_sgpr_assignments(result).front();
     EXPECT_TRUE(assignment.spill_backed);
     EXPECT_TRUE(assignment.branch_only_scalar_spill);
-    EXPECT_TRUE(assignment.indirect_pc_sgpr);
-    EXPECT_TRUE(assignment.indirect_scc_sgpr);
+    EXPECT_TRUE(assignment.router_jump);
     EXPECT_FALSE(assignment.router_call);
     EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                  &ConSanPatchInfo::kind),
@@ -6414,9 +6411,9 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostPreservesBarrierAndCapturedCallK
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(assignment.indirect_pc_sgpr);
+  ASSERT_TRUE(assignment.router_jump);
   ASSERT_TRUE(assignment.router_call);
-  ASSERT_EQ(assignment.router_call->call_return_sgpr, *assignment.indirect_pc_sgpr);
+  ASSERT_EQ(assignment.router_call->call_return_sgpr, assignment.router_jump->pc_sgpr);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -6440,10 +6437,10 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostPreservesBarrierAndCapturedCallK
   const std::vector<uint32_t> dispatcher_words =
       text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
   const auto captured_key_compare =
-      build_s_cmp_eq_u32(assignment.router_call->dispatch_key_sgpr, *assignment.indirect_pc_sgpr,
+      build_s_cmp_eq_u32(assignment.router_call->dispatch_key_sgpr, assignment.router_jump->pc_sgpr,
                          ROCJITSU_CODE_ARCH_CDNA5);
   const auto tautological_pc_compare = build_s_cmp_eq_u32(
-      *assignment.indirect_pc_sgpr, *assignment.indirect_pc_sgpr, ROCJITSU_CODE_ARCH_CDNA5);
+      assignment.router_jump->pc_sgpr, assignment.router_jump->pc_sgpr, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(captured_key_compare);
   ASSERT_TRUE(tautological_pc_compare);
   EXPECT_GT(std::ranges::count(dispatcher_words, *captured_key_compare), 0u);
@@ -6492,9 +6489,9 @@ TEST(ConSanMoi, Gfx1250RecordReplaySpillBackedDenseBarrierUsesCapturedEntryKey) 
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(assignment.indirect_pc_sgpr);
+  ASSERT_TRUE(assignment.router_jump);
   ASSERT_TRUE(assignment.router_call);
-  ASSERT_EQ(assignment.router_call->call_return_sgpr, *assignment.indirect_pc_sgpr);
+  ASSERT_EQ(assignment.router_call->call_return_sgpr, assignment.router_jump->pc_sgpr);
   const auto first_barrier = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(first_barrier, result.patches.end()) << testing::PrintToString(result.warnings);
@@ -6512,7 +6509,7 @@ TEST(ConSanMoi, Gfx1250RecordReplaySpillBackedDenseBarrierUsesCapturedEntryKey) 
   const auto captured_key_compare =
       build_s_cmp_eq_u32(assignment.router_call->dispatch_key_sgpr, /*literal=*/255u, kArch);
   const auto tautological_pc_compare =
-      build_s_cmp_eq_u32(*assignment.indirect_pc_sgpr, *assignment.indirect_pc_sgpr, kArch);
+      build_s_cmp_eq_u32(assignment.router_jump->pc_sgpr, assignment.router_jump->pc_sgpr, kArch);
   ASSERT_TRUE(captured_key_compare);
   ASSERT_TRUE(tautological_pc_compare);
   EXPECT_GT(std::ranges::count(dispatcher_words, *captured_key_compare), 0u);
@@ -6638,8 +6635,9 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostAvoidsTransientSgprLiveRange) {
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
-  EXPECT_EQ(assignment.indirect_pc_sgpr, kTransientWindow[0]);
-  EXPECT_EQ(assignment.indirect_scc_sgpr, kTransientWindow[2]);
+  ASSERT_TRUE(assignment.router_jump);
+  EXPECT_EQ(assignment.router_jump->pc_sgpr, kTransientWindow[0]);
+  EXPECT_EQ(assignment.router_jump->scc_save_sgpr, kTransientWindow[2]);
   ASSERT_TRUE(assignment.router_call);
   EXPECT_EQ(assignment.router_call->dispatch_key_sgpr, kTransientWindow[3]);
   bool saw_relocated_host = false;
@@ -8702,8 +8700,7 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesWithoutDeadTransientScalarRegisters) {
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
   EXPECT_TRUE(assignment.branch_only_scalar_spill);
-  EXPECT_TRUE(assignment.indirect_pc_sgpr);
-  EXPECT_TRUE(assignment.indirect_scc_sgpr);
+  EXPECT_TRUE(assignment.router_jump);
   EXPECT_FALSE(assignment.dispatch_id_sgpr);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
@@ -8751,8 +8748,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayRoutesWithoutDeadTransientScalarRegisters) {
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
   EXPECT_TRUE(assignment.branch_only_scalar_spill);
-  EXPECT_TRUE(assignment.indirect_pc_sgpr);
-  EXPECT_TRUE(assignment.indirect_scc_sgpr);
+  EXPECT_TRUE(assignment.router_jump);
   EXPECT_FALSE(assignment.dispatch_id_sgpr);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
@@ -9458,8 +9454,7 @@ TEST(ConSanMoi, Cdna4RecordReplayBorrowsEntryTupleToHalveFarRelayDemand) {
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.branch_only_scalar_spill);
-  EXPECT_TRUE(assignment.indirect_pc_sgpr);
-  EXPECT_TRUE(assignment.indirect_scc_sgpr);
+  EXPECT_TRUE(assignment.router_jump);
   ASSERT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             1u)
@@ -9730,8 +9725,7 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesBarrierWithoutDeadTransientScalarRegister
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
   EXPECT_TRUE(assignment.branch_only_scalar_spill);
-  EXPECT_TRUE(assignment.indirect_pc_sgpr);
-  EXPECT_TRUE(assignment.indirect_scc_sgpr);
+  EXPECT_TRUE(assignment.router_jump);
 
   const auto barrier_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);

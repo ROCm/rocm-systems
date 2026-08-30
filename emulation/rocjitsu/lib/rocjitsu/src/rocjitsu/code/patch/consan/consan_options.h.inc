@@ -298,6 +298,16 @@ struct ConSanMoiPrologueScratchVgprAssignment {
   auto operator<=>(const ConSanMoiPrologueScratchVgprAssignment &) const = default;
 };
 
+/// Scalar PC pair and saved-SCC register used by one preserving indirect jump.
+/// The jump sequence cannot be emitted safely with only one of these pieces,
+/// so placement publishes them as one allocation.
+struct ConSanMoiIndirectJumpSgprs {
+  uint16_t pc_sgpr = 0;
+  uint16_t scc_save_sgpr = 0;
+
+  auto operator<=>(const ConSanMoiIndirectJumpSgprs &) const = default;
+};
+
 /// Scalar key and return pair retained across one generated router call.
 /// These registers are selected and consumed together; representing them as
 /// one allocation prevents accepted operating points from carrying a partial
@@ -323,8 +333,7 @@ struct ConSanMoiTransientSgprAssignment {
   /// and records zero generation rather than clobbering guest scalar state.
   std::optional<uint16_t> dispatch_id_sgpr;
   bool spill_backed = false;
-  std::optional<uint16_t> indirect_pc_sgpr;
-  std::optional<uint16_t> indirect_scc_sgpr;
+  std::optional<ConSanMoiIndirectJumpSgprs> router_jump;
   std::optional<ConSanMoiRouterCallSgprs> router_call;
   std::optional<uint16_t> visible_evidence_sgpr;
   /// The complete scalar window is preserved in private memory and control
@@ -860,8 +869,7 @@ struct ConSanMoiOperatingPoint {
   /// cannot use the mode's fixed register layout. The indirect jump, dispatch
   /// key, and call-return pair are one shared routing mechanism used by Inline,
   /// Record/Replay, and Sampled rather than separate mode-owned state.
-  std::optional<uint16_t> moi_router_indirect_pc_sgpr;
-  std::optional<uint16_t> moi_router_indirect_scc_sgpr;
+  std::optional<ConSanMoiIndirectJumpSgprs> moi_router_jump;
   std::optional<ConSanMoiRouterCallSgprs> moi_router_call;
   /// Inline-only visible evidence temporary within that shared router ABI.
   std::optional<uint16_t> moi_inline_visible_evidence_sgpr;
@@ -908,8 +916,8 @@ struct ConSanMoiOperatingPoint {
   /// operating point. EXEC, owner, dispatch, and persistent state have
   /// separate lifetime rules and are intentionally not part of this view.
   template <typename Visitor> void for_each_auxiliary_sgpr_range(Visitor &&visit) const {
-    visit(moi_router_indirect_pc_sgpr, 2u);
-    visit(moi_router_indirect_scc_sgpr, 1u);
+    visit(moi_router_jump ? std::optional{moi_router_jump->pc_sgpr} : std::nullopt, 2u);
+    visit(moi_router_jump ? std::optional{moi_router_jump->scc_save_sgpr} : std::nullopt, 1u);
     visit(moi_router_call ? std::optional{moi_router_call->dispatch_key_sgpr} : std::nullopt, 1u);
     visit(moi_router_call ? std::optional{moi_router_call->call_return_sgpr} : std::nullopt, 2u);
     visit(moi_inline_visible_evidence_sgpr, 1u);

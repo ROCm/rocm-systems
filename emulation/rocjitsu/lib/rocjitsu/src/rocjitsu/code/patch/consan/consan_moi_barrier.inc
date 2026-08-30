@@ -1591,7 +1591,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         result.errors.emplace_back("ConSan MOI reused barrier relay has no compatible scalar ABI");
         return ReusedDenseRelayResult::Failed;
       }
-      const MoiIndirectJumpSgprs indirect_state = scalar_abi->indirect_jump;
+      const ConSanMoiIndirectJumpSgprs indirect_state = scalar_abi->indirect_jump;
       const uint16_t call_return_sgpr = *scalar_abi->call_return_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
@@ -2727,7 +2727,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       info.branch_only_return_relay_offsets = branch_only_route->return_relay_offsets;
     }
     if (staged.borrowed_entry) {
-      const MoiIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(emission);
+      const ConSanMoiIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(emission);
       info.branch_only_borrowed_indirect_entry = true;
       info.indirect_pc_sgpr = jump_sgprs.pc_sgpr;
       info.indirect_saved_scc_sgpr = jump_sgprs.scc_save_sgpr;

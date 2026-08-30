@@ -1189,7 +1189,7 @@ void try_apply_first_light_access_record_patch(
       note_moi_replay_access_patch_info(info, planned_patch);
       info.branch_only_borrowed_indirect_entry = planned_patch.borrowed_entry.has_value();
       if (planned_patch.borrowed_entry) {
-        const MoiIndirectJumpSgprs jump_sgprs =
+        const ConSanMoiIndirectJumpSgprs jump_sgprs =
             *moi_indirect_jump_sgprs(candidate_options, candidate_options);
         info.indirect_pc_sgpr = jump_sgprs.pc_sgpr;
         info.indirect_saved_scc_sgpr = jump_sgprs.scc_save_sgpr;

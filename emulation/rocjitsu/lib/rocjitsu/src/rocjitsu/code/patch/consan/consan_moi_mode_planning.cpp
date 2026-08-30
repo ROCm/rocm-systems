@@ -97,16 +97,13 @@ make_moi_scalar_abi_plan(const ConSanMoiOperatingPoint &point,
                         .indirect_jump = std::nullopt,
                         .access_router_uses_dense_abi = access_router_uses_dense_abi};
   if (point.has_moi_scalar_spill()) {
-    if (point.moi_router_indirect_pc_sgpr && point.moi_router_indirect_scc_sgpr) {
-      plan.indirect_jump =
-          MoiIndirectJumpSgprs{.pc_sgpr = *point.moi_router_indirect_pc_sgpr,
-                               .scc_save_sgpr = *point.moi_router_indirect_scc_sgpr};
-    }
+    if (point.moi_router_jump)
+      plan.indirect_jump = point.moi_router_jump;
     return plan;
   }
   if (!point.moi_exec_save_sgpr || !special_state)
     return plan;
-  plan.indirect_jump = MoiIndirectJumpSgprs{
+  plan.indirect_jump = ConSanMoiIndirectJumpSgprs{
       .pc_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + fixed_indirect_pc_offset),
       .scc_save_sgpr = special_state->scc_save_sgpr,
   };
@@ -128,8 +125,8 @@ moi_special_state_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPo
   return plan_moi_scalar_abi(request, point).special_state;
 }
 
-std::optional<MoiIndirectJumpSgprs> moi_indirect_jump_sgprs(const ConSanRequest &request,
-                                                            const ConSanMoiOperatingPoint &point) {
+std::optional<ConSanMoiIndirectJumpSgprs>
+moi_indirect_jump_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point) {
   return plan_moi_scalar_abi(request, point).indirect_jump;
 }
 

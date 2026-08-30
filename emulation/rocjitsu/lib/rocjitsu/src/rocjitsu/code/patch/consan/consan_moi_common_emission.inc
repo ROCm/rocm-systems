@@ -59,7 +59,7 @@
   } else {
     const bool spill_backed = point.has_compact_moi_scalar_spill();
     if (!point.moi_exec_save_sgpr ||
-        (spill_backed && (!point.moi_router_indirect_pc_sgpr || !point.moi_router_call))) {
+        (spill_backed && (!point.moi_router_jump || !point.moi_router_call))) {
       return fail("lost its recording dense scalar ABI");
     }
     const uint16_t base = *point.moi_exec_save_sgpr;
@@ -67,7 +67,7 @@
         moi_special_state_sgprs(request, point);
     if (!special_state)
       return fail("lost its dense special-state scalar ABI");
-    pc_sgpr = spill_backed ? *point.moi_router_indirect_pc_sgpr : base;
+    pc_sgpr = spill_backed ? point.moi_router_jump->pc_sgpr : base;
     scc_save_sgpr = special_state->scc_save_sgpr;
     key_sgpr =
         spill_backed ? point.moi_router_call->dispatch_key_sgpr : static_cast<uint16_t>(base + 5u);

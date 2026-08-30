@@ -251,14 +251,14 @@ MoiScalarAbiPlan plan_sampled_scalar_abi(const ConSanRequest &request,
                                          const ConSanMoiOperatingPoint &point) {
   const auto publication = moi_sampled_publication_state_sgprs(request, point);
   const std::optional<consan_detail::MoiSpecialStateSgprs> special_state =
-      publication ? std::optional{consan_detail::MoiSpecialStateSgprs{
-                        .vcc_save_sgpr = publication->selection_vcc_save_sgpr,
-                        .scc_save_sgpr = point.has_compact_moi_scalar_spill() &&
-                                                 point.moi_router_indirect_scc_sgpr
-                                             ? *point.moi_router_indirect_scc_sgpr
-                                             : publication->publication_exec_save_sgpr,
-                    }}
-                  : std::nullopt;
+      publication
+          ? std::optional{consan_detail::MoiSpecialStateSgprs{
+                .vcc_save_sgpr = publication->selection_vcc_save_sgpr,
+                .scc_save_sgpr = point.has_compact_moi_scalar_spill() && point.moi_router_jump
+                                     ? point.moi_router_jump->scc_save_sgpr
+                                     : publication->publication_exec_save_sgpr,
+            }}
+          : std::nullopt;
   return make_moi_scalar_abi_plan(point, special_state, 0u, false);
 }
 

@@ -942,8 +942,7 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
   options.moi_owner_vgpr = 40u;
   options.moi_epoch_vgpr = 41u;
   options.moi_exec_save_sgpr = 4u;
-  options.moi_router_indirect_pc_sgpr = kIndirectPcSgpr;
-  options.moi_router_indirect_scc_sgpr = kKeyAndSccSgpr;
+  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr};
   options.moi_router_call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr};
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
@@ -953,8 +952,7 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
       .owner_sgpr = std::nullopt,
       .dispatch_id_sgpr = std::nullopt,
       .spill_backed = true,
-      .indirect_pc_sgpr = kIndirectPcSgpr,
-      .indirect_scc_sgpr = kKeyAndSccSgpr,
+      .router_jump = ConSanMoiIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr},
       .router_call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr},
       .visible_evidence_sgpr = std::nullopt,
       .branch_only_scalar_spill = false,
@@ -4851,9 +4849,8 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   atomic_only_options.moi_exec_save_sgpr = 4u;
   atomic_only_options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   atomic_only_options.moi_inline_visible_evidence_sgpr = 40u;
-  atomic_only_options.moi_router_indirect_pc_sgpr = 42u;
+  atomic_only_options.moi_router_jump = ConSanMoiIndirectJumpSgprs{42u, 46u};
   atomic_only_options.moi_router_call = ConSanMoiRouterCallSgprs{41u, 44u};
-  atomic_only_options.moi_router_indirect_scc_sgpr = 46u;
   const ConSanTransformArtifacts atomic_only = test_lower_consan(
       make_rdna4_lds_code_object(atomic_only_words, "inline_atomic_only_scalar_spill"),
       atomic_only_options);
@@ -4893,9 +4890,8 @@ TEST(ConSanMoi, InlineAtomicScalarSpillRejectsAliasedGuestScalarAddress) {
   options.moi_exec_save_sgpr = 4u;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 40u;
-  options.moi_router_indirect_pc_sgpr = 42u;
+  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{42u, 46u};
   options.moi_router_call = ConSanMoiRouterCallSgprs{41u, 44u};
-  options.moi_router_indirect_scc_sgpr = 46u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 2u;

@@ -25,8 +25,8 @@ using consan_moi_detail::moi_bound_dispatch_id_sources;
                std::ranges::find(allocation.owner_transient_sgprs, descriptor_offset,
                                  &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
            return assignment != allocation.owner_transient_sgprs.end() &&
-                  assignment->branch_only_scalar_spill && assignment->indirect_pc_sgpr &&
-                  assignment->indirect_scc_sgpr && !assignment->router_call;
+                  assignment->branch_only_scalar_spill && assignment->router_jump &&
+                  !assignment->router_call;
          });
 }
 

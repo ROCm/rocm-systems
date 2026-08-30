@@ -130,7 +130,7 @@ enum class MoiDenseAccessRouteAbi {
 };
 
 struct MoiInlineDenseRouterScalarAbi {
-  MoiIndirectJumpSgprs indirect_jump;
+  ConSanMoiIndirectJumpSgprs indirect_jump;
   uint16_t dispatch_key_sgpr = 0;
   std::optional<uint16_t> call_return_sgpr;
 };

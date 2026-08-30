@@ -140,8 +140,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .automatic_moi_owner_sgpr = true,
       .automatic_moi_dispatch_id_sgprs = true,
       .automatic_moi_private_dispatch_id = true,
-      .moi_router_indirect_pc_sgpr = 2u,
-      .moi_router_indirect_scc_sgpr = 7u,
+      .moi_router_jump = ConSanMoiIndirectJumpSgprs{2u, 7u},
       .moi_router_call = ConSanMoiRouterCallSgprs{12u, 14u},
       .moi_inline_visible_evidence_sgpr = 8u,
       .moi_inline_branch_only_scalar_spill = true,
@@ -187,8 +186,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   expect_field_participates([](auto &value) { value.automatic_moi_owner_sgpr = false; });
   expect_field_participates([](auto &value) { value.automatic_moi_dispatch_id_sgprs = false; });
   expect_field_participates([](auto &value) { value.automatic_moi_private_dispatch_id = false; });
-  expect_field_participates([](auto &value) { value.moi_router_indirect_pc_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.moi_router_indirect_scc_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_router_jump.reset(); });
   expect_field_participates([](auto &value) { value.moi_inline_visible_evidence_sgpr.reset(); });
   expect_field_participates([](auto &value) { value.moi_inline_branch_only_scalar_spill = false; });
   expect_field_participates(

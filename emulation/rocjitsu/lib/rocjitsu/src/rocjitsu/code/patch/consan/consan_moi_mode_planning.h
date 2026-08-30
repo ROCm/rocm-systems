@@ -151,7 +151,7 @@ struct MoiDispatchIdentityPlan {
 /// publication-derived special-state registers.
 struct MoiScalarAbiPlan {
   std::optional<consan_detail::MoiSpecialStateSgprs> special_state;
-  std::optional<MoiIndirectJumpSgprs> indirect_jump;
+  std::optional<ConSanMoiIndirectJumpSgprs> indirect_jump;
   bool access_router_uses_dense_abi = false;
 };
 
