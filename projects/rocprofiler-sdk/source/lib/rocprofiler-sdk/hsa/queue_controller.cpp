@@ -760,30 +760,6 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
                     else if(count > 0)
                         --count;
                 }
-            });
-
-            any_enabled = state.any();
-        });
-
-        _serialized_enabled.store(any_enabled);
-
-        if(transitioned.empty()) return;
-
-        _profiler_serializer.wlock([&](auto& m) {
-            for(const auto& [agent_id, now_enabled] : transitioned)
-            {
-                auto itr = m.find(agent_id);
-                if(itr == m.end() || !itr->second) continue;
-
-                auto queues = hsa_barrier::queue_map_ptr_t{};
-                if(auto it = pd_map.find(agent_id); it != pd_map.end()) queues = it->second;
-
-                itr->second->wlock([&](auto& serializer) {
-                    if(now_enabled)
-                        serializer.enable(queues);
-                    else
-                        serializer.disable(queues);
-                });
             }
 
             _profiler_serializer.wlock([&](auto& serializers) {
