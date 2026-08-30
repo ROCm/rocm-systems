@@ -45,6 +45,7 @@
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -157,6 +158,9 @@ public:
     void resource_init();
     void resource_deinit();
 
+    bool collects_on(rocprofiler_agent_id_t agent_id) const;
+    bool intersects(const DispatchThreadTracer& rhs) const;
+
     void add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack)
     {
         auto lk       = std::unique_lock{agents_map_mut};
@@ -174,13 +178,15 @@ public:
                                  const hsa::packet_data_t&        packet_data);
     const auto& get_agents() const { return agents; }
 
+    std::unordered_set<rocprofiler_agent_id_t> configured_agents() const;
+
 private:
     std::unordered_map<hsa_agent_t, std::unique_ptr<ThreadTracerAgent>>     agents{};
     std::unordered_map<rocprofiler_agent_id_t, thread_trace_parameter_pack> params{};
 
-    std::shared_mutex agents_map_mut{};
-    std::atomic<int>  post_move_data{0};
-    std::atomic<bool> enabled{false};
+    mutable std::shared_mutex agents_map_mut{};
+    std::atomic<int>          post_move_data{0};
+    std::atomic<bool>         enabled{false};
 };
 
 class DeviceThreadTracer

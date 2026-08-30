@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -70,10 +71,6 @@ struct cbdata_t
     const rocprofiler_user_data_t*                  userdata   = nullptr;
     uint64_t                                        next_chunk = 0;
 };
-
-// Keeps track of a single client registering for serialized thread trace
-// operations so we can gate new traces while one is active.
-common::Synchronized<std::optional<int64_t>> client;
 
 // True once the HSA runtime is registered. Gates start_context() so pre-init
 // start requests are deferred and replayed by start_active_contexts().
@@ -411,16 +408,10 @@ DispatchThreadTracer::resource_init()
 void
 DispatchThreadTracer::resource_deinit()
 {
-    enabled.store(false, std::memory_order_release);
-
-    if(auto* controller = hsa::get_queue_controller())
+    if(enabled.exchange(false, std::memory_order_acq_rel))
     {
-        client.wlock([&](auto& client_id) {
-            if(!client_id) return;
-            controller->remove_callback(*client_id);
-            client_id = std::nullopt;
-        });
-        controller->disable_serialization();
+        if(auto* controller = hsa::get_queue_controller())
+            controller->disable_serialization(configured_agents());
     }
 
     ROCP_TRACE << "Clearing agents";
@@ -486,59 +477,61 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t& aql,
 
     for(auto& aql_pkt : aql)
     {
+        if(aql_pkt.second != hsa::queue_hooks::THREAD_TRACE_CLIENT_ID) continue;
+
         auto* pkt = dynamic_cast<hsa::TraceControlAQLPacket*>(aql_pkt.first.get());
         if(!pkt) continue;
 
         std::shared_lock<std::shared_mutex> lk(agents_map_mut);
-        post_move_data.fetch_sub(1);
+        auto it = agents.find(pkt->GetAgent());
+        if(it == agents.end() || it->second == nullptr) continue;
 
+        post_move_data.fetch_sub(1);
         if(pkt->after_krn_pkt.empty()) continue;
 
-        auto it = agents.find(pkt->GetAgent());
-        if(it != agents.end() && it->second != nullptr)
-            it->second->iterate_data(pkt->GetHandle(), packet_data.user_data);
+        it->second->iterate_data(pkt->GetHandle(), packet_data.user_data);
     }
+}
+
+std::unordered_set<rocprofiler_agent_id_t>
+DispatchThreadTracer::configured_agents() const
+{
+    auto                                result = std::unordered_set<rocprofiler_agent_id_t>{};
+    std::shared_lock<std::shared_mutex> lk(agents_map_mut);
+    for(const auto& [agent_id, _] : params)
+        result.insert(agent_id);
+    return result;
+}
+
+bool
+DispatchThreadTracer::collects_on(rocprofiler_agent_id_t agent_id) const
+{
+    std::shared_lock<std::shared_mutex> lk(agents_map_mut);
+    return params.count(agent_id) > 0;
+}
+
+bool
+DispatchThreadTracer::intersects(const DispatchThreadTracer& rhs) const
+{
+    std::shared_lock<std::shared_mutex> lk(agents_map_mut);
+    std::shared_lock<std::shared_mutex> lk_rhs(rhs.agents_map_mut);
+    for(const auto& [agent_id, _] : params)
+    {
+        if(rhs.params.count(agent_id) > 0) return true;
+    }
+    return false;
 }
 
 void
 DispatchThreadTracer::start_context()
 {
-    using corr_id_map_t = hsa::queue_info_session_t::external_corr_id_map_t;
-
-    // Only installs queue-controller callbacks (cached and applied to queues as
-    // they are created), so this is safe to call before hsa_init.
-    CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization();
+    // Thread trace no longer registers a per-queue callback with the queue controller; the
+    // HSA write interceptor now calls thread_trace::write_hook / signal_completion_hook
+    // directly (see hsa/queue.cpp). Scope serialization to the agents configured on this
+    // context. An empty set still means every agent.
+    const auto serialization_agents = configured_agents();
     enabled.store(true, std::memory_order_release);
-
-    // Only one thread should be attempting to enable/disable this context
-    client.wlock([&](auto& client_id) {
-        if(client_id) return;
-
-        auto&& _callbacks = hsa::queue_callbacks_t{
-            .batch_packets = []() { return false; },
-            .write_interceptor =
-                [=](const hsa::Queue& q,
-                    const hsa::rocprofiler_packet& /* kern_pkt */,
-                    rocprofiler_kernel_id_t   kernel_id,
-                    rocprofiler_dispatch_id_t dispatch_id,
-                    rocprofiler_user_data_t*  user_data,
-                    const corr_id_map_t& /* extern_corr_ids */,
-                    const context::correlation_id* corr_id) {
-                    return this->pre_kernel_call(q, kernel_id, dispatch_id, user_data, corr_id);
-                },
-            .signal_completion =
-                [=](const hsa::Queue& /* q */,
-                    hsa::rocprofiler_packet /* kern_pkt */,
-                    std::shared_ptr<hsa::queue_info_session_t>& session,
-                    hsa::packet_data_t&                         packet_data,
-                    inst_pkt_t&                                 aql,
-                    kernel_dispatch::profiling_time) {
-                    this->post_kernel_call(aql, *session, packet_data);
-                }};
-
-        client_id = CHECK_NOTNULL(hsa::get_queue_controller())
-                        ->add_callback(std::nullopt, std::move(_callbacks));
-    });
+    CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization(serialization_agents);
 }
 
 void
@@ -548,7 +541,12 @@ DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-funct
     // registered so packets already in the queues can drain through the serializer transition.
     if(!enabled.exchange(false, std::memory_order_acq_rel)) return;
 
-    if(auto* controller = hsa::get_queue_controller()) controller->disable_serialization();
+    hsa::queue_controller_sync();
+
+    auto* controller = hsa::get_queue_controller();
+    if(!controller) return;
+    const auto serialization_agents = configured_agents();
+    controller->disable_serialization(serialization_agents);
 }
 
 DeviceThreadTracer::DeviceThreadTracer()
