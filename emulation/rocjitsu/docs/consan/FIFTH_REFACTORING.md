@@ -391,14 +391,56 @@ work should search for a coherent architecture in which:
 - validation remains genuinely independent without becoming a duplicate
   implementation of construction;
 - adding an engine or target exercises the intended extension axes; and
-- the resulting code is easier to explain, test, change, and ultimately
-  simplify.
+- the resulting code is easier to explain, test, and change while containing
+  materially less production implementation.
 
-Implementation-line reduction remains a likely consequence and a useful
-diagnostic, not a quota. Temporary growth can be justified for regression
-tests, explicit contracts, or a vertical migration that removes a hidden
-dependency. A superficially smaller implementation that weakens validation,
-coverage, diagnostics, or target support is not progress.
+Code-size reduction is a required deliverable of the fifth refactoring, not
+merely an expected side effect. There is still no license to optimize an
+arbitrary line-count quota by weakening validation, coverage, diagnostics,
+tests, target support, or clarity. Within those constraints, however, a design
+that creates more opportunities to consolidate or delete code is preferable to
+one that preserves the same implementation volume behind cleaner filenames.
+
+### 10.1 Create deletion opportunities and reap them
+
+The refactoring has a two-part code-size contract:
+
+1. **Create opportunities.** Redesign boundaries, representations, mode/target
+   composition, and ownership so duplicated authorities, parallel mechanisms,
+   compatibility paths, special cases, and legacy state machines become
+   unnecessary.
+2. **Reap opportunities.** Once a replacement is validated, consolidate every
+   applicable consumer onto it and delete the superseded production
+   implementation. An opportunity recorded but left behind as future cleanup
+   does not satisfy the contract.
+
+This makes deletion part of each vertical migration rather than a final sweep.
+A completed slice should normally leave one authority, remove its displaced
+adapters and implementations, pass its focused tests, and record the net
+production-code change. Temporary coexistence is acceptable only while a
+reviewable migration crosses a real dependency boundary; it must have a named
+owner and a near-term removal checkpoint.
+
+Code sharing means one implementation behind an honest contract. Moving
+equivalent code into several mode or architecture packages, wrapping every old
+path in a new facade, or replacing duplication with one giant switch-driven
+implementation does not realize the intended benefit. The design should seek
+representations and operations that allow whole branches, fallback protocols,
+patch-shape joins, option plumbing, validators, and compatibility conversions
+to disappear.
+
+The exact post-fourth production baseline and recurring accounting method will
+be recorded before implementation starts. Measurements must exclude tests,
+generated code, documentation, comments, and blank lines so additional
+regression coverage cannot obscure the production result. The final numerical
+target remains to be chosen with the rest of the convergence criteria, but the
+absence of an arbitrary quota cannot be used to declare success with no
+material net reduction.
+
+The operational no-file-deletion rule does not weaken this requirement. Legacy
+implementation must actually be removed. If a filename must remain as an inert
+comment-only tombstone, it contains no production implementation and is
+accounted as deleted code rather than retained compatibility.
 
 ## 11. Design freedom and discovery
 
@@ -710,16 +752,24 @@ It is expected to grow substantially.
 - Which extension tests can demonstrate genuine additive engine and target
   behavior?
 
-### 12.9 Complexity and implementation size
+### 12.9 Code deletion, sharing, and implementation size
 
 - Which code volume represents necessary domain complexity, and which exists
   because authority, state, or variability is duplicated?
+- For each proposed design change, which existing implementations, adapters,
+  branches, fields, or compatibility paths will become deletable?
+- Does the migration plan include the consumer convergence and deletion step,
+  or does it merely introduce a new abstraction beside the legacy path?
 - After every major boundary change, how do implementation size, dependency
   edges, broad-type consumers, switch concentration, and test coverage change?
 - Does a clearer design make formerly indispensable validation, fallback, or
   mode-specific code collapse into shared declarative forms?
 - Are there larger representational changes that would remove entire classes
   of code rather than merely redistribute them?
+- Which recurring patterns should be consolidated into one honest mechanism,
+  and how will the old copies be proven unused and removed?
+- What temporary production growth has each migration introduced, when is it
+  paid back, and what is the resulting net production-code reduction?
 
 ## 13. Operating invariants
 
@@ -737,7 +787,8 @@ already carry forward:
 4. Behavior, coverage, target support, validation strength, and stable
    diagnostics are not traded away to simplify structure.
 5. Temporary compatibility layers must have named ownership and an exit
-   condition; the refactoring must not leave parallel long-term authorities.
+   condition at a near-term convergence checkpoint; the refactoring must not
+   leave parallel long-term authorities.
 6. Measurements are evidence, not substitutes for reading the code or
    understanding semantic ownership.
 7. The architecture may be revised as implementation evidence accumulates;
@@ -751,6 +802,16 @@ already carry forward:
    retain one shared implementation in explicitly named mechanism or
    exact-subset owners rather than being duplicated or hidden in deep
    common-code switches.
+10. Every completed migration must remove the legacy production code it makes
+    unnecessary; commented-out implementations, permanently dormant paths,
+    and indefinite compatibility wrappers do not count as deletion.
+11. Production implementation size, excluding tests, generated code,
+    documentation, comments, and blank lines, must fall materially over the
+    fifth refactoring. Local temporary growth requires an identified deletion
+    payoff and recurring accounting.
+12. Destination-design choices should consider deletion leverage explicitly:
+    when two designs are otherwise sound, prefer the one that enables more
+    duplicated or legacy machinery to be removed.
 
 ## 14. Sections intentionally left open
 
@@ -763,6 +824,7 @@ the initial pressure-point list into an unjustified destination design.
 - Experiments and vertical slices used to choose among them.
 - Migration workstreams and stage ordering.
 - Component-level and full-matrix test strategy.
-- Quantitative baseline and recurring measurements.
+- Exact quantitative baseline, recurring measurements, and the final
+  production-code reduction target.
 - Definition of success and final convergence criteria.
 - Completion and handoff records.
