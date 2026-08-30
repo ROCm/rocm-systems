@@ -23,13 +23,11 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-using consan_detail::append_moi_workitem_owner_derivation;
 using consan_detail::MoiAtomicEvidenceSitePlan;
 using consan_detail::MoiBarrierEvidenceSitePlan;
 using consan_detail::MoiFenceEvidenceSitePlan;
 using consan_detail::MoiSpecialStateSgprs;
 using consan_detail::MoiWorkitemOwnerDerivationPlan;
-using consan_detail::range_overlaps;
 using consan_detail::reject_atomic_candidate_scratch_overlap;
 using consan_detail::reject_optional_scratch_range_overlap;
 using consan_moi_detail::append_atomic_fetch_add_one_u32;
@@ -39,9 +37,7 @@ using consan_moi_detail::append_dynamic_record_store_u32_literal;
 using consan_moi_detail::append_dynamic_record_store_u32_scalar_src;
 using consan_moi_detail::append_dynamic_record_store_u32_vgpr;
 using consan_moi_detail::append_dynamic_record_store_workgroup_source;
-using consan_moi_detail::append_moi_scc_preserving_indirect_jump;
 using consan_moi_detail::ConSanMoiLiteralDispatchIdPolicy;
-using consan_moi_detail::DynamicRecordLayout;
 using consan_moi_detail::kAtomicRecordLayout;
 using consan_moi_detail::kBarrierRecordLayout;
 using consan_moi_detail::kFenceRecordLayout;

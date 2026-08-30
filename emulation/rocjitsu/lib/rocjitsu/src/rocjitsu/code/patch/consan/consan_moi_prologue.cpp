@@ -41,35 +41,20 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-using consan_detail::append_moi_workitem_owner_derivation;
-using consan_detail::build_moi_relocated_guest_access_words;
 using consan_detail::ConSanMoiDispatchIdCapture;
-using consan_detail::has_recent_saveexec;
-using consan_detail::moi_guest_access_relocation_requires_adjusted_address;
 using consan_detail::moi_workgroup_shadow_initialization_lanes;
 using consan_detail::moi_workgroup_shadow_preferred_zero_vgpr_count;
 using consan_detail::MoiEntryScalarBackup;
 using consan_detail::MoiOwnerEpochPrologueEmissionPlan;
 using consan_detail::MoiPrivateEpochPrologueEmissionPlan;
-using consan_detail::MoiSpecialStateSgprs;
 using consan_detail::MoiWorkgroupKeyRegisterPlan;
 using consan_detail::MoiWorkgroupShadowClearStoreForm;
-using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::plan_moi_workgroup_shadow_clear;
 using consan_detail::range_overlaps;
-using consan_moi_detail::append_moi_report_dispatch_id_pair;
-using consan_moi_detail::append_moi_report_dispatch_id_word;
 using consan_moi_detail::append_moi_scc_preserving_indirect_jump;
-using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::append_words_bytes;
-using consan_moi_detail::count_nop_padding;
 using consan_moi_detail::decode_relocatable_entry_instruction;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
-using consan_moi_detail::moi_permits_literal_dispatch_identity;
-using consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous;
-using consan_moi_detail::record_replay_has_entry_workgroup_capture;
-using consan_moi_detail::record_replay_requires_entry_workgroup_capture;
-using consan_moi_detail::record_replay_uses_automatic_banked_capture;
 
 [[nodiscard]] bool append_moi_entry_salu_write(std::vector<uint32_t> &words, uint32_t word,
                                                rj_code_arch_t arch) {

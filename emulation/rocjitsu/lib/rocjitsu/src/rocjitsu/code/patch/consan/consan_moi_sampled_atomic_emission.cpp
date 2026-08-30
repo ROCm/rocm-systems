@@ -23,16 +23,11 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-using consan_detail::append_reload_moi_spilled_vgpr;
 using consan_detail::MoiAtomicEvidenceSitePlan;
-using consan_detail::MoiSpecialStateSgprs;
-using consan_detail::MoiSpilledVgprReloadResult;
 using consan_detail::range_overlaps;
 using consan_moi_detail::append_atomic_fetch_add_one_u32;
 using consan_moi_detail::append_load_u32_vgpr_at_offset;
 using consan_moi_detail::append_moi_prepare_scc_preserving_indirect_jump;
-using consan_moi_detail::append_store_u32_literal;
-using consan_moi_detail::append_store_u32_vgpr;
 using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::ConSanMoiLiteralDispatchIdPolicy;
 using consan_moi_detail::ConSanMoiRecordEmitter;

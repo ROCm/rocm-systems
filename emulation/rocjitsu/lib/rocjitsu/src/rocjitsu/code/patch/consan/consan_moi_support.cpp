@@ -536,21 +536,8 @@ namespace {
 
 using consan_detail::append_moi_workitem_owner_derivation;
 using consan_detail::build_moi_relocated_guest_access_words;
-using consan_detail::ConSanMoiDispatchIdCapture;
 using consan_detail::moi_guest_access_relocation_requires_adjusted_address;
-using consan_detail::moi_workgroup_shadow_initialization_lanes;
-using consan_detail::moi_workgroup_shadow_preferred_zero_vgpr_count;
-using consan_detail::MoiAtomicEvidenceSitePlan;
-using consan_detail::MoiBarrierEvidenceSitePlan;
-using consan_detail::MoiEntryScalarBackup;
-using consan_detail::MoiFenceEvidenceSitePlan;
-using consan_detail::MoiOwnerEpochPrologueEmissionPlan;
-using consan_detail::MoiPrivateEpochPrologueEmissionPlan;
 using consan_detail::MoiSpecialStateSgprs;
-using consan_detail::MoiWorkgroupKeyRegisterPlan;
-using consan_detail::MoiWorkgroupShadowClearStoreForm;
-using consan_detail::MoiWorkitemOwnerDerivationPlan;
-using consan_detail::plan_moi_workgroup_shadow_clear;
 
 [[nodiscard]] std::optional<uint16_t>
 scalar_owner_cdna_physical_vcc_base(uint32_t decoded_sgpr_count) {

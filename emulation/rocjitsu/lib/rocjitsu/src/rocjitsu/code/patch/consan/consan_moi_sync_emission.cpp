@@ -39,26 +39,17 @@
 
 namespace rocjitsu {
 
-using consan_detail::append_moi_workitem_owner_derivation;
-using consan_detail::build_moi_relocated_guest_access_words;
 using consan_detail::MoiAtomicEvidenceSitePlan;
 using consan_detail::MoiBarrierEvidenceSitePlan;
 using consan_detail::MoiFenceEvidenceSitePlan;
 using consan_detail::MoiSpecialStateSgprs;
 using consan_detail::MoiWorkgroupKeyRegisterPlan;
-using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::range_overlaps;
 using consan_detail::reject_optional_scratch_range_overlap;
 using consan_moi_detail::append_atomic_fetch_add_one_u32;
 using consan_moi_detail::append_atomic_load_u32;
-using consan_moi_detail::append_atomic_or_u32_literal;
 using consan_moi_detail::append_compare_moi_report_dispatch_id_word;
 using consan_moi_detail::append_load_u32_vgpr_at_offset;
-using consan_moi_detail::append_publish_visible_evidence_if_zero;
-using consan_moi_detail::append_store_moi_report_dispatch_id_pair;
-using consan_moi_detail::append_store_u32_literal;
-using consan_moi_detail::append_store_u32_sgpr;
-using consan_moi_detail::append_store_u32_vgpr;
 using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::ConSanMoiLiteralDispatchIdPolicy;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;

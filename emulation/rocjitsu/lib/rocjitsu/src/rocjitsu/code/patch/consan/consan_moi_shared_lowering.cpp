@@ -40,30 +40,22 @@
 
 namespace rocjitsu {
 
-using consan_detail::append_moi_workitem_owner_derivation;
 using consan_detail::build_moi_relocated_guest_access_words;
 using consan_detail::has_recent_saveexec;
 using consan_detail::moi_guest_access_relocation_requires_adjusted_address;
-using consan_detail::MoiSpecialStateSgprs;
 using consan_detail::MoiWorkgroupKeyRegisterPlan;
 using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::reject_optional_scratch_range_overlap;
 using consan_moi_detail::append_atomic_fetch_add_one_u32;
 using consan_moi_detail::append_atomic_or_u32_literal;
-using consan_moi_detail::append_dynamic_diagnostic_record_address;
-using consan_moi_detail::append_dynamic_record_address;
 using consan_moi_detail::append_dynamic_record_event_index_store;
 using consan_moi_detail::append_dynamic_record_store_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_dynamic_record_store_u32_literal;
 using consan_moi_detail::append_dynamic_record_store_u32_scalar_src;
 using consan_moi_detail::append_dynamic_record_store_u32_vgpr;
 using consan_moi_detail::append_dynamic_record_store_workgroup_source;
-using consan_moi_detail::append_moi_scc_preserving_indirect_jump;
 using consan_moi_detail::append_store_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_store_u32_literal;
-using consan_moi_detail::append_store_u32_sgpr;
-using consan_moi_detail::append_store_u32_vgpr;
-using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::ConSanMoiLiteralDispatchIdPolicy;
 using consan_moi_detail::ConSanMoiRecordEmitter;
 using consan_moi_detail::kAccessRecordLayout;
