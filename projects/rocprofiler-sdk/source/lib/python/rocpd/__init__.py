@@ -33,7 +33,8 @@ try:
     # sqlite3 symbols are loaded, avoiding mixed-lib symbol collisions
     import _sqlite3
 
-    sqlite3.connect(":memory:")  # Test that sqlite3 works after these imports
+    _sqlite3_test_connection = sqlite3.connect(":memory:")
+    _sqlite3_test_connection.close()  # Test that sqlite3 works after these imports
     # promote the SQLite3 symbols introduced by _sqlite3 to global scope so that
     # librocpd and Python use the same SQLite library, avoiding mixed-lib symbol
     # collisions
