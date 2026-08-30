@@ -74,11 +74,6 @@ struct MoiPersistentStateDemand {
   bool prefer_private_epoch_for_descriptor_growth = false;
 };
 
-/// Target-neutral input to the mode-owned dynamic-stack spill policy.
-struct MoiDynamicStackSpillFacts {
-  bool target_has_backend = false;
-};
-
 /// Mode-owned contract for a site whose ordinary scratch allocation spills
 /// through a runtime-sized private frame. Target inspection is reduced to the
 /// common capability profile before modes publish this policy.
@@ -170,7 +165,8 @@ struct MoiModeOperations {
                                                       const BoundRuntimeResources &,
                                                       const ConSanMoiOperatingPoint &,
                                                       const MoiPersistentStateFacts &);
-  MoiDynamicStackSpillPolicy (*dynamic_stack_spill)(const MoiDynamicStackSpillFacts &);
+  bool dynamic_stack_spill_without_target_backend;
+  bool dynamic_stack_spill_requires_every_owner_dynamic;
   MoiOperandOverlapSpillPolicy (*operand_overlap_spill)(const MoiOperandOverlapSpillContext &);
   std::optional<uint16_t> (*access_spill_fallback)(const MoiAccessSpillFallbackContext &);
 };

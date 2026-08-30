@@ -161,10 +161,6 @@ plan_inline_shadow_persistent_state_demand(const ConSanRequest &, const BoundRun
   };
 }
 
-MoiDynamicStackSpillPolicy inline_shadow_dynamic_stack_spill(const MoiDynamicStackSpillFacts &) {
-  return {.backend_supported = true, .requires_every_owner_dynamic = false};
-}
-
 MoiOperandOverlapSpillPolicy
 inline_shadow_operand_overlap_spill(const MoiOperandOverlapSpillContext &context) {
   MoiOperandOverlapSpillPolicy policy;
@@ -190,9 +186,13 @@ inline_shadow_access_spill_fallback(const MoiAccessSpillFallbackContext &context
 }
 
 const MoiModeOperations kInlineShadowModeOperations = {
-    plan_inline_shadow_object_mode,          apply_inline_shadow_mode_patches,
-    inline_shadow_access_scratch_vgpr_count, plan_inline_shadow_persistent_state_demand,
-    inline_shadow_dynamic_stack_spill,       inline_shadow_operand_overlap_spill,
+    plan_inline_shadow_object_mode,
+    apply_inline_shadow_mode_patches,
+    inline_shadow_access_scratch_vgpr_count,
+    plan_inline_shadow_persistent_state_demand,
+    true,
+    false,
+    inline_shadow_operand_overlap_spill,
     inline_shadow_access_spill_fallback,
 };
 

@@ -198,10 +198,6 @@ MoiPersistentStateDemand plan_sampled_persistent_state_demand(
   return demand;
 }
 
-MoiDynamicStackSpillPolicy sampled_dynamic_stack_spill(const MoiDynamicStackSpillFacts &facts) {
-  return {.backend_supported = facts.target_has_backend, .requires_every_owner_dynamic = true};
-}
-
 MoiOperandOverlapSpillPolicy
 sampled_operand_overlap_spill(const MoiOperandOverlapSpillContext &context) {
   if (!consan_is_capability_arch(context.arch))
@@ -242,9 +238,13 @@ sampled_access_spill_fallback(const MoiAccessSpillFallbackContext &context) {
 }
 
 const MoiModeOperations kSampledModeOperations = {
-    plan_sampled_object_mode,          apply_sampled_mode_patches,
-    sampled_access_scratch_vgpr_count, plan_sampled_persistent_state_demand,
-    sampled_dynamic_stack_spill,       sampled_operand_overlap_spill,
+    plan_sampled_object_mode,
+    apply_sampled_mode_patches,
+    sampled_access_scratch_vgpr_count,
+    plan_sampled_persistent_state_demand,
+    false,
+    true,
+    sampled_operand_overlap_spill,
     sampled_access_spill_fallback,
 };
 

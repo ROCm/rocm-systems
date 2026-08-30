@@ -71,10 +71,12 @@ MoiPersistentStateDemand plan_moi_persistent_state_demand(const ConSanRequest &r
 
 MoiDynamicStackSpillPolicy plan_moi_dynamic_stack_spill(ConSanMoiEngine engine,
                                                         rj_code_arch_t arch) {
-  const MoiDynamicStackSpillFacts facts{
-      .target_has_backend = consan_is_capability_arch(arch),
+  const MoiModeOperations &operations = moi_mode_operations(engine);
+  return {
+      .backend_supported =
+          operations.dynamic_stack_spill_without_target_backend || consan_is_capability_arch(arch),
+      .requires_every_owner_dynamic = operations.dynamic_stack_spill_requires_every_owner_dynamic,
   };
-  return moi_mode_operations(engine).dynamic_stack_spill(facts);
 }
 
 MoiOperandOverlapSpillPolicy

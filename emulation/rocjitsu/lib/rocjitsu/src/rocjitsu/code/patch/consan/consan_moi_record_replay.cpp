@@ -174,11 +174,6 @@ MoiPersistentStateDemand plan_record_replay_persistent_state_demand(
   return demand;
 }
 
-MoiDynamicStackSpillPolicy
-record_replay_dynamic_stack_spill(const MoiDynamicStackSpillFacts &facts) {
-  return {.backend_supported = facts.target_has_backend, .requires_every_owner_dynamic = true};
-}
-
 MoiOperandOverlapSpillPolicy
 record_replay_operand_overlap_spill(const MoiOperandOverlapSpillContext &context) {
   MoiOperandOverlapSpillPolicy policy;
@@ -194,7 +189,8 @@ const MoiModeOperations kRecordReplayModeOperations = {
     apply_record_replay_mode_patches,
     record_replay_access_scratch_vgpr_count,
     plan_record_replay_persistent_state_demand,
-    record_replay_dynamic_stack_spill,
+    false,
+    true,
     record_replay_operand_overlap_spill,
     nullptr,
 };
