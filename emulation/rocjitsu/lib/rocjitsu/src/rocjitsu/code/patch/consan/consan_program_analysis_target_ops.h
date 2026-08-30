@@ -41,6 +41,48 @@ struct ConSanAccvgprTransferEncoding {
   std::optional<uint16_t> accumulator_vgpr;
 };
 
+enum class ConSanTargetDecodeStatus : uint8_t {
+  UnsupportedArchitecture,
+  UnsupportedEncodingSize,
+  Decoded,
+};
+
+enum class ConSanEncodedFlatSegment : uint8_t {
+  Unspecified,
+  Private,
+  Global,
+};
+
+/// Target-normalized FLAT fields shared by access and ordinary-memory
+/// inventory. The target owner validates raw padding and form bits once;
+/// semantic inventory owners decide how the decoded operation is used.
+struct ConSanFlatMemoryEncoding {
+  uint32_t raw_op = 0;
+  uint32_t raw_saddr = 0;
+  uint32_t raw_nv = 0;
+  bool raw_scale_offset = false;
+  uint32_t raw_sve = 0;
+  uint32_t raw_vaddr = 0;
+  uint32_t raw_vsrc = 0;
+  uint32_t raw_vdst = 0;
+  int32_t raw_ioffset = 0;
+  uint32_t raw_segment = 0;
+  uint32_t raw_scope = 0;
+  uint32_t raw_th = 0;
+  ConSanEncodedFlatSegment encoded_segment = ConSanEncodedFlatSegment::Unspecified;
+  std::optional<uint16_t> scalar_provenance_sgpr;
+  bool scope_follows_address_space = false;
+  bool exact_size = false;
+  bool ordinary_well_formed = false;
+  bool ordinary_requires_complete_registers = false;
+  bool ordinary_mutation_supported = false;
+};
+
+struct ConSanFlatMemoryDecode {
+  ConSanTargetDecodeStatus status = ConSanTargetDecodeStatus::UnsupportedArchitecture;
+  ConSanFlatMemoryEncoding encoding;
+};
+
 [[nodiscard]] std::optional<ConSanScratchComponentEncoding>
 decode_consan_scratch_component_encoding(std::span<const uint8_t> instruction, rj_code_arch_t arch);
 
@@ -56,6 +98,9 @@ decode_consan_lane_transfer_encoding(std::span<const uint8_t> instruction, rj_co
 [[nodiscard]] std::optional<ConSanAccvgprTransferEncoding>
 decode_consan_accvgpr_transfer_index(std::span<const uint8_t> instruction, rj_code_arch_t arch,
                                      bool write_accumulator);
+
+[[nodiscard]] ConSanFlatMemoryDecode
+decode_consan_flat_memory_encoding(std::span<const uint8_t> instruction, rj_code_arch_t arch);
 
 /// Decode target-native atomic operands into the common atomic inventory
 /// product. Returns false when the target or encoded form is not represented;

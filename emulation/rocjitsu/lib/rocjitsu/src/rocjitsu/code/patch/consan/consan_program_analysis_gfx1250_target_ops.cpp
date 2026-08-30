@@ -8,6 +8,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_program_analysis_gfx12_target_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 
 #include <cstring>
 
@@ -39,6 +40,21 @@ decode_gfx1250_lane_transfer(std::span<const uint8_t> instruction) {
   return ConSanLaneTransferEncoding{
       .lane_selector = static_cast<uint32_t>(raw.src1),
       .value_source_operand = 0,
+  };
+}
+
+ConSanFlatMemoryDecode decode_gfx1250_flat_memory(std::span<const uint8_t> instruction) {
+  if (instruction.size() < sizeof(cdna5::VflatMachineInst))
+    return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
+  cdna5::VflatMachineInst raw{};
+  std::memcpy(&raw, instruction.data(), sizeof(raw));
+  const bool well_formed = instruction.size() == sizeof(raw) && raw.encoding == 0xecu &&
+                           raw.pad_8_13 == 0u && raw.pad_22_23 == 0u && raw.pad_40_47 == 0u &&
+                           raw.pad_63 == 0u;
+  return {
+      .status = ConSanTargetDecodeStatus::Decoded,
+      .encoding = make_gfx12_flat_memory_encoding(
+          raw, cdna5::OPR_SREG_NULL, instruction.size() == sizeof(raw), well_formed, false),
   };
 }
 

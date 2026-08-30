@@ -14,6 +14,42 @@
 
 namespace rocjitsu::consan_program_analysis_target_detail {
 
+ConSanFlatMemoryDecode decode_gfx1100_flat_memory(std::span<const uint8_t> instruction) {
+  if (instruction.size() < sizeof(rdna3::FlatMachineInst))
+    return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
+  rdna3::FlatMachineInst raw{};
+  std::memcpy(&raw, instruction.data(), sizeof(raw));
+  ConSanEncodedFlatSegment segment = ConSanEncodedFlatSegment::Unspecified;
+  if (raw.seg == 1u)
+    segment = ConSanEncodedFlatSegment::Private;
+  else if (raw.seg == 2u)
+    segment = ConSanEncodedFlatSegment::Global;
+  return {
+      .status = ConSanTargetDecodeStatus::Decoded,
+      .encoding =
+          {
+              .raw_op = static_cast<uint32_t>(raw.op),
+              .raw_saddr = static_cast<uint32_t>(raw.saddr),
+              .raw_scale_offset = false,
+              .raw_vaddr = static_cast<uint32_t>(raw.addr),
+              .raw_vsrc = static_cast<uint32_t>(raw.data),
+              .raw_vdst = static_cast<uint32_t>(raw.vdst),
+              .raw_ioffset = sign_extend_13_bit_offset(static_cast<uint32_t>(raw.offset)),
+              .raw_segment = static_cast<uint32_t>(raw.seg),
+              .raw_scope = 0u,
+              .raw_th = static_cast<uint32_t>(raw.glc) | (static_cast<uint32_t>(raw.slc) << 1u),
+              .encoded_segment = segment,
+              .scalar_provenance_sgpr = std::nullopt,
+              .scope_follows_address_space = true,
+              .exact_size = instruction.size() == sizeof(raw),
+              .ordinary_well_formed = instruction.size() == sizeof(raw) && raw.encoding == 0x37u &&
+                                      raw.seg == 0u && raw.pad_25 == 0u,
+              .ordinary_requires_complete_registers = false,
+              .ordinary_mutation_supported = false,
+          },
+  };
+}
+
 template <typename Raw> void fill_gfx1100_flat_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_saddr = static_cast<uint32_t>(raw.saddr);

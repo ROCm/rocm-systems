@@ -72,6 +72,42 @@ decode_gfx9_cdna_accvgpr_transfer(std::span<const uint8_t> instruction, bool wri
   return ConSanAccvgprTransferEncoding{.accumulator_vgpr = static_cast<uint16_t>(raw.src0 - 256u)};
 }
 
+ConSanFlatMemoryDecode decode_gfx9_cdna_flat_memory(std::span<const uint8_t> instruction) {
+  if (instruction.size() < sizeof(cdna4::FlatMachineInst))
+    return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
+  cdna4::FlatMachineInst raw{};
+  std::memcpy(&raw, instruction.data(), sizeof(raw));
+  ConSanEncodedFlatSegment segment = ConSanEncodedFlatSegment::Unspecified;
+  if (raw.seg == 1u)
+    segment = ConSanEncodedFlatSegment::Private;
+  else if (raw.seg == 2u)
+    segment = ConSanEncodedFlatSegment::Global;
+  return {
+      .status = ConSanTargetDecodeStatus::Decoded,
+      .encoding =
+          {
+              .raw_op = static_cast<uint32_t>(raw.op),
+              .raw_saddr = static_cast<uint32_t>(raw.saddr),
+              .raw_scale_offset = false,
+              .raw_vaddr = static_cast<uint32_t>(raw.addr),
+              .raw_vsrc = static_cast<uint32_t>(raw.data),
+              .raw_vdst = static_cast<uint32_t>(raw.vdst),
+              .raw_ioffset = static_cast<int32_t>(raw.offset),
+              .raw_segment = static_cast<uint32_t>(raw.seg),
+              .raw_scope = 0u,
+              .raw_th = static_cast<uint32_t>(raw.sc0) | (static_cast<uint32_t>(raw.sc1) << 1u),
+              .encoded_segment = segment,
+              .scalar_provenance_sgpr = std::nullopt,
+              .scope_follows_address_space = true,
+              .exact_size = instruction.size() == sizeof(raw),
+              .ordinary_well_formed =
+                  instruction.size() == sizeof(raw) && raw.encoding == 0x37u && raw.seg == 0u,
+              .ordinary_requires_complete_registers = false,
+              .ordinary_mutation_supported = false,
+          },
+  };
+}
+
 template <typename Raw>
 void fill_gfx9_cdna_flat_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
