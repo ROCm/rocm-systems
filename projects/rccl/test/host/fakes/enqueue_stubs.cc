@@ -15,8 +15,6 @@
 // Exception: profiler entry points and benign teardown return success, because
 // happy-path helpers legitimately call them in passing.
 
-#include <hip/hip_runtime.h>
-
 #include <cstdio>
 #include <cstdlib>
 
@@ -36,7 +34,7 @@ namespace {
 
 // ---- HIP kernel launch ----------------------------------------------------
 // hipModuleLaunchKernel and its 15 siblings live in
-// fakes/hip_profile_interceptor_fakes.cc: leaving any of them undefined makes
+// fakes/hip_fakes.cc: leaving any of them undefined makes
 // lld pull InstrProfilingPlatformROCm.cpp.o out of libclang_rt.profile, whose
 // dependencies do not link. That is not enqueue-specific, so it is not here.
 

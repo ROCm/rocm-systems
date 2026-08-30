@@ -40,7 +40,7 @@
 //
 // SHAPE
 // -----
-// List here, definitions in hip_profile_interceptor_fakes.cc. Deliberately NOT
+// List here, definitions in hip_fakes.cc. Deliberately NOT
 // inline definitions in this header: an unreferenced inline function need not be
 // emitted, the symbol would stay undefined, and the archive member would be
 // extracted again -- a silent regression visible only in CI.

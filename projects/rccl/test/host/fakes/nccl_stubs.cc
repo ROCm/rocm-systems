@@ -59,7 +59,8 @@ ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, stru
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclGinFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { return ncclSuccess; }
-// Omitted when RCCL_STUBS_OMIT_ncclInitKernelsForDevice is defined -- the unit under test defines this itself (enqueue.cc:90).
+// Omitted when RCCL_STUBS_OMIT_ncclInitKernelsForDevice is defined -- the unit
+// under test defines this itself (enqueue.cc:90).
 #ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) { ::abort(); }
 #endif
@@ -129,14 +130,16 @@ int rcclGetTuningIndexForArch(const char* gfxarch) {
   g_tuningIndexLastArch = gfxarch ? gfxarch : "<null>";
   return g_tuningIndexValue;
 }
-// Omitted when RCCL_STUBS_OMIT_rcclUseAinic is defined -- a unit needs a real value, not a fail-loud stub; see its own fakes.
+// Omitted when RCCL_STUBS_OMIT_rcclUseAinic is defined -- a unit needs a real
+// value, not a fail-loud stub; see its own fakes.
 #ifndef RCCL_STUBS_OMIT_rcclUseAinic
 bool rcclUseAinic() { ::abort(); }
 #endif
 
 ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { return ncclSuccess; }
 ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob*, ncclResult_t(*)(struct ncclAsyncJob*), void(*)(struct ncclAsyncJob*), void(*)(void*), struct ncclComm*) { ::abort(); }
-// Omitted when RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering is defined -- the unit under test emits this via NCCL_PARAM (enqueue.cc:1986).
+// Omitted when RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering is defined -- the
+// unit under test emits this via NCCL_PARAM (enqueue.cc:1986).
 #ifndef RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
 int64_t ncclParamGraphStreamOrdering() { return 0; }
 #endif

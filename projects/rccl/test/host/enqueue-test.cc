@@ -50,10 +50,16 @@
 //
 // As of this change, the only declaration enqueue.cc uses from it is the six
 // ncclDevKernel_Generic_N kernels whose ADDRESSES populate ncclKerns[] at
-// enqueue.cc:53; every use is `plan->kernelFn = ncclKerns[i].kernelFn`, an opaque
-// void* that is stored, never dereferenced or launched on a host path. So we
-// pre-set the device header's own include guard to neuter it and supply those
-// six symbols as ordinary host functions.
+// enqueue.cc:53. On every path this binary covers, the only use is
+// `plan->kernelFn = ncclKerns[i].kernelFn` -- an opaque void* that is stored and
+// nothing more. That is a statement about COVERAGE, not about enqueue.cc, which
+// does dereference these addresses elsewhere: ncclInitKernelsForDevice (:110)
+// passes them to cudaFuncGetAttributes (:115) and cudaFuncSetAttribute (:121),
+// and ncclLaunchKernel (:2218) reads plan->kernelFn back to launch it. No
+// covered path reaches any of those three, which is what makes the substitution
+// safe today; a test that reaches one invalidates it. So we pre-set the device
+// header's own include guard to neuter it and supply those six symbols as
+// ordinary host functions.
 //
 // LIMITS OF THIS SUBSTITUTION -- read before relying on it:
 //   * These are host functions, NOT __global__ declarations with the production
@@ -244,11 +250,23 @@ TEST_F(EnqueueMicrotest, ShmemScratchWarpSize_SimpleTermDominatesAtWarp32) {
   EXPECT_EQ(4112, rcclShmemScratchWarpSize(942, 32)) << "measured constant";
 }
 
-TEST_F(EnqueueMicrotest, ShmemScratchWarpSize_NvlsTermOnlyAppliesAtArch900Plus) {
-  // :66 gates the NVLS term on `cudaArch >= 900`, then adds a flat +16 either
-  // way. Below 900 the term is 0, so the result is driven purely by SIMPLE.
+TEST_F(EnqueueMicrotest, ShmemScratchWarpSize_NvlsTermNeverWins) {
+  // HONEST SCOPE: :66 gates the NVLS term on `cudaArch >= 900`, but that gate is
+  // an EQUIVALENT MUTANT today. ncclNvlsUnrollBytes is the constant 4*16 for
+  // every arch, so the gated term is at most WarpSize*64 + 16, while SIMPLE is
+  // ncclCollUnroll(arch)*WarpSize*16 + 16 and ncclCollUnroll is never below 4.
+  // SIMPLE therefore wins (or ties) at every arch and WarpSize, and deleting the
+  // gate changes nothing. The static_assert is the real guard: the moment the
+  // two constants move apart it fails, and whoever changes them is told to make
+  // this test differential (compare 899 against 900) at exactly the point the
+  // branch regains power.
+  static_assert(ncclCollUnroll(700) * 16 >= ncclNvlsUnrollBytes(900),
+                "The NVLS unroll can now exceed the collective unroll: make "
+                "ShmemScratchWarpSize_NvlsTermNeverWins differential.");
   constexpr int kSimple899 = (ncclCollUnroll(899) * 32 + 1) * 16;
   EXPECT_EQ((kSimple899 + 15) & -16, rcclShmemScratchWarpSize(899, 32));
+  EXPECT_EQ(rcclShmemScratchWarpSize(899, 32), rcclShmemScratchWarpSize(900, 32))
+      << "the gate is inert while ncclCollUnroll(899) == ncclCollUnroll(900)";
 }
 
 #ifndef RCCL_DEVICE_LINKER
@@ -743,6 +761,8 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_Reduce_TreeVsRing_SelectsDistinctPatte
   auto ring = MakeTask(ncclFuncReduce, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
   auto rt = RunChunking(cc, tree, 4, 1 << 20);
   auto rr = RunChunking(cc, ring, 4, 1 << 20);
+  ASSERT_EQ(ncclSuccess, rt.rc);
+  ASSERT_EQ(ncclSuccess, rr.rc);
   EXPECT_EQ(ncclPatternTreeUp, rt.proxyOp.pattern);
   EXPECT_EQ(ncclPatternPipelineTo, rr.proxyOp.pattern);
 }
@@ -1047,7 +1067,10 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_ChunkIsAlignedDownToProtocolGrain) {
   }
 }
 
-TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128GrainDependsOnWarpSizeAndLineElems) {
+TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128GrainIsNonZeroForTheFixture) {
+  // HONEST SCOPE: ChunkComm hardcodes WarpSize=32, ll128LineElems=120 and
+  // ll128DataElems=112, so this does not vary any of them -- it only asserts the
+  // grain is non-zero for that one fixture.
   // Guards the fixture invariant above as an executable assertion: if WarpSize or
   // the ll128 elem counts are ever left unset, grainSize goes to 0 and :3028
   // divides by zero. This fails loudly instead of core-dumping the suite.
@@ -1110,7 +1133,11 @@ TEST_F(EnqueueMicrotest, PackedChannels_NonPositiveMaxChannels_ReturnedUnchanged
 }
 
 TEST_F(EnqueueMicrotest, PackedChannels_ZeroCount_ReturnsMaxChannels) {
-  // Second half of the same early-out: `count == 0`.
+  // HONEST SCOPE: this pins the behaviour at count == 0 but CANNOT fail on its
+  // own. Dropping `count == 0` from the early-out at :179 is an EQUIVALENT
+  // MUTANT: with count == 0, cells = divUp(0, cellSize) is 0, so cellsPerChannel
+  // is 0 and the guard at :190 returns the same nMaxChannels by the long route.
+  // The value is documentary -- it records the contract, not a caught mutant.
   EXPECT_EQ(16, rcclKernelPackedChannels(RankComm(8).get(), ncclFuncAllReduce, 0,
                                          ncclFloat32, NCCL_PROTO_SIMPLE, 16));
 }
@@ -1154,10 +1181,13 @@ TEST_F(EnqueueMicrotest, PackedChannels_IsMonotonicInCount) {
   }
 }
 
-TEST_F(EnqueueMicrotest, PackedChannels_LLProtocolQuadruplesTraffic) {
+TEST_F(EnqueueMicrotest, PackedChannels_LLNeverNeedsFewerChannelsThanSimple) {
   // `if (protocol == NCCL_PROTO_LL) trafficPerByte *= 4` -- LL moves 4x the
   // bytes, so at a size where SIMPLE has not yet saturated, LL needs >= as many
-  // channels. Differential, since the absolute value is not the interesting part.
+  // channels. This pins the ORDERING only: >= is satisfied with equality by an
+  // implementation that dropped the 4x, so it does not on its own prove the
+  // multiplier is applied. PackedChannels_LLNeedsStrictlyMoreChannelsThanSimple_Isolated
+  // carries the strict check.
   const size_t count = 1 << 12;
   int simple = rcclKernelPackedChannels(RankComm(8).get(), ncclFuncAllReduce, count,
                                         ncclFloat32, NCCL_PROTO_SIMPLE, 32);
@@ -2164,15 +2194,23 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pRecordsRoundAndBatchEligibility) {
   EXPECT_EQ(r1, bp.chan()->wipBatch.p2pRounds[1]);
 }
 
-TEST_F(EnqueueMicrotest, AddWorkBatch_P2pIneligibleAfterEligible_ForcesNewBatch) {
-  // `newBatch |= !chan->wipBatch.batchP2P` -- an op that is not batch-eligible
-  // must not join a batch opened by an eligible one.
+TEST_F(EnqueueMicrotest, AddWorkBatch_P2pEligibleAfterIneligible_ForcesNewBatch) {
+  // `newBatch |= !chan->wipBatch.batchP2P` (:227) -- an op that IS batch-eligible
+  // must not join a batch opened by an ineligible one. The first call latches
+  // wipBatch.batchP2P=false (:283); the second arrives with batchP2P=true.
+  //
+  // The call order isolates the conjunct: with nNodes>2 and batchP2P=true the
+  // next term takes the `nP2ps == NCCL_MAX_DEV_WORK_P2P_PER_BATCH` arm (1 != 2,
+  // false), and rounds 0 and 1 neither collide nor cross an epoch. So :227 is the
+  // ONLY thing that splits, and deleting it makes this test fail. Passing false
+  // twice instead would fall into the `nP2ps == 1` arm, which splits on its own
+  // and lets a mutant that drops :227 survive.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
   addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, 0, /*batchP2P=*/false);
   addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), 1,
-                     /*batchP2P=*/false);
-  EXPECT_EQ(2, bp.queueLength()) << "batchP2P=false caps the batch at one op";
+                     /*batchP2P=*/true);
+  EXPECT_EQ(2, bp.queueLength()) << "an ineligible batch must not absorb an eligible op";
 }
 
 TEST_F(EnqueueMicrotest, AddWorkBatch_CountsP2pBatchesSeparately) {
