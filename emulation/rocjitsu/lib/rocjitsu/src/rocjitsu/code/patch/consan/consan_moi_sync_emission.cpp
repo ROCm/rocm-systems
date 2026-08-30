@@ -60,12 +60,12 @@ namespace consan_moi_impl {
 /// emitted geometry comes from the patch product being committed in the same
 /// transaction. No patch kind or anchor is interpreted to recover either.
 [[nodiscard]] std::optional<ConSanCommittedLowering>
-make_moi_sync_lowering_commit(const ConSanTransformArtifacts &result,
+make_moi_sync_lowering_commit(const ConSanObservationPlan &observation,
                               std::span<const ConSanProbeIntentId> intent_ids,
                               const ConSanCommittedPatchGeometry &patch) {
   std::vector<PhysicalSiteId> original_sites;
   for (ConSanProbeIntentId id : intent_ids) {
-    const ConSanProbeIntent *intent = result.observation_plan.intent(id);
+    const ConSanProbeIntent *intent = observation.intent(id);
     if (intent == nullptr)
       return std::nullopt;
     if (std::ranges::find(original_sites, intent->physical_site) == original_sites.end())
@@ -93,7 +93,7 @@ make_moi_sync_lowering_commit(const ConSanTransformArtifacts &result,
       });
     }
   }
-  return make_consan_committed_lowering(result.observation_plan, intent_ids, locations,
+  return make_consan_committed_lowering(observation, intent_ids, locations,
                                         ConSanLoweringOutcomeKind::Instrumented);
 }
 
@@ -102,7 +102,7 @@ make_moi_sync_lowering_commit(const ConSanTransformArtifacts &result,
                                                    const ConSanCommittedPatchGeometry &patch,
                                                    std::string_view probe_name,
                                                    std::vector<ConSanCommittedLowering> &commits) {
-  auto commit = make_moi_sync_lowering_commit(result, intent_ids, patch);
+  auto commit = make_moi_sync_lowering_commit(result.observation_plan, intent_ids, patch);
   if (!commit) {
     result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                                " produced an invalid intent-bound lowering");
@@ -325,11 +325,11 @@ normalize_ordinary_fence_communication(const ConSanOrdinaryMemorySite &site) {
 /// replacement range. Lowering therefore receives no candidate that still
 /// needs semantic filtering.
 [[nodiscard]] std::vector<MoiFenceEvidenceSitePlan>
-build_moi_fence_evidence_site_plans(const ConSanTransformArtifacts &result,
+build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
+                                    const ConSanObservationPlan &observation,
                                     std::vector<std::string> &errors) {
   std::vector<MoiFenceEvidenceSitePlan> plans;
-  const SynchronizationInventoryView graph = result.program_inventory.sync();
-  const ConSanObservationPlan &observation = result.observation_plan;
+  const SynchronizationInventoryView graph = inventory.sync();
 
   for (const ConSanFenceSiteDecision &decision : observation.fence_site_decisions) {
     if (decision.kind != ConSanSiteDecisionKind::Admitted)
@@ -464,17 +464,16 @@ build_moi_fence_evidence_site_plans(const ConSanTransformArtifacts &result,
 
     bool completed = false;
     if (fence_event->in_kernel) {
-      const ConSanKernelInfo *kernel =
-          result.program_inventory.find_kernel_by_name(fence_event->container_name);
+      const ConSanKernelInfo *kernel = inventory.find_kernel_by_name(fence_event->container_name);
       if (kernel == nullptr && communication->execution_owners.size() == 1u) {
-        kernel = result.program_inventory.find_kernel_by_descriptor(
+        kernel = inventory.find_kernel_by_descriptor(
             communication->execution_owners.front().descriptor_file_offset);
       }
       completed = kernel != nullptr && !is_rocclr_runtime_kernel_name(kernel->name) &&
                   complete_from(*kernel, kernel->descriptor_file_offset);
     } else {
       const ConSanFunctionInfo *function =
-          result.program_inventory.find_function_by_name(fence_event->container_name);
+          inventory.find_function_by_name(fence_event->container_name);
       completed = function != nullptr && complete_from(*function, std::nullopt);
     }
     if (!completed || !plan.is_well_formed()) {
@@ -557,13 +556,11 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
 /// the fact. Record/Replay ordinary sequences owned by a fence have no
 /// `AtomicRecord` intent and therefore do not enter the atomic-record path;
 /// Sampled and InlineShadow select their own explicit evidence intent kinds.
-[[nodiscard]] std::vector<MoiAtomicEvidenceSitePlan>
-build_moi_atomic_evidence_site_plans(const ConSanTransformArtifacts &result,
-                                     ConSanProbeIntentKind evidence_kind,
-                                     std::vector<std::string> &errors) {
+[[nodiscard]] std::vector<MoiAtomicEvidenceSitePlan> build_moi_atomic_evidence_site_plans(
+    const ProgramInventory &inventory, const ConSanObservationPlan &observation,
+    ConSanProbeIntentKind evidence_kind, std::vector<std::string> &errors) {
   std::vector<MoiAtomicEvidenceSitePlan> plans;
-  const SynchronizationInventoryView graph = result.program_inventory.sync();
-  const ConSanObservationPlan &observation = result.observation_plan;
+  const SynchronizationInventoryView graph = inventory.sync();
 
   for (const ConSanAtomicSiteDecision &decision : observation.atomic_site_decisions) {
     if (decision.kind != ConSanSiteDecisionKind::Admitted)
@@ -652,17 +649,15 @@ build_moi_atomic_evidence_site_plans(const ConSanTransformArtifacts &result,
 
     bool completed = false;
     if (event->in_kernel) {
-      const ConSanKernelInfo *kernel =
-          result.program_inventory.find_kernel_by_name(event->container_name);
+      const ConSanKernelInfo *kernel = inventory.find_kernel_by_name(event->container_name);
       if (kernel == nullptr && event->execution_owners.size() == 1u) {
-        kernel = result.program_inventory.find_kernel_by_descriptor(
+        kernel = inventory.find_kernel_by_descriptor(
             event->execution_owners.front().descriptor_file_offset);
       }
       completed = kernel != nullptr && !is_rocclr_runtime_kernel_name(kernel->name) &&
                   complete_from(*kernel, kernel->descriptor_file_offset);
     } else {
-      const ConSanFunctionInfo *function =
-          result.program_inventory.find_function_by_name(event->container_name);
+      const ConSanFunctionInfo *function = inventory.find_function_by_name(event->container_name);
       completed = function != nullptr && complete_from(*function, std::nullopt);
     }
     if (!completed || !plan.is_well_formed()) {

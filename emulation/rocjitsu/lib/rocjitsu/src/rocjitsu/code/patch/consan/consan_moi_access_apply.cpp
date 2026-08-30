@@ -18,7 +18,7 @@ namespace rocjitsu::consan_moi_impl {
 using consan_moi_detail::append_word_bytes;
 
 [[nodiscard]] std::optional<ConSanCommittedLowering>
-make_moi_access_lowering_commit(const ConSanTransformArtifacts &result,
+make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
                                 const ConSanMoiCandidate &candidate,
                                 const ConSanPatchLoweringProduct &patch) {
   std::vector<ConSanCommittedLoweringLocation> locations;
@@ -50,7 +50,7 @@ make_moi_access_lowering_commit(const ConSanTransformArtifacts &result,
       access.execution_owner_descriptor_file_offsets.end());
   std::optional<ConSanProbeIntentKind> intent_kind;
   for (ConSanProbeIntentId id : candidate.intent_ids) {
-    const ConSanProbeIntent *intent = result.observation_plan.intent(id);
+    const ConSanProbeIntent *intent = observation.intent(id);
     if (intent == nullptr || (intent_kind && *intent_kind != intent->kind))
       return std::nullopt;
     intent_kind = intent->kind;
@@ -93,7 +93,7 @@ make_moi_access_lowering_commit(const ConSanTransformArtifacts &result,
   default:
     return std::nullopt;
   }
-  return make_consan_committed_lowering(result.observation_plan, candidate.intent_ids, locations,
+  return make_consan_committed_lowering(observation, candidate.intent_ids, locations,
                                         ConSanLoweringOutcomeKind::Instrumented, {},
                                         std::move(runtime_mapping));
 }

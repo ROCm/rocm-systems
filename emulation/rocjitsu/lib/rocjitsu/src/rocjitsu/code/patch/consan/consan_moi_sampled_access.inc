@@ -1047,7 +1047,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         info.relocated_guest_instruction_offset =
             candidate.anchor() + planned_patch.probe_guest_instruction_offset;
       }
-      auto commit = make_moi_access_lowering_commit(result, candidate, info);
+      auto commit = make_moi_access_lowering_commit(result.observation_plan, candidate, info);
       if (!commit) {
         result.errors.emplace_back(
             "ConSan MOI sampled probe produced an invalid intent-bound lowering");

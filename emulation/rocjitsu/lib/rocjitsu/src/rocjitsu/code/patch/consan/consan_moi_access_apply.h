@@ -34,7 +34,7 @@ using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::append_words_bytes;
 
 [[nodiscard]] std::optional<ConSanCommittedLowering>
-make_moi_access_lowering_commit(const ConSanTransformArtifacts &result,
+make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
                                 const ConSanMoiCandidate &candidate,
                                 const ConSanPatchLoweringProduct &patch);
 
@@ -87,7 +87,8 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
   lowering_commits.reserve(planned_patches.size());
   for (const PlannedPatch &planned_patch : planned_patches) {
     ConSanPatchInfo patch = make_patch_info(planned_patch);
-    auto commit = make_moi_access_lowering_commit(result, *planned_patch.candidate, patch);
+    auto commit =
+        make_moi_access_lowering_commit(result.observation_plan, *planned_patch.candidate, patch);
     if (!commit) {
       result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                                  " produced an invalid intent-bound lowering");

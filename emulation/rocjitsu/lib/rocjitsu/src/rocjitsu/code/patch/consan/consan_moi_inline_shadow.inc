@@ -1305,7 +1305,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
               (words->size() - planned_patch.guest_instruction_word_count) * sizeof(uint32_t);
         }
       }
-      auto commit = make_moi_access_lowering_commit(result, candidate, info);
+      auto commit = make_moi_access_lowering_commit(result.observation_plan, candidate, info);
       if (!commit) {
         result.errors.emplace_back(
             "ConSan MOI inline-shadow probe produced an invalid intent-bound lowering");

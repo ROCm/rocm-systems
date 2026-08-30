@@ -18,8 +18,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     return;
   }
 
-  std::vector<MoiFenceEvidenceSitePlan> candidates =
-      build_moi_fence_evidence_site_plans(result, result.errors);
+  std::vector<MoiFenceEvidenceSitePlan> candidates = build_moi_fence_evidence_site_plans(
+      result.program_inventory, result.observation_plan, result.errors);
   if (!result.errors.empty())
     return;
   if (candidates.empty()) {

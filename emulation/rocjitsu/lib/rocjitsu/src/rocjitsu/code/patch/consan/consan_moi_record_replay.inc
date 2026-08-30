@@ -1472,7 +1472,7 @@ void try_apply_first_light_access_record_patch(
         if (selected_record_replay_anchor_relay_offsets.contains(offset))
           info.branch_relay_offsets.push_back(offset);
       }
-      auto commit = make_moi_access_lowering_commit(result, candidate, info);
+      auto commit = make_moi_access_lowering_commit(result.observation_plan, candidate, info);
       if (!commit) {
         result.errors.emplace_back(
             "ConSan MOI first-light probe produced an invalid intent-bound lowering");

@@ -6,15 +6,11 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/consan/consan_moi_evidence_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.h"
 
 namespace rocjitsu::consan_moi_impl {
-
-[[nodiscard]] std::vector<consan_detail::MoiBarrierEvidenceSitePlan>
-build_moi_barrier_evidence_site_plans(const ConSanTransformArtifacts &result,
-                                      ConSanProbeIntentKind evidence_kind,
-                                      std::vector<std::string> &errors);
 
 [[nodiscard]] uint16_t inline_shadow_barrier_scratch_count(const ConSanRequest &request,
                                                            const BoundRuntimeResources &resources,

@@ -663,7 +663,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
   }
 
   const std::vector<MoiBarrierEvidenceSitePlan> barrier_plans =
-      build_moi_barrier_evidence_site_plans(result, ConSanProbeIntentKind::SampledBarrierEpoch,
+      build_moi_barrier_evidence_site_plans(result.program_inventory, result.observation_plan,
+                                            ConSanProbeIntentKind::SampledBarrierEpoch,
                                             result.errors);
   if (!result.errors.empty())
     return;
@@ -1529,7 +1530,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     }
   }
   std::vector<MoiAtomicEvidenceSitePlan> admitted = build_moi_atomic_evidence_site_plans(
-      result, ConSanProbeIntentKind::SampledAtomicOrdering, result.errors);
+      result.program_inventory, result.observation_plan,
+      ConSanProbeIntentKind::SampledAtomicOrdering, result.errors);
   if (!result.errors.empty())
     return;
   for (MoiAtomicEvidenceSitePlan &atomic : admitted) {

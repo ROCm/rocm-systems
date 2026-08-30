@@ -16,8 +16,8 @@ void append_moi_operational_resource_plans(
       evidence_kind = ConSanProbeIntentKind::ExactBarrierEpoch;
       break;
     }
-    std::vector<MoiBarrierEvidenceSitePlan> candidates =
-        build_moi_barrier_evidence_site_plans(result, evidence_kind, errors);
+    std::vector<MoiBarrierEvidenceSitePlan> candidates = build_moi_barrier_evidence_site_plans(
+        result.program_inventory, result.observation_plan, evidence_kind, errors);
     if (!errors.empty())
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
@@ -66,8 +66,8 @@ void append_moi_operational_resource_plans(
       evidence_kind = ConSanProbeIntentKind::ExactAtomicOrdering;
       break;
     }
-    std::vector<MoiAtomicEvidenceSitePlan> candidates =
-        build_moi_atomic_evidence_site_plans(result, evidence_kind, errors);
+    std::vector<MoiAtomicEvidenceSitePlan> candidates = build_moi_atomic_evidence_site_plans(
+        result.program_inventory, result.observation_plan, evidence_kind, errors);
     if (!errors.empty())
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
@@ -86,8 +86,8 @@ void append_moi_operational_resource_plans(
     }
   }
   if (request.moi_track_atomics && request.moi_engine == ConSanMoiEngine::RecordReplay) {
-    std::vector<MoiFenceEvidenceSitePlan> candidates =
-        build_moi_fence_evidence_site_plans(result, errors);
+    std::vector<MoiFenceEvidenceSitePlan> candidates = build_moi_fence_evidence_site_plans(
+        result.program_inventory, result.observation_plan, errors);
     if (!errors.empty())
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {

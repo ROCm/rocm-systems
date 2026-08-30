@@ -31,8 +31,9 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
           container_name);
     }
   }
-  std::vector<MoiAtomicEvidenceSitePlan> candidates = build_moi_atomic_evidence_site_plans(
-      result, ConSanProbeIntentKind::AtomicRecord, result.errors);
+  std::vector<MoiAtomicEvidenceSitePlan> candidates =
+      build_moi_atomic_evidence_site_plans(result.program_inventory, result.observation_plan,
+                                           ConSanProbeIntentKind::AtomicRecord, result.errors);
   if (!result.errors.empty())
     return;
   if (candidates.empty()) {

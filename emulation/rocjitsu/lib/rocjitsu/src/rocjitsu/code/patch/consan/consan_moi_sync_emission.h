@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/consan/consan_moi_evidence_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
@@ -57,18 +58,9 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
 [[nodiscard]] std::string_view
 sampled_atomic_semantics_reason_name(SampledAtomicSemanticsReason reason);
 
-[[nodiscard]] std::vector<consan_detail::MoiFenceEvidenceSitePlan>
-build_moi_fence_evidence_site_plans(const ConSanTransformArtifacts &result,
-                                    std::vector<std::string> &errors);
-
 [[nodiscard]] uint16_t fence_record_scratch_count(const ConSanAtomicLoweringForm &form);
 [[nodiscard]] uint16_t atomic_record_scratch_count(const ConSanAtomicLoweringForm &form);
 [[nodiscard]] uint16_t inline_shadow_atomic_scratch_count(rj_code_arch_t arch);
-
-[[nodiscard]] std::vector<consan_detail::MoiAtomicEvidenceSitePlan>
-build_moi_atomic_evidence_site_plans(const ConSanTransformArtifacts &result,
-                                     ConSanProbeIntentKind evidence_kind,
-                                     std::vector<std::string> &errors);
 
 [[nodiscard]] bool neutralize_atomic_scalar_clause(
     std::vector<uint8_t> &text, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,

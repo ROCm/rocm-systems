@@ -7,12 +7,10 @@
 /// decoded instruction per insertion site. Redundant barriers, runtime
 /// kernels, container filters, and engine-specific signal/wait rules have
 /// already been decided by policy and are never rediscovered here.
-[[nodiscard]] std::vector<MoiBarrierEvidenceSitePlan>
-build_moi_barrier_evidence_site_plans(const ConSanTransformArtifacts &result,
-                                      ConSanProbeIntentKind evidence_kind,
-                                      std::vector<std::string> &errors) {
-  const SynchronizationInventoryView graph = result.program_inventory.sync();
-  const ConSanObservationPlan &observation = result.observation_plan;
+[[nodiscard]] std::vector<MoiBarrierEvidenceSitePlan> build_moi_barrier_evidence_site_plans(
+    const ProgramInventory &inventory, const ConSanObservationPlan &observation,
+    ConSanProbeIntentKind evidence_kind, std::vector<std::string> &errors) {
+  const SynchronizationInventoryView graph = inventory.sync();
   std::vector<ConSanProbeIntentId> admitted_intents;
   for (const ConSanBarrierSiteDecision &decision : observation.barrier_site_decisions) {
     if (decision.kind != ConSanSiteDecisionKind::Admitted)
@@ -86,10 +84,9 @@ build_moi_barrier_evidence_site_plans(const ConSanTransformArtifacts &result,
 
     bool completed = false;
     if (event->in_kernel) {
-      const ConSanKernelInfo *kernel =
-          result.program_inventory.find_kernel_by_name(event->container_name);
+      const ConSanKernelInfo *kernel = inventory.find_kernel_by_name(event->container_name);
       if (kernel == nullptr && event->execution_owners.size() == 1u) {
-        kernel = result.program_inventory.find_kernel_by_descriptor(
+        kernel = inventory.find_kernel_by_descriptor(
             event->execution_owners.front().descriptor_file_offset);
       }
       completed = kernel != nullptr && !is_rocclr_runtime_kernel_name(kernel->name) &&
@@ -97,8 +94,7 @@ build_moi_barrier_evidence_site_plans(const ConSanTransformArtifacts &result,
       if (completed && !kernel->has_text_range)
         plan.container_code_size = 0u;
     } else {
-      const ConSanFunctionInfo *function =
-          result.program_inventory.find_function_by_name(event->container_name);
+      const ConSanFunctionInfo *function = inventory.find_function_by_name(event->container_name);
       completed = function != nullptr && complete_from(*function, std::nullopt);
     }
     if (!completed || !plan.is_well_formed()) {
@@ -806,8 +802,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   const ConSanProbeIntentKind evidence_kind = options.moi_engine == ConSanMoiEngine::RecordReplay
                                                   ? ConSanProbeIntentKind::BarrierRecord
                                                   : ConSanProbeIntentKind::ExactBarrierEpoch;
-  std::vector<MoiBarrierEvidenceSitePlan> candidates =
-      build_moi_barrier_evidence_site_plans(result, evidence_kind, result.errors);
+  std::vector<MoiBarrierEvidenceSitePlan> candidates = build_moi_barrier_evidence_site_plans(
+      result.program_inventory, result.observation_plan, evidence_kind, result.errors);
   if (!result.errors.empty())
     return;
   if (candidates.empty()) {
@@ -2292,8 +2288,9 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     return;
   }
 
-  std::vector<MoiBarrierEvidenceSitePlan> candidates = build_moi_barrier_evidence_site_plans(
-      result, ConSanProbeIntentKind::BarrierRecord, result.errors);
+  std::vector<MoiBarrierEvidenceSitePlan> candidates =
+      build_moi_barrier_evidence_site_plans(result.program_inventory, result.observation_plan,
+                                            ConSanProbeIntentKind::BarrierRecord, result.errors);
   if (!result.errors.empty())
     return;
   if (candidates.empty()) {
