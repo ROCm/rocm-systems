@@ -1326,3 +1326,66 @@ all five simulated targets at `-j16` in 244.70 seconds, and all 635 serialized
 physical gfx1201 tests at `-j1` in 109.49 seconds. All are green. The seven new
 tests directly pin mode-owned object planning, prologue policy, persistent
 state demand, and the shared Record/Replay-plus-Sampled identity rule.
+
+### 16.7 Convergence checkpoint 6: persistent representation ownership and legacy harvesting
+
+This checkpoint, through commit `60bcbe505a`, follows the mode-demand boundary
+into the storage-representation decisions that common placement still made on
+behalf of each engine. `MoiPersistentStateDemand` now states whether its mode
+supports scalar and private persistent state, when capacity/private fallback
+requires scalar state, and whether descriptor growth should prefer private
+epoch storage. Record/Replay, Sampled, and InlineShadow populate those facts in
+their own translation units. The common solver now chooses a legal location
+for the requested representation without enumerating modes in that region.
+
+Two scalar helpers that were already semantically and nominally mode-local
+have moved from common placement into their actual owners: InlineShadow owns
+visible-evidence scalar selection, and Sampled owns its stable access-return
+SCC selection. No duplicate compatibility definitions remain.
+
+The now-explicit boundaries exposed several small but concrete legacy layers,
+which this checkpoint harvests rather than merely recording as future work:
+
+- transient and persistent component assignments use their types' structural
+  equality instead of duplicated hand-maintained field inventories;
+- private assignment lookup functions and their public one-line forwarding
+  wrappers have collapsed into one canonical lookup per assignment kind;
+- host-hook diagnostics call the canonical core naming functions directly
+  instead of six local forwarding aliases; and
+- fault planning calls the canonical target-operation classification and
+  capability functions directly instead of four compatibility aliases.
+
+These deletions are individually modest, but they are directionally useful:
+the canonical structural comparisons automatically cover future fields, and
+the canonical naming/target APIs eliminate parallel authorities. Common
+placement fell from 6,385 to 6,317 physical lines and from 69 to 52 explicit
+mode-enum references.
+
+| Signal | Checkpoint 6 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 248 | +19 |
+| Physical production lines | 105,299 | +324 |
+| Nonblank production lines | 99,246 | +163 |
+| Production implementation lines | 91,628 | **+178** |
+| `MoiOptions` references / files | 95 / 30 | +8 / +5 |
+| `ConSanTransformArtifacts` references / files | 258 / 58 | -18 / +1 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 296 / 56 | +6 / +5 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | 52 | -43 |
+| Test inventory | 5,352 | +7 |
+
+This is the first checkpoint after the mode-boundary investment to move both
+locality and size in the desired direction: 50 implementation lines and 62
+physical lines have been removed since checkpoint 5. It is not completion.
+The implementation remains 178 lines above the starting baseline, common
+placement still contains 52 mode checks, and the mode/target extension
+exercises and broader build-graph enforcement required by Section 14 remain
+open. The next slices must continue harvesting superseded paths and move
+cohesive remaining policy out of common placement; reaching the old baseline
+is a near-term threshold, not the final material-shrinkage target.
+
+Validation includes repeated focused MOI, assignment, scalar-layout, fault,
+and host-hook gates; the complete 4,717-test nonphysical matrix over all five
+simulated targets at `-j16` in 247.06 seconds; and all 635 serialized physical
+gfx1201 tests at `-j1` in 109.23 seconds. All are green.
