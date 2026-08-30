@@ -217,6 +217,7 @@ TEST(ConSanAccessClassifier, MechanismSpecificRejectionsRemainTypedAndIndependen
 
   ConSanAccessInventorySite invalid_scalar = flat_store_site(12);
   invalid_scalar.operands.raw_saddr = 105;
+  invalid_scalar.operands.scalar_address_sgpr = 105;
   invalid_scalar.operands.raw_scale_offset = true;
   const ConSanAccessInventorySite scalar = complete_site(
       std::move(invalid_scalar), ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);

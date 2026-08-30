@@ -75,6 +75,11 @@ _consan_assert_no_match(
     "ROCJITSU_CODE_ARCH_"
     "synchronization analysis must consume the typed target profile"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_access_classifier.cpp"
+    "isa/arch/amdgpu/generated/|ROCJITSU_CODE_ARCH_"
+    "access classification must consume normalized inventory and the typed target profile"
+)
 
 # Mode implementations may select typed target capabilities, but may not see
 # product constants, generated ISA declarations, or member namespaces.
@@ -107,7 +112,6 @@ endforeach()
 # family/member lowering, program analysis, or independent validation owners.
 set(
     _generated_header_owners
-    consan_access_classifier.cpp
     consan_fault_gfx12_target_ops.cpp
     consan_fault_gfx9_target_ops.cpp
     consan_final_validation.cpp

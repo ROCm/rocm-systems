@@ -4,8 +4,6 @@
 #include "rocjitsu/code/patch/consan/consan_access_classifier.h"
 
 #include "rocjitsu/code/patch/consan/consan.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 
 #include <array>
 #include <ranges>
@@ -60,14 +58,13 @@ template <typename Range>
 }
 
 [[nodiscard]] bool is_replayable_single_range_native_lds(std::string_view mnemonic,
-                                                         rj_code_arch_t arch) {
-  if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-       consan_uses_gfx12_encoding(arch)) &&
-      (mnemonic == "ds_load_b96" || mnemonic == "ds_store_b96")) {
+                                                         const ConSanTargetProfile &target) {
+  const bool gfx9_cdna = target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
+                         target.encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
+  if (!gfx9_cdna && (mnemonic == "ds_load_b96" || mnemonic == "ds_store_b96")) {
     return true;
   }
-  if (consan_uses_gfx9_cdna_encoding(arch) &&
-      (mnemonic == "ds_read_b96" || mnemonic == "ds_write_b96")) {
+  if (gfx9_cdna && (mnemonic == "ds_read_b96" || mnemonic == "ds_write_b96")) {
     return true;
   }
   constexpr std::array always = {
@@ -89,7 +86,7 @@ template <typename Range>
       "ds_read_i8_d16",     "ds_read_i8_d16_hi",  "ds_read_u16_d16",
       "ds_read_u16_d16_hi", "ds_write_b8_d16_hi", "ds_write_b16_d16_hi",
   };
-  return consan_uses_gfx9_cdna_encoding(arch) && named(mnemonic, gfx9);
+  return gfx9_cdna && named(mnemonic, gfx9);
 }
 
 [[nodiscard]] bool is_replayable_flat_access(std::string_view mnemonic) {
@@ -148,14 +145,6 @@ template <typename Range>
   return named(mnemonic, forms);
 }
 
-[[nodiscard]] uint32_t vector_flat_no_saddr(rj_code_arch_t arch) {
-  if (consan_uses_gfx9_cdna_encoding(arch))
-    return 0u;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
-    return static_cast<uint32_t>(cdna5::OPR_SREG_NULL);
-  return static_cast<uint32_t>(rdna4::OPR_SREG_NULL);
-}
-
 [[nodiscard]] std::optional<uint16_t>
 native_data_register_count(const ConSanAccessInventorySite &access,
                            const std::optional<TwoRangeShape> &two_address) {
@@ -170,7 +159,7 @@ native_data_register_count(const ConSanAccessInventorySite &access,
 }
 
 [[nodiscard]] Reason native_compare_support(const ConSanAccessInventorySite &access,
-                                            rj_code_arch_t arch,
+                                            const ConSanTargetProfile &target,
                                             const std::optional<TwoRangeShape> &two_address,
                                             uint16_t data_register_count) {
   if (access.instruction_size != 2u * sizeof(uint32_t))
@@ -245,9 +234,7 @@ native_data_register_count(const ConSanAccessInventorySite &access,
     if (!named(access.mnemonic, reads))
       return Reason::UnsupportedMnemonic;
     if (access.operands.destination_accvgpr) {
-      const ConSanTargetProfile *profile = consan_target_profile(arch);
-      return profile &&
-                     profile->accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned &&
+      return target.accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned &&
                      static_cast<uint32_t>(*access.operands.destination_accvgpr) +
                              data_register_count <=
                          256u
@@ -256,7 +243,7 @@ native_data_register_count(const ConSanAccessInventorySite &access,
     }
     if (!access.operands.destination_vgpr)
       return Reason::MissingResultOperand;
-    const uint32_t limit = consan_arch_has_selectable_vgpr_bank(arch) ? 1024u : 256u;
+    const uint32_t limit = target.has_selectable_vgpr_bank ? 1024u : 256u;
     return static_cast<uint32_t>(*access.operands.destination_vgpr) + data_register_count <= limit
                ? Reason::None
                : Reason::OperandRegisterRange;
@@ -327,7 +314,8 @@ classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code
   if (access.file_offset > access.physical_id.code_object.byte_size ||
       access.instruction_size > access.physical_id.code_object.byte_size - access.file_offset)
     return reject(Reason::InstructionOutOfBounds);
-  if (consan_target_profile(arch) == nullptr)
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr)
     return reject(Reason::TargetUnavailable);
 
   ConSanAccessLoweringForm form{
@@ -366,11 +354,11 @@ classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code
       return reject(Reason::UnsupportedMnemonic);
     form.address_vgpr_count = 1u;
     form.data_register_count = *register_count;
-    replay = is_replayable_single_range_native_lds(access.mnemonic, arch) || two_address ||
+    replay = is_replayable_single_range_native_lds(access.mnemonic, *target) || two_address ||
                      is_relaxed_lds_atomic(access.mnemonic)
                  ? Reason::None
                  : Reason::UnsupportedMnemonic;
-    compare = native_compare_support(access, arch, two_address, *register_count);
+    compare = native_compare_support(access, *target, two_address, *register_count);
   } else if (access.origin == ConSanAccessOrigin::Flat) {
     if ((access.instruction_size != 2u * sizeof(uint32_t) &&
          access.instruction_size != 3u * sizeof(uint32_t)) ||
@@ -381,25 +369,24 @@ classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code
     if (!register_count)
       return reject(Reason::UnsupportedMnemonic);
     form.data_register_count = *register_count;
-    const bool scalar_vector_address = consan_uses_gfx12_encoding(arch) &&
-                                       access.operands.raw_saddr &&
-                                       *access.operands.raw_saddr != vector_flat_no_saddr(arch);
+    const bool gfx12_encoding = target->encoding_family == ConSanEncodingFamily::Gfx12;
+    const bool scalar_vector_address = gfx12_encoding && access.operands.scalar_address_sgpr;
     form.kind = scalar_vector_address ? ConSanAccessLoweringFormKind::FlatScalarVectorAddress
                                       : ConSanAccessLoweringFormKind::FlatVectorAddress;
     form.address_vgpr_count = scalar_vector_address ? 1u : 2u;
     if (scalar_vector_address)
-      form.scalar_address_sgpr = static_cast<uint16_t>(*access.operands.raw_saddr);
+      form.scalar_address_sgpr = *access.operands.scalar_address_sgpr;
 
-    const bool gfx12_encoding = access.instruction_size == 3u * sizeof(uint32_t);
+    const bool exact_gfx12_encoding = access.instruction_size == 3u * sizeof(uint32_t);
     const bool cdna4_encoding =
         access.instruction_size == 2u * sizeof(uint32_t) && access.operands.raw_segment == 0u;
-    if (!gfx12_encoding && !cdna4_encoding) {
+    if (!exact_gfx12_encoding && !cdna4_encoding) {
       replay = Reason::UnsupportedEncoding;
     } else if (!access.operands.raw_ioffset ||
-               (consan_uses_gfx12_encoding(arch) &&
+               (gfx12_encoding &&
                 (!access.operands.raw_saddr || !access.operands.raw_scale_offset))) {
       replay = Reason::UnsupportedEncoding;
-    } else if (*access.operands.raw_ioffset != 0 && !consan_uses_gfx12_encoding(arch)) {
+    } else if (*access.operands.raw_ioffset != 0 && !gfx12_encoding) {
       replay = Reason::NonzeroImmediateOffset;
     } else if (scalar_vector_address &&
                (*access.operands.raw_saddr > 104u || (*access.operands.raw_saddr & 1u) != 0u)) {
@@ -417,9 +404,8 @@ classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code
 
   form.element_register_count = static_cast<uint16_t>((form.element_width_bits + 31u) / 32u);
   form.destination_register_count = form.destination_vgpr ? form.data_register_count : 0u;
-  const ConSanTargetProfile *target = consan_target_profile(arch);
   form.data_register_alignment =
-      target && target->requires_even_vgpr_tuples && form.data_register_count > 1u ? 2u : 1u;
+      target->requires_even_vgpr_tuples && form.data_register_count > 1u ? 2u : 1u;
   form.destination_allocation_headroom = needs_destination_allocation_headroom(access.mnemonic);
   if (uses_high_register_subword(access.mnemonic)) {
     form.register_value_placement = ConSanAccessRegisterValuePlacement::High16;

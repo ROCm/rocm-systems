@@ -368,6 +368,10 @@ struct ConSanAccessOperandFacts {
   std::optional<uint16_t> destination_vgpr;
   std::optional<uint16_t> destination_accvgpr;
   std::optional<uint16_t> address_vgpr;
+  /// Target-normalized scalar half of a scalar-vector FLAT address. The raw
+  /// SADDR encoding remains below for exact lowering validation; absence here
+  /// means that the target decoder identified its vector-only sentinel.
+  std::optional<uint16_t> scalar_address_sgpr;
   std::optional<uint16_t> data_vgpr;
   std::optional<uint16_t> second_data_vgpr;
   std::optional<uint32_t> raw_op;

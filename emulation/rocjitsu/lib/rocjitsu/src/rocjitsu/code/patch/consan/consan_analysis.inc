@@ -1203,6 +1203,7 @@ void apply_flat_memory_encoding(ConSanAccessInventorySite &site,
   site.operands.raw_segment = encoding.raw_segment;
   site.operands.raw_scope = encoding.raw_scope;
   site.operands.raw_th = encoding.raw_th;
+  site.operands.scalar_address_sgpr = encoding.scalar_provenance_sgpr;
   if (encoding.encoded_segment == ConSanEncodedFlatSegment::Private)
     site.flat_address_space_hint = ConSanFlatAddressSpaceHint::Private;
   else if (encoding.encoded_segment == ConSanEncodedFlatSegment::Global)
