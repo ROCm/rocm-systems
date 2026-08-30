@@ -902,16 +902,16 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
 }
 
 void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
-                                            const ConSanOptions &options,
+                                            const ConSanFaultMutationPlan &plan,
                                             ConSanTransformArtifacts &result) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
-  if (options.fault_barrier_sequence_identity.empty() || !options.fault_barrier_target_id) {
+  if (!plan.selection_sequence_identity || !plan.target_barrier_id) {
     result.errors.emplace_back(
         "ConSan barrier ID/scope mutation requires an exact sequence identity and target ID");
     return;
   }
-  const auto selected = std::ranges::find(
-      sync.sync_sequences, options.fault_barrier_sequence_identity, &ConSanSyncSequence::identity);
+  const auto selected = std::ranges::find(sync.sync_sequences, *plan.selection_sequence_identity,
+                                          &ConSanSyncSequence::identity);
   if (selected == sync.sync_sequences.end() || selected->kind != ConSanSyncSequenceKind::Barrier ||
       selected->operation != ConSanSyncOperation::BarrierFull ||
       !consan_sync_confidence_meets(selected->confidence, ConSanSemanticConfidence::Conservative) ||
@@ -929,7 +929,7 @@ void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
         std::string(consan_barrier_lifecycle_issue_message(lifecycle_group->issue)));
     return;
   }
-  const int32_t target_id = *options.fault_barrier_target_id;
+  const int32_t target_id = *plan.target_barrier_id;
   if (target_id == *selected->barrier_id ||
       barrier_scope_for_id(target_id) == ConSanBarrierSite::Scope::Unknown) {
     result.errors.emplace_back(
@@ -1058,11 +1058,14 @@ void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
 }
 
 void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_object,
-                                               const ConSanOptions &options,
+                                               const ConSanFaultMutationPlan &plan,
                                                ConSanTransformArtifacts &result) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
-  const auto selected = std::ranges::find(
-      sync.sync_sequences, options.fault_barrier_sequence_identity, &ConSanSyncSequence::identity);
+  const auto selected =
+      plan.selection_sequence_identity
+          ? std::ranges::find(sync.sync_sequences, *plan.selection_sequence_identity,
+                              &ConSanSyncSequence::identity)
+          : sync.sync_sequences.end();
   const ConSanBarrierLifecycleGroup *group =
       selected == sync.sync_sequences.end()
           ? nullptr
@@ -1071,11 +1074,6 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
       group != nullptr && group->admissible()
           ? find_static_participant_init(result.program_inventory, *group)
           : nullptr;
-  if (options.fault_barrier_target_participant_mask) {
-    mark_participant_mutation_unsupported(
-        result, "the GFX12.5 lifecycle exposes a six-bit count in M0, not a participant mask");
-    return;
-  }
   if (group == nullptr || !group->admissible() || init == nullptr ||
       init->participant_encoding != ConSanBarrierSite::ParticipantEncoding::M0Literal32 ||
       !init->participant_count || !init->participant_setup_text_offset ||
@@ -1084,10 +1082,9 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
         result, "no complete lifecycle has an immediately preceding literal M0 count setup");
     return;
   }
-  if (!options.fault_barrier_target_participant_count ||
-      *options.fault_barrier_target_participant_count == 0u ||
-      *options.fault_barrier_target_participant_count > 63u ||
-      *options.fault_barrier_target_participant_count == *init->participant_count) {
+  if (!plan.target_participant_count || *plan.target_participant_count == 0u ||
+      *plan.target_participant_count > 63u ||
+      *plan.target_participant_count == *init->participant_count) {
     mark_participant_mutation_unsupported(
         result, "the target count must be a distinct value in the encodable range [1, 63]");
     return;
@@ -1103,8 +1100,8 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
   }
   constexpr uint32_t kParticipantCountMask = 0x3fu << 16u;
   uint32_t replacement_literal = *init->participant_setup_literal;
-  replacement_literal = (replacement_literal & ~kParticipantCountMask) |
-                        (*options.fault_barrier_target_participant_count << 16u);
+  replacement_literal =
+      (replacement_literal & ~kParticipantCountMask) | (*plan.target_participant_count << 16u);
   result.replacement.assign(original_bytes.begin(), original_bytes.end());
   std::memcpy(result.replacement.data() + literal_file_offset, &replacement_literal,
               sizeof(replacement_literal));
@@ -1116,14 +1113,14 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
   patch.trampoline_offset = patch.anchor_offset;
   patch.original_size = 2u * sizeof(uint32_t);
   patch.original_participant_count = init->participant_count;
-  patch.target_participant_count = options.fault_barrier_target_participant_count;
+  patch.target_participant_count = plan.target_participant_count;
   result.patches.push_back(std::move(patch));
   result.mark_modified();
   result.mutation.applied_fault_logical_identity = group->identity;
   result.warnings.emplace_back("ConSan barrier participant mutation rewrote one proven static "
                                "lifecycle count from " +
                                std::to_string(*init->participant_count) + " to " +
-                               std::to_string(*options.fault_barrier_target_participant_count));
+                               std::to_string(*plan.target_participant_count));
 }
 
 void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,

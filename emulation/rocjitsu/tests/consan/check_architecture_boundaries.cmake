@@ -288,10 +288,20 @@ if(NOT _fault_planning_contract MATCHES "ConSanFaultPlanningInput" OR
     message(FATAL_ERROR "ConSan fault planning lost its explicit input/product contract")
 endif()
 file(READ "${_consan_dir}/consan_fault_injection.h" _fault_application_contract)
-if(NOT _fault_application_contract MATCHES
-   "try_apply_lds_fault_patch[^;]*ConSanFaultMutationPlan")
-    message(FATAL_ERROR "ConSan LDS fault application must consume its retained typed plan")
-endif()
+foreach(
+    _typed_fault_application
+    IN ITEMS
+       try_apply_barrier_id_scope_fault_patch
+       try_apply_barrier_participant_fault_patch
+       try_apply_lds_fault_patch
+)
+    if(NOT _fault_application_contract MATCHES
+       "${_typed_fault_application}[^;]*ConSanFaultMutationPlan")
+        message(FATAL_ERROR
+            "ConSan fault application must consume its retained typed plan: ${_typed_fault_application}"
+        )
+    endif()
+endforeach()
 
 # Native emission and target-operation components accept narrow operation
 # contracts, not the broad mutable MoiOptions bus.

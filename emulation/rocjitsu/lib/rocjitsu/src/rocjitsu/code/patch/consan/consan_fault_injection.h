@@ -21,10 +21,10 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
                                         const ConSanOptions &options,
                                         ConSanTransformArtifacts &result);
 void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
-                                            const ConSanOptions &options,
+                                            const ConSanFaultMutationPlan &plan,
                                             ConSanTransformArtifacts &result);
 void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_object,
-                                               const ConSanOptions &options,
+                                               const ConSanFaultMutationPlan &plan,
                                                ConSanTransformArtifacts &result);
 void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                         const ConSanOptions &options,

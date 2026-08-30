@@ -444,21 +444,13 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   if (const ConSanFaultMutationPlan *plan =
           find_fault_plan(plans, ConSanFaultMutationKind::BarrierIdScope);
       plan != nullptr && result.errors.empty()) {
-    ConSanOptions options = make_fault_application_options(context);
-    options.fault_mutate_barrier_id_scope = true;
-    options.fault_barrier_sequence_identity = *plan->selection_sequence_identity;
-    options.fault_barrier_target_id = plan->target_barrier_id;
-    try_apply_barrier_id_scope_fault_patch(code_object, options, result);
+    try_apply_barrier_id_scope_fault_patch(code_object, *plan, result);
   }
   if (const ConSanFaultMutationPlan *plan =
           find_fault_plan(plans, ConSanFaultMutationKind::BarrierParticipantCount);
       plan != nullptr && result.errors.empty() &&
       result.outcome != ConSanTransformOutcome::Unsupported) {
-    ConSanOptions options = make_fault_application_options(context);
-    options.fault_mutate_barrier_participants = true;
-    options.fault_barrier_sequence_identity = *plan->selection_sequence_identity;
-    options.fault_barrier_target_participant_count = plan->target_participant_count;
-    try_apply_barrier_participant_fault_patch(code_object, options, result);
+    try_apply_barrier_participant_fault_patch(code_object, *plan, result);
   }
 
   const ConSanFaultMutationPlan *atomic_address =
