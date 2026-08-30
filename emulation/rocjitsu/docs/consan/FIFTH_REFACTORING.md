@@ -422,6 +422,63 @@ that some current commonality is accidental and should be separated, or that
 apparently mode-specific code expresses a more general semantic operation. It
 may also discover components not named in this initial audit.
 
+### 11.1 Architecture locality as a directional ideal
+
+One explicit ideal for the fifth refactoring is **physical locality of gfx
+architecture support**. Code whose reason for existing is support for one
+concrete gfx architecture should eventually be recognizable from its path
+without reading its implementation. A near-term form could be a small set of
+files bearing the architecture name, such as `*_gfx1201_*`; a stronger eventual
+form could be an `arch/gfx1201/` package. The exact directory and interface
+design remain open, but locality itself is a goal.
+
+This ideal serves two audiences:
+
+1. A maintainer adding a future gfx architecture should find an obvious,
+   bounded place to implement its profile, decoding/normalization, ABI and
+   placement constraints, native operations, and validation support.
+2. A reader concerned with ConSan semantics, one engine, or a different target
+   should be able to skip the concrete architecture packages and still
+   understand the common design.
+
+The desired reading boundary is stronger than hiding raw generated-ISA
+includes. Common policy, engine, solver, and transaction code should speak in
+target-neutral semantic operations and constraints. Except for a narrow
+registration/composition authority, those components should not need to name a
+concrete gfx architecture or know which file implements it. Conversely, a
+concrete architecture package should implement target mechanics and facts; it
+should not decide which ConSan mode semantically wants an observation.
+
+Genuinely shared family behavior remains valid, but should be equally local and
+honest: for example, an explicitly named `arch/rdna4/` or `*_rdna4_*` owner may
+hold behavior proved common across that family, while thin concrete-target
+packages supply member differences. “Shared” should not become a miscellaneous
+home for target branches that happen to have more than one caller.
+
+Physical locality does not require one giant file per architecture. A target
+package may expose several cohesive facets -- for example profile facts,
+inventory decoding, lowering operations, resource constraints, and independent
+validation -- while keeping all concrete-target dependencies behind the same
+package boundary. Nor does the ideal require duplicating family-shared recipes
+into every member directory. The design problem is to make concrete and family
+ownership visible while preserving exact normalization and independent proof.
+
+A useful extension test for candidate designs is the hypothetical addition of
+one fully supported architecture. For operations already represented by the
+common semantic contracts, the expected change should be approximately:
+
+- add one target or target-family package implementing the required facets;
+- add one narrow registry/profile entry;
+- add target-specific fixtures and matrix coverage; and
+- make no edits to mode-owned policy or lowering code.
+
+This is a design test, not yet a frozen plugin API or a claim that every future
+ISA feature will fit without extending common contracts. When a new target
+introduces a genuinely new semantic operation, the common contract may grow
+once and all interested modes may elect to consume it. What should disappear
+is the need to scatter routine target enablement through central analysis,
+placement, validation, and every engine.
+
 ## 12. Initial exploration map
 
 The following is a non-exhaustive map of pressure points and design questions.
@@ -469,6 +526,15 @@ It is expected to grow substantially.
 
 ### 12.4 Target composition
 
+- What should the cohesive facets of one concrete `gfxXYZ` architecture
+  package be, and which interfaces connect those facets to common ConSan code?
+- Can all concrete-target identifiers, generated ISA types, raw encodings,
+  special-register operands, ABI differences, placement constraints, and
+  validation recipes be made local to a few clearly named files or one target
+  directory?
+- Can a reader understand the complete target-neutral transformation while
+  deliberately excluding `arch/gfxXYZ/` and family directories from the files
+  they read?
 - What normalized target facts should program analysis publish before common
   semantic code runs?
 - Which decoding, emission, ABI, relocation, placement, and validation
@@ -480,6 +546,9 @@ It is expected to grow substantially.
   should be supplied by a target contract?
 - Can a hypothetical sixth target implement already-normalized operations
   without edits to every engine or to central switch statements?
+- Can that hypothetical extension be expressed as one package, one registry
+  change, and tests, with build and boundary checks rejecting target-specific
+  additions elsewhere?
 
 ### 12.5 Resource solving and mode-by-target interaction
 
@@ -562,6 +631,9 @@ already carry forward:
 7. The architecture may be revised as implementation evidence accumulates;
    previously written hypotheses have no authority over a demonstrably clearer
    design.
+8. Concrete gfx-architecture support should move toward physically local,
+   skippable packages, while genuinely shared family behavior remains in
+   explicitly named family owners rather than being duplicated.
 
 ## 14. Sections intentionally left open
 
