@@ -8,12 +8,26 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 
+#include <initializer_list>
+
 namespace rocjitsu::consan_moi_impl {
 
 [[nodiscard]] bool checked_moi_report_capacity(uint64_t count, uint32_t &capacity);
 
-[[nodiscard]] bool append_moi_report_region(uint64_t count, uint64_t element_size,
-                                            uint64_t alignment, uint64_t &cursor, size_t &offset);
+struct MoiReportRegionPlan {
+  uint64_t count, element_size, alignment;
+  uint32_t *capacity;
+  size_t *offset;
+};
+
+template <typename Element>
+[[nodiscard]] MoiReportRegionPlan moi_report_region(uint64_t count, uint32_t &capacity,
+                                                    size_t &offset) {
+  return {count, sizeof(Element), alignof(Element), &capacity, &offset};
+}
+
+[[nodiscard]] bool plan_moi_report_regions(std::initializer_list<MoiReportRegionPlan> regions,
+                                           ConSanMoiAutoReportPlan &plan, uint64_t &cursor);
 
 [[nodiscard]] bool plan_record_replay_report_layout(const ConSanMoiAutoReportInventory &inventory,
                                                     ConSanMoiAutoReportPlan &plan,

@@ -21,8 +21,10 @@ bool checked_moi_report_capacity(uint64_t count, uint32_t &capacity) {
   return true;
 }
 
-bool append_moi_report_region(uint64_t count, uint64_t element_size, uint64_t alignment,
-                              uint64_t &cursor, size_t &offset) {
+namespace {
+
+[[nodiscard]] bool append_moi_report_region(uint64_t count, uint64_t element_size,
+                                            uint64_t alignment, uint64_t &cursor, size_t &offset) {
   if (!std::has_single_bit(alignment))
     return false;
   const auto aligned = util::checked_align_up(cursor, alignment);
@@ -33,6 +35,22 @@ bool append_moi_report_region(uint64_t count, uint64_t element_size, uint64_t al
     return false;
   offset = static_cast<size_t>(*aligned);
   cursor = *end;
+  return true;
+}
+
+} // namespace
+
+bool plan_moi_report_regions(std::initializer_list<MoiReportRegionPlan> regions,
+                             ConSanMoiAutoReportPlan &plan, uint64_t &cursor) {
+  for (const MoiReportRegionPlan &region : regions) {
+    if (!checked_moi_report_capacity(region.count, *region.capacity)) {
+      plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
+      return false;
+    }
+    if (!append_moi_report_region(region.count, region.element_size, region.alignment, cursor,
+                                  *region.offset))
+      return false;
+  }
   return true;
 }
 

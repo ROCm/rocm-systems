@@ -25,34 +25,23 @@ bool plan_sampled_report_layout(const ConSanMoiAutoReportInventory &inventory,
     plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
     return false;
   }
-  if (!checked_moi_report_capacity(inventory.diagnostic_count, layout.diagnostic_capacity) ||
-      !checked_moi_report_capacity(sampled_sync_slot_count,
-                                   layout.sampled_causal_window_capacity) ||
-      !checked_moi_report_capacity(inventory.sampled_watchpoint_count,
-                                   layout.sampled_watchpoint_capacity) ||
-      !checked_moi_report_capacity(sampled_sync_slot_count,
-                                   layout.sampled_sync_metadata_capacity) ||
-      !checked_moi_report_capacity(*pending_acquire_count,
-                                   layout.sampled_pending_acquire_capacity)) {
-    plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
-    return false;
-  }
-  return append_moi_report_region(inventory.diagnostic_count, sizeof(ConSanMoiDiagnosticRecord),
-                                  alignof(ConSanMoiDiagnosticRecord), cursor,
-                                  layout.diagnostic_records_offset) &&
-         append_moi_report_region(sampled_sync_slot_count, sizeof(ConSanMoiSampledCausalWindow),
-                                  alignof(ConSanMoiSampledCausalWindow), cursor,
-                                  layout.sampled_causal_windows_offset) &&
-         append_moi_report_region(inventory.sampled_watchpoint_count, sizeof(uint64_t),
-                                  alignof(uint64_t), cursor, layout.sampled_watchpoints_offset) &&
-         append_moi_report_region(sampled_sync_slot_count,
-                                  sizeof(ConSanMoiSampledSyncMetadataPacked),
-                                  alignof(ConSanMoiSampledSyncMetadataPacked), cursor,
-                                  layout.sampled_sync_metadata_offset) &&
-         append_moi_report_region(*pending_acquire_count,
-                                  sizeof(ConSanMoiSampledPendingAcquireSlot),
-                                  alignof(ConSanMoiSampledPendingAcquireSlot), cursor,
-                                  layout.sampled_pending_acquires_offset);
+  return plan_moi_report_regions(
+      {moi_report_region<ConSanMoiDiagnosticRecord>(inventory.diagnostic_count,
+                                                    layout.diagnostic_capacity,
+                                                    layout.diagnostic_records_offset),
+       moi_report_region<ConSanMoiSampledCausalWindow>(sampled_sync_slot_count,
+                                                       layout.sampled_causal_window_capacity,
+                                                       layout.sampled_causal_windows_offset),
+       moi_report_region<uint64_t>(inventory.sampled_watchpoint_count,
+                                   layout.sampled_watchpoint_capacity,
+                                   layout.sampled_watchpoints_offset),
+       moi_report_region<ConSanMoiSampledSyncMetadataPacked>(sampled_sync_slot_count,
+                                                             layout.sampled_sync_metadata_capacity,
+                                                             layout.sampled_sync_metadata_offset),
+       moi_report_region<ConSanMoiSampledPendingAcquireSlot>(
+           *pending_acquire_count, layout.sampled_pending_acquire_capacity,
+           layout.sampled_pending_acquires_offset)},
+      plan, cursor);
 }
 
 std::optional<ConSanMoiAutoReportInventory>

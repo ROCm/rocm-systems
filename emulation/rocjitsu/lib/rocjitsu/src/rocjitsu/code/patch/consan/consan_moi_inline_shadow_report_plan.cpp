@@ -33,41 +33,27 @@ bool plan_inline_shadow_report_layout(const ConSanMoiAutoReportInventory &invent
     plan.reason = ConSanMoiAutoReportPlanReason::ByteSizeOverflow;
     return false;
   }
-  if (!checked_moi_report_capacity(inventory.diagnostic_count, layout.diagnostic_capacity) ||
-      !checked_moi_report_capacity(*exact_shadow_count, layout.exact_shadow_entry_capacity) ||
-      !checked_moi_report_capacity(inventory.inline_atomic_release_count,
-                                   layout.inline_atomic_release_capacity) ||
-      !checked_moi_report_capacity(inventory.inline_causal_snapshot_count,
-                                   layout.inline_causal_snapshot_capacity) ||
-      !checked_moi_report_capacity(inventory.inline_compact_token_mapping_count,
-                                   layout.inline_compact_token_mapping_capacity) ||
-      !checked_moi_report_capacity(inventory.inline_acquired_epoch_token_count,
-                                   layout.inline_acquired_epoch_token_capacity)) {
-    plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
-    return false;
-  }
-  return append_moi_report_region(inventory.diagnostic_count, sizeof(ConSanMoiDiagnosticRecord),
-                                  alignof(ConSanMoiDiagnosticRecord), cursor,
-                                  layout.diagnostic_records_offset) &&
-         append_moi_report_region(*exact_shadow_count, sizeof(ConSanMoiInlineExactShadowSlot),
-                                  alignof(ConSanMoiInlineExactShadowSlot), cursor,
-                                  layout.exact_shadow_entries_offset) &&
-         append_moi_report_region(inventory.inline_atomic_release_count,
-                                  sizeof(ConSanMoiInlineAtomicReleaseSlot),
-                                  alignof(ConSanMoiInlineAtomicReleaseSlot), cursor,
-                                  layout.inline_atomic_release_slots_offset) &&
-         append_moi_report_region(inventory.inline_causal_snapshot_count,
-                                  sizeof(ConSanMoiInlineCausalSnapshot),
-                                  alignof(ConSanMoiInlineCausalSnapshot), cursor,
-                                  layout.inline_causal_snapshots_offset) &&
-         append_moi_report_region(inventory.inline_compact_token_mapping_count,
-                                  sizeof(ConSanMoiCompactDiagnosticTokenMapping),
-                                  alignof(ConSanMoiCompactDiagnosticTokenMapping), cursor,
-                                  layout.inline_compact_token_mappings_offset) &&
-         append_moi_report_region(inventory.inline_acquired_epoch_token_count,
-                                  sizeof(ConSanMoiInlineAcquiredEpochTokenSlot),
-                                  alignof(ConSanMoiInlineAcquiredEpochTokenSlot), cursor,
-                                  layout.inline_acquired_epoch_token_slots_offset);
+  return plan_moi_report_regions(
+      {moi_report_region<ConSanMoiDiagnosticRecord>(inventory.diagnostic_count,
+                                                    layout.diagnostic_capacity,
+                                                    layout.diagnostic_records_offset),
+       moi_report_region<ConSanMoiInlineExactShadowSlot>(*exact_shadow_count,
+                                                         layout.exact_shadow_entry_capacity,
+                                                         layout.exact_shadow_entries_offset),
+       moi_report_region<ConSanMoiInlineAtomicReleaseSlot>(
+           inventory.inline_atomic_release_count, layout.inline_atomic_release_capacity,
+           layout.inline_atomic_release_slots_offset),
+       moi_report_region<ConSanMoiInlineCausalSnapshot>(inventory.inline_causal_snapshot_count,
+                                                        layout.inline_causal_snapshot_capacity,
+                                                        layout.inline_causal_snapshots_offset),
+       moi_report_region<ConSanMoiCompactDiagnosticTokenMapping>(
+           inventory.inline_compact_token_mapping_count,
+           layout.inline_compact_token_mapping_capacity,
+           layout.inline_compact_token_mappings_offset),
+       moi_report_region<ConSanMoiInlineAcquiredEpochTokenSlot>(
+           inventory.inline_acquired_epoch_token_count, layout.inline_acquired_epoch_token_capacity,
+           layout.inline_acquired_epoch_token_slots_offset)},
+      plan, cursor);
 }
 
 std::optional<ConSanMoiAutoReportInventory>
