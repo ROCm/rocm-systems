@@ -1672,3 +1672,72 @@ Validation includes 130-test five-target dispatch/fallback gates and a
 gate; the complete 4,720-test nonphysical matrix, including all 2,908 simulated
 device tests over five targets, at `-j16` in 246.98 seconds; and all 635
 serialized physical gfx1201 tests at `-j1` in 108.28 seconds. All are green.
+
+### 16.11 Convergence checkpoint 10: scalar ABI ownership and shared register search
+
+This checkpoint, through commit `f989245d23`, follows the dispatch-policy
+boundary into scalar ABI selection and then harvests invalid state and repeated
+search mechanics exposed by that migration:
+
+- Record/Replay, Sampled, and InlineShadow now own their complete scalar ABI
+  layout. The mode operations publish special-state and indirect-jump
+  registers, while one common builder retains the spill-aware mechanics;
+- the former placement-owned `moi_special_state_sgprs` and
+  `moi_indirect_jump_sgprs` implementations moved behind that mode boundary,
+  removing another five explicit mode references from common placement;
+- the operating point's two independent scalar-spill booleans, which could
+  represent the impossible state that both incompatible layouts were active,
+  collapsed into one exclusive `None`, `Inline`, or `Compact` layout. Common,
+  Inline, and Record/Replay-plus-Sampled consumers now ask the representation
+  the exact question they need; and
+- eighteen deterministic forward first-fit register loops now use one shared
+  traversal. Each caller still owns its range width, floor, alignment, and
+  admission predicate, but candidate order and termination are implemented
+  once. Reverse searches, candidate-list construction, and the stateful
+  multi-result Inline ABI search remain separate because they are not the same
+  mechanism.
+
+The scalar ABI migration exposed and fixed a real fallback bug before commit:
+the first common builder incorrectly required a global EXEC-save base before
+honoring an explicitly selected spill-backed indirect PC/SCC pair. Four
+gfx1250 Inline dense-router tests failed deterministically. The builder now
+honors the explicit spill ABI first, and the owner-level mode-planning test
+directly covers a spill-backed layout with no global EXEC-save base.
+
+The reviewed placement body is now 6,060 physical lines with 33 explicit
+mode-enum references, down from 6,143 and 38 at checkpoint 9 and from 6,694 and
+95 at the starting review. The exclusive spill representation also reduces
+the broad operating-point occurrence count despite replacing many raw field
+reads with typed queries.
+
+| Signal | Checkpoint 10 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 249 | +20 |
+| Physical production lines | 105,139 | +164 |
+| Nonblank production lines | 99,050 | -33 |
+| Production implementation lines | 91,416 | **-34** |
+| `MoiOptions` references / files | 95 / 30 | +8 / +5 |
+| `ConSanTransformArtifacts` references / files | 256 / 58 | -20 / +1 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 307 / 56 | +17 / +5 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | 33 | -62 |
+| Explicit mode-enum references in `consan_moi_report_plan.cpp` | 15 | -3 |
+| Test inventory | 5,356 | +11 |
+
+The mode-owned ABI contract temporarily grew production more than its first
+five deleted placement branches repaid. Making the spill layout exclusive and
+sharing the register traversal then removed that invalid state and 34
+implementation lines. The cumulative result is nine implementation lines
+larger than checkpoint 9 and still only 34 below the starting baseline. This
+is therefore another structural checkpoint, not the material reduction
+required by Section 14. The remaining placement interactions, wide operating
+point, target locality, component build graph, extension exercises, and
+independent completion audit remain open.
+
+Validation includes a 1,034-test spill, dense-routing, barrier, publication,
+and indirect-state gate plus the previously overloaded gfx1250 publication
+case serialized separately; the complete 4,721-test nonphysical matrix over
+all five simulated targets at `-j16` in 248.12 seconds; and all 635 physical
+gfx1201 tests at `-j1` in 108.06 seconds. All are green. The inventory increase
+is the direct scalar-ABI fallback regression.
