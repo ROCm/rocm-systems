@@ -123,7 +123,11 @@ struct acclCollInfo {
 //   proxy_peer_wait_us     waiting for the remote FIFO
 //   proxy_flush_us         GDR flush
 //   proxy_gpu_recv_wait_us proxy waiting for the GPU to consume
-// The proxy_* rows and the n_* counts are aggregated across all proxy ops.
+// The n_* counts are totals over all proxy ops. Each proxy_* row is a mean over
+// the op class that can produce it — the send-only states over n_send_ops, the
+// recv-only ones over n_recv_ops — so it is a per-channel cost for the usual
+// one-send-plus-one-recv-per-channel ring, not a per-op cost. proxy_network_us
+// spans both classes and is the sum of the two per-class means.
 #define ACCL_DECOMP_FIELDS(X, XE)                                    \
   X (double, enqueue_to_kernel_us,   "%.2f", enqueueToKernelUs)      \
   X (double, gpu_kernel_avg_us,      "%.2f", gpuKernelUs)            \
