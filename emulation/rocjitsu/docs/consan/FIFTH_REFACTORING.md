@@ -1196,3 +1196,56 @@ validation tests; 14 focused MOI fault-composition and retry tests; and the
 complete 4,710-test nonphysical gate over all five emulated targets at `-j16`
 in 242.73 seconds. The serialized 635-test physical gfx1201 baseline remains
 green and will be repeated at a later periodic physical checkpoint.
+
+### 16.5 Convergence checkpoint 4: direct typed fault application
+
+The planning product exposed one remaining compatibility layer. Composition
+translated each retained `ConSanFaultMutationPlan` back into a mostly empty
+`ConSanOptions`, and the mutation emitters then reinterpreted that legacy
+request to recover the exact site, pair, sequence, destination, and mutation
+payload that planning had already chosen. This was parallel authority across
+the planning/application boundary: the application path could accidentally
+reselect a different site or reconstruct a different policy decision.
+
+All seven fault-application families now consume typed plans directly:
+barrier drop, barrier move, barrier ID/scope, barrier participants, atomic,
+LDS, and ordinary-memory mutation. Each emitter resolves the exact retained
+identities against the same pristine inventory and fails closed if the plan is
+stale. Barrier-move application additionally validates its retained logical
+pair and structured-CFG proof instead of rerunning request-level admission.
+The old plan-to-options construction helper and its per-family field-copying
+blocks have been deleted. A structural regression requires every fault
+emitter's public contract to name `ConSanFaultMutationPlan`.
+
+Stateful emitters still receive `ConSanTransformArtifacts` deliberately: that
+object owns the byte transaction, emitted patch telemetry, diagnostics, and
+modified outcome. It no longer acts as the fault-selection or planning input.
+The one non-plan policy needed by barrier-move byte growth is passed as the
+narrow `ConSanPatchedImageGrowthLimit` value. This completes the boundary
+migration rather than leaving typed and legacy application paths in parallel.
+
+| Signal | Checkpoint 4 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 237 | +8 |
+| Physical production lines | 104,938 | -37 |
+| Nonblank production lines | 99,022 | -61 |
+| Production implementation lines | 91,353 | **-97** |
+| `ConSanTransformArtifacts` references / files | 251 / 53 | **-25 / -4** |
+| `ConSanOptions` references / files | 86 / 36 | **-24 / 0** |
+| Other recorded broad-bus reference/file counts | unchanged | 0 |
+| Test inventory | 5,345 | 0 |
+
+This slice pays back the preceding contract investment: it removes 56
+implementation lines relative to checkpoint 3 and restores a larger
+cumulative reduction than checkpoint 2, while retaining the explicit planning
+product. The extra broad-transaction reference relative to checkpoint 3 is
+the temporary compatibility overload in the shared growth-policy helper; the
+next trace of that policy boundary must either remove the overload or justify
+why its callers cannot consume the narrow limit directly.
+
+Validation includes a full `-j16` rebuild, 14 focused barrier-move and typed-
+plan contract tests, the architecture-boundary test, and the complete 4,710-
+test nonphysical gate over all five emulated targets at `-j16` in 244.53
+seconds. The test inventory is unchanged. The serialized 635-test physical
+gfx1201 baseline remains green and will be repeated at a later periodic
+physical checkpoint.
