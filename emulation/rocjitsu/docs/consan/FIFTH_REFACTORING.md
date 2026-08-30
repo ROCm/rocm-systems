@@ -1877,3 +1877,70 @@ report-ABI, capacity, spill, and structural-boundary gates. The complete
 4,722-test nonphysical matrix over all five simulated targets passed at `-j16`,
 and all 635 serialized physical gfx1201 tests passed at `-j1` in 109.30
 seconds. The inventory increase is the target-capability contract regression.
+
+### 16.14 Convergence checkpoint 13: one mode-owned evidence path
+
+This checkpoint, through commit `6566586342`, completes the report/evidence
+mode-locality slice begun at checkpoint 12. The common report planner now owns
+only engine-neutral intent classification, report-region composition, and
+canonical layout validation. Record/Replay, Sampled, InlineShadow, and
+SuperCollider each own their evidence-requirement construction and validation
+beside the corresponding report implementation.
+
+The three report-backed engines derive from one shared MOI evidence contract
+for the common runtime requirements, sizing inventory, ABI plan, and typed
+construction result. This deletes the repeated four-field payload without
+forcing mode-specific invariants into the base. Shared intent validation,
+count accumulation, publication requirements, and report-region mechanics
+remain single common implementations used by the mode owners.
+
+The transform pipeline no longer switches over MOI engines to translate
+request bounds into three separate capacity-policy APIs. Evidence planning is
+a facet of the existing `MoiModeOperations` registry, fed by one narrow
+immutable context. Record/Replay owns the dynamic-ring ceiling exception,
+Sampled owns its bank policy, and InlineShadow owns the program-inventory/LDS
+aperture join. The former per-mode production planner functions and three
+capacity-policy types were then deleted rather than retained as compatibility
+facades. Focused tests use test-only typed adapters; production has one path.
+
+Structural checks fix both `consan_moi_report_plan.cpp` and
+`consan_pipeline.cpp` at zero explicit MOI engine references, prohibit direct
+per-mode evidence-planner calls in the pipeline, and reject resurrection of
+the retired production planner names anywhere in the ConSan implementation.
+A new mode adds its report/evidence owner and one operations-registry entry; it
+does not add another branch to shared report composition or the transform
+pipeline.
+
+| Signal | Checkpoint 13 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 256 | +27 |
+| Physical production lines | 105,191 | +216 |
+| Nonblank production lines | 99,031 | **-52** |
+| Production implementation lines | 91,407 | **-43** |
+| `MoiOptions` references / files | 95 / 30 | +8 / +5 |
+| `ConSanTransformArtifacts` references / files | 245 / 58 | -31 / +1 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 315 / 56 | +25 / +5 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | **0** | **-95** |
+| Explicit mode-enum references in `consan_moi_report_plan.cpp` | **0** | **-18** |
+| Explicit mode-enum references in `consan_pipeline.cpp` | **0** | n/a |
+| Test inventory | 5,357 | +12 |
+
+The initial file localization and common contract cost five implementation
+lines, and registering evidence planning cost another 35. The immediately
+following convergence commit removed the parallel APIs and 50 implementation
+lines, paying back all 40 temporary lines plus ten more. Production is now 43
+implementation lines below the starting baseline. This is a completed
+boundary migration with measurable deletion, but it still does not constitute
+the material code-size reduction or overall completion evidence required by
+Section 14. The wide operating point, core build graph, target locality of
+emitted ISA and independent validation, both extension exercises, and final
+independent audit remain open.
+
+Validation includes the 106-test evidence-requirement, report-ABI,
+mode-planning, pipeline, and structural-boundary gate, followed by a broader
+931-test MOI/evidence/pipeline nonphysical gate at `-j16` in 43.70 seconds.
+Both are green. The immediately preceding checkpoint supplied the complete
+4,722-test nonphysical and 635-test physical gates, so the serialized physical
+matrix was not repeated for this target-neutral ownership-only slice.
