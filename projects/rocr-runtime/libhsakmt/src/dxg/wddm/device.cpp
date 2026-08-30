@@ -339,7 +339,8 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
   if (!CpuWait(&page_syncobj_, &value, 1, false))
     return HSA_STATUS_ERROR;
 
-  if (dxg_runtime->wddm_version < KMT_DRIVERVERSION_WDDM_3_1 && IsDgpu()) {
+  if (dxg_runtime->wddm_version != 0 && dxg_runtime->wddm_version < KMT_DRIVERVERSION_WDDM_3_1 &&
+      IsDgpu()) {
     if (!d3dthunk::QueryVideoMemoryInfoAvailable()) return HSA_STATUS_ERROR;
 
     D3DKMT_QUERYVIDEOMEMORYINFO info = {};
