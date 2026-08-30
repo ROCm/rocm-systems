@@ -44,13 +44,6 @@ struct MoiLocalNopIsland {
   bool claimed = false;
 };
 
-[[nodiscard]] constexpr bool moi_supports_full_pressure_component_state(rj_code_arch_t arch,
-                                                                        ConSanMoiEngine engine) {
-  return consan_is_capability_arch(arch) &&
-         (engine == ConSanMoiEngine::RecordReplay || engine == ConSanMoiEngine::InlineShadow ||
-          engine == ConSanMoiEngine::Sampled);
-}
-
 [[nodiscard]] bool moi_sgpr_range_overlaps_dynamic_stack_state(uint16_t base, uint16_t width) {
   return range_overlaps(base, width, kDynamicStackTopSgpr, 1u) ||
          range_overlaps(base, width, kDynamicFrameBaseSgpr, 1u);
@@ -1368,15 +1361,13 @@ summarize_moi_complete_text_register_references(const MoiResourcePlanningState &
   return result;
 }
 
-[[nodiscard]] bool moi_resource_plan_can_be_recovered_by_persistent_placement(
-    const ConSanCandidateResourcePlan &plan, const ConSanRequest &request,
-    const ConSanDebugOverrides &debug, rj_code_arch_t arch) {
+[[nodiscard]] bool
+moi_resource_plan_can_be_recovered_by_persistent_placement(const ConSanCandidateResourcePlan &plan,
+                                                           const ConSanDebugOverrides &debug,
+                                                           rj_code_arch_t arch) {
   if (plan.source != ConSanRegisterAllocationSource::Unsupported)
     return false;
-  if ((!consan_uses_gfx9_cdna_encoding(arch)) ||
-      (request.moi_engine != ConSanMoiEngine::InlineShadow &&
-       request.moi_engine != ConSanMoiEngine::Sampled &&
-       request.moi_engine != ConSanMoiEngine::RecordReplay)) {
+  if (!consan_uses_gfx9_cdna_encoding(arch)) {
     return false;
   }
   // Persistent placement and resource planning form a fixed point for the
@@ -4608,7 +4599,7 @@ moi_indirect_jump_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPo
   // which to seed the ordinary high-window fallback. Seed component planning
   // with a placeholder; every admitted owner must replace it with either a
   // liveness-dead window or a spill-backed access-probe layout.
-  if (moi_supports_full_pressure_component_state(arch, request.moi_engine)) {
+  if (consan_is_capability_arch(arch)) {
     options.moi_exec_save_sgpr = 0u;
     options.automatic_moi_partial_exec_save_sgprs = true;
     if (configure_automatic_moi_transient_sgpr_assignments(options, problem, site_plans, warnings,
@@ -5481,8 +5472,8 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
                // every semantically admitted, resolved owner in this
                // query so placement can recover that site on the rebuild.
                return (plan.source != ConSanRegisterAllocationSource::Unsupported ||
-                       moi_resource_plan_can_be_recovered_by_persistent_placement(plan, request,
-                                                                                  debug, arch)) &&
+                       moi_resource_plan_can_be_recovered_by_persistent_placement(plan, debug,
+                                                                                  arch)) &&
                       std::ranges::find(plan.owner_descriptor_file_offsets,
                                         kernel.descriptor_file_offset) !=
                           plan.owner_descriptor_file_offsets.end();
