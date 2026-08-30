@@ -145,6 +145,27 @@ static double JsonNumber(const std::string& json, const char* key) {
     return strtod(json.c_str() + pos + needle.size(), nullptr);
 }
 
+// -------------------------------------------------------------------------
+// Reads the run summary line back out of the emitted JSONL.
+// -------------------------------------------------------------------------
+static std::string ReadSummaryLine(const char* dir, const char* commHashHex) {
+    char host[256] = {0};
+    gethostname(host, sizeof(host) - 1);
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/accl_profiler_rank0_%s_pid%d_%s.jsonl",
+             dir, host, (int)getpid(), commHashHex);
+    std::ifstream ifs(path);
+    std::string line, summary;
+    // Deliberately no break: keep overwriting so we end up holding the LAST
+    // summary line in the file, which is the one finalize wrote.
+    while (std::getline(ifs, line)) {
+        if (line.find("\"summary\"") != std::string::npos) {
+            summary = line;
+        }
+    }
+    return summary;
+}
+
 // Fills a Coll event descriptor with the fields every lifecycle test needs.
 static void MakeCollDescr(ncclProfilerEventDescr_v5_t* d, uint8_t nChannels,
                           uint64_t seqNumber, size_t count) {
@@ -425,6 +446,109 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
                        std::string::npos);
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// ACCL_PROFILER_MIN_SIZE_BYTES: collectives below the threshold are dropped at
+// start, and one exactly at the threshold is kept.
+//
+// Every other test leaves the variable unset, so gMinMsgSize is 0 and both the
+// comparison and its inverse hold for every size those tests use — deleting the
+// filter outright does not move them.  The equal case is a separate collective
+// because the comparison is a strict `<`: a `<=` typo would still drop 4096 B
+// and still keep 16384 B, so only the 8192 B collective can see it.
+//
+// gMinMsgSize is a process-global read once in acclPluginInit(); the isolated
+// runner fork+execv's /proc/self/exe, so the child starts from the static
+// initializer and re-reads the environment.
+// =========================================================================
+TEST(AcclProfilerMinSize, DropsBelowThresholdAndKeepsEqual) {
+    ScopedProfilerDir dir("minsize");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerMinSize.DropsBelowThresholdAndKeepsEqual",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x5127, &mask, "minsize_test",
+                                     1, 2, 0, nullptr), 0);
+            ASSERT_NE(ctx, nullptr);
+
+            // Drives one single-channel collective to completion and returns the
+            // coll handle, or nullptr if the size filter rejected it at start.
+            auto runColl = [&](uint64_t seqNumber, size_t count) -> void* {
+                ncclProfilerEventDescr_v5_t cd;
+                MakeCollDescr(&cd, /*nChannels=*/1, seqNumber, count);
+                void* coll = nullptr;
+                EXPECT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+                if (!coll) return nullptr;
+
+                ncclProfilerEventDescr_v5_t kd;
+                memset(&kd, 0, sizeof(kd));
+                kd.type = ncclProfileKernelCh;
+                kd.parentObj = coll;
+                kd.kernelCh.channelId = 0;
+                kd.kernelCh.pTimer = 1000000;
+                void* kch = nullptr;
+                EXPECT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
+                EXPECT_EQ(acclPluginStopEvent(coll), 0);
+                ncclProfilerEventStateArgs_v5_t sa;
+                memset(&sa, 0, sizeof(sa));
+                sa.kernelCh.pTimer = 1010000;
+                EXPECT_EQ(acclPluginRecordEventState(
+                    kch, ncclProfilerKernelChStop, &sa), 0);
+                EXPECT_EQ(acclPluginStopEvent(kch), 0);
+                return coll;
+            };
+
+            // MakeCollDescr uses ncclFloat32, which acclDatatypeSize reports as
+            // 4 bytes, so count scales by 4: 1024 -> 4096 B, 2048 -> 8192 B,
+            // 4096 -> 16384 B against a threshold of 8192.
+            EXPECT_EQ(runColl(/*seqNumber=*/80, /*count=*/1024), nullptr)
+                << "4096 B is below ACCL_PROFILER_MIN_SIZE_BYTES=8192 and must "
+                   "be rejected with a NULL handle";
+            EXPECT_NE(runColl(/*seqNumber=*/81, /*count=*/2048), nullptr)
+                << "8192 B is exactly the threshold and the comparison is a "
+                   "strict `<`, so this collective must be profiled";
+            EXPECT_NE(runColl(/*seqNumber=*/82, /*count=*/4096), nullptr)
+                << "16384 B is above the threshold and must be profiled";
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string out = ReadProfilerOutput(dir.c_str(), "0x5127");
+            ASSERT_FALSE(out.empty()) << "No profiler output produced";
+
+            // Count coll records only: finalize() always appends a summary line.
+            int records = 0;
+            std::istringstream lines(out);
+            std::string line;
+            while (std::getline(lines, line)) {
+                if (line.find("\"coll_perf\"") != std::string::npos) records++;
+            }
+            EXPECT_EQ(records, 2)
+                << "Expected the two admitted collectives only, got " << records
+                << ":\n" << out;
+
+            EXPECT_EQ(out.find("\"coll_sn\":80"), std::string::npos)
+                << "The filtered collective must not reach the JSONL: " << out;
+            EXPECT_EQ(out.find("\"coll_msg_size_bytes\":4096"),
+                      std::string::npos) << out;
+            EXPECT_NE(out.find("\"coll_msg_size_bytes\":8192"),
+                      std::string::npos)
+                << "The at-threshold collective is missing: " << out;
+            EXPECT_NE(out.find("\"coll_msg_size_bytes\":16384"),
+                      std::string::npos)
+                << "The above-threshold collective is missing: " << out;
+
+            // A size-filtered collective is never allocated, so it must not be
+            // counted as lost — the summary still describes a clean run.
+            std::string s = ReadSummaryLine(dir.c_str(), "0x5127");
+            ASSERT_FALSE(s.empty()) << "no summary line was written";
+            EXPECT_NE(s.find("\"complete\":true"), std::string::npos)
+                << "a size-filtered collective was miscounted as lost: " << s;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()},
+         {"ACCL_PROFILER_MIN_SIZE_BYTES", "8192"}}
     );
 }
 
@@ -1682,28 +1806,6 @@ TEST(AcclProfilerLifecycle, FinalizeDoesNotCloseOutputUnderAWriter) {
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
-}
-
-
-// -------------------------------------------------------------------------
-// Reads the run summary line back out of the emitted JSONL.
-// -------------------------------------------------------------------------
-static std::string ReadSummaryLine(const char* dir, const char* commHashHex) {
-    char host[256] = {0};
-    gethostname(host, sizeof(host) - 1);
-    char path[1024];
-    snprintf(path, sizeof(path), "%s/accl_profiler_rank0_%s_pid%d_%s.jsonl",
-             dir, host, (int)getpid(), commHashHex);
-    std::ifstream ifs(path);
-    std::string line, summary;
-    // Deliberately no break: keep overwriting so we end up holding the LAST
-    // summary line in the file, which is the one finalize wrote.
-    while (std::getline(ifs, line)) {
-        if (line.find("\"summary\"") != std::string::npos) {
-            summary = line;
-        }
-    }
-    return summary;
 }
 
 // =========================================================================
