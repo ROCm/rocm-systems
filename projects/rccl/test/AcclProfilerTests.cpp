@@ -801,6 +801,17 @@ TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
                 << "Expected avg of 100+200=150us";
             EXPECT_NE(line.find("\"gpu_kernel_min_us\":100.00"), std::string::npos);
             EXPECT_NE(line.find("\"gpu_kernel_max_us\":200.00"), std::string::npos);
+            // event_trace_ts is part of the documented output contract (README.md):
+            // one entry per channel, in channel order, with the raw pTimer stamps.
+            EXPECT_NE(line.find(
+                "\"event_trace_ts\":{\"kernel_events\":["
+                "{\"channel_id\":0,\"kernel_start_ts\":1000000,"
+                "\"kernel_stop_ts\":1010000,\"duration_us\":100},"
+                "{\"channel_id\":1,\"kernel_start_ts\":1000000,"
+                "\"kernel_stop_ts\":1020000,\"duration_us\":200}]}"),
+                std::string::npos)
+                << "event_trace_ts kernel_events array missing or malformed in: "
+                << line;
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );

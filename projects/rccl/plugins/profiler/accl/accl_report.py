@@ -17,7 +17,7 @@ import json
 import os
 import sys
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
 
@@ -48,7 +48,6 @@ class Record:
     n_proxy_ops: int = 0
     n_send_ops: int = 0
     n_recv_ops: int = 0
-    kernel_events: list = field(default_factory=list)
 
 
 def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
