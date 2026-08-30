@@ -2092,3 +2092,79 @@ final-validation, and structural-boundary gate. The complete 4,723-test
 nonphysical matrix over all five simulated targets passed at `-j16` in 241.80
 seconds. All 635 serialized physical gfx1201 tests passed at `-j1` in 109.30
 seconds. The test inventory is unchanged.
+
+### 16.17 Convergence checkpoint 16: directed core build graph
+
+This checkpoint, through commit `ad34057504`, turns the de-facto core
+components into an enforced production build graph. The prerequisite slice
+first removed the inert lowering forwarding facade and then broke the one real
+reverse edge between independent validation and top-level composition.
+Pristine mutation and perturbation proof formerly called the complete composer
+only to stop after program inventory, while composition called final
+validation. Both now invoke the shared program-analysis authority directly.
+The two validation products and their deliberately different barrier semantics
+remain unchanged; no second inventory implementation was introduced.
+
+ConSan production now builds as six object-library components with one short
+direction:
+
+`contracts -> targets -> analysis -> transform -> validation -> orchestration`
+
+Validation also names its intentional direct analysis dependency. Contracts
+own target-neutral types and policy; targets own concrete normalization and
+machine operations; analysis owns program, synchronization, and fault
+inventory; transform owns shared mechanics, modes, mutation, and resource
+work; validation independently proves the proposed result; orchestration owns
+the public pipeline and composition. This is an honest coarse graph rather
+than a claim that every large component is already at its final internal cut.
+In particular, mutation and mode mechanics remain together because their
+current calls are not yet acyclic enough to justify a fictitious split.
+
+Every production consumer now assembles the same component object list rather
+than obtaining ConSan incidentally from `rocjitsu_code`. Configure-time checks
+require every active production `.cpp` to belong to exactly one component (the
+required inert `consan_lowerer.cpp` tombstone is the sole exception). The
+architecture-boundary test requires all six targets, rejects a collapse back
+into `rocjitsu_code`, and rejects upward includes from contracts, target
+normalization, analysis, transformation, and validation. Thus the conceptual
+direction, compilation ownership, final binaries, and structural enforcement
+now agree.
+
+| Signal | Checkpoint 16 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 261 | +32 |
+| Physical production lines | 105,243 | +268 |
+| Nonblank production lines | 99,041 | **-42** |
+| Production implementation lines | 91,378 | **-72** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 |
+| `ConSanTransformArtifacts` references / files | 239 / 58 | **-37 / +1** |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 304 / 53 | +14 / +2 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | **0** | **-95** |
+| Explicit mode-enum references in `consan_moi_report_plan.cpp` | **0** | **-18** |
+| Explicit mode-enum references in `consan_pipeline.cpp` | **0** | n/a |
+| Test inventory | 5,358 | +13 |
+
+The facade deletion and shared analysis entry point together reduce production
+by 13 physical, four nonblank, and twelve implementation lines relative to
+checkpoint 15. More importantly, final validation no longer reaches backward
+through orchestration, four additional broad-transaction references disappear,
+and two option consumers disappear. The build split itself adds no production
+C++ implementation. Production is now 72 implementation lines below the
+fifth-refactoring baseline, still far short of the material reduction required
+for completion.
+
+Validation includes repeated full `-j16` rebuilds after all ConSan sources were
+recompiled under their new component targets, plus the 123-test program-
+inventory, fault, perturbation, final-proof, and architecture-boundary gate.
+All are green. The immediately preceding checkpoint supplied the complete
+4,723-test nonphysical and 635-test physical matrices, so those expensive gates
+were not repeated for this semantics-preserving source/build-ownership slice.
+
+Section 14's first criterion now has a concrete core graph rather than an open
+placeholder, but the completion audit must still judge whether its component
+cuts survive the remaining migrations. Full target-facet locality, both
+extension exercises, the broad transaction and operating-point surfaces,
+material code shrinkage, and the final independent deep-read audit remain
+open.
