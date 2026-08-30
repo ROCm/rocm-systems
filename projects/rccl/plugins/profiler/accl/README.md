@@ -55,6 +55,15 @@ Per-collective JSONL records with timing decomposition:
 (`NCCL_MAX_NCHANNELS=256`) reports `0`. The plugin promotes a reported `0` to 256,
 so the two fields differ only in that wrapped case.
 
+Each `proxy_*` field is a mean over the proxy ops that can produce it, not over
+`n_proxy_ops`. A send op only passes through the send-side states and a recv op
+only through the recv-side ones, so `proxy_gpu_wait_us` and `proxy_peer_wait_us`
+are averaged over `n_send_ops`, and `proxy_flush_us` and `proxy_gpu_recv_wait_us`
+over `n_recv_ops`. `proxy_network_us` covers both directions and is the sum of
+the per-send-op and per-recv-op means. A ring collective posts one send and one
+recv op per channel, so all five are per-channel costs on the same scale as
+`gpu_kernel_avg_us`. A class with no ops contributes 0, since its total is 0 too.
+
 The last line of every file is a summary, written on every clean finalize:
 
 ```json

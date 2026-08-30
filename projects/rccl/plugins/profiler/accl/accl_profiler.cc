@@ -408,29 +408,47 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
       ? (double)(coll->tsCollStopUs - coll->tsCollStartUs) : 0;
   }
 
-  // Proxy decomposition
-  double totalGpuWait = 0, totalNetwork = 0, totalPeerWait = 0;
-  double totalFlush = 0, totalGpuRecvWait = 0;
+  // Proxy decomposition. Each component is averaged over the ops that can
+  // contribute to it, not over every proxy op: a send op only ever passes
+  // through the SendGPUWait/SendPeerWait/SendWait states and a recv op only
+  // through RecvWait/RecvFlushWait/RecvGPUWait, so dividing a one-sided total
+  // by nProxyOps scales it by that class's share of the op mix. A ring
+  // collective posts one send and one recv op per channel, so the per-class
+  // means below are per-channel costs, which is the scale gpu_kernel_avg_us is
+  // already on and the scale accl_report.py's classifier compares against.
+  double sendGpuWait = 0, sendPeerWait = 0, sendNetwork = 0;
+  double recvFlush = 0, recvGpuWait = 0, recvNetwork = 0;
   int nSend = 0, nRecv = 0;
 
   for (int i = 0; i < coll->nProxyOps; i++) {
     int opIdx = coll->proxyOpIndices[i];
     if (opIdx < 0 || opIdx >= ACCL_PROXY_OP_POOL_SIZE) continue;
     struct acclProxyOpInfo* op = &ctx->proxyOpPool[opIdx];
-    totalGpuWait += (double)op->totalGpuWaitUs;
-    totalNetwork += (double)op->totalNetworkUs;
-    totalPeerWait += (double)op->totalPeerWaitUs;
-    totalFlush += (double)op->totalFlushUs;
-    totalGpuRecvWait += (double)op->totalGpuRecvWaitUs;
-    if (op->isSend) nSend++; else nRecv++;
+    if (op->isSend) {
+      nSend++;
+      sendGpuWait += (double)op->totalGpuWaitUs;
+      sendPeerWait += (double)op->totalPeerWaitUs;
+      sendNetwork += (double)op->totalNetworkUs;
+    } else {
+      nRecv++;
+      recvFlush += (double)op->totalFlushUs;
+      recvGpuWait += (double)op->totalGpuRecvWaitUs;
+      recvNetwork += (double)op->totalNetworkUs;
+    }
   }
 
+  // A zero denominator only happens when the class has no ops at all, in which
+  // case its numerator is zero too, so reporting 0 states the truth rather than
+  // papering over a division; the guard exists only to avoid 0/0.
+  double meanSendNet = nSend > 0 ? sendNetwork / nSend : 0;
+  double meanRecvNet = nRecv > 0 ? recvNetwork / nRecv : 0;
+
   int nOps = coll->nProxyOps;
-  rec.proxyGpuWaitUs = nOps > 0 ? totalGpuWait / nOps : 0;
-  rec.proxyNetworkUs = nOps > 0 ? totalNetwork / nOps : 0;
-  rec.proxyPeerWaitUs = nOps > 0 ? totalPeerWait / nOps : 0;
-  rec.proxyFlushUs = nOps > 0 ? totalFlush / nOps : 0;
-  rec.proxyGpuRecvWaitUs = nOps > 0 ? totalGpuRecvWait / nOps : 0;
+  rec.proxyGpuWaitUs = nSend > 0 ? sendGpuWait / nSend : 0;
+  rec.proxyNetworkUs = meanSendNet + meanRecvNet;
+  rec.proxyPeerWaitUs = nSend > 0 ? sendPeerWait / nSend : 0;
+  rec.proxyFlushUs = nRecv > 0 ? recvFlush / nRecv : 0;
+  rec.proxyGpuRecvWaitUs = nRecv > 0 ? recvGpuWait / nRecv : 0;
   rec.nProxyOps = nOps;
   rec.nSendOps = nSend;
   rec.nRecvOps = nRecv;
