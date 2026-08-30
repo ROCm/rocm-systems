@@ -39,6 +39,7 @@ struct acclProxyStepInfo {
   uint64_t tsStartUs;
   uint64_t tsStopUs;
   uint64_t lastStateTs;
+  int      prevState;    // state the step is currently IN; -1 before the first transition
   // Accumulated time in each proxy step state (us)
   uint64_t gpuWaitUs;
   uint64_t peerWaitUs;
