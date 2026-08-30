@@ -44,13 +44,34 @@ static void acclFreeCollProxyOps(struct acclCommContext* ctx,
 // Per-communicator pool allocators
 // ============================================================================
 
+// Release one context reference. The last holder tears the context down, so a
+// callback that outlives acclPluginFinalize still finds live mutexes and file.
+static void acclCtxUnref(struct acclCommContext* ctx) {
+  if (__atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST) != 0) {
+    return;
+  }
+  if (ctx->outputFile) {
+    fclose(ctx->outputFile);
+    ctx->outputFile = NULL;
+  }
+  for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
+    pthread_mutex_destroy(&ctx->collPool[i].mutex);
+  }
+  pthread_mutex_destroy(&ctx->outputMutex);
+  pthread_mutex_destroy(&ctx->collPoolMutex);
+  pthread_mutex_destroy(&ctx->proxyOpPoolMutex);
+  pthread_mutex_destroy(&ctx->proxyStepPoolMutex);
+  free(ctx);
+}
+
 static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
   pthread_mutex_lock(&ctx->collPoolMutex);
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
     if (!ctx->collPoolUsed[i]) {
       ctx->collPoolUsed[i] = 1;
+      pthread_mutex_t keep = ctx->collPool[i].mutex;
       memset(&ctx->collPool[i], 0, sizeof(ctx->collPool[i]));
-      pthread_mutex_init(&ctx->collPool[i].mutex, NULL);
+      ctx->collPool[i].mutex = keep;
       __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
       pthread_mutex_unlock(&ctx->collPoolMutex);
       return &ctx->collPool[i];
@@ -74,14 +95,13 @@ static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
 
 static void acclFreeColl(struct acclCommContext* ctx, struct acclCollInfo* coll) {
   if (!coll) return;
-  pthread_mutex_destroy(&coll->mutex);
   pthread_mutex_lock(&ctx->collPoolMutex);
   int idx = (int)(coll - ctx->collPool);
   if (idx >= 0 && idx < ACCL_COLL_POOL_SIZE) {
     ctx->collPoolUsed[idx] = 0;
   }
   pthread_mutex_unlock(&ctx->collPoolMutex);
-  __atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
+  acclCtxUnref(ctx);
 }
 
 static struct acclProxyOpInfo* acclAllocProxyOp(struct acclCommContext* ctx) {
@@ -89,6 +109,7 @@ static struct acclProxyOpInfo* acclAllocProxyOp(struct acclCommContext* ctx) {
   for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
     if (!ctx->proxyOpPoolUsed[i]) {
       ctx->proxyOpPoolUsed[i] = 1;
+      __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
       memset(&ctx->proxyOpPool[i], 0, sizeof(ctx->proxyOpPool[i]));
       pthread_mutex_init(&ctx->proxyOpPool[i].mutex, NULL);
       pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
@@ -109,6 +130,7 @@ static void acclFreeProxyOp(struct acclCommContext* ctx, struct acclProxyOpInfo*
     ctx->proxyOpPoolUsed[idx] = 0;
   }
   pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
+  acclCtxUnref(ctx);
 }
 
 static struct acclProxyStepInfo* acclAllocProxyStep(struct acclCommContext* ctx) {
@@ -116,6 +138,7 @@ static struct acclProxyStepInfo* acclAllocProxyStep(struct acclCommContext* ctx)
   for (int i = 0; i < ACCL_PROXY_STEP_POOL_SIZE; i++) {
     if (!ctx->proxyStepPoolUsed[i]) {
       ctx->proxyStepPoolUsed[i] = 1;
+      __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
       memset(&ctx->proxyStepPool[i], 0, sizeof(ctx->proxyStepPool[i]));
       pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
       return &ctx->proxyStepPool[i];
@@ -134,6 +157,7 @@ static void acclFreeProxyStep(struct acclCommContext* ctx, struct acclProxyStepI
     ctx->proxyStepPoolUsed[idx] = 0;
   }
   pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
+  acclCtxUnref(ctx);
 }
 
 // ============================================================================
@@ -401,6 +425,9 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   if (!ctx) return ncclSuccess;
 
   ctx->refCount = 1;
+  for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
+    pthread_mutex_init(&ctx->collPool[i].mutex, NULL);
+  }
   ctx->commHash = commHash;
   ctx->rank = rank;
   ctx->nRanks = nRanks;
@@ -458,14 +485,14 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
         acclFreeCollProxyOps(ctx, coll);
       }
       coll->finalized = 1;
-      pthread_mutex_destroy(&coll->mutex);
       ctx->collPoolUsed[i] = 0;
       __atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
     }
   }
   pthread_mutex_unlock(&ctx->collPoolMutex);
 
-  // Write drop summary and close output before tearing down mutexes.
+  // Write the drop summary while the output file is still open. The file is
+  // closed by acclCtxUnref once the last reference goes away.
   if (ctx->outputFile) {
     // Emit the summary unconditionally, including on a clean run: a consumer
     // that finds no summary line cannot distinguish "nothing was lost" from
@@ -484,18 +511,10 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
                 ctx->rank, (unsigned long)ctx->droppedCollectives,
                 (unsigned long)ctx->leakedCollectives);
     }
-    fclose(ctx->outputFile);
-    ctx->outputFile = NULL;
   }
 
-  // Tear down context only after refcount reaches zero.
-  if (__atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST) == 0) {
-    pthread_mutex_destroy(&ctx->outputMutex);
-    pthread_mutex_destroy(&ctx->collPoolMutex);
-    pthread_mutex_destroy(&ctx->proxyOpPoolMutex);
-    pthread_mutex_destroy(&ctx->proxyStepPoolMutex);
-    free(ctx);
-  }
+  // Drop the init reference; outstanding proxy ops/steps hold their own.
+  acclCtxUnref(ctx);
   return ncclSuccess;
 }
 
@@ -689,6 +708,11 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
 
     if (coll) {
       pthread_mutex_lock(&coll->mutex);
+      if (coll->finalized) {
+        pthread_mutex_unlock(&coll->mutex);
+        acclFreeProxyOp(ctx, op);
+        return ncclSuccess;
+      }
       int opIdx = (int)(op - ctx->proxyOpPool);
       if (coll->nProxyOps < ACCL_MAX_PROXY_OPS) {
         coll->proxyOpIndices[coll->nProxyOps] = opIdx;
