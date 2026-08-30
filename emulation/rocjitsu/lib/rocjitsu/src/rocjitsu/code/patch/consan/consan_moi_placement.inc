@@ -4979,6 +4979,9 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
       update.prologue_scratch_assignments;
   const std::span<const uint8_t> bytes = planning_state.bytes;
   const rj_code_arch_t arch = planning_state.arch;
+  const bool inline_scalar_layout =
+      moi_mode_operations(request.moi_engine).transient_scalar_placement.spill_layout ==
+      ConSanMoiScalarSpillLayout::Inline;
   MoiPersistentStateFacts persistent_facts;
   for (const ConSanCandidateResourcePlan &plan : resource_plans) {
     if (plan.source == ConSanRegisterAllocationSource::Unsupported ||
@@ -5060,8 +5063,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
         "scope");
     return update;
   }
-  if (is_rdna_dispatch_vgpr_arch && (request.moi_engine == ConSanMoiEngine::RecordReplay ||
-                                     request.moi_engine == ConSanMoiEngine::Sampled)) {
+  if (is_rdna_dispatch_vgpr_arch && !inline_scalar_layout) {
     // Persistent owner/epoch and exact-workgroup state shares the ordinary
     // VGPR file with site-local Record/Replay and Sampled probes. Keep it above
     // the largest operational scratch window. Guest operands may overlap a
@@ -5090,10 +5092,9 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
   const uint32_t named_persistent_count = automatic_owner_epoch_count +
                                           static_cast<uint32_t>(needs_workgroup_key) +
                                           record_replay_workgroup_count + dispatch_id_count;
-  const uint32_t persistent_count =
-      request.moi_engine == ConSanMoiEngine::InlineShadow && consan_uses_gfx12_cdna_execution(arch)
-          ? std::max<uint32_t>(named_persistent_count, 5u)
-          : named_persistent_count;
+  const uint32_t persistent_count = inline_scalar_layout && consan_uses_gfx12_cdna_execution(arch)
+                                        ? std::max<uint32_t>(named_persistent_count, 5u)
+                                        : named_persistent_count;
   const uint32_t persistent_end = persistent_base + persistent_count;
   const auto has_dynamic_stack_resource_owner = [&] {
     return std::ranges::any_of(program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
@@ -5147,8 +5148,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
   // state by itself fits below every AccVGPR boundary.  The other components
   // retain the smaller scalar-dispatch representation.
   const bool needs_cdna_component_dispatch_placement =
-      (consan_uses_gfx9_cdna_encoding(program_inventory.arch())) &&
-      request.moi_engine == ConSanMoiEngine::InlineShadow &&
+      (consan_uses_gfx9_cdna_encoding(program_inventory.arch())) && inline_scalar_layout &&
       options.automatic_moi_private_dispatch_id && !needs_persistent_dispatch_vgprs;
   if (crosses_cdna_accvgpr_boundary || needs_cdna_component_dispatch_placement) {
     // ACCUM_OFFSET defines the compiler's ordinary/accumulator register split.
@@ -5157,8 +5157,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
     // gfx950 workloads. Until persistent tuples are selected per owning kernel,
     // reject a code object whose one global tuple would cross any such boundary.
     const bool has_dynamic_stack_owner = has_dynamic_stack_resource_owner();
-    if (request.moi_engine == ConSanMoiEngine::InlineShadow &&
-        options.automatic_moi_private_epoch && !has_dynamic_stack_owner) {
+    if (inline_scalar_layout && options.automatic_moi_private_epoch && !has_dynamic_stack_owner) {
       diagnostics.emplace_back(
           "ConSan MOI retained owner/epoch and dispatch identity in entry-captured private state "
           "below a CDNA AccVGPR boundary");
