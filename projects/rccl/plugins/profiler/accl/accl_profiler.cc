@@ -10,6 +10,7 @@
 #include "accl_profiler.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stddef.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -20,13 +21,65 @@
 
 static ncclDebugLogger_t gLogFn;
 
+// INFO is scoped to the NCCL_PROFILE subsystem (0x4000) so it appears only for
+// someone who asked for profiler chatter. WARN uses NCCL_ALL (~0), as RCCL's own
+// WARN macro does: the default NCCL_DEBUG_SUBSYS mask is INIT|BOOTSTRAP|ENV, so
+// a WARN tagged NCCL_PROFILE is dropped unless the user also set
+// NCCL_DEBUG_SUBSYS, and every WARN below reports lost profiling data.
 #define ACCL_INFO(...)  do { if (gLogFn) gLogFn(4, 0x4000, __func__, __LINE__, __VA_ARGS__); } while(0)
-#define ACCL_WARN(...)  do { if (gLogFn) gLogFn(3, 0x4000, __func__, __LINE__, __VA_ARGS__); } while(0)
-
-// Env vars
-static size_t gMinMsgSize = 0;  // ACCL_PROFILER_MIN_SIZE_BYTES
+#define ACCL_WARN(...)  do { if (gLogFn) gLogFn(3, ~0UL, __func__, __LINE__, __VA_ARGS__); } while(0)
 
 static inline const char* safeStr(const char* s) { return s ? s : ""; }
+
+// Parse ACCL_PROFILER_MIN_SIZE_BYTES. Returns the threshold, or 0 with *bad set
+// for anything that is not a plain non-negative decimal integer fitting size_t.
+//
+// atol() used to do this, and both of its failure modes end in silence rather
+// than in an error. "-1" converts to SIZE_MAX and an out-of-range value
+// saturates to LONG_MAX; either way the threshold exceeds every collective, so
+// every start returns a NULL handle, no record is ever allocated, and the run
+// writes only a summary that truthfully reports zero drops over zero records --
+// an empty file that reads as a clean run. "abc" and "0x10" convert to 0, which
+// is indistinguishable from a deliberate 0.
+static size_t acclParseMinSize(const char* env, int* bad) {
+  *bad = 0;
+  const char* p = env;
+  while (*p == ' ' || *p == '\t') {
+    p++;
+  }
+  // An all-blank value is the usual shell idiom for "off", not a typo, so it
+  // takes the default without complaint.
+  if (*p == '\0') {
+    return 0;
+  }
+  // strtoull accepts a leading '-' and wraps it to a huge positive, which is the
+  // silent filter-everything case above, so reject the sign before parsing.
+  if (*p == '-') {
+    *bad = 1;
+    return 0;
+  }
+  errno = 0;
+  char* end = NULL;
+  unsigned long long v = strtoull(p, &end, 10);
+  if (end == p || errno == ERANGE) {
+    *bad = 1;
+    return 0;
+  }
+  while (*end == ' ' || *end == '\t') {
+    end++;
+  }
+  if (*end != '\0') {
+    *bad = 1;
+    return 0;
+  }
+#if SIZE_MAX < ULLONG_MAX
+  if (v > (unsigned long long)SIZE_MAX) {
+    *bad = 1;
+    return 0;
+  }
+#endif
+  return (size_t)v;
+}
 
 // mkdir -p for the output directory. Returns 0 on success, -1 with errno set.
 // A bare mkdir() only ever creates the last component, so the multi-level path
@@ -506,13 +559,28 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
                                      ncclDebugLogger_t logfn) {
   gLogFn = logfn;
 
-  const char* env;
-  if ((env = getenv("ACCL_PROFILER_MIN_SIZE_BYTES")) != NULL) {
-    gMinMsgSize = (size_t)atol(env);
-  }
-
   struct acclCommContext* ctx = (struct acclCommContext*)calloc(1, sizeof(*ctx));
   if (!ctx) return ncclSuccess;
+
+  // Read into the context, not a file static: with several communicators in one
+  // process a static is last-init-wins, and because the assignment is
+  // conditional it is also never reset once set.
+  const char* env;
+  if ((env = getenv("ACCL_PROFILER_MIN_SIZE_BYTES")) != NULL) {
+    int badMinSize = 0;
+    ctx->minMsgSize = acclParseMinSize(env, &badMinSize);
+    if (badMinSize) {
+      // Fall back to 0, not to any non-zero guess. An unusable threshold has to
+      // fail open: too large a threshold profiles nothing and leaves an empty
+      // file that no summary field marks as wrong, while 0 profiles everything,
+      // so the mistake shows up as more data than asked for rather than as none.
+      ACCL_WARN("ACCL Profiler: ACCL_PROFILER_MIN_SIZE_BYTES=\"%s\" is not a "
+                "non-negative byte count; ignoring it and profiling every "
+                "collective. A negative or out-of-range value would otherwise "
+                "filter out every collective and leave an empty output file.",
+                env);
+    }
+  }
 
   ctx->refCount = 1;
   for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
@@ -575,7 +643,7 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
 
   ACCL_INFO("ACCL Profiler: init rank=%d nRanks=%d nNodes=%d "
             "output=%s minSize=%zu",
-            rank, nRanks, nNodes, ctx->outputPath, gMinMsgSize);
+            rank, nRanks, nNodes, ctx->outputPath, ctx->minMsgSize);
   return ncclSuccess;
 }
 
@@ -681,7 +749,7 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
   if (eDescr->type == ncclProfileColl) {
     // Check message size filter
     size_t msgSize = (size_t)acclDatatypeSize(eDescr->coll.datatype) * eDescr->coll.count;
-    if (msgSize < gMinMsgSize) {
+    if (msgSize < ctx->minMsgSize) {
       *eHandle = NULL;
       return ncclSuccess;
     }

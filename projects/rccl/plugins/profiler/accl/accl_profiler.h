@@ -193,6 +193,11 @@ struct acclCommContext {
   int         proxyOpPoolWarned;    // one-shot guards, as for the coll pool above
   int         proxyStepPoolWarned;
   uint64_t    commHash;
+  // ACCL_PROFILER_MIN_SIZE_BYTES as read when THIS communicator was created.
+  // Per-comm, not process-global: a later communicator created after the
+  // variable changed must not retroactively re-filter this one, and the
+  // minSize= this comm echoed in its init log has to keep describing it.
+  size_t      minMsgSize;
   int         rank;
   int         nRanks;
   int         nNodes;
