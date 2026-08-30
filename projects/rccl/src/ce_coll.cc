@@ -108,7 +108,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   static int64_t paramMax = rcclParamCeArMaxMsgBytes();
   static constexpr size_t kCeArMaxDefault = 256ULL * 1024 * 1024;
   comm->ceColl.ceArMaxBytes = (paramMax >= 0) ? (size_t)paramMax
-      : (comm->archThresholds != nullptr ? comm->archThresholds->ceArMax : kCeArMaxDefault);
+      : (comm->archThresholds != nullptr ? comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] : kCeArMaxDefault);
   size_t maxChunkBytes = comm->ceColl.ceArMaxBytes / (size_t)comm->nRanks;
   size_t ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
   int i = 0;
