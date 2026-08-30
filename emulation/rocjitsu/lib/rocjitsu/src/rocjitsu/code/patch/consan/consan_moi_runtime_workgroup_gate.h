@@ -13,10 +13,12 @@ namespace rocjitsu::consan_moi_impl {
 
 /// Immutable policy and ABI input to the shared runtime workgroup gate.
 struct MoiRuntimeWorkgroupGatePlan {
+  enum class Flavor : uint8_t { RecordReplay, Sampled };
+
   uint16_t exec_save_sgpr = 0;
   uint32_t sample_stride = 1;
   uint32_t sample_offset = 0;
-  bool record_replay = false;
+  Flavor flavor = Flavor::Sampled;
   std::optional<ConSanMoiWorkgroupSource> cached_selection;
   std::optional<uint16_t> dispatch_id_sgpr;
   uint64_t literal_dispatch_id = 0;
@@ -31,7 +33,7 @@ moi_has_probe_entry_runtime_workgroup_gate(const ConSanMoiWorkgroupSources &work
 [[nodiscard]] std::optional<MoiRuntimeWorkgroupGatePlan> plan_moi_runtime_workgroup_gate(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &point, const ConSanMoiWorkgroupSources &workgroup_sources,
-    rj_code_arch_t arch);
+    MoiRuntimeWorkgroupGatePlan::Flavor flavor, rj_code_arch_t arch);
 
 [[nodiscard]] uint64_t
 moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,

@@ -38,21 +38,18 @@ bool moi_has_probe_entry_runtime_workgroup_gate(
 std::optional<MoiRuntimeWorkgroupGatePlan> plan_moi_runtime_workgroup_gate(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &point, const ConSanMoiWorkgroupSources &workgroup_sources,
-    rj_code_arch_t arch) {
+    MoiRuntimeWorkgroupGatePlan::Flavor flavor, rj_code_arch_t arch) {
   const ConSanTargetProfile *target = consan_target_profile(arch);
   const auto cached_selection = moi_runtime_workgroup_selection_source();
-  const bool record_replay = request.moi_engine == ConSanMoiEngine::RecordReplay;
   if (!point.moi_exec_save_sgpr || request.moi_runtime_sample_stride <= 1u || target == nullptr ||
-      !moi_has_probe_entry_runtime_workgroup_gate(workgroup_sources) ||
-      (!record_replay && !cached_selection && !point.moi_dispatch_id_sgpr &&
-       !consan_moi_detail::moi_permits_literal_dispatch_identity(request.moi_engine, arch))) {
+      !moi_has_probe_entry_runtime_workgroup_gate(workgroup_sources)) {
     return std::nullopt;
   }
   return MoiRuntimeWorkgroupGatePlan{
       .exec_save_sgpr = *point.moi_exec_save_sgpr,
       .sample_stride = request.moi_runtime_sample_stride,
       .sample_offset = request.moi_runtime_sample_offset,
-      .record_replay = record_replay,
+      .flavor = flavor,
       .cached_selection = cached_selection,
       .dispatch_id_sgpr = point.moi_dispatch_id_sgpr,
       .literal_dispatch_id = resources.moi_report_dispatch_id,
@@ -183,7 +180,7 @@ uint64_t moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
     return true;
   }
 
-  if (plan.record_replay) {
+  if (plan.flavor == MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay) {
     // Record/Replay samples stable workgroup coordinates. Dispatch identity
     // remains in every record's attribution but does not rotate the selected
     // workgroup or make offset zero omit workgroup zero.
@@ -287,10 +284,10 @@ uint64_t moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
   // word for that engine without destroying the live call return. Sampled
   // returns with its ordinary indirect-PC pair and retains the established
   // residue slot.
-  const uint16_t residue =
-      plan.record_replay && plan.direct_call_form == ConSanDirectCallForm::SCallI64
-          ? plan.exec_save_sgpr
-          : static_cast<uint16_t>(plan.exec_save_sgpr + 6u);
+  const uint16_t residue = plan.flavor == MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay &&
+                                   plan.direct_call_form == ConSanDirectCallForm::SCallI64
+                               ? plan.exec_save_sgpr
+                               : static_cast<uint16_t>(plan.exec_save_sgpr + 6u);
 
   std::vector<uint32_t> words;
   words.reserve(reserved_word_count);

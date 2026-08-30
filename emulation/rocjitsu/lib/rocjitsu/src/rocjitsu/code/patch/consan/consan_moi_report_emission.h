@@ -52,8 +52,6 @@ struct ConSanMoiReportDispatchIdPlanningContext {
   const BoundRuntimeResources &resources;
 };
 
-[[nodiscard]] bool moi_permits_literal_dispatch_identity(ConSanMoiEngine engine,
-                                                         rj_code_arch_t arch);
 [[nodiscard]] ConSanMoiReportDispatchIdSource
 moi_target_dispatch_id_sources(const ConSanMoiReportDispatchIdPlanningContext &context,
                                rj_code_arch_t arch);

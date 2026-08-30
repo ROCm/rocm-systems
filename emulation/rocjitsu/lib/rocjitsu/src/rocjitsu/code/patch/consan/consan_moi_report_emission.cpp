@@ -55,10 +55,6 @@ bool ConSanMoiRecordEmitter::store_workgroup(uint32_t offset,
          store_vgpr(offset, temporary_vgpr_);
 }
 
-bool moi_permits_literal_dispatch_identity(ConSanMoiEngine engine, rj_code_arch_t arch) {
-  return consan_arch_uses_literal_dispatch_identity(arch) || engine == ConSanMoiEngine::Sampled;
-}
-
 namespace {
 
 ConSanMoiReportDispatchIdSource

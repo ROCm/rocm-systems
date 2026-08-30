@@ -111,7 +111,6 @@ using consan_moi_detail::kBarrierRecordLayout;
 using consan_moi_detail::kDiagnosticRecordLayout;
 using consan_moi_detail::kFenceRecordLayout;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
-using consan_moi_detail::moi_permits_literal_dispatch_identity;
 using consan_moi_detail::note_moi_persistent_vgpr_state;
 using consan_moi_detail::resolve_moi_report_layout;
 

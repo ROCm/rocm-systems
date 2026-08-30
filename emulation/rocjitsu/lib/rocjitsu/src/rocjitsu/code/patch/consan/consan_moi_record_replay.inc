@@ -1246,7 +1246,8 @@ void try_apply_first_light_access_record_patch(
             }
             const auto gate_plan = plan_moi_runtime_workgroup_gate(
                 candidate_options, candidate_options, candidate_options,
-                *planned_patch.runtime_workgroup_sources, arch);
+                *planned_patch.runtime_workgroup_sources,
+                MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay, arch);
             if (gate_plan) {
               auto gate = build_moi_runtime_workgroup_gate_island_words(
                   bytes, candidate, *gate_plan, *planned_patch.runtime_workgroup_sources,
@@ -1281,7 +1282,8 @@ void try_apply_first_light_access_record_patch(
           }
           const auto gate_plan = plan_moi_runtime_workgroup_gate(
               candidate_options, candidate_options, candidate_options,
-              *planned_patch.runtime_workgroup_sources, arch);
+              *planned_patch.runtime_workgroup_sources,
+              MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay, arch);
           if (!gate_plan) {
             result.errors.emplace_back(
                 "ConSan MOI first-light probe lost its dense runtime workgroup gate plan");

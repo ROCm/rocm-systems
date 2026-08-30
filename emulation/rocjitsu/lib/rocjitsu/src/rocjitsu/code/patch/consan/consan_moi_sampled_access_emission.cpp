@@ -37,7 +37,6 @@ using consan_moi_detail::append_compare_moi_report_dispatch_id_word;
 using consan_moi_detail::append_load_u32_vgpr_at_offset;
 using consan_moi_detail::append_store_moi_report_dispatch_id_pair;
 using consan_moi_detail::ConSanMoiRecordEmitter;
-using consan_moi_detail::moi_permits_literal_dispatch_identity;
 
 [[nodiscard]] bool append_sampled_banked_address(std::vector<uint32_t> &words,
                                                  uint64_t first_address, uint32_t element_size,
@@ -471,11 +470,6 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
           : tmp_vgpr;
   if (runtime_sampled && !point.moi_owner_vgpr && !derived_owner_vgpr) {
     errors.emplace_back("ConSan MOI runtime sampled probe could not derive a wave owner");
-    return std::nullopt;
-  }
-  if (runtime_sampled && !point.moi_dispatch_id_sgpr &&
-      !moi_permits_literal_dispatch_identity(request.moi_engine, arch)) {
-    errors.emplace_back("ConSan MOI runtime sampled probe requires a hardware dispatch ID");
     return std::nullopt;
   }
   if (!point.moi_exec_save_sgpr || *point.moi_exec_save_sgpr > 98u ||

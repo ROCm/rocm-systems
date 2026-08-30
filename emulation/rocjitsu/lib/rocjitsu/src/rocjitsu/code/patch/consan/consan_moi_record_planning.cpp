@@ -68,7 +68,8 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
   std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
   if (request.moi_runtime_sample_stride > 1u && !point.has_compact_moi_scalar_spill()) {
     runtime_workgroup_gate =
-        plan_moi_runtime_workgroup_gate(request, bound_resources, point, *workgroup_sources, arch);
+        plan_moi_runtime_workgroup_gate(request, bound_resources, point, *workgroup_sources,
+                                        MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay, arch);
   }
   return MoiRecordEventEmissionPlan{
       .scratch_vgpr = scratch_vgpr,

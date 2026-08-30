@@ -215,10 +215,15 @@ file(
 foreach(_file IN LISTS _consan_sources)
     _consan_assert_no_match(
         "${_file}"
-        "ConSanMoiLiteralDispatchIdPolicy|ConSanMoiReportDispatchIdWordSource|ConSanMoiReportDispatchIdSources|moi_report_dispatch_id_sources|moi_report_dispatch_id_source_permitted"
+        "ConSanMoiLiteralDispatchIdPolicy|ConSanMoiReportDispatchIdWordSource|ConSanMoiReportDispatchIdSources|moi_permits_literal_dispatch_identity|moi_report_dispatch_id_sources|moi_report_dispatch_id_source_permitted"
         "dispatch identity must be authorized once as one inseparable source-planning product"
     )
 endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_runtime_workgroup_gate.cpp"
+    "ConSanMoiEngine"
+    "the shared Record/Replay-Sampled runtime gate must consume its exact-subset flavor"
+)
 foreach(_file IN LISTS _consan_sources)
     file(STRINGS "${_file}" _generated_includes REGEX "isa/arch/amdgpu/generated/")
     if(NOT _generated_includes)
