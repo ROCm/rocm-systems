@@ -1610,3 +1610,65 @@ nonphysical matrix over all five simulated targets at `-j16` in 245.35
 seconds; and all 635 serialized physical gfx1201 tests at `-j1` in 109.79
 seconds. All are green. The two new tests directly pin per-mode dynamic-stack
 and operand-overlap policy ownership.
+
+### 16.10 Convergence checkpoint 9: mode-owned dispatch identity
+
+This checkpoint, through commit `134bbecda5`, follows the mode boundary into
+dispatch-identity demand and fallback selection, then harvests repeated
+register-shape knowledge exposed by that work:
+
+- Record/Replay, Sampled, and InlineShadow now declare whether their semantic
+  consumers require dispatch identity, which lossless fallback they permit,
+  and whether fallback replanning replaces the complete scalar ABI or only the
+  dispatch pair. Common placement receives normalized target and site facts
+  and retains one register-search and retry mechanism;
+- a new mode-contract test fixes the three distinct policies without teaching
+  the common solver how to recognize an engine;
+- the exact Record/Replay workgroup-register tuple publishes one iterable
+  representation used by nine placement, overlap, sizing, and validation
+  consumers instead of nine hand-unpacked copies;
+- the accepted operating point similarly publishes one fixed-width auxiliary
+  SGPR traversal. Conflict detection, architectural validation, and descriptor
+  sizing no longer carry three independent lists of the Inline and
+  Record/Replay spill ABI fields; and
+- the fallback path no longer recomputes target and site-demand facts that it
+  does not consume.
+
+The reviewed `consan_moi_placement.inc` budget is now 38 explicit mode-enum
+references, down from 46 at checkpoint 8 and 95 at the starting review. The
+file fell by another 78 physical lines, from 6,221 to 6,143, despite adding the
+shared dispatch-policy consumer. This is the intended one-way movement: mode
+meaning leaves the common solver, the shared mechanism remains singular, and
+representation-owned traversal deletes copies rather than hiding them behind
+mode wrappers.
+
+| Signal | Checkpoint 9 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 249 | +20 |
+| Physical production lines | 105,119 | +144 |
+| Nonblank production lines | 99,040 | -43 |
+| Production implementation lines | 91,407 | **-43** |
+| `MoiOptions` references / files | 95 / 30 | +8 / +5 |
+| `ConSanTransformArtifacts` references / files | 256 / 58 | -20 / +1 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 310 / 56 | +20 / +5 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | 38 | -57 |
+| Explicit mode-enum references in `consan_moi_report_plan.cpp` | 15 | -3 |
+| Test inventory | 5,355 | +10 |
+
+The dispatch contract temporarily adds more policy structure than its deleted
+branches alone repay. The two representation consolidations and removal of
+the redundant demand scan nevertheless leave this checkpoint nine
+implementation lines smaller than checkpoint 8 and 43 below baseline. That
+is genuine local convergence, but still not the material production shrinkage
+required by Section 14. The remaining placement interactions, wide operating
+point, target locality, component build graph, two extension exercises, and
+independent final deep audit all remain open; this checkpoint does not satisfy
+the completion bar.
+
+Validation includes 130-test five-target dispatch/fallback gates and a
+421-test scalar-spill, dynamic-stack, descriptor, and architectural-validation
+gate; the complete 4,720-test nonphysical matrix, including all 2,908 simulated
+device tests over five targets, at `-j16` in 246.98 seconds; and all 635
+serialized physical gfx1201 tests at `-j1` in 108.28 seconds. All are green.
