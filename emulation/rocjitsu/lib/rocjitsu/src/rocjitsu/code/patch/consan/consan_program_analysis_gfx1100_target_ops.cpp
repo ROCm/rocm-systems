@@ -27,3 +27,13 @@ bool decode_gfx1100_atomic_site(ConSanAtomicSite &site, std::string_view mnemoni
 }
 
 } // namespace rocjitsu::consan_program_analysis_target_detail
+
+namespace rocjitsu {
+
+extern const ConSanProgramAnalysisTargetOperations kConSanGfx1100ProgramAnalysisOperations = {
+    .decode_flat_memory = consan_program_analysis_target_detail::decode_gfx1100_flat_memory,
+    .decode_global_memory = consan_program_analysis_target_detail::decode_gfx1100_global_memory,
+    .decode_atomic_site = consan_program_analysis_target_detail::decode_gfx1100_atomic_site,
+};
+
+} // namespace rocjitsu

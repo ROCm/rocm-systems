@@ -105,3 +105,22 @@ bool decode_gfx9_cdna_atomic_site(ConSanAtomicSite &site, std::string_view mnemo
 }
 
 } // namespace rocjitsu::consan_program_analysis_target_detail
+
+namespace rocjitsu {
+
+extern const ConSanProgramAnalysisTargetOperations kConSanGfx9CdnaProgramAnalysisOperations = {
+    .decode_scratch_component =
+        consan_program_analysis_target_detail::decode_gfx9_cdna_scratch_component,
+    .decode_private_component =
+        consan_program_analysis_target_detail::decode_gfx9_cdna_private_component,
+    .decode_lane_transfer = consan_program_analysis_target_detail::decode_gfx9_cdna_lane_transfer,
+    .decode_accvgpr_transfer =
+        consan_program_analysis_target_detail::decode_gfx9_cdna_accvgpr_transfer,
+    .decode_flat_memory = consan_program_analysis_target_detail::decode_gfx9_cdna_flat_memory,
+    .decode_global_memory = consan_program_analysis_target_detail::decode_gfx9_cdna_global_memory,
+    .decode_direct_lds_transfer =
+        consan_program_analysis_target_detail::decode_gfx9_cdna_direct_lds_transfer,
+    .decode_atomic_site = consan_program_analysis_target_detail::decode_gfx9_cdna_atomic_site,
+};
+
+} // namespace rocjitsu

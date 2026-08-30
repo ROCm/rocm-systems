@@ -108,6 +108,27 @@ struct ConSanDirectLdsTransferEncoding {
   std::optional<uint8_t> address_source_operand;
 };
 
+/// One target's complete program-analysis normalization facet. Unsupported
+/// operations remain null rather than requiring common dispatch code to know
+/// which concrete target implements which decoder.
+struct ConSanProgramAnalysisTargetOperations {
+  std::optional<ConSanScratchComponentEncoding> (*decode_scratch_component)(
+      std::span<const uint8_t>) = nullptr;
+  std::optional<ConSanPrivateComponentEncoding> (*decode_private_component)(
+      std::span<const uint8_t>) = nullptr;
+  std::optional<ConSanLaneTransferEncoding> (*decode_lane_transfer)(std::span<const uint8_t>) =
+      nullptr;
+  std::optional<ConSanAccvgprTransferEncoding> (*decode_accvgpr_transfer)(std::span<const uint8_t>,
+                                                                          bool) = nullptr;
+  ConSanVectorMemoryDecode (*decode_flat_memory)(std::span<const uint8_t>) = nullptr;
+  ConSanVectorMemoryDecode (*decode_global_memory)(std::span<const uint8_t>) = nullptr;
+  ConSanBufferMemoryDecode (*decode_buffer_memory)(std::span<const uint8_t>) = nullptr;
+  std::optional<ConSanDirectLdsTransferEncoding> (*decode_direct_lds_transfer)(
+      std::string_view, std::span<const uint8_t>) = nullptr;
+  bool (*decode_atomic_site)(ConSanAtomicSite &, std::string_view,
+                             std::span<const uint8_t>) = nullptr;
+};
+
 [[nodiscard]] std::optional<ConSanScratchComponentEncoding>
 decode_consan_scratch_component_encoding(std::span<const uint8_t> instruction, rj_code_arch_t arch);
 

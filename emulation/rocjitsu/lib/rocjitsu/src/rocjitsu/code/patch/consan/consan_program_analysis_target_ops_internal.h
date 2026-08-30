@@ -64,3 +64,12 @@ decode_gfx1250_direct_lds_transfer(std::string_view mnemonic, std::span<const ui
                                               std::span<const uint8_t> instruction);
 
 } // namespace rocjitsu::consan_program_analysis_target_detail
+
+namespace rocjitsu {
+
+extern const ConSanProgramAnalysisTargetOperations kConSanGfx9CdnaProgramAnalysisOperations;
+extern const ConSanProgramAnalysisTargetOperations kConSanGfx1100ProgramAnalysisOperations;
+extern const ConSanProgramAnalysisTargetOperations kConSanGfx1201ProgramAnalysisOperations;
+extern const ConSanProgramAnalysisTargetOperations kConSanGfx1250ProgramAnalysisOperations;
+
+} // namespace rocjitsu

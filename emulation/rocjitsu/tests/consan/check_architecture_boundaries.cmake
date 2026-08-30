@@ -85,6 +85,17 @@ _consan_assert_no_match(
     "ROCJITSU_CODE_ARCH_"
     "program analysis must consume target-normalized decodes and profile facts"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_program_analysis_target_ops.cpp"
+    "consan_program_analysis_target_detail::"
+    "common program-analysis dispatch must consume the target-owned operations product"
+)
+_consan_assert_match_count_at_most(
+    "${_consan_dir}/consan_program_analysis_target_ops.cpp"
+    "ROCJITSU_CODE_ARCH_"
+    5
+    "program-analysis target selection must remain one narrow registry"
+)
 
 # Mode implementations may select typed target capabilities, but may not see
 # product constants, generated ISA declarations, or member namespaces.

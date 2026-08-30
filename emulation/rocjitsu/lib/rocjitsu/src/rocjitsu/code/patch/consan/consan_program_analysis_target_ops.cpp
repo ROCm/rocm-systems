@@ -8,114 +8,93 @@
 
 namespace rocjitsu {
 
+namespace {
+
+[[nodiscard]] const ConSanProgramAnalysisTargetOperations *operations(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return &kConSanGfx9CdnaProgramAnalysisOperations;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return &kConSanGfx1100ProgramAnalysisOperations;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return &kConSanGfx1201ProgramAnalysisOperations;
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return &kConSanGfx1250ProgramAnalysisOperations;
+  default:
+    return nullptr;
+  }
+}
+
+template <typename Result, typename... Parameters, typename... Arguments>
+[[nodiscard]] Result
+invoke_target_operation(rj_code_arch_t arch,
+                        Result (*ConSanProgramAnalysisTargetOperations::*operation)(Parameters...),
+                        Arguments &&...arguments) {
+  const auto *target = operations(arch);
+  const auto decoder = target ? target->*operation : nullptr;
+  return decoder ? decoder(std::forward<Arguments>(arguments)...) : Result{};
+}
+
+} // namespace
+
 std::optional<ConSanScratchComponentEncoding>
 decode_consan_scratch_component_encoding(std::span<const uint8_t> instruction,
                                          rj_code_arch_t arch) {
-  if (consan_uses_gfx9_cdna_encoding(arch))
-    return consan_program_analysis_target_detail::decode_gfx9_cdna_scratch_component(instruction);
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
-    return consan_program_analysis_target_detail::decode_gfx1201_scratch_component(instruction);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
-    return consan_program_analysis_target_detail::decode_gfx1250_scratch_component(instruction);
-  return std::nullopt;
+  return invoke_target_operation(
+      arch, &ConSanProgramAnalysisTargetOperations::decode_scratch_component, instruction);
 }
 
 std::optional<ConSanPrivateComponentEncoding>
 decode_consan_private_component_encoding(std::span<const uint8_t> instruction,
                                          rj_code_arch_t arch) {
-  if (consan_uses_gfx9_cdna_encoding(arch))
-    return consan_program_analysis_target_detail::decode_gfx9_cdna_private_component(instruction);
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
-    return consan_program_analysis_target_detail::decode_gfx1201_private_component(instruction);
-  return std::nullopt;
+  return invoke_target_operation(
+      arch, &ConSanProgramAnalysisTargetOperations::decode_private_component, instruction);
 }
 
 std::optional<ConSanLaneTransferEncoding>
 decode_consan_lane_transfer_encoding(std::span<const uint8_t> instruction, rj_code_arch_t arch) {
-  if (consan_uses_gfx9_cdna_encoding(arch))
-    return consan_program_analysis_target_detail::decode_gfx9_cdna_lane_transfer(instruction);
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
-    return consan_program_analysis_target_detail::decode_gfx1201_lane_transfer(instruction);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
-    return consan_program_analysis_target_detail::decode_gfx1250_lane_transfer(instruction);
-  return std::nullopt;
+  return invoke_target_operation(arch, &ConSanProgramAnalysisTargetOperations::decode_lane_transfer,
+                                 instruction);
 }
 
 std::optional<ConSanAccvgprTransferEncoding>
 decode_consan_accvgpr_transfer_index(std::span<const uint8_t> instruction, rj_code_arch_t arch,
                                      bool write_accumulator) {
-  if (consan_uses_gfx9_cdna_encoding(arch)) {
-    return consan_program_analysis_target_detail::decode_gfx9_cdna_accvgpr_transfer(
-        instruction, write_accumulator);
-  }
-  return std::nullopt;
+  return invoke_target_operation(arch,
+                                 &ConSanProgramAnalysisTargetOperations::decode_accvgpr_transfer,
+                                 instruction, write_accumulator);
 }
 
 ConSanVectorMemoryDecode decode_consan_flat_memory_encoding(std::span<const uint8_t> instruction,
                                                             rj_code_arch_t arch) {
-  if (consan_uses_gfx9_cdna_encoding(arch))
-    return consan_program_analysis_target_detail::decode_gfx9_cdna_flat_memory(instruction);
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return consan_program_analysis_target_detail::decode_gfx1100_flat_memory(instruction);
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
-    return consan_program_analysis_target_detail::decode_gfx1201_flat_memory(instruction);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
-    return consan_program_analysis_target_detail::decode_gfx1250_flat_memory(instruction);
-  return {};
+  return invoke_target_operation(arch, &ConSanProgramAnalysisTargetOperations::decode_flat_memory,
+                                 instruction);
 }
 
 ConSanVectorMemoryDecode decode_consan_global_memory_encoding(std::span<const uint8_t> instruction,
                                                               rj_code_arch_t arch) {
-  if (consan_uses_gfx9_cdna_encoding(arch))
-    return consan_program_analysis_target_detail::decode_gfx9_cdna_global_memory(instruction);
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return consan_program_analysis_target_detail::decode_gfx1100_global_memory(instruction);
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
-    return consan_program_analysis_target_detail::decode_gfx1201_global_memory(instruction);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
-    return consan_program_analysis_target_detail::decode_gfx1250_global_memory(instruction);
-  return {};
+  return invoke_target_operation(arch, &ConSanProgramAnalysisTargetOperations::decode_global_memory,
+                                 instruction);
 }
 
 ConSanBufferMemoryDecode decode_consan_buffer_memory_encoding(std::span<const uint8_t> instruction,
                                                               rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
-    return consan_program_analysis_target_detail::decode_gfx1250_buffer_memory(instruction);
-  return {};
+  return invoke_target_operation(arch, &ConSanProgramAnalysisTargetOperations::decode_buffer_memory,
+                                 instruction);
 }
 
 std::optional<ConSanDirectLdsTransferEncoding> decode_consan_direct_lds_transfer_encoding(
     std::string_view mnemonic, std::span<const uint8_t> instruction, rj_code_arch_t arch) {
-  if (consan_uses_gfx9_cdna_encoding(arch)) {
-    return consan_program_analysis_target_detail::decode_gfx9_cdna_direct_lds_transfer(mnemonic,
-                                                                                       instruction);
-  }
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-    return consan_program_analysis_target_detail::decode_gfx1250_direct_lds_transfer(mnemonic,
-                                                                                     instruction);
-  }
-  return std::nullopt;
+  return invoke_target_operation(arch,
+                                 &ConSanProgramAnalysisTargetOperations::decode_direct_lds_transfer,
+                                 mnemonic, instruction);
 }
 
 bool decode_consan_atomic_site_encoding(ConSanAtomicSite &site, std::string_view mnemonic,
                                         std::span<const uint8_t> instruction, rj_code_arch_t arch) {
-  if (consan_uses_gfx9_cdna_encoding(arch)) {
-    return consan_program_analysis_target_detail::decode_gfx9_cdna_atomic_site(site, mnemonic,
-                                                                               instruction);
-  }
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
-    return consan_program_analysis_target_detail::decode_gfx1100_atomic_site(site, mnemonic,
-                                                                             instruction);
-  }
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
-    return consan_program_analysis_target_detail::decode_gfx1201_atomic_site(site, mnemonic,
-                                                                             instruction);
-  }
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-    return consan_program_analysis_target_detail::decode_gfx1250_atomic_site(site, mnemonic,
-                                                                             instruction);
-  }
-  return false;
+  return invoke_target_operation(arch, &ConSanProgramAnalysisTargetOperations::decode_atomic_site,
+                                 site, mnemonic, instruction);
 }
 
 } // namespace rocjitsu

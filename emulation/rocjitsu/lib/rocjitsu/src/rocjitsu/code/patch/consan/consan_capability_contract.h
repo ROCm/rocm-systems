@@ -306,7 +306,6 @@ struct ConSanTargetProfile {
   ConSanCodeTransportModel code_transport = ConSanCodeTransportModel::DirectCodeObject;
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
-
   bool supports_wave32 = false;
   bool supports_wave64 = true;
   uint8_t exec_register_width_bits = 64;
