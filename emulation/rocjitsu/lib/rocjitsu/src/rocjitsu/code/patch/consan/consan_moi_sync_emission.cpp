@@ -18,7 +18,6 @@
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
-#include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/isa/decoder.h"
@@ -34,7 +33,6 @@
 #include <ranges>
 #include <span>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 namespace rocjitsu {
@@ -401,82 +399,59 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
     plan.patch_text_offset = fence_event->text_offset;
     plan.patch_file_offset = fence_event->file_offset;
     plan.patch_size = fence_event->size;
-    const auto complete_from = [&](const auto &container,
-                                   std::optional<uint64_t> descriptor_file_offset) -> bool {
-      if (communication->kind == ConSanSyncEventKind::Atomic) {
-        const auto site = std::ranges::find(container.atomic_sites, communication->text_offset,
-                                            &ConSanAtomicSite::text_offset);
-        if (site == container.atomic_sites.end() ||
-            std::ranges::count(container.atomic_sites, communication->text_offset,
-                               &ConSanAtomicSite::text_offset) != 1u) {
-          return false;
-        }
-        plan.communication_site = *site;
-      } else {
-        const auto site =
-            std::ranges::find(container.ordinary_memory_sites, communication->text_offset,
-                              &ConSanOrdinaryMemorySite::text_offset);
-        if (site == container.ordinary_memory_sites.end() ||
-            std::ranges::count(container.ordinary_memory_sites, communication->text_offset,
-                               &ConSanOrdinaryMemorySite::text_offset) != 1u ||
-            (site->support_reason != ConSanOrdinaryMemorySupportReason::Supported &&
-             site->support_reason !=
-                 ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly)) {
-          return false;
-        }
-        plan.communication_site = normalize_ordinary_fence_communication(*site);
-        if (association->memory_role == ConSanSyncMemoryRole::Acquire) {
-          if (sequence->kind != ConSanSyncSequenceKind::OrdinaryMemory ||
-              sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
-              sequence->begin_text_offset != site->text_offset ||
-              sequence->end_text_offset <= sequence->begin_text_offset ||
-              sequence->end_text_offset < fence_event->text_offset + fence_event->size ||
-              sequence->end_text_offset - sequence->begin_text_offset >
-                  std::numeric_limits<uint32_t>::max()) {
-            return false;
-          }
-          plan.patch_text_offset = sequence->begin_text_offset;
-          plan.patch_file_offset = site->file_offset;
-          plan.patch_size =
-              static_cast<uint32_t>(sequence->end_text_offset - sequence->begin_text_offset);
-          plan.capture_address_before_guest = true;
-          plan.scalar_clause_text_offset = sequence->scalar_clause_text_offset;
-        }
-      }
-      if (sequence->raw_scope)
-        plan.communication_site.raw_scope = sequence->raw_scope;
-      if (!decision.communication_lowering_form) {
-        return false;
-      }
-      plan.communication_lowering_form = *decision.communication_lowering_form;
-      if (descriptor_file_offset &&
-          (communication->execution_owners.size() != 1u ||
-           communication->execution_owners.front().descriptor_file_offset !=
-               *descriptor_file_offset)) {
-        descriptor_file_offset.reset();
-      }
-      plan.kernel_descriptor_file_offset = descriptor_file_offset;
-      plan.container_name = (fence_event->in_kernel ? "kernel:" : "function:") + container.name;
-      plan.container_entry_text_offset = container.entry_text_offset;
-      plan.text_file_offset = container.text_file_offset;
-      return true;
-    };
-
-    bool completed = false;
-    if (fence_event->in_kernel) {
-      const ConSanKernelInfo *kernel = inventory.find_kernel_by_name(fence_event->container_name);
-      if (kernel == nullptr && communication->execution_owners.size() == 1u) {
-        kernel = inventory.find_kernel_by_descriptor(
-            communication->execution_owners.front().descriptor_file_offset);
-      }
-      completed = kernel != nullptr && !is_rocclr_runtime_kernel_name(kernel->name) &&
-                  complete_from(*kernel, kernel->descriptor_file_offset);
-    } else {
-      const ConSanFunctionInfo *function =
-          inventory.find_function_by_name(fence_event->container_name);
-      completed = function != nullptr && complete_from(*function, std::nullopt);
+    auto container = resolve_moi_evidence_container(inventory, fence_event->in_kernel,
+                                                    fence_event->container_name,
+                                                    communication->execution_owners);
+    if (!container || !decision.communication_lowering_form) {
+      errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
+      return {};
     }
-    if (!completed || !plan.is_well_formed()) {
+    if (communication->kind == ConSanSyncEventKind::Atomic) {
+      const ConSanAtomicSite *site =
+          find_unique_moi_evidence_site(container->atomic_sites, communication->text_offset);
+      if (site == nullptr) {
+        errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
+        return {};
+      }
+      plan.communication_site = *site;
+    } else {
+      const ConSanOrdinaryMemorySite *site = find_unique_moi_evidence_site(
+          container->ordinary_memory_sites, communication->text_offset);
+      if (site == nullptr ||
+          (site->support_reason != ConSanOrdinaryMemorySupportReason::Supported &&
+           site->support_reason !=
+               ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly)) {
+        errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
+        return {};
+      }
+      plan.communication_site = normalize_ordinary_fence_communication(*site);
+      if (association->memory_role == ConSanSyncMemoryRole::Acquire) {
+        if (sequence->kind != ConSanSyncSequenceKind::OrdinaryMemory ||
+            sequence->memory_role != ConSanSyncMemoryRole::Acquire ||
+            sequence->begin_text_offset != site->text_offset ||
+            sequence->end_text_offset <= sequence->begin_text_offset ||
+            sequence->end_text_offset < fence_event->text_offset + fence_event->size ||
+            sequence->end_text_offset - sequence->begin_text_offset >
+                std::numeric_limits<uint32_t>::max()) {
+          errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
+          return {};
+        }
+        plan.patch_text_offset = sequence->begin_text_offset;
+        plan.patch_file_offset = site->file_offset;
+        plan.patch_size =
+            static_cast<uint32_t>(sequence->end_text_offset - sequence->begin_text_offset);
+        plan.capture_address_before_guest = true;
+        plan.scalar_clause_text_offset = sequence->scalar_clause_text_offset;
+      }
+    }
+    if (sequence->raw_scope)
+      plan.communication_site.raw_scope = sequence->raw_scope;
+    plan.communication_lowering_form = *decision.communication_lowering_form;
+    plan.kernel_descriptor_file_offset = container->kernel_descriptor_file_offset;
+    plan.container_name = std::move(container->qualified_name);
+    plan.container_entry_text_offset = container->entry_text_offset;
+    plan.text_file_offset = container->text_file_offset;
+    if (!plan.is_well_formed()) {
       errors.emplace_back("ConSan MOI admitted fence record lost its decoded lowering site");
       return {};
     }
@@ -608,59 +583,36 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
     plan.is_rmw = event->kind == ConSanSyncEventKind::Atomic;
     plan.ordered_sequence_end_text_offset = sequence->end_text_offset;
     plan.scalar_clause_text_offset = sequence->scalar_clause_text_offset;
-
-    const auto complete_from = [&](const auto &container,
-                                   std::optional<uint64_t> descriptor_file_offset) -> bool {
-      if (event->kind == ConSanSyncEventKind::Atomic) {
-        const auto site = std::ranges::find(container.atomic_sites, event->text_offset,
-                                            &ConSanAtomicSite::text_offset);
-        if (site == container.atomic_sites.end() ||
-            std::ranges::count(container.atomic_sites, event->text_offset,
-                               &ConSanAtomicSite::text_offset) != 1u) {
-          return false;
-        }
-        plan.site = *site;
-      } else {
-        const auto site = std::ranges::find(container.ordinary_memory_sites, event->text_offset,
-                                            &ConSanOrdinaryMemorySite::text_offset);
-        if (site == container.ordinary_memory_sites.end() ||
-            std::ranges::count(container.ordinary_memory_sites, event->text_offset,
-                               &ConSanOrdinaryMemorySite::text_offset) != 1u) {
-          return false;
-        }
-        plan.site = normalize_ordinary_fence_communication(*site);
-      }
-      if (sequence->raw_scope)
-        plan.site.raw_scope = sequence->raw_scope;
-      if (!decision.lowering_form)
-        return false;
-      plan.lowering_form = *decision.lowering_form;
-      if (descriptor_file_offset &&
-          (event->execution_owners.size() != 1u ||
-           event->execution_owners.front().descriptor_file_offset != *descriptor_file_offset)) {
-        descriptor_file_offset.reset();
-      }
-      plan.kernel_descriptor_file_offset = descriptor_file_offset;
-      plan.container_name = (event->in_kernel ? "kernel:" : "function:") + container.name;
-      if constexpr (std::is_same_v<std::remove_cvref_t<decltype(container)>, ConSanKernelInfo>)
-        plan.uses_cluster_workgroup_id = container.uses_cluster_workgroup_id;
-      return true;
-    };
-
-    bool completed = false;
-    if (event->in_kernel) {
-      const ConSanKernelInfo *kernel = inventory.find_kernel_by_name(event->container_name);
-      if (kernel == nullptr && event->execution_owners.size() == 1u) {
-        kernel = inventory.find_kernel_by_descriptor(
-            event->execution_owners.front().descriptor_file_offset);
-      }
-      completed = kernel != nullptr && !is_rocclr_runtime_kernel_name(kernel->name) &&
-                  complete_from(*kernel, kernel->descriptor_file_offset);
-    } else {
-      const ConSanFunctionInfo *function = inventory.find_function_by_name(event->container_name);
-      completed = function != nullptr && complete_from(*function, std::nullopt);
+    auto container = resolve_moi_evidence_container(inventory, event->in_kernel,
+                                                    event->container_name, event->execution_owners);
+    if (!container || !decision.lowering_form) {
+      errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
+      return {};
     }
-    if (!completed || !plan.is_well_formed()) {
+    if (event->kind == ConSanSyncEventKind::Atomic) {
+      const ConSanAtomicSite *site =
+          find_unique_moi_evidence_site(container->atomic_sites, event->text_offset);
+      if (site == nullptr) {
+        errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
+        return {};
+      }
+      plan.site = *site;
+    } else {
+      const ConSanOrdinaryMemorySite *site =
+          find_unique_moi_evidence_site(container->ordinary_memory_sites, event->text_offset);
+      if (site == nullptr) {
+        errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
+        return {};
+      }
+      plan.site = normalize_ordinary_fence_communication(*site);
+    }
+    if (sequence->raw_scope)
+      plan.site.raw_scope = sequence->raw_scope;
+    plan.lowering_form = *decision.lowering_form;
+    plan.kernel_descriptor_file_offset = container->kernel_descriptor_file_offset;
+    plan.container_name = std::move(container->qualified_name);
+    plan.uses_cluster_workgroup_id = container->uses_cluster_workgroup_id;
+    if (!plan.is_well_formed()) {
       errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
       return {};
     }

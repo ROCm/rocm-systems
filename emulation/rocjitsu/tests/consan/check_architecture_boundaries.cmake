@@ -115,6 +115,13 @@ _consan_assert_no_match(
     "ConSanTransformArtifacts"
     "evidence planning must consume immutable forward products, not the mutable transaction bus"
 )
+foreach(_source IN ITEMS consan_moi_barrier.inc consan_moi_sync_emission.cpp)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_source}"
+        "find_kernel_by_(name|descriptor)|find_function_by_name|is_rocclr_runtime_kernel_name"
+        "evidence kinds must consume the shared decoded-container projection"
+    )
+endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_program_analysis_target_ops.cpp"
     "consan_program_analysis_target_detail::"

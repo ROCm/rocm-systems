@@ -59,45 +59,22 @@
     plan.association = {.value = sequence->identity};
     plan.evidence_intent = id;
     plan.in_kernel = event->in_kernel;
-    const auto complete_from = [&](const auto &container,
-                                   std::optional<uint64_t> descriptor_file_offset) -> bool {
-      const auto site = std::ranges::find(container.barrier_sites, event->text_offset,
-                                          &ConSanBarrierSite::text_offset);
-      if (site == container.barrier_sites.end() ||
-          std::ranges::count(container.barrier_sites, event->text_offset,
-                             &ConSanBarrierSite::text_offset) != 1u) {
-        return false;
-      }
-      if (descriptor_file_offset &&
-          (event->execution_owners.size() != 1u ||
-           event->execution_owners.front().descriptor_file_offset != *descriptor_file_offset)) {
-        descriptor_file_offset.reset();
-      }
-      plan.container_name = (event->in_kernel ? "kernel:" : "function:") + container.name;
-      plan.site = *site;
-      plan.kernel_descriptor_file_offset = descriptor_file_offset;
-      plan.container_entry_text_offset = container.entry_text_offset;
-      plan.container_code_size = container.code_size;
-      plan.text_file_offset = container.text_file_offset;
-      return true;
-    };
-
-    bool completed = false;
-    if (event->in_kernel) {
-      const ConSanKernelInfo *kernel = inventory.find_kernel_by_name(event->container_name);
-      if (kernel == nullptr && event->execution_owners.size() == 1u) {
-        kernel = inventory.find_kernel_by_descriptor(
-            event->execution_owners.front().descriptor_file_offset);
-      }
-      completed = kernel != nullptr && !is_rocclr_runtime_kernel_name(kernel->name) &&
-                  complete_from(*kernel, kernel->descriptor_file_offset);
-      if (completed && !kernel->has_text_range)
-        plan.container_code_size = 0u;
-    } else {
-      const ConSanFunctionInfo *function = inventory.find_function_by_name(event->container_name);
-      completed = function != nullptr && complete_from(*function, std::nullopt);
+    auto container = resolve_moi_evidence_container(inventory, event->in_kernel,
+                                                    event->container_name, event->execution_owners);
+    const ConSanBarrierSite *site =
+        container ? find_unique_moi_evidence_site(container->barrier_sites, event->text_offset)
+                  : nullptr;
+    if (site == nullptr) {
+      errors.emplace_back("ConSan MOI admitted barrier evidence lost its decoded lowering site");
+      return {};
     }
-    if (!completed || !plan.is_well_formed()) {
+    plan.container_name = std::move(container->qualified_name);
+    plan.site = *site;
+    plan.kernel_descriptor_file_offset = container->kernel_descriptor_file_offset;
+    plan.container_entry_text_offset = container->entry_text_offset;
+    plan.container_code_size = container->code_size;
+    plan.text_file_offset = container->text_file_offset;
+    if (!plan.is_well_formed()) {
       errors.emplace_back("ConSan MOI admitted barrier evidence lost its decoded lowering site");
       return {};
     }

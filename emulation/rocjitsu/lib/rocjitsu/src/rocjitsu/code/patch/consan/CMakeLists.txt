@@ -36,6 +36,7 @@ target_sources(
         consan_moi_common_emission.cpp
         consan_moi_dynamic_record_emission.cpp
         consan_moi_engine_contracts.cpp
+        consan_moi_evidence_planning.cpp
         consan_moi_exact_shadow_emission.cpp
         consan_moi_gfx9_target_ops.cpp
         consan_moi_inline_shadow_emission.cpp
