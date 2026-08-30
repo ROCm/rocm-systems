@@ -216,6 +216,7 @@ const MoiModeOperations kInlineShadowModeOperations = {
     apply_inline_shadow_mode_patches,
     inline_shadow_access_scratch_vgpr_count,
     plan_inline_shadow_persistent_state_demand,
+    {ConSanMoiScalarSpillLayout::Inline, false, false, 0u},
     true,
     false,
     inline_shadow_operand_overlap_spill,

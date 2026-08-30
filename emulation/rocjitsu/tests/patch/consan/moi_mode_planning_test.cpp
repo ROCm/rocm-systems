@@ -7,6 +7,7 @@
 namespace rocjitsu {
 namespace {
 
+using consan_moi_impl::moi_mode_operations;
 using consan_moi_impl::MoiObjectFacts;
 using consan_moi_impl::MoiPersistentStateFacts;
 using consan_moi_impl::plan_moi_dispatch_identity;
@@ -117,6 +118,11 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsScalarAbiLayout) {
   point.moi_exec_save_sgpr = 20u;
 
   request.moi_engine = ConSanMoiEngine::RecordReplay;
+  const auto &record_traits = moi_mode_operations(request.moi_engine).transient_scalar_placement;
+  EXPECT_EQ(record_traits.spill_layout, ConSanMoiScalarSpillLayout::Compact);
+  EXPECT_FALSE(record_traits.requires_capability_target);
+  EXPECT_TRUE(record_traits.branch_only_spill_preserves_indirect_state);
+  EXPECT_EQ(record_traits.compact_spill_scalar_count, 0u);
   auto plan = plan_moi_scalar_abi(request, point);
   EXPECT_EQ(plan.special_state, (consan_detail::MoiSpecialStateSgprs{22u, 24u}));
   ASSERT_TRUE(plan.indirect_jump);
@@ -125,6 +131,11 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsScalarAbiLayout) {
   EXPECT_FALSE(plan.access_router_uses_dense_abi);
 
   request.moi_engine = ConSanMoiEngine::Sampled;
+  const auto &sampled_traits = moi_mode_operations(request.moi_engine).transient_scalar_placement;
+  EXPECT_EQ(sampled_traits.spill_layout, ConSanMoiScalarSpillLayout::Compact);
+  EXPECT_TRUE(sampled_traits.requires_capability_target);
+  EXPECT_FALSE(sampled_traits.branch_only_spill_preserves_indirect_state);
+  EXPECT_EQ(sampled_traits.compact_spill_scalar_count, 8u);
   plan = plan_moi_scalar_abi(request, point);
   ASSERT_TRUE(plan.special_state);
   EXPECT_EQ(plan.special_state->vcc_save_sgpr, 22u);
@@ -133,6 +144,11 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsScalarAbiLayout) {
   EXPECT_EQ(plan.indirect_jump->scc_save_sgpr, 24u);
 
   request.moi_engine = ConSanMoiEngine::InlineShadow;
+  const auto &inline_traits = moi_mode_operations(request.moi_engine).transient_scalar_placement;
+  EXPECT_EQ(inline_traits.spill_layout, ConSanMoiScalarSpillLayout::Inline);
+  EXPECT_FALSE(inline_traits.requires_capability_target);
+  EXPECT_FALSE(inline_traits.branch_only_spill_preserves_indirect_state);
+  EXPECT_EQ(inline_traits.compact_spill_scalar_count, 0u);
   plan = plan_moi_scalar_abi(request, point);
   EXPECT_EQ(plan.special_state, (consan_detail::MoiSpecialStateSgprs{28u, 30u}));
   ASSERT_TRUE(plan.indirect_jump);

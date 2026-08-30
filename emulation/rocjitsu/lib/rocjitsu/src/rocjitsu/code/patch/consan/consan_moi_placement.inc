@@ -460,13 +460,6 @@ moi_persistent_or_descriptor_workgroup_sources(
   return true;
 }
 
-[[nodiscard]] bool moi_inline_uses_planned_owner_sgpr(const ConSanRequest &request,
-                                                      const ConSanMoiOperatingPoint &point) {
-  return request.moi_engine == ConSanMoiEngine::InlineShadow &&
-         request.moi_owner_source == ConSanMoiOwnerSource::HwId &&
-         (!point.moi_owner_sgpr || point.automatic_moi_owner_sgpr);
-}
-
 struct MoiKernelResourceContext {
   const ConSanKernelInfo *kernel = nullptr;
   KernelCfgScope scope;
@@ -551,6 +544,8 @@ moi_transient_sgpr_assignment(const ConSanMoiOperatingPoint &allocation,
 apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOperatingPoint &point,
                                     const ConSanMoiOperatingPoint &allocation,
                                     std::span<const uint64_t> owner_descriptor_offsets) {
+  const ConSanMoiScalarSpillLayout spill_layout =
+      moi_mode_operations(request.moi_engine).transient_scalar_placement.spill_layout;
   const ConSanMoiTransientSgprAssignment *selected = nullptr;
   bool saw_unassigned_owner = false;
   for (uint64_t descriptor_offset : owner_descriptor_offsets) {
@@ -569,8 +564,7 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
   }
   if (!selected) {
     return point.moi_exec_save_sgpr.has_value() ||
-           (request.moi_engine == ConSanMoiEngine::InlineShadow &&
-            point.has_inline_moi_scalar_spill() &&
+           (point.has_inline_moi_scalar_spill() &&
             ((point.moi_inline_indirect_pc_sgpr && point.moi_inline_indirect_scc_sgpr &&
               point.moi_inline_dispatch_key_sgpr && point.moi_inline_call_return_sgpr) ||
              point.moi_inline_branch_only_scalar_spill ||
@@ -589,7 +583,7 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
   point.moi_dispatch_id_sgpr = selected->dispatch_id_sgpr;
   point.moi_inline_indirect_pc_sgpr = selected->indirect_pc_sgpr;
   point.moi_inline_indirect_scc_sgpr = selected->indirect_scc_sgpr;
-  if (request.moi_engine == ConSanMoiEngine::InlineShadow) {
+  if (spill_layout == ConSanMoiScalarSpillLayout::Inline) {
     point.automatic_moi_scalar_spill_layout = selected->spill_backed
                                                   ? ConSanMoiScalarSpillLayout::Inline
                                                   : ConSanMoiScalarSpillLayout::None;
@@ -1552,7 +1546,8 @@ plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
 [[nodiscard]] std::optional<MoiInlineDenseRouterScalarAbi>
 moi_inline_dense_router_scalar_abi(const ConSanRequest &request,
                                    const ConSanMoiOperatingPoint &point, rj_code_arch_t arch) {
-  if (request.moi_engine != ConSanMoiEngine::InlineShadow ||
+  if (moi_mode_operations(request.moi_engine).transient_scalar_placement.spill_layout !=
+          ConSanMoiScalarSpillLayout::Inline ||
       (!consan_uses_gfx9_cdna_encoding(arch) && !consan_uses_gfx12_encoding(arch))) {
     return std::nullopt;
   }
@@ -3222,11 +3217,13 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
   const rj_code_arch_t arch = planning_state.arch;
   const ConSanRequest &request = problem.request();
   const BoundRuntimeResources &resources = problem.resources();
-  const bool component_local_sampled =
-      request.moi_engine == ConSanMoiEngine::Sampled && consan_is_capability_arch(arch);
-  if ((request.moi_engine != ConSanMoiEngine::RecordReplay &&
-       request.moi_engine != ConSanMoiEngine::InlineShadow && !component_local_sampled) ||
-      (!options.automatic_moi_partial_exec_save_sgprs && !dispatch_only) ||
+  const MoiTransientScalarPlacementTraits &placement =
+      moi_mode_operations(request.moi_engine).transient_scalar_placement;
+  const bool capability_target = consan_is_capability_arch(arch);
+  const bool placement_enabled = !placement.requires_capability_target || capability_target;
+  const bool inline_layout = placement.spill_layout == ConSanMoiScalarSpillLayout::Inline;
+  const bool compact_layout = placement.spill_layout == ConSanMoiScalarSpillLayout::Compact;
+  if (!placement_enabled || (!options.automatic_moi_partial_exec_save_sgprs && !dispatch_only) ||
       !options.moi_exec_save_sgpr)
     return false;
 
@@ -3320,8 +3317,7 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
   // special state, while persistent owner/epoch values live in VGPRs. Do not
   // turn entry ABI inputs into false live-through constraints for that
   // site-local window.
-  if (moi_initializes_owner_epoch(request, options) &&
-      request.moi_engine != ConSanMoiEngine::InlineShadow) {
+  if (moi_initializes_owner_epoch(request, options) && !inline_layout) {
     for (const ConSanKernelInfo &kernel : problem.inventory().kernels())
       include_site(kernel.entry_text_offset);
   }
@@ -3375,10 +3371,8 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
          range_overlaps(*options.moi_exec_save_sgpr, count, *options.moi_dispatch_id_sgpr,
                         kMoiDispatchStateSgprCount));
     const bool needs_override =
-        dispatch_only
-            ? needs_dispatch_override
-            : needs_exec_override ||
-                  (request.moi_engine == ConSanMoiEngine::InlineShadow && needs_dispatch_override);
+        dispatch_only ? needs_dispatch_override
+                      : needs_exec_override || (inline_layout && needs_dispatch_override);
     if (!needs_override)
       continue;
     const RegisterSet &unavailable = unavailable_by_component[root];
@@ -3410,8 +3404,7 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
     std::optional<uint16_t> spill_visible;
     bool branch_only_scalar_spill = false;
     std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
-    if (!selected.valid &&
-        (request.moi_engine == ConSanMoiEngine::RecordReplay || component_local_sampled)) {
+    if (!selected.valid && compact_layout) {
       const auto candidate = first_admitted_moi_register_range(
           liveness_search_floor, count, limit, 2u, [&](uint16_t candidate) {
             if (overlaps_architectural_state(candidate, count) ||
@@ -3432,8 +3425,8 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
       if (candidate)
         selected.set(*candidate);
     }
-    if (!selected.valid && request.moi_engine == ConSanMoiEngine::InlineShadow &&
-        consan_is_capability_arch(arch) && consan_address_free_private_limit(arch)) {
+    if (!selected.valid && inline_layout && capability_target &&
+        consan_address_free_private_limit(arch)) {
       const auto reserved = [&](uint16_t base, uint16_t width) {
         return overlaps_architectural_state(base, width) ||
                (options.moi_owner_sgpr &&
@@ -3678,9 +3671,7 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
           selected.set(*candidate);
       }
     }
-    const bool supports_compact_scalar_spill =
-        (request.moi_engine == ConSanMoiEngine::RecordReplay || component_local_sampled) &&
-        consan_is_capability_arch(arch);
+    const bool supports_compact_scalar_spill = compact_layout && capability_target;
     if (!selected.valid && supports_compact_scalar_spill &&
         consan_address_free_private_limit(arch)) {
       const auto conflicts_with_cdna_vcc = [&](uint16_t base, uint16_t width) {
@@ -3722,7 +3713,8 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
       // One dead pair is therefore sufficient for both transient roles.
       if (spill_key)
         spill_call_return = spill_pc;
-      const uint16_t spilled_scalar_count = component_local_sampled ? 8u : count;
+      const uint16_t spilled_scalar_count =
+          placement.compact_spill_scalar_count ? placement.compact_spill_scalar_count : count;
       if (spill_call_return) {
         const auto spill_window = first_admitted_moi_register_range(
             0u, spilled_scalar_count, limit, 2u, [&](uint16_t candidate) {
@@ -3798,7 +3790,7 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
         // appended body returns through branch-only relays, so no key or call
         // return survives the entry island. Other engines retain the fully
         // branch-only ABI.
-        if (request.moi_engine == ConSanMoiEngine::RecordReplay && count >= 4u) {
+        if (placement.branch_only_spill_preserves_indirect_state && count >= 4u) {
           spill_pc = static_cast<uint16_t>(selected.base + 2u);
           spill_scc = selected.base;
         } else {
@@ -3830,7 +3822,8 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
       owner_transient_sgprs.push_back(
           {.descriptor_file_offset = owner,
            .exec_save_sgpr = selected_sgpr,
-           .owner_sgpr = moi_inline_uses_planned_owner_sgpr(request, options)
+           .owner_sgpr = inline_layout && request.moi_owner_source == ConSanMoiOwnerSource::HwId &&
+                                 (!options.moi_owner_sgpr || options.automatic_moi_owner_sgpr)
                              ? std::optional<uint16_t>(selected_sgpr)
                              : options.moi_owner_sgpr,
            .dispatch_id_sgpr = dispatch_id_sgpr,
@@ -3859,7 +3852,7 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
   // persistent VGPR pair during the later persistent-state placement pass.
   // The marker is intentionally set only after component assignment has
   // proved which owners cannot use the global pair.
-  if (request.moi_engine == ConSanMoiEngine::InlineShadow && options.moi_dispatch_id_sgpr &&
+  if (inline_layout && options.moi_dispatch_id_sgpr &&
       std::ranges::any_of(owner_transient_sgprs,
                           [](const ConSanMoiTransientSgprAssignment &assignment) {
                             return !assignment.dispatch_id_sgpr;
@@ -3883,6 +3876,9 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
   const std::span<const ConSanMoiCandidate> candidates = problem.candidates();
   const ConSanRequest &request = problem.request();
   const BoundRuntimeResources &resources = problem.resources();
+  const MoiTransientScalarPlacementTraits &placement =
+      moi_mode_operations(request.moi_engine).transient_scalar_placement;
+  const bool inline_layout = placement.spill_layout == ConSanMoiScalarSpillLayout::Inline;
   if (options.moi_exec_save_sgpr)
     return false;
   const uint16_t count = moi_exec_save_sgpr_count(
@@ -3954,8 +3950,7 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
       continue;
     }
     options.moi_exec_save_sgpr = base;
-    options.moi_exec_save_sgprs_persistent =
-        request.moi_engine == ConSanMoiEngine::InlineShadow && options.moi_inline_access_present;
+    options.moi_exec_save_sgprs_persistent = inline_layout && options.moi_inline_access_present;
     warnings.emplace_back("ConSan MOI automatically assigned EXEC-save SGPRs s" +
                           std::to_string(base) + ":s" + std::to_string(base + count - 1u));
     return true;
@@ -4018,8 +4013,7 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
           range_overlaps(candidate, count, *component_dispatch_sgpr, dispatch_count);
       if (dispatch_overlaps_candidate) {
         const bool can_relocate_automatic_inline_dispatch =
-            request.moi_engine == ConSanMoiEngine::InlineShadow &&
-            options.automatic_moi_dispatch_id_sgprs;
+            inline_layout && options.automatic_moi_dispatch_id_sgprs;
         if (!can_relocate_automatic_inline_dispatch)
           continue;
         component_dispatch_sgpr.reset();
@@ -4171,8 +4165,8 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
   // can preserve a transient window in private memory, but entry islands and
   // cross-site visible-evidence state still require genuinely dead/fresh
   // registers outside that window.
-  if (consan_uses_gfx12_encoding(arch) && request.moi_engine == ConSanMoiEngine::InlineShadow &&
-      options.moi_inline_access_present && state.valid && saw_site) {
+  if (consan_uses_gfx12_encoding(arch) && inline_layout && options.moi_inline_access_present &&
+      state.valid && saw_site) {
     const size_t ordinary_access_count =
         std::ranges::count_if(candidates, [](const ConSanMoiCandidate &candidate) {
           return candidate.kind == ConSanLdsAccessKind::Read ||
@@ -4351,7 +4345,8 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
   const rj_code_arch_t arch = state.arch;
   if (problem.request().moi_owner_source != ConSanMoiOwnerSource::HwId || point.moi_owner_sgpr)
     return false;
-  if (problem.request().moi_engine == ConSanMoiEngine::InlineShadow)
+  if (moi_mode_operations(problem.request().moi_engine).transient_scalar_placement.spill_layout ==
+      ConSanMoiScalarSpillLayout::Inline)
     return false;
 
   const auto plan_contexts = resolve_moi_resource_plan_scalar_owner_contexts(state, site_plans);
@@ -4398,7 +4393,12 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
 [[nodiscard]] bool configure_inline_moi_owner_sgpr(const ConSanRequest &request,
                                                    ConSanMoiOperatingPoint &point,
                                                    std::vector<std::string> &diagnostics) {
-  if (!moi_inline_uses_planned_owner_sgpr(request, point) || point.automatic_moi_owner_sgpr)
+  const bool uses_planned_owner =
+      moi_mode_operations(request.moi_engine).transient_scalar_placement.spill_layout ==
+          ConSanMoiScalarSpillLayout::Inline &&
+      request.moi_owner_source == ConSanMoiOwnerSource::HwId &&
+      (!point.moi_owner_sgpr || point.automatic_moi_owner_sgpr);
+  if (!uses_planned_owner || point.automatic_moi_owner_sgpr)
     return false;
   if (!point.moi_exec_save_sgpr) {
     diagnostics.emplace_back(
@@ -4871,6 +4871,9 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
                                    const ConSanMoiOperatingPoint &point, rj_code_arch_t arch) {
   const ConSanMoiOperatingPoint &options = point;
   const uint16_t limit = moi_ordinary_sgpr_limit(arch);
+  const bool inline_layout =
+      moi_mode_operations(request.moi_engine).transient_scalar_placement.spill_layout ==
+      ConSanMoiScalarSpillLayout::Inline;
   const auto overlaps_architectural_state = [&](std::optional<uint16_t> base, uint16_t width) {
     return base && persistent_sgpr_range_overlaps_reserved_ordinary_range(*base, width, arch);
   };
@@ -4917,11 +4920,10 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
   });
   const bool branch_only_scalar_invalid =
       options.moi_inline_branch_only_scalar_spill &&
-      (request.moi_engine != ConSanMoiEngine::InlineShadow ||
-       !options.has_inline_moi_scalar_spill() || !consan_uses_gfx12_encoding(arch) ||
-       !options.moi_exec_save_sgpr || options.moi_inline_indirect_pc_sgpr ||
-       options.moi_inline_indirect_scc_sgpr || options.moi_inline_dispatch_key_sgpr ||
-       options.moi_inline_call_return_sgpr);
+      (!inline_layout || !options.has_inline_moi_scalar_spill() ||
+       !consan_uses_gfx12_encoding(arch) || !options.moi_exec_save_sgpr ||
+       options.moi_inline_indirect_pc_sgpr || options.moi_inline_indirect_scc_sgpr ||
+       options.moi_inline_dispatch_key_sgpr || options.moi_inline_call_return_sgpr);
   const bool dynamic_bootstrap_invalid = [&] {
     if (!options.moi_inline_dynamic_stack_borrowed_sgpr)
       return false;
@@ -4940,10 +4942,10 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
          options.moi_persistent_sgprs.record_replay_workgroup.registers()) {
       overlaps_workgroup_tuple |= reg && range_overlaps(base, 2u, *reg, 1u);
     }
-    return request.moi_engine != ConSanMoiEngine::InlineShadow ||
-           !options.has_inline_moi_scalar_spill() || !options.moi_inline_branch_only_scalar_spill ||
-           !options.moi_dynamic_stack_spill || !consan_uses_gfx12_encoding(arch) ||
-           base % 2u != 0u || moi_sgpr_range_overlaps_dynamic_stack_state(base, 2u) ||
+    return !inline_layout || !options.has_inline_moi_scalar_spill() ||
+           !options.moi_inline_branch_only_scalar_spill || !options.moi_dynamic_stack_spill ||
+           !consan_uses_gfx12_encoding(arch) || base % 2u != 0u ||
+           moi_sgpr_range_overlaps_dynamic_stack_state(base, 2u) ||
            (options.moi_exec_save_sgpr &&
             range_overlaps(base, 2u, *options.moi_exec_save_sgpr, exec_count)) ||
            options.moi_inline_indirect_pc_sgpr || options.moi_inline_indirect_scc_sgpr ||

@@ -215,6 +215,7 @@ const MoiModeOperations kRecordReplayModeOperations = {
     apply_record_replay_mode_patches,
     record_replay_access_scratch_vgpr_count,
     plan_record_replay_persistent_state_demand,
+    {ConSanMoiScalarSpillLayout::Compact, false, true, 0u},
     false,
     true,
     record_replay_operand_overlap_spill,

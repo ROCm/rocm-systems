@@ -270,6 +270,7 @@ const MoiModeOperations kSampledModeOperations = {
     apply_sampled_mode_patches,
     sampled_access_scratch_vgpr_count,
     plan_sampled_persistent_state_demand,
+    {ConSanMoiScalarSpillLayout::Compact, true, false, 8u},
     false,
     true,
     sampled_operand_overlap_spill,

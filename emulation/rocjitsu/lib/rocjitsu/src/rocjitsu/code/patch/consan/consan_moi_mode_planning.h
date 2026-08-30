@@ -144,6 +144,18 @@ struct MoiScalarAbiPlan {
   bool access_router_uses_dense_abi = false;
 };
 
+/// Mode-owned representation selected when no code-object-wide transient
+/// scalar window is legal. Common placement owns the register search; a mode
+/// declares which spill ABI it can emit and any exact constraints of that ABI.
+struct MoiTransientScalarPlacementTraits {
+  ConSanMoiScalarSpillLayout spill_layout = ConSanMoiScalarSpillLayout::None;
+  bool requires_capability_target = false;
+  bool branch_only_spill_preserves_indirect_state = false;
+  /// Zero retains the ordinary transient ABI width. Sampled's compact private
+  /// frame has a fixed eight-scalar representation.
+  uint16_t compact_spill_scalar_count = 0u;
+};
+
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.
 [[nodiscard]] MoiPersistentStateDemand make_exact_workgroup_capture_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
@@ -203,6 +215,7 @@ struct MoiModeOperations {
                                                       const BoundRuntimeResources &,
                                                       const ConSanMoiOperatingPoint &,
                                                       const MoiPersistentStateFacts &);
+  MoiTransientScalarPlacementTraits transient_scalar_placement;
   bool dynamic_stack_spill_without_target_backend;
   bool dynamic_stack_spill_requires_every_owner_dynamic;
   MoiOperandOverlapSpillPolicy (*operand_overlap_spill)(const MoiOperandOverlapSpillContext &);
