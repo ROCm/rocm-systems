@@ -2,10 +2,30 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/code/patch/consan/consan_fault_selection.h"
+#include "rocjitsu/code/patch/consan/consan_final_validation.h"
+#include "rocjitsu/code/patch/consan/consan_lowerer.h"
 
 namespace rocjitsu {
 namespace {
+
+/// Apply an already selected fault plan through the production mutation
+/// boundary. These tests vary the original request after planning to prove
+/// that emitters obey the retained typed plan rather than selecting again from
+/// mutable flags, indices, or payload values.
+[[nodiscard]] ConSanTransformArtifacts
+apply_planned_faults(std::span<const uint8_t> code_object_bytes,
+                     const ConSanOptions &application_context,
+                     ConSanTransformArtifacts planned_artifacts) {
+  const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
+                                                       code_object_bytes.data(),
+                                                       code_object_bytes.size());
+  apply_consan_fault_mutation_plans(code_object_bytes, application_context,
+                                    planned_artifacts.fault_plans, planned_artifacts);
+  return finalize_consan_result(std::move(planned_artifacts), code_object_bytes,
+                                application_context.moi_report_dispatch_id);
+}
 
 TEST(ConSan, ExactBarrierDropIssuesAreTypedAndRenderEstablishedDiagnostics) {
   using PairIssue = ExactBarrierDropPairIssue;
@@ -258,7 +278,7 @@ TEST(ConSan, FaultApplicationConsumesRetainedPlanInsteadOfReselectingFromRequest
   conflicting_context.fault_site_identity = planned.fault_sites[0].identity;
   conflicting_context.fault_atomic_address_delta = 4u;
   const ConSanTransformArtifacts applied =
-      test_apply_consan_fault_plans(bytes, conflicting_context, planned);
+      apply_planned_faults(bytes, conflicting_context, planned);
   ASSERT_EQ(applied.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(applied.errors);
   ASSERT_EQ(applied.patches.size(), 1u);
@@ -286,7 +306,7 @@ TEST(ConSan, FaultApplicationRejectsMalformedForeignAndDuplicatePlans) {
   ConSanTransformArtifacts malformed = planned;
   malformed.fault_plans.front().address_delta_bytes.reset();
   const ConSanTransformArtifacts malformed_result =
-      test_apply_consan_fault_plans(bytes, options, std::move(malformed));
+      apply_planned_faults(bytes, options, std::move(malformed));
   EXPECT_EQ(malformed_result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_TRUE(malformed_result.replacement.empty());
   EXPECT_TRUE(std::ranges::any_of(malformed_result.errors, [](const std::string &error) {
@@ -296,7 +316,7 @@ TEST(ConSan, FaultApplicationRejectsMalformedForeignAndDuplicatePlans) {
   ConSanTransformArtifacts foreign = planned;
   ++foreign.fault_plans.front().source_code_object.collision_verifier;
   const ConSanTransformArtifacts foreign_result =
-      test_apply_consan_fault_plans(bytes, options, std::move(foreign));
+      apply_planned_faults(bytes, options, std::move(foreign));
   EXPECT_EQ(foreign_result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_TRUE(foreign_result.replacement.empty());
   EXPECT_TRUE(std::ranges::any_of(foreign_result.errors, [](const std::string &error) {
@@ -306,7 +326,7 @@ TEST(ConSan, FaultApplicationRejectsMalformedForeignAndDuplicatePlans) {
   ConSanTransformArtifacts duplicate = planned;
   duplicate.fault_plans.push_back(duplicate.fault_plans.front());
   const ConSanTransformArtifacts duplicate_result =
-      test_apply_consan_fault_plans(bytes, options, std::move(duplicate));
+      apply_planned_faults(bytes, options, std::move(duplicate));
   EXPECT_EQ(duplicate_result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_TRUE(duplicate_result.replacement.empty());
   EXPECT_TRUE(std::ranges::any_of(duplicate_result.errors, [](const std::string &error) {
