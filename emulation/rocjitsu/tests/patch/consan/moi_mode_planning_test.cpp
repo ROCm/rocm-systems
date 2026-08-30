@@ -118,5 +118,32 @@ TEST(ConSanMoiModePlanning, InlineDemandFollowsAdmittedConsumers) {
   EXPECT_EQ(plan_moi_object_mode(request, point, {}, observation).errors.size(), 1u);
 }
 
+TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
+  ConSanRequest request;
+  ConSanMoiOperatingPoint point;
+  const MoiObjectFacts facts{.has_access_candidate = true};
+  const ConSanObservationPlan observation;
+
+  request.moi_engine = ConSanMoiEngine::RecordReplay;
+  auto plan = plan_moi_object_mode(request, point, facts, observation);
+  EXPECT_FALSE(plan.reserve_dynamic_stack_prologue_entry);
+  EXPECT_TRUE(plan.prologue_requires_consumer);
+
+  MoiObjectFacts buffered_facts = facts;
+  buffered_facts.has_report_buffer = true;
+  EXPECT_FALSE(
+      plan_moi_object_mode(request, point, buffered_facts, observation).prologue_requires_consumer);
+
+  request.moi_engine = ConSanMoiEngine::Sampled;
+  plan = plan_moi_object_mode(request, point, facts, observation);
+  EXPECT_TRUE(plan.reserve_dynamic_stack_prologue_entry);
+  EXPECT_TRUE(plan.prologue_requires_consumer);
+
+  request.moi_engine = ConSanMoiEngine::InlineShadow;
+  plan = plan_moi_object_mode(request, point, facts, observation);
+  EXPECT_FALSE(plan.reserve_dynamic_stack_prologue_entry);
+  EXPECT_TRUE(plan.prologue_requires_consumer);
+}
+
 } // namespace
 } // namespace rocjitsu

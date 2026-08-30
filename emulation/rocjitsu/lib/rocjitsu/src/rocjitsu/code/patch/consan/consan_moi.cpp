@@ -86,6 +86,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   object_facts.target_supports_dense_barrier_router = consan_is_capability_arch(arch);
   object_facts.has_explicit_persistent_state =
       effective_options.moi_owner_vgpr || effective_options.moi_epoch_vgpr;
+  object_facts.has_report_buffer = effective_options.moi_report_buffer_address.has_value();
   AmdGpuCodeObject original_code_object(code_object_bytes.data(), code_object_bytes.size());
   const uint64_t original_text_size = original_code_object.text_sections().size() == 1
                                           ? original_code_object.text_sections().front()->size()
@@ -113,7 +114,6 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                        std::make_move_iterator(mode_plan.errors.end()));
   if (!result.errors.empty())
     return result;
-  const bool explicit_persistent_state = object_facts.has_explicit_persistent_state;
   const bool inline_atomic_without_access = mode_plan.inline_atomic_without_access;
   // Register selection iterates as automatic persistent and transient state is
   // chosen. The code bytes, decoded CFG, ownership scopes, and liveness facts
@@ -246,7 +246,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     publish_pending_moi_lowering_rejections(result);
     return result;
   }
-  if (effective_options.moi_engine == ConSanMoiEngine::Sampled &&
+  if (mode_plan.reserve_dynamic_stack_prologue_entry &&
       moi_initializes_owner_epoch(effective_options, effective_options)) {
     for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       if (!kernel.has_text_range || !kernel.uses_dynamic_stack.value_or(false))
@@ -295,21 +295,8 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   if (result.errors.empty())
     apply_moi_mode_patches(code_object_bytes, effective_options, arch, resource_planning_state,
                            moi_candidates, object_facts, result);
-  // Sampled and inline prologues only initialize state consumed by an emitted
-  // access or sync probe. The automatic Record/Replay report-sizing pass also
-  // has no buffer and therefore cannot emit a consumer yet; keep its semantic
-  // inventory pristine so the allocated-buffer retry can select and emit the
-  // exact entry tuple. Explicit Record/Replay register controls retain their
-  // standalone prologue behavior for host-level lowering tests.
-  const bool automatic_record_replay_inventory =
-      effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-      !effective_options.moi_report_buffer_address && !explicit_persistent_state;
-  const bool prologue_needs_consumer =
-      effective_options.moi_engine == ConSanMoiEngine::Sampled ||
-      effective_options.moi_engine == ConSanMoiEngine::InlineShadow ||
-      automatic_record_replay_inventory;
   if (result.errors.empty() && !owner_epoch_prologue_applied_early &&
-      (!prologue_needs_consumer || result.modified()))
+      (!mode_plan.prologue_requires_consumer || result.modified()))
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options,
                                          prologue_scratch_assignments, arch, result);
   if (result.errors.empty())

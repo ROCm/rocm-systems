@@ -25,6 +25,7 @@ struct MoiObjectFacts {
   bool has_stranded_admitted_barrier = false;
   bool target_supports_dense_barrier_router = false;
   bool has_explicit_persistent_state = false;
+  bool has_report_buffer = false;
 };
 
 /// Effective mode demand consumed by common resource solving. This deliberately
@@ -39,6 +40,8 @@ struct MoiObjectModePlan {
   bool inline_access_present = false;
   bool inline_atomic_without_access = false;
   bool atomic_or_fence_relevant = false;
+  bool reserve_dynamic_stack_prologue_entry = false;
+  bool prologue_requires_consumer = false;
   std::vector<std::string> warnings;
   std::vector<std::string> errors;
 };

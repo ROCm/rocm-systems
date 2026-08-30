@@ -92,6 +92,7 @@ MoiObjectModePlan plan_inline_shadow_object_mode(const ConSanRequest &request,
                                                  const MoiObjectFacts &facts,
                                                  const ConSanObservationPlan &observation_plan) {
   MoiObjectModePlan plan = make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::HwId);
+  plan.prologue_requires_consumer = true;
   if (plan.owner_source == ConSanMoiOwnerSource::WorkitemId) {
     plan.errors.emplace_back(
         "ConSan MOI Inline Shadow requires resident-wave ownership; workitem_id_x is not exact "

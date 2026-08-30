@@ -126,6 +126,8 @@ MoiObjectModePlan plan_sampled_object_mode(const ConSanRequest &request,
                                            const ConSanObservationPlan &) {
   MoiObjectModePlan plan =
       make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::WorkitemId);
+  plan.reserve_dynamic_stack_prologue_entry = true;
+  plan.prologue_requires_consumer = true;
   if (plan.track_atomics && !facts.has_access_candidate) {
     // Sampled atomics publish ordering only into a selected LDS watchpoint's
     // causal window. Without that consumer they do not improve coverage.

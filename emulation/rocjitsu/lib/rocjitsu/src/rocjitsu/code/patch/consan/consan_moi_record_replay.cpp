@@ -61,6 +61,12 @@ MoiObjectModePlan plan_record_replay_object_mode(const ConSanRequest &request,
       make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::WorkitemId);
   plan.atomic_or_fence_relevant =
       plan.track_atomics && (facts.has_admitted_atomic || facts.has_admitted_fence);
+  // A bufferless automatic pass only sizes the report. Do not perturb its
+  // semantic inventory with a prologue before the allocated-buffer retry can
+  // emit an actual consumer. Explicit register controls retain their
+  // standalone prologue behavior for host-level lowering tests.
+  plan.prologue_requires_consumer =
+      !facts.has_report_buffer && !facts.has_explicit_persistent_state;
 
   constexpr size_t kCompactBarrierMemberLimit = 32u;
   plan.dense_barrier_router =
