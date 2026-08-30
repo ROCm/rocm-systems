@@ -228,6 +228,11 @@ static double acclBusBwFactor(const char* func, int nRanks) {
   return 1.0;
 }
 
+// Expansions of ACCL_DECOMP_FIELDS (accl_profiler.h) used by acclWriteRecord().
+#define ACCL_DECOMP_KEY(ctype, key, fmt, member)      "\"" #key "\":" fmt ","
+#define ACCL_DECOMP_KEY_LAST(ctype, key, fmt, member) "\"" #key "\":" fmt
+#define ACCL_DECOMP_ARG(ctype, key, fmt, member)      , rec->member
+
 // ============================================================================
 // JSON output for a completed collective
 // ============================================================================
@@ -253,18 +258,7 @@ static void acclWriteRecord(struct acclCommContext* ctx,
     "\"coll_algobw_gbs\":%.6f,\"coll_busbw_gbs\":%.6f,"
     "\"coll_timing_source\":\"%s\","
     "\"decomposition\":{"
-      "\"enqueue_to_kernel_us\":%.2f,"
-      "\"gpu_kernel_avg_us\":%.2f,"
-      "\"gpu_kernel_min_us\":%.2f,"
-      "\"gpu_kernel_max_us\":%.2f,"
-      "\"proxy_gpu_wait_us\":%.2f,"
-      "\"proxy_network_us\":%.2f,"
-      "\"proxy_peer_wait_us\":%.2f,"
-      "\"proxy_flush_us\":%.2f,"
-      "\"proxy_gpu_recv_wait_us\":%.2f,"
-      "\"n_proxy_ops\":%d,"
-      "\"n_send_ops\":%d,"
-      "\"n_recv_ops\":%d"
+      ACCL_DECOMP_FIELDS(ACCL_DECOMP_KEY, ACCL_DECOMP_KEY_LAST)
     "},",
     rec->rank, rec->nRanks,
     safeStr(rec->func), (unsigned long)rec->seqNumber, rec->msgSizeBytes,
@@ -272,19 +266,8 @@ static void acclWriteRecord(struct acclCommContext* ctx,
     rec->nChannels, rec->nChannelsRaw,
     rec->totalExecUs,
     algoBw, busBw,
-    rec->hasGpuTiming ? "gpu_globaltimer" : "cpu_wallclock",
-    rec->enqueueToKernelUs,
-    rec->gpuKernelUs,
-    rec->gpuKernelMinUs,
-    rec->gpuKernelMaxUs,
-    rec->proxyGpuWaitUs,
-    rec->proxyNetworkUs,
-    rec->proxyPeerWaitUs,
-    rec->proxyFlushUs,
-    rec->proxyGpuRecvWaitUs,
-    rec->nProxyOps,
-    rec->nSendOps,
-    rec->nRecvOps
+    rec->hasGpuTiming ? "gpu_globaltimer" : "cpu_wallclock"
+    ACCL_DECOMP_FIELDS(ACCL_DECOMP_ARG, ACCL_DECOMP_ARG)
   );
 
   // Kernel events array
