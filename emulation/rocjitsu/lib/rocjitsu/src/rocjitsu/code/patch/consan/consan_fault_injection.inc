@@ -1740,22 +1740,17 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
 }
 
 void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                               const ConSanOptions &options, ConSanTransformArtifacts &result) {
+                               const ConSanFaultMutationPlan &plan,
+                               ConSanTransformArtifacts &result) {
   if (!consan_lds_address_fault_arch_supported(arch)) {
     result.errors.emplace_back("ConSan LDS address fault is unsupported for the selected target");
     return;
   }
-  const ConSanFaultSite *selected =
-      select_fault_site_for_plan(fault_selection_view(result), options,
-                                 ConSanFaultSiteKind::LdsAccess, options.fault_lds_index);
-  if (selected == nullptr) {
-    if (!options.fault_site_identity.empty()) {
-      result.warnings.emplace_back("ConSan LDS fault found no site with exact identity '" +
-                                   options.fault_site_identity + "'");
-    } else {
-      result.warnings.emplace_back("ConSan LDS fault found no supported access at index " +
-                                   std::to_string(options.fault_lds_index));
-    }
+  const ConSanFaultSite *selected = find_fault_site_by_identity(
+      fault_selection_view(result), plan.primary_identity, ConSanFaultSiteKind::LdsAccess);
+  if (selected == nullptr || selected->address_vgpr != plan.original_address_vgpr) {
+    result.errors.emplace_back(
+        "ConSan LDS fault plan no longer matches its pristine address operand");
     return;
   }
   if (!selected->address_vgpr || selected->size != 2u * sizeof(uint32_t)) {
@@ -1763,11 +1758,11 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
         "ConSan LDS address fault selected an unsupported decoded instruction shape");
     return;
   }
-  if (!options.fault_lds_address_vgpr) {
+  if (!plan.target_address_vgpr) {
     result.errors.emplace_back("ConSan LDS address fault requires an explicit replacement VGPR");
     return;
   }
-  const uint16_t target_address_vgpr = *options.fault_lds_address_vgpr;
+  const uint16_t target_address_vgpr = *plan.target_address_vgpr;
   if (target_address_vgpr == *selected->address_vgpr) {
     result.errors.emplace_back(
         "ConSan LDS address fault requires a distinct 8-bit replacement VGPR");
