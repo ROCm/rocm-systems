@@ -76,8 +76,7 @@ bool validate_inline_shadow_exec_save_sgpr(const ConSanRequest &request,
   if (!point.moi_exec_save_sgpr)
     return true;
   if (point.has_inline_moi_scalar_spill() && point.moi_inline_access_present &&
-      (!point.moi_router_call && !point.moi_inline_branch_only_scalar_spill &&
-       !point.moi_inline_dynamic_stack_borrowed_sgpr)) {
+      (!point.moi_router_call && !point.moi_branch_only_spill)) {
     errors.emplace_back(
         "ConSan MOI spill-backed inline-shadow probes require a dense router or branch-only "
         "scalar spill");

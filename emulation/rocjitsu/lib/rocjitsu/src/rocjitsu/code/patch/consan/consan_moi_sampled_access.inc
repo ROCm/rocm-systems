@@ -179,7 +179,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                           &ConSanMoiTransientSgprAssignment::spill_backed);
   const bool has_branch_only_scalar_assignment =
       std::ranges::any_of(result.moi_operating_point.owner_transient_sgprs,
-                          &ConSanMoiTransientSgprAssignment::branch_only_scalar_spill);
+                          [](const ConSanMoiTransientSgprAssignment &assignment) {
+                            return assignment.branch_only_spill.has_value();
+                          });
   const bool use_indirect_appended =
       options.moi_exec_save_sgpr.has_value() &&
       (candidates.size() > 8u || has_function_candidate || has_spill_backed_scalar_assignment ||

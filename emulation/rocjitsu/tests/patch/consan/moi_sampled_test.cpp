@@ -2848,8 +2848,7 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverridePreservesPriorOwnerLocalExecWindow) 
       .router_jump = std::nullopt,
       .router_call = std::nullopt,
       .visible_evidence_sgpr = std::nullopt,
-      .branch_only_scalar_spill = false,
-      .dynamic_stack_borrowed_sgpr = std::nullopt,
+      .branch_only_spill = std::nullopt,
   };
 
   const ConSanTransformArtifacts result =
@@ -7351,7 +7350,7 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSav
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
-  EXPECT_TRUE(assignment.branch_only_scalar_spill);
+  EXPECT_TRUE(assignment.branch_only_spill);
   EXPECT_FALSE(assignment.router_jump);
 
   const auto access = std::ranges::find(
@@ -7424,7 +7423,7 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyReservoirsCoverEarliestSource) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u);
-  EXPECT_TRUE(test_moi_transient_sgpr_assignments(result).front().branch_only_scalar_spill);
+  EXPECT_TRUE(test_moi_transient_sgpr_assignments(result).front().branch_only_spill);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             2u)
@@ -7614,8 +7613,7 @@ TEST(ConSanMoi, Cdna4SampledFarBarrierUsesOwnerLocalScalarRoute) {
       .router_jump = ConSanMoiIndirectJumpSgprs{kLocalIndirectPcSgpr, kLocalIndirectSccSgpr},
       .router_call = ConSanMoiRouterCallSgprs{5u, kLocalIndirectPcSgpr},
       .visible_evidence_sgpr = std::nullopt,
-      .branch_only_scalar_spill = false,
-      .dynamic_stack_borrowed_sgpr = std::nullopt,
+      .branch_only_spill = std::nullopt,
   };
 
   const ConSanTransformArtifacts result =

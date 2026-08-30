@@ -198,8 +198,8 @@ file(GLOB _consan_production_files "${_consan_dir}/*.cpp" "${_consan_dir}/*.h" "
 foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_file}"
-        "moi_(inline|record_replay)_(indirect_(pc|scc)|dispatch_key|call_return)_sgpr|moi_router_(indirect_(pc|scc)|dispatch_key|call_return)_sgpr"
-        "scalar-router jump and call state must remain shared typed allocations"
+        "moi_(inline|record_replay)_(indirect_(pc|scc)|dispatch_key|call_return)_sgpr|moi_router_(indirect_(pc|scc)|dispatch_key|call_return)_sgpr|moi_inline_(branch_only_scalar_spill|dynamic_stack_borrowed_sgpr)"
+        "scalar-router and branch-only preservation state must remain shared typed allocations"
     )
 endforeach()
 

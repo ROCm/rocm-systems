@@ -563,9 +563,7 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
   if (!selected) {
     return point.moi_exec_save_sgpr.has_value() ||
            (point.has_inline_moi_scalar_spill() &&
-            ((point.moi_router_jump && point.moi_router_call) ||
-             point.moi_inline_branch_only_scalar_spill ||
-             point.moi_inline_dynamic_stack_borrowed_sgpr));
+            ((point.moi_router_jump && point.moi_router_call) || point.moi_branch_only_spill));
   }
   if (saw_unassigned_owner)
     return false;
@@ -585,14 +583,12 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
                                                   ? ConSanMoiScalarSpillLayout::Inline
                                                   : ConSanMoiScalarSpillLayout::None;
     point.moi_inline_visible_evidence_sgpr = selected->visible_evidence_sgpr;
-    point.moi_inline_branch_only_scalar_spill = selected->branch_only_scalar_spill;
-    point.moi_inline_dynamic_stack_borrowed_sgpr = selected->dynamic_stack_borrowed_sgpr;
+    point.moi_branch_only_spill = selected->branch_only_spill;
   } else {
     point.automatic_moi_scalar_spill_layout = selected->spill_backed
                                                   ? ConSanMoiScalarSpillLayout::Compact
                                                   : ConSanMoiScalarSpillLayout::None;
-    point.moi_inline_branch_only_scalar_spill = false;
-    point.moi_inline_dynamic_stack_borrowed_sgpr.reset();
+    point.moi_branch_only_spill.reset();
   }
   return true;
 }
@@ -604,7 +600,7 @@ moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiOperatingPoint &allo
          std::ranges::all_of(owner_descriptor_offsets, [&](uint64_t descriptor_offset) {
            const ConSanMoiTransientSgprAssignment *assignment =
                moi_transient_sgpr_assignment(allocation, descriptor_offset);
-           return assignment != nullptr && assignment->branch_only_scalar_spill;
+           return assignment != nullptr && assignment->branch_only_spill;
          });
 }
 
@@ -1535,7 +1531,7 @@ moi_inline_dense_router_scalar_abi(const ConSanRequest &request,
       (!consan_uses_gfx9_cdna_encoding(arch) && !consan_uses_gfx12_encoding(arch))) {
     return std::nullopt;
   }
-  if (point.moi_inline_branch_only_scalar_spill)
+  if (point.moi_branch_only_spill)
     return std::nullopt;
   const auto indirect_jump = moi_indirect_jump_sgprs(request, point);
   if (!indirect_jump)
@@ -3162,7 +3158,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
            (assignment.router_call && (overlaps(assignment.router_call->dispatch_key_sgpr) ||
                                        overlaps(assignment.router_call->call_return_sgpr, 2u))) ||
            overlaps(assignment.visible_evidence_sgpr) ||
-           overlaps(assignment.dynamic_stack_borrowed_sgpr, 2u);
+           (assignment.branch_only_spill &&
+            overlaps(assignment.branch_only_spill->dynamic_stack_borrowed_sgpr, 2u));
   };
   bool overlaps_auxiliary_state = false;
   point.for_each_auxiliary_sgpr_range(
@@ -3806,8 +3803,10 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                                                                *spill_key, *spill_call_return}}
                                                          : std::nullopt,
            .visible_evidence_sgpr = spill_visible,
-           .branch_only_scalar_spill = branch_only_scalar_spill,
-           .dynamic_stack_borrowed_sgpr = dynamic_stack_borrowed_sgpr});
+           .branch_only_spill =
+               branch_only_scalar_spill
+                   ? std::optional{ConSanMoiBranchOnlyScalarSpill{dynamic_stack_borrowed_sgpr}}
+                   : std::nullopt});
     }
     assigned_any = true;
   }
@@ -4892,14 +4891,15 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
                                   overlaps_architectural_state(base, width));
   });
   const bool branch_only_scalar_invalid =
-      options.moi_inline_branch_only_scalar_spill &&
+      options.moi_branch_only_spill &&
       (!inline_layout || !options.has_inline_moi_scalar_spill() ||
        !consan_uses_gfx12_encoding(arch) || !options.moi_exec_save_sgpr ||
        options.moi_router_jump || options.moi_router_call);
   const bool dynamic_bootstrap_invalid = [&] {
-    if (!options.moi_inline_dynamic_stack_borrowed_sgpr)
+    if (!options.moi_branch_only_spill ||
+        !options.moi_branch_only_spill->dynamic_stack_borrowed_sgpr)
       return false;
-    const uint16_t base = *options.moi_inline_dynamic_stack_borrowed_sgpr;
+    const uint16_t base = *options.moi_branch_only_spill->dynamic_stack_borrowed_sgpr;
     const uint16_t exec_count = moi_exec_save_sgpr_count(
         resolve_moi_exec_save_requirement(request, resources, point), arch);
     const bool overlaps_persistent =
@@ -4915,7 +4915,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
       overlaps_workgroup_tuple |= reg && range_overlaps(base, 2u, *reg, 1u);
     }
     return !inline_layout || !options.has_inline_moi_scalar_spill() ||
-           !options.moi_inline_branch_only_scalar_spill || !options.moi_dynamic_stack_spill ||
+           !options.moi_branch_only_spill || !options.moi_dynamic_stack_spill ||
            !consan_uses_gfx12_encoding(arch) || base % 2u != 0u ||
            moi_sgpr_range_overlaps_dynamic_stack_state(base, 2u) ||
            (options.moi_exec_save_sgpr &&

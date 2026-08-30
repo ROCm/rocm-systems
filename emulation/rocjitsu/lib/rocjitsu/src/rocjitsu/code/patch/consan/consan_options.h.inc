@@ -319,6 +319,15 @@ struct ConSanMoiRouterCallSgprs {
   auto operator<=>(const ConSanMoiRouterCallSgprs &) const = default;
 };
 
+/// Inline spill state reached through branch-only relays. A dynamic-stack
+/// bootstrap may additionally borrow one live ordinary pair, but that pair
+/// cannot exist independently of the branch-only preservation strategy.
+struct ConSanMoiBranchOnlyScalarSpill {
+  std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
+
+  auto operator<=>(const ConSanMoiBranchOnlyScalarSpill &) const = default;
+};
+
 /// Probe-local scalar state selected for one connected set of owning kernels.
 /// A shared helper connects its callers because its single instruction stream
 /// cannot use a different transient window for each caller.
@@ -340,11 +349,7 @@ struct ConSanMoiTransientSgprAssignment {
   /// reaches the appended body through branch-only relays. This avoids any
   /// scalar value that would otherwise have to remain live from the guest
   /// anchor through the router.
-  bool branch_only_scalar_spill = false;
-  /// Live ordinary pair preserved through the dynamic-stack VGPR bootstrap.
-  /// This optional dynamic-stack sub-case is valid only when
-  /// branch_only_scalar_spill is true.
-  std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
+  std::optional<ConSanMoiBranchOnlyScalarSpill> branch_only_spill;
 
   auto operator<=>(const ConSanMoiTransientSgprAssignment &) const = default;
 };
@@ -873,13 +878,10 @@ struct ConSanMoiOperatingPoint {
   std::optional<ConSanMoiRouterCallSgprs> moi_router_call;
   /// Inline-only visible evidence temporary within that shared router ABI.
   std::optional<uint16_t> moi_inline_visible_evidence_sgpr;
-  /// Internal proof marker for an Inline component whose saved scalar window
-  /// is reached through branch-only relays instead of live-through SGPR state.
-  bool moi_inline_branch_only_scalar_spill = false;
-  /// Component-local live pair used only while a branch-only spill-backed
-  /// Inline body establishes and releases its runtime-sized private frame.
-  /// A value is valid only when moi_inline_branch_only_scalar_spill is true.
-  std::optional<uint16_t> moi_inline_dynamic_stack_borrowed_sgpr;
+  /// Inline component whose saved scalar window is reached through branch-only
+  /// relays instead of live-through SGPR state, including its optional
+  /// dynamic-stack bootstrap pair.
+  std::optional<ConSanMoiBranchOnlyScalarSpill> moi_branch_only_spill;
   std::optional<uint16_t> moi_dispatch_id_sgpr;
   std::optional<uint16_t> moi_dispatch_id_vgpr;
   /// Uniform persistent scalar state selected when an MOI owner cannot retain
@@ -921,7 +923,8 @@ struct ConSanMoiOperatingPoint {
     visit(moi_router_call ? std::optional{moi_router_call->dispatch_key_sgpr} : std::nullopt, 1u);
     visit(moi_router_call ? std::optional{moi_router_call->call_return_sgpr} : std::nullopt, 2u);
     visit(moi_inline_visible_evidence_sgpr, 1u);
-    visit(moi_inline_dynamic_stack_borrowed_sgpr, 2u);
+    visit(moi_branch_only_spill ? moi_branch_only_spill->dynamic_stack_borrowed_sgpr : std::nullopt,
+          2u);
   }
 
   bool operator==(const ConSanMoiOperatingPoint &) const = default;

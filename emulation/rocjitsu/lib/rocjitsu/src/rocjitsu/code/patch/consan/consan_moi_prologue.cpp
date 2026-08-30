@@ -2633,9 +2633,10 @@ void try_apply_owner_epoch_prologue_patch(
       }
     }
     std::optional<MoiEntryScalarBackup> entry_scalar_backup;
-    const bool needs_branch_only_scalar_backup = kernel_options.moi_inline_branch_only_scalar_spill;
+    const bool needs_branch_only_scalar_backup = kernel_options.moi_branch_only_spill.has_value();
     const bool needs_dynamic_stack_scalar_backup =
-        kernel_options.moi_inline_dynamic_stack_borrowed_sgpr.has_value();
+        kernel_options.moi_branch_only_spill &&
+        kernel_options.moi_branch_only_spill->dynamic_stack_borrowed_sgpr.has_value();
     // A spill-backed Record/Replay probe protects its borrowed scalar window
     // at each access body. Sparse workgroup selection uses that same window
     // earlier, in the owner/epoch entry prologue, so it needs an independent

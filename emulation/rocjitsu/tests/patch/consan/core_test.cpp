@@ -143,8 +143,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .moi_router_jump = ConSanMoiIndirectJumpSgprs{2u, 7u},
       .moi_router_call = ConSanMoiRouterCallSgprs{12u, 14u},
       .moi_inline_visible_evidence_sgpr = 8u,
-      .moi_inline_branch_only_scalar_spill = true,
-      .moi_inline_dynamic_stack_borrowed_sgpr = 10u,
+      .moi_branch_only_spill = ConSanMoiBranchOnlyScalarSpill{10u},
       .moi_dispatch_id_sgpr = 16u,
       .moi_dispatch_id_vgpr = 18u,
       .moi_persistent_sgprs = {.owner = 20u,
@@ -188,9 +187,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   expect_field_participates([](auto &value) { value.automatic_moi_private_dispatch_id = false; });
   expect_field_participates([](auto &value) { value.moi_router_jump.reset(); });
   expect_field_participates([](auto &value) { value.moi_inline_visible_evidence_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.moi_inline_branch_only_scalar_spill = false; });
-  expect_field_participates(
-      [](auto &value) { value.moi_inline_dynamic_stack_borrowed_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_branch_only_spill.reset(); });
   expect_field_participates([](auto &value) { value.moi_router_call.reset(); });
   expect_field_participates([](auto &value) { value.moi_dispatch_id_sgpr.reset(); });
   expect_field_participates([](auto &value) { value.moi_dispatch_id_vgpr.reset(); });

@@ -1336,7 +1336,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         !compute_sopp_branch_simm16(cave_text_offset, return_text_offset) &&
         !moi_indirect_jump_sgprs(candidate_options, candidate_options)) {
       result.warnings.emplace_back(
-          candidate_options.moi_inline_branch_only_scalar_spill
+          candidate_options.moi_branch_only_spill
               ? "ConSan MOI branch-only scalar-spill barrier has no encodable far return in " +
                     candidate.container_name
               : "ConSan MOI inline-shadow barrier has no encodable far return in " +

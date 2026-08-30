@@ -1186,8 +1186,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       .router_jump = ConSanMoiIndirectJumpSgprs{48u, 50u},
       .router_call = ConSanMoiRouterCallSgprs{50u, 48u},
       .visible_evidence_sgpr = std::nullopt,
-      .branch_only_scalar_spill = false,
-      .dynamic_stack_borrowed_sgpr = std::nullopt,
+      .branch_only_spill = std::nullopt,
   };
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -1406,8 +1405,7 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
       .router_jump = ConSanMoiIndirectJumpSgprs{48u, 50u},
       .router_call = ConSanMoiRouterCallSgprs{50u, 48u},
       .visible_evidence_sgpr = std::nullopt,
-      .branch_only_scalar_spill = false,
-      .dynamic_stack_borrowed_sgpr = std::nullopt,
+      .branch_only_spill = std::nullopt,
   };
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -3291,8 +3289,8 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(assignment.branch_only_scalar_spill);
-  ASSERT_TRUE(assignment.dynamic_stack_borrowed_sgpr);
+  ASSERT_TRUE(assignment.branch_only_spill);
+  ASSERT_TRUE(assignment.branch_only_spill->dynamic_stack_borrowed_sgpr);
   EXPECT_FALSE(assignment.router_jump);
   EXPECT_FALSE(assignment.router_call);
 
@@ -3419,8 +3417,8 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(assignment.branch_only_scalar_spill);
-  EXPECT_FALSE(assignment.dynamic_stack_borrowed_sgpr);
+  ASSERT_TRUE(assignment.branch_only_spill);
+  EXPECT_FALSE(assignment.branch_only_spill->dynamic_stack_borrowed_sgpr);
   EXPECT_FALSE(assignment.router_jump);
   EXPECT_FALSE(assignment.router_call);
 
@@ -3529,7 +3527,7 @@ void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
-  EXPECT_TRUE(assignment.branch_only_scalar_spill);
+  EXPECT_TRUE(assignment.branch_only_spill);
   EXPECT_FALSE(assignment.router_jump);
   EXPECT_FALSE(assignment.router_call);
   EXPECT_EQ(std::ranges::count(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
@@ -3581,7 +3579,9 @@ TEST(ConSanMoi, Rdna4InlineUnknownStackDoesNotSelectFixedStackBranchOnlySpill) {
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_FALSE(result.program_inventory.kernels().front().uses_dynamic_stack.has_value());
   EXPECT_FALSE(std::ranges::any_of(test_moi_transient_sgpr_assignments(result),
-                                   &ConSanMoiTransientSgprAssignment::branch_only_scalar_spill))
+                                   [](const ConSanMoiTransientSgprAssignment &assignment) {
+                                     return assignment.branch_only_spill.has_value();
+                                   }))
       << testing::PrintToString(result.warnings);
   EXPECT_FALSE(std::ranges::any_of(result.patches, &ConSanPatchInfo::branch_only_continuation))
       << testing::PrintToString(result.warnings);
@@ -3750,7 +3750,7 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyReservoirsCoverEarliestPendingSource) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u);
-  EXPECT_TRUE(test_moi_transient_sgpr_assignments(result).front().branch_only_scalar_spill);
+  EXPECT_TRUE(test_moi_transient_sgpr_assignments(result).front().branch_only_spill);
   EXPECT_EQ(std::ranges::count_if(result.patches,
                                   [](const ConSanPatchInfo &patch) {
                                     return patch.kind ==
@@ -6640,8 +6640,7 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
       .router_jump = ConSanMoiIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr},
       .router_call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr},
       .visible_evidence_sgpr = std::nullopt,
-      .branch_only_scalar_spill = false,
-      .dynamic_stack_borrowed_sgpr = std::nullopt,
+      .branch_only_spill = std::nullopt,
   };
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -7243,7 +7242,7 @@ TEST(ConSanMoi, Gfx1250BranchOnlyInlineShadowFarBarrierDoesNotAbortObject) {
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u)
       << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(test_moi_transient_sgpr_assignments(result).front().branch_only_scalar_spill);
+  EXPECT_TRUE(test_moi_transient_sgpr_assignments(result).front().branch_only_spill);
   EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                               &ConSanPatchInfo::kind),
             result.patches.end());
@@ -7599,7 +7598,7 @@ TEST(ConSanMoi, Gfx1250InlineUsesComponentLocalScalarSpillForMixedPressureOwners
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
-  EXPECT_TRUE(assignment.branch_only_scalar_spill);
+  EXPECT_TRUE(assignment.branch_only_spill);
   EXPECT_FALSE(assignment.visible_evidence_sgpr);
   EXPECT_FALSE(assignment.router_jump);
   EXPECT_FALSE(assignment.router_call);

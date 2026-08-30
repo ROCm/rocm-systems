@@ -99,7 +99,9 @@ void try_apply_first_light_access_record_patch(
                           &ConSanMoiTransientSgprAssignment::spill_backed);
   const bool has_branch_only_scalar_assignment =
       std::ranges::any_of(result.moi_operating_point.owner_transient_sgprs,
-                          &ConSanMoiTransientSgprAssignment::branch_only_scalar_spill);
+                          [](const ConSanMoiTransientSgprAssignment &assignment) {
+                            return assignment.branch_only_spill.has_value();
+                          });
   // Spill-backed groups need room for the extra scalar-save arm, while truly
   // large generated objects need a conservative envelope to keep every
   // routing target reachable. Applying that spacing to every ordinary

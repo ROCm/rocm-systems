@@ -102,7 +102,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   const bool has_branch_only_scalar_assignment =
       std::ranges::any_of(result.moi_operating_point.owner_transient_sgprs,
                           [](const ConSanMoiTransientSgprAssignment &assignment) {
-                            return assignment.branch_only_scalar_spill;
+                            return assignment.branch_only_spill.has_value();
                           });
   const bool use_indirect_appended =
       options.moi_exec_save_sgpr.has_value() &&
@@ -477,7 +477,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
         moi_scalar_spill_requires_dynamic_vgpr_frame(
             result.program_inventory, *resources,
             static_cast<const ConSanMoiOperatingPoint &>(candidate_options))) {
-      if (candidate_options.moi_inline_dynamic_stack_borrowed_sgpr) {
+      if (candidate_options.moi_branch_only_spill &&
+          candidate_options.moi_branch_only_spill->dynamic_stack_borrowed_sgpr) {
         constexpr uint16_t reservoir_count =
             DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount;
         const uint32_t scalar_frame_bytes =
@@ -495,7 +496,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
             static_cast<uint16_t>(resources->base + resources->count - reservoir_count);
         const auto borrowed = build_dynamic_stack_borrowed_sgpr_spill_sequence(
             resources->base, resources->count,
-            *candidate_options.moi_inline_dynamic_stack_borrowed_sgpr, reservoir_base,
+            *candidate_options.moi_branch_only_spill->dynamic_stack_borrowed_sgpr, reservoir_base,
             resources->original_private_segment_size, arch, scalar_frame_bytes);
         if (!borrowed) {
           result.warnings.emplace_back(
@@ -596,7 +597,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     uint64_t branch_only_relay_bank_word_count = 0u;
     uint32_t displaced_original_size = candidate.size();
     bool placed_through_indirect_island = false;
-    if (use_indirect_appended && candidate_options.moi_inline_branch_only_scalar_spill) {
+    if (use_indirect_appended && candidate_options.moi_branch_only_spill) {
       const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t)) +
                                    spill_bytes + scalar_spill_bytes + vgpr_msb_bytes +
                                    scalar_spill_guard_bytes;
@@ -710,7 +711,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       }
     }
     if (use_indirect_appended && !placed_through_indirect_island) {
-      if (candidate_options.moi_inline_branch_only_scalar_spill) {
+      if (candidate_options.moi_branch_only_spill) {
         result.warnings.emplace_back(
             "ConSan MOI inline-shadow probe could not route its branch-only scalar-spill body");
         continue;
@@ -1135,9 +1136,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
           cave_words->erase(displaced_begin, cave_words->end());
         }
         if (planned_patch.branch_only_route) {
-          if (!candidate_options.moi_inline_branch_only_scalar_spill ||
-              planned_patch.entry_island_offset || planned_patch.dense_call_anchor ||
-              !planned_patch.displaced_tail_words.empty()) {
+          if (!candidate_options.moi_branch_only_spill || planned_patch.entry_island_offset ||
+              planned_patch.dense_call_anchor || !planned_patch.displaced_tail_words.empty()) {
             result.errors.emplace_back(
                 "ConSan MOI inline-shadow probe found inconsistent branch-only state");
             return;

@@ -955,8 +955,7 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
       .router_jump = ConSanMoiIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr},
       .router_call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr},
       .visible_evidence_sgpr = std::nullopt,
-      .branch_only_scalar_spill = false,
-      .dynamic_stack_borrowed_sgpr = std::nullopt,
+      .branch_only_spill = std::nullopt,
   };
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
