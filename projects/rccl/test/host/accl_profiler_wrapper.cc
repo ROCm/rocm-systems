@@ -9,6 +9,9 @@ extern "C" {
   double test_acclBusBwFactor(const char* func, int nRanks) {
     return acclBusBwFactor(func, nRanks);
   }
+  size_t test_acclParseMinSize(const char* env, int* bad) {
+    return acclParseMinSize(env, bad);
+  }
 
   // Context lifetime accessors. The plugin recycles pool slots and hands raw
   // interior pointers to RCCL, so the tests below need to observe the refcount
