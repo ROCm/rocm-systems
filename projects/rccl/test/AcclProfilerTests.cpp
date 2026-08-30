@@ -22,6 +22,7 @@
 
 #include <gtest/gtest.h>
 
+#include "accl_profiler.h"
 #include "accl_shim.h"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
@@ -1195,6 +1196,203 @@ TEST(AcclProfilerLifecycle, FinalizeDoesNotCloseOutputUnderAWriter) {
             test_acclFreeColl(ctx, coll);
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_fclose_race"}}
+    );
+}
+
+
+// -------------------------------------------------------------------------
+// Reads the run summary line back out of the emitted JSONL.
+// -------------------------------------------------------------------------
+static std::string ReadSummaryLine(const char* dir, const char* commHashHex) {
+    char host[256] = {0};
+    gethostname(host, sizeof(host) - 1);
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/accl_profiler_rank0_%s_pid%d_%s.jsonl",
+             dir, host, (int)getpid(), commHashHex);
+    std::ifstream ifs(path);
+    std::string line, summary;
+    // Deliberately no break: keep overwriting so we end up holding the LAST
+    // summary line in the file, which is the one finalize wrote.
+    while (std::getline(ifs, line)) {
+        if (line.find("\"summary\"") != std::string::npos) {
+            summary = line;
+        }
+    }
+    return summary;
+}
+
+// =========================================================================
+// A run that lost proxy data must not report itself complete.
+//
+// The proxy-op and proxy-step pools drop silently when full, and a completed
+// proxy op is discarded when its collective already holds ACCL_MAX_PROXY_OPS.
+// None of the three affects the emitted records in any visible way: the
+// decomposition simply understates the proxy side. The only place the loss can
+// surface is the end-of-run summary, so each of these drives one loss channel
+// and asserts the summary both counts it and clears "complete".
+// =========================================================================
+TEST(AcclProfilerSummary, ProxyOpPoolExhaustionIsCounted) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerSummary.ProxyOpPoolExhaustionIsCounted",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x7001, &mask, "op_pool",
+                                     1, 1, 0, nullptr), 0);
+
+            // Pin every proxy-op slot by starting ops and never stopping them.
+            ncclProfilerEventDescr_v5_t od;
+            memset(&od, 0, sizeof(od));
+            od.type = ncclProfileProxyOp;
+            od.proxyOp.nSteps = 1;
+            od.proxyOp.isSend = 1;
+            for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
+                void* h = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &h, &od), 0);
+                ASSERT_NE(h, nullptr) << "pool exhausted early at i=" << i;
+            }
+            // The next three have nowhere to go and must be counted.
+            for (int i = 0; i < 3; i++) {
+                void* h = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &h, &od), 0);
+                EXPECT_EQ(h, nullptr) << "a full proxy-op pool must return NULL";
+            }
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string s = ReadSummaryLine("/tmp/accl_test_op_pool", "0x7001");
+            ASSERT_FALSE(s.empty()) << "no summary line was written";
+            EXPECT_NE(s.find("\"dropped_proxy_ops\":3"), std::string::npos) << s;
+            EXPECT_NE(s.find("\"complete\":false"), std::string::npos)
+                << "a run that dropped proxy ops reported itself complete: " << s;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_op_pool"}}
+    );
+}
+
+TEST(AcclProfilerSummary, ProxyStepPoolExhaustionIsCounted) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerSummary.ProxyStepPoolExhaustionIsCounted",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x7002, &mask, "step_pool",
+                                     1, 1, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t od;
+            memset(&od, 0, sizeof(od));
+            od.type = ncclProfileProxyOp;
+            od.proxyOp.nSteps = 1;
+            od.proxyOp.isSend = 1;
+            void* op = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &op, &od), 0);
+            ASSERT_NE(op, nullptr);
+
+            ncclProfilerEventDescr_v5_t sd;
+            memset(&sd, 0, sizeof(sd));
+            sd.type = ncclProfileProxyStep;
+            sd.parentObj = op;
+            for (int i = 0; i < ACCL_PROXY_STEP_POOL_SIZE; i++) {
+                void* h = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &h, &sd), 0);
+                ASSERT_NE(h, nullptr) << "pool exhausted early at i=" << i;
+            }
+            for (int i = 0; i < 2; i++) {
+                void* h = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &h, &sd), 0);
+                EXPECT_EQ(h, nullptr) << "a full proxy-step pool must return NULL";
+            }
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string s = ReadSummaryLine("/tmp/accl_test_step_pool", "0x7002");
+            ASSERT_FALSE(s.empty()) << "no summary line was written";
+            EXPECT_NE(s.find("\"dropped_proxy_steps\":2"), std::string::npos) << s;
+            EXPECT_NE(s.find("\"complete\":false"), std::string::npos)
+                << "a run that dropped proxy steps reported itself complete: " << s;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_step_pool"}}
+    );
+}
+
+TEST(AcclProfilerSummary, ProxyOpOverflowPerCollectiveIsCounted) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerSummary.ProxyOpOverflowPerCollectiveIsCounted",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x7003, &mask, "op_overflow",
+                                     1, 1, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/1, /*count=*/1024);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+            ASSERT_NE(coll, nullptr);
+
+            // Two more ops than the collective can record. They complete
+            // normally; the plugin has nowhere to put the last two.
+            ncclProfilerEventDescr_v5_t od;
+            memset(&od, 0, sizeof(od));
+            od.type = ncclProfileProxyOp;
+            od.parentObj = coll;
+            od.proxyOp.nSteps = 1;
+            od.proxyOp.isSend = 1;
+            for (int i = 0; i < ACCL_MAX_PROXY_OPS + 2; i++) {
+                void* h = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &h, &od), 0);
+                ASSERT_NE(h, nullptr);
+                ASSERT_EQ(acclPluginStopEvent(h), 0);
+            }
+            ASSERT_EQ(acclPluginStopEvent(coll), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string s = ReadSummaryLine("/tmp/accl_test_op_overflow", "0x7003");
+            ASSERT_FALSE(s.empty()) << "no summary line was written";
+            EXPECT_NE(s.find("\"overflow_proxy_ops\":2"), std::string::npos) << s;
+            EXPECT_NE(s.find("\"complete\":false"), std::string::npos)
+                << "a run that discarded proxy ops reported itself complete: " << s;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_op_overflow"}}
+    );
+}
+
+TEST(AcclProfilerSummary, CleanRunStillReportsComplete) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerSummary.CleanRunStillReportsComplete",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x7004, &mask, "clean_run",
+                                     1, 1, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/1, /*count=*/1024);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+            ASSERT_NE(coll, nullptr);
+
+            ncclProfilerEventDescr_v5_t kd;
+            memset(&kd, 0, sizeof(kd));
+            kd.type = ncclProfileKernelCh;
+            kd.parentObj = coll;
+            kd.kernelCh.channelId = 0;
+            kd.kernelCh.pTimer = 1000000;
+            void* kch = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
+            ASSERT_EQ(acclPluginStopEvent(coll), 0);
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 1010000;
+            ASSERT_EQ(acclPluginRecordEventState(kch, ncclProfilerKernelChStop, &sa), 0);
+            ASSERT_EQ(acclPluginStopEvent(kch), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string s = ReadSummaryLine("/tmp/accl_test_clean_run", "0x7004");
+            ASSERT_FALSE(s.empty()) << "no summary line was written";
+            EXPECT_NE(s.find("\"complete\":true"), std::string::npos)
+                << "a clean run must still report complete: " << s;
+            EXPECT_NE(s.find("\"dropped_proxy_ops\":0"), std::string::npos) << s;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_clean_run"}}
     );
 }
 
