@@ -450,62 +450,11 @@ moi_persistent_or_descriptor_workgroup_sources(
   return true;
 }
 
-[[nodiscard]] uint16_t inline_shadow_scratch_count(const ConSanRequest &request,
-                                                   const ConSanMoiOperatingPoint &point) {
-  // Versioned exact publication retains the slot address, new packed access,
-  // prior dispatch, ready version, and CAS operands through commit. The token
-  // hash aliases the now-larger transaction window.
-  return consan_detail::inline_shadow_transaction_scratch_count(
-      point.moi_exec_save_sgpr.has_value(), request.moi_track_atomics);
-}
-
-[[nodiscard]] uint16_t inline_shadow_loop_scratch_count(const ConSanMoiCandidate &candidate) {
-  // Wide local accesses retain an offset and iteration counter. Wide external
-  // accesses retain an iteration counter and the workgroup key, since the
-  // versioned transaction reuses all of its ordinary address temporaries.
-  return consan_detail::inline_shadow_loop_scratch_count(candidate.width_bits(),
-                                                         consan_moi_exact_shadow::granule_bytes);
-}
-
 [[nodiscard]] bool moi_inline_uses_planned_owner_sgpr(const ConSanRequest &request,
                                                       const ConSanMoiOperatingPoint &point) {
   return request.moi_engine == ConSanMoiEngine::InlineShadow &&
          request.moi_owner_source == ConSanMoiOwnerSource::HwId &&
          (!point.moi_owner_sgpr || point.automatic_moi_owner_sgpr);
-}
-
-[[nodiscard]] bool validate_inline_shadow_exec_save_sgpr(const ConSanRequest &request,
-                                                         const BoundRuntimeResources &resources,
-                                                         const ConSanMoiOperatingPoint &point,
-                                                         rj_code_arch_t arch,
-                                                         std::vector<std::string> &errors) {
-  if (!point.moi_exec_save_sgpr)
-    return true;
-  if (point.automatic_moi_inline_sgpr_spill && point.moi_inline_access_present &&
-      ((!point.moi_inline_call_return_sgpr || !point.moi_inline_dispatch_key_sgpr) &&
-       !point.moi_inline_branch_only_scalar_spill &&
-       !point.moi_inline_dynamic_stack_borrowed_sgpr)) {
-    errors.emplace_back(
-        "ConSan MOI spill-backed inline-shadow probes require a dense router or branch-only "
-        "scalar spill");
-    return false;
-  }
-  // Diagnostics use s[base:base+10]. Atomic publication and causal-token
-  // handling retain masks through +20:+21. Access probes additionally use
-  // local/dynamic state through +25 and preserve application EXEC in the
-  // dedicated +26:+27 pair.
-  const uint16_t ordinary_sgpr_count = consan_uses_gfx9_cdna_encoding(arch) ? 102u : kMaxSgprs;
-  const uint16_t required_sgpr_count =
-      moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(request, resources, point), arch);
-  const uint16_t max_exec_save_sgpr =
-      static_cast<uint16_t>(ordinary_sgpr_count - required_sgpr_count);
-  if (*point.moi_exec_save_sgpr > max_exec_save_sgpr || *point.moi_exec_save_sgpr % 2u != 0u) {
-    errors.emplace_back("ConSan MOI inline-shadow diagnostics require an even "
-                        "RJ_CONSAN_MOI_EXEC_SAVE_SGPR in 0.." +
-                        std::to_string(max_exec_save_sgpr));
-    return false;
-  }
-  return true;
 }
 
 // A Sampled store executes its displaced guest instruction before the probe
@@ -549,46 +498,6 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanRequest &request,
   // generated code.
   return moi_initializes_owner_epoch(request, point) || request.moi_track_atomics ||
          request.moi_track_barriers || request.moi_runtime_sample_stride > 1u;
-}
-
-[[nodiscard]] uint16_t inline_shadow_scratch_count(const ConSanRequest &request,
-                                                   const ConSanMoiOperatingPoint &point,
-                                                   const ConSanMoiCandidate &candidate,
-                                                   rj_code_arch_t arch) {
-  const uint16_t flat_offset_address_count = flat_access_address_scratch_count(candidate);
-  const uint16_t dynamic_stack_reservoir_count =
-      consan_uses_gfx12_encoding(arch) && point.moi_dynamic_stack_spill
-          ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
-          : 0u;
-  const uint16_t two_address_replay_count = consan_uses_gfx12_cdna_execution(arch) &&
-                                                    candidate.is_native_two_range() &&
-                                                    candidate.encoded_offset_scale_bytes() > 8u
-                                                ? 1u
-                                                : 0u;
-  return static_cast<uint16_t>(
-      inline_shadow_scratch_count(request, point) + inline_shadow_loop_scratch_count(candidate) +
-      ((candidate.is_direct_to_lds() || moi_load_clobbers_address(candidate) ||
-        moi_access_requires_high_bank_address_capture(candidate, arch)) &&
-               flat_offset_address_count == 0u
-           ? 1u
-           : 0u) +
-      flat_offset_address_count + dynamic_stack_reservoir_count + two_address_replay_count);
-}
-
-[[nodiscard]] uint16_t
-inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
-                                         const ConSanMoiOperatingPoint &point,
-                                         const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
-  const uint16_t normal_count = inline_shadow_scratch_count(request, point, candidate, arch);
-  // A spill-backed CDNA probe can recover an overlapping guest address from
-  // its authoritative private slot into a phase-shared transaction register.
-  // Only the non-spill path must retain a dedicated address snapshot when a
-  // load overwrites its address operand.
-  const bool can_reload_clobbered_address =
-      (consan_uses_gfx9_cdna_encoding(arch)) && !candidate.is_flat() &&
-      moi_load_clobbers_address(candidate) &&
-      !candidate_requires_flat_address_materialization(candidate);
-  return static_cast<uint16_t>(normal_count - (can_reload_clobbered_address ? 1u : 0u));
 }
 
 struct MoiKernelResourceContext {
