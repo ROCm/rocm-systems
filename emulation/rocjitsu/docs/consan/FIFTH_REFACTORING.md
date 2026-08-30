@@ -1802,3 +1802,78 @@ full-pressure gate. The complete 4,721-test nonphysical matrix over all five
 simulated targets passed at `-j16` in 244.18 seconds, and all 635 serialized
 physical gfx1201 tests passed at `-j1` in 109.51 seconds. The test inventory is
 unchanged at this checkpoint.
+
+### 16.13 Convergence checkpoint 12: target-normalized analysis and mode-owned report ABI
+
+This checkpoint, through commit `c8450bdeda`, advances two independent
+locality fronts and harvests duplication exposed by both.
+
+On the architecture front, raw decoder and synchronization code no longer
+select target behavior by repeating concrete architecture tests. Atomic target
+selection, synchronization selection, preservation of normalized scalar
+addresses, and atomic-address capabilities now flow through target-owned
+operations or target profiles. Program analysis has one narrow five-entry
+target-operations registry, while the redundant per-decoder target declaration
+surface has been deleted. Concrete architecture constants are confined to the
+five target-profile implementations, the gfx1250 selectable-bank owner, and
+that registry. Structural checks prohibit their reintroduction into the common
+access, atomic, synchronization, MOI address, fault, and placement paths.
+
+This boundary also exposed two shareable mechanisms. Exact-workgroup state
+commit now has one implementation rather than two mode-shaped copies, and the
+general spill manager owns dynamic-stack scratch transfers that had been
+duplicated in ConSan support code. Target-specific examples were moved out of
+common implementation comments and into target-neutral contract tests, so a
+reader can traverse the shared mechanics without encountering accidental gfx
+recipes.
+
+On the mode front, evidence planning now receives a narrow immutable view
+instead of the whole mutable transformation transaction. One shared component
+resolves kernel/function ownership, descriptor fallback, unique sites, and the
+rocclr exclusion for barrier, fence, and atomic evidence planning. Those
+planners can no longer acquire direct code-object lookup dependencies without
+failing the structural gate.
+
+Report ABI construction, capacity fitting, and inverse inventory
+reconstruction are now explicit facets of each mode's existing operations
+product. Record/Replay, Sampled, and InlineShadow own those facets in named
+mode-local files; the common report planner composes the selected operations
+and retains shared semantic evidence classification and validation. This is
+not a second mode dispatch mechanism. After the split exposed three copies of
+capacity conversion and byte-region layout, one typed region planner replaced
+them. A shared power-of-two capacity predicate likewise replaced the repeated
+four-dimensional Record/Replay ABI checks. The common report planner now has
+six explicit mode references, down from 15 at checkpoint 11 and 18 at the
+starting review; the six remaining references belong to evidence-requirement
+construction and validation, not report layout.
+
+| Signal | Checkpoint 12 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 255 | +26 |
+| Physical production lines | 105,233 | +258 |
+| Nonblank production lines | 99,078 | -5 |
+| Production implementation lines | 91,417 | **-33** |
+| `MoiOptions` references / files | 95 / 30 | +8 / +5 |
+| `ConSanTransformArtifacts` references / files | 245 / 58 | -31 / +1 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 315 / 56 | +25 / +5 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | **0** | **-95** |
+| Explicit mode-enum references in `consan_moi_report_plan.cpp` | 6 | **-12** |
+| Test inventory | 5,357 | +12 |
+
+The mode-local report split was an intentional 62-implementation-line locality
+investment. Consolidating the newly visible common region mechanics harvested
+25 lines in the immediately following slice. Together with the target and
+evidence work, production is now 33 implementation lines below the starting
+baseline. This is real forward movement, but it is still not the material
+shrinkage required by Section 14. In particular, the wide operating point,
+core build graph, remaining report evidence policy, target locality of emitted
+ISA and independent validation, both extension exercises, and independent
+completion audit remain open.
+
+Validation includes focused target-normalization, evidence-planning,
+report-ABI, capacity, spill, and structural-boundary gates. The complete
+4,722-test nonphysical matrix over all five simulated targets passed at `-j16`,
+and all 635 serialized physical gfx1201 tests passed at `-j1` in 109.30
+seconds. The inventory increase is the target-capability contract regression.
