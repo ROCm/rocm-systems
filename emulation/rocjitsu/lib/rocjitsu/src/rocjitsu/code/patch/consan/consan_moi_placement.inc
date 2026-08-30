@@ -483,8 +483,8 @@ struct MoiKernelResourceContext {
 };
 
 [[nodiscard]] const ConSanMoiPersistentVgprAssignment *
-find_moi_persistent_vgpr_assignment(const ConSanMoiOperatingPoint &allocation,
-                                    uint64_t descriptor_offset) {
+moi_persistent_vgpr_assignment(const ConSanMoiOperatingPoint &allocation,
+                               uint64_t descriptor_offset) {
   const auto assignment =
       std::ranges::find(allocation.owner_persistent_vgprs, descriptor_offset,
                         &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
@@ -492,8 +492,8 @@ find_moi_persistent_vgpr_assignment(const ConSanMoiOperatingPoint &allocation,
 }
 
 [[nodiscard]] const ConSanMoiTransientSgprAssignment *
-find_moi_transient_sgpr_assignment(const ConSanMoiOperatingPoint &allocation,
-                                   uint64_t descriptor_offset) {
+moi_transient_sgpr_assignment(const ConSanMoiOperatingPoint &allocation,
+                              uint64_t descriptor_offset) {
   const auto assignment =
       std::ranges::find(allocation.owner_transient_sgprs, descriptor_offset,
                         &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
@@ -537,7 +537,7 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
   const ConSanMoiTransientSgprAssignment *selected = nullptr;
   bool saw_unassigned_owner = false;
   for (uint64_t descriptor_offset : owner_descriptor_offsets) {
-    const auto *assignment = find_moi_transient_sgpr_assignment(allocation, descriptor_offset);
+    const auto *assignment = moi_transient_sgpr_assignment(allocation, descriptor_offset);
     if (!assignment) {
       saw_unassigned_owner = true;
       continue;
@@ -597,7 +597,7 @@ moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiOperatingPoint &allo
   return !owner_descriptor_offsets.empty() &&
          std::ranges::all_of(owner_descriptor_offsets, [&](uint64_t descriptor_offset) {
            const ConSanMoiTransientSgprAssignment *assignment =
-               find_moi_transient_sgpr_assignment(allocation, descriptor_offset);
+               moi_transient_sgpr_assignment(allocation, descriptor_offset);
            return assignment != nullptr && assignment->branch_only_scalar_spill;
          });
 }
@@ -613,7 +613,7 @@ apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
   const ConSanMoiPersistentVgprAssignment *selected = nullptr;
   size_t assigned_owner_count = 0u;
   for (uint64_t descriptor_offset : owner_descriptor_offsets) {
-    const auto *assignment = find_moi_persistent_vgpr_assignment(allocation, descriptor_offset);
+    const auto *assignment = moi_persistent_vgpr_assignment(allocation, descriptor_offset);
     if (!assignment)
       continue;
     ++assigned_owner_count;
@@ -2292,7 +2292,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
       !plan.owner_descriptor_file_offsets.empty() &&
       std::ranges::all_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
         const ConSanMoiTransientSgprAssignment *assignment =
-            find_moi_transient_sgpr_assignment(state.register_allocation, descriptor_offset);
+            moi_transient_sgpr_assignment(state.register_allocation, descriptor_offset);
         return assignment != nullptr && assignment->spill_backed;
       });
   const bool fixed_lane_scalar_reservoir =
@@ -2443,7 +2443,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
   }
   for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
     const auto *assignment =
-        find_moi_persistent_vgpr_assignment(state.register_allocation, descriptor_offset);
+        moi_persistent_vgpr_assignment(state.register_allocation, descriptor_offset);
     if (!assignment)
       continue;
     request.forbidden.expand({RegClass::VGPR, assignment->owner_vgpr, 1});
@@ -2542,7 +2542,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
     }
     for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
       const auto *assignment =
-          find_moi_persistent_vgpr_assignment(state.register_allocation, descriptor_offset);
+          moi_persistent_vgpr_assignment(state.register_allocation, descriptor_offset);
       if (!assignment)
         continue;
       spill_request.forbidden.expand({RegClass::VGPR, assignment->owner_vgpr, 1});
@@ -3066,7 +3066,7 @@ template <typename PersistentVgprState>
     anchors.push_back({&context, instruction});
     common_limit = std::min(common_limit, context.ordinary_vgpr_limit);
 
-    const auto *assignment = find_moi_persistent_vgpr_assignment(state.register_allocation, owner);
+    const auto *assignment = moi_persistent_vgpr_assignment(state.register_allocation, owner);
     if (!assignment)
       continue;
     forbid(assignment->owner_vgpr);
@@ -3120,18 +3120,6 @@ std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr_for_state(
   };
   return find_moi_borrowed_entry_backup_vgpr(state, owners, text_offset, allocated_vgpr_count,
                                              adapter);
-}
-
-const ConSanMoiPersistentVgprAssignment *
-moi_persistent_vgpr_assignment(const ConSanMoiOperatingPoint &allocation,
-                               uint64_t descriptor_offset) {
-  return find_moi_persistent_vgpr_assignment(allocation, descriptor_offset);
-}
-
-const ConSanMoiTransientSgprAssignment *
-moi_transient_sgpr_assignment(const ConSanMoiOperatingPoint &allocation,
-                              uint64_t descriptor_offset) {
-  return find_moi_transient_sgpr_assignment(allocation, descriptor_offset);
 }
 
 [[nodiscard]] const ConSanCandidateResourcePlan *
@@ -3236,7 +3224,7 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
       }
     }
     for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-      const auto *assignment = find_moi_persistent_vgpr_assignment(allocation, descriptor_offset);
+      const auto *assignment = moi_persistent_vgpr_assignment(allocation, descriptor_offset);
       if (!assignment)
         continue;
       uint16_t end = static_cast<uint16_t>(assignment->epoch_vgpr + 1u);
