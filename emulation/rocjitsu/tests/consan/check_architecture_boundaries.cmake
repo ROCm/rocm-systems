@@ -70,6 +70,11 @@ _consan_assert_no_match(
     "ROCJITSU_CODE_ARCH_"
     "atomic classification must consume the typed target profile"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_sync_analysis.inc"
+    "ROCJITSU_CODE_ARCH_"
+    "synchronization analysis must consume the typed target profile"
+)
 
 # Mode implementations may select typed target capabilities, but may not see
 # product constants, generated ISA declarations, or member namespaces.

@@ -57,10 +57,12 @@ namespace {
       (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)) {
     return false;
   }
-  // gfx1250 two-address accesses are split during instrumentation, so there is
-  // no single relocated instruction against which to prove this exact rewrite.
-  return arch != ROCJITSU_CODE_ARCH_CDNA5 || !site.lowering.form ||
-         site.lowering.form->kind != ConSanAccessLoweringFormKind::NativeTwoRange;
+  // A target that splits relocated two-address accesses has no single guest
+  // instruction against which to prove this exact rewrite.
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  return target != nullptr &&
+         (!target->requires_split_two_address_lds_relocation || !site.lowering.form ||
+          site.lowering.form->kind != ConSanAccessLoweringFormKind::NativeTwoRange);
 }
 
 template <typename Container>
@@ -173,7 +175,7 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
     site.size = access.instruction_size;
     site.width_bits = access.decoded_width_bits;
     site.address_vgpr = access.operands.address_vgpr;
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && access.file_offset >= site.text_offset) {
+    if (consan_arch_has_selectable_vgpr_bank(arch) && access.file_offset >= site.text_offset) {
       site.selectable_vgpr_bank_mode = consan_selectable_vgpr_bank_mode_at(
           arch, bytes, access.container.text_file_offset, access.container.entry_text_offset,
           access.file_offset);
@@ -1233,19 +1235,17 @@ template <typename Container>
       site->operation != ConSanOrdinaryMemoryOperation::Load ||
       site->flat_address_space_hint != ConSanFlatAddressSpaceHint::Group)
     return false;
-  if (consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3) {
+  if (consan_uses_gfx9_cdna_encoding(arch) || consan_uses_gfx11_encoding(arch)) {
     // Language acquire is SC0/GLC without SC1/SLC. The latter bit appears on
     // volatile observations but does not create a language happens-before.
     return site->raw_th && *site->raw_th == 1u;
   }
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-    // gfx1250's implicit VFLAT scope is the group-aperture workgroup form.
+  if (consan_uses_gfx12_cdna_execution(arch)) {
+    // The GFX12 CDNA implicit VFLAT scope is the group-aperture workgroup form.
     // Explicit system scope is used by the final volatile observation.
     return site->raw_scope && *site->raw_scope == 0u;
   }
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
-    return site->raw_scope && *site->raw_scope == 1u;
-  return false;
+  return consan_uses_gfx12_rdna_execution(arch) && site->raw_scope && *site->raw_scope == 1u;
 }
 
 [[nodiscard]] bool exact_workgroup_flat_acquire_encoding(const ConSanTransformArtifacts &result,
@@ -1670,7 +1670,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
               is_acquire_cache_event(first_sequence_event(events, candidate)) &&
               prove_bounded_acquire_path(atomic, candidate, blocks)) {
             acquire = &candidate;
-          } else if (arch == ROCJITSU_CODE_ARCH_RDNA3 && i + 3 < sync_sequences.size() &&
+          } else if (consan_uses_gfx11_encoding(arch) && i + 3 < sync_sequences.size() &&
                      candidate.kind == ConSanSyncSequenceKind::Fence &&
                      sync_sequences[i + 3].kind == ConSanSyncSequenceKind::Fence &&
                      prove_bounded_acquire_path(atomic, candidate, blocks) &&
@@ -1695,7 +1695,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
         i += 2;
         continue;
       }
-      if (arch == ROCJITSU_CODE_ARCH_RDNA3 && i + 2 < sync_sequences.size() &&
+      if (consan_uses_gfx11_encoding(arch) && i + 2 < sync_sequences.size() &&
           acquire.kind == ConSanSyncSequenceKind::Fence &&
           sync_sequences[i + 2].kind == ConSanSyncSequenceKind::Fence &&
           prove_bounded_acquire_path(current, acquire, blocks) &&
