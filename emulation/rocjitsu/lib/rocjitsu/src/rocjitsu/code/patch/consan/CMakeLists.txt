@@ -41,6 +41,7 @@ target_sources(
         consan_moi_gfx9_target_ops.cpp
         consan_moi_inline_shadow_emission.cpp
         consan_moi_inline_shadow.cpp
+        consan_moi_inline_shadow_report_plan.cpp
         consan_moi_memory_emission.cpp
         consan_moi_mode_planning.cpp
         consan_moi_model.cpp
@@ -56,10 +57,12 @@ target_sources(
         consan_moi_record_event_emission.cpp
         consan_moi_record_planning.cpp
         consan_moi_record_replay.cpp
+        consan_moi_record_replay_report_plan.cpp
         consan_moi_runtime_workgroup_gate.cpp
         consan_moi_sampled_access_emission.cpp
         consan_moi_sampled_contracts.cpp
         consan_moi_sampled.cpp
+        consan_moi_sampled_report_plan.cpp
         consan_moi_sampled_atomic_emission.cpp
         consan_moi_shared_lowering.cpp
         consan_moi_support.cpp

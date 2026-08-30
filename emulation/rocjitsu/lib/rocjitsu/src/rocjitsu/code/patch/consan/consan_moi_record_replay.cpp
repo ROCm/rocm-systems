@@ -25,6 +25,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_record_event_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_record_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
+#include "rocjitsu/code/patch/consan/consan_moi_report_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -223,6 +224,8 @@ const MoiModeOperations kRecordReplayModeOperations = {
     nullptr,
     plan_record_replay_dispatch_identity,
     plan_record_replay_scalar_abi,
+    plan_record_replay_report_layout,
+    reconstruct_record_replay_report_inventory,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"

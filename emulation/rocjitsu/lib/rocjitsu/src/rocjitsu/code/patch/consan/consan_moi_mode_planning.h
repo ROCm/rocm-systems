@@ -232,6 +232,10 @@ struct MoiModeOperations {
   MoiDispatchIdentityPlan (*dispatch_identity)(const ConSanRequest &,
                                                const MoiDispatchIdentityFacts &);
   MoiScalarAbiPlan (*scalar_abi)(const ConSanRequest &, const ConSanMoiOperatingPoint &);
+  bool (*plan_report_layout)(const ConSanMoiAutoReportInventory &, ConSanMoiAutoReportPlan &,
+                             uint64_t &cursor);
+  std::optional<ConSanMoiAutoReportInventory> (*reconstruct_report_inventory)(
+      const ConSanMoiReportBufferLayout &);
 };
 
 extern const MoiModeOperations kRecordReplayModeOperations;

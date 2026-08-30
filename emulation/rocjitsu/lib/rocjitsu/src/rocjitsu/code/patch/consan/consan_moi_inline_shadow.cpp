@@ -32,6 +32,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_report_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
@@ -221,6 +222,8 @@ const MoiModeOperations kInlineShadowModeOperations = {
     inline_shadow_access_spill_fallback,
     plan_inline_shadow_dispatch_identity,
     plan_inline_shadow_scalar_abi,
+    plan_inline_shadow_report_layout,
+    reconstruct_inline_shadow_report_inventory,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"

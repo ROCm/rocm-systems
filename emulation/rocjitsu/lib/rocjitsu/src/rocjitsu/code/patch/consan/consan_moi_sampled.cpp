@@ -31,6 +31,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_report_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_atomic_emission.h"
@@ -278,6 +279,8 @@ const MoiModeOperations kSampledModeOperations = {
     sampled_access_spill_fallback,
     plan_sampled_dispatch_identity,
     plan_sampled_scalar_abi,
+    plan_sampled_report_layout,
+    reconstruct_sampled_report_inventory,
 };
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"
