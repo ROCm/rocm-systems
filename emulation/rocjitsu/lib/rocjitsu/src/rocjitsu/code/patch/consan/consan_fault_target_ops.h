@@ -44,24 +44,7 @@ decode_consan_ordinary_global_fault_encoding(std::span<const uint8_t> instructio
 [[nodiscard]] bool rewrite_consan_ordinary_global_fault_scope(std::span<uint8_t> instruction,
                                                               uint32_t scope);
 
-// Concise internal vocabulary retained at existing fault-planning call sites.
+// Concise internal type vocabulary retained at fault-planning call sites.
 using AtomicFaultEncoding = ConSanAtomicFaultEncoding;
-
-[[nodiscard]] inline ConSanAtomicFaultEncoding
-atomic_fault_encoding(std::string_view mnemonic, uint32_t size, rj_code_arch_t arch) {
-  return classify_consan_atomic_fault_encoding(mnemonic, size, arch);
-}
-
-[[nodiscard]] inline bool atomic_fault_supports_scope(ConSanAtomicFaultEncoding encoding) {
-  return consan_atomic_fault_supports_scope(encoding);
-}
-
-[[nodiscard]] inline bool atomic_fault_supports_order(ConSanAtomicFaultEncoding encoding) {
-  return consan_atomic_fault_supports_order(encoding);
-}
-
-[[nodiscard]] inline bool atomic_fault_supports_address(ConSanAtomicFaultEncoding encoding) {
-  return consan_atomic_fault_supports_address(encoding);
-}
 
 } // namespace rocjitsu

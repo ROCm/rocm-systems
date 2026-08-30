@@ -533,11 +533,12 @@ ConSanFaultPlanningResult build_fault_mutation_plan(const ConSanOptions &options
   }
   if (options.fault_atomic_wrong_address) {
     const AtomicFaultEncoding encoding =
-        atomic == nullptr ? AtomicFaultEncoding::Unsupported
-                          : atomic_fault_encoding(atomic->mnemonic, atomic->size, arch);
+        atomic == nullptr
+            ? AtomicFaultEncoding::Unsupported
+            : classify_consan_atomic_fault_encoding(atomic->mnemonic, atomic->size, arch);
     if (atomic == nullptr) {
       // The exact missing-site diagnostic above is authoritative.
-    } else if (!atomic_fault_supports_address(encoding)) {
+    } else if (!consan_atomic_fault_supports_address(encoding)) {
       reject_application(
           "ConSan fault dry run cannot rewrite the address for the selected atomic encoding",
           "ConSan atomic address fault is unsupported for the selected atomic encoding");
@@ -555,10 +556,11 @@ ConSanFaultPlanningResult build_fault_mutation_plan(const ConSanOptions &options
   }
   if (options.fault_atomic_weaken_order) {
     const AtomicFaultEncoding encoding =
-        atomic == nullptr ? AtomicFaultEncoding::Unsupported
-                          : atomic_fault_encoding(atomic->mnemonic, atomic->size, arch);
+        atomic == nullptr
+            ? AtomicFaultEncoding::Unsupported
+            : classify_consan_atomic_fault_encoding(atomic->mnemonic, atomic->size, arch);
     const ConSanSyncSequence *sequence =
-        atomic_fault_supports_order(encoding) && atomic->sync_event_identity
+        consan_atomic_fault_supports_order(encoding) && atomic->sync_event_identity
             ? program_inventory.sync().find_unique_sequence_containing(*atomic->sync_event_identity)
             : nullptr;
     const ConSanSyncEvent *fence = nullptr;
@@ -588,7 +590,7 @@ ConSanFaultPlanningResult build_fault_mutation_plan(const ConSanOptions &options
     }
     if (atomic == nullptr) {
       // The exact missing-site diagnostic above is authoritative.
-    } else if (!atomic_fault_supports_order(encoding)) {
+    } else if (!consan_atomic_fault_supports_order(encoding)) {
       reject_application(
           "ConSan fault dry run cannot weaken order for the selected atomic encoding",
           "ConSan atomic order fault is unsupported for the selected atomic encoding");
@@ -610,11 +612,12 @@ ConSanFaultPlanningResult build_fault_mutation_plan(const ConSanOptions &options
   }
   if (options.fault_atomic_weaken_scope) {
     const AtomicFaultEncoding encoding =
-        atomic == nullptr ? AtomicFaultEncoding::Unsupported
-                          : atomic_fault_encoding(atomic->mnemonic, atomic->size, arch);
+        atomic == nullptr
+            ? AtomicFaultEncoding::Unsupported
+            : classify_consan_atomic_fault_encoding(atomic->mnemonic, atomic->size, arch);
     if (atomic == nullptr) {
       // The exact missing-site diagnostic above is authoritative.
-    } else if (!atomic_fault_supports_scope(encoding)) {
+    } else if (!consan_atomic_fault_supports_scope(encoding)) {
       reject_application(
           "ConSan fault dry run cannot weaken scope for the selected atomic encoding",
           "ConSan atomic scope fault is unsupported for the selected atomic encoding");
@@ -1486,18 +1489,18 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
   }
 
   const AtomicFaultEncoding encoding =
-      atomic_fault_encoding(selected->mnemonic, selected->size, arch);
-  if (scope_plan != nullptr && !atomic_fault_supports_scope(encoding)) {
+      classify_consan_atomic_fault_encoding(selected->mnemonic, selected->size, arch);
+  if (scope_plan != nullptr && !consan_atomic_fault_supports_scope(encoding)) {
     result.errors.emplace_back(
         "ConSan atomic scope fault is unsupported for the selected atomic encoding");
     return;
   }
-  if (order_plan != nullptr && !atomic_fault_supports_order(encoding)) {
+  if (order_plan != nullptr && !consan_atomic_fault_supports_order(encoding)) {
     result.errors.emplace_back(
         "ConSan atomic order fault is unsupported for the selected atomic encoding");
     return;
   }
-  if (address_plan != nullptr && !atomic_fault_supports_address(encoding)) {
+  if (address_plan != nullptr && !consan_atomic_fault_supports_address(encoding)) {
     result.errors.emplace_back(
         "ConSan atomic address fault is unsupported for the selected atomic encoding");
     return;

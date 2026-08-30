@@ -101,7 +101,7 @@ void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::strin
 
   uint32_t atomic_occurrence = 0;
   for (const ConSanAtomicSite &atomic : container.atomic_sites) {
-    if (atomic_fault_encoding(atomic.mnemonic, atomic.size, arch) ==
+    if (classify_consan_atomic_fault_encoding(atomic.mnemonic, atomic.size, arch) ==
         AtomicFaultEncoding::Unsupported) {
       continue;
     }
