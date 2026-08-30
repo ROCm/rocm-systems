@@ -10,7 +10,40 @@
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 
+#include <cstring>
+
 namespace rocjitsu::consan_program_analysis_target_detail {
+
+template <typename Raw>
+std::optional<ConSanScratchComponentEncoding>
+decode_gfx12_scratch_component(std::span<const uint8_t> instruction) {
+  if (instruction.size() != sizeof(Raw))
+    return std::nullopt;
+  Raw raw{};
+  std::memcpy(&raw, instruction.data(), sizeof(raw));
+  if (raw.encoding != 0xedu || raw.vaddr != 0u)
+    return std::nullopt;
+  return ConSanScratchComponentEncoding{
+      .vector_address_vgpr = static_cast<uint16_t>(raw.vaddr),
+      .load_data_vgpr = static_cast<uint16_t>(raw.vdst),
+      .store_data_vgpr = static_cast<uint16_t>(raw.vsrc),
+      .scalar_address_sgpr = static_cast<uint16_t>(raw.saddr),
+      .immediate_offset = static_cast<uint32_t>(raw.ioffset),
+  };
+}
+
+template <typename Raw>
+std::optional<ConSanLaneTransferEncoding>
+decode_gfx12_lane_transfer(std::span<const uint8_t> instruction, int value_source_operand) {
+  if (instruction.size() < sizeof(Raw))
+    return std::nullopt;
+  Raw raw{};
+  std::memcpy(&raw, instruction.data(), sizeof(raw));
+  return ConSanLaneTransferEncoding{
+      .lane_selector = static_cast<uint32_t>(raw.src1),
+      .value_source_operand = value_source_operand,
+  };
+}
 
 template <typename Raw>
 ConSanVectorMemoryEncoding
@@ -43,6 +76,30 @@ make_gfx12_vector_memory_encoding(const Raw &raw, uint32_t null_saddr, bool exac
       .ordinary_well_formed = ordinary_well_formed,
       .ordinary_requires_complete_registers = true,
       .ordinary_mutation_supported = ordinary_mutation_supported,
+  };
+}
+
+template <typename Raw>
+ConSanVectorMemoryDecode decode_gfx12_vector_memory(std::span<const uint8_t> instruction,
+                                                    uint32_t null_saddr, uint32_t expected_encoding,
+                                                    bool mutation_supported) {
+  if (instruction.size() < sizeof(Raw))
+    return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
+  Raw raw{};
+  std::memcpy(&raw, instruction.data(), sizeof(raw));
+  const bool high_padding = [&] {
+    if constexpr (requires { raw.pad_40_48; })
+      return raw.pad_40_48 == 0u;
+    else
+      return raw.pad_40_47 == 0u;
+  }();
+  const bool exact_size = instruction.size() == sizeof(raw);
+  const bool well_formed = exact_size && raw.encoding == expected_encoding && raw.pad_8_13 == 0u &&
+                           raw.pad_22_23 == 0u && high_padding && raw.pad_63 == 0u;
+  return {
+      .status = ConSanTargetDecodeStatus::Decoded,
+      .encoding = make_gfx12_vector_memory_encoding(raw, null_saddr, exact_size, well_formed,
+                                                    mutation_supported),
   };
 }
 
@@ -79,6 +136,43 @@ template <typename Raw> void fill_gfx12_ds_atomic_site(ConSanAtomicSite &site, c
   site.raw_data1 = static_cast<uint32_t>(raw.data1);
   site.raw_vdst = static_cast<uint32_t>(raw.vdst);
   site.raw_ioffset = static_cast<int32_t>(raw.offset0);
+}
+
+template <typename DsRaw, typename FlatRaw, typename GlobalRaw, typename ScratchRaw,
+          typename BufferRaw>
+bool decode_gfx12_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+                              std::span<const uint8_t> instruction) {
+  if (mnemonic.starts_with("ds_") && instruction.size() >= sizeof(DsRaw)) {
+    DsRaw raw{};
+    std::memcpy(&raw, instruction.data(), sizeof(raw));
+    fill_gfx12_ds_atomic_site(site, raw);
+    return true;
+  }
+  if (mnemonic.starts_with("flat_atomic") && instruction.size() >= sizeof(FlatRaw)) {
+    FlatRaw raw{};
+    std::memcpy(&raw, instruction.data(), sizeof(raw));
+    fill_gfx12_flat_atomic_site(site, raw);
+    return true;
+  }
+  if (mnemonic.starts_with("global_atomic") && instruction.size() >= sizeof(GlobalRaw)) {
+    GlobalRaw raw{};
+    std::memcpy(&raw, instruction.data(), sizeof(raw));
+    fill_gfx12_flat_atomic_site(site, raw);
+    return true;
+  }
+  if (mnemonic.starts_with("scratch_atomic") && instruction.size() >= sizeof(ScratchRaw)) {
+    ScratchRaw raw{};
+    std::memcpy(&raw, instruction.data(), sizeof(raw));
+    fill_gfx12_flat_atomic_site(site, raw);
+    return true;
+  }
+  if (mnemonic.starts_with("buffer_atomic") && instruction.size() >= sizeof(BufferRaw)) {
+    BufferRaw raw{};
+    std::memcpy(&raw, instruction.data(), sizeof(raw));
+    fill_gfx12_buffer_atomic_site(site, raw);
+    return true;
+  }
+  return false;
 }
 
 } // namespace rocjitsu::consan_program_analysis_target_detail
