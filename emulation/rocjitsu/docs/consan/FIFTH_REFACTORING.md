@@ -1546,3 +1546,67 @@ gates; the complete 4,717-test nonphysical matrix over all five simulated
 targets at `-j16` in 246.20 seconds; and all 635 serialized physical gfx1201
 tests at `-j1` in 109.29 seconds. All are green and the test inventory is
 unchanged from checkpoint 6.
+
+### 16.9 Convergence checkpoint 8: mode-owned spill policy
+
+This checkpoint, through commit `760a32a4a5`, follows the mode boundary into
+the shared resource solver's spill fallbacks:
+
+- Record/Replay, Sampled, and InlineShadow now own their dynamic-stack spill
+  policy. The common solver consumes target-normalized backend availability
+  and the selected mode's mixed-owner requirement without naming InlineShadow
+  as an exception;
+- the three distinct guest-operand-overlap rules now produce one narrow policy
+  containing retry permission and any guest result range that must remain
+  disjoint. Common placement performs the allocation retry without decoding
+  mode semantics;
+- Sampled and InlineShadow now own the eligibility and scratch shape of their
+  spill-backed access fallbacks. The common access-plan loop only invokes the
+  selected optional planner and adopts the returned fallback through the
+  existing shared trace mechanism;
+- the primary and overlap-spill allocation paths share one persistent-VGPR
+  exclusion mechanism, deleting two copies of owner, epoch, dispatch, and
+  workgroup-tuple traversal; and
+- the dynamic-stack policy proved to be declarative after extraction, so its
+  three temporary callbacks were collapsed into two traits in each mode-owned
+  operations table rather than retained as abstraction ceremony.
+
+The architecture-boundary gate now fixes the reviewed
+`consan_moi_placement.inc` budget at 46 explicit mode-enum references, down
+from 52 at checkpoint 7 and from 95 at the starting review. The file also fell
+from 6,288 to 6,221 physical lines in this checkpoint. These are real locality
+and knot-size improvements: the access spill loop no longer contains an
+explicit mode branch, and a future mode declares its policies beside its other
+mode operations.
+
+| Signal | Checkpoint 8 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 249 | +20 |
+| Physical production lines | 105,112 | +137 |
+| Nonblank production lines | 99,041 | -42 |
+| Production implementation lines | 91,416 | **-34** |
+| `MoiOptions` references / files | 95 / 30 | +8 / +5 |
+| `ConSanTransformArtifacts` references / files | 256 / 58 | -20 / +1 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 310 / 56 | +20 / +5 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | 46 | -49 |
+| Explicit mode-enum references in `consan_moi_report_plan.cpp` | 15 | -3 |
+| Test inventory | 5,354 | +9 |
+
+The typed policy products and two new mode-contract regressions cost 65
+implementation lines relative to checkpoint 7. The persistent-register
+consolidation and declarative-trait cleanup reap part of that cost immediately,
+but the result remains only 34 implementation lines below the starting
+baseline. This is therefore a structural convergence checkpoint, not the
+material shrinkage required for completion. The remaining 46 placement mode
+references, architecture locality, build-graph simplification, wide operating
+point, both extension exercises, and the Section 14 completion evidence all
+remain open.
+
+Validation includes repeated 95-test five-target spill/pressure gates and
+173-test dynamic-stack/mode-planning gates; the complete 4,719-test
+nonphysical matrix over all five simulated targets at `-j16` in 245.35
+seconds; and all 635 serialized physical gfx1201 tests at `-j1` in 109.79
+seconds. All are green. The two new tests directly pin per-mode dynamic-stack
+and operand-overlap policy ownership.
