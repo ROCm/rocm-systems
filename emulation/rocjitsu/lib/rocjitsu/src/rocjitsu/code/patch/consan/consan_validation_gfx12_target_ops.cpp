@@ -26,79 +26,33 @@ namespace {
   return result;
 }
 
-ConSanEncodedMutationValidation
-validate_gfx12_ordinary_global_address_mutation(std::span<const uint8_t> before_bytes,
-                                                std::span<const uint8_t> after_bytes) {
-  if (!same_size(before_bytes, after_bytes, sizeof(rdna4::VglobalMachineInst)))
-    return ConSanEncodedMutationValidation::UnexpectedInstructionSize;
-  const auto before = words(before_bytes);
-  const auto after = words(after_bytes);
+[[nodiscard]] ConSanEncodedMutationValidation mutation_validation(bool valid) {
+  return valid ? ConSanEncodedMutationValidation::Valid
+               : ConSanEncodedMutationValidation::InvalidMutation;
+}
+
+[[nodiscard]] bool valid_flat_address_mutation(const std::array<uint32_t, 3> &before,
+                                               const std::array<uint32_t, 3> &after) {
   const int32_t before_offset = sign_extend_24(before[2] >> 8u);
   const int32_t after_offset = sign_extend_24(after[2] >> 8u);
   const int64_t delta = static_cast<int64_t>(after_offset) - before_offset;
-  const bool valid = before[0] == after[0] && before[1] == after[1] &&
-                     (before[2] & 0xffu) == (after[2] & 0xffu) && delta > 0 && delta <= 0x7fffff &&
-                     delta % static_cast<int64_t>(sizeof(uint32_t)) == 0;
-  return valid ? ConSanEncodedMutationValidation::Valid
-               : ConSanEncodedMutationValidation::InvalidMutation;
+  return before[0] == after[0] && before[1] == after[1] &&
+         (before[2] & 0xffu) == (after[2] & 0xffu) && delta > 0 && delta <= 0x7fffff &&
+         delta % static_cast<int64_t>(sizeof(uint32_t)) == 0;
 }
 
-ConSanEncodedMutationValidation
-validate_gfx12_ordinary_global_scope_mutation(std::span<const uint8_t> before_bytes,
-                                              std::span<const uint8_t> after_bytes) {
-  if (!same_size(before_bytes, after_bytes, sizeof(rdna4::VglobalMachineInst)))
-    return ConSanEncodedMutationValidation::UnexpectedInstructionSize;
-  const auto before = words(before_bytes);
-  const auto after = words(after_bytes);
-  const uint32_t original_scope = (before[1] >> 18u) & 0x3u;
+[[nodiscard]] bool valid_scope_mutation(const std::array<uint32_t, 3> &before,
+                                        const std::array<uint32_t, 3> &after) {
   const uint32_t expected_scope_word = before[1] & ~(0x3u << 18u);
-  const bool valid = (original_scope == 2u || original_scope == 3u) && before[0] == after[0] &&
-                     after[1] == expected_scope_word && before[2] == after[2];
-  return valid ? ConSanEncodedMutationValidation::Valid
-               : ConSanEncodedMutationValidation::InvalidMutation;
+  return before[0] == after[0] && after[1] == expected_scope_word && before[2] == after[2];
 }
 
-ConSanEncodedMutationValidation
-validate_gfx12_atomic_address_mutation(std::span<const uint8_t> before_bytes,
-                                       std::span<const uint8_t> after_bytes) {
-  const bool ds = same_size(before_bytes, after_bytes, sizeof(rdna4::VdsMachineInst));
-  const bool flat = same_size(before_bytes, after_bytes, sizeof(rdna4::VflatMachineInst));
-  if (!ds && !flat)
-    return ConSanEncodedMutationValidation::UnexpectedInstructionSize;
-  const auto before = words(before_bytes);
-  const auto after = words(after_bytes);
-  bool valid = false;
-  if (ds) {
-    const int64_t delta = static_cast<int64_t>(after[0] & 0xffu) - (before[0] & 0xffu);
-    valid = (after[0] & ~0xffu) == (before[0] & ~0xffu) && after[1] == before[1] && delta > 0 &&
-            delta <= 0xff && delta % static_cast<int64_t>(sizeof(uint32_t)) == 0 &&
-            (after[0] & 0xffu) % sizeof(uint32_t) == 0;
-  } else {
-    const int32_t before_offset = sign_extend_24(before[2] >> 8u);
-    const int32_t after_offset = sign_extend_24(after[2] >> 8u);
-    const int64_t delta = static_cast<int64_t>(after_offset) - before_offset;
-    valid = before[0] == after[0] && before[1] == after[1] &&
-            (after[2] & 0xffu) == (before[2] & 0xffu) && delta > 0 && delta <= 0x7fffff &&
-            delta % static_cast<int64_t>(sizeof(uint32_t)) == 0;
-  }
-  return valid ? ConSanEncodedMutationValidation::Valid
-               : ConSanEncodedMutationValidation::InvalidMutation;
-}
-
-ConSanEncodedMutationValidation
-validate_gfx12_atomic_scope_mutation(std::span<const uint8_t> before_bytes,
-                                     std::span<const uint8_t> after_bytes) {
-  if (same_size(before_bytes, after_bytes, sizeof(rdna4::VdsMachineInst)))
-    return ConSanEncodedMutationValidation::UnsupportedInstructionEncoding;
-  if (!same_size(before_bytes, after_bytes, sizeof(rdna4::VflatMachineInst)))
-    return ConSanEncodedMutationValidation::UnexpectedInstructionSize;
-  const auto before = words(before_bytes);
-  const auto after = words(after_bytes);
-  const uint32_t expected_scope_word = before[1] & ~(0x3u << 18u);
-  const bool valid =
-      after[0] == before[0] && after[1] == expected_scope_word && after[2] == before[2];
-  return valid ? ConSanEncodedMutationValidation::Valid
-               : ConSanEncodedMutationValidation::InvalidMutation;
+[[nodiscard]] bool valid_ds_address_mutation(const std::array<uint32_t, 3> &before,
+                                             const std::array<uint32_t, 3> &after) {
+  const int64_t delta = static_cast<int64_t>(after[0] & 0xffu) - (before[0] & 0xffu);
+  return (after[0] & ~0xffu) == (before[0] & ~0xffu) && after[1] == before[1] && delta > 0 &&
+         delta <= 0xff && delta % static_cast<int64_t>(sizeof(uint32_t)) == 0 &&
+         (after[0] & 0xffu) % sizeof(uint32_t) == 0;
 }
 
 } // namespace
@@ -107,14 +61,33 @@ ConSanEncodedMutationValidation validate_gfx12_encoded_mutation(ConSanEncodedMut
                                                                 std::span<const uint8_t> before,
                                                                 std::span<const uint8_t> after) {
   switch (kind) {
-  case ConSanEncodedMutationKind::OrdinaryGlobalAddress:
-    return validate_gfx12_ordinary_global_address_mutation(before, after);
-  case ConSanEncodedMutationKind::OrdinaryGlobalScope:
-    return validate_gfx12_ordinary_global_scope_mutation(before, after);
-  case ConSanEncodedMutationKind::AtomicAddress:
-    return validate_gfx12_atomic_address_mutation(before, after);
+  case ConSanEncodedMutationKind::OrdinaryGlobalAddress: {
+    if (!same_size(before, after, sizeof(rdna4::VglobalMachineInst)))
+      return ConSanEncodedMutationValidation::UnexpectedInstructionSize;
+    return mutation_validation(valid_flat_address_mutation(words(before), words(after)));
+  }
+  case ConSanEncodedMutationKind::OrdinaryGlobalScope: {
+    if (!same_size(before, after, sizeof(rdna4::VglobalMachineInst)))
+      return ConSanEncodedMutationValidation::UnexpectedInstructionSize;
+    const auto original = words(before);
+    const uint32_t scope = (original[1] >> 18u) & 0x3u;
+    return mutation_validation((scope == 2u || scope == 3u) &&
+                               valid_scope_mutation(original, words(after)));
+  }
+  case ConSanEncodedMutationKind::AtomicAddress: {
+    const bool ds = same_size(before, after, sizeof(rdna4::VdsMachineInst));
+    const bool flat = same_size(before, after, sizeof(rdna4::VflatMachineInst));
+    if (!ds && !flat)
+      return ConSanEncodedMutationValidation::UnexpectedInstructionSize;
+    return mutation_validation(ds ? valid_ds_address_mutation(words(before), words(after))
+                                  : valid_flat_address_mutation(words(before), words(after)));
+  }
   case ConSanEncodedMutationKind::AtomicScope:
-    return validate_gfx12_atomic_scope_mutation(before, after);
+    if (same_size(before, after, sizeof(rdna4::VdsMachineInst)))
+      return ConSanEncodedMutationValidation::UnsupportedInstructionEncoding;
+    if (same_size(before, after, sizeof(rdna4::VflatMachineInst)))
+      return mutation_validation(valid_scope_mutation(words(before), words(after)));
+    return ConSanEncodedMutationValidation::UnexpectedInstructionSize;
   }
   return ConSanEncodedMutationValidation::UnsupportedInstructionEncoding;
 }
