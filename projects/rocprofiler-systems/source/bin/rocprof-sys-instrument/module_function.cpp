@@ -9,7 +9,6 @@
 #include "log.hpp"
 #include "rocprof-sys-instrument.hpp"
 
-#include <fmt/format.h>
 #include <stdexcept>
 
 module_function::width_t&

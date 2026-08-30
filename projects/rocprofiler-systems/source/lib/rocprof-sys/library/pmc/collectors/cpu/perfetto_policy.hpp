@@ -10,7 +10,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <fmt/format.h>
 #include <limits>
 #include <map>
 #include <memory>
