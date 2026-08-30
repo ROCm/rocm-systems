@@ -2167,7 +2167,7 @@ public:
         "moi_runtime_sample_stride=%u moi_runtime_sample_stride_source=%s "
         "moi_report_buffer=%s moi_report_buffer_size=%llu "
         "moi_auto_report_buffer_size=%llu moi_auto_report_buffer_size_source=%s mode=%s",
-        flavor_name(config.flavor.value_or(rocjitsu::ConSanFlavor::None)),
+        rocjitsu::consan_flavor_name(config.flavor.value_or(rocjitsu::ConSanFlavor::None)),
         rocjitsu::consan_moi_engine_name(config.moi_engine), hook_policy_name(config.policy),
         config.flavor == rocjitsu::ConSanFlavor::Moi ? kMoiStandardProfile.data() : "none",
         config.delay_nops, config.fail_closed ? "true" : "false",
@@ -2185,7 +2185,7 @@ public:
         config.moi_forbid_diagnostics ? "true" : "false",
         config.moi_require_replay_conflict ? "true" : "false",
         config.moi_forbid_overflow ? "true" : "false", config.fault_barrier_index,
-        delay_mode_name(config.delay_mode), config.delay_var_ssrc,
+        rocjitsu::consan_delay_mode_name(config.delay_mode), config.delay_var_ssrc,
         patched_image_growth_limit_kind_name(config.patched_image_growth_limit.kind),
         static_cast<unsigned long long>(
             patched_image_growth_limit_value(config.patched_image_growth_limit)),
@@ -4212,7 +4212,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         "moi_report_buffer=%s moi_report_buffer_size=%llu "
         "moi_auto_report_buffer_size=%llu require_patch=%s",
         static_cast<unsigned long long>(code_object_reader.handle),
-        flavor_name(request.flavor.value_or(rocjitsu::ConSanFlavor::None)),
+        rocjitsu::consan_flavor_name(request.flavor.value_or(rocjitsu::ConSanFlavor::None)),
         rocjitsu::consan_moi_engine_name(request.moi_engine),
         transform_result.code_object.byte_size,
         transform_result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid ? "true"
@@ -4227,7 +4227,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         config->moi_init_owner_epoch ? "true" : "false",
         config->moi_track_barriers ? "true" : "false", config->moi_track_atomics ? "true" : "false",
         config->moi_dynamic_access_records ? "true" : "false", config->fault_barrier_index,
-        delay_mode_name(config->delay_mode), config->delay_var_ssrc,
+        rocjitsu::consan_delay_mode_name(config->delay_mode), config->delay_var_ssrc,
         patched_image_growth_limit_kind_name(transform_policy.patched_image_growth_limit.kind),
         static_cast<unsigned long long>(
             patched_image_growth_limit_value(transform_policy.patched_image_growth_limit)),
@@ -4357,8 +4357,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   plan.original_barrier_id ? std::to_string(*plan.original_barrier_id).c_str()
                                            : "-",
                   plan.target_barrier_id ? std::to_string(*plan.target_barrier_id).c_str() : "-",
-                  barrier_scope_name(plan.original_barrier_scope),
-                  barrier_scope_name(plan.target_barrier_scope));
+                  rocjitsu::consan_barrier_scope_name(plan.original_barrier_scope),
+                  rocjitsu::consan_barrier_scope_name(plan.target_barrier_scope));
     }
     emit_fault_summary_message(
         config->fault_require_exactly_one,
@@ -4438,36 +4438,36 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       } else {
         release_wait_offset[0] = '-';
       }
-      log_message(kLogVerbose,
-                  "ConSan sync sequence reader=%llu identity=%s kind=%s operation=%s "
-                  "address_source=%s memory_role=%s memory_role_confidence=%s rmw_outcome=%s "
-                  "confidence=%s reason=%s "
-                  "container=%s container_kind=%s block=%s begin_text_offset=0x%llx "
-                  "end_text_offset=0x%llx width_bits=%u static_offset=%s raw_scope=%s "
-                  "barrier_id=%s barrier_operand_source=%s barrier_raw_selector=%s "
-                  "barrier_literal_width_bits=%s barrier_literal_value=%s "
-                  "barrier_raw_simm16=%s barrier_scope=%s "
-                  "release_wait_text_offset=%s "
-                  "participant_count=%s participant_mask=%s members=%s "
-                  "owners=%zu owner_names=%s owner_proofs=%s",
-                  static_cast<unsigned long long>(code_object_reader.handle),
-                  sequence.identity.c_str(), sync_sequence_kind_name(sequence.kind),
-                  sync_operation_name(sequence.operation),
-                  sync_address_source_name(sequence.address_source),
-                  sync_memory_role_name(sequence.memory_role),
-                  sync_confidence_name(sequence.memory_role_confidence),
-                  sync_rmw_outcome_name(sequence.rmw_outcome),
-                  sync_confidence_name(sequence.confidence), reason.c_str(),
-                  sequence.container_name.c_str(), sequence.in_kernel ? "kernel" : "function",
-                  block.c_str(), static_cast<unsigned long long>(sequence.begin_text_offset),
-                  static_cast<unsigned long long>(sequence.end_text_offset), sequence.width_bits,
-                  static_offset.c_str(), raw_scope.c_str(), barrier_id.c_str(),
-                  barrier_operand_source_name(sequence.barrier_operand_source),
-                  barrier_raw_selector.c_str(), barrier_literal_width.c_str(),
-                  barrier_literal_value.c_str(), barrier_raw_simm16.c_str(),
-                  barrier_scope_name(sequence.barrier_scope), release_wait_offset.data(),
-                  participant_count.c_str(), participant_mask.c_str(), members.c_str(),
-                  sequence.execution_owners.size(), owners.names.c_str(), owners.proofs.c_str());
+      log_message(
+          kLogVerbose,
+          "ConSan sync sequence reader=%llu identity=%s kind=%s operation=%s "
+          "address_source=%s memory_role=%s memory_role_confidence=%s rmw_outcome=%s "
+          "confidence=%s reason=%s "
+          "container=%s container_kind=%s block=%s begin_text_offset=0x%llx "
+          "end_text_offset=0x%llx width_bits=%u static_offset=%s raw_scope=%s "
+          "barrier_id=%s barrier_operand_source=%s barrier_raw_selector=%s "
+          "barrier_literal_width_bits=%s barrier_literal_value=%s "
+          "barrier_raw_simm16=%s barrier_scope=%s "
+          "release_wait_text_offset=%s "
+          "participant_count=%s participant_mask=%s members=%s "
+          "owners=%zu owner_names=%s owner_proofs=%s",
+          static_cast<unsigned long long>(code_object_reader.handle), sequence.identity.c_str(),
+          sync_sequence_kind_name(sequence.kind), sync_operation_name(sequence.operation),
+          sync_address_source_name(sequence.address_source),
+          sync_memory_role_name(sequence.memory_role),
+          sync_confidence_name(sequence.memory_role_confidence),
+          sync_rmw_outcome_name(sequence.rmw_outcome), sync_confidence_name(sequence.confidence),
+          reason.c_str(), sequence.container_name.c_str(),
+          sequence.in_kernel ? "kernel" : "function", block.c_str(),
+          static_cast<unsigned long long>(sequence.begin_text_offset),
+          static_cast<unsigned long long>(sequence.end_text_offset), sequence.width_bits,
+          static_offset.c_str(), raw_scope.c_str(), barrier_id.c_str(),
+          rocjitsu::consan_barrier_operand_source_name(sequence.barrier_operand_source),
+          barrier_raw_selector.c_str(), barrier_literal_width.c_str(),
+          barrier_literal_value.c_str(), barrier_raw_simm16.c_str(),
+          rocjitsu::consan_barrier_scope_name(sequence.barrier_scope), release_wait_offset.data(),
+          participant_count.c_str(), participant_mask.c_str(), members.c_str(),
+          sequence.execution_owners.size(), owners.names.c_str(), owners.proofs.c_str());
     }
     if (request.flavor == rocjitsu::ConSanFlavor::Moi) {
       const rocjitsu::ConSanResourcePlanSummary &resource_summary =
@@ -4496,7 +4496,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                     "max_referenced_vgprs=%u..%u ordinary_vgpr_limit=%u..%u "
                     "required_vgprs=%u..%u owners=%zu..%zu indirect_vgprs=%s",
                     static_cast<unsigned long long>(code_object_reader.handle),
-                    moi_resource_site_kind_name(failure.site_kind),
+                    rocjitsu::consan_resource_site_kind_name(failure.site_kind),
                     rocjitsu::consan_register_plan_reason_name(failure.reason), failure.count,
                     failure.min_scratch_vgprs, failure.max_scratch_vgprs, failure.min_current_vgprs,
                     failure.max_current_vgprs, failure.min_max_referenced_vgprs,
@@ -4512,11 +4512,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                     "text_offset=0x%llx attempt=%zu kind=%s scratch_count=%u "
                     "source=%s reason=%s outcome=%s",
                     static_cast<unsigned long long>(code_object_reader.handle),
-                    moi_resource_site_kind_name(alternative.site_kind), alternative.candidate_index,
+                    rocjitsu::consan_resource_site_kind_name(alternative.site_kind),
+                    alternative.candidate_index,
                     static_cast<unsigned long long>(alternative.text_offset),
                     alternative.attempt_index,
                     rocjitsu::consan_resource_plan_alternative_kind_name(alternative.kind),
-                    alternative.scratch_vgpr_count, moi_resource_source_name(alternative.source),
+                    alternative.scratch_vgpr_count,
+                    rocjitsu::consan_register_allocation_source_name(alternative.source),
                     rocjitsu::consan_register_plan_reason_name(alternative.reason),
                     rocjitsu::consan_resource_plan_alternative_outcome_name(alternative.outcome));
       }
@@ -4626,7 +4628,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         "fence_discovered=%llu fence_supported=%llu fence_selected=%llu "
         "fence_patched=%llu fence_unsupported=%llu fence_resource_failed=%llu "
         "fence_placement_or_lowering_failed=%llu fence_expert_limit_omitted=%llu load=%llu",
-        static_cast<unsigned long long>(code_object_reader.handle), flavor_name(*request.flavor),
+        static_cast<unsigned long long>(code_object_reader.handle),
+        rocjitsu::consan_flavor_name(*request.flavor),
         request.flavor == rocjitsu::ConSanFlavor::SuperCollider
             ? "supercollider"
             : rocjitsu::consan_moi_engine_name(request.moi_engine),

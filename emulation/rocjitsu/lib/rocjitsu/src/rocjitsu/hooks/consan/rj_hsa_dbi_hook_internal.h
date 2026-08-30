@@ -102,11 +102,6 @@ constexpr uint32_t kMoiRecordReplayStandardRuntimeStride = 65536u;
 // bounded workloads statistically likely to publish no evidence at all.
 constexpr uint32_t kMoiSampledStandardRuntimeStride = 256u;
 
-[[nodiscard]] inline const char *
-moi_resource_site_kind_name(rocjitsu::ConSanResourceSiteKind site_kind) {
-  return rocjitsu::consan_resource_site_kind_name(site_kind);
-}
-
 [[nodiscard]] inline const char *fault_site_kind_name(rocjitsu::ConSanFaultSiteKind kind) {
   switch (kind) {
   case rocjitsu::ConSanFaultSiteKind::Barrier:
@@ -212,15 +207,6 @@ barrier_move_cfg_contract_name(rocjitsu::ConSanBarrierMoveCfgContract contract) 
     return "ordinary-memory";
   }
   return "unknown";
-}
-
-[[nodiscard]] inline const char *
-barrier_operand_source_name(rocjitsu::ConSanBarrierSite::OperandSource source) {
-  return rocjitsu::consan_barrier_operand_source_name(source);
-}
-
-[[nodiscard]] inline const char *barrier_scope_name(rocjitsu::ConSanBarrierSite::Scope scope) {
-  return rocjitsu::consan_barrier_scope_name(scope);
 }
 
 [[nodiscard]] inline const char *sync_operation_name(rocjitsu::ConSanSyncOperation operation) {
@@ -368,15 +354,6 @@ owner_log_fields(std::span<const rocjitsu::ConSanExecutionOwner> owners,
 }
 
 [[nodiscard]] inline const char *
-moi_resource_source_name(rocjitsu::ConSanRegisterAllocationSource source) {
-  return rocjitsu::consan_register_allocation_source_name(source);
-}
-
-[[nodiscard]] inline const char *delay_mode_name(rocjitsu::ConSanDelayMode mode) {
-  return rocjitsu::consan_delay_mode_name(mode);
-}
-
-[[nodiscard]] inline const char *
 patched_image_growth_limit_kind_name(rocjitsu::ConSanPatchedImageGrowthLimitKind kind) {
   switch (kind) {
   case rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes:
@@ -415,10 +392,6 @@ flat_provenance_mode_name(rocjitsu::ConSanFlatProvenanceMode mode) {
     return "strict";
   }
   return "unknown";
-}
-
-[[nodiscard]] inline const char *flavor_name(rocjitsu::ConSanFlavor flavor) {
-  return rocjitsu::consan_flavor_name(flavor);
 }
 
 [[nodiscard]] inline const char *check_trap_mode_name(CheckTrapMode mode) {
