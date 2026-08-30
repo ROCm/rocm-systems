@@ -2606,6 +2606,50 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
   return plan;
 }
 
+/// Preserve the complete feasibility-search trace when an outer fallback
+/// retries resource planning with a different scratch shape. A successful
+/// retry supersedes the first selected path and incorporates its nested
+/// choices; a failed retry leaves the original plan selected and records its
+/// nested selections as vetoed.
+void adopt_moi_resource_plan_fallback(ConSanCandidateResourcePlan &plan,
+                                      ConSanCandidateResourcePlan fallback,
+                                      ConSanResourcePlanAlternativeKind kind,
+                                      uint16_t scratch_count) {
+  const bool selected = fallback.source == ConSanRegisterAllocationSource::SpillRequired;
+  ConSanResourcePlanAlternative outer{
+      .kind = kind,
+      .source = fallback.source,
+      .reason = fallback.reason,
+      .scratch_vgpr_count = scratch_count,
+      .outcome = selected ? ConSanResourcePlanAlternativeOutcome::Selected
+                          : ConSanResourcePlanAlternativeOutcome::Rejected,
+  };
+  std::vector<ConSanResourcePlanAlternative> initial = std::move(plan.alternatives);
+  std::vector<ConSanResourcePlanAlternative> nested = std::move(fallback.alternatives);
+  if (selected) {
+    for (ConSanResourcePlanAlternative &alternative : initial) {
+      if (alternative.outcome == ConSanResourcePlanAlternativeOutcome::Selected)
+        alternative.outcome = ConSanResourcePlanAlternativeOutcome::Superseded;
+    }
+  }
+  for (ConSanResourcePlanAlternative &alternative : nested) {
+    if (alternative.outcome == ConSanResourcePlanAlternativeOutcome::Selected) {
+      alternative.outcome = selected ? ConSanResourcePlanAlternativeOutcome::Contributed
+                                     : ConSanResourcePlanAlternativeOutcome::Vetoed;
+    }
+  }
+  std::vector<ConSanResourcePlanAlternative> trace;
+  trace.reserve(initial.size() + 1u + nested.size());
+  trace.insert(trace.end(), std::make_move_iterator(initial.begin()),
+               std::make_move_iterator(initial.end()));
+  trace.push_back(outer);
+  trace.insert(trace.end(), std::make_move_iterator(nested.begin()),
+               std::make_move_iterator(nested.end()));
+  if (selected)
+    plan = std::move(fallback);
+  plan.alternatives = std::move(trace);
+}
+
 void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequest &request,
                                const BoundRuntimeResources &resources,
                                const ConSanDebugOverrides &debug,
@@ -2656,44 +2700,9 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
           state, request, debug, site_point, ConSanResourceSiteKind::Access, candidate_index,
           candidate.anchor(), candidate.kernel_descriptor_file_offset, spill_scratch_count,
           &candidate, /*atomic_form=*/nullptr, /*require_spill=*/true);
-      const bool selected = spill_plan.source == ConSanRegisterAllocationSource::SpillRequired;
-      const ConSanResourcePlanAlternative alternative{
-          .kind = ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery,
-          .source = spill_plan.source,
-          .reason = spill_plan.reason,
-          .scratch_vgpr_count = spill_scratch_count,
-          .outcome = selected ? ConSanResourcePlanAlternativeOutcome::Selected
-                              : ConSanResourcePlanAlternativeOutcome::Rejected,
-      };
-      std::vector<ConSanResourcePlanAlternative> initial_alternatives =
-          std::move(plan.alternatives);
-      std::vector<ConSanResourcePlanAlternative> nested_alternatives =
-          std::move(spill_plan.alternatives);
-      if (selected) {
-        for (ConSanResourcePlanAlternative &initial : initial_alternatives) {
-          if (initial.outcome == ConSanResourcePlanAlternativeOutcome::Selected)
-            initial.outcome = ConSanResourcePlanAlternativeOutcome::Superseded;
-        }
-        for (ConSanResourcePlanAlternative &nested : nested_alternatives) {
-          if (nested.outcome == ConSanResourcePlanAlternativeOutcome::Selected)
-            nested.outcome = ConSanResourcePlanAlternativeOutcome::Contributed;
-        }
-      } else {
-        for (ConSanResourcePlanAlternative &nested : nested_alternatives) {
-          if (nested.outcome == ConSanResourcePlanAlternativeOutcome::Selected)
-            nested.outcome = ConSanResourcePlanAlternativeOutcome::Vetoed;
-        }
-      }
-      std::vector<ConSanResourcePlanAlternative> alternatives;
-      alternatives.reserve(initial_alternatives.size() + 1u + nested_alternatives.size());
-      alternatives.insert(alternatives.end(), std::make_move_iterator(initial_alternatives.begin()),
-                          std::make_move_iterator(initial_alternatives.end()));
-      alternatives.push_back(alternative);
-      alternatives.insert(alternatives.end(), std::make_move_iterator(nested_alternatives.begin()),
-                          std::make_move_iterator(nested_alternatives.end()));
-      if (selected)
-        plan = std::move(spill_plan);
-      plan.alternatives = std::move(alternatives);
+      adopt_moi_resource_plan_fallback(
+          plan, std::move(spill_plan),
+          ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery, spill_scratch_count);
     }
     if (request.moi_engine == ConSanMoiEngine::InlineShadow &&
         (consan_uses_gfx9_cdna_encoding(state.arch)) && !candidate.is_flat() &&
@@ -2714,47 +2723,9 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
       // in place because the application load is deferred until after the
       // instrumentation and spill restore. Both cases therefore fit the same
       // compact transaction window.
-      const bool selected = spill_plan.source == ConSanRegisterAllocationSource::SpillRequired;
-      const ConSanResourcePlanAlternative alternative{
-          .kind = ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery,
-          .source = spill_plan.source,
-          .reason = spill_plan.reason,
-          .scratch_vgpr_count = spill_scratch_count,
-          .outcome = selected ? ConSanResourcePlanAlternativeOutcome::Selected
-                              : ConSanResourcePlanAlternativeOutcome::Rejected,
-      };
-      std::vector<ConSanResourcePlanAlternative> initial_alternatives =
-          std::move(plan.alternatives);
-      std::vector<ConSanResourcePlanAlternative> nested_alternatives =
-          std::move(spill_plan.alternatives);
-      if (selected) {
-        for (ConSanResourcePlanAlternative &initial : initial_alternatives) {
-          if (initial.outcome == ConSanResourcePlanAlternativeOutcome::Selected)
-            initial.outcome = ConSanResourcePlanAlternativeOutcome::Superseded;
-        }
-        for (ConSanResourcePlanAlternative &nested : nested_alternatives) {
-          if (nested.outcome == ConSanResourcePlanAlternativeOutcome::Selected)
-            nested.outcome = ConSanResourcePlanAlternativeOutcome::Contributed;
-        }
-      } else {
-        for (ConSanResourcePlanAlternative &nested : nested_alternatives) {
-          if (nested.outcome == ConSanResourcePlanAlternativeOutcome::Selected)
-            nested.outcome = ConSanResourcePlanAlternativeOutcome::Vetoed;
-        }
-      }
-
-      // The attempt numbers form a stable planning trace: attempts retained
-      // from the initial plan, the outer recovery, then its nested attempts.
-      std::vector<ConSanResourcePlanAlternative> alternatives;
-      alternatives.reserve(initial_alternatives.size() + 1u + nested_alternatives.size());
-      alternatives.insert(alternatives.end(), std::make_move_iterator(initial_alternatives.begin()),
-                          std::make_move_iterator(initial_alternatives.end()));
-      alternatives.push_back(alternative);
-      alternatives.insert(alternatives.end(), std::make_move_iterator(nested_alternatives.begin()),
-                          std::make_move_iterator(nested_alternatives.end()));
-      if (selected)
-        plan = std::move(spill_plan);
-      plan.alternatives = std::move(alternatives);
+      adopt_moi_resource_plan_fallback(
+          plan, std::move(spill_plan),
+          ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery, spill_scratch_count);
     }
     plans.push_back(std::move(plan));
   }
