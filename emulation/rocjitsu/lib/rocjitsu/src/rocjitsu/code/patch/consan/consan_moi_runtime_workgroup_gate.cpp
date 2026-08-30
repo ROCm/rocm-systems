@@ -145,26 +145,19 @@ uint64_t moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
   return true;
 }
 
-[[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_runtime_workgroup_gate_island_words(
-    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const MoiRuntimeWorkgroupGatePlan &plan, const ConSanMoiWorkgroupSources &workgroup_sources,
-    uint64_t island_text_offset, uint64_t cave_text_offset, uint64_t return_text_offset,
-    uint64_t island_word_count, rj_code_arch_t arch) {
+/// Emit the selection predicate shared by the inline-island and direct-call
+/// gate layouts. The caller owns only the surrounding return geometry and
+/// chooses registers that do not overlap its live continuation state.
+[[nodiscard]] bool append_moi_runtime_workgroup_predicate(
+    std::vector<uint32_t> &words, const MoiRuntimeWorkgroupGatePlan &plan,
+    const ConSanMoiWorkgroupSources &workgroup_sources, uint16_t saved_scc, uint16_t quotient,
+    uint16_t residue, rj_code_arch_t arch) {
   if (plan.sample_stride <= 1u)
-    return std::nullopt;
-  const uint16_t saved_scc = static_cast<uint16_t>(plan.exec_save_sgpr + 4u);
-  const uint16_t quotient = static_cast<uint16_t>(plan.exec_save_sgpr + 5u);
-  const uint16_t residue = static_cast<uint16_t>(plan.exec_save_sgpr + 6u);
-  const uint16_t shift = scalar_positive_inline_u32(std::countr_zero(plan.sample_stride));
-  const uint32_t mask = plan.sample_stride - 1u;
-  const uint32_t selected_residue = plan.sample_offset & mask;
-
-  std::vector<uint32_t> words;
-  words.reserve(island_word_count);
+    return false;
   const auto save_scc_word = instrumentation::build_s_cselect_b32(
       saved_scc, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
   if (!save_scc_word)
-    return std::nullopt;
+    return false;
   words.push_back(*save_scc_word);
   if (plan.cached_selection) {
     uint16_t selected_source = 0u;
@@ -175,54 +168,68 @@ uint64_t moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
           quotient, *plan.cached_selection->vector_src, arch);
       const auto wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
       if (!read || !wait)
-        return std::nullopt;
+        return false;
       words.push_back(*read);
       words.push_back(*wait);
       selected_source = quotient;
     } else {
-      return std::nullopt;
+      return false;
     }
     const auto selected =
         instrumentation::build_s_cmp_lg_u32(selected_source, scalar_positive_inline_u32(0u), arch);
     if (!selected)
-      return std::nullopt;
+      return false;
     words.push_back(*selected);
-  } else {
-    if (plan.record_replay) {
-      // Record/Replay samples stable workgroup coordinates. Dispatch identity
-      // remains part of every record's attribution, but must not rotate the
-      // selected workgroup or make offset zero omit workgroup zero.
-      words.push_back(build_s_mov_b32(residue, scalar_positive_inline_u32(0u), arch));
-    } else {
-      const uint16_t dispatch_mix = plan.dispatch_id_sgpr.value_or(
-          scalar_positive_inline_u32(static_cast<uint32_t>(plan.literal_dispatch_id) & 63u));
-      const auto mix_dispatch = instrumentation::build_s_sub_u32(
-          residue, scalar_positive_inline_u32(0), dispatch_mix, arch);
-      if (!mix_dispatch)
-        return std::nullopt;
-      words.push_back(*mix_dispatch);
-    }
-
-    // Sample one stable workgroup consistently at every site. Sampled also
-    // mixes dispatch identity above; Record/Replay keeps dispatch identity in
-    // its records instead of using it to rotate this workgroup predicate.
-    if (!append_moi_runtime_workgroup_mix(words, workgroup_sources.x, quotient, residue, arch) ||
-        !append_moi_runtime_workgroup_mix(words, workgroup_sources.y, quotient, residue, arch) ||
-        !append_moi_runtime_workgroup_mix(words, workgroup_sources.z, quotient, residue, arch) ||
-        !append_moi_runtime_workgroup_mix(words, workgroup_sources.cluster_workgroup_id, quotient,
-                                          residue, arch))
-      return std::nullopt;
-
-    words.push_back(build_s_lshr_b32(quotient, residue, shift, arch));
-    words.push_back(build_s_lshl_b32(quotient, quotient, shift, arch));
-    const auto subtract = instrumentation::build_s_sub_u32(residue, residue, quotient, arch);
-    if (!subtract)
-      return std::nullopt;
-    words.push_back(*subtract);
-    if (!append_moi_runtime_workgroup_residue_compare(words, residue, quotient, selected_residue,
-                                                      arch))
-      return std::nullopt;
+    return true;
   }
+
+  if (plan.record_replay) {
+    // Record/Replay samples stable workgroup coordinates. Dispatch identity
+    // remains in every record's attribution but does not rotate the selected
+    // workgroup or make offset zero omit workgroup zero.
+    words.push_back(build_s_mov_b32(residue, scalar_positive_inline_u32(0u), arch));
+  } else {
+    const uint16_t dispatch_mix = plan.dispatch_id_sgpr.value_or(
+        scalar_positive_inline_u32(static_cast<uint32_t>(plan.literal_dispatch_id) & 63u));
+    const auto mix_dispatch = instrumentation::build_s_sub_u32(
+        residue, scalar_positive_inline_u32(0), dispatch_mix, arch);
+    if (!mix_dispatch)
+      return false;
+    words.push_back(*mix_dispatch);
+  }
+  if (!append_moi_runtime_workgroup_mix(words, workgroup_sources.x, quotient, residue, arch) ||
+      !append_moi_runtime_workgroup_mix(words, workgroup_sources.y, quotient, residue, arch) ||
+      !append_moi_runtime_workgroup_mix(words, workgroup_sources.z, quotient, residue, arch) ||
+      !append_moi_runtime_workgroup_mix(words, workgroup_sources.cluster_workgroup_id, quotient,
+                                        residue, arch))
+    return false;
+  const uint16_t shift = scalar_positive_inline_u32(std::countr_zero(plan.sample_stride));
+  words.push_back(build_s_lshr_b32(quotient, residue, shift, arch));
+  words.push_back(build_s_lshl_b32(quotient, quotient, shift, arch));
+  const auto subtract = instrumentation::build_s_sub_u32(residue, residue, quotient, arch);
+  if (!subtract)
+    return false;
+  words.push_back(*subtract);
+  return append_moi_runtime_workgroup_residue_compare(
+      words, residue, quotient, plan.sample_offset & (plan.sample_stride - 1u), arch);
+}
+
+[[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_runtime_workgroup_gate_island_words(
+    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
+    const MoiRuntimeWorkgroupGatePlan &plan, const ConSanMoiWorkgroupSources &workgroup_sources,
+    uint64_t island_text_offset, uint64_t cave_text_offset, uint64_t return_text_offset,
+    uint64_t island_word_count, rj_code_arch_t arch) {
+  if (plan.sample_stride <= 1u)
+    return std::nullopt;
+  const uint16_t saved_scc = static_cast<uint16_t>(plan.exec_save_sgpr + 4u);
+  const uint16_t quotient = static_cast<uint16_t>(plan.exec_save_sgpr + 5u);
+  const uint16_t residue = static_cast<uint16_t>(plan.exec_save_sgpr + 6u);
+
+  std::vector<uint32_t> words;
+  words.reserve(island_word_count);
+  if (!append_moi_runtime_workgroup_predicate(words, plan, workgroup_sources, saved_scc, quotient,
+                                              residue, arch))
+    return std::nullopt;
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch);
   if (!restore_scc)
@@ -284,66 +291,12 @@ uint64_t moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
       plan.record_replay && plan.direct_call_form == ConSanDirectCallForm::SCallI64
           ? plan.exec_save_sgpr
           : static_cast<uint16_t>(plan.exec_save_sgpr + 6u);
-  const uint16_t shift = scalar_positive_inline_u32(std::countr_zero(plan.sample_stride));
-  const uint32_t mask = plan.sample_stride - 1u;
-  const uint32_t selected_residue = plan.sample_offset & mask;
 
   std::vector<uint32_t> words;
   words.reserve(reserved_word_count);
-  const auto save_scc_word = instrumentation::build_s_cselect_b32(
-      saved_scc, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
-  if (!save_scc_word)
+  if (!append_moi_runtime_workgroup_predicate(words, plan, workgroup_sources, saved_scc, quotient,
+                                              residue, arch))
     return std::nullopt;
-  words.push_back(*save_scc_word);
-  if (plan.cached_selection) {
-    uint16_t selected_source = 0u;
-    if (plan.cached_selection->scalar_src) {
-      selected_source = *plan.cached_selection->scalar_src;
-    } else if (plan.cached_selection->vector_src) {
-      const auto read = instrumentation::build_v_readfirstlane_b32(
-          quotient, *plan.cached_selection->vector_src, arch);
-      const auto wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
-      if (!read || !wait)
-        return std::nullopt;
-      words.push_back(*read);
-      words.push_back(*wait);
-      selected_source = quotient;
-    } else {
-      return std::nullopt;
-    }
-    const auto selected =
-        instrumentation::build_s_cmp_lg_u32(selected_source, scalar_positive_inline_u32(0u), arch);
-    if (!selected)
-      return std::nullopt;
-    words.push_back(*selected);
-  } else {
-    if (plan.record_replay) {
-      words.push_back(build_s_mov_b32(residue, scalar_positive_inline_u32(0u), arch));
-    } else {
-      const uint16_t dispatch_mix = plan.dispatch_id_sgpr.value_or(
-          scalar_positive_inline_u32(static_cast<uint32_t>(plan.literal_dispatch_id) & 63u));
-      const auto mix_dispatch = instrumentation::build_s_sub_u32(
-          residue, scalar_positive_inline_u32(0), dispatch_mix, arch);
-      if (!mix_dispatch)
-        return std::nullopt;
-      words.push_back(*mix_dispatch);
-    }
-    if (!append_moi_runtime_workgroup_mix(words, workgroup_sources.x, quotient, residue, arch) ||
-        !append_moi_runtime_workgroup_mix(words, workgroup_sources.y, quotient, residue, arch) ||
-        !append_moi_runtime_workgroup_mix(words, workgroup_sources.z, quotient, residue, arch) ||
-        !append_moi_runtime_workgroup_mix(words, workgroup_sources.cluster_workgroup_id, quotient,
-                                          residue, arch))
-      return std::nullopt;
-    words.push_back(build_s_lshr_b32(quotient, residue, shift, arch));
-    words.push_back(build_s_lshl_b32(quotient, quotient, shift, arch));
-    const auto subtract = instrumentation::build_s_sub_u32(residue, residue, quotient, arch);
-    if (!subtract)
-      return std::nullopt;
-    words.push_back(*subtract);
-    if (!append_moi_runtime_workgroup_residue_compare(words, residue, quotient, selected_residue,
-                                                      arch))
-      return std::nullopt;
-  }
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch);
   if (!restore_scc)
