@@ -254,8 +254,8 @@ MoiScalarAbiPlan plan_sampled_scalar_abi(const ConSanRequest &request,
       publication ? std::optional{consan_detail::MoiSpecialStateSgprs{
                         .vcc_save_sgpr = publication->selection_vcc_save_sgpr,
                         .scc_save_sgpr = point.has_compact_moi_scalar_spill() &&
-                                                 point.moi_inline_indirect_scc_sgpr
-                                             ? *point.moi_inline_indirect_scc_sgpr
+                                                 point.moi_router_indirect_scc_sgpr
+                                             ? *point.moi_router_indirect_scc_sgpr
                                              : publication->publication_exec_save_sgpr,
                     }}
                   : std::nullopt;

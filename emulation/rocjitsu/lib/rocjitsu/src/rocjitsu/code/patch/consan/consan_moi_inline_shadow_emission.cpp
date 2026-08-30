@@ -76,7 +76,7 @@ bool validate_inline_shadow_exec_save_sgpr(const ConSanRequest &request,
   if (!point.moi_exec_save_sgpr)
     return true;
   if (point.has_inline_moi_scalar_spill() && point.moi_inline_access_present &&
-      ((!point.moi_inline_call_return_sgpr || !point.moi_inline_dispatch_key_sgpr) &&
+      ((!point.moi_router_call_return_sgpr || !point.moi_router_dispatch_key_sgpr) &&
        !point.moi_inline_branch_only_scalar_spill &&
        !point.moi_inline_dynamic_stack_borrowed_sgpr)) {
     errors.emplace_back(

@@ -252,15 +252,13 @@ the Stage 10 checkpoint.
 | `automatic_moi_owner_sgpr` | Placement; common emission, prologue, sync | Provenance of selected owner scalar | `ConSanMoiTransientSgprAssignment` source; delete flag in Stage 2 |
 | `automatic_moi_dispatch_id_sgprs` | Placement and pipeline | Provenance of selected persistent dispatch pair | `MoiDispatchIdentityAllocation` source; delete flag in Stage 2 |
 | `automatic_moi_private_dispatch_id` | Placement; Inline access/atomic paths | Selected dispatch-identity storage alternative | Dispatch-identity allocation variant; delete in Stage 2 |
-| `moi_inline_indirect_pc_sgpr` | Placement; common/atomic/Sampled emission | One member of Inline/replay scalar ABI | Typed scalar ABI subobject in operating point; delete loose optional in Stage 2 |
-| `moi_inline_call_return_sgpr` | Placement and Inline planning | Inline route call-return ABI | Inline route plan; delete loose optional in Stage 2 |
-| `moi_inline_dispatch_key_sgpr` | Placement | Inline route key ABI | Inline route plan; delete loose optional in Stage 2 |
-| `moi_inline_indirect_scc_sgpr` | Placement and Sampled synchronization | Saved SCC ABI member | Scalar-preservation plan; delete loose optional in Stage 2 |
+| `moi_router_indirect_pc_sgpr` | Placement; common/atomic/Sampled emission | Shared scalar-router indirect PC pair | Typed scalar ABI subobject in operating point; delete loose optional in Stage 2 |
+| `moi_router_call_return_sgpr` | Placement and Inline/Record/Sampled routing | Shared scalar-router call-return ABI | Typed scalar route plan; delete loose optional in Stage 2 |
+| `moi_router_dispatch_key_sgpr` | Placement and Inline/Record/Sampled routing | Shared scalar-router key ABI | Typed scalar route plan; delete loose optional in Stage 2 |
+| `moi_router_indirect_scc_sgpr` | Placement and Inline/Record/Sampled routing | Shared scalar-router saved SCC | Scalar-preservation plan; delete loose optional in Stage 2 |
 | `moi_inline_visible_evidence_sgpr` | Placement and prologue | Inline evidence-state ABI member | Inline evidence allocation; delete loose optional in Stage 2 |
 | `moi_inline_branch_only_scalar_spill` | Placement; Inline/barrier/prologue | Selected branch-only preservation alternative | `MoiInlineScalarPreservationPlan::BranchOnlySpill`; delete flag in Stage 2 |
 | `moi_inline_dynamic_stack_borrowed_sgpr` | Placement; Inline/prologue | Borrowed pair valid only for one preservation variant | Required field of that typed variant; delete loose optional in Stage 2 |
-| `moi_record_replay_dispatch_key_sgpr` | Placement; pipeline, barrier, common/Sampled emission | Replay route ABI | `MoiReplayRouterAbi`; delete loose optional in Stage 2 |
-| `moi_record_replay_call_return_sgpr` | Placement; pipeline, barrier, common/Sampled emission | Replay route ABI | `MoiReplayRouterAbi`; delete loose optional in Stage 2 |
 | `moi_dispatch_id_sgpr` | Placement; candidate, pipeline, prologue and five emitters | Concrete scalar dispatch-identity allocation | `MoiDispatchIdentityAllocation` variant; delete in Stage 2 |
 | `moi_dispatch_id_vgpr` | Placement; candidate, prologue, Inline emission | Concrete vector dispatch-identity allocation, partly mirrored in result allocation | Sole field of accepted allocation; delete options copy in Stage 2 |
 | `moi_persistent_sgprs` | Placement; thirteen planning/emission files | Persistent scalar owner/epoch/workgroup ABI | Move into authoritative register/persistent-state allocation; delete options copy in Stage 2 |

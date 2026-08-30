@@ -227,14 +227,14 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     const MoiRecordEventEmissionPlan &candidate_options = planned.emission;
     const std::optional<uint16_t> dense_call_return_sgpr =
         candidate_options.automatic_moi_record_replay_sgpr_spill
-            ? candidate_options.moi_record_replay_call_return_sgpr
+            ? candidate_options.moi_router_call_return_sgpr
             : (candidate_options.moi_exec_save_sgpr
                    ? std::optional<uint16_t>(
                          static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 6u))
                    : std::nullopt);
     const std::optional<uint16_t> dense_dispatch_key_sgpr =
         candidate_options.automatic_moi_record_replay_sgpr_spill
-            ? candidate_options.moi_record_replay_dispatch_key_sgpr
+            ? candidate_options.moi_router_dispatch_key_sgpr
             : (candidate_options.moi_exec_save_sgpr
                    ? std::optional<uint16_t>(
                          static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 5u))

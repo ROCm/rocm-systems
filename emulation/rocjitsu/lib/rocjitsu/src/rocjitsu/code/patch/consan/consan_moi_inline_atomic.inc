@@ -189,12 +189,12 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       if (!private_layout)
         continue;
       if (private_layout->dispatch_id_offset) {
-        if (!candidate_options.moi_inline_indirect_pc_sgpr) {
+        if (!candidate_options.moi_router_indirect_pc_sgpr) {
           result.warnings.emplace_back(
               "ConSan MOI inline atomic private dispatch identity has no owner-local reload pair");
           continue;
         }
-        candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_inline_indirect_pc_sgpr;
+        candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_router_indirect_pc_sgpr;
       }
     }
     if (candidate_options.has_inline_moi_scalar_spill()) {
@@ -253,7 +253,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       return;
     }
     if (planned.private_layout && planned.private_layout->dispatch_id_offset)
-      candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_inline_indirect_pc_sgpr;
+      candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_router_indirect_pc_sgpr;
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, candidate_options,
                                candidate_options, candidate_options, arch);
   }
@@ -480,7 +480,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           MoiOptions candidate_options = group_options;
           candidate_options.scratch_vgpr = planned.resources.base;
           if (planned.private_layout && planned.private_layout->dispatch_id_offset)
-            candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_inline_indirect_pc_sgpr;
+            candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_router_indirect_pc_sgpr;
           uint32_t guest_instruction_offset = 0u;
           auto cave_words = build_inline_atomic_ordering_cave_words(
               active_bytes, planned.candidate, planned.address_plan, candidate_options,
@@ -709,7 +709,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       return;
     }
     if (planned.private_layout && planned.private_layout->dispatch_id_offset)
-      candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_inline_indirect_pc_sgpr;
+      candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_router_indirect_pc_sgpr;
     uint32_t guest_instruction_offset = 0;
     auto cave_words = build_inline_atomic_ordering_cave_words(
         active_bytes, candidate, planned.address_plan, candidate_options, candidate_options,

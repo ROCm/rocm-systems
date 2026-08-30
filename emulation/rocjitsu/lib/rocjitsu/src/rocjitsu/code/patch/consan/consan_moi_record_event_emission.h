@@ -29,8 +29,8 @@ struct MoiRecordEventEmissionPlan {
   ConSanMoiPersistentSgprState moi_persistent_sgprs;
   std::optional<uint64_t> moi_report_buffer_address;
   bool automatic_moi_record_replay_sgpr_spill = false;
-  std::optional<uint16_t> moi_record_replay_dispatch_key_sgpr;
-  std::optional<uint16_t> moi_record_replay_call_return_sgpr;
+  std::optional<uint16_t> moi_router_dispatch_key_sgpr;
+  std::optional<uint16_t> moi_router_call_return_sgpr;
   ConSanMoiWorkgroupSources workgroup_sources;
   consan_detail::MoiSpecialStateSgprs special_state;
   consan_moi_detail::ConSanMoiReportDispatchIdSource dispatch_id_sources;

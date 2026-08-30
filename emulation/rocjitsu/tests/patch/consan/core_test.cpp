@@ -140,15 +140,13 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .automatic_moi_owner_sgpr = true,
       .automatic_moi_dispatch_id_sgprs = true,
       .automatic_moi_private_dispatch_id = true,
-      .moi_inline_indirect_pc_sgpr = 2u,
-      .moi_inline_call_return_sgpr = 4u,
-      .moi_inline_dispatch_key_sgpr = 6u,
-      .moi_inline_indirect_scc_sgpr = 7u,
+      .moi_router_indirect_pc_sgpr = 2u,
+      .moi_router_indirect_scc_sgpr = 7u,
+      .moi_router_dispatch_key_sgpr = 12u,
+      .moi_router_call_return_sgpr = 14u,
       .moi_inline_visible_evidence_sgpr = 8u,
       .moi_inline_branch_only_scalar_spill = true,
       .moi_inline_dynamic_stack_borrowed_sgpr = 10u,
-      .moi_record_replay_dispatch_key_sgpr = 12u,
-      .moi_record_replay_call_return_sgpr = 14u,
       .moi_dispatch_id_sgpr = 16u,
       .moi_dispatch_id_vgpr = 18u,
       .moi_persistent_sgprs = {.owner = 20u,
@@ -190,16 +188,14 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   expect_field_participates([](auto &value) { value.automatic_moi_owner_sgpr = false; });
   expect_field_participates([](auto &value) { value.automatic_moi_dispatch_id_sgprs = false; });
   expect_field_participates([](auto &value) { value.automatic_moi_private_dispatch_id = false; });
-  expect_field_participates([](auto &value) { value.moi_inline_indirect_pc_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.moi_inline_call_return_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.moi_inline_dispatch_key_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.moi_inline_indirect_scc_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_router_indirect_pc_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_router_indirect_scc_sgpr.reset(); });
   expect_field_participates([](auto &value) { value.moi_inline_visible_evidence_sgpr.reset(); });
   expect_field_participates([](auto &value) { value.moi_inline_branch_only_scalar_spill = false; });
   expect_field_participates(
       [](auto &value) { value.moi_inline_dynamic_stack_borrowed_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.moi_record_replay_dispatch_key_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.moi_record_replay_call_return_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_router_dispatch_key_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_router_call_return_sgpr.reset(); });
   expect_field_participates([](auto &value) { value.moi_dispatch_id_sgpr.reset(); });
   expect_field_participates([](auto &value) { value.moi_dispatch_id_vgpr.reset(); });
   expect_field_participates([](auto &value) { value.moi_persistent_sgprs = {}; });

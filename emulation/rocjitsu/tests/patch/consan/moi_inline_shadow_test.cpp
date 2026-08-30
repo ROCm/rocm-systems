@@ -1173,10 +1173,10 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.test_force_vgpr_spill = true;
   options.moi_exec_save_sgpr = 4u;
-  options.moi_inline_indirect_pc_sgpr = 48u;
-  options.moi_inline_indirect_scc_sgpr = 50u;
-  options.moi_inline_dispatch_key_sgpr = 50u;
-  options.moi_inline_call_return_sgpr = 48u;
+  options.moi_router_indirect_pc_sgpr = 48u;
+  options.moi_router_indirect_scc_sgpr = 50u;
+  options.moi_router_dispatch_key_sgpr = 50u;
+  options.moi_router_call_return_sgpr = 48u;
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   const ConSanMoiTransientSgprAssignment seed_assignment{
@@ -1397,10 +1397,10 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.test_force_vgpr_spill = true;
   options.moi_exec_save_sgpr = 4u;
-  options.moi_inline_indirect_pc_sgpr = 48u;
-  options.moi_inline_indirect_scc_sgpr = 50u;
-  options.moi_inline_dispatch_key_sgpr = 50u;
-  options.moi_inline_call_return_sgpr = 48u;
+  options.moi_router_indirect_pc_sgpr = 48u;
+  options.moi_router_indirect_scc_sgpr = 50u;
+  options.moi_router_dispatch_key_sgpr = 50u;
+  options.moi_router_call_return_sgpr = 48u;
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   const ConSanMoiTransientSgprAssignment seed_assignment{
@@ -6377,9 +6377,9 @@ TEST(ConSanMoi, Gfx1250DenseCallReturnRejectsArchitecturalAliases) {
   options.moi_owner_vgpr = 80u;
   options.moi_epoch_vgpr = 81u;
   options.moi_exec_save_sgpr = 60u;
-  options.moi_inline_indirect_pc_sgpr = 88u;
-  options.moi_inline_indirect_scc_sgpr = 90u;
-  options.moi_inline_dispatch_key_sgpr = 91u;
+  options.moi_router_indirect_pc_sgpr = 88u;
+  options.moi_router_indirect_scc_sgpr = 90u;
+  options.moi_router_dispatch_key_sgpr = 91u;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = false;
@@ -6392,7 +6392,7 @@ TEST(ConSanMoi, Gfx1250DenseCallReturnRejectsArchitecturalAliases) {
     // These encodable scalar pairs alias FLAT_SCRATCH and XNACK_MASK. An
     // s_call_i64 return in either pair corrupts architectural state rather
     // than an ordinary guest register.
-    options.moi_inline_call_return_sgpr = call_return;
+    options.moi_router_call_return_sgpr = call_return;
     const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     EXPECT_FALSE(result.modified());
@@ -6643,10 +6643,10 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
   options.moi_owner_vgpr = 80u;
   options.moi_epoch_vgpr = 81u;
   options.moi_exec_save_sgpr = 4u;
-  options.moi_inline_indirect_pc_sgpr = kIndirectPcSgpr;
-  options.moi_inline_indirect_scc_sgpr = kKeyAndSccSgpr;
-  options.moi_inline_dispatch_key_sgpr = kKeyAndSccSgpr;
-  options.moi_inline_call_return_sgpr = kIndirectPcSgpr;
+  options.moi_router_indirect_pc_sgpr = kIndirectPcSgpr;
+  options.moi_router_indirect_scc_sgpr = kKeyAndSccSgpr;
+  options.moi_router_dispatch_key_sgpr = kKeyAndSccSgpr;
+  options.moi_router_call_return_sgpr = kIndirectPcSgpr;
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   const ConSanMoiTransientSgprAssignment seed_assignment{
@@ -7184,10 +7184,10 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
   options.moi_exec_save_sgpr = 60;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
-  options.moi_inline_indirect_pc_sgpr = 30;
-  options.moi_inline_call_return_sgpr = 26;
-  options.moi_inline_dispatch_key_sgpr = 25;
-  options.moi_inline_indirect_scc_sgpr = 29;
+  options.moi_router_indirect_pc_sgpr = 30;
+  options.moi_router_call_return_sgpr = 26;
+  options.moi_router_dispatch_key_sgpr = 25;
+  options.moi_router_indirect_scc_sgpr = 29;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = true;
@@ -7303,10 +7303,10 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarrierReusesAccessDispatcherWhenItFits)
   options.moi_exec_save_sgpr = 60;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
-  options.moi_inline_indirect_pc_sgpr = 30;
-  options.moi_inline_call_return_sgpr = 26;
-  options.moi_inline_dispatch_key_sgpr = 25;
-  options.moi_inline_indirect_scc_sgpr = 29;
+  options.moi_router_indirect_pc_sgpr = 30;
+  options.moi_router_call_return_sgpr = 26;
+  options.moi_router_dispatch_key_sgpr = 25;
+  options.moi_router_indirect_scc_sgpr = 29;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = true;
@@ -7416,10 +7416,10 @@ TEST(ConSanMoi, Gfx1250DenseBarrierFallsBackWhenAccessDispatcherReservationIsFul
   options.moi_exec_save_sgpr = 60;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
-  options.moi_inline_indirect_pc_sgpr = 30;
-  options.moi_inline_call_return_sgpr = 26;
-  options.moi_inline_dispatch_key_sgpr = 25;
-  options.moi_inline_indirect_scc_sgpr = 29;
+  options.moi_router_indirect_pc_sgpr = 30;
+  options.moi_router_call_return_sgpr = 26;
+  options.moi_router_dispatch_key_sgpr = 25;
+  options.moi_router_indirect_scc_sgpr = 29;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = true;
@@ -7506,10 +7506,10 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersPartitionRelayWindowsAcrossLarge
   options.moi_exec_save_sgpr = 60;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
-  options.moi_inline_indirect_pc_sgpr = 30;
-  options.moi_inline_call_return_sgpr = 26;
-  options.moi_inline_dispatch_key_sgpr = 25;
-  options.moi_inline_indirect_scc_sgpr = 29;
+  options.moi_router_indirect_pc_sgpr = 30;
+  options.moi_router_call_return_sgpr = 26;
+  options.moi_router_dispatch_key_sgpr = 25;
+  options.moi_router_indirect_scc_sgpr = 29;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = true;

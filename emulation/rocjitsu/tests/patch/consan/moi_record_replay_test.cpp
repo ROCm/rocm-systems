@@ -5497,8 +5497,8 @@ TEST(ConSanMoi, SparseRecordReplaySpillSkipsUninitializedEntryHashWindowAcrossTa
     options.moi_init_owner_epoch = true;
     options.moi_exec_save_sgpr = kExecSaveSgpr;
     options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
-    options.moi_inline_indirect_pc_sgpr = 70u;
-    options.moi_inline_indirect_scc_sgpr = 72u;
+    options.moi_router_indirect_pc_sgpr = 70u;
+    options.moi_router_indirect_scc_sgpr = 72u;
     options.moi_dispatch_id_sgpr = 60u;
     options.moi_persistent_sgprs.record_replay_workgroup = {.x = 50u, .y = 51u, .z = 52u};
     options.moi_runtime_sample_stride = 65'536u;

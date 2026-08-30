@@ -58,10 +58,9 @@
     relocated_entry_return_words = kMoiInlineShadowIndirectIslandWords;
   } else {
     const bool spill_backed = point.has_compact_moi_scalar_spill();
-    if (!point.moi_exec_save_sgpr ||
-        (spill_backed &&
-         (!point.moi_inline_indirect_pc_sgpr || !point.moi_record_replay_dispatch_key_sgpr ||
-          !point.moi_record_replay_call_return_sgpr))) {
+    if (!point.moi_exec_save_sgpr || (spill_backed && (!point.moi_router_indirect_pc_sgpr ||
+                                                       !point.moi_router_dispatch_key_sgpr ||
+                                                       !point.moi_router_call_return_sgpr))) {
       return fail("lost its recording dense scalar ABI");
     }
     const uint16_t base = *point.moi_exec_save_sgpr;
@@ -69,12 +68,12 @@
         moi_special_state_sgprs(request, point);
     if (!special_state)
       return fail("lost its dense special-state scalar ABI");
-    pc_sgpr = spill_backed ? *point.moi_inline_indirect_pc_sgpr : base;
+    pc_sgpr = spill_backed ? *point.moi_router_indirect_pc_sgpr : base;
     scc_save_sgpr = special_state->scc_save_sgpr;
-    key_sgpr = spill_backed ? *point.moi_record_replay_dispatch_key_sgpr
-                            : static_cast<uint16_t>(base + 5u);
+    key_sgpr =
+        spill_backed ? *point.moi_router_dispatch_key_sgpr : static_cast<uint16_t>(base + 5u);
     call_return_sgpr =
-        spill_backed ? *point.moi_record_replay_call_return_sgpr : static_cast<uint16_t>(base + 6u);
+        spill_backed ? *point.moi_router_call_return_sgpr : static_cast<uint16_t>(base + 6u);
     explicit_key = !consan_arch_has_s_call_i64(arch);
     collapsed_spill_router = spill_backed && *call_return_sgpr == pc_sgpr &&
                              (!explicit_key || collapse_spill_router_for_explicit_key);

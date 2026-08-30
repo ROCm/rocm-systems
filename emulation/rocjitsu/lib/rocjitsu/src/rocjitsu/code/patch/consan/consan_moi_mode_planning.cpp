@@ -97,10 +97,10 @@ make_moi_scalar_abi_plan(const ConSanMoiOperatingPoint &point,
                         .indirect_jump = std::nullopt,
                         .access_router_uses_dense_abi = access_router_uses_dense_abi};
   if (point.has_moi_scalar_spill()) {
-    if (point.moi_inline_indirect_pc_sgpr && point.moi_inline_indirect_scc_sgpr) {
+    if (point.moi_router_indirect_pc_sgpr && point.moi_router_indirect_scc_sgpr) {
       plan.indirect_jump =
-          MoiIndirectJumpSgprs{.pc_sgpr = *point.moi_inline_indirect_pc_sgpr,
-                               .scc_save_sgpr = *point.moi_inline_indirect_scc_sgpr};
+          MoiIndirectJumpSgprs{.pc_sgpr = *point.moi_router_indirect_pc_sgpr,
+                               .scc_save_sgpr = *point.moi_router_indirect_scc_sgpr};
     }
     return plan;
   }
