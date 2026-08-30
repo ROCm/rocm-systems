@@ -2034,3 +2034,61 @@ gate. The complete 4,723-test nonphysical matrix over all five simulated
 targets passed at `-j16` in 245.85 seconds. All 635 serialized physical
 gfx1201 tests passed at `-j1` in 110.16 seconds. The inventory increase is the
 dispatch-source planning regression.
+
+### 16.16 Convergence checkpoint 15: shared final-validation environment
+
+This checkpoint, through commit `c7ae9770ed`, harvests the deletion required
+by checkpoint 14 from the final semantic-proof path. A deep trace of every
+final validator found fourteen independent passes repeatedly reconstructing
+the same one-text-section views, target profile, architecture, decoder, and
+bounded word comparisons. The repetition was prerequisite plumbing rather
+than pass-specific proof semantics.
+
+`FinalValidationEnvironment` now owns those immutable universal
+prerequisites exactly once. Its `ValidationText` views provide the common
+bounded word and encoded-word-span operations. Every proof pass still owns
+its own applicability test, semantic walk, fail-closed decisions, and exact
+diagnostic text; no construction policy, mutable transaction state, or
+pass-specific derived analysis entered the shared environment. The one decoder
+is safe to reuse because these validation calls do not activate its instruction
+pool and decoding does not retain cross-call state.
+
+The passes also append directly to one ordered validation-error sink instead
+of allocating and moving fourteen temporary vectors. Two validators use their
+error count as local fail-fast state; they now compare against the count on
+entry so an error from an earlier independent proof cannot suppress their own
+work. Thus the consolidation preserves both error ordering and the former
+independence of the passes. A boundary gate requires the immutable text and
+environment owners and exactly one decoder construction and one environment
+instance in final validation.
+
+| Signal | Checkpoint 15 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 261 | +32 |
+| Physical production lines | 105,256 | +281 |
+| Nonblank production lines | 99,045 | **-38** |
+| Production implementation lines | 91,390 | **-60** |
+| `MoiOptions` references / files | 95 / 30 | +8 / +5 |
+| `ConSanTransformArtifacts` references / files | 243 / 58 | **-33 / +1** |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 305 / 53 | +15 / +2 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | **0** | **-95** |
+| Explicit mode-enum references in `consan_moi_report_plan.cpp` | **0** | **-18** |
+| Explicit mode-enum references in `consan_pipeline.cpp` | **0** | n/a |
+| Test inventory | 5,358 | +13 |
+
+The slice removes 104 physical, 112 nonblank, and 116 implementation lines
+relative to checkpoint 14. It therefore pays back all 99 implementation lines
+added by that checkpoint plus 17 more, and places production 60 implementation
+lines below the fifth-refactoring baseline. This satisfies the immediate
+deletion contract without claiming the material overall shrinkage or the
+independent completion evidence required by Section 14. The core build graph,
+remaining broad transaction and operating-point surfaces, full target-facet
+locality, both extension exercises, and final independent audit remain open.
+
+Validation includes the focused 124-test fault, perturbation, composite,
+final-validation, and structural-boundary gate. The complete 4,723-test
+nonphysical matrix over all five simulated targets passed at `-j16` in 241.80
+seconds. All 635 serialized physical gfx1201 tests passed at `-j1` in 109.30
+seconds. The test inventory is unchanged.
