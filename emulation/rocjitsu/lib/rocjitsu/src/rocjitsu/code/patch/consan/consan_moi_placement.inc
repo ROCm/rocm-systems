@@ -5223,7 +5223,13 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
       const auto scalar_tail = first_admitted_moi_register_range(
           first, scalar_count, moi_ordinary_sgpr_limit(arch), 1u,
           [&](uint16_t candidate) { return !unavailable(candidate); });
-      if (scalar_tail) {
+      const std::string scalar_state_description =
+          "ConSan MOI assigned persistent scalar " +
+          std::string(has_explicit_owner_epoch ? "" : "owner/epoch") +
+          std::string(needs_workgroup_key ? "/workgroup-key" : "") +
+          std::string(needs_record_replay_workgroup_tuple ? "/exact-workgroup-tuple" : "");
+      const auto commit_exact_workgroup_scalar_state = [&](uint16_t base,
+                                                           std::string diagnostic_suffix) {
         std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch;
         // Record/Replay initializes both persistent values directly in SGPRs;
         // its shared prologue API does not use the placeholder VGPR pair.
@@ -5235,16 +5241,14 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
           if (kernel.has_text_range)
             prologue_scratch.push_back({kernel.descriptor_file_offset, 0u});
         }
-        assign_scalar_persistent_state(*scalar_tail);
+        assign_scalar_persistent_state(base);
         options.moi_initialize_owner_epoch = true;
         prologue_scratch_assignments = std::move(prologue_scratch);
-        diagnostics.emplace_back(
-            "ConSan MOI assigned persistent scalar " +
-            std::string(has_explicit_owner_epoch ? "" : "owner/epoch") +
-            std::string(needs_workgroup_key ? "/workgroup-key" : "") +
-            std::string(needs_record_replay_workgroup_tuple ? "/exact-workgroup-tuple" : "") +
-            " state for CDNA Record/Replay");
+        diagnostics.push_back(scalar_state_description + std::move(diagnostic_suffix));
         update.changed = true;
+      };
+      if (scalar_tail) {
+        commit_exact_workgroup_scalar_state(*scalar_tail, " state for CDNA Record/Replay");
         return update;
       }
 
@@ -5323,28 +5327,10 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
             [&](uint16_t candidate) { return !hole_unavailable(candidate); });
       }
       if (persistent_hole) {
-        std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch;
-        // Resource plans are rebuilt after persistent-state selection. Keep
-        // the same placeholder used by the ordinary scalar fallback for every
-        // kernel that the rebuild can newly admit. Record/Replay initializes
-        // its persistent values directly in SGPRs, so the shared prologue API
-        // does not actually clobber this placeholder VGPR pair.
-        for (const ConSanKernelInfo &kernel : program_inventory.kernels()) {
-          if (kernel.has_text_range)
-            prologue_scratch.push_back({kernel.descriptor_file_offset, 0u});
-        }
-        assign_scalar_persistent_state(*persistent_hole);
-        options.moi_initialize_owner_epoch = true;
-        prologue_scratch_assignments = std::move(prologue_scratch);
-        diagnostics.emplace_back(
-            "ConSan MOI assigned persistent scalar " +
-            std::string(has_explicit_owner_epoch ? "" : "owner/epoch") +
-            std::string(needs_workgroup_key ? "/workgroup-key" : "") +
-            std::string(needs_record_replay_workgroup_tuple ? "/exact-workgroup-tuple" : "") +
-            " state to a proven-unused CDNA SGPR window below the "
-            "maximum guest reference" +
-            std::string(used_complete_text_summary ? " using complete-text coverage" : ""));
-        update.changed = true;
+        commit_exact_workgroup_scalar_state(
+            *persistent_hole,
+            " state to a proven-unused CDNA SGPR window below the maximum guest reference" +
+                std::string(used_complete_text_summary ? " using complete-text coverage" : ""));
         return update;
       }
       // Some full-pressure CDNA kernels leave independently proven holes in
