@@ -155,6 +155,9 @@ plan_inline_shadow_persistent_state_demand(const ConSanRequest &, const BoundRun
       .private_dispatch_incompatible_with_dynamic_stack =
           point.automatic_moi_private_dispatch_id && facts.has_operational_dynamic_stack_owner,
       .prefer_private_epoch_for_dynamic_lds = facts.has_operational_dynamic_lds_owner,
+      .scalar_state_supported = true,
+      .private_state_supported = true,
+      .scalar_state_required_for_private_or_overflow = facts.has_operational_dynamic_stack_owner,
   };
 }
 

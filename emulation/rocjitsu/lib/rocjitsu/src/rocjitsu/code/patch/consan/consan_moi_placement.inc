@@ -5919,9 +5919,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
       // conservative representation when it is legal across the complete
       // owner union; component-local VGPR growth remains the fallback when a
       // different owner makes the global scalar tail unavailable.
-      if (crosses_encoded_component_boundary &&
-          (request.moi_engine == ConSanMoiEngine::InlineShadow ||
-           request.moi_engine == ConSanMoiEngine::Sampled) &&
+      if (crosses_encoded_component_boundary && persistent_demand.scalar_state_supported &&
           !debug.test_force_private_epoch && !component_needs_persistent_dispatch_vgprs &&
           try_assign_scalar_persistent_state()) {
         update.changed = true;
@@ -5934,17 +5932,13 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
                   program_inventory.find_kernel_by_descriptor(descriptor_offset);
               return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
             });
-        if (!crosses_encoded_component_boundary &&
-            (request.moi_engine == ConSanMoiEngine::InlineShadow ||
-             request.moi_engine == ConSanMoiEngine::Sampled) &&
+        if (!crosses_encoded_component_boundary && persistent_demand.scalar_state_supported &&
             !debug.test_force_private_epoch && !component_needs_persistent_dispatch_vgprs &&
             try_assign_scalar_persistent_state()) {
           update.changed = true;
           return update;
         }
-        if ((request.moi_engine == ConSanMoiEngine::InlineShadow ||
-             request.moi_engine == ConSanMoiEngine::Sampled) &&
-            has_dynamic_stack_owner) {
+        if (persistent_demand.scalar_state_supported && has_dynamic_stack_owner) {
           update.rejection = ConSanMoiPlacementRejection::PersistentStateUnavailable;
           diagnostics.emplace_back(
               "ConSan MOI cannot place persistent scalar state (" + scalar_persistence_failure +
@@ -5954,13 +5948,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
               std::to_string(component_limit));
           return update;
         }
-        const bool supports_private_component =
-            !has_dynamic_stack_owner &&
-            (request.moi_engine == ConSanMoiEngine::InlineShadow ||
-             request.moi_engine == ConSanMoiEngine::RecordReplay ||
-             (request.moi_engine == ConSanMoiEngine::Sampled &&
-              request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId));
-        if (supports_private_component) {
+        if (!has_dynamic_stack_owner && persistent_demand.private_state_supported) {
           options.moi_initialize_owner_epoch = true;
           options.automatic_moi_private_epoch = true;
           assigned_private_component = true;
@@ -5972,7 +5960,9 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
           continue;
         }
         update.rejection = ConSanMoiPlacementRejection::PersistentStateUnavailable;
-        if (request.moi_engine == ConSanMoiEngine::Sampled && !scalar_persistence_failure.empty()) {
+        if (persistent_demand.scalar_state_supported &&
+            persistent_demand.prefer_private_epoch_for_descriptor_growth &&
+            !scalar_persistence_failure.empty()) {
           diagnostics.emplace_back(
               "ConSan MOI cannot place persistent scalar state (" + scalar_persistence_failure +
               ") or persistent VGPR state below a connected CDNA AccVGPR boundary");
@@ -6068,14 +6058,11 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
        persistent_demand.private_workgroup_tuple_supported) &&
       !persistent_demand.synchronization_requires_persistent_owner &&
       (persistent_demand.prefer_private_epoch_for_dynamic_lds ||
-       (would_grow_descriptor && request.moi_engine != ConSanMoiEngine::InlineShadow));
-  const bool rdna_needs_scalar_epoch = consan_uses_gfx11_or_gfx12_encoding(arch) &&
-                                       !debug.test_force_private_epoch &&
-                                       (request.moi_engine == ConSanMoiEngine::RecordReplay ||
-                                        ((request.moi_engine == ConSanMoiEngine::Sampled ||
-                                          request.moi_engine == ConSanMoiEngine::InlineShadow) &&
-                                         has_dynamic_stack_owner)) &&
-                                       (persistent_end > kMaxVgprs || prefer_private_epoch);
+       (would_grow_descriptor && persistent_demand.prefer_private_epoch_for_descriptor_growth));
+  const bool rdna_needs_scalar_epoch =
+      consan_uses_gfx11_or_gfx12_encoding(arch) && !debug.test_force_private_epoch &&
+      persistent_demand.scalar_state_required_for_private_or_overflow &&
+      (persistent_end > kMaxVgprs || prefer_private_epoch);
   if (rdna_needs_scalar_epoch) {
     const std::string rdna_arch_name = rj_code_arch_name(arch);
     if (needs_persistent_dispatch_vgprs) {
@@ -6101,8 +6088,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
       return update;
     }
     auto prologue_scratch = plan_moi_scalar_prologue_scratch(
-        scalar_state, *resolved_contexts,
-        /*needs_entry_vgpr_pair=*/request.moi_engine != ConSanMoiEngine::RecordReplay);
+        scalar_state, *resolved_contexts, persistent_demand.scalar_state_supported);
     if (!prologue_scratch) {
       if (has_dynamic_stack_owner)
         update.rejection = ConSanMoiPlacementRejection::PersistentStateUnavailable;

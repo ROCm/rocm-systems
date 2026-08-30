@@ -161,11 +161,19 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsPersistentStateDemand) {
   EXPECT_TRUE(demand.needs_persistent_state);
   EXPECT_TRUE(demand.prefer_compact_barriers);
   EXPECT_TRUE(demand.private_workgroup_tuple_supported);
+  EXPECT_FALSE(demand.scalar_state_supported);
+  EXPECT_TRUE(demand.private_state_supported);
+  EXPECT_TRUE(demand.scalar_state_required_for_private_or_overflow);
+  EXPECT_TRUE(demand.prefer_private_epoch_for_descriptor_growth);
 
   request.moi_engine = ConSanMoiEngine::Sampled;
   request.moi_track_barriers = false;
   demand = plan_moi_persistent_state_demand(request, resources, point, {});
   EXPECT_FALSE(demand.needs_persistent_state);
+  EXPECT_TRUE(demand.scalar_state_supported);
+  EXPECT_FALSE(demand.private_state_supported);
+  EXPECT_FALSE(demand.scalar_state_required_for_private_or_overflow);
+  EXPECT_TRUE(demand.prefer_private_epoch_for_descriptor_growth);
 
   demand = plan_moi_persistent_state_demand(request, resources, point, {.atomic_count = 1u});
   EXPECT_TRUE(demand.needs_entry_workgroup_tuple);
@@ -183,6 +191,10 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsPersistentStateDemand) {
   EXPECT_TRUE(demand.needs_persistent_state);
   EXPECT_TRUE(demand.private_dispatch_incompatible_with_dynamic_stack);
   EXPECT_TRUE(demand.prefer_private_epoch_for_dynamic_lds);
+  EXPECT_TRUE(demand.scalar_state_supported);
+  EXPECT_TRUE(demand.private_state_supported);
+  EXPECT_TRUE(demand.scalar_state_required_for_private_or_overflow);
+  EXPECT_FALSE(demand.prefer_private_epoch_for_descriptor_growth);
 }
 
 } // namespace

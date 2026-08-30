@@ -68,6 +68,10 @@ struct MoiPersistentStateDemand {
   bool private_workgroup_tuple_supported = false;
   bool private_dispatch_incompatible_with_dynamic_stack = false;
   bool prefer_private_epoch_for_dynamic_lds = false;
+  bool scalar_state_supported = false;
+  bool private_state_supported = false;
+  bool scalar_state_required_for_private_or_overflow = false;
+  bool prefer_private_epoch_for_descriptor_growth = false;
 };
 
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.

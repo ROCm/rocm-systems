@@ -173,6 +173,10 @@ MoiPersistentStateDemand plan_sampled_persistent_state_demand(
                                   request.moi_track_barriers ||
                                   request.moi_runtime_sample_stride > 1u;
   demand.synchronization_requires_persistent_owner = facts.atomic_count || facts.barrier_count;
+  demand.scalar_state_supported = true;
+  demand.private_state_supported = request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
+  demand.scalar_state_required_for_private_or_overflow = facts.has_operational_dynamic_stack_owner;
+  demand.prefer_private_epoch_for_descriptor_growth = true;
   return demand;
 }
 

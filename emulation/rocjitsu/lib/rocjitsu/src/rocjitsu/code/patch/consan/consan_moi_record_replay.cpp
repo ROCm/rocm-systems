@@ -168,6 +168,9 @@ MoiPersistentStateDemand plan_record_replay_persistent_state_demand(
   demand.prefer_compact_barriers = request.moi_track_barriers && facts.barrier_count &&
                                    (facts.barrier_count <= kCompactBarrierSiteLimit ||
                                     facts.access_count >= 2u * facts.barrier_count);
+  demand.private_state_supported = true;
+  demand.scalar_state_required_for_private_or_overflow = true;
+  demand.prefer_private_epoch_for_descriptor_growth = true;
   return demand;
 }
 
