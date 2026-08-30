@@ -195,6 +195,38 @@ static void acclFreeProxyStep(struct acclCommContext* ctx, struct acclProxyStepI
   acclCtxUnref(ctx);
 }
 
+// Charge `elapsed` to the bucket of the state the step was IN over that interval.
+// RCCL announces a proxy-step state on ENTRY (src/transport/net.cc:1783,1849,1877,
+// 2059,2092,2187), so the interval that just closed belongs to `state`, the
+// previously announced one, not to the state being entered.  See the note above
+// the switch in acclPluginRecordEventState.
+static void acclProxyStepChargeState(struct acclProxyStepInfo* step, int state, uint64_t elapsed) {
+  switch (state) {
+  case ncclProfilerProxyStepSendGPUWait:
+    step->gpuWaitUs += elapsed;
+    break;
+  case ncclProfilerProxyStepSendPeerWait_v4:
+    step->peerWaitUs += elapsed;
+    break;
+  case ncclProfilerProxyStepSendWait:
+    step->sendWaitUs += elapsed;
+    break;
+  case ncclProfilerProxyStepRecvWait:
+    step->recvWaitUs += elapsed;
+    break;
+  case ncclProfilerProxyStepRecvFlushWait:
+    step->flushWaitUs += elapsed;
+    break;
+  case ncclProfilerProxyStepRecvGPUWait:
+    step->gpuRecvWaitUs += elapsed;
+    break;
+  default:
+    // -1 before the first transition: the buffer-post/irecv-post interval that
+    // precedes it belongs to no named state, so it is deliberately dropped.
+    break;
+  }
+}
+
 // ============================================================================
 // Datatype size helper
 // ============================================================================
@@ -694,6 +726,7 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     step->step = eDescr->proxyStep.step;
     step->tsStartUs = acclGetTimeUs();
     step->lastStateTs = step->tsStartUs;
+    step->prevState = -1;
 
     *eHandle = step;
     return ncclSuccess;
@@ -786,6 +819,11 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
   if (type == ncclProfileProxyStep) {
     struct acclProxyStepInfo* step = (struct acclProxyStepInfo*)eHandle;
     step->tsStopUs = acclGetTimeUs();
+    // Close the last state: no further transition is announced, so the interval
+    // from the last transition to the stop belongs to the state still in effect
+    // (SendWait on the send side, RecvGPUWait on the recv side).
+    acclProxyStepChargeState(step, step->prevState, step->tsStopUs - step->lastStateTs);
+    step->prevState = -1;
 
     // Accumulate step timing into parent proxy op under lock
     struct acclProxyOpInfo* op = (struct acclProxyOpInfo*)step->parentObj;
@@ -826,30 +864,16 @@ __hidden ncclResult_t acclPluginRecordEventState(void* eHandle,
   // ProxyStep state transitions — accumulate time per state
   if (type == ncclProfileProxyStep) {
     struct acclProxyStepInfo* step = (struct acclProxyStepInfo*)eHandle;
+    // RCCL signals a proxy-step state when the step ENTERS it, so the interval
+    // that just closed was spent in step->prevState, not in eState.  Verified
+    // against the emission sites in src/transport/net.cc and against the
+    // reference consumer plugins/profiler/example, whose chrome-trace spans run
+    // ts(state) -> ts(next state) (print_event.cc:118-152).  The final interval
+    // is charged in the ProxyStep stop path.
     uint64_t now = acclGetTimeUs();
-    uint64_t elapsed = now - step->lastStateTs;
+    acclProxyStepChargeState(step, step->prevState, now - step->lastStateTs);
     step->lastStateTs = now;
-
-    switch ((int)eState) {
-    case ncclProfilerProxyStepSendGPUWait:
-      step->gpuWaitUs += elapsed;
-      break;
-    case ncclProfilerProxyStepSendPeerWait_v4:
-      step->peerWaitUs += elapsed;
-      break;
-    case ncclProfilerProxyStepSendWait:
-      step->sendWaitUs += elapsed;
-      break;
-    case ncclProfilerProxyStepRecvWait:
-      step->recvWaitUs += elapsed;
-      break;
-    case ncclProfilerProxyStepRecvFlushWait:
-      step->flushWaitUs += elapsed;
-      break;
-    case ncclProfilerProxyStepRecvGPUWait:
-      step->gpuRecvWaitUs += elapsed;
-      break;
-    }
+    step->prevState = (int)eState;
     return ncclSuccess;
   }
 

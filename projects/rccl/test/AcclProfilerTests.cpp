@@ -125,6 +125,14 @@ static std::string ReadProfilerOutput(const char* dir, const char* commHashHex) 
     return ss.str();
 }
 
+// Returns the numeric value of "key":<number> in `json`, or -1 if absent.
+static double JsonNumber(const std::string& json, const char* key) {
+    std::string needle = std::string("\"") + key + "\":";
+    size_t pos = json.find(needle);
+    if (pos == std::string::npos) return -1;
+    return strtod(json.c_str() + pos + needle.size(), nullptr);
+}
+
 // Fills a Coll event descriptor with the fields every lifecycle test needs.
 static void MakeCollDescr(ncclProfilerEventDescr_v5_t* d, uint8_t nChannels,
                           uint64_t seqNumber, size_t count) {
@@ -657,6 +665,104 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
             ASSERT_TRUE(std::getline(ifs, line));
             EXPECT_NE(line.find("\"n_proxy_ops\":1"), std::string::npos);
             EXPECT_NE(line.find("\"n_send_ops\":1"), std::string::npos);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// Proxy-step state attribution: RCCL announces a state on ENTRY, so the
+// interval between two announcements belongs to the FIRST of the two.
+// Charging it to the state being entered shifts every bucket by one, hiding
+// the real GPU wait under proxy_peer_wait_us and dropping the trailing
+// SendWait interval entirely.
+// =========================================================================
+TEST(AcclProfilerLifecycle, ProxyStepIntervalsChargedToStateBeingLeft) {
+    ScopedProfilerDir dir("stateattr");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.ProxyStepIntervalsChargedToStateBeingLeft",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xC3D4, &mask, "stateattr_test",
+                                     1, 2, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t collDescr;
+            MakeCollDescr(&collDescr, 1, 31, 256);
+            void* collHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
+
+            ncclProfilerEventDescr_v5_t kchDescr;
+            memset(&kchDescr, 0, sizeof(kchDescr));
+            kchDescr.type = ncclProfileKernelCh;
+            kchDescr.parentObj = collHandle;
+            kchDescr.kernelCh.channelId = 0;
+            kchDescr.kernelCh.pTimer = 5000000;
+            void* kchHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kchHandle, &kchDescr), 0);
+
+            ncclProfilerEventDescr_v5_t proxyDescr;
+            memset(&proxyDescr, 0, sizeof(proxyDescr));
+            proxyDescr.type = ncclProfileProxyOp;
+            proxyDescr.parentObj = collHandle;
+            proxyDescr.proxyOp.channelId = 0;
+            proxyDescr.proxyOp.peer = 1;
+            proxyDescr.proxyOp.nSteps = 1;
+            proxyDescr.proxyOp.isSend = 1;
+            void* proxyHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &proxyHandle, &proxyDescr), 0);
+
+            ncclProfilerEventDescr_v5_t stepDescr;
+            memset(&stepDescr, 0, sizeof(stepDescr));
+            stepDescr.type = ncclProfileProxyStep;
+            stepDescr.parentObj = proxyHandle;
+            stepDescr.proxyStep.step = 0;
+            void* stepHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &stepHandle, &stepDescr), 0);
+
+            // Mirror the send-side ordering in src/transport/net.cc: each state
+            // is announced as the step enters it, so the long sleep below is
+            // time spent waiting on the GPU, between SendGPUWait and
+            // SendPeerWait.
+            const int kLongUs = 40000;
+            const int kShortUs = 2000;
+            ASSERT_EQ(acclPluginRecordEventState(
+                stepHandle, ncclProfilerProxyStepSendGPUWait, nullptr), 0);
+            usleep(kLongUs);
+            ASSERT_EQ(acclPluginRecordEventState(
+                stepHandle, ncclProfilerProxyStepSendPeerWait_v4, nullptr), 0);
+            usleep(kShortUs);
+            ASSERT_EQ(acclPluginRecordEventState(
+                stepHandle, ncclProfilerProxyStepSendWait, nullptr), 0);
+            usleep(kShortUs);
+            ASSERT_EQ(acclPluginStopEvent(stepHandle), 0);
+
+            ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 5010000;
+            ASSERT_EQ(acclPluginRecordEventState(
+                kchHandle, ncclProfilerKernelChStop, &sa), 0);
+            ASSERT_EQ(acclPluginStopEvent(kchHandle), 0);
+            ASSERT_EQ(acclPluginStopEvent(proxyHandle), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string out = ReadProfilerOutput(dir.c_str(), "0xc3d4");
+            ASSERT_FALSE(out.empty()) << "no profiler output in " << dir.path();
+
+            // One proxy op, so the per-op divisor is 1 and the JSON values are
+            // the raw accumulated microseconds.
+            const double half = kLongUs / 2.0;
+            EXPECT_GT(JsonNumber(out, "proxy_gpu_wait_us"), half)
+                << "the GPU wait must land in proxy_gpu_wait_us, not the next "
+                   "bucket: " << out;
+            EXPECT_LT(JsonNumber(out, "proxy_peer_wait_us"), half)
+                << "proxy_peer_wait_us must not absorb the preceding GPU wait: "
+                << out;
+            // The interval after the last announced state is only recovered if
+            // the stop path closes it.
+            EXPECT_GT(JsonNumber(out, "proxy_network_us"), 0.0)
+                << "the trailing SendWait interval must not be dropped: " << out;
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
