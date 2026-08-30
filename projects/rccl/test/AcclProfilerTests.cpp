@@ -974,4 +974,111 @@ TEST(AcclProfilerSummary, PoolExhaustionIsCounted) {
     );
 }
 
+
+// =========================================================================
+// Context lifetime: a ProxyOp/ProxyStep handle must keep the context alive
+//
+// acclAllocProxyOp and acclAllocProxyStep hand out pointers INTO
+// acclCommContext (the pools are embedded by value) but take no reference on
+// it, so acclPluginFinalize can free the context while those handles are still
+// live. RCCL delivers proxy events from the proxy progress thread, which is
+// shared across communicators (comm->sharedRes), so a split-comm teardown can
+// finalize one context while events for it are still in flight.
+//
+// These are crash tests by construction: sizeof(acclCommContext) is ~4.4 MB,
+// which is far above glibc's 128 KB mmap threshold, so free() munmaps the
+// region and any later dereference of the handle is a hard SIGSEGV rather than
+// a silent read of stale bytes. The process-isolated runner reports the dead
+// child as a failure, so no sanitizer build is required to catch this.
+// =========================================================================
+TEST(AcclProfilerLifecycle, ProxyStepOutlivingFinalizeKeepsContextAlive) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.ProxyStepOutlivingFinalizeKeepsContextAlive",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xC7F1, &mask, "ctxref_step",
+                                     1, 1, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/1, /*count=*/1024);
+            void* collHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &cd), 0);
+            ASSERT_NE(collHandle, nullptr);
+
+            ncclProfilerEventDescr_v5_t od;
+            memset(&od, 0, sizeof(od));
+            od.type = ncclProfileProxyOp;
+            od.parentObj = collHandle;
+            od.proxyOp.channelId = 0;
+            od.proxyOp.peer = 1;
+            od.proxyOp.nSteps = 1;
+            od.proxyOp.isSend = 1;
+            void* opHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &opHandle, &od), 0);
+            ASSERT_NE(opHandle, nullptr);
+
+            ncclProfilerEventDescr_v5_t sd;
+            memset(&sd, 0, sizeof(sd));
+            sd.type = ncclProfileProxyStep;
+            sd.parentObj = opHandle;
+            sd.proxyStep.step = 0;
+            void* stepHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &stepHandle, &sd), 0);
+            ASSERT_NE(stepHandle, nullptr);
+
+            // The proxy op never stops, so nProxyOpsCompleted stays below
+            // nProxyOpsStarted and the collective cannot finalize here. Its slot
+            // is still in use when finalize runs, which is the teardown-orphan
+            // shape the drain exists to handle.
+            ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            // stepHandle points into ctx->proxyStepPool. If finalize freed the
+            // context, this dereferences unmapped memory and the child dies.
+            EXPECT_EQ(acclPluginStopEvent(stepHandle), 0)
+                << "ProxyStep stop after finalize must not touch a freed context";
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_ctxref_step"}}
+    );
+}
+
+TEST(AcclProfilerLifecycle, ProxyOpOutlivingFinalizeKeepsContextAlive) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.ProxyOpOutlivingFinalizeKeepsContextAlive",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xC7F2, &mask, "ctxref_op",
+                                     1, 1, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/2, /*count=*/1024);
+            void* collHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &cd), 0);
+            ASSERT_NE(collHandle, nullptr);
+
+            ncclProfilerEventDescr_v5_t od;
+            memset(&od, 0, sizeof(od));
+            od.type = ncclProfileProxyOp;
+            od.parentObj = collHandle;
+            od.proxyOp.channelId = 0;
+            od.proxyOp.peer = 1;
+            od.proxyOp.nSteps = 1;
+            od.proxyOp.isSend = 1;
+            void* opHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &opHandle, &od), 0);
+            ASSERT_NE(opHandle, nullptr);
+
+            ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            // opHandle points into ctx->proxyOpPool. Same contract as above.
+            EXPECT_EQ(acclPluginStopEvent(opHandle), 0)
+                << "ProxyOp stop after finalize must not touch a freed context";
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_ctxref_op"}}
+    );
+}
+
 } // namespace RcclUnitTesting
