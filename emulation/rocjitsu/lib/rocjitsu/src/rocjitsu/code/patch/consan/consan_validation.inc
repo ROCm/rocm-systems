@@ -1467,6 +1467,39 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
            (relay_vertices.contains(static_cast<uint64_t>(target)) ||
             island_vertices.contains(static_cast<uint64_t>(target)));
   };
+  const auto validate_relay_payload = [&](uint64_t begin, uint64_t end, std::string_view shape_name,
+                                          uint64_t report_offset, uint64_t report_size) {
+    bool has_used_payload = false;
+    for (uint64_t offset = begin; offset < end; offset += sizeof(uint32_t)) {
+      const auto word = read_word(replacement_text, offset);
+      if (!word) {
+        errors.emplace_back("ConSan relay reservoir proof found a missing payload word");
+        return false;
+      }
+      if (*word == nop)
+        continue;
+      if ((*word & 0xffff0000u) != branch_opcode) {
+        errors.emplace_back("ConSan relay reservoir proof found an invalid relay payload");
+        return false;
+      }
+      const int64_t target =
+          static_cast<int64_t>(offset) + sizeof(uint32_t) +
+          static_cast<int64_t>(static_cast<int16_t>(*word & 0xffffu)) * sizeof(uint32_t);
+      if (!valid_relay_target(offset, target)) {
+        errors.emplace_back("ConSan relay reservoir proof found an invalid relay target from " +
+                            std::to_string(offset) + " to " + std::to_string(target));
+        return false;
+      }
+      has_used_payload = true;
+    }
+    if (!has_used_payload) {
+      errors.emplace_back("ConSan relay reservoir proof found an unused reservoir (" +
+                          std::string(shape_name) + ") at " + std::to_string(report_offset) +
+                          " with " + std::to_string(report_size) + " bytes");
+      return false;
+    }
+    return true;
+  };
 
   for (const ConSanPatchInfo *patch : reservoirs) {
     const BranchRelayReservoirShape shape = branch_relay_reservoir_shape(*patch);
@@ -1478,35 +1511,9 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
         errors.emplace_back("ConSan relay reservoir proof found invalid generated-bank geometry");
         return errors;
       }
-      bool has_used_payload = false;
-      for (uint64_t offset = patch->trampoline_offset;
-           offset < patch->trampoline_offset + patch->trampoline_size; offset += sizeof(uint32_t)) {
-        const auto word = read_word(replacement_text, offset);
-        if (!word) {
-          errors.emplace_back("ConSan relay reservoir proof found a missing payload word");
-          return errors;
-        }
-        if (*word == nop)
-          continue;
-        if ((*word & 0xffff0000u) != branch_opcode) {
-          errors.emplace_back("ConSan relay reservoir proof found an invalid relay payload");
-          return errors;
-        }
-        const int64_t target =
-            static_cast<int64_t>(offset) + sizeof(uint32_t) +
-            static_cast<int64_t>(static_cast<int16_t>(*word & 0xffffu)) * sizeof(uint32_t);
-        if (!valid_relay_target(offset, target)) {
-          errors.emplace_back("ConSan relay reservoir proof found an invalid relay target from " +
-                              std::to_string(offset) + " to " + std::to_string(target));
-          return errors;
-        }
-        has_used_payload = true;
-      }
-      if (!has_used_payload) {
-        errors.emplace_back(
-            "ConSan relay reservoir proof found an unused reservoir (generated) at " +
-            std::to_string(patch->trampoline_offset) + " with " +
-            std::to_string(patch->trampoline_size) + " bytes");
+      if (!validate_relay_payload(patch->trampoline_offset,
+                                  patch->trampoline_offset + patch->trampoline_size, "generated",
+                                  patch->trampoline_offset, patch->trampoline_size)) {
         return errors;
       }
       continue;
@@ -1603,34 +1610,9 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
         errors.emplace_back("ConSan relay reservoir proof found a corrupted direct execution path");
         return errors;
       }
-      bool has_used_payload = false;
-      for (uint64_t offset = patch->anchor_offset + sizeof(uint32_t);
-           offset < patch->anchor_offset + patch->original_size; offset += sizeof(uint32_t)) {
-        const auto word = read_word(replacement_text, offset);
-        if (!word) {
-          errors.emplace_back("ConSan relay reservoir proof found a missing payload word");
-          return errors;
-        }
-        if (*word == nop)
-          continue;
-        if ((*word & 0xffff0000u) != branch_opcode) {
-          errors.emplace_back("ConSan relay reservoir proof found an invalid relay payload");
-          return errors;
-        }
-        const int64_t target =
-            static_cast<int64_t>(offset) + sizeof(uint32_t) +
-            static_cast<int64_t>(static_cast<int16_t>(*word & 0xffffu)) * sizeof(uint32_t);
-        if (!valid_relay_target(offset, target)) {
-          errors.emplace_back("ConSan relay reservoir proof found an invalid relay target from " +
-                              std::to_string(offset) + " to " + std::to_string(target));
-          return errors;
-        }
-        has_used_payload = true;
-      }
-      if (!has_used_payload) {
-        errors.emplace_back("ConSan relay reservoir proof found an unused reservoir (direct) at " +
-                            std::to_string(patch->anchor_offset) + " with " +
-                            std::to_string(patch->original_size) + " bytes");
+      if (!validate_relay_payload(patch->anchor_offset + sizeof(uint32_t),
+                                  patch->anchor_offset + patch->original_size, "direct",
+                                  patch->anchor_offset, patch->original_size)) {
         return errors;
       }
       continue;
@@ -1676,36 +1658,10 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
       errors.emplace_back("ConSan relay reservoir proof found a corrupted normal execution path");
       return errors;
     }
-    bool has_used_payload = false;
-    for (uint64_t offset = patch->anchor_offset + kScRelayEntryWords * sizeof(uint32_t);
-         offset <
-         patch->anchor_offset + patch->original_size - kScRelayTailRestoreWords * sizeof(uint32_t);
-         offset += sizeof(uint32_t)) {
-      const auto word = read_word(replacement_text, offset);
-      if (!word) {
-        errors.emplace_back("ConSan relay reservoir proof found a missing payload word");
-        return errors;
-      }
-      if (*word == nop)
-        continue;
-      if ((*word & 0xffff0000u) != branch_opcode) {
-        errors.emplace_back("ConSan relay reservoir proof found an invalid relay payload");
-        return errors;
-      }
-      const int64_t target =
-          static_cast<int64_t>(offset) + sizeof(uint32_t) +
-          static_cast<int64_t>(static_cast<int16_t>(*word & 0xffffu)) * sizeof(uint32_t);
-      if (!valid_relay_target(offset, target)) {
-        errors.emplace_back("ConSan relay reservoir proof found an invalid relay target from " +
-                            std::to_string(offset) + " to " + std::to_string(target));
-        return errors;
-      }
-      has_used_payload = true;
-    }
-    if (!has_used_payload) {
-      errors.emplace_back("ConSan relay reservoir proof found an unused reservoir (displaced) at " +
-                          std::to_string(patch->anchor_offset) + " with " +
-                          std::to_string(patch->original_size) + " bytes");
+    if (!validate_relay_payload(patch->anchor_offset + kScRelayEntryWords * sizeof(uint32_t),
+                                patch->anchor_offset + patch->original_size -
+                                    kScRelayTailRestoreWords * sizeof(uint32_t),
+                                "displaced", patch->anchor_offset, patch->original_size)) {
       return errors;
     }
   }
