@@ -542,19 +542,12 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
       saw_unassigned_owner = true;
       continue;
     }
-    if (selected &&
-        (selected->exec_save_sgpr != assignment->exec_save_sgpr ||
-         selected->owner_sgpr != assignment->owner_sgpr ||
-         selected->dispatch_id_sgpr != assignment->dispatch_id_sgpr ||
-         selected->spill_backed != assignment->spill_backed ||
-         selected->indirect_pc_sgpr != assignment->indirect_pc_sgpr ||
-         selected->indirect_scc_sgpr != assignment->indirect_scc_sgpr ||
-         selected->dispatch_key_sgpr != assignment->dispatch_key_sgpr ||
-         selected->call_return_sgpr != assignment->call_return_sgpr ||
-         selected->visible_evidence_sgpr != assignment->visible_evidence_sgpr ||
-         selected->branch_only_scalar_spill != assignment->branch_only_scalar_spill ||
-         selected->dynamic_stack_borrowed_sgpr != assignment->dynamic_stack_borrowed_sgpr))
-      return false;
+    if (selected) {
+      ConSanMoiTransientSgprAssignment comparable = *assignment;
+      comparable.descriptor_file_offset = selected->descriptor_file_offset;
+      if (comparable != *selected)
+        return false;
+    }
     selected = assignment;
   }
   if (!selected) {
