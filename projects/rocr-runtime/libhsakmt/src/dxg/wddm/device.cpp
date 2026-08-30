@@ -340,19 +340,16 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
     return HSA_STATUS_ERROR;
 
   if (dxg_runtime->wddm_version < KMT_DRIVERVERSION_WDDM_3_1 && IsDgpu()) {
-    if (!d3dthunk::QueryVideoMemoryInfoAvailable())
-      return HSA_STATUS_ERROR;
+    if (!d3dthunk::QueryVideoMemoryInfoAvailable()) return HSA_STATUS_ERROR;
 
     D3DKMT_QUERYVIDEOMEMORYINFO info = {};
     info.hAdapter = adapter_;
     info.MemorySegmentGroup = D3DKMT_MEMORY_SEGMENT_GROUP_LOCAL;
     info.PhysicalAdapterIndex = 0;
 
-    if (d3dthunk::QueryVideoMemoryInfo(&info) != ErrorCode::Success)
-      return HSA_STATUS_ERROR;
+    if (d3dthunk::QueryVideoMemoryInfo(&info) != ErrorCode::Success) return HSA_STATUS_ERROR;
 
-    *available_bytes =
-        AvailableVramBudget(info.Budget, info.CurrentUsage, VramTotal());
+    *available_bytes = AvailableVramBudget(info.Budget, info.CurrentUsage, VramTotal());
     return HSA_STATUS_SUCCESS;
   }
 

@@ -31,8 +31,7 @@ namespace {
 int failures = 0;
 
 void ExpectEqual(uint64_t actual, uint64_t expected) {
-  if (actual == expected)
-    return;
+  if (actual == expected) return;
 
   std::cerr << "expected " << expected << ", got " << actual << '\n';
   ++failures;
