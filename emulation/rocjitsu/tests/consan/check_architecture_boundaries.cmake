@@ -356,7 +356,7 @@ _consan_assert_no_match(
     "plan_consan_(record_replay|sampled|inline_shadow)_evidence"
     "the common pipeline must compose mode-owned evidence planning through the mode registry"
 )
-foreach(_file IN LISTS _consan_sources)
+foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_file}"
         "plan_consan_(record_replay|sampled|inline_shadow)_evidence"
