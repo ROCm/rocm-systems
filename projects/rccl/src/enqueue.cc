@@ -3868,8 +3868,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
       }
 
-      // Size gate for CE AllReduce without symmetric memory registration: ceARTmpBuf is sized for at most
-      // comm->ceColl.ceArMaxBytes total bytes.
+      // Size gate for unregistered (2-shot) CE AllReduce: table/env cap, then
+      // the allocated staging buffer (grown above the default if 2-shot asked).
       bool ceAllReduceFits = false;
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
@@ -3890,11 +3890,12 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
             (info->count % (size_t)comm->nRanks != 0) || !rcclParamCeAllReduce()) {
           ceAvailable = false;
         } else if (ceAllReduceOpSupported) {
-          // check if we want to force CE AllReduce without symmetric window registration
-          // msgsize needs to be less than or equal to comm->ceColl.ceArMaxBytes
+          // Unregistered 2-shot: table/env cap of 0 disables it; otherwise the
+          // message must fit the 2-shot window and the allocated buffer.
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          if (totalBytes > comm->ceColl.ceArMaxBytes || !rcclParamForceCeAllReduce() ||
-              !comm->symmetricSupport || comm->nNodes > 1) {
+          const size_t twoShotMax = rcclCeAr2ShotMax(comm);
+          if (twoShotMax == 0 || totalBytes > twoShotMax || totalBytes > comm->ceColl.ceArMaxBytes ||
+              !rcclParamForceCeAllReduce() || !comm->symmetricSupport || comm->nNodes > 1) {
             ceAllReduceFits = false;
           } else {
             ceAllReduceFits = true;

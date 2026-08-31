@@ -18,8 +18,12 @@
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
 #define RCCL_CE_NUM_COPY_STREAMS 8
 
-// Default is <= 256 MiB (holds NUM_SLOTS * nRanks chunks (2 scatter slots),
-// and the reduced output goes to the user recvbuff)
+// Default ceARTmpBuf capacity. Independent of the 2-shot table cap
+// (ceNonRegMax[AllReduce]): registered CE always needs a staging buffer, and
+// 2-shot only grows this when its table/env size exceeds the default.
+#ifndef NCCL_CE_AR_TMPBUF_DEFAULT_BYTES
+#define NCCL_CE_AR_TMPBUF_DEFAULT_BYTES (256ULL * 1024 * 1024)
+#endif
 
 #ifndef NCCL_CE_REDUCE_MAX_BLOCKS
 #define NCCL_CE_REDUCE_MAX_BLOCKS 46
@@ -79,7 +83,7 @@ struct ncclCeColl {
   // The reduced result is written straight into the user recvbuff (no scratch).
   uint8_t* ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
-  size_t ceArMaxBytes;   // 2-shot staging cap, resolved at init: env > arch ceArMax
+  size_t ceArMaxBytes;   // allocated ceARTmpBuf capacity (default, grown if 2-shot cap is larger)
   uint32_t* signalBuffer;
   struct ncclDevrWindow* signalWin;
   // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.

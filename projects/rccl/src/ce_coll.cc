@@ -105,10 +105,13 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclWindow_vidmem* arWinDevHost = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
-  static int64_t paramMax = rcclParamCeArMaxMsgBytes();
-  static constexpr size_t kCeArMaxDefault = 256ULL * 1024 * 1024;
-  comm->ceColl.ceArMaxBytes = (paramMax >= 0) ? (size_t)paramMax
-      : (comm->archThresholds != nullptr ? comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] : kCeArMaxDefault);
+  // Staging capacity is independent of the 2-shot table cap. Always allocate
+  // the default so registered CE has a workspace; grow only when 2-shot asks
+  // for more than the default (table or RCCL_CE_AR_MAX_MSG_BYTES).
+  const size_t twoShotMax = rcclCeAr2ShotMax(comm);
+  size_t stagingBytes = NCCL_CE_AR_TMPBUF_DEFAULT_BYTES;
+  if (twoShotMax > stagingBytes) stagingBytes = twoShotMax;
+  comm->ceColl.ceArMaxBytes = stagingBytes;
   size_t maxChunkBytes = comm->ceColl.ceArMaxBytes / (size_t)comm->nRanks;
   size_t ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
   int i = 0;
@@ -173,6 +176,8 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
 
   // CE AllReduce staging buffer (double-buffered scatter staging, no scratch):
   //   [slot 0: nRanks chunks][slot 1: nRanks chunks].
+  // Always allocated when CE AllReduce is enabled: registered CE pipelines
+  // through this buffer even when 2-shot is table-disabled (twoShotMax == 0).
   if (rcclParamCeAllReduce()) {
     NCCLCHECKGOTO(ncclMemAlloc((void**)&ceARTmpBuf, ceARTmpBufSize), ret, fail_ar);
     NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceARTmpBuf, ceARTmpBufSize, NCCL_WIN_COLL_SYMMETRIC, &arWinDev),
@@ -2011,7 +2016,8 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
     break;
   case ncclFuncAllReduce:
       // CE init runs (in ncclCommGroupRegisterSymmetric) before doLaunches, so
-      // ceARTmpBuf is guaranteed non-NULL by the time we get here.
+      // ceARTmpBuf is allocated whenever RCCL_CE_ALLREDUCE is on -- including
+      // when 2-shot is table-disabled, because registered CE still stages here.
     if (comm->ceColl.ceARTmpBuf == NULL) {
       WARN("CE AllReduce invoked before CE init; this should not happen");
       ret = ncclInvalidUsage;
