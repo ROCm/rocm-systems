@@ -328,7 +328,7 @@ struct ElfHarness {
   ElfHarness(const ElfHarness&) = delete;
   ElfHarness& operator=(const ElfHarness&) = delete;
 
-  // Confirm the kernel actually ran; otherwise the numbers time a no-op dispatch.
+  // Confirm the kernel ran; otherwise the numbers time a no-op dispatch.
   // Input is [1..N], so element i must come back as i + 2.
   bool verify() const {
     for (auto* out : outputs) {

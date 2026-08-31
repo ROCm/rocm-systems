@@ -1625,7 +1625,7 @@ TEST_F(FullElfDispatchTest, ElfParseRejectsSecondPdiPatchSite) {
 
 TEST_F(FullElfDispatchTest, ElfWriteControlCodeChecksItsInputs) {
   // The arguments live in the control code rather than in the packet, so nothing downstream can
-  // notice a short argument list -- the dispatch would just run against whatever the ELF's
+  // notice a short argument list -- the dispatch would run against whatever the ELF's
   // placeholder happened to be. The check has to happen here.
   std::vector<std::uint8_t> scratch(kernel.ctrl_code.size());
   const std::vector<std::uint64_t> args(kernel.num_args(), 0x1000);
@@ -1881,8 +1881,8 @@ TEST_F(FullElfDispatchTest, ElfNoPdiCeiling) {
 // As written they assume a rejected dispatch (a) does not abort, (b) releases its
 // completion signal so a waiter wakes, and (c) leaves the output buffer untouched.
 // If the runtime settles on different semantics -- an error callback, say -- these
-// assertions are the part to adjust; what they are really pinning down is that a
-// bad packet is refused rather than executed.
+// assertions are the part to adjust; they pin down that a bad packet is refused
+// rather than executed.
 // ===========================================================================
 #ifdef ROCRTST_AIE_ASYNC_ERROR_REPORTING
 

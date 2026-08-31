@@ -45,7 +45,7 @@ enum class PatchScheme : std::uint32_t {
   kAddress64 = 8,
 };
 
-/// Highest argument index this reader accepts. A kernel argument list is short; the bound just
+/// Highest argument index this reader accepts. A kernel argument list is short; the bound
 /// keeps a malformed symbol name from being used to size a vector.
 inline constexpr std::uint32_t kMaxArgIndex = 4095;
 
@@ -68,7 +68,7 @@ struct Kernel {
   // Patch sites per argument index. Entries may be empty for unused arguments.
   std::vector<std::vector<PatchSite>> arg_sites;
 
-  // Number of arguments the control code actually references.
+  // Number of arguments the control code references.
   std::uint32_t num_args() const { return static_cast<std::uint32_t>(arg_sites.size()); }
 };
 
@@ -375,7 +375,7 @@ inline std::map<std::string, Kernel> ParseFile(const std::string& path) {
 }
 
 // Folds a buffer address into a shim DMA buffer descriptor, the scheme the NPU firmware defines.
-// Note this *adds* to the descriptor already in place, so it must only ever be applied to a
+// This *adds* to the descriptor already in place, so it must only ever be applied to a
 // pristine copy of the control code -- see WriteControlCode.
 inline void PatchShimDma48(std::uint32_t* site, std::uint64_t addr) {
   constexpr std::uint64_t kDdrAieAddrOffset = 0x80000000;

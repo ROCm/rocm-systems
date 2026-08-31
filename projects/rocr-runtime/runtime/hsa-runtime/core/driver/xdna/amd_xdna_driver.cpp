@@ -635,7 +635,7 @@ static bool IsDevHeapVA(const void* heap_base, const void* vaddr) {
 
 /// @brief Destroys @p bo_handle.
 ///
-/// @note This function will unmap the virtual address and close the BO, even if the former fails.
+/// @note Unmaps the virtual address and closes the BO, even if the former fails.
 ///
 /// @param[in] fd driver file descriptor
 /// @param[in] heap_base base of the device heap mapping, which dev heap BOs borrow
@@ -1464,7 +1464,6 @@ static hsa_status_t BuildPdiInstsCommand(int fd, const void* heap_base, const vo
     return err;
   }
 
-  // Create command for the kernel.
   const uint32_t cmd_dwords = (1 +  // CU mask
                                2 +  // txn opcode
                                3 +  // instruction sequence (address lo/hi + size)
@@ -1590,7 +1589,6 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base, const voi
     return err;
   }
 
-  // Create command for the kernel.
   const uint32_t cmd_dwords = 1 +  // CU mask
       sizeof(ert_npu_preempt_data) / sizeof(uint32_t) + ELF_CMD_ARG_DWORDS;
   ert_start_kernel_cmd* cmd = nullptr;
@@ -1647,8 +1645,8 @@ static const char* ErtStateName(uint32_t state) {
 
 /// @brief Reports which command in a failed chain went wrong.
 ///
-/// The firmware records how far it got in the chain itself. Without this a failed chain is just a
-/// status code: the caller cannot tell whether the first command was malformed, whether the chain
+/// The firmware records how far it got in the chain itself. Without this a failed chain is only
+/// a status code: the caller cannot tell whether the first command was malformed, whether the chain
 /// was too long, or whether one dispatch in the middle timed out.
 static void LogChainFailure(const volatile ert_start_kernel_cmd* chain_cmd,
                             const volatile ert_cmd_chain_data* chain, const BOHandle* cmd_bos,
@@ -1659,7 +1657,7 @@ static void LogChainFailure(const volatile ert_start_kernel_cmd* chain_cmd,
   // error_index comes from the device, so it is only trustworthy as an index once it has been
   // checked against the chain this code built. Both indices stay zero if the firmware failed
   // before it got as far as recording them, so they are reported as its claim, not as fact.
-  // Note the firmware updates the chain command's state but not each sub-command's, so a
+  // The firmware updates the chain command's state but not each sub-command's, so a
   // sub-command that never ran still reads 'new'.
   const char* failed_state = "unavailable";
   if (error_index < num_commands) {
