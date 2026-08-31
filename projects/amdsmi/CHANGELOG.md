@@ -18,6 +18,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - When the amdgpu DPM tables (`pp_dpm_vclk`/`pp_dpm_dclk`) expose the power-gated floor as a deep-sleep (`S:`) entry, that frequency was read only for the deep-sleep flag and left out of the min/max scan, so `min_clk` collapsed onto the nominal clock (for example 2100 MHz VCLK / 1700 MHz DCLK). The deep-sleep frequency is now folded into `min_clk`, so it reflects the true achievable floor (for example ~66 MHz VCLK / ~53 MHz DCLK).
   - `DEEP_SLEEP` in `amd-smi metric --clock` is now taken from the driver's `clk_deep_sleep` flag instead of being inferred from `clk < min_clk`. The old heuristic only reported `ENABLED` because `min_clk` was inflated; with the corrected `min_clk` it would have flipped to `DISABLED` even while the clock was parked at its deep-sleep floor.
 
+- **Fixed `amdsmi_get_clock_info()` returning a frequency in the `clk_deep_sleep` True/False field**.  
+  - `clk_deep_sleep` was assigned the deep-sleep frequency truncated to 8 bits, so it reported values such as `255` (no deep-sleep state at all) or `26` instead of `0`/`1`. Every clock domain on every GPU was affected. It is now `1` only when the domain reports a deep-sleep floor, and `0` otherwise.
+
 - **Fixed `amd-smi ras --afid --folder --json` emitting nothing when no CPER files are readable**.  
   - When every `.cper` file in the folder was skipped (e.g. rejected as a symlink), the JSON path printed empty output, so consumers feeding stdout to `json.loads` failed with `Expecting value: line 1 column 1 (char 0)`. It now emits `[]` for that case, matching the `--cper --json` contract.
 
