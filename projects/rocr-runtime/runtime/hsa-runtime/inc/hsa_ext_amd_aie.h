@@ -141,9 +141,44 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
   void* pdi_addr;
 
   /**
-   * Reserved. Must be 0.
+   * Byte offset into the instruction sequence at which the runtime writes the 64-bit device
+   * address of ::pdi_addr, or 0 if the instruction sequence needs no such patch.
+   *
+   * This field selects between the two shapes a dispatch can take:
+   *
+   * - **0 -- PDI plus instruction sequence.** ::insts_addr_low / ::insts_addr_high point at a
+   *   standalone instruction sequence, ::pdi_addr at the PDI that configures the array for it,
+   *   and the hardware patches the arguments in ::kernarg_address into the instruction sequence
+   *   as it runs.
+   *
+   * - **Non-zero -- full ELF.** ::insts_addr_low / ::insts_addr_high point at the control code
+   *   of a full-ELF kernel, which loads its own PDI rather than relying on the array having been
+   *   configured out of band. Supported only on aie2p agents, which report "aie2p" for
+   *   ::HSA_AGENT_INFO_NAME.
+   *
+   *   The application extracts the control code and the PDI from the ELF and allocates both from
+   *   the agent's device memory pool. Neither has to sit at the start of its allocation, but the
+   *   control code must be 16 KiB aligned; a misaligned one is rejected. The PDI has no alignment
+   *   requirement beyond what the pool already gives it.
+   *
+   *   The application also patches its argument addresses into the control code before
+   *   enqueuing, using the relocations in the ELF. The arguments are not passed to the hardware
+   *   in this shape, so two dispatches with different arguments need two control-code buffers --
+   *   including two dispatches in the same batch. ::kernarg_address and ::num_kernargs must
+   *   still list the argument buffers: the runtime does not patch them, but it needs them to
+   *   keep the buffers resident and to maintain their caches around the dispatch.
+   *
+   *   The one address the application cannot know is the PDI's device address, so it passes the
+   *   offset of that patch site here and the runtime writes it. Take the offset from the ELF's
+   *   relocation against the PDI section. It is never 0 for a real full-ELF kernel, because the
+   *   control code begins with a transaction header.
+   *
+   * A queue is homogeneous: the shape of the first packet submitted on a queue fixes it for that
+   * queue's lifetime, and a later packet of the other shape is rejected. The two shapes need
+   * incompatible hardware context configurations, and a hardware context's compute unit
+   * configuration cannot be changed once set.
    */
-  uint64_t reserved4;
+  uint64_t pdi_patch_offset;
 } hsa_amd_aie_kernel_dispatch_packet_t;
 
 /** @} */

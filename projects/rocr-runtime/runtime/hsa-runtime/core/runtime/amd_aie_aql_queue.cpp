@@ -93,7 +93,10 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
   signal_.queue_ptr = &amd_queue_;
 
   auto& driver = static_cast<XdnaDriver&>(agent->driver());
-  hsa_status_t err = driver.CreateKernelModeQueue(req_size_pkts, &kmq_metadata_);
+  // The driver derives a column count from this by dividing by the number of core rows, so
+  // anything smaller than one row's worth of tiles asks for zero columns and is rejected.
+  hsa_status_t err = driver.CreateKernelModeQueue(req_size_pkts, agent->properties().NumNeuralCores,
+                                                  &kmq_metadata_);
   if (err != HSA_STATUS_SUCCESS) {
     throw hsa_exception(err, "Failed to create KMQ metadata for the AIE queue.");
   }
