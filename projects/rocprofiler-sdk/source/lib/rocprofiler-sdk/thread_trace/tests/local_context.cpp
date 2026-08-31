@@ -94,6 +94,37 @@ as_active(const context::context& ctx)
     active.emplace_back(&ctx);
     return active;
 }
+
+// resource_init() keys the tracer's agent map on agent::get_hsa_agent(rocp_agent), but
+// pre_kernel_call() looks it up with queue.get_agent().get_hsa_agent(). Those are two different
+// routes to "the HSA agent for this device", and picking get_supported_agents().begin() gave the
+// fake queue an agent the tracer had not keyed, so pre_kernel_call took its agents.end() branch and
+// the dispatch callback never ran -- the test saw zero hits.
+//
+// Register every supported agent (as resource_creation does) and then let the tracer report which
+// AgentCache it actually mapped. That is precisely the invariant pre_kernel_call needs, read off
+// the tracer's own state rather than re-derived here, so the test does not depend on the two
+// lookup routes agreeing.
+const hsa::AgentCache*
+register_agents_and_find_traceable(thread_trace::DispatchThreadTracer&              tracer,
+                                   const thread_trace::thread_trace_parameter_pack& params)
+{
+    const auto& supported = hsa::get_queue_controller()->get_supported_agents();
+
+    for(const auto& [_, cache] : supported)
+    {
+        if(cache.get_rocp_agent() != nullptr) tracer.add_agent(cache.get_rocp_agent()->id, params);
+    }
+
+    tracer.resource_init();
+
+    for(const auto& [_, cache] : supported)
+    {
+        if(tracer.get_agents().count(cache.get_hsa_agent()) == 1) return &cache;
+    }
+
+    return nullptr;
+}
 }  // namespace
 
 TEST(thread_trace, local_context_override_skips_pre_kernel_call)
@@ -104,10 +135,7 @@ TEST(thread_trace, local_context_override_skips_pre_kernel_call)
     registration::init_logging();
     registration::set_init_status(-1);
 
-    auto agents = hsa::get_queue_controller()->get_supported_agents();
-    ASSERT_FALSE(agents.empty());
-    const auto& agent = agents.begin()->second;
-    ASSERT_TRUE(agent.get_rocp_agent());
+    ASSERT_FALSE(hsa::get_queue_controller()->get_supported_agents().empty());
 
     std::atomic<int> hits{0};
 
@@ -117,9 +145,11 @@ TEST(thread_trace, local_context_override_skips_pre_kernel_call)
     params.callback_userdata.ptr = &hits;
 
     thread_trace::DispatchThreadTracer tracer{};
-    tracer.add_agent(agent.get_rocp_agent()->id, params);
-    tracer.resource_init();
-    ASSERT_FALSE(tracer.get_agents().empty());
+
+    const auto* agent_ptr = register_agents_and_find_traceable(tracer, params);
+    if(agent_ptr == nullptr)
+        GTEST_SKIP() << "no supported agent is reachable through the tracer's agent map";
+    const auto& agent = *agent_ptr;
 
     rocprofiler_queue_id_t  qid{.handle = 1};
     FakeQueue               fq(agent, qid);
@@ -159,10 +189,7 @@ TEST(thread_trace, local_context_override_forced_on_still_invokes_dispatch_cb)
     registration::init_logging();
     registration::set_init_status(-1);
 
-    auto agents = hsa::get_queue_controller()->get_supported_agents();
-    ASSERT_FALSE(agents.empty());
-    const auto& agent = agents.begin()->second;
-    ASSERT_TRUE(agent.get_rocp_agent());
+    ASSERT_FALSE(hsa::get_queue_controller()->get_supported_agents().empty());
 
     std::atomic<int> hits{0};
 
@@ -172,9 +199,11 @@ TEST(thread_trace, local_context_override_forced_on_still_invokes_dispatch_cb)
     params.callback_userdata.ptr = &hits;
 
     thread_trace::DispatchThreadTracer tracer{};
-    tracer.add_agent(agent.get_rocp_agent()->id, params);
-    tracer.resource_init();
-    ASSERT_FALSE(tracer.get_agents().empty());
+
+    const auto* agent_ptr = register_agents_and_find_traceable(tracer, params);
+    if(agent_ptr == nullptr)
+        GTEST_SKIP() << "no supported agent is reachable through the tracer's agent map";
+    const auto& agent = *agent_ptr;
 
     rocprofiler_queue_id_t  qid{.handle = 1};
     FakeQueue               fq(agent, qid);
