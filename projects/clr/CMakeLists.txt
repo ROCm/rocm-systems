@@ -42,6 +42,7 @@ endif()
 
 option(CLR_BUILD_HIP "Build HIP" OFF)
 option(CLR_BUILD_OCL "Build OCL" OFF)
+option(CLR_BUILD_ELFIO_TESTS "Build CLR ELFIO regression tests" OFF)
 option(USE_NEW_HOSTCALL_IMPL
   "Use the new phase/occupancy-based hostcall implementation" OFF)
 
@@ -127,6 +128,10 @@ if((CLR_BUILD_HIP AND HIP_PLATFORM STREQUAL "amd") OR CLR_BUILD_OCL)
     add_subdirectory(rocclr)
 elseif(HIP_PLATFORM STREQUAL "amd")
     message(FATAL_ERROR "Please enable building of one or more of the below runtimes:\n- HIP (-DCLR_BUILD_HIP=ON)\n- OpenCL (-DCLR_BUILD_OCL-ON)")
+endif()
+if(CLR_BUILD_ELFIO_TESTS)
+    enable_testing()
+    add_subdirectory(rocclr/elf/tests)
 endif()
 if(CLR_BUILD_HIP)
     add_subdirectory(hipamd)

@@ -120,8 +120,11 @@ class elfio {
       return false;
     }
 
-    load_sections(stream);
-    bool is_still_good = load_segments(stream);
+    bool is_still_good = load_sections(stream);
+    is_still_good = is_still_good && load_segments(stream);
+    if (!is_still_good) {
+      clean();
+    }
     return is_still_good;
   }
 
@@ -347,14 +350,27 @@ class elfio {
   }
 
   //------------------------------------------------------------------------------
-  Elf_Half load_sections(std::istream& stream) {
+  bool load_sections(std::istream& stream) {
+    unsigned char file_class = header->get_class();
     Elf_Half entry_size = header->get_section_entry_size();
     Elf_Half num = header->get_sections_num();
     Elf64_Off offset = header->get_sections_offset();
 
+    const size_t minimum_entry_size =
+        file_class == ELFCLASS64 ? sizeof(Elf64_Shdr) : sizeof(Elf32_Shdr);
+    stream.seekg(0, stream.end);
+    const std::streamoff end = stream.tellg();
+    if (end < 0 ||
+        (num != 0 && (entry_size < minimum_entry_size || offset > uint64_t(end) ||
+                      static_cast<uint64_t>(num) > (uint64_t(end) - offset) / entry_size))) {
+      return false;
+    }
+
     for (Elf_Half i = 0; i < num; ++i) {
       section* sec = create_section();
-      sec->load(stream, (std::streamoff)offset + i * entry_size);
+      if (!sec->load(stream, static_cast<std::streamoff>(offset + uint64_t(i) * entry_size))) {
+        return false;
+      }
       sec->set_index(i);
       // To mark that the section is not permitted to reassign address
       // during layout calculation
@@ -364,6 +380,9 @@ class elfio {
     Elf_Half shstrndx = get_section_name_str_index();
 
     if (SHN_UNDEF != shstrndx) {
+      if (shstrndx >= sections.size()) {
+        return false;
+      }
       string_section_accessor str_reader(sections[shstrndx]);
       for (Elf_Half i = 0; i < num; ++i) {
         Elf_Word section_offset = sections[i]->get_name_string_offset();
@@ -374,7 +393,7 @@ class elfio {
       }
     }
 
-    return num;
+    return true;
   }
 
   //------------------------------------------------------------------------------
@@ -392,13 +411,23 @@ class elfio {
 
   //------------------------------------------------------------------------------
   bool load_segments(std::istream& stream) {
+    unsigned char file_class = header->get_class();
     Elf_Half entry_size = header->get_segment_entry_size();
     Elf_Half num = header->get_segments_num();
     Elf64_Off offset = header->get_segments_offset();
 
+    const size_t minimum_entry_size =
+        file_class == ELFCLASS64 ? sizeof(Elf64_Phdr) : sizeof(Elf32_Phdr);
+    stream.seekg(0, stream.end);
+    const std::streamoff end = stream.tellg();
+    if (end < 0 ||
+        (num != 0 && (entry_size < minimum_entry_size || offset > uint64_t(end) ||
+                      static_cast<uint64_t>(num) > (uint64_t(end) - offset) / entry_size))) {
+      return false;
+    }
+
     for (Elf_Half i = 0; i < num; ++i) {
       segment* seg;
-      unsigned char file_class = header->get_class();
 
       if (file_class == ELFCLASS64) {
         seg = new segment_impl<Elf64_Phdr>(&convertor);
@@ -408,7 +437,10 @@ class elfio {
         return false;
       }
 
-      seg->load(stream, (std::streamoff)offset + i * entry_size);
+      if (!seg->load(stream, static_cast<std::streamoff>(offset + uint64_t(i) * entry_size))) {
+        delete seg;
+        return false;
+      }
       seg->set_index(i);
 
       // Add sections to the segments (similar to readelfs algorithm)

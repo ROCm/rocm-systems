@@ -58,7 +58,7 @@ class segment {
   ELFIO_SET_ACCESS_DECL(Elf_Half, index);
 
   virtual const std::vector<Elf_Half>& get_sections() const = 0;
-  virtual void load(std::istream& stream, std::streampos header_offset) = 0;
+  virtual bool load(std::istream& stream, std::streampos header_offset) = 0;
   virtual void save(std::ostream& stream, std::streampos header_offset,
                     std::streampos data_offset) = 0;
 };
@@ -144,33 +144,48 @@ template <class T> class segment_impl : public segment {
   void set_index(Elf_Half value) { index = value; }
 
   //------------------------------------------------------------------------------
-  void load(std::istream& stream, std::streampos header_offset) {
+  bool load(std::istream& stream, std::streampos header_offset) {
     stream.seekg(0, stream.end);
-    set_stream_size(stream.tellg());
+    const std::streamoff end = stream.tellg();
+    const std::streamoff header_pos = header_offset;
+    if (end < 0 || header_pos < 0 ||
+        static_cast<uint64_t>(header_pos) > static_cast<uint64_t>(end) ||
+        sizeof(ph) > static_cast<uint64_t>(end) - static_cast<uint64_t>(header_pos)) {
+      return false;
+    }
+    set_stream_size(static_cast<size_t>(end));
 
     stream.seekg(header_offset);
     stream.read(reinterpret_cast<char*>(&ph), sizeof(ph));
+    if (stream.gcount() != sizeof(ph)) {
+      return false;
+    }
     is_offset_set = true;
 
     if (PT_NULL != get_type() && 0 != get_file_size()) {
-      stream.seekg((*convertor)(ph.p_offset));
+      const Elf_Xword offset = (*convertor)(ph.p_offset);
       Elf_Xword size = get_file_size();
 
-      if (size > get_stream_size()) {
-        data = 0;
-      } else {
-        try {
-          data = new char[size + 1];
-        } catch (const std::bad_alloc&) {
-          data = 0;
-        }
-
-        if (0 != data) {
-          stream.read(data, size);
-          data[size] = 0;
-        }
+      if (offset > get_stream_size() || size > get_stream_size() - offset) {
+        return false;
       }
+      try {
+        data = new char[size + 1];
+      } catch (const std::bad_alloc&) {
+        data = 0;
+        return false;
+      }
+
+      stream.seekg(offset);
+      stream.read(data, size);
+      if (static_cast<Elf_Xword>(stream.gcount()) != size) {
+        delete[] data;
+        data = 0;
+        return false;
+      }
+      data[size] = 0;
     }
+    return true;
   }
 
   //------------------------------------------------------------------------------
