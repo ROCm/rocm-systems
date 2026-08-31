@@ -549,7 +549,12 @@ fail:
 
 static inline ncclResult_t ncclCuMemFreeAddr(void* ptr, struct ncclMemManager* manager, int numSegments = 1) {
   if (ptr == NULL) return ncclSuccess;
-  // Check if process is shutting down to avoid use-after-free in HIP runtime
+  // Check if process is shutting down to avoid use-after-free in HIP runtime.
+  // gfx950 (rcclSkipCuMemFree): hipMemUnmap on cuMem VMM *peer* apertures can
+  // deadlock in the HSA busy-wait during ncclCommDestroy. GIN-SDMA device tests
+  // allocate symmetric windows and hit this on teardown; skipping only the peer
+  // VA unmap here lets the run finish (OS reclaims at exit). Owner handle release
+  // (ncclCuMemFree) and ordinary buffers are unaffected — see rcclSkipCuMemFree().
   if (rcclShutdownFlag().load(std::memory_order_acquire) || rcclSkipCuMemFree()) {
     INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Skipping free (%s) pointer %p", rcclSkipCuMemFree() ? "NCCL_CUMEM_SKIP_FREE" : "process shutdown", ptr);
     return ncclSuccess;
