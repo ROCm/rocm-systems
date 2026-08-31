@@ -610,15 +610,15 @@ static hsa_status_t ResolveBOHandle(void* mem, const core::Agent& agent, uint32_
 struct BOHandle {
   /// Mapped address.
   void* vaddr = nullptr;
-  /// Handle returned by xdna. Same value as AMDXDNA_INVALID_BO_HANDLE.
-  uint32_t handle = 0;
+  /// Handle returned by xdna, or AMDXDNA_INVALID_BO_HANDLE when this holds no BO.
+  uint32_t handle = AMDXDNA_INVALID_BO_HANDLE;
   /// Size in bytes.
   size_t size = 0;
 
   constexpr BOHandle() = default;
   constexpr BOHandle(void* vaddr, uint32_t handle, size_t size)
       : vaddr{vaddr}, handle{handle}, size{size} {}
-  constexpr bool IsValid() const { return handle != 0; }
+  constexpr bool IsValid() const { return handle != AMDXDNA_INVALID_BO_HANDLE; }
 };
 
 /// @brief Returns true if @p vaddr lies within the device heap mapping at @p heap_base.
@@ -709,6 +709,46 @@ static hsa_status_t CreateCmdBO(int fd, const void* heap_base, uint32_t size,
 
   cmd_bo_handle = tmp_cmd_bo_handle;
 
+  return HSA_STATUS_SUCCESS;
+}
+
+/// @brief Creates a command BO with @p declared_dwords of payload and fills in its header.
+///
+/// @p declared_dwords is what the command reports in its count field, and the driver reads that
+/// straight back: amdxdna_cmd_get_payload() hands the chain fill path (declared_dwords - 1) dwords
+/// starting at data[1], and the fill path memcpy()s all of them into the chain slot. So the whole
+/// declared payload is allocated and zeroed here, including any padding a caller declares but does
+/// not write -- otherwise the driver copies uninitialised memory to the device.
+///
+/// @param[in] cu_mask value for data[0]. The driver derives a CU index from it with ffs() - 1 and
+/// rejects a command with no bit set, even on the paths that then ignore the index.
+/// @param[out] cmd_bo the command BO, owned by the caller on success.
+/// @param[out] cmd the mapped command, header filled in and payload zeroed.
+static hsa_status_t CreateCommand(int fd, const void* heap_base, uint32_t declared_dwords,
+                                  uint32_t opcode, uint32_t cu_mask, BOHandle* cmd_bo,
+                                  ert_start_kernel_cmd** cmd) {
+  if (declared_dwords > MAX_CMD_COUNT) {
+    // count is an 11-bit field and the chain slot is sized from it, so letting it wrap would
+    // under-size the slot and overflow the chain buffer.
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
+
+  const uint32_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + declared_dwords * sizeof(uint32_t);
+  const hsa_status_t err = CreateCmdBO(fd, heap_base, cmd_bytesize, *cmd_bo);
+  if (err != HSA_STATUS_SUCCESS) {
+    assert(false && "Failed to create command BO.");
+    return err;
+  }
+
+  auto* new_cmd = static_cast<ert_start_kernel_cmd*>(cmd_bo->vaddr);
+  memset(new_cmd, 0, cmd_bytesize);
+  new_cmd->state = ERT_CMD_STATE_NEW;
+  new_cmd->extra_cu_masks = 0;
+  new_cmd->count = declared_dwords;
+  new_cmd->opcode = opcode;
+  new_cmd->data[0] = cu_mask;
+
+  *cmd = new_cmd;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1429,32 +1469,15 @@ static hsa_status_t BuildPdiInstsCommand(int fd, const void* heap_base, const vo
                                2 +  // txn opcode
                                3 +  // instruction sequence (address lo/hi + size)
                                2 * pkt->num_kernargs);  // arguments (address lo/hi)
-  if (cmd_dwords + CMD_COUNT_SIZE_INCREASE > MAX_CMD_COUNT) {
-    // count is an 11-bit field and the chain slot is sized from it, so letting it wrap would
-    // under-size the slot and overflow the chain buffer.
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
-  // The padding is declared to the driver, so it has to be allocated and zeroed too -- the driver
-  // memcpy()s the full declared payload into the chain slot.
-  const uint32_t cmd_data_bytesize = (cmd_dwords + CMD_COUNT_SIZE_INCREASE) * sizeof(uint32_t);
-  const uint32_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + cmd_data_bytesize;
-  err = CreateCmdBO(fd, heap_base, cmd_bytesize, *cmd_bo);
+  ert_start_kernel_cmd* cmd = nullptr;
+  err = CreateCommand(fd, heap_base, cmd_dwords + CMD_COUNT_SIZE_INCREASE, ERT_START_CU,
+                      0x1 << cached_pdi_index, cmd_bo, &cmd);
   if (err != HSA_STATUS_SUCCESS) {
-    assert(false && "Failed to create command BO.");
     return err;
   }
 
-  auto* cmd = static_cast<ert_start_kernel_cmd*>(cmd_bo->vaddr);
-  memset(cmd, 0, cmd_bytesize);
-  cmd->state = ERT_CMD_STATE_NEW;
-  cmd->extra_cu_masks = 0;
-  // The driver places a structure before each command in a command chain.
-  // Need to increase the size of the command by the size of this structure.
-  cmd->count = cmd_dwords + CMD_COUNT_SIZE_INCREASE;
-  cmd->opcode = ERT_START_CU;
-  cmd->data[0] = 0x1 << cached_pdi_index;  // CU mask bit
-  cmd->data[1] = 0x3;                      // txn opcode
-  cmd->data[2] = 0x0;                      // txn opcode
+  cmd->data[1] = 0x3;  // txn opcode
+  cmd->data[2] = 0x0;  // txn opcode
   cmd->data[3] = (DEV_ADDR_BASE |
                   (reinterpret_cast<uintptr_t>(insts_addr) &
                    DEV_ADDR_OFFSET_MASK));              // instruction sequence address (lo)
@@ -1492,7 +1515,18 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base, const voi
   // reaches here when it asked for that patch, so pdi_patch_offset is non-zero.
   void* ctrl_code =
       reinterpret_cast<void*>(Concat<uint64_t>(pkt->insts_addr_high, pkt->insts_addr_low));
-  if (ctrl_code == nullptr || pkt->insts_size == 0) return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+
+  // Validate what can be validated from the packet alone, before spending any ioctls on it.
+  //
+  // The PDI patch site is a 64-bit address and has to lie wholly inside the control code. Check
+  // the size first: both operands are unsigned, so subtracting from an unvalidated insts_size or
+  // adding to an unvalidated offset could wrap and let the bound pass. This also rejects a zero
+  // insts_size.
+  if (ctrl_code == nullptr || pkt->pdi_addr == nullptr || pkt->insts_size < sizeof(uint64_t) ||
+      pkt->pdi_patch_offset > pkt->insts_size - sizeof(uint64_t) ||
+      (pkt->pdi_patch_offset % sizeof(uint32_t)) != 0) {
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
 
   uint32_t ctrl_code_handle = AMDXDNA_INVALID_BO_HANDLE;
   uint64_t ctrl_code_dev_addr = 0;
@@ -1525,8 +1559,6 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base, const voi
   bo_handles.push_back(ctrl_code_handle);
 
   // Write the PDI's device address into the control code where the application asked.
-  if (pkt->pdi_addr == nullptr) return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-
   uint32_t pdi_handle = AMDXDNA_INVALID_BO_HANDLE;
   uint64_t pdi_dev_addr = 0;
   size_t pdi_avail = 0;
@@ -1539,14 +1571,6 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base, const voi
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
 
-  // The patch site is a 64-bit address, so it has to lie wholly inside the control code. Check
-  // the size first: both operands are unsigned, so subtracting from an unvalidated insts_size or
-  // adding to an unvalidated offset could wrap and let the bound pass.
-  if (pkt->insts_size < sizeof(uint64_t) ||
-      pkt->pdi_patch_offset > pkt->insts_size - sizeof(uint64_t) ||
-      (pkt->pdi_patch_offset % sizeof(uint32_t)) != 0) {
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
   auto* site =
       reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ctrl_code) + pkt->pdi_patch_offset);
   site[0] = static_cast<uint32_t>(pdi_dev_addr & 0xFFFFFFFF);
@@ -1569,34 +1593,22 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base, const voi
   // Create command for the kernel.
   const uint32_t cmd_dwords = 1 +  // CU mask
       sizeof(ert_npu_preempt_data) / sizeof(uint32_t) + ELF_CMD_ARG_DWORDS;
-  const uint32_t cmd_data_bytesize = cmd_dwords * sizeof(uint32_t);
-  const uint32_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + cmd_data_bytesize;
-  err = CreateCmdBO(fd, heap_base, cmd_bytesize, *cmd_bo);
+  ert_start_kernel_cmd* cmd = nullptr;
+  // The ELF fill path ignores the CU mask, but the driver still derives a CU index from it before
+  // dispatching and rejects the command if no bit is set.
+  err = CreateCommand(fd, heap_base, cmd_dwords, ERT_START_NPU_PREEMPT_ELF, 0x1, cmd_bo, &cmd);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
-
-  auto* cmd = static_cast<ert_start_kernel_cmd*>(cmd_bo->vaddr);
-  memset(cmd, 0, cmd_bytesize);
-  cmd->state = ERT_CMD_STATE_NEW;
-  cmd->extra_cu_masks = 0;
-  cmd->count = cmd_dwords;
-  cmd->opcode = ERT_START_NPU_PREEMPT_ELF;
-  // The ELF fill path ignores the CU mask, but the driver still derives a CU index from it before
-  // dispatching and rejects the command if no bit is set.
-  cmd->data[0] = 0x1;
 
   // The payload starts after the CU mask, which is data[0]; that puts it at byte offset 8 in a
   // page-aligned command BO, so the 64-bit fields below are aligned.
   auto* npu = reinterpret_cast<ert_npu_preempt_data*>(&cmd->data[1]);
   npu->instruction_buffer = ctrl_code_dev_addr;
   npu->instruction_buffer_size = static_cast<uint32_t>(pkt->insts_size);
-  // A design with no preemption sections leaves these null, which aie2p firmware accepts.
-  npu->save_buffer = 0;
-  npu->save_buffer_size = 0;
-  npu->restore_buffer = 0;
-  npu->restore_buffer_size = 0;
-  npu->instruction_prop_count = 0;
+  // The save and restore buffers and the property count are left zero. This design has no
+  // preemption sections, and aie2p firmware accepts null preemption buffers.
+  //
   // A zeroed 64-bit kernel opcode follows. The driver overwrites its low dword with its own TXN
   // constant, so there is nothing for this code to fill in -- but the space has to be there,
   // because the driver sizes the chain slot from it.
