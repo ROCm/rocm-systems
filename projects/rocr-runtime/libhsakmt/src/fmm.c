@@ -2138,6 +2138,7 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 	/* Paged memory is allocated as a userptr mapping, non-paged
 	 * memory is allocated from KFD
 	 */
+retry:
 	if (!mflags.ui32.NonPaged && fmm_ctx->svm.userptr_for_paged_mem) {
 		int advice = MADV_NORMAL;
 
@@ -2170,8 +2171,25 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 		vm_obj = fmm_allocate_memory_object(ctx, preferred_gpu_id, mem, size,
 						       aperture, &mmap_offset,
 						       ioc_flags);
-		if (!vm_obj)
-			goto out_release_area;
+		if (!vm_obj) {
+			/* KFD refuses userptr on GPUs in recoverable-fault mode.
+			 * Evicting a userptr BO there means invalidating its PTEs
+			 * rather than preempting the queues, which the userptr
+			 * mmu-notifier path cannot do. Stop asking for userptr and
+			 * allocate from KFD, same as HSA_USERPTR_FOR_PAGED_MEM=0.
+			 */
+			if (errno != EOPNOTSUPP)
+				goto out_release_area;
+
+			fmm_ctx->svm.userptr_for_paged_mem = false;
+			pthread_mutex_lock(&aperture->fmm_mutex);
+			aperture_release_area(aperture, mem, size);
+			pthread_mutex_unlock(&aperture->fmm_mutex);
+			mem = NULL;
+			mmap_offset = 0;
+			ioc_flags &= ~KFD_IOC_ALLOC_MEM_FLAGS_USERPTR;
+			goto retry;
+		}
 	} else {
 		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_GTT;
 		mem =  __fmm_allocate_device(ctx, preferred_gpu_id, address, size, aperture,
