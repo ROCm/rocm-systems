@@ -342,24 +342,46 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
     info_.globalMemCacheType_ = CL_NONE;
   }
 
-  uint64_t localRAM;
+  uint64_t visibleFB, invisibleFB;
   if (GPU_ADD_HBCC_SIZE) {
-    localRAM = heaps[Pal::GpuHeapLocal].logicalSize + heaps[Pal::GpuHeapInvisible].logicalSize;
+    visibleFB = heaps[Pal::GpuHeapLocal].logicalSize;
+    invisibleFB = heaps[Pal::GpuHeapInvisible].logicalSize;
   } else {
-    localRAM = heaps[Pal::GpuHeapLocal].physicalSize + heaps[Pal::GpuHeapInvisible].physicalSize;
+    visibleFB = heaps[Pal::GpuHeapLocal].physicalSize;
+    invisibleFB = heaps[Pal::GpuHeapInvisible].physicalSize;
   }
+  const uint64_t localRAM = visibleFB + invisibleFB;
 
   info_.globalMemSize_ = (static_cast<uint64_t>(std::min(GPU_MAX_HEAP_SIZE, 100u)) *
                           static_cast<uint64_t>(localRAM) / 100u);
+
+  const uint64_t gartSize = static_cast<uint64_t>(heaps[Pal::GpuHeapGartUswc].logicalSize);
+  const uint64_t hostRAM = amd::Os::getPhysicalMemSize();
+
+  const bool umaLargeMemory = settings().umaLargeMemory_;
 
   uint uswcPercentAvailable =
       ((static_cast<uint64_t>(heaps[Pal::GpuHeapGartUswc].logicalSize) / Mi) > 1536 && IS_WINDOWS)
           ? 75
           : 50;
+
+  // The aperture is host DRAM the GPU addresses directly, so discounting it only
+  // makes the runtime under-report.
+  if (umaLargeMemory) {
+    uswcPercentAvailable = 100;
+  }
+
+  uint64_t gartCredit = (gartSize * uswcPercentAvailable) / 100;
+
+  if (umaLargeMemory) {
+    // Crediting the whole aperture can leave the OS nothing, so hold back a floor of
+    // host memory. Binds only where the BIOS reserves too little on its own.
+    const uint64_t osFloor = std::min<uint64_t>(16 * Gi, hostRAM / 4);
+    gartCredit = std::min(gartCredit, (hostRAM > osFloor) ? (hostRAM - osFloor) : 0);
+  }
+
   if (settings().apuSystem_) {
-    info_.globalMemSize_ +=
-        (static_cast<uint64_t>(heaps[Pal::GpuHeapGartUswc].logicalSize) * uswcPercentAvailable) /
-        100;
+    info_.globalMemSize_ += gartCredit;
   }
 
   // Find the largest heap form FB memory
@@ -379,13 +401,23 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
         info_.maxMemAllocSize_);
   }
 #endif
+
+  if (umaLargeMemory) {
+    // One allocation is not confined to a single heap. Measured on gfx1151: 100 GiB
+    // verified across a carve-out split 64 GiB visible plus 32 GiB invisible.
+    info_.maxMemAllocSize_ = std::max(info_.globalMemSize_, info_.maxMemAllocSize_);
+  }
+
   info_.maxMemAllocSize_ =
       uint64_t(info_.maxMemAllocSize_ * std::min(GPU_SINGLE_ALLOC_PERCENT, 100u) / 100u);
 
   //! \note Force max single allocation size.
   //! 4GB limit for the blit kernels and 64 bit optimizations.
-  info_.maxMemAllocSize_ =
-      std::min(info_.maxMemAllocSize_, static_cast<uint64_t>(settings().maxAllocSize_));
+  //! Skipped on large unified memory parts: the cap reports far below what they deliver.
+  if (!umaLargeMemory) {
+    info_.maxMemAllocSize_ =
+        std::min(info_.maxMemAllocSize_, static_cast<uint64_t>(settings().maxAllocSize_));
+  }
 
   if (info_.maxMemAllocSize_ < uint64_t(128 * Mi)) {
     LogError(
@@ -405,6 +437,17 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   // We need to verify that we are not reporting more global memory
   // that 4x single alloc
   info_.globalMemSize_ = std::min(4 * info_.maxMemAllocSize_, info_.globalMemSize_);
+
+  // Offline devices populate only the Local heap, so the rest of heaps[] is stale here.
+  if (isOnline()) {
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT,
+            "PAL memory: visible FB %llu MiB, invisible FB %llu MiB, aperture %llu MiB "
+            "(credited %llu MiB at %u%%), host %llu MiB, apu %u, umaLargeMemory %u, "
+            "globalMemSize %llu MiB, maxMemAllocSize %llu MiB",
+            visibleFB / Mi, invisibleFB / Mi, gartSize / Mi, gartCredit / Mi, uswcPercentAvailable,
+            hostRAM / Mi, settings().apuSystem_ ? 1u : 0u, umaLargeMemory ? 1u : 0u,
+            info_.globalMemSize_ / Mi, info_.maxMemAllocSize_ / Mi);
+  }
 
   // Use 64 bit pointers
   info_.addressBits_ = 64;

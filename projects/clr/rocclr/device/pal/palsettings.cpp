@@ -53,6 +53,7 @@ Settings::Settings() {
 
   // GPU device by default
   apuSystem_ = false;
+  umaLargeMemory_ = false;
 
   // Disable 64 bit pointers support by default
   use64BitPtr_ = false;
@@ -131,6 +132,12 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
   // APU systems
   if (palProp.gpuType == Pal::GpuType::Integrated) {
     apuSystem_ = true;
+  }
+
+  // Scoped to the parts where large unified memory has been validated. Others keep the
+  // existing memory reporting until measured.
+  if (palProp.revision == Pal::AsicRevision::StrixHalo) {
+    umaLargeMemory_ = true;
   }
 
   enableXNACK_ = (isa.xnack() == amd::Isa::Feature::Enabled);
