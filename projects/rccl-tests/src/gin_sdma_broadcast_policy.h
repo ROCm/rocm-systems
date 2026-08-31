@@ -86,11 +86,15 @@ static constexpr int    kBroadcastRingMinChunks        = 16;            // fill 
 // ---------------------------- env / threshold ----------------------------
 
 // Parse a size string ("123", "4K", "2M", "1G"; decimal only, optional single
-// binary suffix). Returns kThresholdUnset for null/empty/non-numeric input.
+// binary suffix). Returns kThresholdUnset for null/empty/negative/non-numeric
+// input.
 // Pure: takes the raw string so it is testable without touching the process
 // environment. (common.h::testParseSdmaThresholdEnv = this on getenv(name).)
 inline size_t parseSize(const char* v) {
-  if (v == nullptr || v[0] == '\0') return kThresholdUnset;
+  // strtoull() accepts a leading '-' and wraps it into a huge unsigned value,
+  // which would read as a ~16 EiB threshold and silently pin every message to
+  // the LSA tier. Reject the sign before parsing.
+  if (v == nullptr || v[0] == '\0' || v[0] == '-') return kThresholdUnset;
   char* end = nullptr;
   unsigned long long val = strtoull(v, &end, 10);
   if (end == v) return kThresholdUnset;  // no digits consumed

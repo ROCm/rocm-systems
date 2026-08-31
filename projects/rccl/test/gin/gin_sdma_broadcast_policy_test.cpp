@@ -40,6 +40,14 @@ TEST(ParseSize, NonNumericIsUnset) {
   EXPECT_EQ(parseSize("K"), kUnset);    // suffix only, no digits
 }
 
+TEST(ParseSize, NegativeIsUnset) {
+  // Without an explicit sign check strtoull() wraps these into near-SIZE_MAX
+  // thresholds, which read as "always LSA" instead of "unset".
+  EXPECT_EQ(parseSize("-1"), kUnset);
+  EXPECT_EQ(parseSize("-4K"), kUnset);
+  EXPECT_EQ(parseSize("-262144"), kUnset);
+}
+
 TEST(ParseSize, PlainDecimal) {
   EXPECT_EQ(parseSize("0"), 0u);
   EXPECT_EQ(parseSize("1024"), 1024u);

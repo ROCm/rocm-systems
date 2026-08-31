@@ -284,12 +284,17 @@ static inline size_t BroadcastParseCtasEnv() {
 }
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
-testResult_t BroadcastGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties) {
-  if (!reqs || !commProperties) return testInternalError;
+testResult_t BroadcastGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm) {
+  if (!reqs || !comm) return testInternalError;
+
+  ncclCommProperties_t commProperties = NCCL_COMM_PROPERTIES_INITIALIZER;
+  if (ncclCommQueryProperties(comm, &commProperties) != ncclSuccess) {
+    return testNcclError;
+  }
 
   switch(deviceImpl) {
     case 3: { // GinHybridBroadcastKernel: LSA direct (small) + root GIN puts (large)
-      if (commProperties->ginType == NCCL_GIN_TYPE_NONE) {
+      if (commProperties.ginType == NCCL_GIN_TYPE_NONE) {
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
@@ -1410,6 +1415,7 @@ struct testColl broadcastTest = {
   BroadcastGetBw,
   BroadcastRunColl,
   BroadcastGetAlgoProtoChannels,
+  NULL,
   NULL,
   BroadcastDeviceTime
 };
