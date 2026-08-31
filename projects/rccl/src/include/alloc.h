@@ -108,6 +108,7 @@ struct ncclSideStream {
 
 inline std::unordered_map<ncclSideStreamKey, ncclSideStream, ncclSideStreamKeyHash> sideStream;
 inline pthread_mutex_t sideStreamLock = PTHREAD_MUTEX_INITIALIZER;
+
 extern ncclResult_t getBusId(int cudaDev, int64_t* busId);
 
 // Clamp a requested stream priority into the device-supported range.

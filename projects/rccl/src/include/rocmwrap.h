@@ -198,6 +198,7 @@ static inline bool ncclHsaRegMrDmaBuf(ncclResult_t (*regMrDmaBuf)(void*, void*, 
 
 extern int ncclCuMemEnable();
 extern int ncclIsCuMemSupported();
+extern int ncclCuMemRuntimeSupported();
 extern int ncclCuMemHostEnable();
 extern int64_t rcclParamForceEnableDMABUF();
 extern int64_t ncclParamDmaBufEnable();
