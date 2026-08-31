@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/trampoline_builder.h"
 
+#include "rocjitsu/code/analysis/free_registers.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/patch/error_report.h"
@@ -32,45 +33,6 @@ namespace {
     return false;
   }
   return true;
-}
-
-// TODO: the following functions are very similar to those in LivenessAnalysis
-// but they take a RegisterSet instead of an Instruction. These functions
-// probably belong there and with some refactoring, we can probably reduce the
-// duplicated code. Would like another opinion before making that call though.
-// `any_sgpr_in_range` is similar to a test used by `find_free_*`
-// `find_free_sgpr_pair` is similar to `find_free_sgpr_pair`
-// `find_free_sgpr` is similar to `find_free_sgpr`
-[[nodiscard]] bool any_sgpr_in_range(const RegisterSet &set, uint16_t base, uint16_t count) {
-  for (uint16_t i = 0; i < count; ++i) {
-    if (set.contains(RegisterRef{RegClass::SGPR, static_cast<uint16_t>(base + i), 1}))
-      return true;
-  }
-  return false;
-}
-
-// First even-aligned SGPR pair with both lanes free of @p unavailable, below
-// @p bound (exclusive). @p bound caps selection at the kernel's own allocation so
-// no temp lands past its .sgpr_count; pass REGISTER_SET_ALLOCATABLE_SGPRS for the
-// conservative cross-family limit. nullopt if none.
-[[nodiscard]] std::optional<uint16_t> find_free_sgpr_pair(const RegisterSet &unavailable,
-                                                          uint32_t bound) {
-  for (uint16_t base = 0; static_cast<uint32_t>(base) + 1 < bound; base += 2) {
-    if (!any_sgpr_in_range(unavailable, base, 2))
-      return base;
-  }
-  return std::nullopt;
-}
-
-// First single SGPR free of @p unavailable, below @p bound (exclusive; see
-// find_free_sgpr_pair).
-[[nodiscard]] std::optional<uint16_t> find_free_sgpr(const RegisterSet &unavailable,
-                                                     uint32_t bound) {
-  for (uint16_t base = 0; static_cast<uint32_t>(base) < bound; ++base) {
-    if (!unavailable.contains(RegisterRef{RegClass::SGPR, base, 1}))
-      return base;
-  }
-  return std::nullopt;
 }
 
 // Appends @p w to @p dst in host byte order. AMDGPU code objects are little-
@@ -234,7 +196,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConven
 
   // Reject if either lane of the link pair is live at the anchor; saving a live
   // link pair is deferred.
-  if (any_sgpr_in_range(live_at_anchor, kLinkPairBase, 2)) {
+  if (any_in_range(live_at_anchor, RegClass::SGPR, kLinkPairBase, 2)) {
     report(error_out, ("probe-call resource planning: return-link pair s[" +
                        std::to_string(kLinkPairBase) + ":" + std::to_string(kLinkPairBase + 1) +
                        "] is live at the anchor; cannot yet save a live link pair")
