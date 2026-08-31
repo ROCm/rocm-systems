@@ -92,10 +92,10 @@ static constexpr size_t kAllGatherCtasUnset = (size_t)-1;
 //   * LSA-direct tier (chunk <= threshold): a grid-stride all-peers store that
 //     scales with threads; ~16 CTAs peaks on 8x MI355X (128 KiB 448% of 1-CTA;
 //     tiny sizes are latency-bound and CTA-indifferent).
-//   * GIN-put / Anvil-SDMA tier (chunk > threshold): only nRanks threads issue the
-//     puts (the copy engines move the bytes), so extra CTAs are pure barrier/signal
-//     overhead -- FEW CTAs win (V=32 costs ~13% at 8 MiB, ~18% at 2 MiB vs V=4),
-//     and 4 is a stable near-peak across 1 MiB-128 MiB.
+//   * GIN-put / Anvil-SDMA tier (chunk > threshold): peers are partitioned across
+//     CTAs (peer p -> CTA p % gridDim.x); only the receiving CTA waits on its
+//     signal. Four CTAs give one put slot per peer on 8-rank MI355X; extra CTAs
+//     beyond nRanks are unused for puts.
 // NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS pins a fixed count for all sizes (diagnostic).
 // NCCL_GIN_ANVIL_AG_CTAS is a deprecated alias. The pin is
 // clamped to the launched barrier/lsaBarrier/signal pool (allGatherPoolCtas): the
