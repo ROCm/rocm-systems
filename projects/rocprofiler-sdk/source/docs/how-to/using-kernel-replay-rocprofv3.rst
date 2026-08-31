@@ -80,6 +80,11 @@ not snapshot or restore — the dispatch takes the ordinary path.
 
    rocprofv3 --pmc SQ_WAVES GRBM_COUNT --kernel-replay-beta-enabled -- <application_path>
 
+Input files are unaffected by the flag. An input file's jobs each describe a run of their own --
+their own output configuration, kernel filters and ranges -- so ``rocprofv3`` runs them exactly as
+it would without ``--kernel-replay-beta-enabled``, and replay applies within each job to the
+counter groups that job asks for.
+
 List counters first with ``rocprofv3 --list-avail`` or ``rocprofv3-avail list --pmc``. Each
 individual ``--pmc`` group must still fit in one hardware pass; kernel replay does not split a
 group that the hardware cannot collect together. Use ``rocprofv3-avail pmc-check`` to verify a
