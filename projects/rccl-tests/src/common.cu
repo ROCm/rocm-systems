@@ -1258,6 +1258,9 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   double timeUsec = 0.0;
   if (!skipMetricRow) {
+    // Device-impl kernels (-D != 0, e.g. AllGather/AllToAll GIN-SDMA -D 3) report
+    // wall/kernel time in deltaSec; cputimeSec is host-side and misleading there.
+    // Suppress the cputime column label for every deviceImpl != 0 collective.
     int useCputimeCol = report_cputime && (deviceImpl == 0);
     timeUsec = (useCputimeCol ? cputimeSec : deltaSec)*1.0E6;
     writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, useCputimeCol, report_timestamps, in_place==0);

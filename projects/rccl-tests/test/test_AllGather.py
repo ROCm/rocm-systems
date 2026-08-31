@@ -80,7 +80,7 @@ def test_AllGatherSingleProcess(nthreads, ngpus_single, byte_range, op, step_fac
 # GIN-SDMA AllGather multi-segment regression tests (parity with the >1 GiB
 # SDMA hang fix validated for AllToAll in test_AllToAll.py / PR #9927).
 #
-# These drive the real GinHybridAllGatherKernel (deviceImpl 3, NCCL_GIN_TYPE=5)
+# These drive the real GinHybridAllGatherKernel (deviceImpl 3, NCCL_GIN_TYPE=6)
 # at per-rank chunk sizes that cross the two single-descriptor limits the
 # 128 MiB SDMA copy clamp guards. That clamp lives in the Anvil-SDMA backend
 # Put (ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>), which segments every
@@ -122,7 +122,7 @@ def test_AllGatherSingleProcess(nthreads, ngpus_single, byte_range, op, step_fac
 #                            connectivity-gate abort (default: 5); a genuine data
 #                            check mismatch is never retried.
 #
-# Verified on 8x MI355X (ROCm 7.13, NCCL_GIN_TYPE=5, force-single-channel):
+# Verified on 8x MI355X (ROCm 7.13, NCCL_GIN_TYPE=6, force-single-channel):
 # 256/512 MiB per-rank (2/4 segments) and 2 GiB total all pass with #wrong=0,
 # no hang (busbw ~421-427 GB/s).
 
@@ -164,7 +164,7 @@ def _launch_ag_gin_sdma(request, total_bytes, dtype, force_sdma_tier=True, devic
     the test immediately."""
     size = str(int(total_bytes))
     gin_env = []
-    for kv in ["NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=5"] + AG_XENV:
+    for kv in ["NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=6"] + AG_XENV:
         gin_env += ["-x", kv]
     if force_sdma_tier:
         for kv in ["NCCL_GIN_ANVIL_SDMA_THRESHOLD=0",
