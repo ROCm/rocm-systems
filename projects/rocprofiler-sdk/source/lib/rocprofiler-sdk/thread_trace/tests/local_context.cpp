@@ -120,14 +120,14 @@ register_agents_and_find_traceable(thread_trace::DispatchThreadTracer&          
 
     for(const auto& [_, cache] : supported)
     {
-        if(tracer.get_agents().count(cache.get_hsa_agent()) == 1) return &cache;
+        if(tracer.get_agents().count(cache.get_rocp_agent()->id) == 1) return &cache;
     }
 
     return nullptr;
 }
 
 // pre_kernel_call() only reaches dispatch_cb_fn once the tracer's agent map and the fake queue's
-// AgentCache resolve to the same hsa_agent_t and the agent admits a dispatch. Neither is something
+// AgentCache resolve to the same agent and the agent admits a dispatch. Neither is something
 // the override decides, so establish that a dispatch lands before asserting anything about the
 // override. Without this the forced-off expectation below passes on a node that never dispatches
 // at all, which is indistinguishable from the skip it is meant to prove.

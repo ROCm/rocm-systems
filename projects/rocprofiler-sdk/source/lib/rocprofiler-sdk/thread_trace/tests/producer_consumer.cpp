@@ -72,19 +72,19 @@ constexpr size_t MOCK_BUFFER_SIZE = 1u << 20;
 constexpr size_t MOCK_NUM_BUFFERS = 3;
 
 void
-mock_submit(const att_queue_t&, hsa_ext_amd_aql_pm4_packet_t*, hsa_signal_t*)
+mock_submit(const att_queue_t&, hsa_ext_amd_aql_pm4_packet_t*, att_signal_t*)
 {}
 
 void
-copy_data_mock(void* dst, const void* src, hsa_agent_t, hsa_agent_t, size_t size, hsa_signal_t*)
+copy_data_mock(att_queue_t&, void* dst, const void* src, size_t size)
 {
     std::memcpy(dst, src, size);
 }
 
 att_queue_ptr_t
-make_mock_queue(const hsa::AgentCache& agent)
+make_mock_queue(rocprofiler_agent_id_t agent_id)
 {
-    auto q       = make_att_queue(agent, MOCK_BUFFER_SIZE, MOCK_NUM_BUFFERS);
+    auto q       = make_att_queue(agent_id, MOCK_BUFFER_SIZE, MOCK_NUM_BUFFERS);
     q->submit_fn = mock_submit;
     return q;
 }
@@ -141,6 +141,8 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     }
     if(agent == nullptr) abort();
 
+    const auto agent_id = agent->get_rocp_agent()->id;
+
     auto running_flag = std::make_shared<std::atomic<int>>(WORKER_FLAG_RUNNING);
 
     auto params              = thread_trace_parameter_pack{};
@@ -149,8 +151,7 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     params.shader_cb_fn      = cb_fn;
     params.callback_userdata = userdata;
 
-    auto factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(
-        *agent, params, *table.core_, *table.amd_ext_);
+    auto factory        = std::make_unique<aql::ThreadTraceAQLPacketFactory>(agent_id, params);
     auto control_packet = factory->construct_control_packet();
     // Mirror ThreadTracerAgent::start_thread_trace: the producer loop submits the
     // start packets (before_krn_pkt) and, on stop, after_krn_pkt.at(0). Those
@@ -161,7 +162,7 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     auto buffer_packet    = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
     buffer_packet->header = 1;
 
-    auto mock_queue          = make_mock_queue(*agent);
+    auto mock_queue          = make_mock_queue(agent_id);
     auto worker_data         = std::make_shared<triple_buffer_shared_data_t>();
     worker_data->queue       = mock_queue.get();
     worker_data->num_buffers = MOCK_NUM_BUFFERS;
@@ -171,15 +172,9 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     for(size_t i = 0; i < worker_data->num_buffers; i++)
         worker_data->buffers[i].memory = mock_queue->cpu_buffers.at(i);
 
-    auto start_signal =
-        std::shared_ptr<hsa_signal_t>(new hsa_signal_t{signal_create()}, [](hsa_signal_t* s) {
-            signal_destroy(*s);
-            delete s;
-        });
-
     auto producer_data             = triple_buffer_producer_data_t{};
     producer_data.producer_running = running_flag;
-    producer_data.start_pkt_signal = start_signal;
+    producer_data.submit_signal    = make_signal(*mock_queue);
     producer_data.control_packet   = std::move(control_packet);
     producer_data.copy_data_fn     = copy_data_mock;
     producer_data.shared           = worker_data;

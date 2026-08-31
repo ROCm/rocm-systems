@@ -1524,7 +1524,15 @@ rocprofiler_set_api_table(const char* name,
 
         // need to construct agent mappings before initializing the queue controller
         rocprofiler::agent::construct_agent_cache(hsa_api_table);
-        rocprofiler::thread_trace::initialize(hsa_api_table);
+        // An exception must not cross the ROCr C ABI, but a thread-trace failure must not
+        // prevent the rest of the profiler from initializing either.
+        try
+        {
+            rocprofiler::thread_trace::initialize(hsa_api_table);
+        } catch(const std::exception& e)
+        {
+            ROCP_ERROR << "Unable to initialize thread-trace resources: " << e.what();
+        }
         // code_object::initialize must precede queue_controller_init: when the attach library is
         // in use, queue interception is live immediately upon queue_controller_init returning, so
         // any dispatch that arrives before code object hooks are installed would miss load

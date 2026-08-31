@@ -75,8 +75,9 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
     TraceMemoryManager* memorymgr = dynamic_cast<TraceMemoryManager*>(shared_memorymgr.get());
     if(!memorymgr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-    aql_profile::Pm4Factory*  pm4_factory = aql_profile::Pm4Factory::Create(memorymgr->GetAgent());
-    pm4_builder::SqttBuilder* sqttbuilder = pm4_factory->GetSqttBuilder();
+    aql_profile::Pm4Factory* pm4_factory =
+        aql_profile::Pm4Factory::Create(memorymgr->AgentHandle());
+    pm4_builder::SqttBuilder* sqttbuilder     = pm4_factory->GetSqttBuilder();
     const size_t              se_number_total = pm4_factory->GetShaderEnginesNumber();
     auto* control_ptr = memorymgr->GetTraceControlBuf<pm4_builder::TraceControl>();
 
@@ -143,8 +144,12 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
         }
     }
 
-    constexpr size_t    gfx9_header_size = sizeof(rocprof_trace_decoder_gfx9_header_t);
-    std::vector<size_t> cpu_sample(max_sample_size / sizeof(size_t) + gfx9_header_size, 0);
+    constexpr size_t gfx9_header_size = sizeof(rocprof_trace_decoder_gfx9_header_t);
+
+    // The landing buffer is allocated through the caller's allocator so that it is
+    // GPU-accessible: the copy callback can then write trace data into it directly.
+    auto  host_buffer = memorymgr->AllocHostBuffer(max_sample_size + gfx9_header_size);
+    auto* cpu_sample  = static_cast<char*>(host_buffer.get());
 
     // The samples sizes are returned in the control buffer
     for(uint64_t se_index = 0; se_index < se_number_total; se_index++)
@@ -156,19 +161,18 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
         size_t sample_size = sample_sizes.at(se_index);
         size_t sample_size_plus_header = sample_size;
 
-        char* sample_data_ptr = (char*) cpu_sample.data();
+        char* sample_data_ptr = cpu_sample;
         if(pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID)
         {
-            auto* header =
-                reinterpret_cast<rocprof_trace_decoder_gfx9_header_t*>(cpu_sample.data());
-            *header = getHeaderPacket(
+            auto* header = reinterpret_cast<rocprof_trace_decoder_gfx9_header_t*>(cpu_sample);
+            *header      = getHeaderPacket(
                 se_index, target_cu, memorymgr->GetSimdMask(), pm4_factory->GetGpuId(), false);
             sample_data_ptr += gfx9_header_size;
             sample_size_plus_header = sample_size + gfx9_header_size;
         }
 
         memorymgr->CopyMemory((void*) sample_data_ptr, sample_ptr, sample_size);
-        callback(se_index, (void*) cpu_sample.data(), sample_size_plus_header, userdata);
+        callback(se_index, (void*) cpu_sample, sample_size_plus_header, userdata);
     }
 
     // Reset swaps for next thread trace start
@@ -421,7 +425,7 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
 
     out->_size       = sizeof(aqlprofile_att_buffer_status_t);
     out->is_too_late = false;
-    out->needs_swap  = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())
+    out->needs_swap  = (status & aql_profile::Pm4Factory::Create(manager->AgentHandle())
                                     ->GetSqttBuilder()
                                     ->GetBufferFullMask()) != 0;
 
@@ -431,7 +435,7 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
     if(out->needs_swap)
     {
         // Lockdown error signals we have overflown the buffer and the trace has already stopped
-        out->is_too_late = (status & aql_profile::Pm4Factory::Create(manager->GetAgent())
+        out->is_too_late = (status & aql_profile::Pm4Factory::Create(manager->AgentHandle())
                                          ->GetSqttBuilder()
                                          ->GetLockDownFailMask()) != 0;
 
@@ -466,7 +470,7 @@ aqlprofile_att_get_buffer_packets(uint64_t*                      header,
     auto& buffers = it->second;
     if(buffers.size() < 2) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-    aql_profile::Pm4Factory*  pm4_factory = aql_profile::Pm4Factory::Create(manager->GetAgent());
+    aql_profile::Pm4Factory*  pm4_factory = aql_profile::Pm4Factory::Create(manager->AgentHandle());
     pm4_builder::SqttBuilder* sqttbuilder = pm4_factory->GetSqttBuilder();
     pm4_builder::CmdBuilder*  cmd_writer  = pm4_factory->GetCmdBuilder();
 

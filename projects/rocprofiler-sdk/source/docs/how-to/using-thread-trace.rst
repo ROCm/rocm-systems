@@ -155,6 +155,41 @@ For AMD Radeon, the ``simd-select`` parameter is a SIMD ID defaulting to 3. For 
   rocprofv3 --att --att-simd-select 0x0 -- <application_path>
 
 
+Thread trace environment variables
+==================================
+
+The following environment variables control advanced thread trace behavior:
+
+.. list-table::
+  :header-rows: 1
+  :widths: 35 15 50
+
+  * - Variable
+    - Default
+    - Description
+  * - ``ROCPROFILER_SQTT_FORCE_CP_DMA``
+    - ``false``
+    - Forces KFD-backed trace-buffer copies to use CP DMA instead of an SDMA
+      queue. This can be used to diagnose or work around an SDMA-path problem.
+      It does not select the HSA queue and signal backend. When this variable is
+      unset, ROCprofiler-SDK prefers SDMA and emits a warning if it must fall
+      back to CP DMA.
+  * - ``ROCPROFILER_SQTT_FORCE_HSA``
+    - ``false``
+    - Forces thread trace to use an HSA queue, HSA signals, and HSA-managed
+      memory instead of KFD resources. This is also the only way to run
+      multi-buffer thread trace on HSA resources: see the note below.
+
+ROCprofiler-SDK prefers KFD resources for thread trace. If they are unavailable,
+single-buffer mode falls back to an HSA queue and HSA signals and emits a warning.
+
+Multi-buffer mode does not fall back automatically. Its worker threads keep
+running after the HSA runtime shuts down, which is only safe on KFD resources, so
+a KFD failure is reported as an error instead. Set ``ROCPROFILER_SQTT_FORCE_HSA=1``
+to run multi-buffer thread trace on HSA resources anyway. Selecting the HSA
+backend explicitly does not emit the fallback warning.
+
+
 Using input file
 =================
 
