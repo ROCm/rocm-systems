@@ -208,7 +208,7 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>,
 
     // Woken up by another thread if the call did not fail and this is waking process
     if(_active && ret != -1 &&
-       _info.si_pid == process::get_id())  // NOLINT(misc-include-cleaner)
+       info.si_pid == process::get_id())  // NOLINT(misc-include-cleaner)
     {
         causal::delay::postblock(_delay_value);
     }
