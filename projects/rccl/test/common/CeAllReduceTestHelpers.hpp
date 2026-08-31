@@ -28,9 +28,8 @@ inline bool isCeRuntimeDriverSupported()
            (driverVer >= 70051831 && driverVer < 70060000);
 }
 
-// Staging cap used when no RCCL_CE_AR_MAX_MSG_BYTES override is set. Matches
-// rcclArchThresholds::ceArMax in graph/tuning.cc (256 MiB). Per-rank chunk
-// capacity is that cap / nRanks, same as ncclCeInit.
+// Default ceARTmpBuf capacity. Matches NCCL_CE_AR_TMPBUF_DEFAULT_BYTES.
+// Per-rank chunk capacity is that size / nRanks, same as ncclCeInit.
 constexpr size_t kCeArMaxMsgBytesDefault = 256ull * 1024 * 1024;
 
 inline size_t ceAllReduceMaxChunkBytes(int nRanks,

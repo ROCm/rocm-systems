@@ -269,8 +269,10 @@ struct rcclArchThresholds {
   // CE non-registered (scratch) window per collective, total bytes.
   // CE-Scratch fires when ceNonRegMin[func] <= totalBytes <= ceNonRegMax[func].
   // ceNonRegMin[func] = 0 means no lower bound (fires immediately above DDA exit).
-  // ceNonRegMax[func] = 0 means CE-Scratch disabled for that collective.
-  // For AllReduce, ceNonRegMax[AR] also doubles as the ceARTmpBuf allocation size.
+  // ceNonRegMax[func] = 0 means CE-Scratch / CE 2-shot disabled for that collective.
+  // AllReduce 2-shot: this is a selector cap only. ceARTmpBuf is allocated at
+  // NCCL_CE_AR_TMPBUF_DEFAULT_BYTES and grown only when this entry (or
+  // RCCL_CE_AR_MAX_MSG_BYTES) is larger.
   size_t ceNonRegMin[RCCL_DDA_FUNC_COUNT];
   size_t ceNonRegMax[RCCL_DDA_FUNC_COUNT];
 
@@ -286,6 +288,10 @@ struct rcclArchThresholds {
   // 0 means no suppression (symk may win at any size for that collective).
   // Only AllReduce is relevant today; other collectives default to 0.
   size_t symMaxR2[RCCL_DDA_FUNC_COUNT];
+  // Graph-mode variant of symMaxR2 (graphCapturingHint / stream capture). CE is
+  // graph-unsafe, so graph mode typically wants no suppression (keep symk).
+  // 0 means no suppression, same convention as symMaxR2 -- not "inherit eager".
+  size_t symMaxR2Graph[RCCL_DDA_FUNC_COUNT];
 
   // Per-size unroll factor breakpoints for gfx1250.  Each entry is a
   // (maxBytes, unrollIdx) pair: the first entry whose maxBytes >= msgBytes

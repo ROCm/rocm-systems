@@ -53,10 +53,10 @@ RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
 RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
-RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
+RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 1);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
-RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
+RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 1);
 RCCL_PARAM(CeArMaxMsgBytes,    "CE_AR_MAX_MSG_BYTES", -1);     // -1 = use ceArMax (2-shot)
 RCCL_PARAM(CeArRegMaxMsgBytes, "CE_AR_REG_MAX_MSG_BYTES", -1); // -1 = use ceArRegMax (registered)
 
@@ -715,6 +715,15 @@ inline bool ddaThresholdFromEnv(int64_t param, size_t* threshold) {
 inline size_t ddaThresholdFromTable(const size_t* caps, ncclFunc_t func) {
   return (unsigned)func < RCCL_DDA_FUNC_COUNT ? caps[func] : 0;
 }
+
+// R2 symmetric-kernel size cap. Graph capture uses symMaxR2Graph; eager uses
+// symMaxR2. 0 means do not suppress symk (CE cannot win under capture).
+inline size_t rcclSymMaxR2Cap(const ncclComm* comm, ncclFunc_t func, bool graphMode) {
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return 0;
+  const size_t* caps = graphMode ? table->symMaxR2Graph : table->symMaxR2;
+  return ddaThresholdFromTable(caps, func);
+}
 } // namespace
 
 size_t rcclCeRegMax(const ncclComm* comm, ncclFunc_t func) {
@@ -729,6 +738,16 @@ size_t rcclCeNonRegMax(const ncclComm* comm, ncclFunc_t func) {
   const rcclArchThresholds* table = ddaArchTable(comm);
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMax[(size_t)func] : 0;
+}
+
+size_t rcclCeAr2ShotMax(const ncclComm* comm) {
+  const int64_t param = rcclParamCeArMaxMsgBytes();
+  if (param >= 0) return (size_t)param;
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  // No arch table: keep the historical 256 MiB 2-shot window (matches the
+  // default staging allocation). A present table with 0 means 2-shot is off.
+  if (table == nullptr) return NCCL_CE_AR_TMPBUF_DEFAULT_BYTES;
+  return table->ceNonRegMax[ncclFuncAllReduce];
 }
 
 size_t rcclCeNonRegMin(const ncclComm* comm, ncclFunc_t func) {
@@ -973,14 +992,13 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
     return false;
   }
 
-  // Total message must fit within the pre-allocated staging buffer (ceArMaxBytes set at init).
-  // RCCL_FORCE_CE_ALLREDUCE does not override this cap: ceArMaxBytes is a hard allocation
-  // limit, not a tuning threshold. force only bypasses the CTA_POLICY_ZERO check below.
+  // 2-shot selector cap (table/env). 0 means 2-shot is tuned off; registered CE
+  // still uses the default ceARTmpBuf. Does not override the allocated buffer:
+  // ncclCeInit grows ceArMaxBytes when this cap is larger than the default.
+  const size_t twoShotMax = rcclCeAr2ShotMax(comm);
+  if (twoShotMax == 0) return false;
   size_t msgBytes = count * ncclTypeSize(datatype);
-  if (msgBytes > comm->ceColl.ceArMaxBytes) {
-    WARN("Skipping CE AllReduce: msgBytes (%zu) > ceArMaxBytes (%zu)", msgBytes, comm->ceColl.ceArMaxBytes);
-    return false;
-  }
+  if (msgBytes > twoShotMax) return false;
 
   if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO && !force) {
     WARN("Skipping CE AllReduce: CTA policy is not ZERO");
@@ -1056,24 +1074,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   ncclSymRegType_t winRegType;
   NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
 
-  // (1) Symmetric-window kernel eligibility takes priority over CE / DDA.
-  // symkRequested is the raw "symk would run for these operands" signal and keeps
-  // gating the CE 2-shot and DDA branches below, so registered buffers still reach
-  // CE-registered at (5) rather than being claimed by a staging-buffer or fabric path.
-  // symMaxR2 from the arch table only withdraws symk as the final choice once recv is
-  // registered and the message exceeds the CE/symk crossover size, letting
-  // CE-registered win instead.  0 means no suppression.
-  const bool recvRegistered = (winRegType == ncclSymSendRegRecvReg ||
-                                winRegType == ncclSymSendNonregRecvReg);
-  const size_t symMaxR2 = (comm->archThresholds)
-      ? comm->archThresholds->symMaxR2[ncclFuncAllReduce] : 0;
-  const bool symSuppressedBySize = recvRegistered && symMaxR2 > 0 && msgBytes > symMaxR2;
-  const bool symkRequested =
-    (op == ncclSum) &&
-    isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendbuff, recvbuff);
-  const bool symEligible = symkRequested && !symSuppressedBySize;
-
-  // (2) CE AllReduce graph state. CE is graph-unsafe, so capture disables it.
+  // CE AllReduce graph state. CE is graph-unsafe, so capture disables it.
+  // Probed before the symMaxR2 gate so graph mode can pick symMaxR2Graph.
   //  - Live dispatch (query=false): probe the real stream and tick the graph
   //    latch, exactly as the inline code did.
   //  - Reporting (query=true): the query runs outside capture, so the stream
@@ -1094,6 +1096,25 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   if (query && ceCapturing) ceArGraphAllowed = false;
   decision->ceCapturing = ceCapturing;
   decision->ceArGraphAllowed = ceArGraphAllowed;
+
+  // (1) Symmetric-window kernel eligibility takes priority over CE / DDA.
+  // symkRequested is the raw "symk would run for these operands" signal and keeps
+  // gating the CE 2-shot and DDA branches below, so registered buffers still reach
+  // CE-registered at (5) rather than being claimed by a staging-buffer or fabric path.
+  // symMaxR2 / symMaxR2Graph from the arch table only withdraws symk as the final
+  // choice once recv is registered and the message exceeds the CE/symk crossover
+  // size, letting CE-registered win instead.  0 means no suppression.
+  const bool recvRegistered = (winRegType == ncclSymSendRegRecvReg ||
+                                winRegType == ncclSymSendNonregRecvReg);
+  const size_t symMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncAllReduce, ceCapturing);
+  const bool symSuppressedBySize = recvRegistered && symMaxR2 > 0 && msgBytes > symMaxR2;
+  const bool symkRequested =
+    (op == ncclSum) &&
+    isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendbuff, recvbuff);
+  const bool symEligible = symkRequested && !symSuppressedBySize;
+  INFO(NCCL_COLL,
+       "rcclSelectAllReduce: graph=%d symkRequested=%d symSuppressedBySize=%d symEligible=%d symMaxR2=%zu",
+       (int)ceCapturing, (int)symkRequested, (int)symSuppressedBySize, (int)symEligible, symMaxR2);
 
   // develop's single "will CE AllReduce service this call" gate (collectives.cc
   // ncclAllReduce_impl). force = RCCL_FORCE_CE_ALLREDUCE; symReg probes whether the
@@ -1172,10 +1193,11 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   }
   // Tuning cap only: registered CE has no staging allocation, so this does not
   // size a buffer. 0 (or unset table) means no upper bound. Independent of the
-  // 2-shot ceArMax / ceArMaxBytes limit used above.
+  // 2-shot selector (table/env cap, 0 = off). Independent of the allocated
+  // ceARTmpBuf size used by registered CE.
   const size_t ceArRegMax = rcclCeRegMax(comm, ncclFuncAllReduce);
   const bool ceRegInWindow = ceArRegMax == 0 || msgBytes <= ceArRegMax;
-  if (ceRegInWindow && ceAvailable && !hasSysmemSegment &&
+  if (!symEligible && ceRegInWindow && ceAvailable && !hasSysmemSegment &&
       ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);

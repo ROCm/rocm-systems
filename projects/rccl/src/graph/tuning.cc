@@ -1844,13 +1844,14 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   },
   // ceNonRegMax: upper bound for CE-Scratch window per collective.
   // AG: CE-Scratch exits at 32 MiB; Ring/LL128 wins above.
-  // AR: 256 MiB = staging buffer allocation size AND selector gate (ceArMaxBytes).
+  // AR: 2-shot selector cap only (0 = 2-shot off). ceARTmpBuf stays at the
+  // default 256 MiB unless this entry is larger.
   .ceNonRegMax = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
     32ULL*1024*1024,      // [2] AllGather       -- CE-Scratch upper bound 32 MiB
     0,                    // [3] ReduceScatter   -- not used
-    256ULL*1024*1024,     // [4] AllReduce       -- 2-shot staging cap (also allocation size)
+    0,                    // [4] AllReduce       -- 2-shot off (staging stays at default 256 MiB)
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
@@ -1872,14 +1873,26 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   },
   // symMaxR2: suppress symk in favour of CE-registered when recv is registered and
   // msg > threshold.
-  // AR set to 512 KiB -- CE outperforms symk above this on gfx1250 (tune from perf data).
+  // AR set to 256 KiB -- CE outperforms symk above this on gfx1250 (tune from perf data).
   // All other collectives: 0 (no suppression).
   .symMaxR2 = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
     4ULL*1024*1024,       // [2] AllGather       -- CE-registered wins above 4 MiB for R2 (suppress symk)
     0,                    // [3] ReduceScatter   -- no suppression (placeholder)
-    512ULL*1024,          // [4] AllReduce       -- CE-registered wins above 512 KiB for R2
+    256ULL*1024,          // [4] AllReduce       -- CE-registered wins above 256 KiB for R2
+    0,                    // [5] SendRecv        -- not used
+    0,                    // [6] Send            -- not used
+    0,                    // [7] Recv            -- not used
+    0,                    // [8] AlltoAll        -- not used
+  },
+  // Graph capture: CE is blocked, so do not withdraw symk (0 = no suppression).
+  .symMaxR2Graph = {
+    0,                    // [0] Broadcast      -- not used
+    0,                    // [1] Reduce          -- not used
+    0,                    // [2] AllGather       -- keep symk in graph mode
+    0,                    // [3] ReduceScatter   -- keep symk in graph mode
+    0,                    // [4] AllReduce       -- keep symk in graph mode (CE blocked)
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
@@ -1902,6 +1915,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .ceNonRegMax = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
   .ceRegMax    = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
   .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .symMaxR2Graph = {0, 0, 0, 0, 0, 0, 0, 0, 0},
 
 };
 
@@ -1914,6 +1928,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .ceNonRegMax = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
   .ceRegMax    = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
   .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .symMaxR2Graph = {0, 0, 0, 0, 0, 0, 0, 0, 0},
 
 };
 

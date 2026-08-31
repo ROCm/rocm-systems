@@ -219,6 +219,11 @@ RCCL_PARAM_DECLARE(CeAllReduce);
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
 RCCL_PARAM_DECLARE(CeArMaxMsgBytes);     // -1 = use ceNonRegMax[AR] (2-shot) from arch table
 RCCL_PARAM_DECLARE(CeArRegMaxMsgBytes);  // -1 = use ceRegMax[AR] (registered) from arch table
+// 2-shot AllReduce size cap: env RCCL_CE_AR_MAX_MSG_BYTES if set, else
+// ceNonRegMax[AR] from the arch table (0 = 2-shot disabled). Does not size
+// ceARTmpBuf; that stays at NCCL_CE_AR_TMPBUF_DEFAULT_BYTES unless this cap
+// is larger.
+size_t rcclCeAr2ShotMax(const ncclComm* comm);
 // Registered CE AllReduce AUTO size cap. Env RCCL_CE_AR_REG_MAX_MSG_BYTES wins;
 // else arch table ceRegMax[AR]; 0 means no upper bound.
 size_t rcclCeArRegisteredMax(const ncclComm* comm);
