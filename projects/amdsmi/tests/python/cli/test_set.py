@@ -85,19 +85,21 @@ class TestSet(TestCliBase):
                     )
                 )
 
-            # set --compute-partition defaults
-            accelerator_type = self.partition_data["current_partition"][index]["accelerator_type"]
-            if accelerator_type != "N/A":
-                cmds.append(
-                    (f"amd-smi set --compute-partition {accelerator_type} --gpu {index}", self.PASS)
-                )
-
             # set --memory-partition defaults
             # Safe to write back: the mode only takes effect after a driver reload.
             memory_partition = self.partition_data["current_partition"][index]["memory"]
             if memory_partition != "N/A":
                 cmds.append(
                     (f"amd-smi set --memory-partition {memory_partition} --gpu {index}", self.PASS)
+                )
+
+            # set --compute-partition defaults
+            # Must come after memory partition sets, since the memory partition set can override
+            # this setting (their defaults may differ).
+            accelerator_type = self.partition_data["current_partition"][index]["accelerator_type"]
+            if accelerator_type != "N/A":
+                cmds.append(
+                    (f"amd-smi set --compute-partition {accelerator_type} --gpu {index}", self.PASS)
                 )
 
             # set --compute-partition-mem-alloc-mode defaults
