@@ -68,6 +68,11 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests"
     TIMEOUT 45
     FIXTURES_REQUIRED hip-graph-forkjoin-deadlock
+    # Collecting the tests runs pytest without the run arguments, and the geometry options
+    # have no defaults, so collection has to be given them too. Both lists read the same
+    # variables, so they cannot disagree.
+    DISCOVERY_ARGS --width ${FORKJOIN_WIDTH} --depth ${FORKJOIN_DEPTH} --replays
+                   ${FORKJOIN_REPLAYS}
     ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/hip-graph-forkjoin-deadlock-test.json
          --width ${FORKJOIN_WIDTH} --depth ${FORKJOIN_DEPTH} --replays
          ${FORKJOIN_REPLAYS})
