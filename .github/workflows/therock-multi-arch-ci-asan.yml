@@ -3,16 +3,13 @@
 
 # Multi-Arch CI ASAN for rocm-systems
 #
-# Focused host-ASAN presubmit: builds only runtime components (compiler-runtime,
-# runtime-tests) and runs hip-tests + rocrtst on every PR. This catches host-side
-# memory errors without the full build cost.
+# Presubmit and on-demand ASAN builds. TheRock's configure_multi_arch_ci.py
+# automatically selects host-asan for pull_request events (faster, host-only)
+# and full asan for workflow_dispatch (comprehensive device-side instrumentation).
 #
-# Key configuration (see TheRock docs/development/sanitizers.md):
-# - build_stages: limits build to runtime components only
-# - asan_presubmit: runs without ci:asan label, allocates sandbox test runners
-# - lock_test_labels: PR labels cannot widen test scope
-# - sanity_blocks_components: sanity failures don't block component tests
-# - build_native_linux/build_python_packages/build_pytorch/build_jax: disabled
+# The presubmit is scoped to a runtime-only build (compiler-runtime and
+# runtime-tests) testing hip-tests and rocrtst, so that it is cheap enough to
+# run automatically on every pull request. See ROCm/TheRock#7202.
 #
 # For scheduled nightly runs with full ASAN, see therock-multi-arch-ci-asan-nightly.yml.
 
@@ -66,14 +63,10 @@ jobs:
   setup:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
-      build_variant: "asan"
+      build_variant: "host-asan"
       build_stages: "compiler-runtime,runtime-tests"
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || 'test:hip-tests,test:rocrtst' }}
-      asan_presubmit: true
-      lock_test_labels: true
-      sanity_blocks_components: false
-      validate_artifact_structure: false
       build_native_linux: false
       build_python_packages: false
       build_pytorch: false
