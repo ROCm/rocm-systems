@@ -278,6 +278,20 @@ size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func);
 size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func);
 size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func);
 
+// True when AllGather should run CE-registered rather than the symmetric kernel:
+// recv buffer registered, message above symMaxR2[AG] (the symk/CE crossover) and
+// within ceRegMax[AG]. symMaxR2[AG] = 0 keeps symk at every size. Shared by the
+// selector (reporting) and taskAppend (dispatch) so the two cannot disagree.
+bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes, ncclSymRegType_t winRegType,
+                                     bool graphMode);
+
+// Payload cap used to size comm->ddaScratch: max of every DDA protocol table
+// entry (LL / LL128 / VMM, including R2 and graph VMM variants) plus
+// ceNonRegMax for collectives that stage through ddaScratch (not AllReduce
+// 2-shot, which uses ceARTmpBuf). Env DDA_*_THRESHOLD, when set, is also
+// folded in. ReduceScatter table values are per-rank and scaled by nRanks.
+size_t rcclDdaScratchPayloadCap(const ncclComm* comm);
+
 // Returns true when the DDA fast path should be attempted for this arch/size.
 // `threshold` is the per-collective cap from rcclDdaVmmThreshold(). 0 disables
 // DDA for the call.

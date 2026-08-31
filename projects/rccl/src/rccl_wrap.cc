@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include "graph/topo.h"
 #include "enqueue.h"
 #include <algorithm>
+#include <cstdint>
 #include "debug.h"
 #include "net.h"
 #include "amdsmi_wrap.h"
@@ -756,6 +757,19 @@ size_t rcclCeNonRegMin(const ncclComm* comm, ncclFunc_t func) {
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
 }
 
+bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes, ncclSymRegType_t winRegType,
+                                     bool graphMode) {
+  // CE-registered copies through the user's symmetric windows, so recv must be registered.
+  const bool recvRegistered = (winRegType == ncclSymSendRegRecvReg || winRegType == ncclSymSendNonregRecvReg);
+  if (!recvRegistered) return false;
+  // symMaxR2[AG] is the symk/CE crossover: at or below it the symmetric kernel keeps
+  // the message. 0 means never withdraw symk, same convention as AllReduce.
+  const size_t symMax = rcclSymMaxR2Cap(comm, ncclFuncAllGather, graphMode);
+  if (symMax == 0 || totalBytes <= symMax) return false;
+  const size_t regMax = rcclCeRegMax(comm, ncclFuncAllGather);
+  return regMax == 0 || totalBytes <= regMax;
+}
+
 // Keep old name as a shim for callers that have not been updated yet.
 size_t rcclCeArRegisteredMax(const ncclComm* comm) {
   return rcclCeRegMax(comm, ncclFuncAllReduce);
@@ -783,6 +797,40 @@ size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
   const rcclArchThresholds* table = ddaArchTable(comm);
   if (table == nullptr) return 0;
   return ddaThresholdFromTable(table->ddaVmmMax, func);
+}
+
+size_t rcclDdaScratchPayloadCap(const ncclComm* comm) {
+  size_t cap = 0;
+  auto bump = [&](size_t v) {
+    if (v > cap) cap = v;
+  };
+  auto scaleRs = [&](size_t v, int func) -> size_t {
+    if (v == 0) return 0;
+    if (func != (int)ncclFuncReduceScatter) return v;
+    const size_t nRanks = (comm != nullptr && comm->nRanks > 0) ? (size_t)comm->nRanks : 1;
+    if (nRanks > 1 && v > SIZE_MAX / nRanks) return SIZE_MAX;
+    return v * nRanks;
+  };
+
+  size_t env = 0;
+  if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &env)) bump(env);
+  if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &env)) bump(env);
+  if (ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &env)) bump(env);
+
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return cap;
+
+  for (int i = 0; i < RCCL_DDA_FUNC_COUNT; ++i) {
+    bump(scaleRs(table->ddaLLMax[i], i));
+    bump(scaleRs(table->ddaLL128Max[i], i));
+    bump(scaleRs(table->ddaVmmMax[i], i));
+    bump(scaleRs(table->ddaVmmMaxR2[i], i));
+    bump(scaleRs(table->ddaVmmMaxGraph[i], i));
+    // AG CE-Scratch (and any other non-AR CE-scratch) copies the receive into
+    // ddaScratch, so that window must fit. AR 2-shot uses ceARTmpBuf.
+    if (i != (int)ncclFuncAllReduce) bump(scaleRs(table->ceNonRegMax[i], i));
+  }
+  return cap;
 }
 
 // Context-aware VMM threshold resolver.  Callers pass the full winRegType so
@@ -1375,12 +1423,15 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       decision->algo = RCCL_CE_SCRATCH;
       return ncclSuccess;
     }
-    // Branch #3: CE via registered symmetric windows — requires CTAPolicy=ZERO,
-    // matching the taskAppend gate (line ~3916) so the decision and dispatch agree.
+    // Branch #3: CE via registered symmetric windows. Taken either when the size
+    // falls in the (symMaxR2, ceRegMax] window from the arch table, or when
+    // CTAPolicy=ZERO forces CE for every size. Mirrors the taskAppend gate
+    // (line ~3936) so the decision and the dispatch agree.
     const bool ceAvailable =
       !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
     if (ceAvailable && !hasSysmemSegment &&
-        (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
+        ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) ||
+         rcclAllGatherCeRegisteredWindow(comm, totalBytes, winRegType, ceCapturing))) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }

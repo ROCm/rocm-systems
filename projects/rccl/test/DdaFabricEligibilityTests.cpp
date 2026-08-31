@@ -11,7 +11,9 @@
 #include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
+#include "graph.h"
 #include "gtest/gtest.h"
+#include "rccl_common.h"
 
 namespace RcclUnitTesting
 {
@@ -99,6 +101,27 @@ TEST(DdaFabricScratchSizingTest, LL128FloorDominatesAtHighRankCount)
     constexpr size_t ll128Floor = 2 * nRanks * nccl_dda_detail::kDdaLL128SlotStrideLines * 128;
     EXPECT_EQ(sizing, ll128Floor);
     EXPECT_GT(sizing, (size_t)smallSimpleCap);
+}
+
+TEST(DdaFabricScratchSizingTest, PayloadCapTakesMaxAcrossDdaAndCeScratchTables)
+{
+    rcclArchThresholds table{};
+    table.ddaVmmMax[ncclFuncAllReduce] = 16ULL * 1024 * 1024;
+    table.ddaLL128Max[ncclFuncAllReduce] = 32ULL * 1024 * 1024;
+    table.ceNonRegMax[ncclFuncAllGather] = 32ULL * 1024 * 1024;
+    table.ddaVmmMaxGraph[ncclFuncAllReduce] = 256ULL * 1024 * 1024;
+    table.ddaLLMax[ncclFuncReduceScatter] = 1ULL * 1024 * 1024;
+
+    DdaFabricMockComm mock;
+    mock.comm.nRanks = 4;
+    mock.comm.archThresholds = &table;
+
+    // Graph VMM (256 MiB) dominates LL128/CE-Scratch (32 MiB) and RS LL
+    // (1 MiB/rank * 4 = 4 MiB). AR-only VMM (16 MiB) must not win.
+    EXPECT_EQ(rcclDdaScratchPayloadCap(mock.get()), 256ULL * 1024 * 1024);
+
+    table.ddaVmmMaxGraph[ncclFuncAllReduce] = 0;
+    EXPECT_EQ(rcclDdaScratchPayloadCap(mock.get()), 32ULL * 1024 * 1024);
 }
 
 // ---------------------------------------------------------------------------
