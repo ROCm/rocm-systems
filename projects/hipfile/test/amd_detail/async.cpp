@@ -188,6 +188,26 @@ TEST_F(HipFileAsyncOp, AsyncOpFallbackLimitsMaxIoSize)
     ASSERT_EQ(op->submitted_size, hipFile::getMaxRwCount());
 }
 
+TEST_F(HipFileAsyncOp, AsyncOpLimitsFixedIoSize)
+{
+    size_t  size              = 4_GiB;
+    hoff_t  file_offset       = 0;
+    hoff_t  buffer_offset     = 0;
+    ssize_t bytes_transferred = 0;
+    auto    op_data           = make_shared_void(sizeof(AsyncOpFallback));
+    auto    bounce_buffer     = make_shared_void(1_KiB);
+    EXPECT_CALL(mhip, hipHostMalloc(sizeof(AsyncOpFallback), _)).WillOnce(Return(op_data.get()));
+    EXPECT_CALL(*stream, asyncBufferHostPtr).WillOnce(Return(bounce_buffer.get()));
+    EXPECT_CALL(*stream, asyncBufferDevPtr).WillOnce(Return(bounce_buffer.get()));
+    EXPECT_CALL(*stream, asyncBufferSize).WillOnce(Return(1_KiB));
+    EXPECT_CALL(*stream, fixedIOSize).WillOnce(Return(true));
+    EXPECT_CALL(mhip, hipHostFree(Eq(op_data.get())));
+    auto op = std::shared_ptr<AsyncOpFallback>(new AsyncOpFallback{
+        IoType::Read, file, buffer, stream, &size, &file_offset, &buffer_offset, &bytes_transferred});
+    ASSERT_EQ(op->submitted_size, hipFile::getMaxRwCount());
+    ASSERT_EQ(std::get<size_t>(op->size), hipFile::getMaxRwCount());
+}
+
 TEST_F(HipFileAsyncOp, AsyncOpFallback_new_failure_throws_bad_alloc)
 {
     size_t  size              = 100;
