@@ -1073,14 +1073,14 @@ INSTANTIATE_TEST_SUITE_P(
     });
 
 // Fallback path where the IO is several times the async buffer size, so the fallback loops over
-// multiple chunks. The async buffer defaults to 1 MiB, so a 4 MiB IO spans four chunks.
+// multiple chunks. The async buffer defaults to 16 MiB, so a 64 MiB IO spans four chunks.
 class HipAsyncFallbackMultiChunk : public HipAsync, public ::testing::WithParamInterface<AsyncIoFunction> {
 public:
     HipAsyncFallbackMultiChunk()
     {
-        io_size     = 4_MiB;
-        file_size   = 4_MiB;
-        buffer_size = 4_MiB;
+        io_size     = 64_MiB;
+        file_size   = 64_MiB;
+        buffer_size = 64_MiB;
     }
     void SetUp() override
     {
@@ -1141,9 +1141,9 @@ class HipAsyncFallbackMultiChunkShrink : public HipAsyncStreamUnfixedPaused,
 public:
     HipAsyncFallbackMultiChunkShrink()
     {
-        io_size     = 4_MiB;
-        file_size   = 4_MiB;
-        buffer_size = 4_MiB;
+        io_size     = 64_MiB;
+        file_size   = 64_MiB;
+        buffer_size = 64_MiB;
     }
     void SetUp() override
     {
@@ -1175,10 +1175,10 @@ public:
 
 TEST_P(HipAsyncFallbackMultiChunkShrink, shrinkBelowChunkCountStillCorrect)
 {
-    // Submit the full 4 MiB (four 1 MiB chunks) while paused, then shrink to 1.5 MiB before releasing.
+    // Submit the full 64 MiB (four 16 MiB chunks) while paused, then shrink to 24 MiB before releasing.
     // That leaves two real chunks plus two surplus chunks that must no-op; bytes_transferred must
     // reflect the shrunken size and the untouched tail of the destination must stay zero.
-    const size_t shrunk_size = 1_MiB + 512_KiB;
+    const size_t shrunk_size = 16_MiB + 8_MiB;
     ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
               HIPFILE_SUCCESS);
     io_size = shrunk_size;

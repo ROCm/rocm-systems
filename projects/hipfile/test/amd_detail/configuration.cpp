@@ -246,13 +246,13 @@ TEST_F(HipFileConfiguration, UnsupportedFilesystemsDisabledIfEnvironmentVariable
 TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsNotSet)
 {
     expect_configuration_async_buffer_size(nullptr);
-    ASSERT_EQ(1_MiB, Configuration().asyncBufferSize());
+    ASSERT_EQ(16_MiB, Configuration().asyncBufferSize());
 }
 
 TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsInvalid)
 {
     expect_configuration_async_buffer_size("not-a-number");
-    ASSERT_EQ(1_MiB, Configuration().asyncBufferSize());
+    ASSERT_EQ(16_MiB, Configuration().asyncBufferSize());
 }
 
 TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsSet)
@@ -264,7 +264,7 @@ TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsSet)
 TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsZero)
 {
     expect_configuration_async_buffer_size("0");
-    ASSERT_EQ(1_MiB, Configuration().asyncBufferSize());
+    ASSERT_EQ(16_MiB, Configuration().asyncBufferSize());
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON
