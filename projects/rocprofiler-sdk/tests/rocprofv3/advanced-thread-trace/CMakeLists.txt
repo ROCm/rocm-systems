@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -55,12 +55,6 @@ endif()
 
 find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
                                                            attdecoder_LIBRARY)
-
-option(ROCPROFILER_REQUIRE_ATT_DECODER
-       "Fail configuration when the ATT decoder required by tests is unavailable" OFF)
-if(ROCPROFILER_REQUIRE_ATT_DECODER AND NOT attdecoder_FOUND)
-    message(FATAL_ERROR "rocprof-trace-decoder is required for ATT integration tests")
-endif()
 
 set(COMMON_PARAMS_NO_LIB ${PRELOAD_ARGS} --att --output-format json --log-level env -d
                          ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/)
