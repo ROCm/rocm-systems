@@ -18,8 +18,8 @@
 // fakes/wrap_stubs.cc).
 //
 // Not yet covered, each documented further at its own would-be test site or
-// in fakes/wrap_stubs.cc: rcclSetPipelining; the WarpSpeed helpers (not even
-// compiled into this binary -- ENABLE_WARP_SPEED is off); and the High-tier
+// in fakes/wrap_stubs.cc: the WarpSpeed helpers (not even compiled into this
+// binary -- ENABLE_WARP_SPEED is off); and the High-tier
 // group that shares the DDA/CE/symmetric-kernel abort-floor surface --
 // rcclSelectAllReduce/AllGather/ReduceScatter, rcclHierarchicalAlgoInfo,
 // rcclGetAlgoInfo, rcclGetCollImplInfo, and the deep (post-guard) path of
