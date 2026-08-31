@@ -183,11 +183,31 @@ def get_pr_labels(args) -> List[str]:
     return labels
 
 
-def check_rccl_changes(modified_paths: Optional[Iterable[str]]) -> bool:
-    """Returns true if any files under projects/rccl/ were modified."""
+# The workflow that runs the RCCL host unit tests. It is invoked via workflow_call
+# from therock-ci.yml, so it has no paths: trigger of its own and would otherwise
+# never be exercised by a PR that edits it -- a breakage would first surface on an
+# unrelated RCCL PR, which cannot merge because the job gates the summary check.
+RCCL_HOST_TESTS_WORKFLOW = ".github/workflows/rccl-host-unit-tests.yml"
+
+
+def check_rccl_changes(
+    modified_paths: Optional[Iterable[str]],
+    include_host_test_workflow: bool = False,
+) -> bool:
+    """Returns true if any files under projects/rccl/ were modified.
+
+    include_host_test_workflow also matches the host-test workflow's own path, so
+    that workflow stays self-testing. It defaults to False because only the
+    CPU-only host tests want it: the GPU job (therock-rccl-ci-linux) starts with a
+    ~60 min package build per family, and a CI-only edit must not pull that in.
+    """
     if modified_paths is None:
         return False
-    return any(path.startswith("projects/rccl/") for path in modified_paths)
+    if any(path.startswith("projects/rccl/") for path in modified_paths):
+        return True
+    return include_host_test_workflow and any(
+        path == RCCL_HOST_TESTS_WORKFLOW for path in modified_paths
+    )
 
 
 def check_hip_rocr_changes(modified_paths: Optional[Iterable[str]]) -> bool:
@@ -475,18 +495,23 @@ def run(args):
         "test_type": test_type,
     }
 
-    # Determine if RCCL CI should run (only relevant for Linux platform)
+    # Determine if RCCL CI should run (only relevant for Linux platform).
+    # run_linux_rccl_ci gates the GPU job; run_rccl_host_tests gates the CPU-only
+    # host unit tests, which additionally run when their own workflow is edited.
     if args.get("platform") == "linux":
         if args.get("is_nightly"):
             # Nightly runs always run RCCL CI
             outputs["run_linux_rccl_ci"] = "true"
+            outputs["run_rccl_host_tests"] = "true"
         elif args.get("is_workflow_dispatch"):
             # For workflow_dispatch, check if projects/rccl was explicitly selected
             input_projects = args.get("input_projects", "")
             if "projects/rccl" in input_projects:
                 outputs["run_linux_rccl_ci"] = "true"
+                outputs["run_rccl_host_tests"] = "true"
             else:
                 outputs["run_linux_rccl_ci"] = "false"
+                outputs["run_rccl_host_tests"] = "false"
         else:
             # For push/PR events, check if any files under projects/rccl/ changed
             base_ref = args.get("base_ref")
@@ -495,6 +520,10 @@ def run(args):
                 outputs["run_linux_rccl_ci"] = "true"
             else:
                 outputs["run_linux_rccl_ci"] = "false"
+            if check_rccl_changes(modified_paths, include_host_test_workflow=True):
+                outputs["run_rccl_host_tests"] = "true"
+            else:
+                outputs["run_rccl_host_tests"] = "false"
 
     # Determine if MI455 CI should run (only for PRs on Linux when HIP/ROCR or CI changes)
     if args.get("platform") == "linux":

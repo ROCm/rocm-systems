@@ -48,6 +48,7 @@ jobs:
       linux_projects: ${{ steps.linux_projects.outputs.projects }}
       windows_projects: ${{ steps.windows_projects.outputs.projects }}
       run_linux_rccl_ci: ${{ steps.linux_projects.outputs.run_linux_rccl_ci }}
+      run_rccl_host_tests: ${{ steps.linux_projects.outputs.run_rccl_host_tests }}
       run_mi455_test: ${{ steps.linux_projects.outputs.run_mi455_test }}
       test_type: ${{ steps.linux_projects.outputs.test_type }}
       package_version: ${{ steps.rocm_package_version.outputs.rocm_package_version }}
@@ -232,6 +233,20 @@ jobs:
         -DTHEROCK_ENABLE_ROCPROFV3=ON
         -DTHEROCK_ENABLE_MPI=ON
 
+  # CPU-only RCCL host unit tests (no GPU, no TheRock build artifacts), so this
+  # runs in parallel with the GPU jobs rather than waiting on a package build.
+  # Gated on run_rccl_host_tests, which is run_linux_rccl_ci plus the host-test
+  # workflow's own path so that workflow stays self-testing -- see
+  # check_rccl_changes(include_host_test_workflow=True) in
+  # .github/scripts/therock_configure_ci.py.
+  rccl-host-unit-tests:
+    name: RCCL Host Unit Tests
+    needs: setup
+    if: ${{ needs.setup.outputs.run_rccl_host_tests == 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/rccl-host-unit-tests.yml
+
   therock-ci-windows:
     name: Windows (${{ matrix.projects.projects_to_test }} | ${{ matrix.target_bundle.amdgpu_family }})
     permissions:
@@ -262,6 +277,7 @@ jobs:
       - therock-ci-linux
       - therock-build-linux-mi455
       - therock-rccl-ci-linux
+      - rccl-host-unit-tests
       - therock-ci-windows
     runs-on: ubuntu-24.04
     steps:
