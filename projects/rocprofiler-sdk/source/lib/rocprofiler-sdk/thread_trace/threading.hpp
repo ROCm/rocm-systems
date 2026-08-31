@@ -38,12 +38,6 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
-inline uint64_t
-next_chunk_id(std::vector<uint64_t>& per_shader_engine, size_t shader_engine_id)
-{
-    return per_shader_engine[shader_engine_id]++;
-}
-
 rocprofiler_thread_trace_timestamp_t
 convert_timestamp(rocprofiler_agent_id_t agent_id, uint64_t gpu_clock);
 
