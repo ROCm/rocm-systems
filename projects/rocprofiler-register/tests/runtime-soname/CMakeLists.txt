@@ -4,10 +4,18 @@
 
 set(RUNTIME_SONAME_FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/fixtures")
 
+if(TARGET rocprofiler-register::headers)
+    set(RUNTIME_SONAME_HEADERS_TARGET rocprofiler-register::headers)
+elseif(TARGET rocprofiler-register::rocprofiler-register-headers)
+    set(RUNTIME_SONAME_HEADERS_TARGET rocprofiler-register::rocprofiler-register-headers)
+else()
+    message(FATAL_ERROR "rocprofiler-register headers target not found")
+endif()
+
 add_library(runtime-soname-sdk-fixture SHARED runtime-soname-fixture.cpp)
 target_compile_definitions(runtime-soname-sdk-fixture
                            PRIVATE ROCPROFILER_REGISTER_TEST_SDK_FIXTURE=1)
-target_link_libraries(runtime-soname-sdk-fixture PRIVATE rocprofiler-register::headers)
+target_link_libraries(runtime-soname-sdk-fixture PRIVATE ${RUNTIME_SONAME_HEADERS_TARGET})
 set_target_properties(
     runtime-soname-sdk-fixture
     PROPERTIES OUTPUT_NAME rocprofiler-sdk
@@ -18,7 +26,8 @@ set_target_properties(
 add_library(runtime-soname-attach-fixture SHARED runtime-soname-fixture.cpp)
 target_compile_definitions(runtime-soname-attach-fixture
                            PRIVATE ROCPROFILER_REGISTER_TEST_ATTACH_FIXTURE=1)
-target_link_libraries(runtime-soname-attach-fixture PRIVATE rocprofiler-register::headers)
+target_link_libraries(runtime-soname-attach-fixture
+                      PRIVATE ${RUNTIME_SONAME_HEADERS_TARGET})
 set_target_properties(
     runtime-soname-attach-fixture
     PROPERTIES OUTPUT_NAME rocprofiler-sdk-attach
