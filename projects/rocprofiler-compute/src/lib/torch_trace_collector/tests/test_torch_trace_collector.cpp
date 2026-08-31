@@ -322,9 +322,8 @@ TEST_F(TorchTraceCollectorTest, SameSeqNrOnDifferentThreadsDoesNotCollide)
 
 TEST_F(TorchTraceCollectorTest, EvictsOldestPastMaxEntriesPerShard)
 {
-    const auto sequence_numbers = sequence_numbers_on_shard(0,
-                                                            kThreadA,
-                                                            SnapshotStore::Shard::kMaxEntriesPerShard + 1);
+    const auto sequence_numbers =
+        sequence_numbers_on_shard(0, kThreadA, SnapshotStore::Shard::kMaxEntriesPerShard + 1);
     for (std::size_t i = 0; i < SnapshotStore::Shard::kMaxEntriesPerShard; ++i)
     {
         snapshots().save(sequence_numbers[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
@@ -341,9 +340,8 @@ TEST_F(TorchTraceCollectorTest, EvictsOldestPastMaxEntriesPerShard)
 
 TEST_F(TorchTraceCollectorTest, EvictionIsPerShard)
 {
-    const auto sequence_numbers = sequence_numbers_on_shard(0,
-                                                            kThreadA,
-                                                            SnapshotStore::Shard::kMaxEntriesPerShard + 1);
+    const auto sequence_numbers =
+        sequence_numbers_on_shard(0, kThreadA, SnapshotStore::Shard::kMaxEntriesPerShard + 1);
     const auto other_shard_sequence_numbers = sequence_numbers_on_shard(1, kThreadA, 1);
     for (std::size_t i = 0; i < SnapshotStore::Shard::kMaxEntriesPerShard; ++i)
     {

@@ -16,6 +16,8 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <exception>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -98,6 +100,23 @@ void unwind_observer_context(const RoctxObserverContext& observer_ctx, bool coun
     {
         stack.pop_back();
     }
+}
+
+void handle_start_error(std::unique_ptr<RoctxObserverContext>& observer_ctx,
+                        const char*                            message)
+{
+    if (observer_ctx)
+    {
+        try
+        {
+            unwind_observer_context(*observer_ctx, /*count_pop=*/false);
+        }
+        catch (...)
+        {
+        }
+    }
+    std::fprintf(stderr, "torch_trace_collector: %s\n", message);
+    process_state().stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
 }
 
 std::size_t push_with_prefix_dedup(const std::vector<StackEntry>& chain)
@@ -202,19 +221,14 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_f
 
         return observer_ctx;
     }
+    catch (const std::exception& exc)
+    {
+        handle_start_error(observer_ctx, exc.what());
+        return nullptr;
+    }
     catch (...)
     {
-        if (observer_ctx)
-        {
-            try
-            {
-                unwind_observer_context(*observer_ctx, /*count_pop=*/false);
-            }
-            catch (...)
-            {
-            }
-        }
-        process_state().stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
+        handle_start_error(observer_ctx, "unknown exception");
         return nullptr;
     }
 }
