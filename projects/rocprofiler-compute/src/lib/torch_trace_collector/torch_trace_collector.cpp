@@ -102,8 +102,7 @@ void unwind_observer_context(const RoctxObserverContext& observer_ctx, bool coun
     }
 }
 
-void handle_start_error(std::unique_ptr<RoctxObserverContext>& observer_ctx,
-                        const char*                            message)
+void handle_start_error(std::unique_ptr<RoctxObserverContext>& observer_ctx, const char* message)
 {
     if (observer_ctx)
     {
