@@ -392,13 +392,7 @@ def _register_handlers() -> None:
     # Matrix
     DISPATCH['accvgpr_read'] = lambda c: gen_accvgpr_read(c.dst_ops, c.src_ops)
     DISPATCH['accvgpr_write'] = lambda c: gen_accvgpr_write(c.dst_ops, c.src_ops)
-    DISPATCH['mfma'] = lambda c: gen_mfma(
-        c.inst,
-        c.dst_ops,
-        c.src_ops,
-        arch_name=c.arch_name,
-        supports_gpr_idx=c.profile.supports_gpr_idx,
-    )
+    DISPATCH['mfma'] = gen_mfma
 
 
 _register_handlers()

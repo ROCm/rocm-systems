@@ -36,6 +36,26 @@ Additional hooks: `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, `che
 | **CMake** | Functions: `snake_case`. Variables: `UPPER_CASE`. Commands: lowercase |
 | **Commits / PR titles** | Conventional Commits `type(amdsmi): summary` (lowercase type/scope, 10–80 chars). Legacy `[AMD-SMI]` tags fail the Systems PR Bot |
 
+## Copyright & License Headers
+
+Every AMD-owned source file starts with the two-line SPDX header, using the
+file's comment leader (`//` for C/C++/Go/Rust, `#` for Python/CMake/shell):
+
+    // Copyright Advanced Micro Devices, Inc.
+    // SPDX-License-Identifier: MIT
+
+**❌ BLOCKING** on any AMD-owned in-scope file that:
+- Is missing the header, or orders the lines wrong (copyright first, SPDX second).
+- Carries the old full MIT block, an "All rights reserved" line, a year, or `(c)`.
+- Uses an owner string other than `Copyright Advanced Micro Devices, Inc.`
+
+Out of scope (leave as-is): third-party/vendored files (`third_party/`,
+`esmi_ib_library/`, `include/libdrm/`), Broadcom NIC sources, kernel UAPI
+headers, and generated files (`amdsmi_wrapper.py`, `amdsmi_wrapper.rs`). Fix the
+generator (`tools/generator.py`, `rust-interface/build.rs`), never the generated
+output. The `amdsmi-license-headers` pre-commit hook enforces this; see
+`.github/CONTRIBUTING.md`.
+
 ## Severity
 
 | Marker | Use for |

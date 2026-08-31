@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 set(SUBCOMMAND_FILES
     __init__.py
     bad_pages.py

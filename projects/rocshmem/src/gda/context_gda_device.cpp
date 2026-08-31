@@ -64,14 +64,8 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id)
                       num_qps * sizeof(QueuePair),
                       hipMemcpyDefault));
 
-  ipcImpl_.ipc_bases = backend->ipcImpl.ipc_bases;
-  ipcImpl_.shm_size = backend->ipcImpl.shm_size;
-  ipcImpl_.shm_rank = backend->ipcImpl.shm_rank;
-  ipcImpl_.heap_size = backend->ipcImpl.heap_size;
-  ipcImpl_.pes_with_ipc_avail = backend->ipcImpl.pes_with_ipc_avail;
-  ipcImpl_.ipc_first_pe = backend->ipcImpl.ipc_first_pe;
-  ipcImpl_.ipc_stride = backend->ipcImpl.ipc_stride;
-  ipcImpl_.symm_table = backend->ipcImpl.symm_table;
+  ipcImpl_.initFrom(backend->ipcImpl);
+  ipcImpl_.assignSdmaChannel(ctx_id);
 }
 
 __host__ GDAContext::~GDAContext() {

@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -6437,6 +6438,34 @@ RJ_NOINLINE void VBfmB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   amdgpu::execute_v_bfm_b32_vop3(*this, wf);
+  dpp_write_mask_scope_.restore();
+}
+
+void VBcntU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    execute_modifier_impl(wf);
+    return;
+  }
+  amdgpu::execute_v_bcnt_u32_b32_vop3(*this, wf);
+}
+
+RJ_NOINLINE void VBcntU32B32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
+  std::optional<StagedOperand> dpp_src0_;
+  amdgpu::dpp::DppPlan dpp_plan_;
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                           dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    dpp_write_mask_scope_.bind(wf,
+                               wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  amdgpu::execute_v_bcnt_u32_b32_vop3(*this, wf);
   dpp_write_mask_scope_.restore();
 }
 

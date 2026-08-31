@@ -19,222 +19,16 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
-#include <algorithm>
-#include <cstdlib>
+#include "race_test_support.hpp"
+
+#include <cstdint>
 #include <cstdio>
-#include <fstream>
-#include <sstream>
-#include <string>
-#include <unistd.h>
 #include <vector>
 
-// ============================================================
-// Race log parser
-// ============================================================
+using rocjitsu::test::FindingCount;
+using rocjitsu::test::RaceExpectation;
 
-struct RaceRecord {
-  std::string kernel;   // compact readable kernel name, or "?" if unresolved
-  std::string symbol;   // exact ELF symbol name, or "?" if unresolved
-  int dispatch = -1;    // rocjitsu dispatch id
-  std::string type;     // "VGPR", "SGPR", "LDS"
-  std::string access;   // "read" or "write"
-  int reg = -1;         // register index (VGPR/SGPR) or byte address (LDS)
-  int wave = -1;
-  int lane = -1;
-  std::string wg;       // "x,y,z"
-  std::string conflict; // mnemonic of the instruction that initiated the
-                        // unresolved memory operation (e.g. global_load_dword)
-  std::string message;  // full diagnostic text between RACE header and END_RACE
-};
-
-/// Parse structured RACE blocks from the file at RJ_SINK_DIR/race.log.
-///
-/// Example log file content:
-///
-///   RACE kernel=vgpr_race_kernel symbol=_Z16vgpr_race_kernelPKfPf dispatch=1
-///       type=VGPR access=read reg=2 wave=0 lane=0 wg=0,0,0 conflict=global_load_dword
-///   Race on VGPR v2 [workgroup (0, 0, 0), wave 0, lane 0]
-///    ==>  0x5400021940  global_load_dword v2, v[2:3], off
-///         0x5400021948  s_nop 0
-///    ==>  0x540002194c  v_mov_b32_e32 v4, v2
-///   END_RACE
-///
-/// The first line ("RACE ...") is a machine-parseable header with key=value
-/// pairs. Lines between the header and "END_RACE" are the human-readable
-/// diagnostic message. Each such block becomes one RaceRecord.
-static std::vector<RaceRecord> parse_race_log() {
-  const char *dir = std::getenv("RJ_SINK_DIR");
-  if (!dir) return {};
-  std::string path = std::string(dir) + "/race.log";
-
-  std::ifstream f(path);
-  std::vector<RaceRecord> records;
-  std::string line;
-  while (std::getline(f, line)) {
-    if (line.substr(0, 5) != "RACE ") continue;
-
-    RaceRecord r;
-
-    // Parse key=value pairs from the RACE header line.
-    std::string rest = line.substr(5);
-    size_t pos = 0;
-    while (pos < rest.size()) {
-      size_t eq = rest.find('=', pos);
-      if (eq == std::string::npos) break;
-      size_t sp = rest.find(' ', eq);
-      if (sp == std::string::npos) sp = rest.size();
-      std::string key = rest.substr(pos, eq - pos);
-      std::string val = rest.substr(eq + 1, sp - eq - 1);
-      if (key == "kernel")        r.kernel = val;
-      else if (key == "symbol")   r.symbol = val;
-      else if (key == "dispatch") r.dispatch = std::stoi(val);
-      else if (key == "type")     r.type = val;
-      else if (key == "access")   r.access = val;
-      else if (key == "reg")      r.reg = std::stoi(val);
-      else if (key == "wave")     r.wave = val.empty() ? -1 : std::stoi(val);
-      else if (key == "lane")     r.lane = val.empty() ? -1 : std::stoi(val);
-      else if (key == "wg")       r.wg = val;
-      else if (key == "conflict") r.conflict = val;
-      pos = sp + 1;
-    }
-
-    // Collect message body until END_RACE.
-    while (std::getline(f, line)) {
-      if (line == "END_RACE") break;
-      if (!r.message.empty()) r.message += '\n';
-      r.message += line;
-    }
-
-    records.push_back(std::move(r));
-  }
-  return records;
-}
-
-// ============================================================
-// Trace section parser
-// ============================================================
-
-struct TraceSections {
-  std::string header;
-  std::vector<std::string> before;
-  std::string mark0;
-  std::vector<std::string> between;
-  std::string mark1;
-};
-
-static std::string stripMarkPrefix(const std::string &line) {
-  auto pos = line.find("==>");
-  if (pos == std::string::npos) return line;
-  std::string rest = line.substr(pos + 3);
-  auto hex = rest.find("0x");
-  if (hex != std::string::npos) {
-    auto sp = rest.find(' ', hex);
-    if (sp != std::string::npos)
-      sp = rest.find_first_not_of(' ', sp);
-    if (sp != std::string::npos)
-      return rest.substr(sp);
-  }
-  return rest;
-}
-
-static TraceSections parseTrace(const RaceRecord &r) {
-  TraceSections t;
-  std::istringstream ss(r.message);
-  std::string line;
-  int marks_seen = 0;
-  while (std::getline(ss, line)) {
-    if (t.header.empty()) { t.header = line; continue; }
-    bool is_mark = line.find("==>") != std::string::npos;
-    if (is_mark) {
-      if (marks_seen == 0) t.mark0 = stripMarkPrefix(line);
-      else                 t.mark1 = stripMarkPrefix(line);
-      ++marks_seen;
-    } else {
-      if (marks_seen == 0)      t.before.push_back(line);
-      else if (marks_seen == 1) t.between.push_back(line);
-    }
-  }
-  return t;
-}
-
-static bool anyContains(const std::vector<std::string> &lines,
-                        const std::string &s) {
-  return std::any_of(lines.begin(), lines.end(),
-      [&](const std::string &l) { return l.find(s) != std::string::npos; });
-}
-
-static constexpr auto npos = std::string::npos;
-
-// ============================================================
-// Test fixture
-// ============================================================
-
-class Gfx950RaceTest : public ::testing::Test {
-protected:
-  // Returned pointers are device pointers. Not freed (process exits).
-
-  template <typename T>
-  T *alloc(int n) {
-    T *p;
-    (void)hipMalloc(&p, n * sizeof(T));
-    return p;
-  }
-
-  template <typename T>
-  T *allocWithData(int n) {
-    T *p = alloc<T>(n);
-    std::vector<T> h(n);
-    for (int i = 0; i < n; ++i) h[i] = static_cast<T>(i);
-    (void)hipMemcpy(p, h.data(), n * sizeof(T), hipMemcpyHostToDevice);
-    return p;
-  }
-
-  void sync() { (void)hipDeviceSynchronize(); }
-
-  std::vector<RaceRecord> records() { return parse_race_log(); }
-
-  void ExpectNoRace() {
-    auto r = records();
-    if (!r.empty()) {
-      for (auto &rec : r)
-        fprintf(stderr, "  [%s symbol=%s dispatch=%d %s reg=%d wg=%s] %s\n",
-                rec.kernel.c_str(), rec.symbol.c_str(), rec.dispatch, rec.type.c_str(),
-                rec.reg, rec.wg.c_str(), rec.message.c_str());
-    }
-    EXPECT_TRUE(r.empty()) << "Expected no races, got " << r.size();
-  }
-
-  void ExpectRace() {
-    auto r = records();
-    EXPECT_FALSE(r.empty()) << "Expected at least one race, got none";
-  }
-
-  void ExpectNRaces(int n) {
-    auto r = records();
-    EXPECT_EQ(static_cast<int>(r.size()), n)
-        << "Expected " << n << " race(s), got " << r.size();
-  }
-
-  void ExpectDispatchContext(const RaceRecord &r, const std::string &kernel_name_substring) {
-    // Race reports should carry resolved dispatch context, not just the
-    // instruction trace. "?" would mean kernel-symbol resolution failed.
-    EXPECT_FALSE(r.kernel.empty());
-    EXPECT_NE(r.kernel, "?");
-    EXPECT_FALSE(r.symbol.empty());
-    EXPECT_NE(r.symbol, "?");
-
-    // The dispatch id ties the race back to the AQL dispatch that produced it.
-    // This catches regressions where the plugin logs a default-constructed
-    // context instead of the dispatch packet metadata.
-    EXPECT_GE(r.dispatch, 1);
-
-    // Match on the source kernel name rather than the whole demangled spelling:
-    // the exact symbol can include ABI/compiler-specific type detail, while the
-    // kernel name substring is the user-facing identity the report must preserve.
-    EXPECT_NE(r.kernel.find(kernel_name_substring), npos) << "kernel: " << r.kernel;
-    EXPECT_NE(r.symbol.find(kernel_name_substring), npos) << "symbol: " << r.symbol;
-  }
-};
+using Gfx950RaceTest = rocjitsu::test::RaceTestBase;
 
 // ============================================================
 // Tests
@@ -252,6 +46,16 @@ __global__ void vgpr_no_race_kernel(const float *src, float *dst) {
   );
   dst[tid] = val;
 }
+
+static constexpr RaceExpectation kVgprWaitcntRaceExpectation{
+    .kernel = "vgpr_race_kernel",
+    .type = "VGPR",
+    .access = "read",
+    .wave = 0,
+    .lane = 0,
+    .producer = "global_load_dword",
+    .consumer = "global_store_dword",
+};
 
 __global__ void vgpr_race_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -276,15 +80,7 @@ TEST_F(Gfx950RaceTest, vgpr_waitcnt_race) {
   auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
   vgpr_race_kernel<<<1, 64>>>(src, dst);
   sync();
-  auto r = records();
-  ASSERT_EQ(r.size(), 1u);
-  ExpectDispatchContext(r[0], "vgpr_race_kernel");
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("VGPR"), npos);
-  EXPECT_NE(t.header.find("wave 0"), npos);
-  EXPECT_NE(t.header.find("lane 0"), npos);
-  EXPECT_NE(t.mark0.find("global_load_dword"), npos) << "mark0: " << t.mark0;
-  EXPECT_NE(t.mark1.find("global_store_dword"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kVgprWaitcntRaceExpectation);
 }
 
 // --- SGPR waitcnt ---
@@ -299,6 +95,13 @@ __global__ void sgpr_no_race_kernel(const int *src, int *dst) {
   );
   dst[threadIdx.x] = val;
 }
+
+static constexpr RaceExpectation kSgprWaitcntRaceExpectation{
+    .type = "SGPR",
+    .wave = 0,
+    .producer = "s_load_dword",
+    .consumer = "s_add_u32",
+};
 
 __global__ void sgpr_race_kernel(const int *src, int *dst) {
   int val;
@@ -322,13 +125,7 @@ TEST_F(Gfx950RaceTest, sgpr_waitcnt_race) {
   auto *src = allocWithData<int>(64), *dst = alloc<int>(64);
   sgpr_race_kernel<<<1, 64>>>(src, dst);
   sync();
-  auto r = records();
-  ASSERT_EQ(r.size(), 1u);
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("SGPR"), npos);
-  EXPECT_NE(t.header.find("wave 0"), npos);
-  EXPECT_NE(t.mark0.find("s_load_dword"), npos) << "mark0: " << t.mark0;
-  EXPECT_NE(t.mark1.find("s_add_u32"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kSgprWaitcntRaceExpectation);
 }
 
 // --- LDS cross-wave ---
@@ -341,6 +138,14 @@ __global__ void lds_cross_wave_safe_kernel(int *out) {
   __syncthreads();
   out[tid] = lds[(tid + 64) % 128];
 }
+
+static constexpr RaceExpectation kLdsCrossWaveRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "LDS",
+    .wave = 0,
+    .producer = "ds_write_b32",
+    .consumer = "ds_read_b32",
+};
 
 __attribute__((amdgpu_flat_work_group_size(128, 128)))
 __global__ void lds_cross_wave_race_kernel(int *out) {
@@ -364,13 +169,7 @@ TEST_F(Gfx950RaceTest, lds_cross_wave) {
 TEST_F(Gfx950RaceTest, lds_cross_wave_race) {
   lds_cross_wave_race_kernel<<<5, 128>>>(alloc<int>(5 * 128));
   sync();
-  auto r = records();
-  ASSERT_GE(r.size(), 1u);
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("LDS"), npos);
-  EXPECT_NE(t.header.find("wave 0"), npos);
-  EXPECT_NE(t.mark0.find("ds_write_b32"), npos) << "mark0: " << t.mark0;
-  EXPECT_NE(t.mark1.find("ds_read_b32"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kLdsCrossWaveRaceExpectation);
 }
 
 // --- LDS same-wave instruction ordering ---
@@ -498,6 +297,16 @@ __global__ void buffer_load_lds_kernel(const int *src, int *out) {
   out[gid] = lds[tid];
 }
 
+static constexpr RaceExpectation kGlobalToLdsBufferRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "LDS",
+    .wave = 0,
+    .lane = 0,
+    .producer = "buffer_load_dword",
+    .between = "s_waitcnt",
+    .consumer = "ds_read_b32",
+};
+
 __attribute__((amdgpu_flat_work_group_size(128, 128)))
 __global__ void buffer_load_lds_race_kernel(const int *src, int *out) {
   __shared__ int lds[128];
@@ -561,18 +370,20 @@ TEST_F(Gfx950RaceTest, global_to_lds_buffer) {
 TEST_F(Gfx950RaceTest, global_to_lds_buffer_race) {
   buffer_load_lds_race_kernel<<<3, 128>>>(alloc<int>(384), alloc<int>(384));
   sync();
-  auto r = records();
-  ASSERT_GE(r.size(), 1u);
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("LDS"), npos);
-  EXPECT_NE(t.header.find("wave 0"), npos);
-  EXPECT_NE(t.header.find("lane 0"), npos);
-  EXPECT_NE(t.mark0.find("buffer_load_dword"), npos) << "mark0: " << t.mark0;
-  EXPECT_TRUE(anyContains(t.between, "s_waitcnt"));
-  EXPECT_NE(t.mark1.find("ds_read_b32"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kGlobalToLdsBufferRaceExpectation);
 }
 
 // --- Partial vmcnt ---
+
+static constexpr RaceExpectation kPartialVmcntRaceExpectation{
+    .kernel = "partial_vmcnt_kernel",
+    .type = "VGPR",
+    .wave = 0,
+    .lane = 0,
+    .producer = "global_load_dword",
+    .between = "s_waitcnt",
+    .consumer = "v_add_f32",
+};
 
 __global__ void partial_vmcnt_kernel(const float *src_a, const float *src_b,
                                      float *dst) {
@@ -593,19 +404,17 @@ TEST_F(Gfx950RaceTest, partial_vmcnt_race) {
   partial_vmcnt_kernel<<<1, 64>>>(alloc<float>(64), alloc<float>(64),
                                    alloc<float>(64));
   sync();
-  auto r = records();
-  ASSERT_EQ(r.size(), 1u);
-  ExpectDispatchContext(r[0], "partial_vmcnt_kernel");
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("VGPR"), npos);
-  EXPECT_NE(t.header.find("wave 0"), npos);
-  EXPECT_NE(t.header.find("lane 0"), npos);
-  EXPECT_NE(t.mark0.find("global_load_dword"), npos) << "mark0: " << t.mark0;
-  EXPECT_TRUE(anyContains(t.between, "s_waitcnt"));
-  EXPECT_NE(t.mark1.find("v_add_f32"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kPartialVmcntRaceExpectation);
 }
 
 // --- Multiple race ---
+
+static constexpr RaceExpectation kMultipleRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .producer = "global_load_dword",
+    .consumer = "v_add_f32",
+};
 
 __global__ void two_races_kernel(const float *src_a, const float *src_b,
                                  float *dst) {
@@ -625,13 +434,8 @@ TEST_F(Gfx950RaceTest, multiple_race) {
   two_races_kernel<<<1, 64>>>(alloc<float>(64), alloc<float>(64),
                                alloc<float>(64));
   sync();
-  auto r = records();
   // Both loads race against v_add_f32, but dedup by PC collapses them to 1.
-  ASSERT_GE(r.size(), 1u);
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("VGPR"), npos);
-  EXPECT_NE(t.mark0.find("global_load_dword"), npos) << "mark0: " << t.mark0;
-  EXPECT_NE(t.mark1.find("v_add_f32"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kMultipleRaceExpectation);
 }
 
 // --- Multi-kernel ---
@@ -644,6 +448,15 @@ __global__ void clean_kernel_b(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   dst[tid] = src[tid] + 1.0f;
 }
+
+static constexpr RaceExpectation kMultiKernelRaceExpectation{
+    .kernel = "racy_kernel",
+    .type = "VGPR",
+    .wave = 0,
+    .lane = 0,
+    .producer = "global_load_dword",
+    .consumer = "global_store_dword",
+};
 
 __global__ void racy_kernel(const float *src, float *dst) {
   int tid = threadIdx.x;
@@ -673,15 +486,7 @@ TEST_F(Gfx950RaceTest, multi_kernel_race) {
   racy_kernel<<<1, 64>>>(s, d);
   clean_kernel_a<<<5, 64>>>(s, d);
   sync();
-  auto r = records();
-  ASSERT_EQ(r.size(), 1u);
-  ExpectDispatchContext(r[0], "racy_kernel");
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("VGPR"), npos);
-  EXPECT_NE(t.header.find("wave 0"), npos);
-  EXPECT_NE(t.header.find("lane 0"), npos);
-  EXPECT_NE(t.mark0.find("global_load_dword"), npos) << "mark0: " << t.mark0;
-  EXPECT_NE(t.mark1.find("global_store_dword"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kMultiKernelRaceExpectation);
 }
 
 // --- Multi-workgroup ---
@@ -696,6 +501,15 @@ __global__ void multi_wg_clean_kernel(const float *src, float *dst) {
   );
   dst[tid] = val;
 }
+
+static constexpr RaceExpectation kMultiWorkgroupRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .wave = 0,
+    .lane = 0,
+    .producer = "global_load_dword",
+    .consumer = "global_store_dword",
+};
 
 __global__ void multi_wg_race_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -719,17 +533,19 @@ TEST_F(Gfx950RaceTest, multi_workgroup_race) {
   auto *s = alloc<float>(401 * 64), *d = alloc<float>(401 * 64);
   multi_wg_race_kernel<<<401, 64>>>(s, d);
   sync();
-  auto r = records();
-  ASSERT_GE(r.size(), 1u);
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("VGPR"), npos);
-  EXPECT_NE(t.header.find("wave 0"), npos);
-  EXPECT_NE(t.header.find("lane 0"), npos);
-  EXPECT_NE(t.mark0.find("global_load_dword"), npos) << "mark0: " << t.mark0;
-  EXPECT_NE(t.mark1.find("global_store_dword"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kMultiWorkgroupRaceExpectation);
 }
 
 // --- Mixed counters ---
+
+static constexpr RaceExpectation kMixedCountersRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "SGPR",
+    .wave = 0,
+    .producer = "s_load_dword",
+    .between = "s_waitcnt",
+    .consumer = "v_cvt_f32_i32",
+};
 
 __global__ void mixed_counters_kernel(const float *vsrc, const int *ssrc,
                                       float *dst) {
@@ -751,14 +567,7 @@ TEST_F(Gfx950RaceTest, mixed_counters_race) {
   mixed_counters_kernel<<<1, 64>>>(alloc<float>(64), alloc<int>(64),
                                     alloc<float>(64));
   sync();
-  auto r = records();
-  ASSERT_GE(r.size(), 1u);
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("SGPR"), npos);
-  EXPECT_NE(t.header.find("wave 0"), npos);
-  EXPECT_NE(t.mark0.find("s_load_dword"), npos) << "mark0: " << t.mark0;
-  EXPECT_TRUE(anyContains(t.between, "s_waitcnt"));
-  EXPECT_NE(t.mark1.find("v_cvt_f32_i32"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kMixedCountersRaceExpectation);
 }
 
 // --- Stress: wavefront reuse ---
@@ -772,6 +581,15 @@ __global__ void stress_clean_b(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   dst[tid] = src[tid] + 1.0f;
 }
+
+static constexpr RaceExpectation kStressWavefrontReuseRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .wave = 0,
+    .lane = 0,
+    .producer = "global_load_dword",
+    .consumer = "global_store_dword",
+};
 
 __global__ void stress_racy(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -797,14 +615,7 @@ TEST_F(Gfx950RaceTest, stress_wavefront_reuse_race) {
   stress_clean_a<<<1000, 64>>>(s, d);
   stress_racy<<<1000, 64>>>(s, d);
   sync();
-  auto r = records();
-  ASSERT_GE(r.size(), 1u);
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("VGPR"), npos);
-  EXPECT_NE(t.header.find("wave 0"), npos);
-  EXPECT_NE(t.header.find("lane 0"), npos);
-  EXPECT_NE(t.mark0.find("global_load_dword"), npos) << "mark0: " << t.mark0;
-  EXPECT_NE(t.mark1.find("global_store_dword"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kStressWavefrontReuseRaceExpectation);
 }
 
 // --- EXEC mask ---
@@ -821,6 +632,15 @@ __global__ void exec_mask_safe_kernel(int *out) {
   if (tid >= 64)
     out[tid] = lds[tid - 64];
 }
+
+static constexpr RaceExpectation kExecMaskRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "LDS",
+    .wave = 1,
+    .lane = 0,
+    .producer = "ds_write_b32",
+    .consumer = "ds_read_b32",
+};
 
 __attribute__((amdgpu_flat_work_group_size(128, 128)))
 __global__ void exec_mask_race_kernel(int *out) {
@@ -842,14 +662,7 @@ TEST_F(Gfx950RaceTest, exec_mask) {
 TEST_F(Gfx950RaceTest, exec_mask_race) {
   exec_mask_race_kernel<<<1, 128>>>(alloc<int>(128));
   sync();
-  auto r = records();
-  ASSERT_GE(r.size(), 1u);
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("LDS"), npos);
-  EXPECT_NE(t.header.find("wave 1"), npos);
-  EXPECT_NE(t.header.find("lane 0"), npos);
-  EXPECT_NE(t.mark0.find("ds_write_b32"), npos) << "mark0: " << t.mark0;
-  EXPECT_NE(t.mark1.find("ds_read_b32"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kExecMaskRaceExpectation);
 }
 
 // --- EXEC mask: same-wave vs cross-wave boundary ---
@@ -888,6 +701,16 @@ __global__ void exec_mask_same_wave_kernel(int *out) {
   asm volatile("s_waitcnt lgkmcnt(0)\n" ::: "memory");
   out[tid] = lds[tid];
 }
+
+static constexpr RaceExpectation kExecMaskCrossWaveRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "LDS",
+    .wave = 1,
+    .lane = 0,
+    .producer = "ds_write_b32",
+    .between = "s_waitcnt",
+    .consumer = "ds_read_b32",
+};
 
 __attribute__((amdgpu_flat_work_group_size(256, 256)))
 __global__ void exec_mask_cross_wave_race_kernel(int *out) {
@@ -949,15 +772,7 @@ TEST_F(Gfx950RaceTest, exec_mask_same_wave) {
 TEST_F(Gfx950RaceTest, exec_mask_cross_wave_race) {
   exec_mask_cross_wave_race_kernel<<<1, 256>>>(alloc<int>(256));
   sync();
-  auto r = records();
-  ASSERT_GE(r.size(), 1u);
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("LDS"), npos);
-  EXPECT_NE(t.header.find("wave 1"), npos);
-  EXPECT_NE(t.header.find("lane 0"), npos);
-  EXPECT_NE(t.mark0.find("ds_write_b32"), npos) << "mark0: " << t.mark0;
-  EXPECT_TRUE(anyContains(t.between, "s_waitcnt"));
-  EXPECT_NE(t.mark1.find("ds_read_b32"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kExecMaskCrossWaveRaceExpectation);
 }
 
 TEST_F(Gfx950RaceTest, exec_mask_cross_wave) {
@@ -1011,6 +826,13 @@ __global__ void lds_transpose_safe_kernel(int *out) {
   out[tid] = val;
 }
 
+static constexpr RaceExpectation kLdsTransposeRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "LDS",
+    .producer = "ds_write_b32",
+    .consumer = "ds_read_b32",
+};
+
 __attribute__((amdgpu_flat_work_group_size(128, 128)))
 __global__ void lds_transpose_race_kernel(int *out) {
   __shared__ int lds[128];
@@ -1050,12 +872,7 @@ TEST_F(Gfx950RaceTest, lds_transpose) {
 TEST_F(Gfx950RaceTest, lds_transpose_race) {
   lds_transpose_race_kernel<<<1, 128>>>(alloc<int>(128));
   sync();
-  auto r = records();
-  ASSERT_GE(r.size(), 1u);
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("LDS"), npos);
-  EXPECT_NE(t.mark0.find("ds_write_b32"), npos) << "mark0: " << t.mark0;
-  EXPECT_NE(t.mark1.find("ds_read_b32"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kLdsTransposeRaceExpectation);
 }
 
 // --- Dual-offset LDS ---
@@ -1082,6 +899,16 @@ __global__ void dual_offset_lds_safe_kernel(int *out) {
     out[tid] = val;
   }
 }
+
+static constexpr RaceExpectation kDualOffsetLdsRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "LDS",
+    .wave = 1,
+    .lane = 0,
+    .producer = "ds_write2_b32",
+    .between = "s_waitcnt",
+    .consumer = "ds_read_b32",
+};
 
 __attribute__((amdgpu_flat_work_group_size(128, 128)))
 __global__ void dual_offset_lds_race_kernel(int *out) {
@@ -1113,15 +940,7 @@ TEST_F(Gfx950RaceTest, dual_offset_lds) {
 TEST_F(Gfx950RaceTest, dual_offset_lds_race) {
   dual_offset_lds_race_kernel<<<1, 128>>>(alloc<int>(128));
   sync();
-  auto r = records();
-  ASSERT_GE(r.size(), 1u);
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("LDS"), npos);
-  EXPECT_NE(t.header.find("wave 1"), npos);
-  EXPECT_NE(t.header.find("lane 0"), npos);
-  EXPECT_NE(t.mark0.find("ds_write2_b32"), npos) << "mark0: " << t.mark0;
-  EXPECT_TRUE(anyContains(t.between, "s_waitcnt"));
-  EXPECT_NE(t.mark1.find("ds_read_b32"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kDualOffsetLdsRaceExpectation);
 }
 
 // --- Scratch store vmcnt accounting ---
@@ -1143,6 +962,12 @@ __global__ void scratch_vmcnt_safe_kernel(const float *src, float *dst) {
   );
   dst[tid] = val;
 }
+
+static constexpr RaceExpectation kScratchVmcntRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .producer = "global_load_dword",
+};
 
 __global__ void scratch_vmcnt_race_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -1169,11 +994,7 @@ TEST_F(Gfx950RaceTest, scratch_vmcnt_race) {
   auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
   scratch_vmcnt_race_kernel<<<1, 64>>>(src, dst);
   sync();
-  auto r = records();
-  ASSERT_GE(r.size(), 1u);
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.header.find("VGPR"), npos);
-  EXPECT_NE(t.mark0.find("global_load_dword"), npos) << "mark0: " << t.mark0;
+  ExpectRace(kScratchVmcntRaceExpectation);
 }
 
 // gfx950 enables SRAM ECC, so D16 loads write the full 32-bit VGPR and the
@@ -1182,6 +1003,14 @@ TEST_F(Gfx950RaceTest, scratch_vmcnt_race) {
 // covered by the architecture-parameterized C++ plugin tests.
 
 // --- VGPR WAW: pending load then instruction write ---
+
+static constexpr RaceExpectation kWawGlobalLoadThenAluExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .access = "write",
+    .producer = "global_load_dword",
+    .consumer = "v_add_f32",
+};
 
 __global__ void waw_global_load_then_alu_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -1213,6 +1042,14 @@ __global__ void waw_global_load_then_alu_safe_kernel(const float *src, float *ds
   dst[tid] = val;
 }
 
+static constexpr RaceExpectation kWawGlobalLoadThenMfmaExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .access = "write",
+    .producer = "global_load_dwordx4",
+    .consumer = "v_mfma",
+};
+
 __global__ void waw_global_load_then_mfma_kernel(const int *src, int *out) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   asm volatile(
@@ -1231,13 +1068,7 @@ TEST_F(Gfx950RaceTest, waw_global_load_then_alu) {
   auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
   waw_global_load_then_alu_kernel<<<1, 64>>>(src, dst);
   sync();
-  auto r = records();
-  ASSERT_GE(r.size(), 1u);
-  EXPECT_EQ(r[0].type, "VGPR");
-  EXPECT_EQ(r[0].access, "write");
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.mark0.find("global_load_dword"), npos) << "mark0: " << t.mark0;
-  EXPECT_NE(t.mark1.find("v_add_f32"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kWawGlobalLoadThenAluExpectation);
 }
 
 TEST_F(Gfx950RaceTest, waw_global_load_then_alu_safe) {
@@ -1251,13 +1082,7 @@ TEST_F(Gfx950RaceTest, waw_global_load_then_mfma) {
   auto *src = allocWithData<int>(256), *out = alloc<int>(64);
   waw_global_load_then_mfma_kernel<<<1, 64>>>(src, out);
   sync();
-  auto r = records();
-  ASSERT_GE(r.size(), 1u);
-  EXPECT_EQ(r[0].type, "VGPR");
-  EXPECT_EQ(r[0].access, "write");
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.mark0.find("global_load_dwordx4"), npos) << "mark0: " << t.mark0;
-  EXPECT_NE(t.mark1.find("v_mfma"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kWawGlobalLoadThenMfmaExpectation);
 }
 
 // --- f64 VGPR race (64-bit global load + use without waitcnt) ---
@@ -1265,6 +1090,11 @@ TEST_F(Gfx950RaceTest, waw_global_load_then_mfma) {
 // consumes it with v_fma_f64 without an intervening s_waitcnt.
 // Exercises 64-bit VGPR race detection through the scalar read_lane64
 // path (v_fma_f64 does not currently have a SIMD fast-path probe).
+
+static constexpr RaceExpectation kF64VgprRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+};
 
 __global__ void f64_vgpr_race_kernel(const double *src, double *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -1278,6 +1108,14 @@ __global__ void f64_vgpr_race_kernel(const double *src, double *dst) {
   dst[tid] = result;
 }
 
+TEST_F(Gfx950RaceTest, f64_vgpr_race) {
+  double *src = allocWithData<double>(64);
+  double *dst = alloc<double>(64);
+  f64_vgpr_race_kernel<<<1, 64>>>(src, dst);
+  sync();
+  ExpectRace(kF64VgprRaceExpectation);
+}
+
 __global__ void f64_vgpr_safe_kernel(const double *src, double *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   double val, result;
@@ -1289,6 +1127,22 @@ __global__ void f64_vgpr_safe_kernel(const double *src, double *dst) {
   );
   dst[tid] = result;
 }
+
+TEST_F(Gfx950RaceTest, f64_vgpr_safe) {
+  double *src = allocWithData<double>(64);
+  double *dst = alloc<double>(64);
+  f64_vgpr_safe_kernel<<<1, 64>>>(src, dst);
+  sync();
+  ExpectNoRace();
+}
+
+static constexpr RaceExpectation kF64VgprWawExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .access = "write",
+    .producer = "global_load_dwordx2",
+    .consumer = "v_fma_f64",
+};
 
 __global__ void f64_vgpr_waw_kernel(const double *src, double *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -1304,36 +1158,12 @@ __global__ void f64_vgpr_waw_kernel(const double *src, double *dst) {
   dst[tid] = val;
 }
 
-TEST_F(Gfx950RaceTest, f64_vgpr_race) {
-  double *src = allocWithData<double>(64);
-  double *dst = alloc<double>(64);
-  f64_vgpr_race_kernel<<<1, 64>>>(src, dst);
-  sync();
-  auto r = records();
-  ASSERT_GE(r.size(), 1u);
-  EXPECT_NE(r[0].type.find("VGPR"), npos);
-}
-
-TEST_F(Gfx950RaceTest, f64_vgpr_safe) {
-  double *src = allocWithData<double>(64);
-  double *dst = alloc<double>(64);
-  f64_vgpr_safe_kernel<<<1, 64>>>(src, dst);
-  sync();
-  ExpectNoRace();
-}
-
 TEST_F(Gfx950RaceTest, f64_vgpr_waw) {
   double *src = allocWithData<double>(64);
   double *dst = alloc<double>(64);
   f64_vgpr_waw_kernel<<<1, 64>>>(src, dst);
   sync();
-  auto r = records();
-  ASSERT_GE(r.size(), 1u);
-  EXPECT_EQ(r[0].type, "VGPR");
-  EXPECT_EQ(r[0].access, "write");
-  auto t = parseTrace(r[0]);
-  EXPECT_NE(t.mark0.find("global_load_dwordx2"), npos) << "mark0: " << t.mark0;
-  EXPECT_NE(t.mark1.find("v_fma_f64"), npos) << "mark1: " << t.mark1;
+  ExpectRace(kF64VgprWawExpectation);
 }
 
 int main(int argc, char **argv) {

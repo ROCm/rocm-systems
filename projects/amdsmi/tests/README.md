@@ -1,3 +1,202 @@
+# Test Suite Map
+
+Orientation diagram for everything under `tests/`. For the design rationale and
+the full per-file reference, see
+[../docs/conceptual/test-design.md](../docs/conceptual/test-design.md) and
+[python/README.md](python/README.md).
+
+## Three test families
+
+```text
+                        AMD SMI test estate
+                                │
+        ┌───────────────────────┼───────────────────────────┐
+        │                       │                           │
+   ┌────▼─────┐         ┌───────▼────────┐         ┌────────▼─────────┐
+   │  C++     │         │    Python      │         │   Packaging /    │
+   │ amdsmitst│         │  3 runners     │         │   Build / ABI    │
+   │ (GTest)  │         │  (unittest)    │         │   (stdlib only)  │
+   └────┬─────┘         └───────┬────────┘         └────────┬─────────┘
+        │                       │                           │
+ tests/amd_smi_test/     tests/python/            tests/abi_check/
+                                                  tests/amdsmi_build/
+                                                  tests/dme_integration/
+                                                  tests/python/test_*_guard.py
+                                                  tests/run_amdsmi_*.py
+```
+
+Only the first two families touch hardware. The third is pure logic plus
+package-manager harnesses.
+
+## C++ — one binary, filtered by suite name
+
+```text
+tests/amd_smi_test/
+│
+├── main.cc ─────────────► registers every *functional* test as
+│                          TEST(<Component>Functional<Op>, <Feature><Case>)
+│                          and drives the TestBase lifecycle
+├── test_base.{h,cc} ────► SetUp → Run → Close → DisplayResults
+├── test_common.{h,cc} ──► verbosity macros, enum→string
+├── test_utils.{h,cc}
+├── amdsmitst.exclude ───► BLACKLIST_ALL_ASICS + per-ASIC lists
+├── detect_asic_filter.sh► reads KFD topology → sets $GTEST_EXCLUDE
+├── check_test_conventions.py ──► pre-commit gate on layout/naming
+│
+├── unit/                  no hardware; plain TEST(), self-registering
+│   ├── gpu/               dynamic_metrics, cper_read, mock_cper, wsl_backend
+│   │   └── mock_cper/     committed .cper fixtures (AMDSMI_TEST_MOCK_DIR)
+│   └── system/            lib_loader
+│
+└── functional/            live device; TestBase subclasses, .h + _test.cc pair
+    ├── gpu/{clock,events,identity,memory,metrics,partition,
+    │         pci,perf,power,ras,thermal,xgmi}/
+    ├── system/            flat — no feature leaf
+    ├── ifoe/{fabric,identity}/
+    ├── cpu/{clock,power}/            placeholder_test.cc stubs
+    ├── nic/{discovery,identity}/     placeholder_test.cc stubs
+    └── wsl/smi/                      only when ENABLE_WSL_BACKEND
+```
+
+Nothing is listed by hand — CMake globs the tree:
+
+```text
+CMakeLists.txt (root)
+  └─ add_subdirectory(tests/amd_smi_test)
+        └─ file(GLOB_RECURSE ... CONFIGURE_DEPENDS unit/*.cc functional/*.cc)
+              └─ add_executable(amdsmitst  main.cc test_*.cc  ${globbed})
+                    ├─ links: libamd_smi, GTest::gtest, pthread
+                    └─ install → <share>/amd_smi/tests/
+```
+
+Suite names are the only selection mechanism — `<Component><Type>[<Operation>]`:
+
+```text
+                 ┌──────────────── component ────────────────┐
+   --gtest_filter= Gpu | Cpu | Nic | Ifoe | System | Wsl
+                 └──────────┬────────────────────────────────┘
+                            │
+              ┌─────────────┴──────────────┐
+              │                            │
+          ...Unit                    ...Functional
+       (no hardware)                       │
+                                ┌──────────┴──────────┐
+                            ReadOnly              ReadWrite
+                          (no root)              (root req'd)
+
+  Currently registered:
+    GpuUnit          GpuFunctionalReadOnly     GpuFunctionalReadWrite
+    SystemUnit       SystemFunctionalReadOnly
+                     IfoeFunctionalReadOnly
+                     WslFunctionalReadOnly   (gated)
+```
+
+## Python — three runners over one shared engine
+
+```text
+tests/python/
+│
+├── unit_tests.py ───────┐
+├── integration_test.py ─┼──► common/common.py :: run_test_dir()
+├── cli_unit_test.py ────┘        │
+│                                 ├─ parse -v/-q/-b/-k/-x/-l/-h
+├── common/                       ├─ resolve amdsmi via
+│   ├── common.py                 │    AMDSMI_PATH → ROCM_HOME → ROCM_PATH → /opt/rocm
+│   └── runcmd.py                 ├─ unittest.discover("test_*.py") in own subtree
+│                                 ├─ apply -k include / -x exclude on dotted id
+│                                 ├─ require geteuid()==0
+│                                 └─ GTestSummaryRunner → exit 0/1
+│
+├── unit/          ◄── unit_tests.py         no hardware
+│   ├── gpu/       test_apu_metrics, test_cli_set_clk_limit, ...
+│   └── system/    test_bdf, test_check_res, test_output_file_stdin
+│
+├── functional/    ◄── integration_test.py   live device + root
+│   └── gpu/ cpu/ nic/ ifoe/ system/   test_<feature>.py
+│
+└── cli/           ◄── cli_unit_test.py      drives the installed amd-smi binary
+    ├── base.py    TestCliBase — cached setUpClass, one --json baseline
+    └── test_<command>.py   one module per CLI command (command-first)
+```
+
+Discovery is subtree-scoped, so each runner sees only its own tests:
+
+```text
+ unit_tests.py ──discovers──► unit/**/test_*.py
+ integration_test.py ────────► functional/**/test_*.py
+ cli_unit_test.py ───────────► cli/test_*.py
+```
+
+Leaf `test_*.py` files are **not** directly runnable — they have no `sys.path`
+bootstrap. Always go through a runner with a `-k` filter.
+
+The install target remaps the tree to the historical path:
+
+```text
+  tests/python/   ──CMake install──►  <share>/amd_smi/tests/python_unittest/
+```
+
+## Naming conventions, side by side
+
+```text
+  C++                                    Python
+  ───────────────────────────────        ─────────────────────────────
+  file   <feature>_<op>_test.cc          file   test_<feature>.py
+  hdr    <feature>_<op>.h  (func only)   class  Test<Component><Feature>
+  class  Test<Feature><Op> : TestBase    method test_<op>[_<qualifier>]
+  suite  <Component><Type>[<Op>]         (suite == directory)
+```
+
+## Selection matrix
+
+```text
+  intent                 │ Python                       │ C++ (amdsmitst)
+  ───────────────────────┼──────────────────────────────┼──────────────────────────
+  list tests             │ <runner> -l                  │ --gtest_list_tests
+  unit only              │ unit_tests.py                │ --gtest_filter="*Unit*"
+  all functional         │ integration_test.py          │ "*Functional*"
+  read-only / read-write │ ── not distinguished ──      │ "*FunctionalReadOnly*" /
+                         │                              │ "*FunctionalReadWrite*"
+  CLI                    │ cli_unit_test.py             │ ── none ──
+  by feature             │ -k power                     │ "*.*Power*"
+  exclude                │ -x partition                 │ "-*.*Partition*"
+  ASIC exclusions        │ ── n/a ──                    │ source amdsmitst.exclude
+                         │                              │ source detect_asic_filter.sh
+                         │                              │ --gtest_filter="-$GTEST_EXCLUDE"
+```
+
+## Auxiliary suites (no GPU)
+
+```text
+tests/
+├── abi_check/          abi_check.py + abi_check_test.py   header ABI diff vs develop
+├── amdsmi_build/       run_amdsmi_build.py + tests        distro/pkg-mgr build driver
+├── dme_integration/    metrics/services/submodules + tests
+├── python/test_*_guard.py, test_packaging_scriptlets.py, test_abi_compat.py
+│                       static assertions on CPack/DEBIAN/RPM templates
+├── run_amdsmi_*.py     live package-manager harnesses (install/upgrade/remove/conflict)
+└── api_summary.py      parses amdsmi.h + test logs → api_summary.{csv,txt}
+```
+
+## Where it all gets triggered
+
+```text
+ pre-commit ──► check_test_conventions.py   (layout + naming gate)
+            └─► clang-format, ruff-format, gersemi, codespell
+
+ CI (.github/workflows/)
+   amdsmi-build.yml ──► run_amdsmi_build.py → build+install
+                        └─► source amdsmitst.exclude; detect_asic_filter.sh
+                            ./amdsmitst --gtest_filter="-$GTEST_EXCLUDE"
+                            ./integration_test.py -v
+                            ./unit_tests.py -v
+                        └─► run_amdsmi_build.py summarize
+   abi-compliance-check.yml ──► abi_check.py (major, then minor)
+   amdsmi-python-versions.yml ─► run_amdsmi_python_versions_test.py (3.6.8 → latest)
+   amdsmi-upgrade-downgrade.yml ► run_amdsmi_upgrade_downgrade_test.py
+                                  run_amdsmi_component_removal_test.py
+```
+
 # API Summary Report
 ## Overview
 The API summary report is generated from reading the amdsmi.h header file and the output from the python and C++ tests.  The python script, api_summary.py, will build a table from the available test log files.

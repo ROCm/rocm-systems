@@ -198,7 +198,7 @@ function(rocprofiler_add_integration_execute_test NAME)
         "UNSTABLE" # disable when ROCPROFILER_DISABLE_UNSTABLE_CTESTS=ON
         "DISABLED_CODECOV" # disable when ROCPROFILER_BUILD_CODECOV=ON
         )
-    set(_SINGLE_OPTS "TARGET" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "LABELS" "DISABLED"
+    set(_SINGLE_OPTS "TARGET" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "DISABLED"
                      "DISABLED_MEMCHECKS")
     set(_MULTI_OPTS
         "ARGS"
@@ -206,6 +206,7 @@ function(rocprofiler_add_integration_execute_test NAME)
         "ATTACHED_FILES"
         "ATTACHED_FILES_ON_FAIL"
         "ENVIRONMENT"
+        "LABELS"
         "PRELOAD"
         "FIXTURES_SETUP"
         "FIXTURES_REQUIRED"
@@ -373,13 +374,14 @@ function(rocprofiler_add_integration_validate_test NAME)
         "STRIP_PARAM_BRACKETS"
         "INCLUDE_FILE_PATH"
         "BUNDLE_TESTS")
-    set(_SINGLE_OPTS "TARGET_DEPENDS" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "LABELS"
-                     "DISABLED" "DISABLED_MEMCHECKS" "PYTHON_EXECUTABLE")
+    set(_SINGLE_OPTS "TARGET_DEPENDS" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "DISABLED"
+                     "DISABLED_MEMCHECKS" "PYTHON_EXECUTABLE")
     set(_MULTI_OPTS
         "TEST_PATHS"
         "CONFIG"
         "COPY"
         "ARGS"
+        "LABELS"
         "DISCOVERY_ARGS"
         "ATTACHED_FILES"
         "ATTACHED_FILES_ON_FAIL"

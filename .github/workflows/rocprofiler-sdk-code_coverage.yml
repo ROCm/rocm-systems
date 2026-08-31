@@ -167,6 +167,8 @@ jobs:
           submods-scoped-v1-${{ runner.os }}-
 
     - name: Init/Update submodules
+      timeout-minutes: 15
+      continue-on-error: true
       run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
     - name: Clone ROCDecode

@@ -137,7 +137,19 @@ RJ_API_EXPORT rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
 RJ_API_EXPORT void rj_code_inst_destroy(rj_code_inst_t *inst);
 
 /// @brief GPU target identifiers.
+///
+/// @details Named target values and ROCJITSU_CODE_TARGET_INVALID are stable C
+/// API values. New targets must use the next unallocated value without
+/// renumbering an existing target. ROCJITSU_CODE_TARGET_NUM_TARGETS is the
+/// one-past-the-last upper bound for named targets and grows when a target is
+/// added; it is not itself a target identifier. The ABI representation of
+/// rj_code_target_id_t is one 32-bit integer. C++ fixes the underlying type to
+/// int32_t; C clients must use a compiler ABI with a 32-bit enum representation.
+#ifdef __cplusplus
+typedef enum rj_code_target_id_t : int32_t {
+#else
 typedef enum rj_code_target_id_t {
+#endif
   /// @brief gfx90a target ID (CDNA2).
   ROCJITSU_CODE_TARGET_GFX90A = 0,
   /// @brief gfx942 target ID (CDNA3).
@@ -156,12 +168,12 @@ typedef enum rj_code_target_id_t {
   ROCJITSU_CODE_TARGET_GFX1150 = 7,
   /// @brief gfx1151 target ID (RDNA3.5).
   ROCJITSU_CODE_TARGET_GFX1151 = 8,
-  /*
-   * \NPI every new GPU needs a target id here (one per distinct gfxNNNN \
-   * variant); keep INVALID last.
-   */
-  /// @brief Sentinel value representing an invalid target.
-  ROCJITSU_CODE_TARGET_INVALID = 9
+  // \NPI new GPU: add its public target identifier here and bind its
+  // code-object name and ELF machine value in the corresponding ISA provider.
+  /// @brief Number of named GPU targets and their exclusive upper bound.
+  ROCJITSU_CODE_TARGET_NUM_TARGETS = 9,
+  /// @brief Stable sentinel value representing an invalid target.
+  ROCJITSU_CODE_TARGET_INVALID = INT32_MAX
 } rj_code_target_id_t;
 
 #if defined(__clang__)
@@ -194,6 +206,7 @@ static inline RJ_CODE_NO_SANITIZE_ENUM const char *rj_code_target_name(rj_code_t
     return "gfx1150";
   case ROCJITSU_CODE_TARGET_GFX1151:
     return "gfx1151";
+  case ROCJITSU_CODE_TARGET_NUM_TARGETS:
   case ROCJITSU_CODE_TARGET_INVALID:
     break;
   }
@@ -223,6 +236,7 @@ rj_code_arch_for_target(rj_code_target_id_t target) {
   case ROCJITSU_CODE_TARGET_GFX1150:
   case ROCJITSU_CODE_TARGET_GFX1151:
     return ROCJITSU_CODE_ARCH_RDNA3_5;
+  case ROCJITSU_CODE_TARGET_NUM_TARGETS:
   case ROCJITSU_CODE_TARGET_INVALID:
     break;
   }

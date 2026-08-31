@@ -33,6 +33,34 @@ enum class WaitCounterType : uint8_t {
   ASYNCCNT,  ///< Async global/cluster LDS transfer count (GFX12.5).
 };
 
+/// @brief Return whether waiting on @p wait_type also constrains an event
+/// tracked by @p event_type.
+///
+/// Monolithic counters cover the corresponding split-counter families. Split
+/// waits constrain only their exact counter. Keeping this relationship next to
+/// WaitCounterType avoids reimplementing it in each consumer.
+[[nodiscard]] constexpr bool wait_counter_covers(WaitCounterType wait_type,
+                                                 WaitCounterType event_type) {
+  switch (wait_type) {
+  case WaitCounterType::VMCNT:
+    return event_type == WaitCounterType::VMCNT || event_type == WaitCounterType::LOADCNT;
+  case WaitCounterType::LGKMCNT:
+    return event_type == WaitCounterType::LGKMCNT || event_type == WaitCounterType::DSCNT ||
+           event_type == WaitCounterType::KMCNT;
+  case WaitCounterType::VSCNT:
+    return event_type == WaitCounterType::VSCNT || event_type == WaitCounterType::STORECNT;
+  case WaitCounterType::EXPCNT:
+  case WaitCounterType::LOADCNT:
+  case WaitCounterType::STORECNT:
+  case WaitCounterType::DSCNT:
+  case WaitCounterType::KMCNT:
+  case WaitCounterType::TENSORCNT:
+  case WaitCounterType::ASYNCCNT:
+    return event_type == wait_type;
+  }
+  return false;
+}
+
 /// @brief Outstanding memory operation counters for a wavefront.
 ///
 /// Unified counter set that covers all ISA families.  CDNA1-4 use only

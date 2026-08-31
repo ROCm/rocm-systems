@@ -16,6 +16,18 @@
 
 namespace rocjitsu {
 
+/// @brief The only WAIT_EVENTS timeout the KFD ABI treats as "wait forever".
+///
+/// @details Exactly this value, not a range. The next value down, 0xFFFFFFFE, is
+/// finite -- and it is what ROCr clamps its longest wait to, so it is the large
+/// timeout actually seen in practice. Classifying that as infinite would make it the
+/// one timeout that never expires, which is not what the driver does with it. Treating
+/// it as finite costs nothing: a deadline that far out still polls and still observes
+/// shutdown cancellation, it merely also expires eventually. (Current kernels cap very
+/// large finite waits well below the value asked for, so the real duration is shorter
+/// again -- immaterial here, but it is not the literal millisecond count.)
+inline constexpr uint32_t kWaitEventsInfiniteMs = 0xFFFFFFFFu;
+
 /// @brief KFD mmap offset encoding fields, matching kfd_priv.h.
 inline constexpr uint64_t KFD_MMAP_TYPE_SHIFT = 62;
 inline constexpr uint64_t KFD_MMAP_TYPE_MASK = 0x3ULL << KFD_MMAP_TYPE_SHIFT;
@@ -44,9 +56,6 @@ public:
   /// @brief Return the /dev/kfd fd represented by this driver.
   [[nodiscard]] virtual int fd() const = 0;
 
-  /// @brief Reset inherited child-process state after fork().
-  virtual void reset_after_fork() {}
-
   /// @brief Retain one duplicate open reference, if this driver tracks them.
   /// @retval true A reference was added.
   /// @retval false This driver does not track open references, or there is no
@@ -54,26 +63,36 @@ public:
   ///         caller must NOT treat the fd as retained.
   [[nodiscard]] virtual bool retain_local_open() { return false; }
 
-  /// @brief Non-destructively wake any thread blocked in a driver call so it can
-  /// return and drop its lifetime pin, allowing teardown to proceed.
-  /// @details Called by the interposer on an idle driver BEFORE it takes the
-  /// exclusive lifetime latch for destruction. An indefinite-timeout
-  /// AMDKFD_IOC_WAIT_EVENTS holds a shared lifetime pin for its whole duration, so
-  /// without this wake the exclusive acquire would deadlock waiting on a pin whose
-  /// call only returns once the driver is closed — which happens after the latch.
-  /// This sets the closing flag / signals the event page so the blocked call
-  /// returns promptly; it does NOT free or unpublish anything. Default no-op for
-  /// drivers with no blocking calls. Idempotent (the destroy path may re-run it).
-  virtual void begin_local_shutdown() {}
+  /// @brief Number of open references this driver currently holds.
+  /// @details The interposer decides when the local backend may be torn down by
+  /// comparing this against the count it observed at publication (see
+  /// InterposerContext::local_open_ref_baseline_), so a driver reports its RAW
+  /// count here and does not need to know which references were app-facing.
+  /// Default 0 for drivers that track no references — they are always idle.
+  [[nodiscard]] virtual uint32_t local_open_ref_count() const { return 0; }
 
-  /// @brief Undo a begin_local_shutdown() wake that did not lead to teardown.
-  /// @details The interposer wakes an idle driver before taking the exclusive
-  /// lifetime latch, but a racing dup/retain can make the post-latch idle recheck
-  /// fail and abort teardown. begin_local_shutdown() leaves the driver in a
-  /// "closing" state that would wrongly make the surviving consumer's blocking
-  /// calls fail (e.g. WAIT_EVENTS returning -EBADF), so this clears that state so
-  /// the still-live driver keeps serving. Default no-op; idempotent.
-  virtual void end_local_shutdown() {}
+  /// @brief Release any thread blocked in a driver call so it returns and drops
+  /// its driver snapshot, allowing teardown to complete.
+  /// @details Called by the interposer once it has decided to tear the local
+  /// backend down. A thread parked in an indefinite AMDKFD_IOC_WAIT_EVENTS holds a
+  /// snapshot for the whole call, which would keep the driver alive indefinitely;
+  /// only the driver can end that wait, since closing an fd does not cancel an
+  /// in-flight one.
+  ///
+  /// Every blocking call the driver SERVES ITSELF has to be covered, not only the
+  /// event wait: one that also parks a caller elsewhere -- on a debugger
+  /// acknowledgement, say -- would hold teardown behind that call's own deadline
+  /// instead. A driver that FORWARDS a blocking ioctl to a kernel it cannot interrupt
+  /// is a known residual rather than a bug here: nothing in this process can end that
+  /// wait, so teardown waits it out.
+  ///
+  /// Released waiters report a benign result their caller already handles
+  /// (KFD_IOC_WAIT_RESULT_TIMEOUT for an event wait); this mutates no event, page,
+  /// or process state. The destructive part of teardown belongs to close(). By the
+  /// time this is called teardown is committed, so the release is a one-way latch
+  /// for the driver's remaining life rather than something a later retain undoes.
+  /// Default no-op for drivers with no blocking calls. Idempotent.
+  virtual void begin_local_shutdown() {}
 
   /// @brief Outcome of invalidate_primary_fd(), telling the interposer how to
   /// follow up on a dup2/dup3 that overwrote a primary KFD fd number.

@@ -37,6 +37,7 @@
         "l2_assoc": 16,
         "num_sdma_engines": 1,
         "num_sdma_xgmi_engines": 0,
+        "num_sdma_queues_per_engine": 2,
         "num_cp_queues": 8,
         "max_engine_clk_fcompute": 2700,
         "location_id": 49920,

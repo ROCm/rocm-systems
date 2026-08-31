@@ -204,6 +204,21 @@ private:
   std::vector<std::string> *shutdown_order_;
 };
 
+/// Component whose startup() requests an ordinary exit and only then throws.
+///
+/// @details Pins the precedence between the two terminal writers. The exit request
+/// records a code-0 status FIRST, so unless the failure outranks it, run() hands back
+/// success for a generation whose components never started.
+class ExitThenThrowStartupComponent : public Component {
+public:
+  explicit ExitThenThrowStartupComponent(std::string name) : Component(std::move(name)) {}
+
+  void startup() override {
+    engine()->request_exit("ordinary exit request from startup", /*code=*/0);
+    throw std::runtime_error("startup failed after requesting exit");
+  }
+};
+
 /// Component whose startup() throws the first N times it is called, then
 /// succeeds. Also counts shutdown() so tests can assert unwind cleanup.
 class FlakyStartupComponent : public Component {
@@ -226,6 +241,27 @@ public:
 
 private:
   uint32_t remaining_throws_;
+};
+
+/// Component whose startup() AND shutdown() both throw. Component::shutdown() is
+/// not noexcept, so the startup-failure unwind must survive a throwing shutdown
+/// hook without escaping the engine or stranding wait_until_started().
+class DoublyThrowingComponent : public Component {
+public:
+  explicit DoublyThrowingComponent(std::string name) : Component(std::move(name)) {}
+
+  void startup() override {
+    ++startups;
+    throw std::runtime_error("startup deliberately failing");
+  }
+
+  void shutdown() override {
+    ++shutdowns;
+    throw std::runtime_error("shutdown deliberately failing");
+  }
+
+  uint32_t startups = 0;
+  uint32_t shutdowns = 0;
 };
 
 /// Helper: build engine with manual partition assignment.
@@ -730,6 +766,25 @@ TEST(StartupReadinessTest, CleanStartupReportsReady) {
   EXPECT_TRUE(engine.wait_until_started());
 }
 
+TEST(StartupReadinessTest, StartupFailureOutranksAnEarlierExitRequest) {
+  // The failure is recorded SECOND here, after an ordinary code-0 exit request that
+  // the same startup() issued. Whoever wrote first must not win: a generation whose
+  // components never started has to report failure, or the C API maps code 0 to
+  // success and a dead VM looks like a clean run.
+  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<ExitThenThrowStartupComponent>("exit_then_throw0"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  auto exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::INTERRUPTED);
+  EXPECT_EQ(exit.code, 1) << "a startup failure must not be reported as a clean exit";
+  EXPECT_FALSE(engine.wait_until_started());
+  EXPECT_EQ(engine.last_exit().code, 1);
+}
+
 TEST(StartupReadinessTest, StartupFailureIsTerminalForTheGeneration) {
   // A startup() throw leaves the partial attempt's event/primary/component state
   // intact, so the create() generation is terminal: step() rethrows once, latches
@@ -745,9 +800,22 @@ TEST(StartupReadinessTest, StartupFailureIsTerminalForTheGeneration) {
   EXPECT_THROW(engine.step(), std::runtime_error);
   EXPECT_FALSE(engine.wait_until_started());
 
+  // step() must record the SAME failure ExitStatus run() would. Without it the
+  // create() default {COMPLETED, 0} survives and the terminal guard below hands
+  // back a success-looking status for a generation that never started.
+  EXPECT_EQ(engine.last_exit().reason, ExitReason::INTERRUPTED);
+  EXPECT_EQ(engine.last_exit().code, 1);
+
   // Same-generation retry: startup is NOT re-run (generation is terminal), so the
   // component's startup() never succeeds and step() reports done.
   EXPECT_FALSE(engine.step());
+  EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->successful_startups, 0u);
+
+  // A run() after the failed step() goes through the same terminal guard and must
+  // report the recorded failure, not the create() default.
+  auto after_failed_step = engine.run();
+  EXPECT_EQ(after_failed_step.reason, ExitReason::INTERRUPTED);
+  EXPECT_EQ(after_failed_step.code, 1);
   EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->successful_startups, 0u);
 
   // A fresh generation (shutdown + create) starts cleanly and succeeds.
@@ -756,6 +824,61 @@ TEST(StartupReadinessTest, StartupFailureIsTerminalForTheGeneration) {
   engine.step();
   EXPECT_TRUE(engine.wait_until_started());
   EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->successful_startups, 1u);
+}
+
+TEST(StartupReadinessTest, ThrowingShutdownDuringStartupUnwindStillPublishesFailure) {
+  // Component::shutdown() is not noexcept. If the startup-failure unwind ran
+  // BEFORE the readiness latch, a throwing shutdown hook would escape the catch
+  // path — terminating the interposer's background run() thread — while
+  // wait_until_started() stayed blocked forever. The failure must therefore be
+  // published first and the unwind caught separately.
+  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *doubly = root->add_child(std::make_unique<DoublyThrowingComponent>("doubly0"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  // run() must return the terminal status rather than letting the shutdown throw
+  // propagate out of the engine.
+  auto exit = engine.run();
+  EXPECT_EQ(exit.reason, ExitReason::INTERRUPTED);
+  EXPECT_EQ(exit.code, 1);
+  EXPECT_FALSE(engine.wait_until_started());
+
+  auto *comp = static_cast<DoublyThrowingComponent *>(doubly);
+  EXPECT_EQ(comp->startups, 1u);
+  EXPECT_EQ(comp->shutdowns, 1u) << "the unwind must still attempt the shutdown hook";
+
+  // The engine's own shutdown() must also survive the throwing hook (it is guarded
+  // against a second invocation, so this asserts no rethrow escapes destruction).
+  EXPECT_NO_THROW(engine.shutdown());
+}
+
+TEST(StartupReadinessTest, ThrowingShutdownDuringStepUnwindRethrowsOnlyTheStartupError) {
+  // step() rethrows to its foreground caller. The exception it propagates must be
+  // the STARTUP failure, not whatever the best-effort unwind's shutdown hook threw
+  // on top of it, and readiness must still be published as failed.
+  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *doubly = root->add_child(std::make_unique<DoublyThrowingComponent>("doubly0"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  try {
+    engine.step();
+    ADD_FAILURE() << "step() must rethrow the startup failure";
+  } catch (const std::runtime_error &e) {
+    EXPECT_STREQ(e.what(), "startup deliberately failing")
+        << "the unwind's shutdown throw must not replace the startup error";
+  }
+
+  EXPECT_FALSE(engine.wait_until_started());
+  EXPECT_EQ(engine.last_exit().reason, ExitReason::INTERRUPTED);
+  EXPECT_EQ(engine.last_exit().code, 1);
+
+  auto *comp = static_cast<DoublyThrowingComponent *>(doubly);
+  EXPECT_EQ(comp->startups, 1u);
+  EXPECT_EQ(comp->shutdowns, 1u);
 }
 
 TEST(StartupReadinessTest, RunAfterFailedStartupFailsClosedWithoutRerun) {
@@ -826,6 +949,38 @@ TEST(StartupReadinessTest, StartupFailureUnwindsEveryInitializedComponentOnce) {
   engine.shutdown();
   EXPECT_EQ(before_c->shutdowns, 1u);
   EXPECT_EQ(after_c->shutdowns, 1u);
+}
+
+TEST(StartupReadinessTest, ThrowingShutdownStillCleansUpRemainingComponents) {
+  // shutdown_components() marks the generation shut down before invoking any
+  // callback, so a callback that throws must not be allowed to skip the components
+  // after it — there is no second chance to clean them up. Each callback is
+  // isolated; the first failure is reported once the rest have run.
+  std::vector<std::string> shutdown_order;
+  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *first =
+      root->add_child(std::make_unique<LifecycleCountingComponent>("first", &shutdown_order));
+  auto *thrower = root->add_child(std::make_unique<DoublyThrowingComponent>("thrower"));
+  auto *last =
+      root->add_child(std::make_unique<LifecycleCountingComponent>("last", &shutdown_order));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  // Reverse order is last -> thrower -> first, so the throw lands between them.
+  // shutdown() must NOT propagate it: it is reached from ~SimulationEngine(), from
+  // the engine's own background thread, and across the C API, none of which can
+  // absorb an exception.
+  EXPECT_NO_THROW(engine.shutdown());
+  EXPECT_FALSE(engine.is_created()) << "engine cleanup must complete despite a throwing hook";
+
+  EXPECT_EQ(static_cast<DoublyThrowingComponent *>(thrower)->shutdowns, 1u);
+  EXPECT_EQ(static_cast<LifecycleCountingComponent *>(last)->shutdowns, 1u);
+  EXPECT_EQ(static_cast<LifecycleCountingComponent *>(first)->shutdowns, 1u)
+      << "a throwing callback must not skip cleanup for the components after it";
+  ASSERT_EQ(shutdown_order.size(), 2u);
+  EXPECT_EQ(shutdown_order[0], "last");
+  EXPECT_EQ(shutdown_order[1], "first");
 }
 
 TEST(StartupReadinessTest, CreateThenShutdownRunsComponentCleanup) {

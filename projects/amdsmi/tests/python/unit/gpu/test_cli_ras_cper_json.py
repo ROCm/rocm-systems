@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 """Mock-based unit tests for ``amd-smi ras --cper --json`` output validity.
 
@@ -42,6 +25,7 @@ import io
 import json
 import os
 import sys
+import tempfile
 import types
 import unittest
 
@@ -315,6 +299,24 @@ class TestCliRasCperJson(unittest.TestCase):
             self.assertEqual(buffer.getvalue(), "")
         finally:
             self.ras_module.time.sleep = original_sleep
+
+    def test_afid_folder_all_files_skipped_emits_empty_json(self):
+        # --afid --folder --json where every *.cper is a symlink: O_NOFOLLOW
+        # skips them all, so results is empty. It must still print exactly `[]`
+        # so json.loads consumers don't choke on empty output.
+        with tempfile.TemporaryDirectory() as folder:
+            link = os.path.join(folder, "planted.cper")
+            os.symlink(os.devnull, link)
+
+            commands = self._make_commands()
+            args = argparse.Namespace(folder=folder)
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                commands._decode_afid_folder(args)
+            captured = buffer.getvalue()
+
+        self.assertEqual(captured.strip(), "[]")
+        self.assertEqual(json.loads(captured), [])
 
 
 if __name__ == "__main__":

@@ -109,11 +109,33 @@ table KfdDeviceInfo {
   capability2: uint32 = 0;
   debug_prop: uint64 = 0;
 
-  // Appended to preserve existing field IDs. The default retains rocJitsu's
-  // legacy synthetic-sysfs value; hardware-backed configs should override it.
-  // TODO(hanchung): Set this in every GPU config, reject zero when regular
-  // SDMA engines are present, and remove the legacy fallback.
-  num_sdma_queues_per_engine: uint32 = 2;
+  // Appended to preserve existing field IDs. Required to be nonzero when
+  // num_sdma_engines is nonzero.
+  num_sdma_queues_per_engine: uint32;
+}
+
+/// How the GPU presents itself on a PCI bus, for front ends that attach it to a
+/// VMM rather than interposing the KFD ioctls.
+///
+/// Identity fields not repeated here come from KfdDeviceInfo: the vendor, device
+/// and revision a driver reads are the same values KFD reports. What is here is
+/// the bus shape, which nothing else in the simulation describes.
+///
+/// The class code is what a guest driver's PCI table matches on: amdgpu binds
+/// any AMD device presenting 0x120000 (processing accelerator) or a display
+/// class, and then asks the device what it is through IP discovery.
+table PciDeviceInfo {
+  class_code: uint32 = 0x120000;   // 24-bit PCI class, subclass and programming interface.
+  subsystem_vendor_id: uint32 = 0; // 0 = same as the vendor ID.
+  subsystem_id: uint32 = 0;        // 0 = same as the device ID.
+
+  // Aperture sizes. The register aperture must be large enough to reach every
+  // register the driver reads before IP discovery, the furthest of which sits
+  // at byte 0x5a800; a smaller one pushes those reads onto the indirect window.
+  // Every aperture size must be a power of two, as PCI requires of a BAR.
+  vram_aperture_bytes: uint64 = 0; // 0 = an implementation-chosen window, <= 256 MiB.
+  doorbell_aperture_bytes: uint64 = 2097152;
+  register_aperture_bytes: uint64 = 524288;
 }
 
 /// Top-level AMDGPU configuration.
@@ -124,6 +146,10 @@ table AmdgpuConfig {
   memory: GpuMemoryConfig;
   device: KfdDeviceInfo;         // KFD device identity for sysfs topology.
   num_gpus: uint32 = 1;          // Number of simulated GPU instances.
+  // Appended, not inserted: FlatBuffers assigns field IDs by declaration order,
+  // so placing this before num_gpus would renumber it and change how existing
+  // buffers read.
+  pci: PciDeviceInfo;            // Bus shape for PCI-attached front ends.
 }
 
 enum DbtExecutionBackend: byte {

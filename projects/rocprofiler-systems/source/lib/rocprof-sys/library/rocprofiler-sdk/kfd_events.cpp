@@ -3,8 +3,9 @@
 
 #include "library/rocprofiler-sdk/kfd_events.hpp"
 #include <cstdint>
+#include <rocprofiler-sdk/version.h>
 
-#if ROCPROFILER_VERSION >= 10000
+#if ROCPROFILER_VERSION >= 10202
 
 #    include "core/categories.hpp"
 #    include "core/trace_cache/buffer_storage.hpp"

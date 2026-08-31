@@ -2209,8 +2209,8 @@ TEST(WaitcheckTest, Gfx1100CounterParityCatalogsConservativePairedD16Wait) {
   EXPECT_EQ(diag.counter, WaitCounterKind::Ds);
   EXPECT_EQ(diag.emitted_count, 0u);
   EXPECT_EQ(diag.required_count, 1u);
-  EXPECT_EQ(diag.producer_instruction, "ds_load_u8_d16_hi v0, v14");
-  EXPECT_EQ(diag.consumer_instruction, "v_and_b16 v18, 1, v0");
+  EXPECT_EQ(diag.producer_instruction, "ds_load_u8_d16_hi v0, v14 offset:2");
+  EXPECT_EQ(diag.consumer_instruction, "v_and_b16 v18.l, 1, v0.l");
 }
 
 TEST(WaitcheckTest, Gfx1250CounterParityMatchesSplitLoadcnt) {

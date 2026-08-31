@@ -93,7 +93,7 @@ contains_expected_data(std::vector<uint8_t> &buffer, hoff_t buffer_offset, std::
         }
     }
 
-    if (memcmp(buffer.data() + buffer_offset, expected.data() + expected_offset, count)) {
+    if (count > 0 && memcmp(buffer.data() + buffer_offset, expected.data() + expected_offset, count)) {
         return false;
     }
 
@@ -352,7 +352,8 @@ struct FallbackWrite : public FallbackIo {
             file_data.resize(uoffset + count);
         }
 
-        memcpy(file_data.data() + uoffset, buf, count);
+        if (count > 0)
+            memcpy(file_data.data() + uoffset, buf, count);
 
         return static_cast<ssize_t>(count);
     }
@@ -547,7 +548,8 @@ struct FallbackRead : public FallbackIo {
             count = file_data.size() - uoffset;
         }
 
-        memcpy(buf, file_data.data() + uoffset, count);
+        if (count > 0)
+            memcpy(buf, file_data.data() + uoffset, count);
 
         return static_cast<ssize_t>(count);
     }

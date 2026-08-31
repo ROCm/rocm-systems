@@ -22,6 +22,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadFormatXyMubuf : public Mubuf {
@@ -32,6 +33,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadFormatXyzMubuf : public Mubuf {
@@ -42,6 +44,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadFormatXyzwMubuf : public Mubuf {
@@ -52,6 +55,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreFormatXMubuf : public Mubuf {
@@ -62,6 +66,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreFormatXyMubuf : public Mubuf {
@@ -72,6 +77,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreFormatXyzMubuf : public Mubuf {
@@ -82,6 +88,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreFormatXyzwMubuf : public Mubuf {
@@ -92,6 +99,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadD16FormatXMubuf : public Mubuf {
@@ -103,6 +111,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadD16FormatXyMubuf : public Mubuf {
@@ -113,6 +122,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadD16FormatXyzMubuf : public Mubuf {
@@ -124,6 +134,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadD16FormatXyzwMubuf : public Mubuf {
@@ -134,6 +145,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreD16FormatXMubuf : public Mubuf {
@@ -144,6 +156,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreD16FormatXyMubuf : public Mubuf {
@@ -154,6 +167,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreD16FormatXyzMubuf : public Mubuf {
@@ -164,6 +178,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreD16FormatXyzwMubuf : public Mubuf {
@@ -174,6 +189,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadU8Mubuf : public Mubuf {
@@ -184,6 +200,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadI8Mubuf : public Mubuf {
@@ -194,6 +211,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadU16Mubuf : public Mubuf {
@@ -204,6 +222,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadI16Mubuf : public Mubuf {
@@ -214,6 +233,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadB32Mubuf : public Mubuf {
@@ -224,6 +244,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadB64Mubuf : public Mubuf {
@@ -234,6 +255,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadB96Mubuf : public Mubuf {
@@ -244,6 +266,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadB128Mubuf : public Mubuf {
@@ -254,6 +277,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreB8Mubuf : public Mubuf {
@@ -264,6 +288,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreB16Mubuf : public Mubuf {
@@ -274,6 +299,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreB32Mubuf : public Mubuf {
@@ -284,6 +310,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreB64Mubuf : public Mubuf {
@@ -294,6 +321,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreB96Mubuf : public Mubuf {
@@ -304,6 +332,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreB128Mubuf : public Mubuf {
@@ -314,6 +343,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadD16U8Mubuf : public Mubuf {
@@ -325,6 +355,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadD16I8Mubuf : public Mubuf {
@@ -336,6 +367,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadD16B16Mubuf : public Mubuf {
@@ -347,6 +379,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadD16HiU8Mubuf : public Mubuf {
@@ -358,6 +391,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadD16HiI8Mubuf : public Mubuf {
@@ -369,6 +403,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadD16HiB16Mubuf : public Mubuf {
@@ -380,6 +415,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreD16HiB8Mubuf : public Mubuf {
@@ -390,6 +426,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreD16HiB16Mubuf : public Mubuf {
@@ -400,6 +437,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadD16HiFormatXMubuf : public Mubuf {
@@ -411,6 +449,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreD16HiFormatXMubuf : public Mubuf {
@@ -421,6 +460,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferGl0InvMubuf : public Mubuf {
@@ -443,6 +483,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicCmpswapB32Mubuf : public Mubuf {
@@ -454,6 +496,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAddU32Mubuf : public Mubuf {
@@ -464,6 +508,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicSubU32Mubuf : public Mubuf {
@@ -474,6 +520,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicCsubU32Mubuf : public Mubuf {
@@ -484,6 +532,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMinI32Mubuf : public Mubuf {
@@ -494,6 +544,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMinU32Mubuf : public Mubuf {
@@ -504,6 +556,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMaxI32Mubuf : public Mubuf {
@@ -514,6 +568,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMaxU32Mubuf : public Mubuf {
@@ -524,6 +580,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAndB32Mubuf : public Mubuf {
@@ -534,6 +592,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicOrB32Mubuf : public Mubuf {
@@ -544,6 +604,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicXorB32Mubuf : public Mubuf {
@@ -554,6 +616,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicIncU32Mubuf : public Mubuf {
@@ -564,6 +628,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicDecU32Mubuf : public Mubuf {
@@ -574,6 +640,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicSwapB64Mubuf : public Mubuf {
@@ -584,6 +652,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicCmpswapB64Mubuf : public Mubuf {
@@ -595,6 +665,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAddU64Mubuf : public Mubuf {
@@ -605,6 +677,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicSubU64Mubuf : public Mubuf {
@@ -615,6 +689,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMinI64Mubuf : public Mubuf {
@@ -625,6 +701,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMinU64Mubuf : public Mubuf {
@@ -635,6 +713,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMaxI64Mubuf : public Mubuf {
@@ -645,6 +725,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMaxU64Mubuf : public Mubuf {
@@ -655,6 +737,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAndB64Mubuf : public Mubuf {
@@ -665,6 +749,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicOrB64Mubuf : public Mubuf {
@@ -675,6 +761,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicXorB64Mubuf : public Mubuf {
@@ -685,6 +773,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicIncU64Mubuf : public Mubuf {
@@ -695,6 +785,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicDecU64Mubuf : public Mubuf {
@@ -705,6 +797,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicCmpswapF32Mubuf : public Mubuf {
@@ -716,6 +810,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMinF32Mubuf : public Mubuf {
@@ -726,6 +822,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMaxF32Mubuf : public Mubuf {
@@ -736,6 +834,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAddF32Mubuf : public Mubuf {
@@ -746,6 +846,8 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 } // namespace rdna3

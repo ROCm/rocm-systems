@@ -14,6 +14,7 @@
 #include <atomic>
 #include <barrier>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -197,6 +198,21 @@ public:
   /// embedding must unwind rather than publish the device.
   [[nodiscard]] bool wait_until_started() const;
 
+  /// @brief Latch readiness only if nothing has latched it yet.
+  /// @details Liveness backstop for an embedding that runs the engine on its own
+  /// thread: wait_until_started() blocks until run()/step() latches, so ANY path
+  /// that returns without reaching the latch (a caller-side validation failure
+  /// before run() is entered, an engine that is never run at all) would strand the
+  /// waiter forever. The owning thread calls this after its run() returns so
+  /// readiness becomes a property of the THREAD's completion rather than of run()
+  /// being reached. Must be called from that same thread, after run()/step()
+  /// returns, so it cannot race the in-band latch.
+  /// A failed latch also records the terminal ExitStatus. The flag it sets is what
+  /// run()/step() use as their terminal guard, so latching without a status would
+  /// leave the create() default in place and report a generation that never started
+  /// as a clean run.
+  void latch_startup_if_unlatched(bool failed);
+
   /// @brief Process all events at the next event time (single-threaded only).
   ///
   /// @details On the first call, starts all components (initialization
@@ -329,21 +345,41 @@ private:
   /// @brief Call startup() on all components across all partitions.
   void startup_components();
 
-  /// @brief Call shutdown() on all components across all partitions.
-  void shutdown_components();
+  /// @brief Call shutdown() on every initialized component, in reverse order.
+  /// @details Every callback runs even if an earlier one throws: the generation is
+  /// marked shut down up front, so skipping the rest would strand them with no way
+  /// to retry. Never throws — the first failure is RETURNED so the caller can finish
+  /// its own cleanup before reporting it.
+  /// @returns The first callback exception, or null if all succeeded.
+  [[nodiscard]] std::exception_ptr shutdown_components() noexcept;
+
+  /// @brief Log a captured component-cleanup failure. Never throws.
+  static void report_component_failure(std::exception_ptr failure, const char *phase) noexcept;
 
   /// @brief Latch startup readiness and wake wait_until_started() observers.
   /// @details Stores @p failed BEFORE startup_complete_, then notifies — the order
   /// matters so a waiter that observes complete also observes the correct failed
   /// state. Centralizes the epilogue used by run()/step() on both the success and
   /// the throw paths so the ordering cannot drift. A startup throw is terminal for
-  /// the create() generation (see start_failed_), so this latches failure once and
+  /// the create() generation (see startup_failed()), so this latches failure once and
   /// the caller must shutdown() + create() before a fresh startup can latch success.
   void latch_startup(bool failed) {
     startup_failed_.store(failed, std::memory_order_release);
     startup_complete_.store(true, std::memory_order_release);
     startup_complete_.notify_all();
   }
+
+  /// @brief Common epilogue for a startup_components() throw in run()/step().
+  /// @details Records the terminal failure -- startup_failed_, a failure ExitStatus,
+  /// and done_ so a racing request_exit() cannot overwrite it -- unwinds the started
+  /// components, and only then PUBLISHES readiness via latch_startup(). Publishing
+  /// last is what makes a false return from wait_until_started() mean the generation
+  /// is torn down rather than still running shutdown hooks; it is safe to leave the
+  /// latch until the end because the unwind cannot escape, shutdown_components() and
+  /// report_component_failure() both being noexcept and catching each callback
+  /// individually. Both run() and step() share this so the recorded status and the
+  /// ordering cannot drift apart.
+  void fail_startup(std::string message);
 
   /// @brief Drain all async event buffers into their partition queues (single-threaded).
   void drain_async_events();
@@ -363,6 +399,15 @@ private:
 
   /// @brief Set the exit event (internal helper).
   void set_exit(ExitReason reason, Tick tick, std::string message, int code = 0);
+
+  /// @brief Record a terminal FAILURE status and mark the generation done, atomically.
+  /// @details For terminal failures only, and unlike set_exit() it is last-writer-wins:
+  /// a startup failure outranks an ordinary exit request, including one already
+  /// recorded by a request_exit() issued from inside a startup callback that then
+  /// threw. Keeping first-writer-wins there would let run() report success for a
+  /// generation whose components never started. done_ is stored in the same critical
+  /// section because request_exit() gates its overwrite on reading it under this lock.
+  void set_terminal_exit(ExitReason reason, Tick tick, std::string message, int code);
 
   /// @brief Check if all registered primaries have signaled OK to end.
   /// @retval true All primaries are done (and at least one is registered).
@@ -434,14 +479,21 @@ private:
   /// wait_until_started() report failure instead of blocking forever, since a
   /// throwing startup latches startup_complete_ without the engine running.
   std::atomic<bool> startup_failed_{false};
+
   /// @brief True once a startup() throw made this create() generation terminal.
-  /// @details A startup throw leaves partition/async/cross-partition event queues,
-  /// primary-registration counters, and per-component state from the partial
-  /// attempt intact. Re-running startup on top of that would double-schedule a
-  /// started component's initial event and double-register a primary, so the
-  /// generation is dead: run()/step() refuse to re-run startup and the caller must
-  /// shutdown() + create() for a clean generation. Reset by create().
-  bool start_failed_ = false;
+  /// @details Same flag wait_until_started() publishes, reused as run()/step()'s
+  /// terminal guard rather than a second bool: both are set only by latch_startup()
+  /// and cleared only by create(), so a duplicate could only ever drift. Reusing it
+  /// also makes the thread-death backstop (latch_startup_if_unlatched) terminal for
+  /// the generation, which a separate same-thread flag would have missed.
+  ///
+  /// Terminal rather than retryable because a partial attempt leaves the partition,
+  /// async and cross-partition event queues, the primary-registration counters and
+  /// per-component state intact: re-running startup on top of them would
+  /// double-schedule events and double-register primaries. A caller that wants
+  /// another attempt has to shutdown() and create() a fresh generation.
+  bool startup_failed() const { return startup_failed_.load(std::memory_order_acquire); }
+
   /// @brief True once shutdown_components() has run for this generation, so each
   /// initialized component's shutdown() fires exactly once even if both the
   /// startup-failure unwind and the engine shutdown() path reach it. Reset by

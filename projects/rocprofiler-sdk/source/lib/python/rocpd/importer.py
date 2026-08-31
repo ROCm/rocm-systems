@@ -33,6 +33,7 @@ import sqlite3
 
 from .schema import RocpdSchema
 from . import libpyrocpd
+from .features import get_supported_features_from_version
 
 __all__ = ["RocpdImportData", "execute_statement"]
 
@@ -50,8 +51,9 @@ def internal_init(_input, _output, skip_auto_merge, automerge_limit):
     _connection = libpyrocpd.connect(_output)
     _connection.execute("PRAGMA foreign_keys = ON")
     _table_info = _create_temp_views(_connection, _input)
-    _create_meta_views(_connection)
-    return (_connection, _input, _table_info)
+    _schema_version = _fetch_version_info(_connection)
+    _create_meta_views(_connection, _schema_version)
+    return (_connection, _input, _table_info, _schema_version)
 
 
 class RocpdImportData(libpyrocpd.RocpdImportData):
@@ -76,7 +78,7 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
             elif isinstance(input, str) or (
                 isinstance(input, list) and len(input) > 0 and isinstance(input[0], str)
             ):
-                _connection, _filenames, _table_info = internal_init(
+                _connection, _filenames, _table_info, _schema_version = internal_init(
                     input, dbname, skip_auto_merge, automerge_limit
                 )
                 self.table_info = _table_info
@@ -84,7 +86,12 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
                 raise ValueError(
                     f"input is unsupported type. Expected sqlite3.Connection, string, or (non-empty) list of strings. type={type(input).__name__}"
                 )
-            super(RocpdImportData, self).__init__(_connection, _filenames)
+            _supported_features = list(
+                get_supported_features_from_version(_schema_version)
+            )
+            super(RocpdImportData, self).__init__(
+                _connection, _filenames, _schema_version, _supported_features
+            )
 
     def __getattr__(self, name):
         # any attribute or method not found in RocpdImportData will be looked up on self.connection
@@ -199,7 +206,23 @@ def _create_temp_views(connection, input):
     return all_tables
 
 
-def _create_meta_views(connection):
-    schema = RocpdSchema()
+def _create_meta_views(connection, schema_version):
+    schema = RocpdSchema(version=str(schema_version))
     sql_script = schema.views.replace("CREATE VIEW", "CREATE TEMPORARY VIEW")
     execute_statement(connection, sql_script, is_script=True)
+
+
+def _fetch_version_info(connection):
+    _versions = [
+        itr[0]
+        for itr in execute_statement(
+            connection,
+            "SELECT value FROM rocpd_metadata WHERE tag='schema_version'",
+        ).fetchall()
+    ]
+
+    _versions = list(set(_versions))
+    if len(_versions) != 1:
+        raise ValueError(f"Expected exactly one schema version, found: {_versions}")
+
+    return libpyrocpd.schema_version(_versions[0])

@@ -19,13 +19,18 @@ class L2Cache;
 
 /// @brief Coordinates functional cache state at device-wide atomic boundaries.
 ///
-/// Normal L1 operations hold a shared guard. An atomic RMW holds the exclusive
-/// guard while dirty L2 state is published and the coherence epoch is
-/// advanced, preventing stale writeback or stale post-atomic hits.
+/// An atomic RMW holds the exclusive guard while dirty L2 state is published
+/// and the coherence epoch is advanced, preventing stale writeback or stale
+/// post-atomic hits.
+///
+/// Ordinary cache accesses take no lock here. Each cache owns its epoch
+/// bookkeeping and reconciles lazily: an L2 compares its epoch under its own
+/// maintenance_mutex_, and an L1 -- which is private to one compute unit and
+/// reaches L2 only through that same maintenance_mutex_ -- compares its epoch
+/// with no lock at all. current_epoch() is the single point of cross-thread
+/// contact, and it is a read-mostly atomic load.
 class DeviceCacheCoherence {
 public:
-  using L1AccessGuard = std::shared_lock<std::shared_mutex>;
-
   /// @brief RAII guard for a fully prepared device-wide atomic boundary.
   ///
   /// Destruction releases all L2 maintenance locks before the device guard.
@@ -54,7 +59,6 @@ public:
 
   static DeviceCacheCoherence &instance();
 
-  [[nodiscard]] L1AccessGuard acquire_l1_access();
   [[nodiscard]] AtomicBoundary acquire_atomic_boundary();
   uint64_t current_epoch() const { return epoch_.load(std::memory_order_acquire); }
 

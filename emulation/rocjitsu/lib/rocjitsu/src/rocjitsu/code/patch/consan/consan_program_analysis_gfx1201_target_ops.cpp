@@ -37,7 +37,9 @@ decode_gfx1201_private_component(std::span<const uint8_t> instruction) {
 
 std::optional<ConSanLaneTransferEncoding>
 decode_gfx1201_lane_transfer(std::span<const uint8_t> instruction) {
-  return decode_gfx12_lane_transfer<rdna4::Vop3MachineInst>(instruction, 1);
+  // The generated RDNA4 VOP3 operand table keeps the two architectural
+  // sources first and appends vdst's lane-preservation use last.
+  return decode_gfx12_lane_transfer<rdna4::Vop3MachineInst>(instruction, 0);
 }
 
 ConSanVectorMemoryDecode decode_gfx1201_flat_memory(std::span<const uint8_t> instruction) {

@@ -6,11 +6,11 @@
 
 #include "common/DdaFabricTestHelpers.hpp"
 
-#include "dda_all_gather.h"
-#include "dda_all_reduce.h"
-#include "dda_alltoall.h"
-#include "dda_reduce_scatter.h"
-#include "fabric_gpu_barrier.h"
+#include "algorithms/dda/all_gather/dda_all_gather.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "gtest/gtest.h"
 
 namespace RcclUnitTesting
@@ -84,7 +84,7 @@ TEST(DdaFabricScratchSizingTest, LLFloorDominatesAtHighRankCount)
     constexpr int nRanks = 72;
     constexpr int64_t smallSimpleCap = 8 * 1024 * 1024;  // 8 MiB
     const size_t sizing = nccl_dda_detail::ddaFabricScratchSizing(nRanks, -1, 1, smallSimpleCap, 1, 0);
-    constexpr size_t llFloor = 2 * nRanks * meta::comms::kDdaLLMaxBytes;
+    constexpr size_t llFloor = 2 * nRanks * dda::common::kDdaLLMaxBytes;
     EXPECT_EQ(sizing, llFloor);
     EXPECT_GT(sizing, (size_t)smallSimpleCap);
 }
@@ -154,14 +154,14 @@ TEST_F(DdaFabricEligibilityTest, AllGather_TooFewRanks)
 
 TEST_F(DdaFabricEligibilityTest, AllGather_TooManyRanks)
 {
-    mockComm_.comm.nRanks = meta::comms::kDdaMaxNranks + 1;
+    mockComm_.comm.nRanks = dda::common::kDdaMaxNranks + 1;
     EXPECT_FALSE(ncclAllGatherDdaFabricEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
 
 TEST_F(DdaFabricEligibilityTest, AllGather_MaxRanksEligible)
 {
-    mockComm_.comm.nRanks = meta::comms::kDdaMaxNranks;
+    mockComm_.comm.nRanks = dda::common::kDdaMaxNranks;
     EXPECT_TRUE(ncclAllGatherDdaFabricEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
@@ -322,7 +322,7 @@ TEST_F(DdaFabricEligibilityTest, AllReduce_MinRanksEligible)
 
 TEST_F(DdaFabricEligibilityTest, AllReduce_TooManyRanks)
 {
-    mockComm_.comm.nRanks = meta::comms::kDdaMaxNranks + 1;
+    mockComm_.comm.nRanks = dda::common::kDdaMaxNranks + 1;
     EXPECT_FALSE(ncclAllReduceDdaFabricEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
 }
@@ -440,7 +440,7 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_TooFewRanks)
 
 TEST_F(DdaFabricEligibilityTest, AllReduceLL_TooManyRanks)
 {
-    mockComm_.comm.nRanks = meta::comms::kDdaMaxNranks + 1;
+    mockComm_.comm.nRanks = dda::common::kDdaMaxNranks + 1;
     EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
 }
@@ -456,7 +456,7 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_MinRanksEligible)
 // that has to still fit the scratch.
 TEST_F(DdaFabricEligibilityTest, AllReduceLL_MaxRanksEligible)
 {
-    mockComm_.comm.nRanks = meta::comms::kDdaMaxNranks;
+    mockComm_.comm.nRanks = dda::common::kDdaMaxNranks;
     EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
 }
@@ -648,7 +648,7 @@ TEST_F(DdaFabricEligibilityTest, ReduceScatter_ScratchTooSmall)
 
 TEST_F(DdaFabricEligibilityTest, ReduceScatter_MaxRanksEligible)
 {
-    mockComm_.comm.nRanks = meta::comms::kDdaMaxNranks;
+    mockComm_.comm.nRanks = dda::common::kDdaMaxNranks;
     EXPECT_TRUE(ncclReduceScatterDdaFabricEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
 }

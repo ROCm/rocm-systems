@@ -87,9 +87,11 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include <pthread.h>
 #include <time.h>
 #include <unistd.h>
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
@@ -4106,6 +4108,43 @@ diagnose_status(pid_t _pid, int _status)
 void
 rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
 {
+    // Only the first fatal signal in the process runs the body below. A later one, whether it
+    // is a re-entrant abort from finalization on this thread or a signal on another thread,
+    // must not wait on the std::call_once: the first is a recursive lock, the second blocks
+    // until the finalization it is waiting on completes, and either way the process can no
+    // longer be terminated. This runs before any logging so that a stuck logger or allocator
+    // cannot get in the way.
+    static auto _handling = std::atomic_flag{};
+    if(_handling.test_and_set())
+    {
+        constexpr auto _msg =
+            std::string_view{"[rocprofv3] fatal signal while already handling one... "
+                             "terminating\n"};
+        // write() rather than the logger: async-signal-safe and takes no locks
+        auto _written = ::write(STDERR_FILENO, _msg.data(), _msg.size());
+        (void) _written;
+
+        // rocprofv3 interposes signal()/sigaction() to keep this handler installed, so the
+        // default disposition has to be restored through the real symbol before re-raising.
+        auto _default_action       = sigaction_t{};
+        _default_action.sa_handler = SIG_DFL;
+        sigemptyset(&_default_action.sa_mask);
+        if(auto* _real_sigaction = get_sigaction_function();
+           _real_sigaction != nullptr && _real_sigaction(signo, &_default_action, nullptr) == 0)
+        {
+            // the handler was entered with signo blocked, so unblock it or the raise below
+            // only marks it pending and the process exits rather than dying from the signal
+            auto _blocked = sigset_t{};
+            sigemptyset(&_blocked);
+            sigaddset(&_blocked, signo);
+            ::pthread_sigmask(SIG_UNBLOCK, &_blocked, nullptr);
+            ::raise(signo);
+        }
+
+        // only reached if the signal is not fatal by default or could not be restored
+        ::_exit(128 + signo);
+    }
+
     auto this_pid  = getpid();
     auto this_ppid = getppid();
     auto this_tid  = common::get_tid();

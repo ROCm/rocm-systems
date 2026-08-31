@@ -25,6 +25,7 @@
 
 #include <gtest/gtest.h>
 
+#include <iomanip>
 #include <string_view>
 
 TEST(rocprofiler_lib, error_string)

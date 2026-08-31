@@ -128,14 +128,26 @@ DecodeRecord decode_window(Decoder &decoder, std::span<const uint8_t> bytes) {
     fail_invariant("instruction disassembly is empty");
   const std::string_view mnemonic = inst->mnemonic();
   const size_t dual_separator = mnemonic.find(" :: ");
-  const bool mnemonic_matches =
+  bool mnemonic_matches =
       dual_separator == std::string_view::npos
           ? disassembly.starts_with(mnemonic)
           : disassembly.starts_with(mnemonic.substr(0, dual_separator)) &&
                 disassembly.find(mnemonic.substr(dual_separator)) != std::string::npos;
+  if (!mnemonic_matches && dual_separator == std::string_view::npos) {
+    const std::string_view rendered =
+        std::string_view(disassembly).substr(0, disassembly.find(' '));
+    const auto semantic_base =
+        mnemonic.ends_with("_e32") ? mnemonic.substr(0, mnemonic.size() - 4) : mnemonic;
+    auto rendered_base = rendered;
+    if (rendered_base.ends_with("_e64_dpp"))
+      rendered_base.remove_suffix(8);
+    else if (rendered_base.ends_with("_dpp"))
+      rendered_base.remove_suffix(4);
+    mnemonic_matches = rendered_base == semantic_base;
+  }
   if (!mnemonic_matches) {
     std::ostringstream message;
-    message << "disassembly does not start with mnemonic '" << inst->mnemonic() << "': '"
+    message << "disassembly mnemonic does not match semantic mnemonic '" << mnemonic << "': '"
             << disassembly << '\'';
     fail_invariant(message.str());
   }

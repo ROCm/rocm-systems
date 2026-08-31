@@ -292,7 +292,7 @@ void TcpBootstrap::Impl::initialize(const rocshmem_uniqueid_t& uniqueId, int64_t
     bootstrapCreateRoot();
   }
 
-  char line[MAX_IF_NAME_SIZE + 1];
+  char line[SOCKET_NAME_MAXLEN + 1];
   SocketToString(&uniqueId_.addr, line);
   LOG_INFO("rank %d nranks %d - connecting to %s", rank_, nRanks_, line);
   establishConnections(timeoutSec);

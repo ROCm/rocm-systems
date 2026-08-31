@@ -25,6 +25,8 @@ public:
 
   void Free(uint64_t addr);
 
+  void FreeStats(uint64_t* total_free, uint64_t* largest_free);
+
 private:
   uint64_t AllocImpl(uint64_t bytes, uint64_t align);
 

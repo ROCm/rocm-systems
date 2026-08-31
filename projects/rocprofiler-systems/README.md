@@ -429,8 +429,6 @@ for `foo` via the direct call within `spam`. There will be no entries for `bar` 
 
 ![rocprof-sys-rocm-flow](docs/data/rocprof-sys-rocm-flow.png)
 
-![rocprof-sys-user-api](docs/data/rocprof-sys-user-api.png)
-
 ## Using Perfetto tracing with system backend
 
 Perfetto tracing with the system backend supports multiple processes writing to the same

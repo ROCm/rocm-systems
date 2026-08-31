@@ -116,11 +116,21 @@ struct ncclTopoLinkList {
 #define RCCL_ROME_TOPO_PRESET_MODEL_IDX_4H4P (1000001)
 
 #define GCN_ARCH_NAME_LEN 16
-#define NCCL_TOPO_MLOPART_MASK (0x3) // lower 2 bits: bit[0]=enabled, bit[1]=partition index
-#define NCCL_TOPO_MLOPART_DEV_MAX (2) // max DEV nodes per physical GPU (one per uGPU partition)
-#define NCCL_TOPO_MLOPART(mloPart) ((((int64_t)(mloPart) << 1) | 0x1) & NCCL_TOPO_MLOPART_MASK)
+// The MLOPart partition index is overlaid on the DEV node's busId. These bits must sit above
+// the 36-bit PCI busId (domain[35:20] bus[19:12] device[11:4] function[3:0], see int64ToBusId)
+// and below NCCL_TOPO_GPU_LOCAL_RANK_SHIFT. AMD compute partitions expose HIP logical GPUs as
+// functions of the physical device: DPX/XCP use .0/.1, CPX uses .0 through .7. Only function
+// .0 exists in sysfs as a GPU; the rest are HIP aliases and share that PCI node via mlopart.
+#define NCCL_TOPO_MLOPART_SHIFT (36)
+#define NCCL_TOPO_MLOPART_DEV_MAX (8)
+#define NCCL_TOPO_MLOPART_MASK (((int64_t)0xf) << NCCL_TOPO_MLOPART_SHIFT) // enable bit + 3-bit index
+#define NCCL_TOPO_MLOPART(mloPart) \
+  (((((int64_t)(mloPart) << 1) | 0x1) << NCCL_TOPO_MLOPART_SHIFT) & NCCL_TOPO_MLOPART_MASK)
 #define NCCL_TOPO_MLOPART_BUSID(busId, mloPart) \
   ((mloPart) != NCCL_TOPO_UNDEF ? ((busId) | NCCL_TOPO_MLOPART(mloPart)) : (busId))
+static_assert(NCCL_TOPO_MLOPART_SHIFT >= 36, "MLOPart bits must sit above the 36-bit PCI busId");
+static_assert(NCCL_TOPO_MLOPART_SHIFT + 4 <= NCCL_TOPO_GPU_LOCAL_RANK_SHIFT,
+              "MLOPart bits overlap GPU local rank");
 
 struct ncclTopoNode {
   int type;

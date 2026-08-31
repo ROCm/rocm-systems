@@ -605,7 +605,6 @@ class SCvtPkRtzF16F32Sop2 : public Sop2 {
 public:
   SCvtPkRtzF16F32Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;

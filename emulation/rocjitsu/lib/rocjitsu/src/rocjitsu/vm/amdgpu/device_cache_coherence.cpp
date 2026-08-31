@@ -40,10 +40,6 @@ DeviceCacheCoherence::AtomicBoundary::~AtomicBoundary() {
     owner_->release_l2_locks(locked_l2_count_);
 }
 
-DeviceCacheCoherence::L1AccessGuard DeviceCacheCoherence::acquire_l1_access() {
-  return L1AccessGuard(mutex_);
-}
-
 DeviceCacheCoherence::AtomicBoundary DeviceCacheCoherence::acquire_atomic_boundary() {
   std::unique_lock atomic_lock(atomic_mutex_);
   std::unique_lock coherence_lock(mutex_);

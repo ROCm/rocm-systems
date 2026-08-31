@@ -1,0 +1,537 @@
+#!/usr/bin/env python3
+"""Run PyTorch c10d NCCL distributed tests against CI-built RCCL.
+
+This script handles:
+  1. Discovering the CI-built librccl.so in the artifact directory
+  2. Replacing PyTorch's pip-bundled librccl.so with the CI-built version
+  3. Cloning the matching PyTorch test sources (sparse checkout)
+  4. Running pytest on test_c10d_nccl.py
+
+Usage from GitHub Actions:
+  python projects/rccl/ci/scripts/test_pytorch_c10d.py \
+      --artifact-dir ./build \
+      --pytorch-src ./pytorch-src \
+      --results-log ./pytorch_c10d_results.log
+"""
+
+import argparse
+import json
+import logging
+import os
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+from rccl_ci_utils import (
+    find_pip_sdk_lib_dirs,
+    find_rccl_library,
+    override_bundled_hip_runtime,
+    override_bundled_rccl,
+    parse_junit_xml,
+    quarantine_rocm_sysdeps,
+    reconcile_soname_versions,
+    send_email_report,
+    send_teams_webhook,
+    set_github_output,
+    setup_kpack_device_code,
+    write_github_summary,
+)
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+log = logging.getLogger(__name__)
+
+SMOKE_TESTS = [
+    "test_all_reduce_coalesced_nccl",
+    "test_all_reduce_coalesced_manager_nccl",
+    "test_allgather_base",
+    "test_all_gather_into_tensor_coalesced_manager_nccl",
+    "test_broadcast_coalesced_nccl",
+    "test_broadcast_subgroup",
+    "test_reduce_scatter_base_k",
+    "test_reduce_scatter_tensor_coalesced",
+    "test_non_blocking_p2p",
+    "test_send_recv_subgroup",
+    "test_nccl_barrier_device_ids",
+    "test_reduce_subgroup",
+    "test_scatter_subgroup",
+    "test_gather_subgroup",
+    "test_all_to_all_single",
+    "test_init_wo_backend_str",
+    "test_new_group",
+    "test_pass_nccl_options_high_priority_stream",
+    "test_set_process_group_desc",
+    "test_tensor_dtype_complex",
+    "test_batch_send_recv_subgroup",
+    "test_collectives",
+]
+
+
+def find_rocm_lib_dir(artifact_dir: Path) -> Path | None:
+    """Find the dist/rocm/lib directory in artifacts."""
+    for d in artifact_dir.rglob("dist/rocm/lib"):
+        if d.is_dir():
+            log.info("Found ROCm lib dir: %s", d)
+            return d
+    return None
+
+
+def setup_ld_library_path(rccl_lib_dir: Path, rocm_lib_dir: Path | None) -> str:
+    """Prepend RCCL and ROCm lib dirs to LD_LIBRARY_PATH."""
+    parts = [str(rccl_lib_dir.resolve())]
+    if rocm_lib_dir:
+        parts.append(str(rocm_lib_dir.resolve()))
+    sysdeps_lib = rccl_lib_dir.resolve() / "rocm_sysdeps" / "lib"
+    if sysdeps_lib.is_dir():
+        parts.append(str(sysdeps_lib))
+    existing = os.environ.get("LD_LIBRARY_PATH", "")
+    if existing:
+        parts.append(existing)
+    new_path = ":".join(parts)
+    os.environ["LD_LIBRARY_PATH"] = new_path
+    log.info("LD_LIBRARY_PATH=%s", new_path)
+    return new_path
+
+
+def clone_pytorch_test_sources(pytorch_src: Path) -> None:
+    """Sparse-clone PyTorch test sources matching the installed torch version.
+
+    For release builds (e.g. 2.5.0), clones at the matching tag.
+    For nightly builds (e.g. 2.14.0a0+rocm7.15.0a20260712), clones using
+    --shallow-since to get commits around the build date, then checks out the
+    commit closest to that date so test sources match the installed wheel.
+    """
+    import re
+    from datetime import timedelta
+
+    import torch
+
+    torch_version = torch.__version__
+    base_version = torch_version.split("+")[0]
+    log.info("PyTorch version: %s", torch_version)
+
+    git_ref = f"v{base_version}"
+    result = subprocess.run(
+        ["git", "ls-remote", "--tags", "https://github.com/pytorch/pytorch.git", git_ref],
+        capture_output=True,
+        text=True,
+    )
+
+    date_match = re.search(r"(\d{8})", torch_version)
+    use_date_pinning = False
+
+    if result.stdout.strip():
+        log.info("Found tag %s", git_ref)
+    elif date_match:
+        build_date = date_match.group(1)
+        dt = datetime.strptime(build_date, "%Y%m%d")
+        shallow_since = (dt - timedelta(days=2)).strftime("%Y-%m-%d")
+        log.info("Tag %s not found; nightly build date %s", git_ref, build_date)
+        git_ref = "nightly"
+        use_date_pinning = True
+    else:
+        log.info("Tag %s not found, using nightly branch HEAD", git_ref)
+        git_ref = "nightly"
+
+    if use_date_pinning:
+        log.info("Cloning PyTorch (ref=%s, shallow-since=%s, sparse) into %s",
+                 git_ref, shallow_since, pytorch_src)
+        subprocess.run(
+            [
+                "git", "clone",
+                f"--branch={git_ref}",
+                f"--shallow-since={shallow_since}",
+                "--filter=blob:none",
+                "--sparse",
+                "https://github.com/pytorch/pytorch.git",
+                str(pytorch_src),
+            ],
+            check=True,
+        )
+    else:
+        log.info("Cloning PyTorch (ref=%s, depth=1, sparse) into %s", git_ref, pytorch_src)
+        subprocess.run(
+            [
+                "git", "clone",
+                "--depth=1",
+                f"--branch={git_ref}",
+                "--filter=blob:none",
+                "--sparse",
+                "https://github.com/pytorch/pytorch.git",
+                str(pytorch_src),
+            ],
+            check=True,
+        )
+
+    subprocess.run(
+        ["git", "sparse-checkout", "set", "test/"],
+        cwd=pytorch_src,
+        check=True,
+    )
+
+    if use_date_pinning:
+        before = (dt + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00")
+        result = subprocess.run(
+            ["git", "log", f"--before={before}", "--format=%H", "-1"],
+            cwd=pytorch_src,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            commit = result.stdout.strip()
+            log.info("Checking out commit %s (latest before %s)", commit[:12], before)
+            subprocess.run(
+                ["git", "checkout", commit],
+                cwd=pytorch_src,
+                check=True,
+            )
+        else:
+            log.warning("Could not find commit before %s, using HEAD of nightly", before)
+
+    test_file = pytorch_src / "test" / "distributed" / "test_c10d_nccl.py"
+    if not test_file.exists():
+        log.error("test_c10d_nccl.py not found after clone")
+        sys.exit(1)
+    log.info("Test sources ready: %s", test_file)
+
+
+def patch_missing_torch_modules() -> None:
+    """Create stubs for internal torch modules missing from nightly wheels."""
+    import torch
+
+    torch_dir = Path(torch.__file__).parent
+    strobelight_dir = torch_dir / "_strobelight"
+    profiler_file = strobelight_dir / "compile_time_profiler.py"
+    if not profiler_file.exists():
+        log.info("Creating stub for torch._strobelight (missing from nightly wheel)")
+        strobelight_dir.mkdir(parents=True, exist_ok=True)
+        (strobelight_dir / "__init__.py").write_text("")
+        profiler_file.write_text(
+            "class StrobelightCompileTimeProfiler:\n"
+            "    def __enter__(self): return self\n"
+            "    def __exit__(self, *a): pass\n"
+        )
+
+
+
+def print_environment_info() -> None:
+    """Print GPU and environment details for CI logs."""
+    import torch
+
+    log.info("PyTorch: %s", torch.__version__)
+    log.info("CUDA/HIP available: %s", torch.cuda.is_available())
+    log.info("GPU count: %s", torch.cuda.device_count())
+    for i in range(torch.cuda.device_count()):
+        log.info("  GPU %d: %s", i, torch.cuda.get_device_name(i))
+    log.info("LD_LIBRARY_PATH: %s", os.environ.get("LD_LIBRARY_PATH", ""))
+
+
+def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -> tuple[int, dict]:
+    """Run pytest on test_c10d_nccl.py and return (exit_code, summary_dict)."""
+    miopen_cache = tempfile.mkdtemp(prefix="miopen_cache_")
+    os.environ["MIOPEN_USER_DB_PATH"] = miopen_cache
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(pytorch_src / "test") + ":" + env.get("PYTHONPATH", "")
+
+    junit_xml = results_log.parent / "pytorch_c10d_results.xml"
+
+    if test_scope == "smoke":
+        k_expr = " or ".join(SMOKE_TESTS)
+        timeout = "60"
+        log.info("Running smoke tests (%d tests)", len(SMOKE_TESTS))
+    else:
+        k_expr = "not NCCLTraceTestDumpOnTimeout"
+        timeout = "600"
+        log.info("Running all tests (excluding NCCLTraceTestDumpOnTimeout)")
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        str(pytorch_src / "test" / "distributed" / "test_c10d_nccl.py"),
+        "-v",
+        f"--timeout={timeout}",
+        "--tb=short",
+        f"--junitxml={junit_xml}",
+        "-k",
+        k_expr,
+    ]
+    log.info("Running: %s", " ".join(cmd))
+
+    with open(results_log, "w") as log_file:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=pytorch_src,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            log_file.write(line)
+        proc.wait()
+
+    log.info("Test exit code: %d", proc.returncode)
+    log.info("Results written to: %s", results_log)
+
+    exit_code = proc.returncode
+    passed_tests = []
+    failed_tests = []
+    error_details = []
+    tests_run = 0
+    summary_line = ""
+
+    if junit_xml.exists():
+        log.info("Parsing JUnit XML: %s", junit_xml)
+        junit = parse_junit_xml(junit_xml)
+        passed_tests = junit["passed"]
+        failed_tests = junit["failed"]
+        error_details = junit["error_details"]
+        tests_run = junit["tests_run"]
+
+        if error_details:
+            log.info("Failure/error details from JUnit XML:")
+            for detail in error_details:
+                log.info("  %s", detail)
+    else:
+        log.warning("JUnit XML not found at %s, falling back to exit code only", junit_xml)
+
+    ALL_TESTS_MIN = 200
+    if test_scope == "smoke" and tests_run < len(SMOKE_TESTS):
+        log.error(
+            "Expected %d smoke tests but only %d were collected — "
+            "test names may have changed in the nightly",
+            len(SMOKE_TESTS),
+            tests_run,
+        )
+        exit_code = 1
+    elif test_scope == "all" and tests_run < ALL_TESTS_MIN:
+        log.error(
+            "Expected at least %d tests in 'all' scope but only %d were "
+            "collected — check -k expression or test discovery",
+            ALL_TESTS_MIN,
+            tests_run,
+        )
+        exit_code = 1
+
+    known_failures_file = Path(__file__).parent / "known_failures.json"
+    known_set: set[str] = set()
+    if known_failures_file.exists():
+        with open(known_failures_file) as f:
+            known_data = json.load(f)
+        known_set = set(known_data.get("tests", {}).keys())
+        log.info("Loaded %d known failures from %s", len(known_set), known_failures_file.name)
+
+    known_failed = [t for t in failed_tests if t in known_set]
+    unexpected_failed = [t for t in failed_tests if t not in known_set]
+
+    passed_names = {name for name, _ in passed_tests}
+    now_passing = sorted(known_set & passed_names)
+    if now_passing:
+        log.warning(
+            "%d known failure(s) now PASSING — consider removing from "
+            "known_failures.json: %s", len(now_passing), now_passing,
+        )
+
+    if unexpected_failed:
+        log.error("Unexpected failures: %s", unexpected_failed)
+    elif failed_tests and not unexpected_failed and proc.returncode in (0, 1):
+        log.info("All %d failures are known — treating as PASSED", len(known_failed))
+        exit_code = 0
+
+    parts = []
+    if passed_tests:
+        parts.append(f"{len(passed_tests)} passed")
+    if unexpected_failed:
+        parts.append(f"{len(unexpected_failed)} unexpected failures")
+    if known_failed:
+        parts.append(f"{len(known_failed)} known failures")
+    summary_line = ", ".join(parts)
+
+    summary = {
+        "exit_code": exit_code,
+        "test_scope": test_scope,
+        "passed": passed_tests,
+        "failed": failed_tests,
+        "known_failed": known_failed,
+        "unexpected_failed": unexpected_failed,
+        "summary_line": summary_line,
+        "tests_run": tests_run,
+        "expected_tests": len(SMOKE_TESTS) if test_scope == "smoke" else None,
+    }
+    return exit_code, summary
+
+
+def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
+    """Generate a plain-text summary report."""
+    import torch
+
+    status = "PASSED" if summary["exit_code"] == 0 else "FAILED"
+    gpu_info = []
+    for i in range(torch.cuda.device_count()):
+        gpu_info.append(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
+
+    lines = [
+        f"RCCL PyTorch c10d Test Report",
+        f"{'=' * 40}",
+        f"Status:     {status}",
+        f"Test scope: {summary['test_scope']}",
+        f"Date:       {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        f"",
+        f"PyTorch:    {torch.__version__}",
+        f"RCCL:       {rccl_lib}",
+        f"GPUs:       {torch.cuda.device_count()}x {torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else 'N/A'}",
+        f"",
+        f"Results:    {summary['summary_line']}",
+    ]
+
+    if summary.get("expected_tests") is not None:
+        lines.append(f"Collected:  {summary['tests_run']}/{summary['expected_tests']} expected smoke tests")
+    lines.append("")
+
+    unexpected = summary.get("unexpected_failed", [])
+    known = summary.get("known_failed", [])
+
+    if unexpected:
+        lines.append(f"UNEXPECTED failures ({len(unexpected)}):")
+        for name in unexpected:
+            lines.append(f"  FAIL  {name}")
+        lines.append("")
+
+    if known:
+        lines.append(f"Known failures ({len(known)}) — excluded from verdict")
+        lines.append("")
+
+    if summary["passed"]:
+        lines.append(f"PASSED tests ({len(summary['passed'])}):")
+        for name, duration in summary["passed"]:
+            lines.append(f"  OK    {name:60s} {duration}")
+        lines.append("")
+
+    run_url = os.environ.get("GITHUB_SERVER_URL", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    if run_url and repo and run_id:
+        lines.append(f"CI run: {run_url}/{repo}/actions/runs/{run_id}")
+
+    return "\n".join(lines)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--artifact-dir",
+        type=Path,
+        required=True,
+        help="Directory containing CI-built artifacts",
+    )
+    parser.add_argument(
+        "--pytorch-src",
+        type=Path,
+        required=True,
+        help="Directory to clone PyTorch test sources into",
+    )
+    parser.add_argument(
+        "--results-log",
+        type=Path,
+        default=Path("pytorch_c10d_results.log"),
+        help="Path for test results log file",
+    )
+    parser.add_argument(
+        "--test-scope",
+        choices=["smoke", "all"],
+        default="smoke",
+        help="Run smoke tests (22 curated tests, ~3min) or all tests (default: smoke)",
+    )
+    parser.add_argument(
+        "--notify-email",
+        type=str,
+        default="",
+        help="Send summary report to this email address",
+    )
+    parser.add_argument(
+        "--notify-webhook",
+        type=str,
+        default="",
+        help="Send summary report to this Teams webhook URL",
+    )
+    parser.add_argument(
+        "--discover-only",
+        action="store_true",
+        help="Only discover library paths and set GITHUB_OUTPUT, then exit",
+    )
+
+    args = parser.parse_args()
+
+    # Step 1: Discover RCCL library path
+    rccl_lib = find_rccl_library(args.artifact_dir)
+    rccl_lib_dir = rccl_lib.parent
+    rocm_lib_dir = find_rocm_lib_dir(args.artifact_dir)
+
+    set_github_output("RCCL_LIB_DIR", str(rccl_lib_dir))
+    if rocm_lib_dir:
+        set_github_output("ROCM_LIB_DIR", str(rocm_lib_dir))
+
+    if args.discover_only:
+        return
+
+    # Step 2: Create symlinks for soname version mismatches between
+    # CI-built libraries and pip-installed packages (must run before
+    # quarantine so pip dirs get compatibility symlinks)
+    pip_lib_dirs = find_pip_sdk_lib_dirs()
+    reconcile_soname_versions([rccl_lib_dir] + pip_lib_dirs)
+
+    # Step 3: Quarantine TheRock-bundled libamd_smi and rocm_sysdeps to
+    # prevent the nl_genl destructor crash (SIGSEGV in containers).
+    # After this, libamd_smi resolves from pip dirs (via symlinks above).
+    quarantine_rocm_sysdeps(rccl_lib_dir)
+
+    # Step 4: Replace pip-bundled librccl.so with CI-built version
+    override_bundled_rccl(rccl_lib_dir)
+
+    # Step 4b: Replace pip-bundled libamdhip64.so with TheRock's version
+    # so the HIP runtime matches the compiler that built RCCL's device
+    # code objects (prevents findSymbol → guarantee → abort)
+    override_bundled_hip_runtime(rccl_lib_dir)
+
+    # Step 4c: Configure kpack device code loading — TheRock-built libraries
+    # have device code stripped into separate .kpack archives per GPU arch
+    setup_kpack_device_code(args.artifact_dir)
+
+    setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
+
+    # Step 5: Clone PyTorch test sources
+    clone_pytorch_test_sources(args.pytorch_src)
+
+    # Step 6: Patch missing modules, print environment info, and run tests
+    patch_missing_torch_modules()
+    print_environment_info()
+    exit_code, summary = run_tests(args.pytorch_src, args.results_log, args.test_scope)
+
+    # Step 7: Generate and distribute summary report
+    report = generate_summary_report(summary, rccl_lib)
+    log.info("\n%s", report)
+    write_github_summary(report)
+
+    summary_path = args.results_log.parent / "pytorch_c10d_summary.txt"
+    summary_path.write_text(report)
+    log.info("Summary written to: %s", summary_path)
+
+    status = "PASSED" if exit_code == 0 else "FAILED"
+    if args.notify_email:
+        send_email_report(report, args.notify_email, status,
+                          subject_prefix="RCCL PyTorch c10d Test")
+    if args.notify_webhook:
+        send_teams_webhook(report, args.notify_webhook, status,
+                           subject_prefix="RCCL PyTorch c10d Test")
+
+    sys.exit(exit_code)
+
+
+if __name__ == "__main__":
+    main()

@@ -323,9 +323,15 @@ void __hipUnregisterFatBinary(void** modules) {
   if (!HIP_SKIP_ABORT_ON_GPU_ERROR || !amd::Device::IsGPUInError()) {
     std::call_once(unregister_device_sync, []() {
       for (const auto& hipDevice : g_devices) {
-        // By synchronizing devices ensure that all HSA signal handlers
-        // complete before RemoveFatBinary
         hipDevice->SyncAllStreams(true);
+        // SyncAllStreams only guarantees the GPU finished and the host observed
+        // the completion signals — the HSA async-handler thread can still be
+        // inside a completion callback.  That callback reports kernel names that
+        // point into the Kernel objects RemoveFatBinary is about to destroy, so
+        // the handlers have to be drained too, not just the streams.
+        for (auto* device : hipDevice->devices()) {
+          device->WaitForHsaAsyncHandlersIdle();
+        }
       }
     });
   }
@@ -718,23 +724,21 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   const int deviceId = hip::Stream::DeviceId(stream);
 
   const auto [hip_error, func] = [&]() -> std::pair<hipError_t, hipFunction_t> {
-    hipFunction_t f;
+    hipFunction_t f = nullptr;
     const hipError_t err = PlatformState::Instance().StatCO().GetFunc(&f, hostFunction, deviceId);
 
-    // Propagate specific invalid code object errors
-    if (err == hipErrorInvalidKernelFile ||
-        err == hipErrorInvalidDeviceFunction ||
-        err == hipErrorInvalidImage ||
-        err == hipErrorNotSupported) {  // ROCM_KPACK_ENABLED=OFF
-      return {err, nullptr};
-    }
     // If successful lookup with valid function, use it
     if (err == hipSuccess && f) {
       return {hipSuccess, f};
     }
 
-    // Fallback: assume it's a hip function type
-    return {hipSuccess, reinterpret_cast<hipFunction_t>(const_cast<void*>(hostFunction))};
+    // Only take fallback for hipErrorInvalidSymbol (not in registered table)
+    if (err == hipErrorInvalidSymbol) {
+      return {hipSuccess, reinterpret_cast<hipFunction_t>(const_cast<void*>(hostFunction))};
+    }
+
+    // Propagate all other errors
+    return {err, nullptr};
   }();
 
   if (hip_error != hipSuccess) {

@@ -17,6 +17,9 @@ on:
       notify_webhook:
         type: string
         default: ''
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK:
+        required: false
   workflow_dispatch:
     inputs:
       amdgpu_families:
@@ -69,12 +72,12 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
+          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          sparse-checkout: .github/scripts
+          sparse-checkout: projects/rccl/ci/scripts
           path: rocm-systems
 
       - name: Run setup test environment workflow
@@ -120,12 +123,15 @@ jobs:
         env:
           NCCL_DEBUG: INFO
           NOTIFY_EMAIL: ${{ inputs.notify_email }}
-          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook }}
+          # Falls back to repo secret when no webhook input is provided.
+          # Empty on forked PRs (secrets unavailable) — only the notification
+          # is skipped; tests always run regardless.
+          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook || secrets.RCCL_CI_TEAMS_WEBHOOK }}
         run: |
           NOTIFY_ARGS=()
           [ -n "$NOTIFY_EMAIL" ] && NOTIFY_ARGS+=(--notify-email "$NOTIFY_EMAIL")
           [ -n "$NOTIFY_WEBHOOK" ] && NOTIFY_ARGS+=(--notify-webhook "$NOTIFY_WEBHOOK")
-          python rocm-systems/.github/scripts/test_jax_collective.py \
+          python rocm-systems/projects/rccl/ci/scripts/test_jax_collective.py \
             --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
             --jax-src ${{ env.JAX_SRC }} \
             --results-log ${{ env.JAX_SRC }}/jax_collective_results.log \

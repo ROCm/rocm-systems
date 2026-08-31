@@ -20,7 +20,8 @@ and how to implement them in your applications.
 
 ### amdsmi_init
 
-Description: Initialize amdsmi with AmdSmiInitFlags
+Description: Initialize amdsmi with AmdSmiInitFlags. Requires the `amdgpu`
+kernel driver.
 
 Input parameters: AmdSmiInitFlags
 
@@ -52,6 +53,13 @@ finally:
 ```
 
 Initialize CPUs only example:
+
+```{note}
+`amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)` requires the `amd_hsmp`
+kernel module (with HSMP enabled in BIOS). If the driver is not available, CPU
+discovery is skipped, `amdsmi_init` still succeeds. GPU and NIC functionality
+is unaffected. See {ref}`install_amdgpu_driver` for more information.
+```
 
 ```python
 import amdsmi

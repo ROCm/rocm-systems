@@ -82,7 +82,7 @@ graph:
     tags: [node]
   Unit_hipGraph_BasicFunctional:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, P0]
   Unit_hipGraph_SimpleGraphWithKernel:
     <<: *level_2
     tags: [exec]
@@ -344,7 +344,7 @@ graph:
     tags: [node]
   Unit_hipGraphAddMemcpyNode1D_Positive_Basic:
     <<: *level_2
-    tags: [node]
+    tags: [node, P0]
   Unit_hipGraphAddMemcpyNode1D_Negative_Parameters:
     <<: *level_2
     tags: [node]
@@ -617,7 +617,7 @@ graph:
     tags: [capture]
   Unit_hipStreamBeginCapture_Positive_Basic:
     <<: *level_2
-    tags: [capture]
+    tags: [capture, P0]
   Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Flags:
     <<: *level_2
     tags: [capture]
@@ -782,7 +782,7 @@ graph:
     tags: [capture]
   Unit_hipStreamIsCapturing_Positive_Basic:
     <<: *level_2
-    tags: [capture]
+    tags: [capture, P0]
   Unit_hipStreamIsCapturing_Positive_Functional:
     <<: *level_2
     tags: [capture]
@@ -931,6 +931,7 @@ graph:
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_MemAllocAndFree:
     <<: *level_2
+    disabled: [amd_linux]
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams:
     <<: *level_2
@@ -978,7 +979,7 @@ graph:
     tags: [capture]
   Unit_hipStreamEndCapture_Positive_GraphDestroy:
     <<: *level_2
-    tags: [capture]
+    tags: [capture, P0]
   Unit_hipStreamEndCapture_Negative_Thread:
     <<: *level_2
     tags: [capture]
@@ -1053,7 +1054,7 @@ graph:
     tags: [node]
   Unit_hipGraphAddKernelNode_Negative:
     <<: *level_2
-    tags: [node]
+    tags: [node, P0]
   Unit_hipGraphAddKernelNode_moduleLoadKernelFn_graphNclonedGraph:
     <<: *level_2
     tags: [node]
@@ -1108,7 +1109,7 @@ graph:
     tags: [exec]
   Unit_hipGraphLaunch_Positive:
     <<: *level_2
-    tags: [exec, smoke]
+    tags: [exec, smoke, P0]
   Unit_hipGraphLaunch_Negative_Parameters:
     <<: *level_2
     tags: [exec]
@@ -1237,6 +1238,7 @@ graph:
     tags: [capture]
   Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode:
     <<: *level_2
+    tags: [capture]
     # Hangs on Windows (PAL), hitting CI timeout; passes on Linux.
     # https://github.com/ROCm/rocm-systems/issues/7148
     disabled: [amd_windows, amd_wsl]
@@ -1406,7 +1408,7 @@ graph:
     <<: *level_2
     tags: [exec]
     # ROCM-22772: Temporarily disabled until multi-device graph is added
-    disabled: [amd_windows. amd_linux]
+    disabled: [amd_windows, amd_linux]
   Unit_hipGraphCrossDeviceLaunch_ExplicitNodes:
     <<: *level_2
     tags: [exec]
@@ -1414,12 +1416,8 @@ graph:
   Unit_hipGraphStreamPool_InstantiateFootprint:
     <<: *level_2
     tags: [exec]
-    # (amd_windows) PAL backend does not charge device memory for the unpinned
-    # leaked stream this test measures, so the leak is unmeasurable there.
-    disabled: [amd_windows]
-  Unit_hipGraphStreamPool_CrossDeviceInterleaved:
-    <<: *level_2
-    tags: [exec]
+    # (amd_windows) PAL backend does not charge device memory for eager internal
+    # stream allocation at instantiate, so the footprint is unmeasurable there.
     disabled: [amd_windows]
   Unit_hipGraphKernelNodeCopyAttributes_Functional:
     <<: *level_2

@@ -20,6 +20,9 @@ on:
       notify_webhook:
         type: string
         default: ''
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK:
+        required: false
   workflow_dispatch:
     inputs:
       amdgpu_families:
@@ -76,12 +79,12 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: 35ed46c376f22431411a497dac08db894060a522 # 2026-08-19
+          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          sparse-checkout: .github/scripts
+          sparse-checkout: projects/rccl/ci/scripts
           path: rocm-systems
 
       - name: Run setup test environment workflow
@@ -110,18 +113,33 @@ jobs:
             psutil
 
       - name: Run PyTorch c10d NCCL tests
-        timeout-minutes: 60
+        timeout-minutes: ${{ inputs.test_scope == 'all' && 120 || 60 }}
         env:
           NCCL_DEBUG: INFO
           TORCH_NCCL_BLOCKING_WAIT: 1
           TORCH_NCCL_ASYNC_ERROR_HANDLING: 1
           NOTIFY_EMAIL: ${{ inputs.notify_email }}
-          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook }}
+          # Falls back to repo secret when no webhook input is provided.
+          # Empty on forked PRs (secrets unavailable) — only the notification
+          # is skipped; tests always run regardless.
+          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook || secrets.RCCL_CI_TEAMS_WEBHOOK }}
         run: |
+          # The dynamic linker caches LD_LIBRARY_PATH at process startup.
+          # PyTorch's import chain (rocm_sdk.preload_libraries -> ctypes.CDLL)
+          # needs _rocm_sdk_core/lib on the path before Python starts.
+          export PYTHONPATH="rocm-systems/projects/rccl/ci/scripts:${PYTHONPATH:-}"
+          for d in $(python -c "from rccl_ci_utils import find_pip_sdk_lib_dirs; print('\n'.join(str(d) for d in find_pip_sdk_lib_dirs()))"); do
+            export LD_LIBRARY_PATH="${d}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          done
+          # TheRock's libamdhip64.so depends on librocm_sysdeps_elf.so
+          if [ -d "${{ env.OUTPUT_ARTIFACTS_DIR }}/lib/rocm_sysdeps/lib" ]; then
+            export LD_LIBRARY_PATH="${{ env.OUTPUT_ARTIFACTS_DIR }}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          fi
+
           NOTIFY_ARGS=()
           [ -n "$NOTIFY_EMAIL" ] && NOTIFY_ARGS+=(--notify-email "$NOTIFY_EMAIL")
           [ -n "$NOTIFY_WEBHOOK" ] && NOTIFY_ARGS+=(--notify-webhook "$NOTIFY_WEBHOOK")
-          python rocm-systems/.github/scripts/test_pytorch_c10d.py \
+          python rocm-systems/projects/rccl/ci/scripts/test_pytorch_c10d.py \
             --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
             --pytorch-src ${{ env.PYTORCH_SRC }} \
             --results-log ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.log \

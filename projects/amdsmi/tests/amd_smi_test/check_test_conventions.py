@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Enforce amd_smi_test C++ test conventions.
 
 Fails (exit 1) when a test source breaks the layout, file-naming, or GTest

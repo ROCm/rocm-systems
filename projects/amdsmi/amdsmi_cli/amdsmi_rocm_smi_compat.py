@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """ROCm_SMI_LIB CLI Tool - AMD-SMI Backend
 
 This tool acts as a command line interface for manipulating

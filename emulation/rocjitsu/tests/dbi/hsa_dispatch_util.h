@@ -9,8 +9,8 @@
 ///        boilerplate.
 ///
 /// Functions are `inline` so the header can be included in multiple TUs without
-/// ODR violations. They require a live HSA runtime; callers gate on a real
-/// gfx90a agent before invoking dispatch_vector_add.
+/// ODR violations. They require a live HSA runtime; callers gate on an agent
+/// matching their target ISA before invoking dispatch_vector_add.
 
 #pragma once
 
@@ -24,16 +24,25 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <cstring>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu::dbi_test {
 
-// Find a GPU agent whose ISA name contains "gfx90a". Returns {handle=0} if
-// no such agent is present.
-inline hsa_agent_t find_gfx90a_agent() {
-  hsa_agent_t result{};
+// Find a GPU agent whose HSA ISA name contains @p isa_substring (e.g. "gfx90a",
+// "gfx950"). Returns {handle=0} if no such agent is present.
+//
+// Matching on the ISA name rather than a device ID is what lets one test binary
+// bind either to a real GPU or to whichever agent the rocjitsu CLI supplies, so
+// the Sim and Hardware registrations can share a fixture.
+inline hsa_agent_t find_gpu_agent(std::string_view isa_substring) {
+  struct Ctx {
+    std::string_view needle;
+    hsa_agent_t agent;
+  } ctx{isa_substring, {}};
   hsa_iterate_agents(
       [](hsa_agent_t agent, void *data) -> hsa_status_t {
+        auto *c = static_cast<Ctx *>(data);
         hsa_device_type_t type;
         hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
         if (type != HSA_DEVICE_TYPE_GPU)
@@ -42,14 +51,14 @@ inline hsa_agent_t find_gfx90a_agent() {
         hsa_agent_get_info(agent, HSA_AGENT_INFO_ISA, &isa);
         char isa_name[128]{};
         hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, isa_name);
-        if (std::strstr(isa_name, "gfx90a")) {
-          *static_cast<hsa_agent_t *>(data) = agent;
+        if (std::string_view(isa_name).find(c->needle) != std::string_view::npos) {
+          c->agent = agent;
           return HSA_STATUS_INFO_BREAK;
         }
         return HSA_STATUS_SUCCESS;
       },
-      &result);
-  return result;
+      &ctx);
+  return ctx.agent;
 }
 
 inline hsa_agent_t find_cpu_agent() {

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -111,6 +111,10 @@ iterate_args(uint32_t                                       id,
              const rocprofiler_rocdecode_api_args_t&        data,
              rocprofiler_buffer_tracing_operation_args_cb_t callback,
              void*                                          user_data);
+
+template <typename TableT>
+void
+restore_table(TableT* _orig, uint64_t _tbl_instance);
 
 template <typename TableT>
 void

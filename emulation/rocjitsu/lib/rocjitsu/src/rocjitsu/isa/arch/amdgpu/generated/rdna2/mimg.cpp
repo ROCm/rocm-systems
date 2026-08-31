@@ -278,13 +278,19 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicSwapMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -301,15 +307,21 @@ DecodeResult decodeImageAtomicSwapMimg(const MachineInst *opcode,
 ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
     : Mimg("image_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicCmpswapMimg)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -328,13 +340,19 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicAddMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -353,13 +371,19 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicSubMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -378,13 +402,19 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicSminMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -403,13 +433,19 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicUminMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -428,13 +464,19 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicSmaxMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -453,13 +495,19 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicUmaxMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -478,13 +526,19 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicAndMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -503,13 +557,19 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicOrMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -528,13 +588,19 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicXorMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -553,13 +619,19 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicIncMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -578,13 +650,19 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicDecMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -601,15 +679,21 @@ DecodeResult decodeImageAtomicDecMimg(const MachineInst *opcode,
 ImageAtomicFcmpswapMimg::ImageAtomicFcmpswapMimg(const MachineInst *inst)
     : Mimg("image_atomic_fcmpswap", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicFcmpswapMimg)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -628,13 +712,19 @@ ImageAtomicFminMimg::ImageAtomicFminMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicFminMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -653,13 +743,19 @@ ImageAtomicFmaxMimg::ImageAtomicFmaxMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicFmaxMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
-  num_src_ = 3;
-  num_dst_ = 1;
+  dst_operands_[1] = &gpumem;
+  src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
+  num_src_ = 4;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {

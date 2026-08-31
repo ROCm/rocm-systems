@@ -15,6 +15,34 @@ the simulated GPU. It operates in two modes:
 Daemon mode supports vLLM's multiprocessing spawn, torchrun, torch.distributed,
 and NCCL --- workloads where multiple processes share a single simulated GPU.
 
+### The fork boundary in local mode
+
+In local mode the simulated GPU belongs to the process that was `execve`d under
+the interposer. A child created with `fork()` or `vfork()` does **not** inherit
+usable GPU access: until it `exec`s, it does not own the interposer state, and
+opening a rocJITsu GPU endpoint --- `/dev/kfd` or a `/dev/dri/renderD*` node ---
+fails with `ENODEV`.
+
+**Forked children must `exec` before using local mode.** After `exec` the
+interposer re-initializes in the new process, which then owns its own state and
+can open the simulated device normally. The common `fork()` + `exec()` pattern,
+including `posix_spawn()` and Python's `subprocess`, is therefore fine; what does
+not work is touching the GPU in the window between the two.
+
+This is deliberate rather than a gap. rocJITsu registers no `pthread_atfork`
+handlers, so a pre-exec child holds locks whose owning threads no longer exist
+and containers that a vanished thread was mid-mutation on --- none of it is safe
+to touch. Failing the open is also safer than the alternative: passing through to
+libc would open the *host's* real `/dev/kfd` when one exists, silently moving the
+child off the emulator and onto real hardware. Note that this is a cooperative,
+API-level contract, not a security boundary; a child issuing raw syscalls or
+receiving a descriptor over a Unix socket is not stopped by interposition.
+
+**If child processes need GPU access, use daemon mode** (`--daemon`). There the
+simulated GPU lives in a separate daemon process and each client attaches over
+RPC, so multiple processes --- forked, spawned, or unrelated --- can share one
+simulated GPU.
+
 ## Command-Line Options
 
 ```
@@ -27,7 +55,7 @@ Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only. |
 | `--attach` | Attach to a running daemon. The socket path is resolved as `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, falling back to `/tmp/rocjitsu-<uid>/daemon.sock`. |
 | `--help`, `-h` | Print usage and exit |
-| `--version`, `-v` | Print version and exit |
+| `--version`, `-v` | Print version, Git revision, commit date, and commit title, then exit |
 | `--` | Separator between rocjitsu options and the target application command line |
 
 ### Usage Examples

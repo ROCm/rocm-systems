@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -46,6 +46,9 @@ get_names();
 
 std::vector<uint32_t>
 get_ids();
+
+void
+restore_table(hsa_amd_tool_table_t* _orig, uint64_t lib_instance);
 
 void
 copy_table(hsa_amd_tool_table_t* _orig, uint64_t lib_instance);

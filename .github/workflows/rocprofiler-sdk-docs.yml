@@ -79,6 +79,8 @@ jobs:
           submodules: false
           set-safe-directory: true
       - name: Init/Update submodules
+        timeout-minutes: 15
+        continue-on-error: true
         run: |
           git config --global --add safe.directory '*'
           git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
@@ -152,6 +154,8 @@ jobs:
           git config --system --add safe.directory '*'
 
       - name: Init/Update submodules
+        timeout-minutes: 15
+        continue-on-error: true
         run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
       - name: Setup

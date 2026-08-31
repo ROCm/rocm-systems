@@ -7,9 +7,11 @@ from amdisa.codegen import CodegenConfig, CodeGenerator, CppFile
 from amdisa.gpuisa import (
     InstEncoding,
     Instruction,
+    IsaAdditionProvenance,
     IsaSpec,
     Operand,
 )
+from amdisa.isa_additions import IsaAdditionError, apply_isa_additions
 from amdisa.isa_profile import (
     Cdna1Profile,
     Cdna2Profile,
@@ -52,6 +54,8 @@ __all__ = [
     'Cdna5Profile',
     'InstEncoding',
     'Instruction',
+    'IsaAdditionError',
+    'IsaAdditionProvenance',
     'IsaProfile',
     'MemoryCoherencyModel',
     'MnemonicRule',
@@ -63,6 +67,7 @@ __all__ = [
     'IsaSpec',
     'Operand',
     'Parser',
+    'apply_isa_additions',
     'SchemaValueError',
     'SchemaVersion',
     'InstructionSemantics',

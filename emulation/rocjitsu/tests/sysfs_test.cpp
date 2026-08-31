@@ -50,11 +50,11 @@ std::unordered_map<std::string, uint64_t> read_properties(const std::string &pat
   return props;
 }
 
-std::string read_text(const std::string &path) {
+std::string read_sysfs_file(const std::string &path) {
   std::ifstream f(path);
-  std::ostringstream contents;
-  contents << f.rdbuf();
-  return contents.str();
+  std::ostringstream ss;
+  ss << f.rdbuf();
+  return ss.str();
 }
 
 Sysfs::GpuInfo make_gpu_info(uint32_t gfx_target_version) {
@@ -74,8 +74,20 @@ TEST(SysfsTopologyCompatibilityTest, EveryNodePublishesName) {
   std::string topology_dir = sysfs.generate(make_gpu_info(120500u /* gfx1250 */));
   ASSERT_FALSE(topology_dir.empty());
 
-  EXPECT_EQ(read_text(topology_dir + "/nodes/0/name"), "CPU\n");
-  EXPECT_EQ(read_text(topology_dir + "/nodes/1/name"), "Test GPU\n");
+  EXPECT_EQ(read_sysfs_file(topology_dir + "/nodes/0/name"), "CPU\n");
+  EXPECT_EQ(read_sysfs_file(topology_dir + "/nodes/1/name"), "Test GPU\n");
+}
+
+TEST(SysfsTopologyTest, DefaultGpuInfoHasCoherentSdmaCounts) {
+  Sysfs sysfs;
+  std::string topology_dir = sysfs.generate(make_gpu_info(90500u /* gfx950 */));
+  ASSERT_FALSE(topology_dir.empty());
+
+  auto props = read_properties(topology_dir + "/nodes/1/properties");
+  ASSERT_TRUE(props.count("num_sdma_engines"));
+  ASSERT_TRUE(props.count("num_sdma_queues_per_engine"));
+  EXPECT_EQ(props["num_sdma_engines"], 0u);
+  EXPECT_EQ(props["num_sdma_queues_per_engine"], 0u);
 }
 
 // Golden per-GFXIP expectations. Each row mirrors what
@@ -117,6 +129,9 @@ constexpr DebugCapExpectation kDebugCapExpectations[] = {
     {120000u, "gfx1200", 7, 29, true, false, true, false, false, 0u, 0u, 0u},
     // gfx1201 (R9700): rocprofiler-sdk tests/data/topology node 6.
     {120001u, "gfx1201", 7, 29, true, false, true, false, false, 1745068672u, 0u, 1495u},
+    // TODO(hanchung): Replace the inferred gfx1250 feature row and pin its
+    // capability/capability2/debug_prop words after capturing a physical MI455X
+    // KFD topology.
     // gfx1250: GC 12.1.0 — precise ALU + memory, per-queue reset, LDS OOR (no dump yet).
     {120500u, "gfx1250", 7, 29, true, true, true, true, true, 0u, 0u, 0u},
 };
@@ -142,6 +157,23 @@ Sysfs::GpuInfo debug_gpu_info(const config::KfdDeviceConfig &dev) {
   gpu.capability2 = dev.capability2;
   gpu.debug_prop = dev.debug_prop;
   return gpu;
+}
+
+// KFD's node_show() publishes a "name" sysfs file for every topology node.
+// GPU nodes carry the marketing name; the synthetic CPU node has a stable generic
+// name. Clients that walk the topology tree expect the file to exist on node 0.
+TEST(SysfsTopologyTest, CpuNodePublishesNameFile) {
+  Sysfs sysfs;
+  std::string topology_dir = sysfs.generate(make_gpu_info(90402u /* gfx942 */));
+  ASSERT_FALSE(topology_dir.empty());
+
+  const std::string cpu_name_path = topology_dir + "/nodes/0/name";
+  ASSERT_TRUE(std::filesystem::exists(cpu_name_path));
+  EXPECT_EQ(read_sysfs_file(cpu_name_path), "CPU\n");
+
+  const std::string gpu_name_path = topology_dir + "/nodes/1/name";
+  ASSERT_TRUE(std::filesystem::exists(gpu_name_path));
+  EXPECT_EQ(read_sysfs_file(gpu_name_path), "Test GPU\n");
 }
 
 TEST(SysfsTopologyDebugCapabilityTest, PerGfxipDebugBitsMatchDriver) {
@@ -330,6 +362,7 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
     // so a pair that disagrees reports one part two ways.
     EXPECT_EQ(props["simd_count"], 1216u);
     EXPECT_EQ(props["simd_per_cu"], 4u);
+    EXPECT_EQ(props["num_sdma_queues_per_engine"], 8u);
 
     // What libhsakmt derives from those: NumShaderBanks = array_count /
     // simd_arrays_per_engine, i.e. the node's total shader engines.
@@ -387,6 +420,29 @@ TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) 
     EXPECT_EQ(loaded.device.num_cp_queues, 24u);
     EXPECT_EQ(loaded.device.max_engine_clk_fcompute, 2200u);
   }
+}
+
+// TODO(hanchung): Pin the physical CU geometry, active-CU mask, memory-bank
+// size, clocks, GPU/unique IDs, SDMA engine/queue counts, CP queue count, family
+// ID, and ASIC/PCI revisions after capturing a physical MI455X KFD topology.
+// Until then, this test covers only the checked-in physical device identity and
+// must not be treated as exact rocminfo parity.
+TEST(SysfsTopologyIdentityTest, Mi455xUsesPublishedPhysicalDeviceId) {
+  const std::string config_dir = CONFIG_DIR;
+  auto loaded = config::load_config(config_dir + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  ASSERT_TRUE(loaded.device.present);
+  ASSERT_NE(loaded.soc(), nullptr);
+
+  Sysfs sysfs;
+  std::string topology_dir =
+      sysfs.generate(gpu_info_from_config(loaded.device, loaded.soc()->num_xcds()));
+  ASSERT_FALSE(topology_dir.empty());
+  auto props = read_properties(topology_dir + "/nodes/1/properties");
+
+  ASSERT_TRUE(props.count("vendor_id"));
+  ASSERT_TRUE(props.count("device_id"));
+  EXPECT_EQ(props["vendor_id"], 4098u);
+  EXPECT_EQ(props["device_id"], 30145u);
 }
 
 // Every shipped config must describe the machine it actually simulates.

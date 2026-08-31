@@ -181,7 +181,8 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
 
     if (tid == nworkers) { // Algo computation thread
       PatAGAlgorithm<T> patAlgo(chunkCount * sizeof(T), NCCL_STEPS, NCCL_PAT_NWORKERS / WARP_SIZE, channelOffset,
-                                channelOffset + channelCount, count, chunkCount, rank, nranks);
+                                channelOffset + channelCount, count, chunkCount, rank, nranks,
+                                ncclShmem.comm.patSharedQps);
       int parallelFactor = shmem->parallelFactor = patAlgo.getParallelFactor();
       (void)parallelFactor;// unused variable - compiler warning
       int step = 0;

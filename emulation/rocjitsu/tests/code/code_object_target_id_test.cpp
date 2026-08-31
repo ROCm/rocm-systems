@@ -215,7 +215,8 @@ TEST(GfxCodeObjectTargets, CanonicalIdentityCoversEveryTargetEnumerator) {
   }
   EXPECT_STREQ(rj_code_target_name(ROCJITSU_CODE_TARGET_INVALID), "invalid");
   EXPECT_EQ(rj_code_arch_for_target(ROCJITSU_CODE_TARGET_INVALID), ROCJITSU_CODE_ARCH_INVALID);
-  const auto unknown = static_cast<rj_code_target_id_t>(ROCJITSU_CODE_TARGET_INVALID + 1);
+  const auto unknown =
+      static_cast<rj_code_target_id_t>(static_cast<int32_t>(ROCJITSU_CODE_TARGET_NUM_TARGETS) + 1);
   EXPECT_STREQ(rj_code_target_name(unknown), "invalid");
   EXPECT_EQ(rj_code_arch_for_target(unknown), ROCJITSU_CODE_ARCH_INVALID);
 }

@@ -30,7 +30,7 @@ constexpr bool is_public_architecture_key(rj_code_arch_t key) {
 constexpr bool is_public_gpu_target_key(rj_code_target_id_t key) {
   const std::underlying_type_t<rj_code_target_id_t> value = enum_value(key);
   return value >= enum_value(ROCJITSU_CODE_TARGET_GFX90A) &&
-         value < enum_value(ROCJITSU_CODE_TARGET_INVALID);
+         value < enum_value(ROCJITSU_CODE_TARGET_NUM_TARGETS);
 }
 
 bool contains_id(const IsaTargetDescriptor &descriptor, std::string_view id) {

@@ -39,6 +39,7 @@ rj_add_object_library(rocjitsu_code
     patch/kernarg_extension.cpp
     patch/kernel_text_layout.cpp
     patch/instruction_sequence.cpp
+    patch/log_buffer.cpp
     patch/instrumentor.cpp
     patch/probe_callable.cpp
     patch/probe_clobber.cpp

@@ -39,27 +39,6 @@ function(strip_arch_features targets_list out_var)
   set(${out_var} "${_result}" PARENT_SCOPE)
 endfunction()
 
-# Convert arch feature suffix to clang -Xclang -target-feature flags.
-# gfx950:sramecc+:xnack-  ->  "-Xclang;-target-feature;-Xclang;+sramecc;-Xclang;-target-feature;-Xclang;-xnack"
-# Caller passes the list directly to add_custom_command COMMAND.
-function(arch_features_to_target_feature_flags full_arch out_var)
-  string(REPLACE ":" ";" _all_tokens "${full_arch}")
-  list(LENGTH _all_tokens _ntokens)
-  set(_flags "")
-  if(_ntokens GREATER 1)
-    list(SUBLIST _all_tokens 1 -1 _feat_tokens)
-    foreach(_tok ${_feat_tokens})
-      if(_tok STREQUAL "")
-        continue()
-      endif()
-      # "sramecc+" -> "+sramecc", "xnack-" -> "-xnack"
-      string(REGEX REPLACE "([a-zA-Z0-9_]+)([+-])$" "\\2\\1" _feat "${_tok}")
-      list(APPEND _flags -Xclang -target-feature -Xclang ${_feat})
-    endforeach()
-  endif()
-  set(${out_var} "${_flags}" PARENT_SCOPE)
-endfunction()
-
 # Resolve the target arch list: GPU_TARGETS CMake var -> auto-detect local GPUs.
 # Both accept comma- or semicolon-separated lists.
 if(GPU_TARGETS)
@@ -101,6 +80,9 @@ set(BITCODE_GPU_ARCHS_FULL "${_BITCODE_FULL_LIST}" CACHE STRING
 
 # -fvisibility=default ensures extern "C" device API symbols remain
 # externally visible after llvm-link and clang backend compilation.
+# -fgpu-rdc mirrors the flag used to build librocshmem.a in src/CMakeLists.txt.
+# -Xclang -disable-llvm-passes (added per-arch below) is what actually stops
+# per-TU DCE of these in-TU-uncalled __device__ functions.
 set(BITCODE_COMPILE_FLAGS_BASE
     -Wall
     -Wextra
@@ -110,6 +92,7 @@ set(BITCODE_COMPILE_FLAGS_BASE
     -emit-llvm
     -fvisibility=default
     -O3
+    -fgpu-rdc
     -Xclang -mcode-object-version=none
     -I${CMAKE_CURRENT_SOURCE_DIR}/include/rocshmem
     -I${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -200,16 +183,34 @@ endif()
 
 # Build bitcode for each GPU architecture
 #
-# __device__ API functions (rocshmem_quiet, rocshmem_barrier_wg, etc.) are DCE'd
-# by LLVM's -O3 passes when compiled per-TU: no amdgpu_kernel in the same TU
-# calls them, so the optimizer treats them as dead.  Fix: compile each source
-# with -Xclang -disable-llvm-passes (frontend runs at -O3, LLVM DCE is skipped,
-# all __device__ bodies are retained), then run opt -O3 over the merged BC where
-# all callers exist.  This mirrors the approach in CMakeDeviceBitcodeTester.cmake.
+# __device__ API functions (rocshmem_quiet, rocshmem_barrier_wg, etc.) have no
+# caller within their own TU -- they are public API for code that doesn't
+# exist yet at build time. -Xclang -disable-llvm-passes skips per-TU DCE so
+# these survive; -O3 optimization actually happens once, via opt -O3 below,
+# after llvm-link merges all per-arch .bc files. Mirrors CMakeDeviceBitcodeTester.cmake.
 set(ALL_BITCODE_OUTPUTS)
 foreach(gpu_arch ${BITCODE_GPU_ARCHS})
-  # Per-source flags: -Xclang -disable-llvm-passes suppresses DCE.
-  set(_COMPILE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE} --offload-arch=${gpu_arch}
+  # Resolve the full arch string (with feature suffixes) for this base arch, so
+  # the compile step below embeds the correct amdhsa.target metadata. Mirrors
+  # the lookup in tests/functional_tests/CMakeDeviceBitcodeTester.cmake.
+  set(_FULL_ARCH "${gpu_arch}")
+  set(_FULL_ARCH_MATCHES "")
+  foreach(_candidate ${BITCODE_GPU_ARCHS_FULL})
+    string(REGEX REPLACE ":.*" "" _candidate_base "${_candidate}")
+    if("${_candidate_base}" STREQUAL "${gpu_arch}")
+      list(APPEND _FULL_ARCH_MATCHES "${_candidate}")
+    endif()
+  endforeach()
+  list(LENGTH _FULL_ARCH_MATCHES _n_full_arch_matches)
+  if(_n_full_arch_matches GREATER 0)
+    list(GET _FULL_ARCH_MATCHES 0 _FULL_ARCH)
+    if(_n_full_arch_matches GREATER 1)
+      message(STATUS "Multiple feature variants requested for ${gpu_arch} "
+        "(${_FULL_ARCH_MATCHES}); device bitcode will embed ${_FULL_ARCH}")
+    endif()
+  endif()
+
+  set(_COMPILE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE} --offload-arch=${_FULL_ARCH}
                      -Xclang -disable-llvm-passes)
   set(BITCODE_OBJECTS_${gpu_arch})
   foreach(src_file ${BITCODE_SOURCES})

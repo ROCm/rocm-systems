@@ -1,7 +1,7 @@
 #
 # rocprofv3 HIP graph attribution integration test
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-rocprofv3-hip-graph-attribution

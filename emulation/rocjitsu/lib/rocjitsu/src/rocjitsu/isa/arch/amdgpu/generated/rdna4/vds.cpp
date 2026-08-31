@@ -3319,11 +3319,10 @@ DsBvhStackPush4Pop1RtnB32Vds::DsBvhStackPush4Pop1RtnB32Vds(const MachineInst *in
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
   dst_operands_[1] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  num_src_ = 3;
+  src_operands_[0] = &data0;
+  src_operands_[1] = &data1;
+  num_src_ = 2;
   num_dst_ = 2;
 }
 
@@ -3347,11 +3346,10 @@ DsBvhStackPush8Pop1RtnB32Vds::DsBvhStackPush8Pop1RtnB32Vds(const MachineInst *in
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
   dst_operands_[1] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  num_src_ = 3;
+  src_operands_[0] = &data0;
+  src_operands_[1] = &data1;
+  num_src_ = 2;
   num_dst_ = 2;
 }
 
@@ -3375,11 +3373,10 @@ DsBvhStackPush8Pop2RtnB64Vds::DsBvhStackPush8Pop2RtnB64Vds(const MachineInst *in
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1) {
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
   dst_operands_[1] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
-  num_src_ = 3;
+  src_operands_[0] = &data0;
+  src_operands_[1] = &data1;
+  num_src_ = 2;
   num_dst_ = 2;
 }
 

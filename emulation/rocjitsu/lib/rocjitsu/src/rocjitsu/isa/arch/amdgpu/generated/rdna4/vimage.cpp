@@ -274,6 +274,7 @@ ImageAtomicSwapVimage::ImageAtomicSwapVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -305,6 +306,7 @@ ImageAtomicCmpswapVimage::ImageAtomicCmpswapVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -336,6 +338,7 @@ ImageAtomicAddUintVimage::ImageAtomicAddUintVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -367,6 +370,7 @@ ImageAtomicSubUintVimage::ImageAtomicSubUintVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -398,6 +402,7 @@ ImageAtomicMinIntVimage::ImageAtomicMinIntVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -429,6 +434,7 @@ ImageAtomicMinUintVimage::ImageAtomicMinUintVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -460,6 +466,7 @@ ImageAtomicMaxIntVimage::ImageAtomicMaxIntVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -491,6 +498,7 @@ ImageAtomicMaxUintVimage::ImageAtomicMaxUintVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -522,6 +530,7 @@ ImageAtomicAndVimage::ImageAtomicAndVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -553,6 +562,7 @@ ImageAtomicOrVimage::ImageAtomicOrVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -584,6 +594,7 @@ ImageAtomicXorVimage::ImageAtomicXorVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -615,6 +626,7 @@ ImageAtomicIncUintVimage::ImageAtomicIncUintVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -646,6 +658,7 @@ ImageAtomicDecUintVimage::ImageAtomicDecUintVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -747,10 +760,9 @@ ImageBvhDualIntersectRayVimage::ImageBvhDualIntersectRayVimage(const MachineInst
       vaddr(384, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
   dst_operands_[1] = &vaddr;
-  src_operands_[1] = &rsrc;
-  num_src_ = 2;
+  src_operands_[0] = &rsrc;
+  num_src_ = 1;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
 }
@@ -774,10 +786,9 @@ ImageBvh8IntersectRayVimage::ImageBvh8IntersectRayVimage(const MachineInst *inst
       vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
   dst_operands_[1] = &vaddr;
-  src_operands_[1] = &rsrc;
-  num_src_ = 2;
+  src_operands_[0] = &rsrc;
+  num_src_ = 1;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
 }
@@ -806,6 +817,7 @@ ImageAtomicAddFltVimage::ImageAtomicAddFltVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -837,6 +849,7 @@ ImageAtomicMinFltVimage::ImageAtomicMinFltVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -868,6 +881,7 @@ ImageAtomicMaxFltVimage::ImageAtomicMaxFltVimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -899,6 +913,7 @@ ImageAtomicPkAddF16Vimage::ImageAtomicPkAddF16Vimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
@@ -930,6 +945,7 @@ ImageAtomicPkAddBf16Vimage::ImageAtomicPkAddBf16Vimage(const MachineInst *inst)
   src_operands_[2] = &rsrc;
   dst_operands_[1] = &gpumem;
   src_operands_[3] = &gpumem_in;
+  omit_repeated_destination_sources_ = true;
   num_src_ = 4;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);

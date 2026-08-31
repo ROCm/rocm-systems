@@ -24,6 +24,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/profile_serializer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
 
 #include "lib/rocprofiler-sdk-attach/table.h"
 
@@ -60,11 +61,18 @@ public:
     // HSA has been inited.
     void init(CoreApiTable& core_table, AmdExtTable& ext_table);
 
-    // Called to add a queue that was created by the user program.
-    // When |create_interposition_state| is false, the queue is registered in the queue map and
-    // serializer but no inline QueueState is created.  Use this for non-compute queues (e.g. SDMA)
-    // whose packet format and queue-size semantics are incompatible with AQL interposition.
-    void add_queue(hsa_queue_t*, std::unique_ptr<Queue>, bool create_interposition_state = true);
+    // Called to add a queue that was created by the user program. |is_compute|
+    // gates BOTH inline QueueState creation and the signal-less ownership/window
+    // bookkeeping: only a compute queue's doorbell can source a CP dispatch-log
+    // record (§3.9), and a non-compute (e.g. SDMA) queue's packet format is
+    // incompatible with AQL interposition. |is_attach| marks a queue adopted
+    // mid-life via the attach API: its earlier slot history went unseen, so it
+    // opens no window and latches the process-wide signal-less disable (§0.4,
+    // §3.9). Every call site passes both explicitly.
+    void add_queue(hsa_queue_t*,
+                   std::unique_ptr<Queue>,
+                   bool is_compute = true,
+                   bool is_attach  = false);
     void destroy_queue(hsa_queue_t*);
 
     // Add callback to queues associated with the agent. Returns a client
@@ -149,5 +157,12 @@ queue_controller_init(RocAttachDispatchTable* table);
 
 void
 profiler_serializer_kernel_completion_signal(hsa_signal_t queue_block_signal);
+
+// Resolve a queue's page-relative doorbell slot from its intercept queue's
+// hardware doorbell pointer (§3.2, pure derivation -- no bind, no GPU/queue id).
+// Capture and the reader MUST compute the identical slot for correlation to work.
+// nullopt when the queue's doorbell signal is missing or is not a doorbell kind.
+std::optional<uint32_t>
+capture_doorbell_key(const hsa_queue_t* intercept_queue);
 }  // namespace hsa
 }  // namespace rocprofiler

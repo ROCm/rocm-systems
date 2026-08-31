@@ -7,12 +7,12 @@
 # changed generated sources through the active virtual environment.
 #
 # Usage:
-#   ./scripts/generate-amdisa.sh /path/to/amdgpu_isa_gfx1250.xml
+#   ./scripts/generate-amdisa.sh
 
 set -Eeuo pipefail
 
 usage() {
-  printf 'usage: %s CDNA5_ISA_XML\n' "$(basename "$0")"
+  printf 'usage: %s\n' "$(basename "$0")"
 }
 
 log() {
@@ -28,7 +28,7 @@ if (($# == 1)) && [[ "$1" == "-h" || "$1" == "--help" ]]; then
   usage
   exit 0
 fi
-if (($# != 1)); then
+if (($# != 0)); then
   usage >&2
   exit 2
 fi
@@ -39,7 +39,6 @@ repo="$(git -C "$script_dir" rev-parse --show-toplevel)" \
   || die "could not find repository root from $script_dir"
 repo="$(cd "$repo" && pwd -P)"
 isa_xml="$repo/shared/machine-readable-isa/isa"
-cdna5_xml="$1"
 isa_out="$rocjitsu/lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated"
 dbt_out="$rocjitsu/lib/rocjitsu/src/rocjitsu/code/dbt/generated"
 
@@ -79,8 +78,7 @@ isa_entries=(
   "rdna3:$isa_xml/amdgpu_isa_rdna3.xml"
   "rdna3_5:$isa_xml/amdgpu_isa_rdna3_5.xml"
   "rdna4:$isa_xml/amdgpu_isa_rdna4.xml"
-  # CDNA5 retains gfx1250 as its MR ISA target identifier.
-  "cdna5:$cdna5_xml"
+  "cdna5:$isa_xml/amdgpu_isa_cdna5.xml"
 )
 
 for dir in "$repo" "$rocjitsu" "$isa_out" "$dbt_out" "$venv"; do
@@ -98,8 +96,9 @@ export PYTHONPATH="$rocjitsu/lib/python${PYTHONPATH:+:$PYTHONPATH}"
 
 log "Running amdisa generator"
 "$python" -m amdisa \
-  --multi "${isa_entries[@]}" \
+  "${isa_entries[@]}" \
   --isa-output "$isa_out" \
+  --include-root "$rocjitsu/lib/rocjitsu/src" \
   --dbt-output "$dbt_out"
 
 isa_rel="${isa_out#"$repo/"}"

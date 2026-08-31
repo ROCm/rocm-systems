@@ -602,8 +602,8 @@ add_custom_command(
     -std=c++17
     -fPIC
     -c -o ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_all_reduce_ipc.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_all_reduce_ipc.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu.cpp
   COMMENT "DL compile: dda_all_reduce_ipc.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -621,8 +621,8 @@ add_custom_command(
     -std=c++17
     -fPIC
     -c -o ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_reduce_scatter_ipc.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_reduce_scatter_ipc.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu.cpp
   COMMENT "DL compile: dda_reduce_scatter_ipc.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -640,8 +640,8 @@ add_custom_command(
     -std=c++17
     -fPIC
     -c -o ${DDA_ALL_GATHER_IPC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_all_gather_ipc.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_all_gather_ipc.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_ipc.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_ipc.cu.cpp
   COMMENT "DL compile: dda_all_gather_ipc.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -659,8 +659,8 @@ add_custom_command(
     -std=c++17
     -fPIC
     -c -o ${DDA_ALLTOALL_IPC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_alltoall_ipc.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_alltoall_ipc.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_ipc.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_ipc.cu.cpp
   COMMENT "DL compile: dda_alltoall_ipc.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -684,8 +684,8 @@ add_custom_command(
     -fPIC
     -w
     -c -o ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_all_reduce_fabric.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_all_reduce_fabric.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric.cu.cpp
   COMMENT "DL compile: dda_all_reduce_fabric.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -706,8 +706,8 @@ add_custom_command(
     -fPIC
     -w
     -c -o ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_all_reduce_fabric_ll.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_all_reduce_fabric_ll.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu.cpp
   COMMENT "DL compile: dda_all_reduce_fabric_ll.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -725,8 +725,8 @@ add_custom_command(
     -fPIC
     -w
     -c -o ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_all_reduce_fabric_ll128.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_all_reduce_fabric_ll128.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu.cpp
   COMMENT "DL compile: dda_all_reduce_fabric_ll128.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -755,8 +755,8 @@ add_custom_command(
     -fPIC
     -w
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_reduce_scatter_fabric.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_reduce_scatter_fabric.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu.cpp
   COMMENT "DL compile: dda_reduce_scatter_fabric.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -775,8 +775,8 @@ add_custom_command(
     -fPIC
     -w
     -c -o ${DDA_ALL_GATHER_FABRIC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_all_gather_fabric.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_all_gather_fabric.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric.cu.cpp
   COMMENT "DL compile: dda_all_gather_fabric.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -794,8 +794,8 @@ add_custom_command(
     -fPIC
     -w
     -c -o ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_all_gather_fabric_ll.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_all_gather_fabric_ll.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu.cpp
   COMMENT "DL compile: dda_all_gather_fabric_ll.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -813,8 +813,8 @@ add_custom_command(
     -fPIC
     -w
     -c -o ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_all_gather_fabric_ll128.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_all_gather_fabric_ll128.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu.cpp
   COMMENT "DL compile: dda_all_gather_fabric_ll128.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -833,8 +833,8 @@ add_custom_command(
     -fPIC
     -w
     -c -o ${DDA_ALLTOALL_FABRIC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_alltoall_fabric.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_alltoall_fabric.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric.cu.cpp
   COMMENT "DL compile: dda_alltoall_fabric.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -852,8 +852,8 @@ add_custom_command(
     -fPIC
     -w
     -c -o ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_alltoall_fabric_ll.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_alltoall_fabric_ll.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu.cpp
   COMMENT "DL compile: dda_alltoall_fabric_ll.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -871,8 +871,8 @@ add_custom_command(
     -fPIC
     -w
     -c -o ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_alltoall_fabric_ll128.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_alltoall_fabric_ll128.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu.cpp
   COMMENT "DL compile: dda_alltoall_fabric_ll128.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -890,8 +890,8 @@ add_custom_command(
     -fPIC
     -w
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_reduce_scatter_fabric_ll.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_reduce_scatter_fabric_ll.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu.cpp
   COMMENT "DL compile: dda_reduce_scatter_fabric_ll.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -909,8 +909,8 @@ add_custom_command(
     -fPIC
     -w
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ}
-    ${HIPIFY_DIR}/src/dda_reduce_scatter_fabric_ll128.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/dda_reduce_scatter_fabric_ll128.cu.cpp
+    ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu.cpp
   COMMENT "DL compile: dda_reduce_scatter_fabric_ll128.cu.cpp (has device kernels)"
   VERBATIM
 )

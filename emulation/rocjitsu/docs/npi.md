@@ -37,7 +37,8 @@ What the grep can't point at are the "create a new thing" steps:
 - Construct a `configs/<gpu>.json` (plus the `_kmd` and any multi-GPU variant)
   for the new device.
 - For a brand-new ISA family: sync `shared/machine-readable-isa` with
-  `download.py`, regenerate the ISA/DBT sources per [codegen.md](codegen.md),
+  `download.py`, adding any parser compatibility required by the complete
+  snapshot. Regenerate the ISA/DBT sources per [codegen.md](codegen.md),
   and author the hand-written per-arch files (`isa.h`, `mma_exec.h`,
   `addr_calc.h/.cpp`, ...) under
   `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<isa>/`. The generated files,

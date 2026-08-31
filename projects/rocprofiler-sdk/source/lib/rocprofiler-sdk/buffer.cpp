@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -106,7 +106,15 @@ allocate_buffer()
 
     // ensure buffer has thread to handle flushing it
     static auto _init_threads_once = std::once_flag{};
-    std::call_once(_init_threads_once, []() { internal_threading::initialize(); });
+    std::call_once(_init_threads_once, []() {
+        constexpr auto max_buffer_chunks_before_realloc = (1UL << 10);
+        // make sure that max_buffer_chunks_before_realloc * unique_buffer_vec_t::chunk_size buffers
+        // can be allocated before stable_vector needs to reallocate its internal chunk storage,
+        // which is a vector of chunks. As of this writing, this is 1024 * 16 = 16384 buffers, which
+        // should be sufficient for any use case of the profiler.
+        get_buffers()->reserve_chunks(max_buffer_chunks_before_realloc);
+        internal_threading::initialize();
+    });
 
     // ... allocate any internal space needed to handle another context ...
     auto _lk = std::unique_lock<std::mutex>{get_buffers_mutex()};

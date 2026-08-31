@@ -22,6 +22,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatXyMtbuf : public Mtbuf {
@@ -32,6 +33,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatXyzMtbuf : public Mtbuf {
@@ -42,6 +44,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatXyzwMtbuf : public Mtbuf {
@@ -52,6 +55,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatXMtbuf : public Mtbuf {
@@ -62,6 +66,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatXyMtbuf : public Mtbuf {
@@ -72,6 +77,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatXyzMtbuf : public Mtbuf {
@@ -82,6 +88,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatXyzwMtbuf : public Mtbuf {
@@ -92,6 +99,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadD16FormatXMtbuf : public Mtbuf {
@@ -103,6 +111,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadD16FormatXyMtbuf : public Mtbuf {
@@ -113,6 +122,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadD16FormatXyzMtbuf : public Mtbuf {
@@ -124,6 +134,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadD16FormatXyzwMtbuf : public Mtbuf {
@@ -134,6 +145,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreD16FormatXMtbuf : public Mtbuf {
@@ -144,6 +156,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreD16FormatXyMtbuf : public Mtbuf {
@@ -154,6 +167,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreD16FormatXyzMtbuf : public Mtbuf {
@@ -164,6 +178,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreD16FormatXyzwMtbuf : public Mtbuf {
@@ -174,6 +189,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 } // namespace rdna3

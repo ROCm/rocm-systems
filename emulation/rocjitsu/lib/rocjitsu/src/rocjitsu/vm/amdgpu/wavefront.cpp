@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
@@ -121,6 +122,10 @@ uint32_t Wavefront::hw_id2_raw() const {
   constexpr uint32_t kVmIdMask = 0xfu;
   return (queue_id_ & kQueueIdMask) | ((wg_id_ & kWorkgroupIdMask) << kWorkgroupIdShift) |
          ((process_id_ & kVmIdMask) << kVmIdShift);
+}
+
+bool Wavefront::uses_separate_trap_ctrl() const {
+  return isa_properties(cu_.arch()).wave_state_layout != WaveStateLayout::Legacy;
 }
 
 bool Wavefront::has_gpu_memory() const { return cu_.memory() != nullptr; }

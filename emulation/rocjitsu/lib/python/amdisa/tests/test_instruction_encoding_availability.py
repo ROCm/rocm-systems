@@ -8,7 +8,7 @@ import pytest
 
 from amdisa.codegen import CodeGenerator
 from amdisa.gpuisa import Instruction
-from amdisa.isa_profile import Cdna4Profile, Rdna4Profile
+from amdisa.isa_profile import Cdna4Profile, CdnaProfile, Rdna4Profile
 from amdisa.parser import Parser
 
 
@@ -51,6 +51,36 @@ def test_rdna4_distinguishes_vop1_instructions_with_and_without_dpp():
     assert generator._instruction_supports_dpp8(narrow, 'ENC_VOP1')
 
 
+def test_rdna4_dpp_predicate_filters_opcodes_without_alternates():
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
+    encoding = spec.encoding_map['ENC_VOP3']
+    generator = CodeGenerator(spec, '')
+
+    opcodes = generator._encoded_dpp_opcodes(encoding, 'dpp8')
+    helper = generator._opcode_predicate_helper_impl(
+        encoding,
+        'has_encoded_dpp8',
+        list(opcodes),
+        'amdgpu::dpp::is_src_dpp8(inst_.src0)',
+    )
+
+    assert 384 not in opcodes  # V_NOP
+    assert 385 in opcodes  # V_MOV_B32
+    assert 'amdgpu::dpp::is_src_dpp8(inst_.src0)' in helper
+    assert 'switch (inst_.op)' not in helper
+    assert 'inst_.op >=' in helper
+
+
+def test_opcode_set_condition_omits_unsigned_domain_boundaries():
+    assert CodeGenerator._opcode_set_condition([0, 1, 5]) == (
+        'inst_.op <= 1 || inst_.op == 5'
+    )
+    assert CodeGenerator._opcode_set_condition(list(range(248, 256)), 255) == (
+        'inst_.op >= 248'
+    )
+    assert CodeGenerator._opcode_set_condition(list(range(4)), 3) == 'true'
+
+
 def test_cdna4_distinguishes_vop1_instructions_with_and_without_sdwa():
     spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), Cdna4Profile()).parse()
     supported = _find_instruction(spec, 'ENC_VOP1', 'V_MOV_B32')
@@ -62,6 +92,14 @@ def test_cdna4_distinguishes_vop1_instructions_with_and_without_sdwa():
     generator = CodeGenerator(spec, '')
     assert generator._instruction_supports_sdwa(supported, 'ENC_VOP1')
     assert not generator._instruction_supports_sdwa(unsupported, 'ENC_VOP1')
+
+
+def test_cdna_profile_restores_manual_sdwa_opcode_missing_from_xml():
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna3.xml'), CdnaProfile()).parse()
+    inst = _find_instruction(spec, 'ENC_VOP2', 'V_PK_FMAC_F16')
+
+    assert 'VOP2_VOP_SDWA' not in inst.available_encodings
+    assert CodeGenerator(spec, '')._instruction_supports_sdwa(inst, 'ENC_VOP2')
 
 
 def test_modifier_availability_requires_explicit_encoding_provenance():

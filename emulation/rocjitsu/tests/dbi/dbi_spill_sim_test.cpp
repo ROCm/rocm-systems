@@ -148,6 +148,8 @@ public:
   }
 
   amdgpu::GpuMemory *mem() { return mem_; }
+
+  uint32_t queue_seq_ = 0;
   amdgpu::CommandProcessor *cp() { return soc_->xcd(0)->command_processor(); }
   amdgpu::ComputeUnitCore *cu() { return soc_->xcd(0)->shader_engine(0)->compute_unit(0); }
 
@@ -176,7 +178,17 @@ public:
   std::vector<uint32_t> run_and_read_vgpr(const std::vector<uint32_t> &code, uint32_t private_bytes,
                                           uint32_t reg) {
     const uint64_t ko = write_kernel(0x1000, code, private_bytes);
-    test::AqlQueue queue(mem_, cp());
+    // Callers reuse one DbiSim for several dispatches, and each AqlQueue leaves
+    // its registration behind on the CP, so every run needs its own queue --
+    // its own id, since two live queues sharing one on a CP are rejected (fan-out
+    // routes shards back by (queue_id, process_id)), and its own ring and pointer
+    // page, since queues sharing a ring would let one doorbell be fetched and
+    // dispatched once per registration.
+    const uint32_t queue_id = ++queue_seq_;
+    const uint64_t ring = test::AqlQueue::DEFAULT_RING_ADDR + uint64_t{queue_id} * 0x100000ULL;
+    test::AqlQueue queue(mem_, cp(), ring, test::AqlQueue::DEFAULT_RING_SIZE, ring + 0x10000,
+                         ring + 0x10008, ring + 0x10010, /*xcd_fanout=*/false,
+                         /*queue_id=*/queue_id);
     queue.dispatch(ko, /*grid_size_x=*/wave_size_, /*workgroup_size_x=*/wave_size_);
     engine_->run();
 

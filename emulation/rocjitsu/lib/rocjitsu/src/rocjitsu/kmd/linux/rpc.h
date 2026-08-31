@@ -293,6 +293,22 @@ inline std::string rpc_default_config_file_path() {
 /// connect_to_daemon then uses the well-known socket).
 inline constexpr char kRpcInvocationDirEnv[] = "ROCJITSU_INVOCATION_DIR";
 
+/// @brief Environment variable carrying the PID of the daemon the CLI forked.
+/// @details Exported beside kRpcInvocationDirEnv, and for the same reason: the
+/// CLI knows this PID because it forked the process, then execs the workload
+/// over itself, so nothing survives the exec that is not in the environment.
+///
+/// It exists to name which process a client may authorize to reach into its
+/// address space. SO_PEERCRED alone answers "who is on the other end of this
+/// socket", which is not the same question: the socket path is well known, so
+/// any process of the same user can be listening on it. Only the launcher knows
+/// which PID it started, and only a peer matching it is the daemon this client
+/// was meant to be served by.
+///
+/// Absent in attach mode, where no launcher established a daemon and there is
+/// therefore nothing to compare a peer against.
+inline constexpr char kRpcDaemonPidEnv[] = "ROCJITSU_DAEMON_PID";
+
 /// @brief Per-invocation runtime directory scoped by PID.
 /// @details The CLI creates <runtime_dir>/<pid>/ before execvp and exports its
 /// path via $ROCJITSU_INVOCATION_DIR so the interposer locates the correct

@@ -181,11 +181,25 @@ bool hsakmtRuntime::ReserveLocalHeapSpace() {
     if (device == nullptr) {
       return false;
     }
-    total_local_size += rocr::AlignUp(device->VramTotal(), align) * 2;
+    total_local_size += rocr::AlignUp(device->VramTotal(), align);
   }
-  local_heap_space_start_ = 0;
-  local_heap_space_size_ = total_local_size;
-  return ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align);
+
+  /* Every kLocal allocation carves its VA out of this pool, including the pure
+   * VA reservations of the VMM API. CLR's VmHeapArray alone reserves 2x VRAM of
+   * VA, so a 2x pool leaves nothing for real allocations. VA costs no physical
+   * resource, so oversize the pool and shrink only if the range can't be reserved.
+   */
+  for (uint64_t scale : {8ull, 4ull, 2ull}) {
+    local_heap_space_start_ = 0;
+    local_heap_space_size_ = total_local_size * scale;
+    if (ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align))
+      return true;
+
+    pr_warn("fail to reserve %" PRIu64 "x VRAM (%" PRIu64 " MB) of local heap VA, retry smaller\n",
+            scale, (total_local_size * scale) >> 20);
+  }
+
+  return false;
 }
 
 bool hsakmtRuntime::FreeSvmSpace(uint64_t &base, uint64_t &size) {
@@ -275,6 +289,17 @@ void hsakmtRuntime::InitSystemHeapMgr() {
                                           DEFAULT_GPU_PAGE_SIZE);
 }
 
+static void log_va_exhaustion(const char *heap, wsl::thunk::VaMgr *mgr, gpusize pool_size,
+                              gpusize size, gpusize align, gpusize hint_addr) {
+    uint64_t total_free = 0, largest_free = 0;
+    mgr->FreeStats(&total_free, &largest_free);
+
+    pr_err("%s heap VA exhausted: request %" PRIu64 " MB align %" PRIu64 " KB hint %#" PRIx64
+           "; pool %" PRIu64 " MB, free %" PRIu64 " MB, largest contiguous free %" PRIu64 " MB\n",
+           heap, size >> 20, align >> 10, static_cast<uint64_t>(hint_addr), pool_size >> 20,
+           total_free >> 20, largest_free >> 20);
+}
+
 ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const Wkmi::AllocDomain domain,
         gpusize hit_base_addr, gpusize size,
         gpusize *out_gpu_virt_addr, gpusize alignment, bool lock) {
@@ -292,8 +317,11 @@ ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const Wkmi::AllocDomain domain
         }
 
         gpu_addr = system_heap_mgr_->Alloc(size, align, hit_base_addr);
-        if (gpu_addr == 0)
+        if (gpu_addr == 0) {
+            log_va_exhaustion("system", system_heap_mgr_.get(), system_heap_space_size_, size,
+                              align, hit_base_addr);
             code = ErrorCode::OutOfMemory;
+        }
         else if (!CommitSystemHeapSpace((void*)gpu_addr, size, lock)) {
             system_heap_mgr_->Free(gpu_addr);
             code = ErrorCode::SyscallFail;
@@ -305,8 +333,11 @@ ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const Wkmi::AllocDomain domain
         }
 
         gpu_addr = local_heap_mgr_->Alloc(size, align, hit_base_addr);
-        if (gpu_addr == 0)
+        if (gpu_addr == 0) {
+            log_va_exhaustion("local", local_heap_mgr_.get(), local_heap_space_size_, size, align,
+                              hit_base_addr);
             code = ErrorCode::OutOfGpuMemory;
+        }
     }
 
     *out_gpu_virt_addr = (code == ErrorCode::Success) ? gpu_addr : 0;

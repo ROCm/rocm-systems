@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -209,6 +209,7 @@ using host_functions_map_t = std::unordered_map<uint64_t, host_function_data_t>;
 
 rocprofiler_client_id_t*      client_id        = nullptr;
 rocprofiler_client_finalize_t client_fini_func = nullptr;
+std::string                   output_filename  = {};
 
 using callback_payload_t =
     std::variant<rocprofiler_callback_tracing_code_object_load_data_t,
@@ -1744,6 +1745,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     rocprofiler_get_timestamp(&init_time);
     rocprofiler_get_thread_id(&main_tid);
 
+    // snapshot the output filename at configure time so that multiple tool
+    // instances registered with different ROCPROFILER_TOOL_OUTPUT_FILE values
+    // each write to their own file rather than reading a single shared value
+    // at teardown
+    if(auto* eofname = getenv("ROCPROFILER_TOOL_OUTPUT_FILE")) output_filename = eofname;
+
     assert(tool_data != nullptr);
 
     rocprofiler_query_available_agents_cb_t iterate_cb = [](rocprofiler_agent_version_t agents_ver,
@@ -2766,7 +2773,7 @@ void
 write_json(call_stack_t* _call_stack)
 {
     auto ofname = std::string{"rocprofiler-tool-results.json"};
-    if(auto* eofname = getenv("ROCPROFILER_TOOL_OUTPUT_FILE")) ofname = eofname;
+    if(!output_filename.empty()) ofname = output_filename;
 
     std::ostream* ofs     = nullptr;
     auto          cleanup = std::function<void(std::ostream*&)>{};
@@ -3683,6 +3690,30 @@ rocprofiler_configure(uint32_t                 version,
 
     // return pointer to configure data
     return &cfg;
+}
+
+extern "C" ROCPROFILER_PUBLIC_API rocprofiler_status_t
+json_tool_force_configure()
+{
+    return rocprofiler_force_configure(rocprofiler_configure);
+}
+
+// Mid-run context control hooks for the anytime stop/start test. json-tool normally starts
+// its contexts at tool_init and stops them at tool_fini; these let a driver stop and
+// restart the contexts at controlled points so a test can verify that work performed while
+// the contexts are stopped is not captured.
+extern "C" ROCPROFILER_PUBLIC_API rocprofiler_status_t
+json_tool_stop()
+{
+    client::stop();
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+extern "C" ROCPROFILER_PUBLIC_API rocprofiler_status_t
+json_tool_start()
+{
+    client::start();
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 PERFETTO_TRACK_EVENT_STATIC_STORAGE();

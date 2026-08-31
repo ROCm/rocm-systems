@@ -237,6 +237,7 @@ struct Vop3pBuilderFields {
   uint8_t vdst = 0;
   uint8_t neg_hi = 0;
   uint8_t opsel = 0;
+  uint8_t opsel_hi_2 = 0;
   uint8_t clamp = 0;
   uint16_t src0 = 0;
   uint16_t src1 = 0;
@@ -254,6 +255,7 @@ struct Vop3pBuilderFields {
   builder_detail::set_field(words, fields.vdst, 0, 8);
   builder_detail::set_field(words, fields.neg_hi, 8, 3);
   builder_detail::set_field(words, fields.opsel, 11, 3);
+  builder_detail::set_field(words, fields.opsel_hi_2, 14, 1);
   builder_detail::set_field(words, fields.clamp, 15, 1);
   builder_detail::set_field(words, fields.src0, 32, 9);
   builder_detail::set_field(words, fields.src1, 41, 9);

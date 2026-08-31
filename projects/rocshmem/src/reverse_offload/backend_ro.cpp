@@ -95,7 +95,8 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   bp->heap_window_info = ro_window_proxy_->get();
 
-  initIPC();
+  if (!envvar::disable_mixed_ipc)
+    initIPC();
 
   transport_->initTransport(envvar::max_num_contexts, &backend_proxy);
 
@@ -188,6 +189,8 @@ void ROBackend::setup_default_ctx_buffers() {
 }
 
 ROBackend::~ROBackend() {
+  if (!envvar::disable_mixed_ipc)
+    ipcImpl.ipcHostStop();
   ro_net_free_runtime();
   CHECK_HIP(hipFree(ctx_array));
 }
