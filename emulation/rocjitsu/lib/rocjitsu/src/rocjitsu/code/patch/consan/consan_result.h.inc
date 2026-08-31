@@ -264,6 +264,25 @@ struct ConSanTransformArtifacts {
     patches.clear();
     coverage_ledger.discard_instrumented_lowerings();
   }
+  /// Publish the bytes, semantic commits, and patch proof of one completed
+  /// access-lowering transaction. A failed semantic commit invalidates the
+  /// complete candidate rather than leaving an earlier component installed.
+  [[nodiscard]] bool publish_access_lowering(std::vector<uint8_t> candidate,
+                                             std::string_view diagnostic_subject,
+                                             std::vector<ConSanCommittedLowering> commits,
+                                             std::vector<ConSanPatchInfo> proof) {
+    if (!coverage_ledger.publish_lowering_commits(std::move(commits))) {
+      errors.emplace_back(std::string(diagnostic_subject) +
+                          " could not commit its semantic lowerings");
+      discard_candidate_modification();
+      return false;
+    }
+    replacement = std::move(candidate);
+    patches.insert(patches.end(), std::make_move_iterator(proof.begin()),
+                   std::make_move_iterator(proof.end()));
+    mark_modified();
+    return true;
+  }
 };
 
 /// Whether a semantic claim is at least as strong as the weakest confidence a

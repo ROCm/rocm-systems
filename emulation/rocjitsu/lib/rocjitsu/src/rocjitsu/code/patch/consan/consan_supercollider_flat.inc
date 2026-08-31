@@ -1740,6 +1740,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   }
   const bool has_appended_patch =
       std::ranges::any_of(planned_patches, &PlannedFlatCheckTrapPatch::use_appended_cave);
+  std::vector<uint8_t> replacement;
   std::vector<ConSanDescriptorRegisterGrowth> descriptor_sgpr_growths;
   std::unordered_map<uint64_t, uint32_t> descriptor_private_requirements;
   for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
@@ -1838,7 +1839,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                              "flat check/trap proof", result)) {
       return;
     }
-    result.replacement = std::move(patcher).emit();
+    replacement = std::move(patcher).emit();
   } else {
     std::optional<AmdGpuCodeObject> current_object;
     if (!result.replacement.empty())
@@ -1895,7 +1896,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         return;
       }
     }
-    result.replacement = std::move(patched_bytes);
+    replacement = std::move(patched_bytes);
   }
   std::vector<ConSanCommittedLowering> lowering_commits;
   lowering_commits.reserve(planned_patches.size());
@@ -1910,14 +1911,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
     lowering_commits.push_back(std::move(*commit));
   }
-  if (!result.coverage_ledger.publish_lowering_commits(std::move(lowering_commits))) {
-    result.errors.emplace_back(
-        "ConSan flat check/trap proof could not commit its semantic lowerings");
-    result.discard_candidate_modification();
+  if (!result.publish_access_lowering(std::move(replacement), "ConSan flat check/trap proof",
+                                      std::move(lowering_commits), std::move(new_patch_infos))) {
     return;
   }
-  result.patches.insert(result.patches.end(), new_patch_infos.begin(), new_patch_infos.end());
-  result.mark_modified();
 }
 
 void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,

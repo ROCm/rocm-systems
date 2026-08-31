@@ -38,15 +38,6 @@ make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
                                 const ConSanMoiCandidate &candidate,
                                 const ConSanPatchLoweringProduct &patch);
 
-/// Atomically publish one completed access mutation. Mode owners build the
-/// replacement image, patch proof, and intent-bound commits; this boundary
-/// makes those products visible together.
-[[nodiscard]] bool publish_moi_access_patch(ConSanTransformArtifacts &result,
-                                            std::vector<uint8_t> replacement,
-                                            std::string_view probe_name,
-                                            std::vector<ConSanCommittedLowering> commits,
-                                            std::vector<ConSanPatchInfo> patches);
-
 template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
           typename ApplyExtraRequirements>
 [[nodiscard]] bool apply_inline_moi_access_patches(
@@ -101,8 +92,9 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
     patch_infos.push_back(std::move(patch));
     lowering_commits.push_back(std::move(*commit));
   }
-  return publish_moi_access_patch(result, std::move(replacement), probe_name,
-                                  std::move(lowering_commits), std::move(patch_infos));
+  return result.publish_access_lowering(std::move(replacement),
+                                        "ConSan MOI " + std::string(probe_name),
+                                        std::move(lowering_commits), std::move(patch_infos));
 }
 
 [[nodiscard]] bool apply_moi_appended_access_descriptor_requirements(

@@ -2705,3 +2705,80 @@ and transform-artifact surfaces, prove locality for every target and mode
 facet, produce material net shrinkage, or replace the required independent
 whole-codebase audit. Section 14.4 remains complete through the checkpoint-17
 extension fixtures.
+
+### 16.26 Convergence checkpoint 25: all-engine access transactions
+
+The post-checkpoint-24 audit followed the same access-publication lifecycle
+through the fourth engine. SuperCollider's flat and LDS redundant-access
+lowerers still published ordinary lowering commits directly. More seriously,
+the LDS lowerer used `ConSanTransformArtifacts::replacement` and `patches` as
+construction scratch while it emitted descriptor growth, dense dispatchers,
+entry islands, relay reservoirs, branch-only routes, and final access proof.
+Twenty-four failure sites then cleared the lasting patch inventory to simulate
+rollback. That was a forward-only pipeline violation and left the supposedly
+common access transaction as an MOI-only mechanism.
+
+The completed-access transaction now belongs to its actual state owner:
+`ConSanTransformArtifacts::publish_access_lowering`. It accepts a locally
+completed replacement image, intent-bound commits, patch proof, and a caller-
+owned diagnostic subject. The coverage ledger is published first; success
+makes the bytes and proof visible together, while failure retracts the complete
+instrumented candidate. Record/Replay, Sampled, InlineShadow, and both
+SuperCollider redundant-access paths now use this one transaction. The
+checkpoint-24 MOI-specific publication function is deleted rather than kept as
+an adapter.
+
+SuperCollider LDS construction now owns local replacement and proof values from
+the first emitted byte through descriptor-image verification. Its appended and
+inline/local strategies converge before publication, removing both direct
+terminal branches, all 24 compensating patch clears, and all 43 direct
+`result.replacement`/`result.patches` construction references. SuperCollider
+flat construction still intentionally starts from the already published LDS
+image when the two access families compose, but its new flat products remain
+local until the same transaction accepts them. Engine-specific planning,
+target recipes, relay geometry, diagnostics, and composition order remain in
+the SuperCollider owner.
+
+The boundary gate forbids the retired MOI-specific publication API everywhere,
+confines ordinary batch publication to the coverage owner, pipeline rejection
+assembly, and the one access transaction, and prevents the SuperCollider LDS
+body from reacquiring the lasting replacement/patch buses or rollback method.
+An owner-level test publishes a complete access transaction, then submits a
+mixed stale batch and proves that replacement bytes, patch proof, and earlier
+instrumented ledger state are retracted together.
+
+| Signal | Checkpoint 25 | Cumulative change | Slice change from checkpoint 24 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,673 | +698 | **-45** |
+| Nonblank production lines | 99,397 | +314 | **-42** |
+| Production implementation lines | 91,689 | **+239** | **-42** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 241 / 58 | **-35 / +1** | **-2 / 0** |
+| `ConSanPatchInfo` references / files | 202 / 28 | +2 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| SuperCollider LDS direct replacement/patch-bus construction references | 0 | n/a | **-43** |
+| Independent access publication transactions | 1 | n/a | 0 |
+| Test inventory | 5,373 | +28 | **+1** |
+
+This is the first access-publication boundary that covers all four engines
+rather than treating SuperCollider as an exception. It deletes 42 production
+implementation lines and reduces the broad artifact type by two occurrences,
+but cumulative production remains 239 implementation lines above the starting
+baseline. It therefore advances the deletion contract and all-engine mode
+locality without satisfying the material whole-refactoring shrinkage bar.
+
+Validation includes a regenerated 188-step build; a 1,168-test focused gate
+covering the structural boundary, every MOI access family, SuperCollider,
+LDS/flat probes, and five-target simulator rows; and the dedicated two-test
+transaction/boundary gate. The complete 4,738-test nonphysical matrix,
+including all 2,908 simulator rows over five targets, passed at `-j16` in
+195.98 seconds. All 635 physical gfx1201 tests passed serialized at `-j1` in
+109.68 seconds. No test was removed, disabled, or renamed; the one new test is
+the transaction-owner regression described above.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.6, and 14.7. It does
+not eliminate the remaining broad artifact/operating-point surfaces, prove
+architecture and mode locality across every production facet, produce material
+net shrinkage, or replace the required independent whole-codebase audit.
+Section 14.4 remains complete through the checkpoint-17 extension fixtures.

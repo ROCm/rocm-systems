@@ -1092,8 +1092,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                              "MOI sampled probe", result)) {
       return;
     }
-    if (!publish_moi_access_patch(result, std::move(patcher).emit(), "sampled probe",
-                                  std::move(lowering_commits), std::move(patches))) {
+    if (!result.publish_access_lowering(std::move(patcher).emit(), "ConSan MOI sampled probe",
+                                        std::move(lowering_commits), std::move(patches))) {
       return;
     }
     return;

@@ -1518,8 +1518,8 @@ void try_apply_first_light_access_record_patch(
                              "MOI first-light probe", result)) {
       return;
     }
-    if (!publish_moi_access_patch(result, std::move(patcher).emit(), "first-light probe",
-                                  std::move(lowering_commits), std::move(patches))) {
+    if (!result.publish_access_lowering(std::move(patcher).emit(), "ConSan MOI first-light probe",
+                                        std::move(lowering_commits), std::move(patches))) {
       return;
     }
     if (reserved_sync_island_count != 0u) {

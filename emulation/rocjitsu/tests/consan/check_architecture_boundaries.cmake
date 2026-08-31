@@ -717,6 +717,20 @@ foreach(_file IN LISTS _consan_production_files)
         "publish_moi_sync_lowering_commits"
         "synchronization bytes and semantic commits must publish as one transaction"
     )
+    _consan_assert_no_match(
+        "${_file}"
+        "publish_moi_access_patch"
+        "all engines must publish completed access lowering through the transform transaction owner"
+    )
+    if(NOT _file MATCHES
+       "(consan_access_policy.cpp|consan_observation_plan.h.inc|consan_result.h.inc|consan_pipeline.cpp)$"
+    )
+        _consan_assert_no_match(
+            "${_file}"
+            "publish_lowering_commits"
+            "ordinary lowering commits may publish only through their coverage owner or the access transaction"
+        )
+    endif()
     if(NOT _file MATCHES
        "(consan_access_policy.cpp|consan_observation_plan.h.inc|consan_moi_sync_emission.cpp)$"
     )
@@ -727,6 +741,11 @@ foreach(_file IN LISTS _consan_production_files)
         )
     endif()
 endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_supercollider_lds.inc"
+    "result[.](patches|replacement|mark_modified)|discard_candidate_modification|publish_lowering_commits"
+    "SuperCollider LDS access construction must publish local bytes and proof through the shared access transaction"
+)
 foreach(
     _access_mode_source
     IN ITEMS

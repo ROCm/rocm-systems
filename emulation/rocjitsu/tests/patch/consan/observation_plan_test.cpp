@@ -577,6 +577,63 @@ TEST(ConSanObservationPlan, CommittedLoweringBatchPublicationIsTransactional) {
   EXPECT_TRUE(result.coverage_ledger.lowering_commits().empty());
 }
 
+TEST(ConSanObservationPlan, AccessLoweringPublishesAndRetractsItsCompleteTransaction) {
+  const ConSanAccessPolicyResult policy = plan_consan_access_observation(
+      one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
+  ASSERT_TRUE(policy.valid());
+  ConSanObservationPlan plan = policy.plan;
+  ASSERT_TRUE(plan.append(policy.plan));
+  ASSERT_EQ(plan.probe_intents.size(), 2u);
+
+  const auto make_instrumentation = [&](ConSanProbeIntentId id, uint64_t offset) {
+    const std::array intent_ids = {id};
+    const std::array locations = {ConSanCommittedLoweringLocation{
+        .original_site = plan.probe_intents[id.value].physical_site,
+        .emitted_text_offset = offset,
+        .emitted_size = 4u,
+        .relocated_guest_text_offset = std::nullopt,
+    }};
+    return make_consan_committed_lowering(plan, intent_ids, locations,
+                                          ConSanLoweringOutcomeKind::Instrumented, {},
+                                          record_replay_runtime_mapping_for(plan, intent_ids));
+  };
+  auto first = make_instrumentation({0}, 0x200u);
+  auto second = make_instrumentation({1}, 0x300u);
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+  ConSanCommittedLowering stale_first = *first;
+
+  ConSanTransformArtifacts result;
+  result.coverage_ledger = ConSanCoverageLedger(plan);
+  ConSanPatchInfo first_proof;
+  first_proof.kind = ConSanPatchKind::InlineMoiAccessRecordStore;
+  first_proof.anchor_offset = 0x200u;
+  ASSERT_TRUE(
+      result.publish_access_lowering(std::vector<uint8_t>{0xaau}, "ConSan first access transaction",
+                                     std::vector<ConSanCommittedLowering>{std::move(*first)},
+                                     std::vector<ConSanPatchInfo>{first_proof}));
+  EXPECT_EQ(result.replacement, (std::vector<uint8_t>{0xaau}));
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering,
+            ConSanLoweringOutcomeKind::Instrumented);
+
+  ConSanPatchInfo second_proof;
+  second_proof.kind = ConSanPatchKind::InlineMoiAccessRecordStore;
+  second_proof.anchor_offset = 0x300u;
+  EXPECT_FALSE(result.publish_access_lowering(
+      std::vector<uint8_t>{0xbbu}, "ConSan rejected access transaction",
+      std::vector<ConSanCommittedLowering>{std::move(*second), std::move(stale_first)},
+      std::vector<ConSanPatchInfo>{second_proof}));
+  EXPECT_TRUE(result.replacement.empty());
+  EXPECT_TRUE(result.patches.empty());
+  EXPECT_TRUE(result.coverage_ledger.lowering_commits().empty());
+  EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Pending);
+  EXPECT_EQ(result.coverage_ledger.intent_entry({1})->lowering, ConSanLoweringOutcomeKind::Pending);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_EQ(result.errors.back(),
+            "ConSan rejected access transaction could not commit its semantic lowerings");
+}
+
 TEST(ConSanObservationPlan, CoalescingPublicationOwnsMultiLocationSyncTransactions) {
   const ConSanAccessPolicyResult access = plan_consan_access_observation(
       one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));

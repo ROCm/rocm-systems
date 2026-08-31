@@ -3730,36 +3730,28 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
     }
   }
-  const auto publish_planned_lowerings = [&]() {
-    std::vector<ConSanCommittedLowering> lowering_commits;
-    lowering_commits.reserve(planned_patches.size());
-    for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
-      auto commit =
-          make_sc_access_lowering_commit(result, planned.intent_ids, *planned.site, planned.info);
-      if (!commit) {
-        result.errors.emplace_back(
-            "ConSan LDS check/trap proof produced an invalid intent-bound lowering");
-        return false;
-      }
-      lowering_commits.push_back(std::move(*commit));
-    }
-    if (!result.coverage_ledger.publish_lowering_commits(std::move(lowering_commits))) {
+  std::vector<ConSanPatchInfo> patch_infos;
+  std::vector<ConSanCommittedLowering> lowering_commits;
+  lowering_commits.reserve(planned_patches.size());
+  for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
+    auto commit =
+        make_sc_access_lowering_commit(result, planned.intent_ids, *planned.site, planned.info);
+    if (!commit) {
       result.errors.emplace_back(
-          "ConSan LDS check/trap proof could not commit its semantic lowerings");
-      return false;
+          "ConSan LDS check/trap proof produced an invalid intent-bound lowering");
+      return;
     }
-    return true;
-  };
+    lowering_commits.push_back(std::move(*commit));
+  }
+  std::vector<uint8_t> replacement;
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
     if (!apply_consan_descriptor_vgpr_growths_to_patcher(patcher, original_bytes,
                                                          descriptor_growths, arch, result.errors)) {
-      result.patches.clear();
       return;
     }
     if (!apply_consan_descriptor_sgpr_growths_to_patcher(patcher, descriptor_sgpr_growths, arch,
                                                          result.errors)) {
-      result.patches.clear();
       return;
     }
     for (const auto &[descriptor_offset, required_private_bytes] :
@@ -3768,7 +3760,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       auto descriptor = read_kernel_descriptor(image, descriptor_offset);
       if (!descriptor) {
         result.errors.emplace_back("ConSan LDS check/trap spill descriptor exceeds ELF bytes");
-        result.patches.clear();
         return;
       }
       const SpillDescriptorUpdate update =
@@ -3777,7 +3768,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
            update != SpillDescriptorUpdate::Unchanged) ||
           !patcher.patch_kernel_descriptor(descriptor_offset, *descriptor)) {
         result.errors.emplace_back("ConSan LDS check/trap could not grow its spill descriptor");
-        result.patches.clear();
         return;
       }
     }
@@ -3789,7 +3779,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         generated_island_bank_bytes >
             std::numeric_limits<size_t>::max() - generated_island_bank_offset) {
       result.errors.emplace_back("ConSan LDS check/trap proof found an invalid entry-island bank");
-      result.patches.clear();
       return;
     }
     const uint32_t padding_nop = build_s_nop(0, arch);
@@ -3820,7 +3809,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       info.trampoline_size =
           static_cast<uint32_t>(generated_relay_bank_word_count * sizeof(uint32_t));
       if (generated_relay_bank_used)
-        result.patches.push_back(std::move(info));
+        patch_infos.push_back(std::move(info));
       generated_relay_bank_emitted = true;
     };
     bool wide_composite_relay_donors_emitted = false;
@@ -3870,7 +3859,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         anchor_info.trampoline_offset = donor.host_offset + sizeof(uint32_t);
         anchor_info.original_size = 2u * sizeof(uint32_t);
         anchor_info.trampoline_size = 3u * sizeof(uint32_t);
-        result.patches.push_back(std::move(anchor_info));
+        patch_infos.push_back(std::move(anchor_info));
         ConSanPatchInfo host_info;
         host_info.kind = ConSanPatchKind::TrampolineScBranchRelayDonor;
         host_info.anchor_offset = donor.host_offset;
@@ -3878,7 +3867,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         host_info.original_size =
             static_cast<uint32_t>(donor.host_original_words.size() * sizeof(uint32_t));
         host_info.trampoline_size = host_info.original_size + sizeof(uint32_t);
-        result.patches.push_back(std::move(host_info));
+        patch_infos.push_back(std::move(host_info));
       }
       wide_composite_relay_donors_emitted = true;
       return true;
@@ -3969,7 +3958,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
           info.indirect_return_saved_scc_sgpr = reservoir.return_saved_scc_sgpr;
         info.indirect_required_sgpr_count = reservoir.required_sgpr_count;
         info.owner_descriptor_file_offsets = reservoir.owner_descriptor_file_offsets;
-        result.patches.push_back(std::move(info));
+        patch_infos.push_back(std::move(info));
       }
       relay_reservoirs_emitted = true;
       return true;
@@ -4110,7 +4099,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         else
           dispatcher_info.sc_dense_call_return_sgpr = group.call_return_sgpr;
         dispatcher_info.owner_descriptor_file_offsets = {group.descriptor_file_offset};
-        result.patches.push_back(std::move(dispatcher_info));
+        patch_infos.push_back(std::move(dispatcher_info));
         ConSanPatchInfo host_info;
         host_info.kind = ConSanPatchKind::TrampolineScDenseEntryHost;
         host_info.anchor_offset = group.entry_host_offset;
@@ -4129,7 +4118,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         else
           host_info.sc_dense_call_return_sgpr = group.call_return_sgpr;
         host_info.owner_descriptor_file_offsets = {group.descriptor_file_offset};
-        result.patches.push_back(std::move(host_info));
+        patch_infos.push_back(std::move(host_info));
         ++next_dense_group;
       }
       return true;
@@ -4143,17 +4132,14 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                     planned.cave_words.size() * sizeof(uint32_t));
       } else if (planned.use_appended_cave) {
         if (!append_dense_call_groups_if_due()) {
-          result.patches.clear();
           return;
         }
         if (!append_wide_composite_relay_donors_if_due()) {
-          result.patches.clear();
           return;
         }
         append_generated_relay_bank_if_due();
         append_island_bank_if_due();
         if (!append_relay_reservoirs_if_due()) {
-          result.patches.clear();
           return;
         }
         if (!planned.placement || new_text.size() != planned.placement->body_offset) {
@@ -4162,7 +4148,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
               "ConSan LDS check/trap proof emitted a stale appended-cave mapping: site=" +
               std::to_string(site.physical_id.original_text_offset) + " expected=" +
               std::to_string(expected_offset) + " actual=" + std::to_string(new_text.size()));
-          result.patches.clear();
           return;
         }
         if (planned.entry_island != nullptr) {
@@ -4172,7 +4157,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
               island_bytes > new_text.size() - planned.entry_island->text_offset) {
             result.errors.emplace_back(
                 "ConSan LDS check/trap proof emitted an invalid entry-island mapping");
-            result.patches.clear();
             return;
           }
           std::memcpy(new_text.data() + planned.entry_island->text_offset,
@@ -4188,7 +4172,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                 std::to_string(site.physical_id.original_text_offset) +
                 " expected=" + std::to_string(trailing_relay_offset) +
                 " actual=" + std::to_string(new_text.size()));
-            result.patches.clear();
             return;
           }
           append_consan_patch_words(new_text, std::span<const uint32_t>(&padding_nop, 1));
@@ -4204,22 +4187,19 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         island_info.trampoline_offset = planned.entry_island->text_offset;
         island_info.trampoline_size =
             static_cast<uint32_t>(kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t));
-        result.patches.push_back(std::move(island_info));
+        patch_infos.push_back(std::move(island_info));
       }
-      result.patches.push_back(planned.info);
+      patch_infos.push_back(planned.info);
     }
     if (!append_dense_call_groups_if_due()) {
-      result.patches.clear();
       return;
     }
     if (!append_wide_composite_relay_donors_if_due()) {
-      result.patches.clear();
       return;
     }
     append_generated_relay_bank_if_due();
     append_island_bank_if_due();
     if (!append_relay_reservoirs_if_due()) {
-      result.patches.clear();
       return;
     }
     for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
@@ -4228,30 +4208,26 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       if (!planned.placement) {
         result.errors.emplace_back(
             "ConSan LDS check/trap shared router lost its appended placement");
-        result.patches.clear();
         return;
       }
       std::string relay_error;
       if (!BranchOnlyRelayRouter::emit_and_record(
               new_text, *planned.branch_only_route, planned.placement->body_offset,
               planned.site->physical_id.original_text_offset + planned.site->instruction_size, arch,
-              result.patches, &relay_error)) {
+              patch_infos, &relay_error)) {
         result.errors.emplace_back("ConSan LDS check/trap " + relay_error);
-        result.patches.clear();
         return;
       }
     }
     for (const auto &[relay_offset, relay_word] : entry_relay_words) {
       if (relay_offset > new_text.size() || sizeof(relay_word) > new_text.size() - relay_offset) {
         result.errors.emplace_back("ConSan LDS check/trap relay exceeds executable text");
-        result.patches.clear();
         return;
       }
       std::memcpy(new_text.data() + relay_offset, &relay_word, sizeof(relay_word));
     }
     if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
                              "LDS check/trap proof", result)) {
-      result.patches.clear();
       return;
     }
     const std::span<const uint8_t> patched_image = patcher.image_bytes();
@@ -4259,7 +4235,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     if (!patched_probe.is_valid()) {
       result.errors.emplace_back(
           "ConSan LDS check/trap text replacement produced an invalid descriptor image");
-      result.patches.clear();
       return;
     }
     for (const auto &[descriptor_offset, required_private_bytes] :
@@ -4274,7 +4249,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       if (moved_kernel == patched_probe.kernels().end()) {
         result.errors.emplace_back(
             "ConSan LDS check/trap text replacement lost a spill owner descriptor");
-        result.patches.clear();
         return;
       }
       std::vector<uint8_t> descriptor_probe(patched_image.begin(), patched_image.end());
@@ -4284,59 +4258,48 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         result.errors.emplace_back(
             "ConSan LDS check/trap text replacement lost its spill descriptor update at offset " +
             std::to_string(descriptor_offset));
-        result.patches.clear();
         return;
       }
     }
-    result.replacement = std::move(patcher).emit();
-    if (!publish_planned_lowerings()) {
-      result.discard_candidate_modification();
+    replacement = std::move(patcher).emit();
+  } else {
+    replacement.assign(original_bytes.begin(), original_bytes.end());
+    if (!apply_consan_descriptor_vgpr_growths_to_bytes(replacement, descriptor_growths, arch,
+                                                       result.errors)) {
       return;
     }
-    result.mark_modified();
-    return;
-  }
-
-  if (result.replacement.empty())
-    result.replacement.assign(original_bytes.begin(), original_bytes.end());
-  if (!apply_consan_descriptor_vgpr_growths_to_bytes(result.replacement, descriptor_growths, arch,
-                                                     result.errors)) {
-    result.patches.clear();
-    return;
-  }
-  if (!apply_consan_descriptor_sgpr_growths_to_bytes(result.replacement, descriptor_sgpr_growths,
-                                                     arch, result.errors)) {
-    result.patches.clear();
-    return;
-  }
-  for (const auto &[descriptor_offset, required_private_bytes] : descriptor_private_requirements) {
-    const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-        result.replacement, descriptor_offset, required_private_bytes);
-    if (update != SpillDescriptorUpdate::Updated && update != SpillDescriptorUpdate::Unchanged) {
-      result.errors.emplace_back("ConSan LDS check/trap could not grow its spill descriptor");
-      result.patches.clear();
+    if (!apply_consan_descriptor_sgpr_growths_to_bytes(replacement, descriptor_sgpr_growths, arch,
+                                                       result.errors)) {
       return;
     }
-  }
-  for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
-    const ConSanAccessInventorySite &site = *planned.site;
-    if (planned.use_local_cave) {
-      const uint64_t anchor_bytes = planned.anchor_words.size() * sizeof(uint32_t);
-      const uint64_t cave_bytes = planned.cave_words.size() * sizeof(uint32_t);
-      std::memcpy(result.replacement.data() + site.file_offset, planned.anchor_words.data(),
-                  static_cast<size_t>(anchor_bytes));
-      std::memcpy(result.replacement.data() + planned.local_cave->file_offset,
-                  planned.cave_words.data(), static_cast<size_t>(cave_bytes));
-    } else {
-      const uint64_t patch_bytes = static_cast<uint64_t>(planned.words.size() * sizeof(uint32_t));
-      std::memcpy(result.replacement.data() + site.file_offset, planned.words.data(),
-                  static_cast<size_t>(patch_bytes));
+    for (const auto &[descriptor_offset, required_private_bytes] :
+         descriptor_private_requirements) {
+      const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
+          replacement, descriptor_offset, required_private_bytes);
+      if (update != SpillDescriptorUpdate::Updated && update != SpillDescriptorUpdate::Unchanged) {
+        result.errors.emplace_back("ConSan LDS check/trap could not grow its spill descriptor");
+        return;
+      }
     }
-    result.patches.push_back(planned.info);
+    for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
+      const ConSanAccessInventorySite &site = *planned.site;
+      if (planned.use_local_cave) {
+        const uint64_t anchor_bytes = planned.anchor_words.size() * sizeof(uint32_t);
+        const uint64_t cave_bytes = planned.cave_words.size() * sizeof(uint32_t);
+        std::memcpy(replacement.data() + site.file_offset, planned.anchor_words.data(),
+                    static_cast<size_t>(anchor_bytes));
+        std::memcpy(replacement.data() + planned.local_cave->file_offset, planned.cave_words.data(),
+                    static_cast<size_t>(cave_bytes));
+      } else {
+        const uint64_t patch_bytes = static_cast<uint64_t>(planned.words.size() * sizeof(uint32_t));
+        std::memcpy(replacement.data() + site.file_offset, planned.words.data(),
+                    static_cast<size_t>(patch_bytes));
+      }
+      patch_infos.push_back(planned.info);
+    }
   }
-  if (!publish_planned_lowerings()) {
-    result.discard_candidate_modification();
+  if (!result.publish_access_lowering(std::move(replacement), "ConSan LDS check/trap proof",
+                                      std::move(lowering_commits), std::move(patch_infos))) {
     return;
   }
-  result.mark_modified();
 }

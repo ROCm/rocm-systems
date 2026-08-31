@@ -1347,8 +1347,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                              "MOI inline-shadow probe", result)) {
       return;
     }
-    if (!publish_moi_access_patch(result, std::move(patcher).emit(), "inline-shadow probe",
-                                  std::move(lowering_commits), std::move(patches))) {
+    if (!result.publish_access_lowering(std::move(patcher).emit(), "ConSan MOI inline-shadow probe",
+                                        std::move(lowering_commits), std::move(patches))) {
       return;
     }
     return;
