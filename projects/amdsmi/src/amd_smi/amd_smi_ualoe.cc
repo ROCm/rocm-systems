@@ -838,6 +838,13 @@ amdsmi_status_t get_physical_acc_id_from_ualoe(amd::smi::AMDSmiGPUDevice* device
 static amdsmi_status_t get_gpu_identity_via_ualoe_locked(amd::smi::AMDSmiGPUDevice* device,
                                                          uint32_t& phys_id,
                                                          amdsmi_tray_info_t& tray_info) {
+#ifdef ENABLE_WSL_BACKEND
+  // get_mutex() indexes into the Linux RSMI device list, which WSL devices
+  // are never registered in; skip rather than lock a null mutex.
+  if (device->backend()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
   SMIGPUDEVICE_MUTEX(device->get_mutex());
   return get_gpu_identity_via_ualoe(device, phys_id, tray_info);
 }

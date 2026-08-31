@@ -1460,6 +1460,11 @@ amdsmi_status_t amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processo
 
   // Retrieve Physical Accelerator ID (UALoE)
   info->physical_acc_id = std::numeric_limits<uint32_t>::max();
+#ifdef ENABLE_WSL_BACKEND
+  // get_mutex() indexes into the Linux RSMI device list, which WSL devices
+  // are never registered in; skip rather than lock a null mutex.
+  if (!gpu_device->backend())
+#endif
   {
     SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
     get_physical_acc_id_from_ualoe(gpu_device, &(info->physical_acc_id));
