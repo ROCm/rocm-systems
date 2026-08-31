@@ -64,7 +64,7 @@ jobs:
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
-      baseline_repository: ${{ inputs.baseline_repository || (github.event_name == 'workflow_dispatch' && github.repository) || '' }}
+      baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
       ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
