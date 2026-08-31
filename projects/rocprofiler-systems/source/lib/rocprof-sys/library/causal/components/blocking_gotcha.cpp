@@ -180,7 +180,9 @@ blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
 }
 
 int
-blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*func)(const sigset_t*, int*),  // NOLINT(misc-include-cleaner)
+blocking_gotcha::operator()(gotcha_index<sigwait_idx>,
+                            int (*func)(const sigset_t*,  // NOLINT(misc-include-cleaner)
+                                        int*),
                             const sigset_t* set_v, int* sig) const noexcept
 {
     // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
@@ -205,7 +207,8 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*func)(const sigset_
     causal::sampling::unblock_backtrace_samples();
 
     // Woken up by another thread if the call did not fail and this is waking process
-    if(_active && ret != -1 && _info.si_pid == process::get_id())  // NOLINT(misc-include-cleaner)
+    if(_active && ret != -1 &&
+       _info.si_pid == process::get_id())  // NOLINT(misc-include-cleaner)
     {
         causal::delay::postblock(_delay_value);
     }
