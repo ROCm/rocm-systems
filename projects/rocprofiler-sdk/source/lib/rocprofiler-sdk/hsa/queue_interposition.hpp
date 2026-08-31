@@ -318,29 +318,33 @@ interposition_sync();
 /**
  * @brief Stop and join the completion-monitor thread, retiring any stragglers
  *
- * Closes the producer admission gate, wakes the monitor, joins it, then retires everything
- * left behind so pooled signals and correlation-id references are released. Does not wait for
- * producers still in the doorbell path: a batch they register is either caught by that final
- * retirement or disposed of by the producer itself, which sees the monitor stopped. Must be
- * called before the signal pool is torn down so those releases target a live pool. A batch
- * whose completion signal never dropped is released without emitting a dispatch record: its
- * timestamps live in that signal and were never written.
+ * Closes the producer admission gate, wakes the monitor, joins it, then retires everything left
+ * behind so pooled signals and correlation-id references are released. A batch whose completion
+ * signal never dropped is released without a dispatch record: its timestamps live in that signal
+ * and were never written. Blocks for a bounded grace period on batches already handed to the
+ * record emitter, so their records are out before the caller destroys the state those records
+ * name; called from a dispatch-complete callback, that wait runs to its deadline. Producers still
+ * in the doorbell path are not waited on: what they register is either caught by the final
+ * retirement or disposed of by the producer, which sees the monitor stopped. Must be called
+ * before the signal pool is torn down so those releases target a live pool.
  */
 void
 stop_completion_monitor();
 
 /**
- * @brief Signal that global finalization has begun
+ * @brief Mark that global finalization has begun
  *
  * Moves the monitor to a finalizing state, distinct from the transient per-client
- * finalizer state. The monitor keeps running and keeps retiring completions; only the
- * grace period a drain is willing to wait shortens, because at global shutdown an
- * in-flight dependency may never resolve and stop_completion_monitor's forced retirement
- * is the authoritative flush. Must be called before the finalize-path drain, and only on
- * the true global-teardown path.
+ * finalizer state. The monitor thread keeps running and keeps retiring completions already
+ * registered with it. Drains use the short grace period rather than the full runtime wait,
+ * since at global shutdown an in-flight dependency may never resolve and
+ * stop_completion_monitor's forced retirement is the authoritative flush. The inline
+ * admission gate treats any state other than active as bypass, so dispatches submitted after
+ * this point are not intercepted and produce no records. Must be called before the
+ * finalize-path drain, and only on the true global-teardown path.
  */
 void
-request_completion_monitor_shutdown();
+mark_completion_monitor_finalizing();
 }  // namespace queue_interposition
 }  // namespace hsa
 }  // namespace rocprofiler

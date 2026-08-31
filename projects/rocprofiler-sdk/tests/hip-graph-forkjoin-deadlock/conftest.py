@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,23 @@ def pytest_addoption(parser):
         default="hip-graph-forkjoin-deadlock-test.json",
         help="Input JSON",
     )
+    parser.addoption(
+        "--width",
+        action="store",
+        type=int,
+        required=True,
+        help="Branch kernels per layer",
+    )
+    parser.addoption(
+        "--depth",
+        action="store",
+        type=int,
+        required=True,
+        help="Diamond layers per replay",
+    )
+    parser.addoption(
+        "--replays", action="store", type=int, required=True, help="Graph launches"
+    )
 
 
 @pytest.fixture
@@ -40,3 +57,15 @@ def input_data(request):
     filename = request.config.getoption("--input")
     with open(filename, "r") as inp:
         return json.load(inp)
+
+
+@pytest.fixture
+def expected_dispatches(request):
+    """Kernel nodes the workload launches, which is the floor on dispatch records rather
+    than the exact total. Per replay: one root node, then per layer `width` branch kernels
+    and one join. The geometry is passed in by the test definition so it cannot drift from
+    the arguments the workload actually ran with."""
+    width = request.config.getoption("--width")
+    depth = request.config.getoption("--depth")
+    replays = request.config.getoption("--replays")
+    return replays * (1 + depth * (width + 1))
