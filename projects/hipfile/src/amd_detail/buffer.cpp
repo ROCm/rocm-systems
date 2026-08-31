@@ -59,13 +59,13 @@ Buffer::Buffer(const void *_buffer, size_t _length, int _flags, const PassKey<Bu
     }
 
     hipPointerAttribute_t _attrs = Context<Hip>::get()->hipPointerGetAttributes(buffer);
-    if (_attrs.type != hipMemoryTypeDevice) {
+    if (_attrs.type != hipMemoryTypeDevice && _attrs.type != hipMemoryTypeHost) {
         throw InvalidMemoryType();
     }
     type   = _attrs.type;
-    gpu_id = _attrs.device;
+    gpu_id = _attrs.type == hipMemoryTypeHost ? -1 : _attrs.device;
 
-    if (!isValidBufferRegion(buffer, length)) {
+    if (type == hipMemoryTypeDevice && !isValidBufferRegion(buffer, length)) {
         throw InvalidPointerRange();
     }
 }
@@ -78,11 +78,15 @@ Buffer::Buffer(const void *_buffer, const PassKey<BufferMap> &)
     }
 
     hipPointerAttribute_t _attrs = Context<Hip>::get()->hipPointerGetAttributes(buffer);
-    if (_attrs.type != hipMemoryTypeDevice) {
+    if (_attrs.type != hipMemoryTypeDevice && _attrs.type != hipMemoryTypeHost) {
         throw InvalidMemoryType();
     }
     type   = _attrs.type;
-    gpu_id = _attrs.device;
+    gpu_id = _attrs.type == hipMemoryTypeHost ? -1 : _attrs.device;
+
+    if (type == hipMemoryTypeHost) {
+        throw std::invalid_argument("Host buffer must be registered with an explicit size.");
+    }
 
     HipMemAddressRange range{Context<Hip>::get()->hipMemGetAddressRange(buffer)};
     length = range.size - (reinterpret_cast<uintptr_t>(buffer) - reinterpret_cast<uintptr_t>(range.base));

@@ -20,6 +20,20 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+namespace {
+
+constexpr std::array ioTypes{
+    hipFile::IoType::Read,
+    hipFile::IoType::Write,
+};
+constexpr std::array backends{
+    hipFile::StatsBackend::Fastpath,
+    hipFile::StatsBackend::Fallback,
+    hipFile::StatsBackend::Host,
+};
+
+} // namespace
+
 static int
 sendFd(int sock, int fd) noexcept
 {
@@ -296,6 +310,8 @@ namespace reportUtil {
                 return "Fastpath";
             case StatsBackend::Fallback:
                 return "Fallback";
+            case StatsBackend::Host:
+                return "Host";
             case StatsBackend::Count:
                 [[fallthrough]];
             default:
@@ -324,9 +340,7 @@ generateReportHistogramV1(
     if (stats == nullptr) {
         return;
     }
-    static constexpr IoType       ioTypes[]{IoType::Read, IoType::Write};
-    static constexpr StatsBackend backends[]{StatsBackend::Fastpath, StatsBackend::Fallback};
-    int                           fw{16}, w{34};
+    int fw{16}, w{34};
     stream << "IO " << name << " Histogram\n";
     stream << std::left << std::setw(fw) << "IO Size (KiB)";
     for (const auto &backend : backends) {
@@ -366,8 +380,6 @@ StatsClient::generateReportV1(std::ostream &stream, const StatsV1 *stats)
     stream << "Buffer Registrations: " << stats->getBufferRegistrations().load() << "\n";
     stream << "Fastpath Rejections: " << stats->getFastpathRejections().load() << "\n\n";
 
-    static constexpr IoType       ioTypes[]{IoType::Read, IoType::Write};
-    static constexpr StatsBackend backends[]{StatsBackend::Fastpath, StatsBackend::Fallback};
     for (const auto &backend : backends) {
         for (const auto &ioType : ioTypes) {
             uint64_t totalBytes{}, totalCount{}, totalTimeUs{}, totalErrors{}, totalUnaligned{};

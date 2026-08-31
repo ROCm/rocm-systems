@@ -13,6 +13,7 @@ class Configuration {
 
     std::optional<bool> m_fastpath_override;
     std::optional<bool> m_fallback_override;
+    std::optional<bool> m_host_override;
 
 public:
     virtual ~Configuration() = default;
@@ -42,6 +43,13 @@ public:
     /// @return true if unsupported file systems are allowed, false if only supported file systems are
     /// permitted (default)
     virtual bool unsupportedFileSystems() const noexcept;
+
+    /// @brief Checks if the host backend is enabled
+    /// @return true if the host backend is enabled, false otherwise
+    virtual bool host() const noexcept;
+
+    /// @brief Override host backend enablement
+    virtual void host(bool enabled) noexcept;
 };
 
 }

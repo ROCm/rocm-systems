@@ -60,6 +60,16 @@ public:
     /// nullopt if HIPFILE_UNSUPPORTED_FILE_SYSTEMS was unset or had a value other than
     /// true or false.
     static std::optional<bool> unsupported_file_systems();
+
+    /// @brief Allows IO operations to take place between files and host memory
+    ///
+    /// If enabled (default), file read/write operations allow host memory registered buffers in
+    /// addition to GPU buffers
+    static constexpr const char *const HOST{"HIPFILE_HOST"};
+
+    /// @brief Get the value of HIPFILE_HOST from the environment
+    /// @return An optional boolean if HIPFILE_HOST was set, nullopt otherwise.
+    static std::optional<bool> host();
 };
 
 }

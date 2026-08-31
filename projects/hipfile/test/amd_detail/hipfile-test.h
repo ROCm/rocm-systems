@@ -132,8 +132,43 @@ void expect_file_registration(hipFile::MSys &msys, hipFile::MLibMountHelper &mli
 //  ENUM VALUE HELPERS
 // ***********************************************************************
 
-constexpr std::array<hipMemoryType, 1> SupportedHipMemoryTypes{hipMemoryTypeDevice};
-constexpr std::array<hipMemoryType, 5> UnsupportedHipMemoryTypes{
-    hipMemoryTypeArray,   hipMemoryTypeHost,         hipMemoryTypeManaged,
-    hipMemoryTypeUnified, hipMemoryTypeUnregistered,
+namespace {
+
+// Allow either array or vector as input argument
+template <typename T, typename U>
+    requires(std::is_same_v<typename T::value_type, typename U::value_type>)
+auto
+set_difference(T lhs, U rhs) -> std::vector<typename T::value_type>
+{
+    std::sort(lhs.begin(), lhs.end());
+    std::sort(rhs.begin(), rhs.end());
+
+    std::vector<typename T::value_type> result;
+    result.reserve(std::size(lhs));
+    std::set_difference(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), std::back_inserter(result));
+    return result;
+}
+
+template <typename T, size_t N, size_t M>
+std::vector<T>
+set_union(std::array<T, N> lhs, std::array<T, M> rhs)
+{
+    std::sort(lhs.begin(), lhs.end());
+    std::sort(rhs.begin(), rhs.end());
+
+    std::vector<T> result;
+    result.reserve(std::size(lhs));
+    std::set_union(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), std::back_inserter(result));
+    return result;
+}
+
+}
+
+constexpr std::array KnownHipMemoryTypes = {
+    hipMemoryTypeDevice,  hipMemoryTypeHost,    hipMemoryTypeArray,
+    hipMemoryTypeManaged, hipMemoryTypeUnified, hipMemoryTypeUnregistered,
 };
+
+constexpr std::array SupportedFastpathMemoryTypes{hipMemoryTypeDevice};
+
+constexpr std::array SupportedHostMemoryTypes{hipMemoryTypeHost};

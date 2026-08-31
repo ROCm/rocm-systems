@@ -371,7 +371,8 @@ TEST_P(FastpathSupportedHipMemoryParam, Score)
               SCORE_ACCEPT);
 }
 
-INSTANTIATE_TEST_SUITE_P(FastpathTest, FastpathSupportedHipMemoryParam, ValuesIn(SupportedHipMemoryTypes));
+INSTANTIATE_TEST_SUITE_P(FastpathTest, FastpathSupportedHipMemoryParam,
+                         ValuesIn(SupportedFastpathMemoryTypes));
 
 struct FastpathUnsupportedHipMemoryParam : public FastpathTestBase, public TestWithParam<hipMemoryType> {};
 
@@ -387,7 +388,7 @@ TEST_P(FastpathUnsupportedHipMemoryParam, Score)
 }
 
 INSTANTIATE_TEST_SUITE_P(FastpathTest, FastpathUnsupportedHipMemoryParam,
-                         ValuesIn(UnsupportedHipMemoryTypes));
+                         ValuesIn(set_difference(KnownHipMemoryTypes, SupportedFastpathMemoryTypes)));
 
 struct FastpathAlignedIoSizesParam : public FastpathTestBase, public TestWithParam<size_t> {};
 
