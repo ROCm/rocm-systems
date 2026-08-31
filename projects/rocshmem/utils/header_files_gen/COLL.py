@@ -471,7 +471,9 @@ def generate_reduction_wave_api():
 
     float_types = [
         ("float", "float"),
-        ("double", "double")
+        ("double", "double"),
+        ("__half", "half"),
+        ("__hip_bfloat16", "bfloat16")
     ]
 
     for type_, tname_ in int_types:
@@ -583,7 +585,9 @@ def generate_reducescatter_wave_api():
 
     float_types = [
         ("float", "float"),
-        ("double", "double")
+        ("double", "double"),
+        ("__half", "half"),
+        ("__hip_bfloat16", "bfloat16")
     ]
 
     for type_, tname_ in int_types:
@@ -686,7 +690,9 @@ def generate_reduction_api():
 
     float_types = [
         ("float", "float"),
-        ("double", "double")
+        ("double", "double"),
+        ("__half", "half"),
+        ("__hip_bfloat16", "bfloat16")
     ]
 
     for type_, tname_ in int_types:
@@ -726,7 +732,9 @@ def generate_reduce_on_stream_api():
 
     float_types = [
         ("float", "float"),
-        ("double", "double")
+        ("double", "double"),
+        ("__half", "half"),
+        ("__hip_bfloat16", "bfloat16")
     ]
 
     for type_, tname_ in int_types:
