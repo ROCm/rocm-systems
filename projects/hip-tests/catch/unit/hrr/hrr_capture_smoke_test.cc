@@ -24,16 +24,27 @@
 
 namespace fs = std::filesystem;
 
+#ifndef HRR_CLR_LIB
+#define HRR_CLR_LIB ""
+#endif
+
 #ifdef _WIN32
 static constexpr char kPathSep = ';';
 #else
 static constexpr char kPathSep = ':';
 #endif
 
-static void set_proc_search_path(hip::SpawnProc& proc) {
+static void set_proc_runtime_env(hip::SpawnProc& proc) {
   const char* cur_path = getenv("PATH");
   proc.setEnv("PATH",
               std::string(ROCM_BIN_PATH) + kPathSep + (cur_path ? cur_path : ""));
+#if !defined(_WIN32)
+  if (HRR_CLR_LIB[0] != '\0') {
+    const char* cur_ld = getenv("LD_LIBRARY_PATH");
+    std::string ld = std::string(HRR_CLR_LIB) + kPathSep + (cur_ld ? cur_ld : "");
+    proc.setEnv("LD_LIBRARY_PATH", ld);
+  }
+#endif
 }
 
 struct ScopedDir {
@@ -67,7 +78,7 @@ HIP_TEST_CASE(Unit_HRR_CaptureSmoke) {
 
   hip::SpawnProc proc(HRR_TEST_EXE);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-  set_proc_search_path(proc);
+  set_proc_runtime_env(proc);
   int ret = proc.run("\"Unit_HRR_CaptureSmoke_Direct\"");
   INFO("Capture subprocess exit code: " << ret);
   REQUIRE(ret == 0);
