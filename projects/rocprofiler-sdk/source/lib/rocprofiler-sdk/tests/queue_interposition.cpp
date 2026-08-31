@@ -36,6 +36,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -492,6 +493,95 @@ TEST(queue_interposition, doorbell_blocks_while_queue_lifetime_lock_is_held)
     EXPECT_EQ(real_wdid, 1u);
     EXPECT_EQ(state->next_submit_pos, 1u);
     EXPECT_EQ(get_pkt(ring, 0, 255)->kernel_object, static_cast<uint64_t>(0xFEEDFACE));
+}
+
+// Dispatch-storm stress: one thread per queue ringing doorbells continuously while
+// destroy_queue()'s exclusive section repeatedly cuts in. gate_lock is per-queue, so these
+// really do run concurrently. Every packet must still be published exactly once and in
+// order, and the run must not deadlock against the exclusive holder.
+TEST(queue_interposition, doorbell_stress_many_queues_concurrent_destroy)
+{
+    constexpr auto num_queues           = size_t{8};
+    constexpr auto dispatches_per_queue = size_t{20000};
+    constexpr auto ring_slots           = uint64_t{256};
+
+    struct fake_queue_ring
+    {
+        std::shared_ptr<QueueState> state     = std::make_shared<QueueState>();
+        std::vector<char>           ring      = std::vector<char>(64 * ring_slots, 0);
+        uint64_t                    real_wdid = 0;
+        uint64_t                    real_rdid = 0;
+    };
+
+    auto queues = std::vector<std::unique_ptr<fake_queue_ring>>{};
+    queues.reserve(num_queues);
+    for(size_t q = 0; q < num_queues; ++q)
+    {
+        auto _v              = std::make_unique<fake_queue_ring>();
+        _v->state->ring_buf  = _v->ring.data();
+        _v->state->ring_size = ring_slots;
+        _v->state->ring_mask = ring_slots - 1;
+        _v->state->real_wdid = &_v->real_wdid;
+        _v->state->real_rdid = &_v->real_rdid;
+        queues.emplace_back(std::move(_v));
+    }
+
+    std::atomic<bool> stop_destroyer{false};
+    std::atomic<int>  exclusive_acquisitions{0};
+
+    std::thread destroyer([&]() {
+        while(!stop_destroyer.load(std::memory_order_acquire))
+        {
+            auto _lifetime = std::unique_lock{queue_lifetime_mutex()};
+            exclusive_acquisitions.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
+        }
+    });
+
+    auto workers = std::vector<std::thread>{};
+    workers.reserve(num_queues);
+    for(size_t q = 0; q < num_queues; ++q)
+    {
+        workers.emplace_back([&, q]() {
+            auto* fq = queues[q].get();
+            for(uint64_t n = 0; n < dispatches_per_queue; ++n)
+            {
+                auto* pkt          = get_pkt(fq->ring.data(), n, ring_slots - 1);
+                pkt->kernel_object = 0xD000 + n;
+                __atomic_store_n(&pkt->header,
+                                 static_cast<uint16_t>(HSA_PACKET_TYPE_KERNEL_DISPATCH
+                                                       << HSA_PACKET_HEADER_TYPE),
+                                 __ATOMIC_RELEASE);
+                fq->state->virtual_wptr.store(n + 1, std::memory_order_release);
+
+                process_doorbell_impl(fq->state, n, [](hsa_signal_t, hsa_signal_value_t) {});
+
+                // simulate the GPU draining so the ring never backs up
+                __atomic_store_n(&fq->real_rdid, n + 1, __ATOMIC_RELEASE);
+            }
+        });
+    }
+
+    for(auto& itr : workers)
+        itr.join();
+    stop_destroyer.store(true, std::memory_order_release);
+    destroyer.join();
+
+    EXPECT_GT(exclusive_acquisitions.load(), 0)
+        << "the destroyer never acquired the exclusive lock, so nothing was contended";
+
+    GTEST_LOG_(INFO) << "queues=" << num_queues << " dispatches/queue=" << dispatches_per_queue
+                     << " exclusive_acquisitions=" << exclusive_acquisitions.load();
+
+    for(size_t q = 0; q < num_queues; ++q)
+    {
+        const auto* fq = queues[q].get();
+        EXPECT_EQ(fq->real_wdid, dispatches_per_queue) << "queue " << q
+                                                       << " published the wrong "
+                                                          "number of packets";
+        EXPECT_EQ(fq->state->next_scan_pos, dispatches_per_queue) << "queue " << q;
+        EXPECT_EQ(fq->state->next_submit_pos, dispatches_per_queue) << "queue " << q;
+    }
 }
 }  // namespace
 }  // namespace queue_interposition

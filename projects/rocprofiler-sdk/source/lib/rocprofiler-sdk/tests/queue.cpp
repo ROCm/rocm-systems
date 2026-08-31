@@ -38,6 +38,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -104,6 +105,22 @@ fake_agent_cache()
 void
 null_writer(const void*, uint64_t)
 {}
+
+// WriteInterceptor invokes the writer while still holding the shared lifetime lock
+// (queue.cpp:329 under the lock taken at :317), so these counters observe the inside of the
+// guarded region. The writer is a raw function pointer and cannot capture, hence file scope.
+std::atomic<int>      dispatch_in_flight{0};
+std::atomic<bool>     observed_overlap{false};
+std::atomic<uint64_t> dispatch_count{0};
+
+void
+counting_writer(const void*, uint64_t)
+{
+    dispatch_in_flight.fetch_add(1, std::memory_order_acq_rel);
+    std::this_thread::yield();
+    dispatch_count.fetch_add(1, std::memory_order_relaxed);
+    dispatch_in_flight.fetch_sub(1, std::memory_order_acq_rel);
+}
 }  // namespace
 
 // Regression test for the Queue use-after-free on the HSA-intercept path. destroy_queue()
@@ -139,6 +156,67 @@ TEST(queue, write_interceptor_blocks_while_queue_lifetime_lock_is_held)
 
     ASSERT_TRUE(completed) << "WriteInterceptor did not resume after the exclusive "
                               "queue_lifetime_mutex() was released";
+}
+
+// Stress the same invariant under dispatch-storm conditions: many concurrent interceptor
+// calls on one shared Queue while destroy_queue()'s exclusive section repeatedly cuts in.
+// The writer runs inside the shared lock, so a writer observed while the exclusive lock is
+// held would mean the two sections overlapped and ~Queue() could free the object mid-call.
+TEST(queue, write_interceptor_stress_under_concurrent_destroy)
+{
+    constexpr auto num_dispatch_threads  = size_t{8};
+    constexpr auto dispatches_per_thread = size_t{20000};
+
+    auto _queue = FakeQueue{fake_agent_cache(), rocprofiler_queue_id_t{.handle = 1}};
+
+    auto packets      = std::array<hsa_kernel_dispatch_packet_t, 1>{};
+    packets[0].header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+
+    dispatch_in_flight.store(0);
+    observed_overlap.store(false);
+    dispatch_count.store(0);
+
+    std::atomic<bool> stop_destroyer{false};
+    std::atomic<int>  exclusive_acquisitions{0};
+
+    // stands in for QueueController::destroy_queue()'s critical section
+    std::thread destroyer([&]() {
+        while(!stop_destroyer.load(std::memory_order_acquire))
+        {
+            auto _lifetime = std::unique_lock{queue_lifetime_mutex()};
+            if(dispatch_in_flight.load(std::memory_order_acquire) != 0)
+                observed_overlap.store(true, std::memory_order_release);
+            std::this_thread::yield();
+            if(dispatch_in_flight.load(std::memory_order_acquire) != 0)
+                observed_overlap.store(true, std::memory_order_release);
+            exclusive_acquisitions.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    auto dispatchers = std::vector<std::thread>{};
+    dispatchers.reserve(num_dispatch_threads);
+    for(size_t i = 0; i < num_dispatch_threads; ++i)
+    {
+        dispatchers.emplace_back([&]() {
+            for(size_t n = 0; n < dispatches_per_thread; ++n)
+                _queue.invoke_write_interceptor(packets.data(), packets.size(), counting_writer);
+        });
+    }
+
+    for(auto& itr : dispatchers)
+        itr.join();
+    stop_destroyer.store(true, std::memory_order_release);
+    destroyer.join();
+
+    EXPECT_FALSE(observed_overlap.load())
+        << "a WriteInterceptor call was in flight while queue_lifetime_mutex() was held "
+           "exclusively: the shared and exclusive sections overlapped";
+    EXPECT_EQ(dispatch_count.load(), num_dispatch_threads * dispatches_per_thread);
+    EXPECT_GT(exclusive_acquisitions.load(), 0)
+        << "the destroyer never acquired the exclusive lock, so nothing was contended";
+
+    GTEST_LOG_(INFO) << "dispatches=" << dispatch_count.load()
+                     << " exclusive_acquisitions=" << exclusive_acquisitions.load();
 }
 }  // namespace hsa
 }  // namespace rocprofiler
