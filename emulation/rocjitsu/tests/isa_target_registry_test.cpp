@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <string>
@@ -94,8 +95,16 @@ static_assert(cdna2::kTargetDescriptor.gpu_targets.front().public_id ==
 static_assert(rdna4::kTargetDescriptor.aliases.size() == 2);
 static_assert(rdna4::kTargetDescriptor.aliases[0] == "gfx1200");
 static_assert(rdna4::kTargetDescriptor.aliases[1] == "gfx1201");
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX90A) == 0);
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX942) == 1);
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX950) == 2);
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1200) == 3);
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1201) == 4);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1250) == 5);
-static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_INVALID) == 6);
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_NUM_TARGETS) == 6);
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_INVALID) == INT32_MAX);
+static_assert(sizeof(rj_code_target_id_t) == sizeof(int32_t));
+static_assert(std::is_same_v<std::underlying_type_t<rj_code_target_id_t>, int32_t>);
 
 TEST(IsaTargetRegistryTest, PreservesStaticDescriptorOrder) {
   static constexpr std::array targets = {
@@ -196,6 +205,15 @@ TEST(IsaTargetRegistryTest, RejectsInvalidTargetDescriptors) {
       fixture_target("invalid-gpu-target", {}, ROCJITSU_CODE_ARCH_CDNA1, invalid_gpu_value),
   };
   expect_registry_error(invalid_gpu_target, "unallocated GPU target");
+
+  static constexpr std::array past_last_gpu_value = {
+      fixture_gpu_target(ROCJITSU_CODE_TARGET_NUM_TARGETS, "past-last-gpu-target",
+                         EF_AMDGPU_MACH_AMDGCN_GFX90A),
+  };
+  static constexpr std::array past_last_gpu_target = {
+      fixture_target("past-last-gpu-target", {}, ROCJITSU_CODE_ARCH_CDNA1, past_last_gpu_value),
+  };
+  expect_registry_error(past_last_gpu_target, "unallocated GPU target");
 
   static constexpr std::array<std::string_view, 1> duplicate_enum_alias{"duplicate-enums-alias"};
   static constexpr std::array duplicate_enum_values = {

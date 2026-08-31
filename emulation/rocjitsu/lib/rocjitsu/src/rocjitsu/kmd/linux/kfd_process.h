@@ -23,6 +23,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
@@ -475,6 +476,7 @@ public:
   /// @param mtype PTE MTYPE for these pages (derived from allocation flags).
   void map_pages(uint64_t gpu_va, void *host_ptr, size_t size,
                  amdgpu::Mtype mtype = amdgpu::Mtype::RW) {
+    std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
     auto *base = static_cast<uint8_t *>(host_ptr);
     uint64_t mapped_va = gpu_va;
@@ -500,6 +502,7 @@ public:
 
   /// @brief Unmap pages from this process's GPU page table.
   void unmap_pages(uint64_t gpu_va, size_t size) {
+    std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
     uint64_t mapped_va = gpu_va;
     size_t unmapped_bytes = 0;
@@ -525,6 +528,7 @@ public:
   /// page-table critical section. Only entries still pointing at the expected
   /// old page are changed.
   void remap_page_host_ptrs(uint64_t gpu_va, void *old_host_ptr, void *new_host_ptr, size_t size) {
+    std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
     auto *old_base = static_cast<uint8_t *>(old_host_ptr);
     auto *new_base = static_cast<uint8_t *>(new_host_ptr);
@@ -558,6 +562,7 @@ public:
 
   /// @brief Update the MTYPE of mapped pages and invalidate cached PTE copies.
   void set_page_mtype(uint64_t gpu_va, size_t size, amdgpu::Mtype mtype) {
+    std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
     bool changed = false;
     uint64_t mapped_va = gpu_va;
@@ -579,6 +584,11 @@ public:
 
   /// @brief Return the mutation counter used by GpuMemory translation caches.
   const uint64_t *page_table_generation() const { return &page_table_generation_; }
+
+  /// @brief Return the lease shared by page-table readers and mutations.
+  std::shared_ptr<std::shared_mutex> page_table_request_mutex() const {
+    return page_table_request_mutex_;
+  }
 
   mutable std::shared_mutex page_table_mutex_;
   PageTable page_table_;
@@ -641,7 +651,16 @@ public:
     uint32_t ring_size = 0;
     uint32_t queue_type = 0;
     uint32_t gpu_id = 0;
+    uint32_t xcc_id = 0;
     uint64_t exception_status = 0; ///< Raised exceptions on this queue (KFD_EC_MASK bits).
+
+    /// @brief Area used by the XCC that owns this queue.
+    uint64_t cwsr_xcc_address() const {
+      return ctx_save_restore_address == 0
+                 ? 0
+                 : ctx_save_restore_address +
+                       static_cast<uint64_t>(xcc_id) * ctx_save_restore_area_size;
+    }
   };
   std::unordered_map<uint32_t, QueueSnapshotInfo> queue_snapshot_map_;
 
@@ -730,8 +749,11 @@ private:
 
   /// @brief Page table version counter, bumped on every PTE mutation.
   /// @details GpuMemory keeps per-thread TLB-like translation caches keyed by
-  ///          this generation; all reads and writes occur while holding
-  ///          page_table_mutex_, so the counter itself does not need atomics.
+  ///          this generation. Mutations hold both page_table_request_mutex_
+  ///          and page_table_mutex_; readers hold at least one of those locks,
+  ///          so the counter itself does not need atomics.
+  std::shared_ptr<std::shared_mutex> page_table_request_mutex_ =
+      std::make_shared<std::shared_mutex>();
   uint64_t page_table_generation_{1};
 };
 
