@@ -26,6 +26,7 @@ NCCL_PARAM(GinA2AEnable, "GIN_A2A_ENABLE", 1)
 NCCL_PARAM(GinA2AMinBytes, "GIN_A2A_MIN_BYTES", 0)
 
 // Per-peer bytes at or above which SDMA beats direct LSA stores.
+// On 8 ranks that is a 64 MiB message, so LSA covers everything up to 32 MiB.
 NCCL_PARAM(GinA2ASdmaMinBytes, "GIN_A2A_SDMA_MIN_BYTES", 8 * 1024 * 1024)
 
 namespace {
@@ -35,7 +36,7 @@ constexpr bool kSdmaDeviceBackendCompiled = (NCCL_GIN_ANVIL_SDMA_ENABLE != 0);
 
 // markSdmaDirty packs (peer, channel) into a 64-bit mask and drops anything past
 // bit 64. The scaleup path uses one channel, so this bound keeps us in range.
-// SDMA puts one peer per thread, so kGinA2AThreadsPerCta has to be at least this.
+// SDMA puts one peer per thread and strides if there are more peers than threads.
 constexpr int kGinA2AMaxRanks = 16;
 
 // This path only queues one put per peer and the SDMA engines do the copying.
@@ -113,8 +114,7 @@ __global__ void ncclGinA2AKernel(ncclWindow_t sendWin, size_t sendOff, ncclWindo
     ncclBarrierSession<ncclCoopCta> bar{ncclCoopCta(), ncclTeamTagWorld(), gin, slot};
     bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::None);
 
-    int peer = threadIdx.x;
-    if (peer < devComm.nRanks) {
+    for (int peer = threadIdx.x; peer < devComm.nRanks; peer += blockDim.x) {
       gin.put(ncclTeamWorld(devComm), peer, recvWin, recvOff + devComm.rank * bytesPerPeer, sendWin,
               sendOff + peer * bytesPerPeer, bytesPerPeer, ncclGin_SignalInc{slot});
     }
