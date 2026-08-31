@@ -17,7 +17,7 @@ from utils.kernel_name_shortener import (
     kernel_name_shortener,
 )
 from utils.logger import console_error, console_log, console_warning
-from utils.mem_chart_common import format_mem_chart_heading
+from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
     NS_TO_MS,
@@ -854,6 +854,7 @@ def format_table_output(
                         args.normal_unit,
                         panel_id=int(table_config["id"]),
                     ),
+                    gpu_arch=gpu_arch,
                 )
                 + "\n"
             )
@@ -1059,7 +1060,11 @@ def show_all(
                 )
             elif is_gfx9(gpu_arch):
                 panel_content += (
-                    mem_chart_gfx9.plot_mem_chart(mem_chart_data, chart_title=heading)
+                    mem_chart_gfx9.plot_mem_chart(
+                        mem_chart_data,
+                        chart_title=heading,
+                        gpu_arch=gpu_arch,
+                    )
                     + "\n"
                 )
             elif is_gfx1250(gpu_arch):
@@ -1078,6 +1083,8 @@ def show_all(
         if panel_content and (
             table_config["id"] not in [401, 402] or _tty_view_is_table(args)
         ):
+            if not hasattr(output, "isatty") or not output.isatty():
+                panel_content = strip_ansi(panel_content)
             if _panel_is_mem_chart_only(panel) and not _tty_view_is_table(args):
                 print(panel_content, file=output)
             else:
