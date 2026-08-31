@@ -94,8 +94,8 @@ __host__ int ROHostContext::reduce_scatter(rocshmem_team_t team, T *dest,
 
 template <typename T, ROCSHMEM_OP Op>
 __host__ int ROHostContext::reduce_on_stream(rocshmem_team_t team, T *dest,
-                                             const T *source, 
-                                             int nreduce, 
+                                             const T *source,
+                                             int nreduce,
                                              hipStream_t stream) {
   return host_interface->reduce_on_stream<T, Op>(team, dest, source, nreduce, stream);
 }

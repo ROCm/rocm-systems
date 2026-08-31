@@ -367,8 +367,8 @@ __device__ void ROContext::broadcast_wg(rocshmem_team_t team, T *dest,
 
 template <typename T>
 __device__ int ROContext::broadcast_wave([[maybe_unused]] rocshmem_team_t team,
-                                        [[maybe_unused]] T *dest, 
-                                        [[maybe_unused]] const T* source, 
+                                        [[maybe_unused]] T *dest,
+                                        [[maybe_unused]] const T* source,
                                         [[maybe_unused]] int nelems,
                                         [[maybe_unused]] int PE_root) {
   LOGD_WARN("Broadcast Wave API not implemented for reverse offload backend");
@@ -395,9 +395,9 @@ __device__ void ROContext::alltoall_wg(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ int ROContext::alltoall_wave([[maybe_unused]] rocshmem_team_t team, 
-                                            [[maybe_unused]] T* dest, 
-                                            [[maybe_unused]] const T* source, 
+__device__ int ROContext::alltoall_wave([[maybe_unused]] rocshmem_team_t team,
+                                            [[maybe_unused]] T* dest,
+                                            [[maybe_unused]] const T* source,
                                             [[maybe_unused]] int nelems) {
   LOGD_WARN("Alltoall_wave not implemented for reverse offload backend");
   return ROCSHMEM_ERROR;
