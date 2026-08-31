@@ -60,7 +60,6 @@ jobs:
     needs: resolve_nightly
     env:
       AIS_CI_IMAGE_NAME: ais_ci_ubuntu
-      AIS_INPUT_PLATFORM: ubuntu
       AIS_NIGHTLY_BUILD: ${{ needs.resolve_nightly.outputs.nightly_build }}
       AIS_NIGHTLY_ROCM_VERSION: ${{ needs.resolve_nightly.outputs.nightly_rocm_version }}
     runs-on: [ubuntu-24.04]
