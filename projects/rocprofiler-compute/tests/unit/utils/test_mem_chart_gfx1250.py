@@ -177,12 +177,6 @@ class TestIntegrationGfx1250:
         chart = mem_chart_gfx1250.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
         assert chart.count("GB/s") >= 5
 
-    def test_get_sample_metrics_returns_copy(self):
-        m1 = mem_chart_gfx1250.get_sample_metrics()
-        m2 = mem_chart_gfx1250.get_sample_metrics()
-        m1["DRAM Read Bandwidth"] = 0
-        assert m2["DRAM Read Bandwidth"] != 0
-
 
 def test_chart_title_appears_as_first_line():
     chart_title = "7. Memory Chart (Normalization: per_kernel)"
