@@ -1470,7 +1470,7 @@ static hsa_status_t BuildPdiInstsCommand(int fd, const void* heap_base, const vo
                                2 * pkt->num_kernargs);  // arguments (address lo/hi)
   ert_start_kernel_cmd* cmd = nullptr;
   err = CreateCommand(fd, heap_base, cmd_dwords + CMD_COUNT_SIZE_INCREASE, ERT_START_CU,
-                      0x1 << cached_pdi_index, cmd_bo, &cmd);
+                      1u << cached_pdi_index, cmd_bo, &cmd);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
@@ -1882,9 +1882,10 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
       ++chunk_len;
     }
     if (chunk_len == 0) {
-      // A single command does not fit in the chain buffer at all. Nothing to split further.
-      assert(false && "Command exceeds the driver's chain buffer.");
-      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+      // This command does not fit in a chain buffer on its own. Submit it by itself anyway:
+      // SubmitAndWaitChain sends a lone command directly, with no chain wrapper, so the 4 KiB
+      // chain buffer is not involved and the budget above does not apply to it.
+      chunk_len = 1;
     }
 
     const hsa_status_t status = SubmitAndWaitChain(

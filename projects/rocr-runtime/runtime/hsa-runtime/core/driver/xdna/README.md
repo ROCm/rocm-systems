@@ -186,7 +186,7 @@ construction are correct.
 ## Known gaps
 
 - The 68-command full-ELF chain ceiling is arithmetic, never exercised: the AIE queue is pinned at
-  64 packets, so a full-ELF chain cannot reach it. Only the PDI path's 40-command split is covered
+  64 packets, so a full-ELF chain cannot reach it. Only the PDI path's 44-command split is covered
   by a test.
 - The aie2 rejection path has no test that can run on aie2p hardware.
 - Too-old firmware on a supported part is not distinguished from other submit failures.

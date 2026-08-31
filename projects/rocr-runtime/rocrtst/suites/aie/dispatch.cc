@@ -1620,7 +1620,16 @@ TEST_F(FullElfDispatchTest, ElfParseRejectsSecondPdiPatchSite) {
   ASSERT_NO_THROW(aie_full_elf::Parse(image.data(), image.size()));
 
   ASSERT_TRUE(mutate_relocation(image, 1, /*sym=*/1, /*type=*/8));
-  EXPECT_THROW(aie_full_elf::Parse(image.data(), image.size()), std::runtime_error);
+  // Assert on the reason, not just that something threw: this ELF encodes the patch scheme in
+  // r_info, but an ABI-version-1 ELF encodes it in the addend, where rewriting r_info alone would
+  // leave the scheme unchanged and trip a different check.
+  try {
+    aie_full_elf::Parse(image.data(), image.size());
+    FAIL() << "a second PDI patch site was accepted";
+  } catch (const std::runtime_error& e) {
+    EXPECT_NE(std::string(e.what()).find("more than one PDI patch site"), std::string::npos)
+        << "rejected for the wrong reason: " << e.what();
+  }
 }
 
 TEST_F(FullElfDispatchTest, ElfWriteControlCodeChecksItsInputs) {
@@ -1910,6 +1919,8 @@ TEST_F(FullElfDispatchTest, ElfMisalignedControlCodeRejected) {
   auto* in = input.as<std::uint32_t>();
   auto* out = output.as<std::uint32_t>();
   std::iota(in, in + aie_full_elf_kernel::element_count, 0);
+  constexpr std::uint32_t sentinel = 0xD0D0D0D0;
+  std::fill_n(out, aie_full_elf_kernel::element_count, sentinel);
   std::memcpy(pdi.get(), kernel.pdi.data(), kernel.pdi.size());
   ASSERT_NO_THROW(aie_full_elf::WriteControlCode(
       kernel, ctrl_code, kernel.ctrl_code.size(),
@@ -1922,10 +1933,11 @@ TEST_F(FullElfDispatchTest, ElfMisalignedControlCodeRejected) {
       kernargs.as<std::uint64_t>(), signal, queue);
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
 
-  // Must come back as an error, not a hang.
-  EXPECT_NE(hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
-                                      HSA_WAIT_STATE_BLOCKED),
-            0);
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
+    ASSERT_EQ(out[i], sentinel) << "rejected dispatch wrote output at index " << i;
+  }
 
   EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
@@ -2312,7 +2324,7 @@ TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
 
 // The PDI + instruction sequence path packs a wider chain slot than full-ELF, so
 // its chains are shorter. The driver packs each command into a 4 KiB buffer, giving
-// floor(4096 / (52 + 4 * arg_cnt)) commands per chain: 40 for this kernel's two
+// floor(4096 / (52 + 4 * arg_cnt)) commands per chain: 44 for this kernel's two
 // arguments, against a 64-packet queue. The runtime splits an oversized batch
 // across several chains rather than letting the driver reject it.
 //
