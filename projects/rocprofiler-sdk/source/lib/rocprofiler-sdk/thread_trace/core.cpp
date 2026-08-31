@@ -43,7 +43,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <limits>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -145,18 +144,8 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
     const auto* agent =
         CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
 
-    // The public mask is wider than the set of shader engines implemented by an agent. Filter it
-    // before constructing AQLProfile resources and buffering packets so, for example, 0xFFFFFFFF
-    // becomes 0xF on a four-SE agent instead of creating packets for non-existent engines.
     num_shader_engines = agent->get_rocp_agent()->num_shader_banks;
-    const auto valid_shader_engine_mask =
-        (num_shader_engines >= std::numeric_limits<uint64_t>::digits)
-            ? std::numeric_limits<uint64_t>::max()
-            : (uint64_t{1} << num_shader_engines) - 1;
-    params.shader_engine_mask &= valid_shader_engine_mask;
-
-    if(params.shader_engine_mask == 0)
-        throw std::runtime_error("Thread trace shader-engine mask does not select a valid engine");
+    params.shader_engine_mask &= (uint64_t{1} << num_shader_engines) - 1;
 
     size_t staging_size = (params.num_buffers > 1) ? params.buffer_size : 0ul;
     size_t staging_n    = (params.num_buffers > 1) ? params.num_buffers : 0ul;
