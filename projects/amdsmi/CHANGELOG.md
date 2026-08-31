@@ -11,9 +11,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added `physical_acc_id` to `amdsmi_enumeration_info_t`**.  
   - Populated by `amdsmi_get_gpu_enumeration_info()`, UALoE-backed like the existing `physical_acc_id` field in `amdsmi_asic_info_t`.
   - CLI: `amd-smi list --enumeration` now includes `PHYSICAL_ACC_ID` next to `OAM_ID`.
-- **Expanded `amdsmi_gpu_block_t` enum with 20 new RAS IP blocks**.  
-  - Added blocks: from `AMDSMI_GPU_BLOCK_MMSCH` to `AMDSMI_GPU_BLOCK_UCIE_PCS` at bit positions 19-38.
-  - Updated `AMDSMI_GPU_BLOCK_LAST` to `AMDSMI_GPU_BLOCK_UCIE_PCS`.
 
 ### Changed
 
