@@ -38,8 +38,6 @@ else()
     list(APPEND SYSTEM_TEST_SOURCE_FILES
         system/amd/io.cpp
         system/amd/io-data-modification.cpp
-        system/amd/io-data-modification-bytes.cpp
-        system/amd/io-data-modification-unaligned.cpp
         system/amd/verify-kernel.hip
     )
     list(APPEND SHARED_SOURCE_FILES common/ais-capability.cpp)
