@@ -31,6 +31,12 @@ else()
     set(LOG_LEVEL "trace")
 endif()
 
+set(DEFAULT_TOOL_SONAME_TEST_DISABLED ${IS_DISABLED})
+if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
+    # This test requires trace output, which is intentionally disabled under LSan.
+    set(DEFAULT_TOOL_SONAME_TEST_DISABLED ON)
+endif()
+
 set(rocattach-test-env
     "ROCP_TOOL_ATTACH=1"
     "ROCPROFILER_REGISTER_LOG_LEVEL=${LOG_LEVEL}"
@@ -195,6 +201,18 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}|ROCPROFILER_REGISTER_LIBRARY is already set|Test FAILED"
     )
+
+rocprofiler_add_integration_execute_test(
+    rocattach-default-tool-soname-test-execute
+    TARGET rocattach-tool-path-validation-test
+    ARGS --default
+    TIMEOUT 5
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${DEFAULT_TOOL_SONAME_TEST_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "Tool library path: librocprofiler-sdk-tool\\.so\\.[0-9]+"
+    FAIL_REGULAR_EXPRESSION "Test FAILED")
 
 # Verify absolute tool library paths fail early when target-side dlopen could not resolve
 # them from the target mount namespace.
