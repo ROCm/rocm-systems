@@ -69,8 +69,10 @@ TEST(AllGatherGpu, TierPredicateMatchesHost) {
   if (!gpuAvailable()) GTEST_SKIP() << "no visible GPU";
 
   // Absolute semantics at the compiled default crossover (not just host/device parity).
-  EXPECT_TRUE(gin_sdma_allgather::chunkUsesLsaTier(32768, kAllGatherSdmaThresholdDefault));
-  EXPECT_FALSE(gin_sdma_allgather::chunkUsesLsaTier(32769, kAllGatherSdmaThresholdDefault));
+  EXPECT_TRUE(gin_sdma_allgather::chunkUsesLsaTier(
+      32768, gin_sdma_allgather::kAllGatherSdmaThresholdDefault));
+  EXPECT_FALSE(gin_sdma_allgather::chunkUsesLsaTier(
+      32769, gin_sdma_allgather::kAllGatherSdmaThresholdDefault));
 
   std::vector<uint64_t> chunk, thr;
   const uint64_t thresholds[] = {0, 128, 2097152, 16777216};
