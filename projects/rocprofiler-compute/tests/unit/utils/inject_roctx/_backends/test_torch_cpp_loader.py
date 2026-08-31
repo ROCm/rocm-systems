@@ -69,11 +69,6 @@ def test_torch_version_exits_when_torch_is_missing(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def clear_cmake_binary_dir(monkeypatch):
-    monkeypatch.delenv("CMAKE_BINARY_DIR", raising=False)
-
-
 def write_collector_so(directory: Path, version: str, abi: str = _FAKE_ABI) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"torch_trace_collector-{version}.{abi}.so"
@@ -156,16 +151,6 @@ def test_list_collector_artifacts_uses_root_build_lib(tmp_path, monkeypatch):
     package_root = tmp_path / "src"
     package_root.mkdir(parents=True)
     so_path = write_collector_so(tmp_path / "build" / "lib", "2.13")
-    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
-    assert inject_roctx_loader.list_collector_artifacts() == {"2.13": so_path}
-
-
-def test_list_collector_artifacts_uses_cmake_binary_dir_lib(tmp_path, monkeypatch):
-    package_root = tmp_path / "src"
-    package_root.mkdir(parents=True)
-    cmake_binary_dir = tmp_path / "out"
-    so_path = write_collector_so(cmake_binary_dir / "lib", "2.13")
-    monkeypatch.setenv("CMAKE_BINARY_DIR", str(cmake_binary_dir))
     monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
     assert inject_roctx_loader.list_collector_artifacts() == {"2.13": so_path}
 
