@@ -189,7 +189,7 @@ snap(hsa_agent_t agent)
         [&](void* gpu_addr, size_t size, std::string_view what, bool from_tracker) -> bool {
         if(size == 0) return true;
 
-        mem_block_t blk;
+        auto blk         = mem_block_t{};
         blk.gpu_addr     = gpu_addr;
         blk.from_tracker = from_tracker;
         try
