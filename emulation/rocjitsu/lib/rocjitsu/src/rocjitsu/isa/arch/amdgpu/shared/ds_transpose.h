@@ -11,8 +11,9 @@
 /// cross-lane shuffle to produce the transposed matrix layout expected by
 /// matrix instructions.
 ///
-/// B64_TR_B8 is the CDNA4 MFMA byte transpose with groups of 4 consecutive
-/// lanes. WMMA_TR_B8 is the CDNA5/RDNA4 16x16 byte-matrix transpose.
+/// B64_TR_B8 is the CDNA4 MFMA byte transpose within 16-lane groups.
+/// WMMA_TR_B8 is used by RDNA4 and CDNA5 global loads. CDNA5_DS_TR_B8
+/// handles the four-row, two-column-half request grouping of gfx1250 DS loads.
 /// TR16_B128 (gfx1250 ds/global_load_tr16_b128, RDNA4 global_load_tr_b128)
 /// transposes 16-bit elements within groups of 8 consecutive lanes.
 /// B64_TR_B16 (CDNA4 ds_read_b64_tr_b16) is a 4x16-lane halfword transpose
@@ -20,6 +21,7 @@
 
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -35,53 +37,37 @@ enum class TransposeKind : uint8_t {
   TR16_B128 = 4,
   B64_TR_B16 = 5,
   WMMA_TR_B8 = 6,
+  CDNA5_DS_TR_B8 = 7,
 };
 
-/// @brief CDNA4 B64 byte-level MFMA transpose (B64_TR_B8 only).
+/// @brief CDNA4 MFMA B64 byte-level transpose (B64_TR_B8 only).
 ///
-/// Groups of 4 source lanes, 8 byte iterations per group.
-/// Each iteration packs one byte from each of 4 source lanes into a dword
-/// and writes to a cross-lane destination computed by compact formula.
+/// Within each 16-lane group, destination lane `l` byte `n` comes from source
+/// lane `((l & ~0xf) | ((l >> 3) & 1)) + 2 * n`, byte `l & 7`.
+/// B64_TR_B8 always carries exactly two dwords (eight bytes) per lane.
 inline void transpose_b64_tr_b8(std::vector<uint8_t> &response_data, uint32_t num_elems,
                                 uint32_t wf_size) {
-  constexpr uint32_t lanes_per_half = 32;
-  constexpr uint32_t source_group_size = 4;
-  constexpr uint32_t bytes_per_lane = 8;
-
+  assert(num_elems == 2 && "B64_TR_B8 requires an eight-byte lane payload");
   const uint32_t bytes_per_lane_total = num_elems * 4;
-  const uint32_t num_halves = (wf_size > lanes_per_half) ? 2u : 1u;
 
   std::vector<uint8_t> output(response_data.size(), 0);
 
-  for (uint32_t half_index = 0; half_index < num_halves; ++half_index) {
-    const uint32_t lane_base = half_index * lanes_per_half;
-
-    for (uint32_t group_start = 0; group_start < lanes_per_half; group_start += source_group_size) {
-      for (uint32_t byte_index = 0; byte_index < bytes_per_lane; ++byte_index) {
-        uint32_t packed_dword = 0;
-        for (uint32_t lane_in_group = 0; lane_in_group < source_group_size; ++lane_in_group) {
-          uint32_t source_lane = lane_base + group_start + lane_in_group;
-          uint32_t source_offset = source_lane * bytes_per_lane_total + byte_index;
-          uint8_t source_byte =
-              (source_offset < response_data.size()) ? response_data[source_offset] : 0;
-          packed_dword |= static_cast<uint32_t>(source_byte) << (lane_in_group * 8);
-        }
-
-        uint32_t dest_vgpr_index = (group_start % 16) / 8;
-        uint32_t dest_lane = lane_base + (group_start / 16) * 16 +
-                             ((group_start / source_group_size) % 2) * bytes_per_lane + byte_index;
-        uint32_t dest_offset = dest_lane * bytes_per_lane_total + dest_vgpr_index * 4;
-
-        if (dest_offset + 4 <= output.size())
-          std::memcpy(&output[dest_offset], &packed_dword, 4);
-      }
+  for (uint32_t dest_lane = 0; dest_lane < wf_size; ++dest_lane) {
+    const uint32_t source_byte = dest_lane & 7u;
+    const uint32_t source_base = (dest_lane & ~0xfu) | ((dest_lane >> 3) & 1u);
+    for (uint32_t dest_byte = 0; dest_byte < bytes_per_lane_total; ++dest_byte) {
+      const uint32_t source_lane = source_base + 2u * dest_byte;
+      const uint32_t source_offset = source_lane * bytes_per_lane_total + source_byte;
+      const uint32_t dest_offset = dest_lane * bytes_per_lane_total + dest_byte;
+      if (source_offset < response_data.size() && dest_offset < output.size())
+        output[dest_offset] = response_data[source_offset];
     }
   }
 
   response_data = std::move(output);
 }
 
-/// @brief CDNA5/RDNA4 16x16 8-bit WMMA transpose-load layout.
+/// @brief RDNA4 and CDNA5 global-load 16x16 8-bit WMMA transpose layout.
 ///
 /// Each of source lanes 0..31 reads eight adjacent matrix rows for one K
 /// coordinate. Wave32 writes two VGPRs per lane. RDNA4 Wave64 consumes the
@@ -122,10 +108,39 @@ inline void transpose_wmma_tr_b8(std::vector<uint8_t> &response_data, uint32_t &
   num_elems = dest_stride / 4;
 }
 
+/// @brief gfx1250 DS B64 byte-level transpose.
+/// @details Destination lane `l` byte `n` comes from source lane
+/// `((l & ~0xf) | (((l >> 3) & 1) * 4)) + (n & 3) + 8 * (n >> 2)`, byte
+/// `l & 7`. The instruction has an eight-byte lane payload and requires wave32.
+inline void transpose_cdna5_ds_tr_b8(std::vector<uint8_t> &response_data, uint32_t num_elems,
+                                     uint32_t wf_size) {
+  assert(num_elems == 2 && "CDNA5 DS TR_B8 requires an eight-byte lane payload");
+  assert(wf_size == 32 && "CDNA5 DS transpose loads require wave32");
+  const uint32_t bytes_per_lane = num_elems * 4;
+  std::vector<uint8_t> output(response_data.size(), 0);
+
+  // Each 16-lane half loads an 8x16 matrix. Four adjacent lanes address
+  // consecutive rows of one eight-column half; lanes 8..15 address rows 4..7.
+  // Destination lane half*16+column receives rows 0..7 of that column.
+  for (uint32_t dest_lane = 0; dest_lane < wf_size; ++dest_lane) {
+    const uint32_t source_byte = dest_lane & 7u;
+    const uint32_t source_base = (dest_lane & ~0xfu) | (((dest_lane >> 3) & 1u) * 4u);
+    for (uint32_t dest_byte = 0; dest_byte < bytes_per_lane; ++dest_byte) {
+      const uint32_t source_lane = source_base + (dest_byte & 3u) + 8u * (dest_byte >> 2);
+      output[dest_lane * bytes_per_lane + dest_byte] =
+          response_data[source_lane * bytes_per_lane + source_byte];
+    }
+  }
+
+  response_data = std::move(output);
+}
+
 /// @brief Return the lanes that issue a transpose-load memory request.
 /// @details Wave64 B8 transpose loads issue through lanes 0-31; other forms use all active lanes.
 inline uint64_t transpose_request_lane_mask(const VectorMemState &d) {
-  if (static_cast<TransposeKind>(d.transpose) == TransposeKind::WMMA_TR_B8 && d.wf_size == 64)
+  const auto kind = static_cast<TransposeKind>(d.transpose);
+  if (d.wf_size == 64 && (kind == TransposeKind::WMMA_TR_B8 ||
+                          (d.tag() == GLOBAL_MEM && kind == TransposeKind::TR16_B128)))
     return d.lane_mask & 0xFFFF'FFFFULL;
   return d.lane_mask;
 }
@@ -136,15 +151,18 @@ inline uint64_t transpose_request_lane_mask(const VectorMemState &d) {
 /// Groups of 8 source lanes, each reading 8 halfwords. Destination lane
 /// `group_start + halfword_index` receives that halfword from each source lane.
 inline void transpose_tr16_b128(std::vector<uint8_t> &response_data, uint32_t num_elems,
-                                uint32_t wf_size) {
+                                uint32_t wf_size, bool compact_wave64 = false) {
   constexpr uint32_t lanes_per_half = 32;
 
-  const uint32_t bytes_per_lane_total = num_elems * 4;
-  const uint32_t halfwords_per_source_lane = bytes_per_lane_total / 2;
+  const uint32_t source_bytes_per_lane = num_elems * 4;
+  compact_wave64 = compact_wave64 && wf_size == 64;
+  const uint32_t destination_bytes_per_lane =
+      compact_wave64 ? source_bytes_per_lane / 2 : source_bytes_per_lane;
+  const uint32_t halfwords_per_source_lane = source_bytes_per_lane / 2;
   const uint32_t group_size = halfwords_per_source_lane;
-  const uint32_t num_halves = (wf_size > lanes_per_half) ? 2u : 1u;
+  const uint32_t num_halves = compact_wave64 ? 1u : (wf_size > lanes_per_half ? 2u : 1u);
 
-  std::vector<uint8_t> output(response_data.size(), 0);
+  std::vector<uint8_t> output(static_cast<size_t>(wf_size) * destination_bytes_per_lane, 0);
 
   for (uint32_t half_index = 0; half_index < num_halves; ++half_index) {
     const uint32_t lane_base = half_index * lanes_per_half;
@@ -155,8 +173,13 @@ inline void transpose_tr16_b128(std::vector<uint8_t> &response_data, uint32_t nu
         const uint32_t dest_lane = lane_base + group_start + halfword_index;
         for (uint32_t lane_in_group = 0; lane_in_group < group_size; ++lane_in_group) {
           const uint32_t source_lane = lane_base + group_start + lane_in_group;
-          const uint32_t source_offset = source_lane * bytes_per_lane_total + halfword_index * 2;
-          const uint32_t dest_offset = dest_lane * bytes_per_lane_total + lane_in_group * 2;
+          const uint32_t source_offset = source_lane * source_bytes_per_lane + halfword_index * 2;
+          const uint32_t dest_half = compact_wave64 ? lane_in_group / (group_size / 2) : 0;
+          const uint32_t dest_halfword =
+              compact_wave64 ? lane_in_group % (group_size / 2) : lane_in_group;
+          const uint32_t physical_dest_lane = dest_lane + dest_half * lanes_per_half;
+          const uint32_t dest_offset =
+              physical_dest_lane * destination_bytes_per_lane + dest_halfword * 2;
 
           if (source_offset + 2 <= response_data.size() && dest_offset + 2 <= output.size())
             std::memcpy(&output[dest_offset], &response_data[source_offset], 2);
@@ -322,6 +345,8 @@ inline void transpose_b6(std::vector<uint8_t> &response_data, uint32_t num_elems
 
 inline void transpose_response(VectorMemState &d) {
   auto kind = static_cast<TransposeKind>(d.transpose);
+  const bool compact_wave64 =
+      d.tag() == GLOBAL_MEM && d.wf_size == 64 && kind == TransposeKind::TR16_B128;
   switch (kind) {
   case TransposeKind::B64_TR_B8:
     transpose_b64_tr_b8(d.response_data, d.num_elems, d.wf_size);
@@ -329,8 +354,11 @@ inline void transpose_response(VectorMemState &d) {
   case TransposeKind::WMMA_TR_B8:
     transpose_wmma_tr_b8(d.response_data, d.num_elems, d.wf_size);
     break;
+  case TransposeKind::CDNA5_DS_TR_B8:
+    transpose_cdna5_ds_tr_b8(d.response_data, d.num_elems, d.wf_size);
+    break;
   case TransposeKind::TR16_B128:
-    transpose_tr16_b128(d.response_data, d.num_elems, d.wf_size);
+    transpose_tr16_b128(d.response_data, d.num_elems, d.wf_size, compact_wave64);
     break;
   case TransposeKind::B64_TR_B16:
     transpose_b64_tr_b16(d.response_data, d.num_elems, d.wf_size);
@@ -344,6 +372,8 @@ inline void transpose_response(VectorMemState &d) {
   case TransposeKind::NONE:
     break;
   }
+  if (compact_wave64)
+    d.num_elems /= 2;
 }
 
 } // namespace amdgpu

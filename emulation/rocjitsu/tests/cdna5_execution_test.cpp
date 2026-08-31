@@ -383,7 +383,7 @@ TEST(Gfx1250ExecutionTest, Wave32VectorComparePreservesVccHiScratch) {
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(0x3u);
-    wf->set_vcc(0x000001c0ffffffffull);
+    wf->set_vcc_raw(0x000001c0ffffffffull);
     write_wave_sgpr(*cu, *wf, 28, 7u);
     const uint32_t vgpr_base = wf->vgpr_alloc().base;
     cu->write_vgpr(vgpr_base + 18, 0, 6u);
@@ -1033,7 +1033,10 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
     ASSERT_NE(typed_compare, nullptr);
     if (!force_scalar) {
       EXPECT_TRUE(amdgpu::try_execute_vopc64_vop3_int_simd<int64_t>(
-          *typed_compare, *wf, [](auto a, auto b) { return a < b; }));
+          *typed_compare, *wf, [](auto a, auto b) { return a < b; },
+          [&](uint64_t result) {
+            amdgpu::write_explicit_lane_mask(typed_compare->vdst, *wf, result);
+          }));
       EXPECT_EQ(read_wave_sgpr(*cu, *wf, 0), 0x3u);
       write_wave_sgpr(*cu, *wf, 0, 0u);
       write_wave_sgpr(*cu, *wf, 1, 0u);
@@ -1180,7 +1183,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
 
     auto base = cdna5::build_vop3p(test_case.opcode, fields);
     if (test_case.operation == Operation::Fma)
-      base[0] |= uint32_t{1} << 14; // pad_14 is the src2 high-half selector.
+      base[0] |= uint32_t{1} << 14; // op_sel_hi_2 is the src2 high-half selector.
     const std::array words{base[0], base[1], kLiteral};
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
@@ -1467,7 +1470,7 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
     auto words = cdna5::build_vop3p(
         cdna5::kVPkFmaF32Vop3p,
         {.vdst = 6, .neg_hi = 4, .src0 = 256, .src1 = 258, .src2 = 260, .opsel_hi = 3, .neg = 2});
-    words[0] |= uint32_t{1} << 14; // pad_14 is the src2 high-half selector.
+    words[0] |= uint32_t{1} << 14; // op_sel_hi_2 is the src2 high-half selector.
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
@@ -1638,14 +1641,16 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
         const uint32_t ck = 2u * group + which;
         const uint8_t value = static_cast<uint8_t>(1u + ((row * 3u + group + which * 2u) % 7u));
         compressed_a[row][ck] = value;
-        const uint32_t lane = row + 16u * ((ck >> 3) & 1u);
-        const uint32_t slot = (ck & 7u) + 8u * (ck >> 4);
-        write_byte(kA, lane, slot, value);
+        const uint32_t a_lane = row + 16u * ((ck >> 4) & 1u);
+        const uint32_t a_slot = (ck & 15u) + 16u * (ck >> 5);
+        write_byte(kA, a_lane, a_slot, value);
 
-        const uint32_t word = slot / 16;
-        const uint32_t shift = 2u * (slot % 16);
-        const uint32_t old = cu.read_vgpr(base + kIndex + word, lane);
-        cu.write_vgpr(base + kIndex + word, lane, old | ((pair[which] & 3u) << shift));
+        const uint32_t index_lane = row + 16u * (ck / 32u);
+        const uint32_t index_slot = ck % 32u;
+        const uint32_t word = index_slot / 16;
+        const uint32_t shift = 2u * (index_slot % 16);
+        const uint32_t old = cu.read_vgpr(base + kIndex + word, index_lane);
+        cu.write_vgpr(base + kIndex + word, index_lane, old | ((pair[which] & 3u) << shift));
       }
     }
 
@@ -1653,8 +1658,8 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
     for (uint32_t col = 0; col < 16; ++col) {
       const uint8_t value = static_cast<uint8_t>(1u + ((k * 5u + col * 3u) % 11u));
       dense_b[col][k] = value;
-      const uint32_t lane = col + 16u * ((k >> 4) & 1u);
-      const uint32_t slot = (k & 15u) + 16u * (k >> 5);
+      const uint32_t lane = col + 16u * ((k >> 5) & 1u);
+      const uint32_t slot = (k & 31u) + 32u * (k >> 6);
       write_byte(kB, lane, slot, value);
     }
 

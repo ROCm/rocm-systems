@@ -7,10 +7,9 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
-#include <cstdlib>
+#include "race_test_support.hpp"
+
 #include <cstdint>
-#include <fstream>
-#include <string>
 #include <vector>
 
 int main(int argc, char **argv) {
@@ -22,82 +21,10 @@ int main(int argc, char **argv) {
 
 namespace {
 
-struct RaceRecord {
-  std::string type;
-  std::string access;
-  std::string message;
-};
+using rocjitsu::test::FindingCount;
+using rocjitsu::test::RaceExpectation;
 
-std::vector<RaceRecord> parse_race_log() {
-  const char *dir = std::getenv("RJ_SINK_DIR");
-  if (!dir)
-    return {};
-
-  std::ifstream f(std::string(dir) + "/race.log");
-  std::vector<RaceRecord> records;
-  std::string line;
-  while (std::getline(f, line)) {
-    if (!line.starts_with("RACE "))
-      continue;
-
-    RaceRecord record;
-    auto type_pos = line.find("type=");
-    if (type_pos != std::string::npos) {
-      auto value_begin = type_pos + 5;
-      auto value_end = line.find(' ', value_begin);
-      record.type = line.substr(value_begin, value_end - value_begin);
-    }
-    auto access_pos = line.find("access=");
-    if (access_pos != std::string::npos) {
-      auto value_begin = access_pos + 7;
-      auto value_end = line.find(' ', value_begin);
-      record.access = line.substr(value_begin, value_end - value_begin);
-    }
-
-    while (std::getline(f, line)) {
-      if (line == "END_RACE")
-        break;
-      if (!record.message.empty())
-        record.message += '\n';
-      record.message += line;
-    }
-    records.push_back(std::move(record));
-  }
-  return records;
-}
-
-class Gfx1151RaceTest : public ::testing::Test {
-protected:
-  template <typename T>
-  T *alloc(int n) {
-    T *p = nullptr;
-    (void)hipMalloc(&p, n * sizeof(T));
-    return p;
-  }
-
-  template <typename T>
-  T *allocWithData(int n) {
-    T *p = alloc<T>(n);
-    std::vector<T> h(n);
-    for (int i = 0; i < n; ++i)
-      h[i] = static_cast<T>(i);
-    (void)hipMemcpy(p, h.data(), n * sizeof(T), hipMemcpyHostToDevice);
-    return p;
-  }
-
-  void sync() { (void)hipDeviceSynchronize(); }
-
-  void ExpectNoRace() {
-    auto records = parse_race_log();
-    EXPECT_TRUE(records.empty()) << "Expected no races, got " << records.size();
-  }
-
-  std::vector<RaceRecord> ExpectRace() {
-    auto records = parse_race_log();
-    EXPECT_FALSE(records.empty()) << "Expected at least one race, got none";
-    return records;
-  }
-};
+using Gfx1151RaceTest = rocjitsu::test::RaceTestBase;
 
 __global__ void vgpr_no_race_kernel(const float *src, float *dst) {
   int tid = threadIdx.x;
@@ -108,6 +35,11 @@ __global__ void vgpr_no_race_kernel(const float *src, float *dst) {
                : "v"(&src[tid]));
   dst[tid] = val;
 }
+
+static constexpr RaceExpectation kVgprWaitcntRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+};
 
 __global__ void vgpr_race_kernel(const float *src, float *dst) {
   int tid = threadIdx.x;
@@ -152,6 +84,12 @@ __global__ void d16_global_load_hi_merge_kernel(const uint8_t *src, uint32_t *ds
 // omits s_waitcnt before storing the VGPR. The store consumes the load
 // destination while the low-half load is still outstanding, so the race detector
 // should report a real VGPR race after the memory-completion self-race is fixed.
+static constexpr RaceExpectation kD16GlobalLoadMissingWaitcntRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .producer = "global_load_d16_u8",
+};
+
 __global__ void d16_global_load_missing_waitcnt_kernel(const uint8_t *src, uint32_t *dst) {
   int tid = threadIdx.x;
   uint32_t val = 0xABCD0000u;
@@ -162,6 +100,14 @@ __global__ void d16_global_load_missing_waitcnt_kernel(const uint8_t *src, uint3
                : "memory");
   dst[tid] = val;
 }
+
+static constexpr RaceExpectation kWawGlobalLoadThenWmmaExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .access = "write",
+    .producer = "global_load",
+    .consumer = "v_wmma",
+};
 
 __global__ void waw_global_load_then_wmma_kernel(const int *src, int *out) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -186,6 +132,11 @@ lds_wave32_cross_wave_safe_kernel(int *out) {
   out[tid] = lds[(tid + 32) & 63];
 }
 
+static constexpr RaceExpectation kLdsWave32CrossWaveRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "LDS",
+};
+
 __attribute__((amdgpu_flat_work_group_size(64, 64))) __global__ void
 lds_wave32_cross_wave_race_kernel(int *out) {
   __shared__ int lds[64];
@@ -208,9 +159,7 @@ TEST_F(Gfx1151RaceTest, vgpr_waitcnt_race) {
   auto *dst = alloc<float>(32);
   vgpr_race_kernel<<<1, 32>>>(src, dst);
   sync();
-  auto records = ExpectRace();
-  ASSERT_FALSE(records.empty());
-  EXPECT_EQ(records[0].type, "VGPR");
+  ExpectRace(kVgprWaitcntRaceExpectation);
 }
 
 TEST_F(Gfx1151RaceTest, d16_global_load_merge_no_race) {
@@ -245,10 +194,7 @@ TEST_F(Gfx1151RaceTest, d16_global_load_missing_waitcnt_race) {
   d16_global_load_missing_waitcnt_kernel<<<1, 32>>>(src, dst);
   sync();
 
-  auto records = ExpectRace();
-  ASSERT_FALSE(records.empty());
-  EXPECT_EQ(records[0].type, "VGPR");
-  EXPECT_NE(records[0].message.find("global_load_d16_u8"), std::string::npos);
+  ExpectRace(kD16GlobalLoadMissingWaitcntRaceExpectation);
 }
 
 TEST_F(Gfx1151RaceTest, lds_wave32_cross_wave) {
@@ -260,9 +206,7 @@ TEST_F(Gfx1151RaceTest, lds_wave32_cross_wave) {
 TEST_F(Gfx1151RaceTest, lds_wave32_cross_wave_race) {
   lds_wave32_cross_wave_race_kernel<<<1, 64>>>(alloc<int>(64));
   sync();
-  auto records = ExpectRace();
-  ASSERT_FALSE(records.empty());
-  EXPECT_EQ(records[0].type, "LDS");
+  ExpectRace(kLdsWave32CrossWaveRaceExpectation);
 }
 
 TEST_F(Gfx1151RaceTest, waw_global_load_then_wmma) {
@@ -270,12 +214,7 @@ TEST_F(Gfx1151RaceTest, waw_global_load_then_wmma) {
   auto *out = alloc<int>(32);
   waw_global_load_then_wmma_kernel<<<1, 32>>>(src, out);
   sync();
-  auto records = ExpectRace();
-  ASSERT_FALSE(records.empty());
-  EXPECT_EQ(records[0].type, "VGPR");
-  EXPECT_EQ(records[0].access, "write");
-  EXPECT_NE(records[0].message.find("global_load"), std::string::npos);
-  EXPECT_NE(records[0].message.find("v_wmma"), std::string::npos);
+  ExpectRace(kWawGlobalLoadThenWmmaExpectation);
 }
 
 } // namespace

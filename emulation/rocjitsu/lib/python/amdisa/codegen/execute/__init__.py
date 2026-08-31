@@ -43,6 +43,7 @@ class ExecuteContext:
     supports_dpp: bool = False
     supports_dpp8: bool = False
     supports_sdwa: bool = False
+    result_writer: str | None = None
 
     @property
     def cls(self) -> str:
@@ -150,13 +151,34 @@ def _register_handlers() -> None:
     # and always classifies in f32, so the dedicated per-type generator here
     # (correct f16/f32/f64 qnan masks, full 64-bit f64 read) owns it instead.
     DISPATCH['vector_cmpx'] = lambda c: gen_vector_cmpx(
-        c.src_ops, c.op, c.dtype, c.cmpx_writes_vcc, c.is_vop3, c.dst_ops, c.has_abs
+        c.src_ops,
+        c.op,
+        c.dtype,
+        c.cmpx_writes_vcc,
+        c.is_vop3,
+        c.dst_ops,
+        c.has_abs,
+        c.result_writer,
     )
     DISPATCH['vector_cmp_class'] = lambda c: gen_vector_cmp_class(
-        c.dst_ops, c.src_ops, c.dtype, False, False, c.is_vop3, c.has_abs
+        c.dst_ops,
+        c.src_ops,
+        c.dtype,
+        False,
+        False,
+        c.is_vop3,
+        c.has_abs,
+        c.result_writer,
     )
     DISPATCH['vector_cmpx_class'] = lambda c: gen_vector_cmp_class(
-        c.dst_ops, c.src_ops, c.dtype, True, c.cmpx_writes_vcc, c.is_vop3, c.has_abs
+        c.dst_ops,
+        c.src_ops,
+        c.dtype,
+        True,
+        c.cmpx_writes_vcc,
+        c.is_vop3,
+        c.has_abs,
+        c.result_writer,
     )
 
     # Vector special
@@ -170,6 +192,7 @@ def _register_handlers() -> None:
         c.supports_dpp,
         c.supports_dpp8,
         c.supports_sdwa,
+        c.profile.dpp_bound_ctrl_applies_to_inactive_sources,
     )
     DISPATCH['vector_swaprel'] = lambda c: gen_vector_swaprel(
         c.dst_ops, c.src_ops, c.profile.uses_vgpr_msb_indexing
@@ -190,7 +213,7 @@ def _register_handlers() -> None:
         c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
     )
     DISPATCH['vector_mad_64_32'] = lambda c: gen_vector_mad_64_32(
-        c.dst_ops, c.src_ops, c.dtype
+        c.dst_ops, c.src_ops, c.dtype, c.result_writer
     )
     DISPATCH['vector_mad_32_16'] = lambda c: gen_vector_mad_32_16(
         c.dst_ops, c.src_ops, c.dtype, c.is_vop3
@@ -199,7 +222,12 @@ def _register_handlers() -> None:
         c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
     )
     DISPATCH['vector_div_scale'] = lambda c: gen_vector_div_scale(
-        c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
+        c.dst_ops,
+        c.src_ops,
+        c.dtype,
+        c.is_vop3,
+        c.has_abs,
+        c.result_writer,
     )
     DISPATCH['vector_div_fmas'] = lambda c: gen_vector_div_fmas(
         c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
@@ -364,13 +392,7 @@ def _register_handlers() -> None:
     # Matrix
     DISPATCH['accvgpr_read'] = lambda c: gen_accvgpr_read(c.dst_ops, c.src_ops)
     DISPATCH['accvgpr_write'] = lambda c: gen_accvgpr_write(c.dst_ops, c.src_ops)
-    DISPATCH['mfma'] = lambda c: gen_mfma(
-        c.inst,
-        c.dst_ops,
-        c.src_ops,
-        arch_name=c.arch_name,
-        supports_gpr_idx=c.profile.supports_gpr_idx,
-    )
+    DISPATCH['mfma'] = gen_mfma
 
 
 _register_handlers()

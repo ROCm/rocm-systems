@@ -1,24 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "hw_topology_read.h"
 
 #include <gtest/gtest.h>
@@ -80,6 +62,25 @@ void TestHWTopologyRead::Run(void) {
   }
 
   uint32_t num_devices = num_monitor_devs();
+
+  // Null output pointers must be rejected regardless of topology.
+  if (num_devices > 0) {
+    amdsmi_link_type_t null_type;
+    amdsmi_p2p_capability_t null_cap;
+    uint64_t null_hops;
+    ASSERT_EQ(amdsmi_topo_get_link_type(processor_handles_[0], processor_handles_[0], nullptr,
+                                        &null_type),
+              AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(amdsmi_topo_get_link_type(processor_handles_[0], processor_handles_[0], &null_hops,
+                                        nullptr),
+              AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(amdsmi_topo_get_p2p_status(processor_handles_[0], processor_handles_[0], nullptr,
+                                         &null_cap),
+              AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(amdsmi_topo_get_p2p_status(processor_handles_[0], processor_handles_[0], &null_type,
+                                         nullptr),
+              AMDSMI_STATUS_INVAL);
+  }
 
   // gpu_link_t gpu_links[num_devices][num_devices];
   std::vector<std::vector<gpu_link_t>> gpu_links(num_devices, std::vector<gpu_link_t>(num_devices));

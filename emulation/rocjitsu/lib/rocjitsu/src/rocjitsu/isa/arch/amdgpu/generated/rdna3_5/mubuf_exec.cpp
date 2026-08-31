@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -615,36 +616,6 @@ void BufferGl0InvMubuf::execute_impl(amdgpu::Wavefront &wf) {
 
 void BufferGl1InvMubuf::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_buffer_gl1_inv_mubuf(*this, wf);
-}
-
-void BufferLoadLdsU8Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
-void BufferLoadLdsI8Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
-void BufferLoadLdsU16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
-void BufferLoadLdsI16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
-void BufferLoadLdsB32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
-void BufferLoadLdsFormatXMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 void BufferAtomicSwapB32Mubuf::execute_impl(amdgpu::Wavefront &wf) {

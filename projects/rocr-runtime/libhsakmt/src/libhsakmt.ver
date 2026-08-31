@@ -27,6 +27,7 @@ hsaKmtAllocMemory;
 hsaKmtAllocMemoryAlign;
 hsaKmtFreeMemory;
 hsaKmtAvailableMemory;
+hsaKmtGetDefaultHostGpu;
 hsaKmtRegisterMemory;
 hsaKmtRegisterMemoryToNodes;
 hsaKmtImportExternalSemaphore;
