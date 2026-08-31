@@ -219,6 +219,20 @@ _consan_assert_no_match(
     "owner scalar and its provenance must remain one typed allocation"
 )
 
+# Exact workgroup identity is an optional tuple, not four independently
+# optional coordinates. Register and private-offset storage share that one
+# all-or-none mechanism.
+_consan_assert_no_match(
+    "${_consan_dir}/consan_options.h.inc"
+    "(struct|class)[ \t]+ConSanMoiPersistentWorkgroup(Registers|PrivateOffsets)"
+    "persistent workgroup storage must remain one shared all-or-none tuple"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_options.h.inc"
+    "std::optional<(uint16_t|uint32_t)>[ \t]+(x|y|z|cluster_workgroup_id)[ \t]*;"
+    "persistent workgroup coordinates must not regain independent optional storage"
+)
+
 # Semantic policy owns meaning, never an ISA recipe or product identity.
 set(
     _semantic_policy_sources

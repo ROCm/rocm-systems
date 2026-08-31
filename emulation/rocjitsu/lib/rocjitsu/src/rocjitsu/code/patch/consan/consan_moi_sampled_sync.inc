@@ -2246,10 +2246,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                         overlaps_optional(group_options.moi_dispatch_identity.sgpr(),
                                           kMoiDispatchStateSgprCount);
         for (const std::optional<uint16_t> reg :
-             {group_options.moi_persistent_sgprs.record_replay_workgroup.x,
-              group_options.moi_persistent_sgprs.record_replay_workgroup.y,
-              group_options.moi_persistent_sgprs.record_replay_workgroup.z,
-              group_options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
+             group_options.moi_persistent_sgprs.record_replay_workgroup.values()) {
           overlaps |= overlaps_optional(reg);
         }
         if (group_options.delay_mode == ConSanDelayMode::SleepVar)
@@ -2607,10 +2604,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                         overlaps_optional(route_options.moi_dispatch_identity.sgpr(),
                                           kMoiDispatchStateSgprCount);
         for (const std::optional<uint16_t> reg :
-             {route_options.moi_persistent_sgprs.record_replay_workgroup.x,
-              route_options.moi_persistent_sgprs.record_replay_workgroup.y,
-              route_options.moi_persistent_sgprs.record_replay_workgroup.z,
-              route_options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
+             route_options.moi_persistent_sgprs.record_replay_workgroup.values()) {
           overlaps |= overlaps_optional(reg);
         }
         if (route_options.delay_mode == ConSanDelayMode::SleepVar)

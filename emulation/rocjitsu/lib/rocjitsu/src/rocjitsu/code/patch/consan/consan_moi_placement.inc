@@ -374,13 +374,13 @@ record_replay_persistent_workgroup_sources(ConSanMoiEngine engine,
   };
   if (point.moi_persistent_sgprs.record_replay_workgroup.complete()) {
     return ConSanMoiWorkgroupSources{
-        .x = scalar_source(*point.moi_persistent_sgprs.record_replay_workgroup.x),
-        .y = scalar_source(*point.moi_persistent_sgprs.record_replay_workgroup.y),
-        .z = scalar_source(*point.moi_persistent_sgprs.record_replay_workgroup.z),
+        .x = scalar_source(*point.moi_persistent_sgprs.record_replay_workgroup.x()),
+        .y = scalar_source(*point.moi_persistent_sgprs.record_replay_workgroup.y()),
+        .z = scalar_source(*point.moi_persistent_sgprs.record_replay_workgroup.z()),
         .cluster_workgroup_id =
-            point.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id
+            point.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id()
                 ? scalar_source(
-                      *point.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id)
+                      *point.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id())
                 : ConSanMoiWorkgroupSource{},
         .cdna_full_payload_base = std::nullopt,
         .cdna_guest_payload_base = std::nullopt,
@@ -389,12 +389,12 @@ record_replay_persistent_workgroup_sources(ConSanMoiEngine engine,
   }
   if (point.moi_record_replay_workgroup_vgprs.complete()) {
     return ConSanMoiWorkgroupSources{
-        .x = vector_source(*point.moi_record_replay_workgroup_vgprs.x),
-        .y = vector_source(*point.moi_record_replay_workgroup_vgprs.y),
-        .z = vector_source(*point.moi_record_replay_workgroup_vgprs.z),
+        .x = vector_source(*point.moi_record_replay_workgroup_vgprs.x()),
+        .y = vector_source(*point.moi_record_replay_workgroup_vgprs.y()),
+        .z = vector_source(*point.moi_record_replay_workgroup_vgprs.z()),
         .cluster_workgroup_id =
-            point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id
-                ? vector_source(*point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id)
+            point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id()
+                ? vector_source(*point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id())
                 : ConSanMoiWorkgroupSource{},
         .cdna_full_payload_base = std::nullopt,
         .cdna_guest_payload_base = std::nullopt,
@@ -403,13 +403,13 @@ record_replay_persistent_workgroup_sources(ConSanMoiEngine engine,
   }
   if (point.moi_record_replay_workgroup_private_offsets.complete()) {
     return ConSanMoiWorkgroupSources{
-        .x = private_source(*point.moi_record_replay_workgroup_private_offsets.x),
-        .y = private_source(*point.moi_record_replay_workgroup_private_offsets.y),
-        .z = private_source(*point.moi_record_replay_workgroup_private_offsets.z),
+        .x = private_source(*point.moi_record_replay_workgroup_private_offsets.x()),
+        .y = private_source(*point.moi_record_replay_workgroup_private_offsets.y()),
+        .z = private_source(*point.moi_record_replay_workgroup_private_offsets.z()),
         .cluster_workgroup_id =
-            point.moi_record_replay_workgroup_private_offsets.cluster_workgroup_id
+            point.moi_record_replay_workgroup_private_offsets.cluster_workgroup_id()
                 ? private_source(
-                      *point.moi_record_replay_workgroup_private_offsets.cluster_workgroup_id)
+                      *point.moi_record_replay_workgroup_private_offsets.cluster_workgroup_id())
                 : ConSanMoiWorkgroupSource{},
         .cdna_full_payload_base = std::nullopt,
         .cdna_guest_payload_base = std::nullopt,
@@ -2243,10 +2243,8 @@ void forbid_moi_persistent_vgprs(RegisterSet &forbidden, const ConSanMoiOperatin
       forbidden.expand({RegClass::VGPR, *reg, count});
   };
   const auto forbid_workgroup_tuple = [&](const ConSanMoiPersistentWorkgroupRegisters &registers) {
-    forbid_vgpr(registers.x);
-    forbid_vgpr(registers.y);
-    forbid_vgpr(registers.z);
-    forbid_vgpr(registers.cluster_workgroup_id);
+    for (std::optional<uint16_t> reg : registers.values())
+      forbid_vgpr(reg);
   };
   forbid_vgpr(point.moi_owner_vgpr);
   forbid_vgpr(point.moi_epoch_vgpr);
@@ -2931,7 +2929,7 @@ template <typename PersistentVgprState>
   forbid(options.moi_epoch_vgpr);
   forbid(options.moi_workgroup_key_vgpr);
   forbid(options.moi_dispatch_identity.vgpr(), 2u);
-  for (std::optional<uint16_t> reg : options.moi_record_replay_workgroup_vgprs.registers()) {
+  for (std::optional<uint16_t> reg : options.moi_record_replay_workgroup_vgprs.values()) {
     forbid(reg);
   }
 
@@ -2964,7 +2962,7 @@ template <typename PersistentVgprState>
     forbid(assignment->epoch_vgpr);
     forbid(assignment->workgroup_key_vgpr);
     forbid(assignment->dispatch_id_vgpr, 2u);
-    for (std::optional<uint16_t> reg : assignment->record_replay_workgroup_vgprs.registers()) {
+    for (std::optional<uint16_t> reg : assignment->record_replay_workgroup_vgprs.values()) {
       forbid(reg);
     }
   }
@@ -3103,7 +3101,7 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
                              static_cast<uint16_t>(*site_point.moi_dispatch_identity.vgpr() + 2u));
     }
     for (const std::optional<uint16_t> reg :
-         site_point.moi_record_replay_workgroup_vgprs.registers()) {
+         site_point.moi_record_replay_workgroup_vgprs.values()) {
       if (reg) {
         resolved.required_vgpr_count =
             std::max<uint16_t>(resolved.required_vgpr_count, static_cast<uint16_t>(*reg + 1u));
@@ -3118,8 +3116,7 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
         end = std::max<uint16_t>(end, static_cast<uint16_t>(*assignment->workgroup_key_vgpr + 1u));
       if (assignment->dispatch_id_vgpr)
         end = std::max<uint16_t>(end, static_cast<uint16_t>(*assignment->dispatch_id_vgpr + 2u));
-      for (const std::optional<uint16_t> reg :
-           assignment->record_replay_workgroup_vgprs.registers()) {
+      for (const std::optional<uint16_t> reg : assignment->record_replay_workgroup_vgprs.values()) {
         if (reg)
           end = std::max<uint16_t>(end, static_cast<uint16_t>(*reg + 1u));
       }
@@ -3594,7 +3591,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                                 kMoiDispatchStateSgprCount) ||
               overlaps_optional(base, width, options.moi_inline_visible_evidence_sgpr);
           for (const std::optional<uint16_t> reg :
-               options.moi_persistent_sgprs.record_replay_workgroup.registers()) {
+               options.moi_persistent_sgprs.record_replay_workgroup.values()) {
             overlaps |= overlaps_optional(base, width, reg);
           }
           return overlaps;
@@ -3735,7 +3732,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
             overlaps_optional(base, width, options.moi_dispatch_identity.sgpr(),
                               kMoiDispatchStateSgprCount);
         for (const std::optional<uint16_t> reg :
-             options.moi_persistent_sgprs.record_replay_workgroup.registers()) {
+             options.moi_persistent_sgprs.record_replay_workgroup.values()) {
           overlaps |= overlaps_optional(base, width, reg);
         }
         return overlaps;
@@ -4823,7 +4820,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
   bool overlaps_persistent_state = overlaps(point.moi_owner_vgpr) ||
                                    overlaps(point.moi_epoch_vgpr) ||
                                    overlaps(point.moi_workgroup_key_vgpr);
-  for (const std::optional<uint16_t> reg : point.moi_record_replay_workgroup_vgprs.registers()) {
+  for (const std::optional<uint16_t> reg : point.moi_record_replay_workgroup_vgprs.values()) {
     overlaps_persistent_state |= overlaps(reg);
   }
   if (static_cast<uint32_t>(base) + 2u > kMaxVgprs || overlaps_persistent_state) {
@@ -4864,7 +4861,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
                               overlaps_architectural_state(options.moi_owner_sgpr.base(), 1u));
   const auto persistent_workgroup_tuple_invalid = [&] {
     for (const std::optional<uint16_t> reg :
-         options.moi_persistent_sgprs.record_replay_workgroup.registers()) {
+         options.moi_persistent_sgprs.record_replay_workgroup.values()) {
       if (reg && (*reg >= limit ||
                   persistent_sgpr_range_overlaps_reserved_ordinary_range(*reg, 1u, arch))) {
         return true;
@@ -4911,7 +4908,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
          range_overlaps(base, 2u, *options.moi_persistent_sgprs.workgroup_key, 1u));
     bool overlaps_workgroup_tuple = false;
     for (const std::optional<uint16_t> reg :
-         options.moi_persistent_sgprs.record_replay_workgroup.registers()) {
+         options.moi_persistent_sgprs.record_replay_workgroup.values()) {
       overlaps_workgroup_tuple |= reg && range_overlaps(base, 2u, *reg, 1u);
     }
     return !inline_layout || !options.has_inline_moi_scalar_spill() ||
@@ -5099,13 +5096,9 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
     if (needs_workgroup_key)
       options.moi_persistent_sgprs.workgroup_key = next++;
     if (needs_record_replay_workgroup_tuple) {
-      options.moi_persistent_sgprs.record_replay_workgroup = {
-          .x = next,
-          .y = static_cast<uint16_t>(next + 1u),
-          .z = static_cast<uint16_t>(next + 2u),
-          .cluster_workgroup_id =
-              needs_cluster_workgroup_id ? std::optional<uint16_t>(next + 3u) : std::nullopt,
-      };
+      options.moi_persistent_sgprs.record_replay_workgroup = ConSanMoiPersistentWorkgroupRegisters{
+          next, static_cast<uint16_t>(next + 1u), static_cast<uint16_t>(next + 2u),
+          needs_cluster_workgroup_id ? std::optional<uint16_t>(next + 3u) : std::nullopt};
     }
   };
   const bool crosses_cdna_accvgpr_boundary =
@@ -5375,11 +5368,10 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
           const uint16_t vector_base = *owner_epoch_vector_base;
           options.moi_owner_vgpr = vector_base;
           options.moi_epoch_vgpr = static_cast<uint16_t>(vector_base + 1u);
-          options.moi_persistent_sgprs.record_replay_workgroup = {
-              .x = scalar_base,
-              .y = static_cast<uint16_t>(scalar_base + 1u),
-              .z = static_cast<uint16_t>(scalar_base + 2u),
-          };
+          options.moi_persistent_sgprs.record_replay_workgroup =
+              ConSanMoiPersistentWorkgroupRegisters{scalar_base,
+                                                    static_cast<uint16_t>(scalar_base + 1u),
+                                                    static_cast<uint16_t>(scalar_base + 2u)};
           options.moi_initialize_owner_epoch = true;
           options.automatic_moi_persistent_vgprs = true;
           prologue_scratch_assignments.clear();
@@ -5665,13 +5657,11 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
         if (needs_workgroup_key)
           assignment.workgroup_key_vgpr = next++;
         if (needs_record_replay_workgroup_tuple) {
-          assignment.record_replay_workgroup_vgprs = {
-              .x = next++,
-              .y = next++,
-              .z = next++,
-              .cluster_workgroup_id =
-                  needs_cluster_workgroup_id ? std::optional<uint16_t>(next++) : std::nullopt,
-          };
+          const uint16_t x = next++;
+          const uint16_t y = next++;
+          const uint16_t z = next++;
+          assignment.record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{
+              x, y, z, needs_cluster_workgroup_id ? std::optional<uint16_t>(next++) : std::nullopt};
         }
         if (component_needs_persistent_dispatch_vgprs) {
           assignment.dispatch_id_vgpr = next;
@@ -5874,14 +5864,13 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
   if (needs_workgroup_key)
     options.moi_workgroup_key_vgpr = next_persistent_vgpr++;
   if (needs_record_replay_workgroup_tuple) {
-    options.moi_record_replay_workgroup_vgprs = {
-        .x = next_persistent_vgpr++,
-        .y = next_persistent_vgpr++,
-        .z = next_persistent_vgpr++,
-        .cluster_workgroup_id = needs_cluster_workgroup_id
-                                    ? std::optional<uint16_t>(next_persistent_vgpr++)
-                                    : std::nullopt,
-    };
+    const uint16_t x = next_persistent_vgpr++;
+    const uint16_t y = next_persistent_vgpr++;
+    const uint16_t z = next_persistent_vgpr++;
+    options.moi_record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{
+        x, y, z,
+        needs_cluster_workgroup_id ? std::optional<uint16_t>(next_persistent_vgpr++)
+                                   : std::nullopt};
   }
   if (needs_persistent_dispatch_vgprs) {
     options.moi_dispatch_identity.set_vgpr(next_persistent_vgpr);

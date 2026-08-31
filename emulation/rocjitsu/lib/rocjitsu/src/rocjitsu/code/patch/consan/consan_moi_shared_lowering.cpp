@@ -273,15 +273,14 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     return std::nullopt;
   }
   if (record_replay_workgroup_offset_values) {
-    record_replay_workgroup_offsets = {
-        .x = static_cast<uint32_t>((*record_replay_workgroup_offset_values)[0]),
-        .y = static_cast<uint32_t>((*record_replay_workgroup_offset_values)[1]),
-        .z = static_cast<uint32_t>((*record_replay_workgroup_offset_values)[2]),
-        .cluster_workgroup_id = (*record_replay_workgroup_offset_values)[3] != 0u
-                                    ? std::optional<uint32_t>(static_cast<uint32_t>(
-                                          (*record_replay_workgroup_offset_values)[3]))
-                                    : std::nullopt,
-    };
+    record_replay_workgroup_offsets = ConSanMoiPersistentWorkgroupPrivateOffsets{
+        static_cast<uint32_t>((*record_replay_workgroup_offset_values)[0]),
+        static_cast<uint32_t>((*record_replay_workgroup_offset_values)[1]),
+        static_cast<uint32_t>((*record_replay_workgroup_offset_values)[2]),
+        (*record_replay_workgroup_offset_values)[3] != 0u
+            ? std::optional<uint32_t>(
+                  static_cast<uint32_t>((*record_replay_workgroup_offset_values)[3]))
+            : std::nullopt};
   }
   const auto ephemeral_base =
       consan_normalize_address_free_private_size(arch, static_cast<uint32_t>(persistent_end));
@@ -799,20 +798,18 @@ private:
       reject_optional_scratch_range_overlap(point.moi_epoch_vgpr, scratch_vgpr, scratch_count,
                                             "MOI epoch", errors) ||
       reject_optional_scratch_range_overlap(point.moi_workgroup_key_vgpr, scratch_vgpr,
-                                            scratch_count, "MOI workgroup key", errors) ||
-      reject_optional_scratch_range_overlap(point.moi_record_replay_workgroup_vgprs.x, scratch_vgpr,
-                                            scratch_count, "MOI Record/Replay workgroup x",
-                                            errors) ||
-      reject_optional_scratch_range_overlap(point.moi_record_replay_workgroup_vgprs.y, scratch_vgpr,
-                                            scratch_count, "MOI Record/Replay workgroup y",
-                                            errors) ||
-      reject_optional_scratch_range_overlap(point.moi_record_replay_workgroup_vgprs.z, scratch_vgpr,
-                                            scratch_count, "MOI Record/Replay workgroup z",
-                                            errors) ||
-      reject_optional_scratch_range_overlap(
-          point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id, scratch_vgpr, scratch_count,
-          "MOI Record/Replay cluster workgroup ID", errors))
+                                            scratch_count, "MOI workgroup key", errors))
     return std::nullopt;
+  constexpr std::array<std::string_view, 4> workgroup_names = {
+      "MOI Record/Replay workgroup x", "MOI Record/Replay workgroup y",
+      "MOI Record/Replay workgroup z", "MOI Record/Replay cluster workgroup ID"};
+  const std::array<std::optional<uint16_t>, 4> workgroup_registers =
+      point.moi_record_replay_workgroup_vgprs.values();
+  for (size_t index = 0; index < workgroup_registers.size(); ++index) {
+    if (reject_optional_scratch_range_overlap(workgroup_registers[index], scratch_vgpr,
+                                              scratch_count, workgroup_names[index], errors))
+      return std::nullopt;
+  }
   const auto &access_ranges = candidate.ranges;
   if (access_ranges.empty()) {
     errors.emplace_back("ConSan MOI first-light probe requires a supported LDS access range");

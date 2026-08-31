@@ -212,38 +212,55 @@ struct ConSanPreappliedMutationLayout {
   bool operator==(const ConSanPreappliedMutationLayout &) const = default;
 };
 
-/// Exact persistent Record/Replay workgroup tuple. Record/Replay publishes
-/// full coordinates, unlike Inline Shadow's separately packed cell key.
-struct ConSanMoiPersistentWorkgroupRegisters {
-  std::optional<uint16_t> x;
-  std::optional<uint16_t> y;
-  std::optional<uint16_t> z;
-  /// gfx1250's cluster-local workgroup coordinate. This remains empty on
-  /// architectures whose launch identity is exactly the x/y/z tuple.
-  std::optional<uint16_t> cluster_workgroup_id = std::nullopt;
+/// Optional exact x/y/z and cluster workgroup identity in one storage domain.
+///
+/// Record/Replay and Sampled always consume x/y/z as one identity. Keeping the
+/// optionality around the tuple, rather than around each coordinate, prevents
+/// placement, ABI telemetry, and private-state planning from publishing a
+/// partial identity. The optional cluster coordinate refines that complete
+/// identity only on targets that expose cluster-local workgroup state.
+template <typename T> class ConSanMoiPersistentWorkgroupTuple {
+public:
+  ConSanMoiPersistentWorkgroupTuple() = default;
+  ConSanMoiPersistentWorkgroupTuple(T x, T y, T z,
+                                    std::optional<T> cluster_workgroup_id = std::nullopt)
+      : coordinates_{{x, y, z}}, cluster_workgroup_id_(cluster_workgroup_id) {}
 
-  [[nodiscard]] bool empty() const { return !x && !y && !z && !cluster_workgroup_id; }
-  [[nodiscard]] bool complete() const { return x && y && z; }
-  [[nodiscard]] std::array<std::optional<uint16_t>, 4> registers() const {
-    return {x, y, z, cluster_workgroup_id};
+  [[nodiscard]] bool empty() const { return !coordinates_; }
+  [[nodiscard]] bool complete() const { return coordinates_.has_value(); }
+  [[nodiscard]] std::optional<T> x() const {
+    return coordinates_ ? std::optional{(*coordinates_)[0]} : std::nullopt;
+  }
+  [[nodiscard]] std::optional<T> y() const {
+    return coordinates_ ? std::optional{(*coordinates_)[1]} : std::nullopt;
+  }
+  [[nodiscard]] std::optional<T> z() const {
+    return coordinates_ ? std::optional{(*coordinates_)[2]} : std::nullopt;
+  }
+  [[nodiscard]] std::optional<T> cluster_workgroup_id() const { return cluster_workgroup_id_; }
+  [[nodiscard]] std::array<std::optional<T>, 4> values() const {
+    return {x(), y(), z(), cluster_workgroup_id()};
   }
 
-  auto operator<=>(const ConSanMoiPersistentWorkgroupRegisters &) const = default;
+  void reset() {
+    coordinates_.reset();
+    cluster_workgroup_id_.reset();
+  }
+
+  auto operator<=>(const ConSanMoiPersistentWorkgroupTuple &) const = default;
+
+private:
+  std::optional<std::array<T, 3>> coordinates_;
+  std::optional<T> cluster_workgroup_id_;
 };
+
+/// Exact persistent Record/Replay workgroup tuple. Record/Replay publishes
+/// full coordinates, unlike Inline Shadow's separately packed cell key.
+using ConSanMoiPersistentWorkgroupRegisters = ConSanMoiPersistentWorkgroupTuple<uint16_t>;
 
 /// Per-workitem private offsets holding the exact Record/Replay workgroup
 /// tuple when no lifetime-safe persistent register window exists.
-struct ConSanMoiPersistentWorkgroupPrivateOffsets {
-  std::optional<uint32_t> x;
-  std::optional<uint32_t> y;
-  std::optional<uint32_t> z;
-  std::optional<uint32_t> cluster_workgroup_id = std::nullopt;
-
-  [[nodiscard]] bool empty() const { return !x && !y && !z && !cluster_workgroup_id; }
-  [[nodiscard]] bool complete() const { return x && y && z; }
-
-  auto operator<=>(const ConSanMoiPersistentWorkgroupPrivateOffsets &) const = default;
-};
+using ConSanMoiPersistentWorkgroupPrivateOffsets = ConSanMoiPersistentWorkgroupTuple<uint32_t>;
 
 /// Exact ordinary-SGPR ABI that retains MOI state across arbitrary guest
 /// instructions.

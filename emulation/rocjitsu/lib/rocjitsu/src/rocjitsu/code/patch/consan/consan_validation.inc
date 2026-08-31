@@ -3938,15 +3938,11 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
     }
     const ConSanMoiPersistentWorkgroupPrivateOffsets &private_workgroup =
         patch.persistent_record_replay_workgroup_private_offsets;
-    if (!private_workgroup.empty() && !private_workgroup.complete()) {
-      errors.emplace_back(
-          "ConSan final validation found an incomplete private Record/Replay workgroup tuple");
-    }
-    if (private_workgroup.complete()) {
-      std::vector<uint32_t> offsets = {*private_workgroup.x, *private_workgroup.y,
-                                       *private_workgroup.z};
-      if (private_workgroup.cluster_workgroup_id)
-        offsets.push_back(*private_workgroup.cluster_workgroup_id);
+    if (!private_workgroup.empty()) {
+      std::vector<uint32_t> offsets = {*private_workgroup.x(), *private_workgroup.y(),
+                                       *private_workgroup.z()};
+      if (private_workgroup.cluster_workgroup_id())
+        offsets.push_back(*private_workgroup.cluster_workgroup_id());
       if (!patch.persistent_private_state_end) {
         errors.emplace_back(
             "ConSan final validation found a private Record/Replay workgroup tuple without a "
@@ -4035,10 +4031,8 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
           }
           const ConSanMoiPersistentWorkgroupRegisters &workgroup_vgprs =
               patch.persistent_record_replay_workgroup_vgprs;
-          if (workgroup_vgprs.complete()) {
-            for (const std::optional<uint16_t> reg :
-                 {workgroup_vgprs.x, workgroup_vgprs.y, workgroup_vgprs.z,
-                  workgroup_vgprs.cluster_workgroup_id}) {
+          if (!workgroup_vgprs.empty()) {
+            for (const std::optional<uint16_t> reg : workgroup_vgprs.values()) {
               if (!reg)
                 continue;
               requirement.required_vgpr_count = std::max<uint16_t>(

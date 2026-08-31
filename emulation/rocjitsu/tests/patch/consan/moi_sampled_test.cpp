@@ -484,17 +484,17 @@ TEST(ConSanMoi, Gfx1250DenseSampledPrivateStateUsesSpillSafeBodyGate) {
   ASSERT_NE(access, result.patches.end());
   ASSERT_TRUE(access->scratch_vgpr);
   ASSERT_TRUE(access->persistent_record_replay_workgroup_private_offsets.complete());
-  ASSERT_TRUE(access->persistent_record_replay_workgroup_private_offsets.cluster_workgroup_id);
+  ASSERT_TRUE(access->persistent_record_replay_workgroup_private_offsets.cluster_workgroup_id());
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> cave =
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
   const uint16_t coordinate_vgpr = static_cast<uint16_t>(*access->scratch_vgpr + 2u);
   for (uint32_t offset : {
-           *access->persistent_record_replay_workgroup_private_offsets.x,
-           *access->persistent_record_replay_workgroup_private_offsets.y,
-           *access->persistent_record_replay_workgroup_private_offsets.z,
-           *access->persistent_record_replay_workgroup_private_offsets.cluster_workgroup_id,
+           *access->persistent_record_replay_workgroup_private_offsets.x(),
+           *access->persistent_record_replay_workgroup_private_offsets.y(),
+           *access->persistent_record_replay_workgroup_private_offsets.z(),
+           *access->persistent_record_replay_workgroup_private_offsets.cluster_workgroup_id(),
        }) {
     const auto load =
         instrumentation::build_private_load_b32(coordinate_vgpr, offset, ROCJITSU_CODE_ARCH_CDNA5);
@@ -543,9 +543,9 @@ TEST(ConSanMoi, Gfx1250DenseSampledFastGateIncludesClusterWorkgroupId) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  ASSERT_TRUE(prologue->persistent_record_replay_workgroup_vgprs.cluster_workgroup_id);
+  ASSERT_TRUE(prologue->persistent_record_replay_workgroup_vgprs.cluster_workgroup_id());
   const uint16_t persistent_cluster =
-      *prologue->persistent_record_replay_workgroup_vgprs.cluster_workgroup_id;
+      *prologue->persistent_record_replay_workgroup_vgprs.cluster_workgroup_id();
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
   EXPECT_NE(std::ranges::find(prologue_words,
@@ -586,8 +586,8 @@ TEST(ConSanMoi, Gfx1250DenseSampledGateReservesCodeObjectWideClusterTuple) {
   // Persistent placement is shared by the whole code object. Model a
   // cluster-aware sibling kernel even though this access owner itself never
   // reads the cluster launch input.
-  options.moi_record_replay_workgroup_vgprs = {
-      .x = 42u, .y = 43u, .z = 44u, .cluster_workgroup_id = 45u};
+  options.moi_record_replay_workgroup_vgprs =
+      ConSanMoiPersistentWorkgroupRegisters{42u, 43u, 44u, 45u};
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(kAccessCount);
   options.moi_runtime_sample_stride = 256u;
@@ -1346,7 +1346,7 @@ TEST(ConSanMoi, Cdna4SampledAtomicTracksCacheAssociatedOrdering) {
   options.moi_exec_save_sgpr = 80;
   options.moi_owner_vgpr = 20;
   options.moi_epoch_vgpr = 21;
-  options.moi_record_replay_workgroup_vgprs = {.x = 30u, .y = 31u, .z = 32u};
+  options.moi_record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{30u, 31u, 32u};
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
   options.max_patches = 2;
@@ -1385,7 +1385,7 @@ TEST(ConSanMoi, Cdna4SampledRelocatesOrdinaryAtomicAcquireSequence) {
   options.moi_exec_save_sgpr = 80;
   options.moi_owner_vgpr = 20;
   options.moi_epoch_vgpr = 21;
-  options.moi_record_replay_workgroup_vgprs = {.x = 30u, .y = 31u, .z = 32u};
+  options.moi_record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{30u, 31u, 32u};
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(4);
   options.max_patches = 4;
@@ -1479,7 +1479,8 @@ TEST(ConSanMoi, SampledRoutesOnlyNearestAcquireToEachPayloadWindow) {
     options.moi_exec_save_sgpr = 80u;
     options.moi_owner_vgpr = 20u;
     options.moi_epoch_vgpr = 21u;
-    options.moi_record_replay_workgroup_vgprs = {.x = 30u, .y = 31u, .z = 32u};
+    options.moi_record_replay_workgroup_vgprs =
+        ConSanMoiPersistentWorkgroupRegisters{30u, 31u, 32u};
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = direct_sampled_report_bytes(4u);
     options.moi_runtime_sample_stride = 1u;
@@ -1535,7 +1536,7 @@ TEST(ConSanMoi, Cdna4SampledAtomicReportsGuestOperandOverlapFallback) {
   // spill-backed guest-overlap retry can place the operational probe at v0.
   options.moi_owner_vgpr = 29;
   options.moi_epoch_vgpr = 30;
-  options.moi_record_replay_workgroup_vgprs = {.x = 26u, .y = 27u, .z = 28u};
+  options.moi_record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{26u, 27u, 28u};
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
   options.max_patches = 2;
@@ -1757,9 +1758,9 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
         const uint16_t workgroup_value_vgpr = static_cast<uint16_t>(
             *atomic->scratch_vgpr + (deferred_acquire ? kValueOffset : kExpectedOffset));
         for (uint32_t offset : {
-                 *atomic->persistent_record_replay_workgroup_private_offsets.x,
-                 *atomic->persistent_record_replay_workgroup_private_offsets.y,
-                 *atomic->persistent_record_replay_workgroup_private_offsets.z,
+                 *atomic->persistent_record_replay_workgroup_private_offsets.x(),
+                 *atomic->persistent_record_replay_workgroup_private_offsets.y(),
+                 *atomic->persistent_record_replay_workgroup_private_offsets.z(),
              }) {
           const auto workgroup_load =
               instrumentation::build_private_load_b32(workgroup_value_vgpr, offset, target.arch);
@@ -3942,9 +3943,9 @@ TEST(ConSanMoi, Cdna4PrivateWorkgroupStateUsesSpillSafeSampledBodyGate) {
   ASSERT_TRUE(access->scratch_vgpr);
   const uint16_t coordinate_vgpr = static_cast<uint16_t>(*access->scratch_vgpr + 2u);
   for (uint32_t offset : {
-           *access->persistent_record_replay_workgroup_private_offsets.x,
-           *access->persistent_record_replay_workgroup_private_offsets.y,
-           *access->persistent_record_replay_workgroup_private_offsets.z,
+           *access->persistent_record_replay_workgroup_private_offsets.x(),
+           *access->persistent_record_replay_workgroup_private_offsets.y(),
+           *access->persistent_record_replay_workgroup_private_offsets.z(),
        }) {
     const auto load = instrumentation::build_private_load_b32(coordinate_vgpr, offset, kArch);
     ASSERT_TRUE(load);
@@ -5667,9 +5668,9 @@ TEST(ConSanMoi, SampledRuntimeGateUsesExpandedBranchIslands) {
   const auto dependency_wait =
       instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(dependency_wait);
-  for (uint16_t coordinate : {*prologue->persistent_record_replay_workgroup_vgprs.x,
-                              *prologue->persistent_record_replay_workgroup_vgprs.y,
-                              *prologue->persistent_record_replay_workgroup_vgprs.z}) {
+  for (uint16_t coordinate : {*prologue->persistent_record_replay_workgroup_vgprs.x(),
+                              *prologue->persistent_record_replay_workgroup_vgprs.y(),
+                              *prologue->persistent_record_replay_workgroup_vgprs.z()}) {
     const auto read = instrumentation::build_v_readfirstlane_b32(
         /*sdst=*/85u, coordinate, ROCJITSU_CODE_ARCH_RDNA4);
     const auto mix =
@@ -8055,9 +8056,9 @@ TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareG
   ASSERT_NE(prologue, result.patches.end());
   ASSERT_TRUE(prologue->persistent_record_replay_workgroup_vgprs.complete());
   const std::array<uint16_t, 3> persistent_grid = {
-      *prologue->persistent_record_replay_workgroup_vgprs.x,
-      *prologue->persistent_record_replay_workgroup_vgprs.y,
-      *prologue->persistent_record_replay_workgroup_vgprs.z,
+      *prologue->persistent_record_replay_workgroup_vgprs.x(),
+      *prologue->persistent_record_replay_workgroup_vgprs.y(),
+      *prologue->persistent_record_replay_workgroup_vgprs.z(),
   };
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);

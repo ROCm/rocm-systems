@@ -881,15 +881,18 @@ TEST(ConSanMoi, FullWorkgroupPayloadRequirementUsesMoiPatchSemantics) {
   patch.kind = ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
   EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
       result.observation_plan.engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
-  patch.persistent_sgpr_state.record_replay_workgroup = {.x = 20u, .y = 21u, .z = 22u};
+  patch.persistent_sgpr_state.record_replay_workgroup =
+      ConSanMoiPersistentWorkgroupRegisters{20u, 21u, 22u};
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
       result.observation_plan.engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
   patch.persistent_sgpr_state = {};
-  patch.persistent_record_replay_workgroup_vgprs = {.x = 20u, .y = 21u, .z = 22u};
+  patch.persistent_record_replay_workgroup_vgprs =
+      ConSanMoiPersistentWorkgroupRegisters{20u, 21u, 22u};
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
       result.observation_plan.engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
   patch.persistent_record_replay_workgroup_vgprs = {};
-  patch.persistent_record_replay_workgroup_private_offsets = {.x = 0u, .y = 4u, .z = 8u};
+  patch.persistent_record_replay_workgroup_private_offsets =
+      ConSanMoiPersistentWorkgroupPrivateOffsets{0u, 4u, 8u};
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
       result.observation_plan.engine, ROCJITSU_CODE_ARCH_CDNA3, patch));
 
@@ -2124,12 +2127,12 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
     if (engine == ConSanMoiEngine::RecordReplay) {
       EXPECT_FALSE(test_moi_persistent_sgpr_state(result).workgroup_key);
       ASSERT_TRUE(test_moi_persistent_sgpr_state(result).record_replay_workgroup.complete());
-      EXPECT_EQ(*test_moi_persistent_sgpr_state(result).record_replay_workgroup.x,
+      EXPECT_EQ(*test_moi_persistent_sgpr_state(result).record_replay_workgroup.x(),
                 *test_moi_persistent_sgpr_state(result).epoch + 1u);
-      EXPECT_EQ(*test_moi_persistent_sgpr_state(result).record_replay_workgroup.y,
-                *test_moi_persistent_sgpr_state(result).record_replay_workgroup.x + 1u);
-      EXPECT_EQ(*test_moi_persistent_sgpr_state(result).record_replay_workgroup.z,
-                *test_moi_persistent_sgpr_state(result).record_replay_workgroup.y + 1u);
+      EXPECT_EQ(*test_moi_persistent_sgpr_state(result).record_replay_workgroup.y(),
+                *test_moi_persistent_sgpr_state(result).record_replay_workgroup.x() + 1u);
+      EXPECT_EQ(*test_moi_persistent_sgpr_state(result).record_replay_workgroup.z(),
+                *test_moi_persistent_sgpr_state(result).record_replay_workgroup.y() + 1u);
     }
     const auto access_patch =
         std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {

@@ -298,24 +298,18 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
                                        ConSanMoiPersistentWorkgroupRegisters vector_destinations,
                                        const ConSanMoiWorkgroupSources &sources,
                                        rj_code_arch_t arch, std::vector<std::string> &errors) {
-  if ((!scalar_destinations.empty() && !scalar_destinations.complete()) ||
-      (!vector_destinations.empty() && !vector_destinations.complete()) ||
-      (scalar_destinations.complete() && vector_destinations.complete())) {
+  if (!scalar_destinations.empty() && !vector_destinations.empty()) {
     errors.emplace_back(
         "ConSan MOI exact workgroup-tuple prologue requires one complete register tuple");
     return false;
   }
-  if (!scalar_destinations.complete() && !vector_destinations.complete())
+  if (scalar_destinations.empty() && vector_destinations.empty())
     return true;
 
   const std::array<const ConSanMoiWorkgroupSource *, 4> source_tuple = {
       &sources.x, &sources.y, &sources.z, &sources.cluster_workgroup_id};
-  const std::array<std::optional<uint16_t>, 4> scalar_tuple = {
-      scalar_destinations.x, scalar_destinations.y, scalar_destinations.z,
-      scalar_destinations.cluster_workgroup_id};
-  const std::array<std::optional<uint16_t>, 4> vector_tuple = {
-      vector_destinations.x, vector_destinations.y, vector_destinations.z,
-      vector_destinations.cluster_workgroup_id};
+  const std::array<std::optional<uint16_t>, 4> scalar_tuple = scalar_destinations.values();
+  const std::array<std::optional<uint16_t>, 4> vector_tuple = vector_destinations.values();
   for (size_t index = 0; index < source_tuple.size(); ++index) {
     if (!scalar_tuple[index] && !vector_tuple[index])
       continue;
@@ -906,9 +900,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
 runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar_registers,
                                     ConSanMoiPersistentWorkgroupRegisters vector_registers) {
-  if ((!scalar_registers.empty() && !scalar_registers.complete()) ||
-      (!vector_registers.empty() && !vector_registers.complete()) ||
-      (scalar_registers.complete() && vector_registers.complete())) {
+  if (!scalar_registers.empty() && !vector_registers.empty()) {
     return std::nullopt;
   }
   const auto scalar_source = [](std::optional<uint16_t> reg) {
@@ -917,23 +909,23 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
   const auto vector_source = [](std::optional<uint16_t> reg) {
     return reg ? ConSanMoiWorkgroupSource::vector(*reg) : ConSanMoiWorkgroupSource{};
   };
-  if (scalar_registers.complete()) {
+  if (!scalar_registers.empty()) {
     return ConSanMoiWorkgroupSources{
-        .x = scalar_source(scalar_registers.x),
-        .y = scalar_source(scalar_registers.y),
-        .z = scalar_source(scalar_registers.z),
-        .cluster_workgroup_id = scalar_source(scalar_registers.cluster_workgroup_id),
+        .x = scalar_source(scalar_registers.x()),
+        .y = scalar_source(scalar_registers.y()),
+        .z = scalar_source(scalar_registers.z()),
+        .cluster_workgroup_id = scalar_source(scalar_registers.cluster_workgroup_id()),
         .cdna_full_payload_base = std::nullopt,
         .cdna_guest_payload_base = std::nullopt,
         .cdna_guest_payload_mask = 0u,
     };
   }
-  if (vector_registers.complete()) {
+  if (!vector_registers.empty()) {
     return ConSanMoiWorkgroupSources{
-        .x = vector_source(vector_registers.x),
-        .y = vector_source(vector_registers.y),
-        .z = vector_source(vector_registers.z),
-        .cluster_workgroup_id = vector_source(vector_registers.cluster_workgroup_id),
+        .x = vector_source(vector_registers.x()),
+        .y = vector_source(vector_registers.y()),
+        .z = vector_source(vector_registers.z()),
+        .cluster_workgroup_id = vector_source(vector_registers.cluster_workgroup_id()),
         .cdna_full_payload_base = std::nullopt,
         .cdna_guest_payload_base = std::nullopt,
         .cdna_guest_payload_mask = 0u,
@@ -1439,9 +1431,8 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
         arch);
   }
   std::array<std::optional<std::vector<uint32_t>>, 4> record_replay_workgroup_stores;
-  const std::array<std::optional<uint32_t>, 4> record_replay_workgroup_offset_values = {
-      record_replay_workgroup_offsets.x, record_replay_workgroup_offsets.y,
-      record_replay_workgroup_offsets.z, record_replay_workgroup_offsets.cluster_workgroup_id};
+  const std::array<std::optional<uint32_t>, 4> record_replay_workgroup_offset_values =
+      record_replay_workgroup_offsets.values();
   for (size_t index = 0; index < record_replay_workgroup_offset_values.size(); ++index) {
     if (record_replay_workgroup_offset_values[index]) {
       record_replay_workgroup_stores[index] = instrumentation::build_private_store_b32(
@@ -1965,10 +1956,7 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
           std::max(persistent_end, *access_patch->persistent_dispatch_id_private_offset +
                                        2u * SpillManager::kSlotBytes);
     for (const std::optional<uint32_t> offset :
-         {access_patch->persistent_record_replay_workgroup_private_offsets.x,
-          access_patch->persistent_record_replay_workgroup_private_offsets.y,
-          access_patch->persistent_record_replay_workgroup_private_offsets.z,
-          access_patch->persistent_record_replay_workgroup_private_offsets.cluster_workgroup_id}) {
+         access_patch->persistent_record_replay_workgroup_private_offsets.values()) {
       if (offset)
         persistent_end = std::max(persistent_end, *offset + SpillManager::kSlotBytes);
     }
@@ -2289,10 +2277,7 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
     required = std::max<uint32_t>(required, *point.moi_workgroup_key_vgpr + 1u);
   if (point.moi_dispatch_identity.vgpr())
     required = std::max<uint32_t>(required, *point.moi_dispatch_identity.vgpr() + 2u);
-  for (const std::optional<uint16_t> reg :
-       {point.moi_record_replay_workgroup_vgprs.x, point.moi_record_replay_workgroup_vgprs.y,
-        point.moi_record_replay_workgroup_vgprs.z,
-        point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
+  for (const std::optional<uint16_t> reg : point.moi_record_replay_workgroup_vgprs.values()) {
     if (reg)
       required = std::max<uint32_t>(required, *reg + 1u);
   }
@@ -2315,10 +2300,7 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanMoiOperatingPoi
                   overlaps(point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount) ||
                   overlaps(point.moi_inline_visible_evidence_sgpr);
   for (const std::optional<uint16_t> reg :
-       {point.moi_persistent_sgprs.record_replay_workgroup.x,
-        point.moi_persistent_sgprs.record_replay_workgroup.y,
-        point.moi_persistent_sgprs.record_replay_workgroup.z,
-        point.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
+       point.moi_persistent_sgprs.record_replay_workgroup.values()) {
     conflict |= overlaps(reg);
   }
   return !conflict;
@@ -2344,10 +2326,7 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanMoiOperatingPoi
       overlaps(point.moi_dispatch_identity.vgpr(), 2u)) {
     return true;
   }
-  for (const std::optional<uint16_t> reg :
-       {point.moi_record_replay_workgroup_vgprs.x, point.moi_record_replay_workgroup_vgprs.y,
-        point.moi_record_replay_workgroup_vgprs.z,
-        point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id}) {
+  for (const std::optional<uint16_t> reg : point.moi_record_replay_workgroup_vgprs.values()) {
     if (overlaps(reg))
       return true;
   }
@@ -2802,10 +2781,7 @@ void try_apply_owner_epoch_prologue_patch(
           static_cast<uint32_t>(*kernel_options.moi_persistent_sgprs.workgroup_key) + 1u);
     }
     for (const std::optional<uint16_t> reg :
-         {kernel_options.moi_persistent_sgprs.record_replay_workgroup.x,
-          kernel_options.moi_persistent_sgprs.record_replay_workgroup.y,
-          kernel_options.moi_persistent_sgprs.record_replay_workgroup.z,
-          kernel_options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
+         kernel_options.moi_persistent_sgprs.record_replay_workgroup.values()) {
       if (reg)
         required_sgpr_count = std::max<uint32_t>(required_sgpr_count, *reg + 1u);
     }

@@ -145,9 +145,11 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .moi_persistent_sgprs = {.owner = 20u,
                                .epoch = 21u,
                                .workgroup_key = 22u,
-                               .record_replay_workgroup = {.x = 23u, .y = 24u, .z = 25u}},
-      .moi_record_replay_workgroup_vgprs = {.x = 26u, .y = 27u, .z = 28u},
-      .moi_record_replay_workgroup_private_offsets = {.x = 32u, .y = 36u, .z = 40u},
+                               .record_replay_workgroup =
+                                   ConSanMoiPersistentWorkgroupRegisters{23u, 24u, 25u}},
+      .moi_record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{26u, 27u, 28u},
+      .moi_record_replay_workgroup_private_offsets =
+          ConSanMoiPersistentWorkgroupPrivateOffsets{32u, 36u, 40u},
       .moi_workgroup_key_vgpr = 29u,
       .owner_persistent_vgprs = {},
       .owner_transient_sgprs = {},
@@ -417,6 +419,25 @@ TEST(ConSan, MoiPersistentScalarStateRequiresTheOwnerEpochPair) {
 
   state.owner.reset();
   EXPECT_FALSE(state.complete());
+}
+
+TEST(ConSan, MoiPersistentWorkgroupTupleIsAllOrNothing) {
+  ConSanMoiPersistentWorkgroupRegisters registers;
+  EXPECT_TRUE(registers.empty());
+  EXPECT_FALSE(registers.complete());
+  EXPECT_EQ(registers.values(), (std::array<std::optional<uint16_t>, 4>{
+                                    std::nullopt, std::nullopt, std::nullopt, std::nullopt}));
+
+  registers = ConSanMoiPersistentWorkgroupRegisters{12u, 13u, 14u, 15u};
+  EXPECT_FALSE(registers.empty());
+  EXPECT_TRUE(registers.complete());
+  EXPECT_EQ(registers.values(), (std::array<std::optional<uint16_t>, 4>{12u, 13u, 14u, 15u}));
+
+  registers.reset();
+  EXPECT_TRUE(registers.empty());
+  EXPECT_FALSE(registers.complete());
+  EXPECT_EQ(registers.values(), (std::array<std::optional<uint16_t>, 4>{
+                                    std::nullopt, std::nullopt, std::nullopt, std::nullopt}));
 }
 
 TEST(ConSan, PhysicalSiteAliasCanonicalizationRetainsOrderAndRunsTypedMerge) {
