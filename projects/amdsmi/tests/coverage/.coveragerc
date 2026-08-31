@@ -1,0 +1,42 @@
+# Canonical coverage.py config for the amd-smi Python test suites.
+#
+# Manual use:
+#   cd tests/python
+#   python3 -m coverage run --rcfile=../coverage/.coveragerc \
+#       --source=$(python3 -c "import amdsmi,os;print(os.path.dirname(amdsmi.__file__))") \
+#       unit_tests.py -q
+#   python3 -m coverage combine
+#   python3 -m coverage report --rcfile=../coverage/.coveragerc
+#
+# The run_coverage.sh helper injects the machine-specific `source` list (the
+# installed amdsmi binding + the amdsmi_cli dir) in place of the __SOURCE__
+# marker below, so CLI subprocesses measured via COVERAGE_PROCESS_START pick up
+# the same source scope.
+[run]
+branch = True
+parallel = True
+# __SOURCE__ (run_coverage.sh replaces this marker with a resolved source = list)
+omit =
+    # Auto-generated ctypes wrapper: 1:1 with the C header, not hand-written logic.
+    */amdsmi_wrapper.py
+    # The test code itself should not count toward product coverage.
+    */tests/*
+
+[paths]
+# Fold the installed copies back onto the git source tree so reports show
+# repo-relative paths regardless of where the package was imported from.
+binding =
+    py-interface/
+    */dist-packages/amdsmi/
+    */site-packages/amdsmi/
+    */share/amd_smi/amdsmi/
+cli =
+    amdsmi_cli/
+    */libexec/amdsmi_cli/
+
+[report]
+show_missing = True
+skip_empty = True
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
