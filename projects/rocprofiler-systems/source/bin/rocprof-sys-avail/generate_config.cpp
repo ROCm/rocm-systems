@@ -273,11 +273,13 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             }
         }
 
-        if(filepath::open(_ofs, _fname))
+        if(rocprofsys::path::create_parent_dirs_and_open_ofstream(_ofs, _fname))
         {
             if(settings::verbose() >= 0)
+            {
                 printf("[rocprof-sys-avail] Outputting %s configuration file '%s'...\n",
                        _type.c_str(), _fname.c_str());
+            }
         }
         else
         {

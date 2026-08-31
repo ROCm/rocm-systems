@@ -1287,8 +1287,10 @@ main(int argc, char** argv)
         log_ofs = std::make_unique<std::ofstream>();
         verbprintf_bare(0, "%s", ::tim::log::color::source());
         verbprintf(0, "Opening '%s' for log output... ", logfile.c_str());
-        if(!filepath::open(*log_ofs, logfile))
+        if(!path::create_parent_dirs_and_open_ofstream(*log_ofs, logfile))
+        {
             throw std::runtime_error("Error opening log output file " + logfile);
+        }
         verbprintf_bare(0, "Done\n%s", ::tim::log::color::end());
         print_log_entries(*log_ofs, -1, {}, {}, "", false);
     }

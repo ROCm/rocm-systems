@@ -543,11 +543,13 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
 
         auto _fname = tim::settings::compose_output_filename(_fname_base, "json", _cfg);
         auto ofs    = std::ofstream{};
-        if(tim::filepath::open(ofs, _fname))
+        if(path::create_parent_dirs_and_open_ofstream(ofs, _fname))
         {
             if(get_verbose() >= 0)
+            {
                 operation::file_output_message<experiment>{}(
                     _fname, std::string{ "causal_experiments" });
+            }
             ofs << oss.str() << "\n";
         }
         else
@@ -577,11 +579,13 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
 
     std::ofstream ofs{};
     ofs.setf(std::ios::fixed);
-    if(tim::filepath::open(ofs, _fname))
+    if(path::create_parent_dirs_and_open_ofstream(ofs, _fname))
     {
         if(get_verbose() >= 0)
+        {
             operation::file_output_message<experiment>{}(
                 _fname, std::string{ "causal_experiments" });
+        }
 
         ofs << _existing.str();
         ofs << "startup\ttime=" << current_record.startup << "\n";
@@ -678,7 +682,8 @@ experiment::load_experiments(std::string _fname, const filename_config_t& _cfg,
 
     auto ifs   = std::ifstream{};
     auto _data = std::vector<experiment::record>{};
-    if(tim::filepath::open(ifs, _fname))
+    ifs.open(_fname);
+    if(ifs.is_open() && ifs.good())
     {
         auto ar = tim::policy::input_archive<cereal::JSONInputArchive>::get(ifs);
 
