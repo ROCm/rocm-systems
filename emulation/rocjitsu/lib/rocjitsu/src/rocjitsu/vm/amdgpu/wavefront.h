@@ -43,6 +43,13 @@ enum class WfState : uint8_t {
 struct RegAllocation {
   uint32_t base = 0;  ///< First register index in the physical file.
   uint32_t count = 0; ///< Number of registers allocated.
+
+  [[nodiscard]] constexpr bool contains(uint32_t physical_base, uint32_t physical_count = 1) const {
+    if (physical_count == 0 || physical_base < base)
+      return false;
+    const uint32_t offset = physical_base - base;
+    return offset < count && physical_count <= count - offset;
+  }
 };
 
 /// @brief AMDGPU wavefront execution state.
@@ -891,7 +898,7 @@ protected:
   /// @param mode_has_gpr_idx_en Whether MODE bit 27 enables GPR indexing.
   Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_size, uint32_t max_wf_size,
             uint32_t max_sgprs, uint32_t max_vgprs, bool mode_has_gpr_idx_en)
-      : cu_(cu), cu_view_(cu), wf_id_(wf_id), wf_size_(default_wf_size),
+      : cu_(cu), cu_view_(cu, *this), wf_id_(wf_id), wf_size_(default_wf_size),
         default_wf_size_(default_wf_size), max_wf_size_(max_wf_size), max_sgprs_(max_sgprs),
         max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en) {}
 

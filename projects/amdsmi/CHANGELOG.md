@@ -8,11 +8,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `physical_acc_id` to `amdsmi_enumeration_info_t`**.  
+  - Populated by `amdsmi_get_gpu_enumeration_info()`, UALoE-backed like the existing `physical_acc_id` field in `amdsmi_asic_info_t`.
+  - CLI: `amd-smi list --enumeration` now includes `PHYSICAL_ACC_ID` next to `OAM_ID`.
+
 ### Changed
 
 ### Optimized
 
 ### Resolved Issues
+
+- **Fixed `amd-smi ras --afid --folder --json` emitting nothing when no CPER files are readable**.  
+  - When every `.cper` file in the folder was skipped (e.g. rejected as a symlink), the JSON path printed empty output, so consumers feeding stdout to `json.loads` failed with `Expecting value: line 1 column 1 (char 0)`. It now emits `[]` for that case, matching the `--cper --json` contract.
 
 - **Fixed `amd-smi static --vram` reporting `GDDR7` for LPDDR5 unified memory on APUs (e.g. gfx117x)**.  
   - `AMDSMI_VRAM_TYPE__MAX` aliases the highest real memory type (`LPDDR5`), so a genuine LPDDR5 reading was matched by the `__MAX` special case and mislabeled `GDDR7`. It is now correctly reported as `LPDDR5`.
@@ -74,6 +81,12 @@ GPU: 0
   - New APIs: `amdsmi_get_gpu_accelerator_partition_mem_alloc_mode()`, `amdsmi_set_gpu_accelerator_partition_mem_alloc_mode()`.
   - New enum: `amdsmi_accelerator_partition_mem_alloc_mode_t` (`AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING`, `AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL`).
   - Supersedes the equivalent `compute_partition` memory allocation mode APIs, which are now deprecated.
+
+- **Added physical accelerator ID and tray info via UALoE**.
+  - `amdsmi_asic_info_t` gained a `physical_acc_id` field, populated by `amdsmi_get_gpu_asic_info()`.
+  - New node-scoped API `amdsmi_get_tray_info()` reports compute tray type and accelerator count via the new `amdsmi_tray_info_t` struct and `amdsmi_compute_tray_type_t` enum.
+  - Both are UALoE-backed and report `AMDSMI_STATUS_NOT_SUPPORTED` (or the `UINT32_MAX` sentinel for `physical_acc_id`) on systems without an active UALoE session.
+  - CLI: `amd-smi static --asic` now includes `PHYSICAL_ACC_ID`; new `amd-smi node --tray`/`-T` flag prints tray type and accelerator count.
 
 ### Changed
 
@@ -137,6 +150,9 @@ GPU: 0
   - The caller already knows this value, so it is now passed through to `gpuvsmi_get_pid_info()`, eliminating one full topology discovery per process per refresh. Falls back to the original discovery path when the id is unavailable.
 
 ### Resolved Issues
+
+- **Fixed `amd-smi metric --clock` reporting FCLK `max_clk` as 0 MHz**.
+  - `amdsmi_get_clock_info()` derived the FCLK (data-fabric) range from `pp_od_clk_voltage`, which on some GPUs (e.g. MI45x) lists only `OD_SCLK`/`OD_MCLK` and no FCLK section. The parsed maximum stayed at 0 and the code never fell back to `pp_dpm_fclk`, so `amd-smi metric --clock` showed `FCLK_0 MAX_CLK: 0 MHz`. The range now falls back to `pp_dpm_fclk` (and the analogous `pp_dpm_sclk`/`pp_dpm_mclk`) whenever the overdrive file omits that domain.
 
 - **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.  
   - The common no-entries case printed empty output, so consumers feeding stdout to `json.loads` failed with `Expecting value: line 1 column 1 (char 0)`. The command now always emits exactly one valid JSON document: `[]` when there are no entries, or a single aggregated array across all GPUs when there are. `--follow` mode stays silent until entries appear. The human-readable primary-partition warning is also suppressed in JSON mode so it no longer corrupts the output.
@@ -347,7 +363,7 @@ GPU: 0
   - Fields not applicable to the current version are set to sentinel values: `0xFFFF` for `uint16_t`, `0xFFFFFFFF` for `uint32_t`, and `UINT64_MAX` for `uint64_t` fields.
   - Python bindings updated with `AmdSmiApuMetrics` ctypes structure.
 
-- **Added `oam_id` to `amdsmi_enumeration_info_t`**.  
+- **Added `oam_id` to `amdsmi_enumeration_info_t`**.
   - `amd-smi list -e` now displays `OAM_ID` (Physical XGMI ID / OAM ID).
   - Added `--enumeration` as a long-form alias for `-e` in `amd-smi list`.
 

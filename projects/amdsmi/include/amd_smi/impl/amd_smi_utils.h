@@ -10,6 +10,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <iosfwd>
 #include <limits>
 #include <optional>
 #include <string>
@@ -297,21 +298,5 @@ amdsmi_status_t smi_amdgpu_read_clk_freq_from_pp_dpm(amd::smi::AMDSmiGPUDevice* 
  *          that are not VCLK0/VCLK1/DCLK0/DCLK1.
  */
 const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
-
-/**
- *  @brief Whether gfx activity should be reported as N/A for this GPU.
- *
- *  AMDSMI_SILENCE_GFX_ACTIVITY overrides everything ("1" silences, any other
- *  value shows). When unset, silencing auto-enables for GPUs whose graphics and
- *  RLC firmware versions fall in the affected ranges.
- */
-bool is_gfx_activity_silenced(amdsmi_processor_handle processor_handle);
-
-/**
- *  @brief Force the gfx activity fields of @p metrics to the uint-max N/A
- *  sentinel when silenced (whole-GPU and per-XCP busy values). No-op otherwise.
- */
-void apply_gfx_activity_overrides(amdsmi_processor_handle processor_handle,
-                                  amdsmi_gpu_metrics_t* metrics);
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

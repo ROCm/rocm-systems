@@ -98,6 +98,20 @@ git worktree add "${WORKTREE}" -b "${BRANCH}" origin/develop
 cd "${WORKTREE}/projects/amdsmi"
 ```
 
+### Shortcut: `new-worktree.sh`
+
+`new-worktree.sh` (this skill's directory) scripts Steps 0–2 — it derives the main
+checkout, applies the `rocm-systems-<name>` convention, creates the worktree, and
+prints the `cd` target. It hard-codes no user or path, so any rocm-systems checkout
+can use it:
+
+```bash
+.claude/skills/amdsmi-using-git-worktrees/new-worktree.sh -p 10091                       # rocm-systems-pr10091 from the PR head
+.claude/skills/amdsmi-using-git-worktrees/new-worktree.sh apu-fix -b users/me/apu-fix    # new branch off origin/develop
+```
+
+Still confirm consent (Step 1) before running it.
+
 **Sandbox fallback:** If `git worktree add` fails with a permission error, tell the user and work in the current directory instead.
 
 ## Step 3: Project Setup
