@@ -2243,9 +2243,9 @@ def run(app_args, args, **kwargs):
                 "kernel once per pass. Collect them in a separate run."
             )
 
-        # Route counter collection through the in-process kernel-replay service (config.hpp:
-        # ROCPROF_KERNEL_REPLAY). The SDK derives the pass count from the number of counter groups
-        # via the tool's pass-count callback, so no pass-count env is needed.
+        # Route counter collection through the in-process kernel-replay service. The SDK derives
+        # the pass count from the number of counter groups via the tool's pass-count callback, so
+        # there is nothing else to communicate.
         update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
 
     if args.pmc:
