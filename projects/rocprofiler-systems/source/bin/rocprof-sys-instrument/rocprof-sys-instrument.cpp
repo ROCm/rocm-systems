@@ -1194,12 +1194,12 @@ main(int argc, char** argv)
     if(_cmdv && _cmdv[0] && strlen(_cmdv[0]) > 0)
     {
         auto _is_executable = rocprofsys_get_is_executable(_cmdv[0], binary_rewrite);
-        const std::string _cmdv_base      = path::filename(_cmdv[0]);
-        auto              _has_lib_suffix = _cmdv_base.length() > 3 &&
-                               (_cmdv_base.find(".so.") != std::string::npos ||
-                                _cmdv_base.find(".so") == (_cmdv_base.length() - 3) ||
-                                _cmdv_base.find(".a") == (_cmdv_base.length() - 2));
-        auto _has_lib_prefix = _cmdv_base.length() > 3 && _cmdv_base.find("lib") == 0;
+        const std::string _cmdv_base = path::filename(_cmdv[0]);
+        auto              _has_lib_suffix =
+            _cmdv_base.length() > 3 &&
+            (_cmdv_base.find(".so.") != std::string::npos ||
+             _cmdv_base.ends_with(".so") || _cmdv_base.ends_with(".a"));
+        auto _has_lib_prefix = _cmdv_base.length() > 3 && _cmdv_base.starts_with("lib");
         if(!force_config && !_is_executable && !binary_rewrite &&
            (_has_lib_prefix || _has_lib_suffix))
         {
@@ -2719,12 +2719,12 @@ namespace
 std::string
 canonicalize(std::string _path)
 {
-    if(_path.find("./") == 0)
+    if(_path.starts_with("./"))
         _path = _path.replace(0, 1, get_cwd());
-    else if(_path.find("../") == 0)
+    else if(_path.starts_with("../"))
         _path = _path.insert(0, get_cwd() + "/");
 
-    auto _leading_dash = (_path.find('/') == 0);
+    auto _leading_dash = _path.starts_with('/');
     auto _pieces       = rocprofsys::delimit(_path, "/");
     std::reverse(_pieces.begin(), _pieces.end());
     auto _tree = std::vector<std::string>{};
@@ -2753,7 +2753,7 @@ canonicalize(std::string _path)
 std::string
 absolute(std::string _path)
 {
-    if(_path.find('/') == 0) return canonicalize(_path);
+    if(_path.starts_with('/')) return canonicalize(_path);
     return canonicalize(fmt::format("{}/{}", get_cwd(), _path));
 }
 

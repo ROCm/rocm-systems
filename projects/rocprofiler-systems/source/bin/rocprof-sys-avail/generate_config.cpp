@@ -370,21 +370,21 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                       env_vars::USE_AINIC, env_vars::USE_KOKKOSP, env_vars::USE_OMPT,
                       "ROCPROFSYS_USE", env_vars::OUTPUT })
                 {
-                    if(_lhs->get_env_name().find(itr) == 0 &&
-                       _rhs->get_env_name().find(itr) != 0)
+                    if(_lhs->get_env_name().starts_with(itr) &&
+                       !_rhs->get_env_name().starts_with(itr))
                         return true;
-                    if(_rhs->get_env_name().find(itr) == 0 &&
-                       _lhs->get_env_name().find(itr) != 0)
+                    if(_rhs->get_env_name().starts_with(itr) &&
+                       !_lhs->get_env_name().starts_with(itr))
                         return false;
                 }
                 for(const auto* itr :
                     { env_vars::SUPPRESS_PARSING, env_vars::SUPPRESS_CONFIG })
                 {
-                    if(_lhs->get_env_name().find(itr) == 0 &&
-                       _rhs->get_env_name().find(itr) != 0)
+                    if(_lhs->get_env_name().starts_with(itr) &&
+                       !_rhs->get_env_name().starts_with(itr))
                         return false;
-                    if(_rhs->get_env_name().find(itr) == 0 &&
-                       _lhs->get_env_name().find(itr) != 0)
+                    if(_rhs->get_env_name().starts_with(itr) &&
+                       !_lhs->get_env_name().starts_with(itr))
                         return true;
                 }
                 return _lhs->get_name() < _rhs->get_name();

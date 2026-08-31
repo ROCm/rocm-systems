@@ -53,13 +53,6 @@ struct file_closer
 };
 using unique_file = std::unique_ptr<FILE, file_closer>;
 
-constexpr bool
-starts_with(std::string_view str, std::string_view prefix) noexcept
-{
-    if(str.size() < prefix.size()) return false;
-    return prefix == std::string_view{ str.data(), prefix.size() };
-}
-
 inline std::vector<std::string_view>
 split_lines(std::string_view content)
 {
@@ -171,7 +164,7 @@ parse_proc_stat(std::string_view content)
     const auto                    lines = split_lines(content);
 
     const auto parse_cpu_line = [&](std::string_view line) {
-        if(!starts_with(line, PROC_STAT_CPU_PREFIX) ||
+        if(!line.starts_with(PROC_STAT_CPU_PREFIX) ||
            line.size() <= PROC_STAT_CPU_PREFIX.size() ||
            !std::isdigit(static_cast<unsigned char>(line[PROC_STAT_CPU_PREFIX.size()])))
             return;

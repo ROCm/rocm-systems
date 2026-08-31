@@ -34,7 +34,7 @@ constexpr std::string_view rocprofsys_prefix = "ROCPROFSYS";
 bool
 starts_with_rocprofsys(std::string_view entry) noexcept
 {
-    return entry.compare(0, rocprofsys_prefix.size(), rocprofsys_prefix) == 0;
+    return entry.starts_with(rocprofsys_prefix);
 }
 
 [[nodiscard]] std::string_view
@@ -110,8 +110,7 @@ print_environment_impl(const std::vector<std::string>&              env,
 static std::string
 strip_flag_prefix(std::string_view name)
 {
-    if(name.size() > 2 && name.compare(0, 2, "--") == 0)
-        return std::string{ name.substr(2) };
+    if(name.size() > 2 && name.starts_with("--")) return std::string{ name.substr(2) };
     return std::string{ name };
 }
 
