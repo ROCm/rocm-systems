@@ -9,8 +9,13 @@
 #include <cassert>
 
 // QP sharing configuration parameters
-RCCL_PARAM(IbCastCommNGroups, "IB_COMM_NGROUPS", 0);
-RCCL_PARAM(IbCastQpDepthMultiplier, "IB_QP_DEPTH_MULTIPLIER", 1);
+RCCL_PARAM(IbCastQpSharingEnable, "IB_QP_SHARING_ENABLE", 0);  // master switch: 0=off, 1=on
+RCCL_PARAM(IbCastCommNGroups, "IB_COMM_NGROUPS", 4);            // number of sharing groups (effective only when master switch is on)
+RCCL_PARAM(IbCastQpDepthMultiplier, "IB_QP_DEPTH_MULTIPLIER", 8); // CQ/WR depth multiplier for shared QPs
+
+// Global runtime enable flag — initialized from master switch param,
+// can be cleared during init if configuration is invalid (e.g. NGROUPS < 1).
+bool IbCastQpSharingGlobalEnable = false;
 
 // Pool and comm table globals
 struct IbCastSharedQp       g_IbCastSharedQpPool[IBCAST_MAX_SHARED_QPS];
