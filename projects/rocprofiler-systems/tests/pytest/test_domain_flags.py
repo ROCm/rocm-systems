@@ -4,8 +4,7 @@
 """
 Composable domain CLI flags on rocprof-sys-sample (transpose GPU workload).
 
-test_presets.py covers env echo on ``ls``. RocPD uses shared transpose baseline
-rules plus a small set of domain-flags filter contracts.
+Env echo is in test_presets.py on ls. This module asserts Perfetto/RocPD artifacts.
 """
 
 from __future__ import annotations
@@ -113,91 +112,6 @@ def _assert_workload_artifacts(
         rules_files=rules_files,
     )
 
-
-DOMAIN_ENV_ONLY_CASES = [
-    pytest.param(
-        ["--parallel"],
-        [
-            "ROCPROFSYS_USE_MPIP=true",
-            "ROCPROFSYS_USE_OMPT=true",
-            "ROCPROFSYS_USE_KOKKOSP=true",
-            "ROCPROFSYS_USE_RCCLP=true",
-        ],
-        None,
-        id="parallel_bare",
-    ),
-    pytest.param(
-        ["--parallel=mpi,openmp"],
-        ["ROCPROFSYS_USE_MPIP=true", "ROCPROFSYS_USE_OMPT=true"],
-        None,
-        id="parallel_mpi_openmp",
-    ),
-    pytest.param(
-        ["--parallel=mpi,openmp,kokkos,rccl"],
-        [
-            "ROCPROFSYS_USE_MPIP=true",
-            "ROCPROFSYS_USE_OMPT=true",
-            "ROCPROFSYS_USE_KOKKOSP=true",
-            "ROCPROFSYS_USE_RCCLP=true",
-        ],
-        None,
-        id="parallel_all_runtimes",
-    ),
-    pytest.param(
-        ["--parallel=mpi"],
-        ["ROCPROFSYS_USE_MPIP=true"],
-        None,
-        id="parallel_mpi_only",
-    ),
-    pytest.param(
-        ["--parallel=openmp"],
-        ["ROCPROFSYS_USE_OMPT=true"],
-        None,
-        id="parallel_openmp_only",
-    ),
-    pytest.param(
-        ["--parallel=kokkos"],
-        ["ROCPROFSYS_USE_KOKKOSP=true"],
-        None,
-        id="parallel_kokkos_only",
-    ),
-    pytest.param(
-        ["--parallel=rccl"],
-        ["ROCPROFSYS_USE_RCCLP=true"],
-        None,
-        id="parallel_rccl_only",
-    ),
-    pytest.param(
-        ["--ai-nics=nic0"],
-        ["ROCPROFSYS_SAMPLING_AINICS=nic0"],
-        None,
-        id="ai_nics",
-    ),
-    pytest.param(
-        ["--gpus=0"],
-        ["ROCPROFSYS_SAMPLING_GPUS=0"],
-        None,
-        id="gpus_0_bare",
-    ),
-    pytest.param(
-        ["--gpus=0-1"],
-        ["ROCPROFSYS_SAMPLING_GPUS=0-1"],
-        None,
-        id="gpus_range_bare",
-    ),
-    pytest.param(
-        ["--cpus=0-3"],
-        ["ROCPROFSYS_SAMPLING_CPUS=0-3"],
-        _CPU_TARGET_ENV,
-        id="cpus_range_bare",
-    ),
-    pytest.param(
-        ["--cpus=none"],
-        ["ROCPROFSYS_SAMPLING_CPUS=none"],
-        _CPU_TARGET_ENV,
-        id="cpus_none_bare",
-    ),
-]
 
 # flag_args, pass_regex, seed_env, perfetto_categories, with_amd_smi, filter_profiles
 DOMAIN_ARTIFACT_CASES = [
@@ -429,19 +343,6 @@ def domain_rules(validation_rules_dir: Path):
         ]
 
     return _rules
-
-
-@pytest.mark.timeout(180)
-@pytest.mark.gpu
-@pytest.mark.hip
-@pytest.mark.transpose
-@pytest.mark.class_name("domain-flags-env")
-class TestDomainFlagsEnvOnWorkload(RocprofsysTest):
-    @pytest.mark.parametrize("flag_args, pass_regex, seed_env", DOMAIN_ENV_ONLY_CASES)
-    def test_on_transpose(self, domain_flag_env, flag_args, pass_regex, seed_env):
-        env = {**domain_flag_env, **(seed_env or {})}
-        result = _run_transpose_sample(self, env, flag_args)
-        self.assert_regex(result, pass_regex=pass_regex)
 
 
 @pytest.mark.timeout(180)
