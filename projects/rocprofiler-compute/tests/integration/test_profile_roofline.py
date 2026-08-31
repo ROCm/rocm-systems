@@ -19,7 +19,6 @@ from tests.integration.common import (
     skip_unsupported_roofline_soc,
     validate,
 )
-from utils import csv_compression
 
 
 @pytest.mark.roofline_validation
@@ -90,12 +89,12 @@ def test_roof_rocpd(
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
     assert (Path(workload_dir) / "roofline.csv").exists()
 
-    # Run analyze to create merged pmc_perf.csv
+    # Run analyze to create merged pmc_perf.csv.gz
     code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
     assert code == 0
 
-    # Validate merged pmc_perf.csv content
-    assert common.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
+    # Validate merged pmc_perf.csv.gz content
+    assert common.check_file_pattern("Counter_Name", common.pmc_perf_path(workload_dir))
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -305,7 +304,7 @@ def test_bench_only_basic(binary_handler_profile_rocprof_compute):
     assert not (workload_path / "perfmon").exists()
     assert not (workload_path / "sysinfo.csv").exists()
     assert not (workload_path / "profiling_config.yaml").exists()
-    assert not csv_compression.find_csvs(workload_path, "results_*.csv")
+    assert not sorted(workload_path.glob("results_*.csv.gz"))
     assert not list(workload_path.glob("pmc_perf_*.csv"))
 
 

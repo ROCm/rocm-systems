@@ -10,6 +10,7 @@
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/instruction_list.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/decode_result.h"
 #include "util/intrusive_list.h"
 
 #include <cstdint>
@@ -153,6 +154,8 @@ public:
   /// @param[in] co Code object to analyze.
   /// @param[in] decoder Decoder for the target ISA.
   /// @param[in] arch ISA architecture used to match static PC builders.
+  /// @param[in] emit_error Destination for a decode diagnostic, including the
+  /// source `.text` byte offset.
   /// @param[in] extra_leaders Byte offsets that must start a basic block AND are entered from
   /// outside the decoded graph. Under ExplicitOnly these become the external-entry set, so an
   /// offset listed here has no incoming caller facts.
@@ -163,10 +166,10 @@ public:
   /// entries. Function-entry symbols and stored-pointer targets belong here: they are genuine
   /// boundaries, yet most are ordinary helpers whose callers reach them by a decoded edge, and
   /// calling them external would throw those caller facts away.
-  /// @returns Ordered list of basic blocks with their decoded instructions.
-  static std::vector<std::unique_ptr<BasicBlock>>
+  /// @returns Ordered basic blocks with their decoded instructions, or failure.
+  static FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
   build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-        std::span<const uint64_t> extra_leaders = {},
+        DecodeErrorEmitter emit_error = {}, std::span<const uint64_t> extra_leaders = {},
         ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
         std::span<const uint64_t> extra_split_points = {});
 

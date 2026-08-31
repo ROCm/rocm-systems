@@ -11,8 +11,7 @@ import pandas as pd
 import yaml
 
 import config
-from utils import schema, utils_analysis
-from utils.kernel_name_shortener import kernel_name_shortener
+from utils import csv_compression, schema, utils_analysis
 from utils.logger import (
     console_debug,
     console_error,
@@ -75,7 +74,6 @@ def create_df_kernel_top_stats(
     filter_gpu_ids: Optional[list[str]],
     filter_dispatch_ids: Optional[list[str]],
     time_unit: str,
-    kernel_verbose: int,
     sortby: str = "sum",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -312,19 +310,20 @@ def process_pc_sampling_kernel_trace(
 @demarcate
 def create_df_pmc(
     raw_data_dir: str,
-    kernel_verbose: int,
     verbose: int,
 ) -> pd.DataFrame:
     """
     Load all raw pmc counters and join into one df.
     """
-    pmc_perf_path = Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+    pmc_perf_path = csv_compression.compressed_name(
+        Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+    )
     if not pmc_perf_path.is_file():
         return pd.DataFrame()
 
     df = pd.read_csv(pmc_perf_path)
 
-    # rocpd pmc_perf.csv is long: one row per counter per dispatch. Anything
+    # The rocpd counter CSV is long: one row per counter per dispatch. Anything
     # else was written by a removed backend and is no longer supported.
     if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
         console_error(
@@ -333,11 +332,6 @@ def create_df_pmc(
             "Please re-profile this workload with a current release.",
         )
     df = utils_analysis.process_rocpd_csv(df)
-
-    # Demangle original KernelNames
-    # Skip for Standalone Roofline with -1 to keep full kernel names
-    if kernel_verbose >= 0:
-        kernel_name_shortener(df, kernel_verbose)
 
     utils_analysis.add_unit_counter(df)
 

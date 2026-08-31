@@ -7,13 +7,34 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added the `LDS Utilization` metric to the gfx115x Memory Chart.
+
 ### Changed
 
+* gfx115x Memory Chart improvements.
+  * Renamed memory chart metric names for more clarity.
+  * Each edge now reports the traffic measured at the interface it represents.
+  * Updated arrows, labels, and the legend in the memory chart to better represent their meaning.
+
+* Redesigned the CDNA (gfx9) Memory Chart with a new Rich-based layout that improves readability in the terminal. Added Non-buffer/Buffer request breakdowns (Read/Write/Atomic wavefronts) and L2-Fabric bandwidth metrics across all CDNA architectures.
+  * gfx908–gfx942: added HBM and remote traffic percentages.
+  * gfx950: added LDS Read/Write/Atomic instruction counts and per-channel bandwidth for HBM, xGMI, and PCIe.
+
 ### Removed
+
+* Removed the `--kernel-verbose` analyze option and the kernel name shortener it drove. The option had no effect on any output.
+
+* Removed the Nuitka standalone binary build (`STANDALONEBINARY`, `STANDALONEBINARY_EXTRACT_DIR`), its RHEL 8 docker recipe, and the `--call-binary` pytest option that exercised it.
+
+* Removed the `SKIP_NATIVE_TOOL_BUILD` build option. The counter collection tool is always built, and its sources are no longer installed for runtime compilation.
 
 ### Optimized
 
 ### Resolved issues
+
+* Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.
+
+* Fixed `GL2-Fabric Write BW` understating write bandwidth on gfx115x in the System Speed-of-Light and Memory Chart panels.
 
 ### Upcoming changes
 

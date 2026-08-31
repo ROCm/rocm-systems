@@ -1077,6 +1077,28 @@ bool Device::populateOCLDeviceConstants() {
                           &localUID)) {
     info_.luidLowPart_ = localUID.low;
     info_.luidHighPart_ = localUID.high;
+    // Node mask = this agent's index within its adapter (LUID). Agents sharing a
+    // LUID form a linked adapter; a standalone adapter reports 0x1. The LUID is
+    // zero on platforms without a WDDM adapter, where the node mask stays 0.
+    if ((localUID.low != 0) || (localUID.high != 0)) {
+      uint32_t luidNodeIndex = 0;
+      for (const auto& siblingAgent : gpu_agents_) {
+        if (siblingAgent.handle == bkendDevice_.handle) {
+          break;
+        }
+        hsa_luid_t siblingUID = {0};
+        if ((HSA_STATUS_SUCCESS ==
+             Hsa::agent_get_info(siblingAgent,
+                                 static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
+                                 &siblingUID)) &&
+            (siblingUID.low == localUID.low) && (siblingUID.high == localUID.high)) {
+          ++luidNodeIndex;
+        }
+      }
+      if (luidNodeIndex < 32) {
+        info_.luidDeviceNodeMask_ = 1u << luidNodeIndex;
+      }
+    }
   }
 
   if (HSA_STATUS_SUCCESS !=
@@ -3551,8 +3573,12 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     QueueExtras extras;
     extras.deviceMemRingBuf = (desc.flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0;
     extras.largestAqlBarrierBitSlot = std::make_shared<std::atomic<uint64_t>>(kInvalidAqlSlot);
-    hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
-                           &extras.metadataRingBuffer);
+    // Leaving the ring base null makes MetaDataPreloader::HasMetadataQueue() false,
+    // which is the single gate every metadata path already checks.
+    if (DEBUG_CLR_ENABLE_KDQ) {
+      hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+                             &extras.metadataRingBuffer);
+    }
     if (DEBUG_CLR_DIRECT_DOORBELL) {
       uint64_t db_id = 0;
       if (hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &db_id) ==
@@ -3895,8 +3921,7 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
             std::string kernelName = vgpu->AnalyzeAqlQueue();
             const char* kname = kernelName.c_str();
             ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
-                    "Memory Fault Error [%sGPU index: %u, "
-                    "faulting addr: 0x%" PRIx64 ", kernel: %s]",
+                    "[%sGPU index: %u, faulting addr: 0x%" PRIx64 ", kernel: %s]",
                     host_tag.c_str(), roc_dev->index(),
                     event->memory_fault.virtual_address, kname);
           }
@@ -4192,43 +4217,7 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
                               ? device_.maxSdmaReadMask_
                               : device_.maxSdmaWriteMask_;
 
-  // Simple round-robin path if all engines have equal bandwidth
-  // Disabled by default - use preferred engine logic for current GPUs
-  constexpr bool kUseSimpleRR = false;
-
-  if (kUseSimpleRR) {
-    // Simple round-robin: just cycle through valid engines
-    // This will be enabled for future GPUs where engine selection doesn't matter
-    if (validEngineMask == 0) {
-      ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
-              "No valid SDMA engines for VirtualGPU %p", vgpu);
-      return 0;
-    }
-
-    // Cycle through bit positions, find next valid engine
-    uint32_t start_bit = next_rr_engine_.fetch_add(1, std::memory_order_relaxed);
-    uint32_t selected_mask = 0;
-
-    // Try up to 32 positions to find a valid engine
-    for (uint32_t i = 0; i < 32; ++i) {
-      uint32_t bit = (start_bit + i) % 32;
-      uint32_t mask = 1u << bit;
-      if (validEngineMask & mask) {
-        selected_mask = mask;
-        break;
-      }
-    }
-
-    vgpu_to_engine_[vgpu] = selected_mask;
-
-    ClPrint(amd::LOG_INFO, amd::LOG_COPY,
-            "Assigned SDMA engine (simple RR) to VirtualGPU %p: mask=0x%x, engine_type=%d",
-            vgpu, selected_mask, engine_type);
-
-    return selected_mask;
-  }
-
-  // Current path: Query HSA for engine status and preferences
+  // Query HSA for engine status and preferences
   uint32_t freeEngineMask = 0;
   uint32_t preferredMask = 0;
   hsa_status_t status = HSA_STATUS_SUCCESS;

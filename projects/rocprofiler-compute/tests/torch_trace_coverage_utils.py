@@ -3110,8 +3110,8 @@ def kernels_by_marker_leaf(
 
 
 def _read_roctx_marker_dataframe(workload_dir: str) -> Optional[pd.DataFrame]:
-    """Concatenate ``marker_api_trace.csv`` files under ``workload_dir``."""
-    marker_files = sorted(Path(workload_dir).glob("**/*marker_api_trace.csv"))
+    """Concatenate ``marker_api_trace.csv.gz`` files under ``workload_dir``."""
+    marker_files = sorted(Path(workload_dir).glob("**/*marker_api_trace.csv.gz"))
     if not marker_files:
         return None
     marker_df = pd.concat(

@@ -17,13 +17,47 @@
 //!
 //! # Safety
 //!
-//! Every function here is `unsafe`: callers must uphold the C API's
+//! The raw [`Lib`] bindings are `unsafe`: callers must uphold the C API's
 //! contract (valid pointers, correct lifetimes, single-threaded VM
-//! creation, etc.). Higher layers (`mirage_rocjitsu`) wrap these in
-//! safe, RAII-managed abstractions.
+//! creation, and so on).
+//!
+//! Safe, RAII-managed wrappers live here too, in [`daemon`], rather than
+//! in the crates that use them. This crate is the one place in the
+//! workspace permitted to write `unsafe`; every other crate is
+//! `forbid(unsafe_code)`. Keeping the wrapper here means the invariants
+//! and the `unsafe` that relies on them sit in the same file and are
+//! reviewed together, instead of the invariants living in a doc comment
+//! that a caller in another crate has to remember to honour.
 
 use std::ffi::{CStr, OsStr};
+use std::fmt;
+use std::mem::offset_of;
 use std::os::raw::{c_char, c_int, c_void};
+
+type FnGetVersionString = unsafe extern "C" fn() -> *const c_char;
+
+/// Load and copy the formatted build identity exported by `librocjitsu.so`.
+///
+/// # Errors
+///
+/// Returns a diagnostic when the library cannot be loaded, predates the version
+/// API, or violates the API's non-null string contract.
+pub fn version_string(path: impl AsRef<OsStr>) -> Result<String, String> {
+    // SAFETY: Mirage's RocJITsu discovery selects the library. The resolved
+    // symbol has the C signature declared in rj_version.h, and its static string
+    // is copied while the library remains loaded.
+    unsafe {
+        let library = libloading::Library::new(path.as_ref()).map_err(|error| error.to_string())?;
+        let get_version = *library
+            .get::<FnGetVersionString>(b"rj_get_version_string\0")
+            .map_err(|error| error.to_string())?;
+        let version = get_version();
+        if version.is_null() {
+            return Err("rj_get_version_string returned null".to_string());
+        }
+        Ok(CStr::from_ptr(version).to_string_lossy().into_owned())
+    }
+}
 
 /// Status codes returned by the rocjitsu C API (`rj_status_t`).
 pub type RjStatus = c_int;
@@ -47,13 +81,21 @@ pub const ROCJITSU_STATUS_UNSUPPORTED: RjStatus = 6;
 pub type RjHandle = c_int;
 
 /// Opaque VM handle (`rj_vm_t`). Only ever held behind a pointer.
+///
+/// `Debug` prints the type name and nothing else — there is nothing to
+/// print. It exists so a caller can derive `Debug` on a struct holding
+/// `*mut RjVm` without having to hand-write an impl.
 #[repr(C)]
+#[derive(Debug)]
 pub struct RjVm {
     _private: [u8; 0],
 }
 
 /// Opaque daemon handle (`rj_daemon_t`). Only ever held behind a pointer.
+///
+/// `Debug` is present for the same reason as on [`RjVm`].
 #[repr(C)]
+#[derive(Debug)]
 pub struct RjDaemon {
     _private: [u8; 0],
 }
@@ -115,6 +157,10 @@ pub struct RjVmCmd {
     /// In daemon mode the VM substitutes it into DBG_TRAP ENABLE and, on
     /// adoption, clears it to -1 so the caller does not close it.
     pub in_handle: RjHandle,
+    /// `[in/out]` Debugger-authorized target `/proc/pid/mem` fd, or -1.
+    pub in_mem_handle: RjHandle,
+    /// `[in]` Pinned target `/proc/pid` directory fd, or -1.
+    pub in_proc_handle: RjHandle,
 }
 
 /// Device memory mapping descriptor (`rj_vm_map_t`).
@@ -133,6 +179,8 @@ pub struct RjVmMap {
     pub flags: u32,
     /// `[out]` Address the mapping was placed at.
     pub mapped_addr: u64,
+    /// `[out]` errno captured at the failing mmap (0 on success).
+    pub map_errno: i32,
 }
 
 /// Device memory unmapping descriptor (`rj_vm_unmap_t`).
@@ -151,7 +199,7 @@ pub struct RjVmUnmap {
 /// interposer can emulate libdrm/DRM device queries client-side. The
 /// layout must match `rocjitsu/vm/rj_vm.h` byte-for-byte.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct RjVmGpuInfo {
     /// Non-zero when this payload was populated by the VM.
     pub present: u32,
@@ -211,14 +259,115 @@ impl RjVmGpuInfo {
     /// serialisation. Sound because the struct is `#[repr(C)]` POD that
     /// matches `rj_vm_gpu_info_t` exactly.
     pub fn as_bytes(&self) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts(
-                self as *const Self as *const u8,
-                std::mem::size_of::<Self>(),
-            )
-        }
+        unsafe { std::slice::from_raw_parts(self as *const Self as *const u8, size_of::<Self>()) }
     }
 }
+
+// ---------------------------------------------------------------------
+// C ABI layout assertions
+// ---------------------------------------------------------------------
+//
+// Every `#[repr(C)]` type above is written into by C. A field that is
+// missing, reordered, or the wrong width does not fail to compile and
+// does not trip a lint: `#[repr(C)]` describes the layout Rust *will*
+// produce, not the layout C expects, so the two silently disagree and the
+// C side reads or writes at offsets the Rust allocation may not even
+// cover. `rj_vm_map_t` was exactly that — the Rust struct lacked the
+// trailing `map_errno`, so every `rj_vm_device_map*` call wrote four
+// bytes past the end of the caller's `RjVmMap`.
+//
+// The numbers below were read off
+// `rocjitsu/lib/rocjitsu/include/rocjitsu/vm/rj_vm.h` (`rj_vm_cmd_t` at
+// line 56, `rj_vm_map_t` at 68, `rj_vm_unmap_t` at 79, `rj_vm_gpu_info_t`
+// at 85) and `rocjitsu/daemon/rj_daemon.h` (`rj_daemon_status_t` at 26),
+// as a 64-bit LP64 target sees them, and confirmed against a `sizeof` /
+// `offsetof` probe compiled from those headers.
+//
+// Be clear about the guarantee: these are a snapshot. They catch a
+// careless edit *on the Rust side* — a dropped field, a `u32` widened to
+// a `u64`, a field moved across a padding boundary — at compile time, on
+// every build, with no rocjitsu installed. They cannot notice the *C*
+// side changing, because nothing here reads the header. Neither can they
+// catch a swap of two same-width neighbours, which does not move
+// anything. For both of those, `tests/abi_layout.rs` compiles a probe
+// against the real header when one can be found and compares field by
+// name; it skips when the header or a C compiler is absent, which on a
+// mirage checkout is the common case.
+//
+// So: if a number here changes, the header is the authority. Re-read it,
+// and fix the struct rather than the assertion.
+
+const _: () = {
+    // rj_vm_cmd_t — 48 bytes; `cmd` is followed by 4 bytes of padding so
+    // the `buf` pointer lands on an 8-byte boundary, and the three
+    // trailing handles are padded out to a multiple of 8.
+    assert!(size_of::<RjVmCmd>() == 48);
+    assert!(offset_of!(RjVmCmd, cmd) == 0);
+    assert!(offset_of!(RjVmCmd, buf) == 8);
+    assert!(offset_of!(RjVmCmd, buf_size) == 16);
+    assert!(offset_of!(RjVmCmd, result) == 24);
+    assert!(offset_of!(RjVmCmd, shared_handle) == 28);
+    assert!(offset_of!(RjVmCmd, in_handle) == 32);
+    assert!(offset_of!(RjVmCmd, in_mem_handle) == 36);
+    assert!(offset_of!(RjVmCmd, in_proc_handle) == 40);
+
+    // rj_vm_map_t — 48 bytes. `prot`/`flags` pair up into one 8-byte
+    // slot, and the trailing `map_errno` is padded out to 48.
+    assert!(size_of::<RjVmMap>() == 48);
+    assert!(offset_of!(RjVmMap, addr) == 0);
+    assert!(offset_of!(RjVmMap, length) == 8);
+    assert!(offset_of!(RjVmMap, offset) == 16);
+    assert!(offset_of!(RjVmMap, prot) == 24);
+    assert!(offset_of!(RjVmMap, flags) == 28);
+    assert!(offset_of!(RjVmMap, mapped_addr) == 32);
+    assert!(offset_of!(RjVmMap, map_errno) == 40);
+
+    // rj_vm_unmap_t — two u64s, no padding.
+    assert!(size_of::<RjVmUnmap>() == 16);
+    assert!(offset_of!(RjVmUnmap, addr) == 0);
+    assert!(offset_of!(RjVmUnmap, length) == 8);
+
+    // rj_vm_gpu_info_t — 312 bytes, which is also the size of the
+    // `RpcGpuInfo` the daemon handshake embeds verbatim (there is a
+    // matching static_assert in the C++ `rpc.h`), so this number is load
+    // bearing for the wire protocol as well as for the FFI call.
+    //
+    // The u32 runs in this struct are interrupted by four u64s; those are
+    // the only places padding can appear, so they are the offsets worth
+    // pinning. Each one below sits at a position that is already 8-byte
+    // aligned, i.e. the C struct happens to have no padding holes at all
+    // — if an edit inserts or removes a u32 anywhere before one of them,
+    // the anchor moves and this block fails.
+    assert!(size_of::<RjVmGpuInfo>() == 312);
+    assert!(align_of::<RjVmGpuInfo>() == 8);
+    assert!(offset_of!(RjVmGpuInfo, present) == 0);
+    assert!(offset_of!(RjVmGpuInfo, unique_id) == 24);
+    assert!(offset_of!(RjVmGpuInfo, hive_id) == 40);
+    assert!(offset_of!(RjVmGpuInfo, local_mem_size) == 96);
+    assert!(offset_of!(RjVmGpuInfo, debug_prop) == 168);
+    assert!(offset_of!(RjVmGpuInfo, marketing_name) == 184);
+
+    // Scalar widths the signatures below depend on: rj_status_t and
+    // rj_vm_mode_t are C enums (4 bytes on every target rocjitsu builds
+    // for), rj_handle_t is an `int`, and rj_daemon_status_t is an
+    // explicit `int32_t`. rj_client_pid_t is `int32_t` too, but it has
+    // no named binding here — it appears as a bare `i32` argument in
+    // `FnVmDeviceOpen`.
+    assert!(size_of::<RjStatus>() == 4);
+    assert!(size_of::<RjHandle>() == 4);
+    assert!(size_of::<RjVmMode>() == 4);
+    assert!(size_of::<RjDaemonStatus>() == 4);
+
+    // Discriminants are part of the ABI just as much as the layouts are.
+    assert!(RjVmMode::Default as i32 == 0);
+    assert!(RjVmMode::Local as i32 == 1);
+    assert!(RjVmMode::Daemon as i32 == 2);
+    assert!(RjDaemonStatus::Stopped as i32 == 0);
+    assert!(RjDaemonStatus::Starting as i32 == 1);
+    assert!(RjDaemonStatus::Running as i32 == 2);
+    assert!(RjDaemonStatus::Stopping as i32 == 3);
+    assert!(RjDaemonStatus::Error as i32 == 4);
+};
 
 // Raw C function-pointer signatures for the symbols we resolve.
 type FnVmCreate = unsafe extern "C" fn(*const c_char, RjVmMode, *mut *mut RjVm) -> RjStatus;
@@ -286,6 +435,21 @@ pub struct Lib {
 // `*_as` API), so the handle is safe to move and share across threads.
 unsafe impl Send for Lib {}
 unsafe impl Sync for Lib {}
+
+// Printing forty function-pointer addresses would be noise. What a reader
+// of a log actually wants to know about a loaded library is which of the
+// optional entry points it turned out to have, because that is what
+// decides whether plugin selection works and whether a daemon client gets
+// real `gpu_info` — and it is the first thing to check when an older
+// library behaves unexpectedly.
+impl fmt::Debug for Lib {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Lib")
+            .field("vm_load_plugins", &self.vm_load_plugins.is_some())
+            .field("vm_gpu_info", &self.vm_gpu_info.is_some())
+            .finish_non_exhaustive()
+    }
+}
 
 impl Lib {
     /// Load the rocjitsu shared library at `path` and resolve the
@@ -597,28 +761,19 @@ impl Lib {
     }
 }
 
+pub mod daemon;
+
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
     use super::*;
 
-    /// The C `rj_vm_*` structs must match the rocjitsu headers exactly,
-    /// or every FFI call corrupts memory. Pin the sizes the daemon RPC
-    /// code relies on.
-    #[test]
-    fn struct_sizes_match_c_abi() {
-        assert_eq!(std::mem::size_of::<RjVmMap>(), 40);
-        assert_eq!(std::mem::size_of::<RjVmUnmap>(), 16);
-        // rj_vm_cmd_t: u32 + (pad) + ptr + usize + i32 + i32 + i32 + (pad)
-        // on 64-bit.
-        assert_eq!(std::mem::size_of::<RjVmCmd>(), 40);
-        assert_eq!(RjVmMode::Daemon as i32, 2);
-        // rj_vm_gpu_info_t — must match the 312-byte RpcGpuInfo the
-        // daemon handshake embeds (static_assert in rpc.h).
-        assert_eq!(std::mem::size_of::<RjVmGpuInfo>(), 312);
-        assert_eq!(RjDaemonStatus::Stopped as i32, 0);
-        assert_eq!(RjDaemonStatus::Running as i32, 2);
-        assert_eq!(RjDaemonStatus::Error as i32, 4);
-    }
+    // The sizes, field offsets and discriminants that used to be checked
+    // here at run time are now checked at *compile* time, in the "C ABI
+    // layout assertions" block above. A `#[test]` for them was strictly
+    // weaker: it only ran when someone ran the suite, and it could not
+    // express a field offset without duplicating the struct.
 
     #[test]
     fn status_codes_match_c_api() {

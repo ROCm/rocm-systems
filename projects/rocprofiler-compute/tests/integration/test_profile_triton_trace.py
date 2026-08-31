@@ -4,6 +4,7 @@
 """Integration tests for Triton operator tracing during profiling."""
 
 import csv
+import gzip
 from pathlib import Path
 
 import common
@@ -13,7 +14,6 @@ from tests.integration.common import (
     config,
     require_triton,
 )
-from utils import csv_compression
 
 
 def test_triton_trace_profile(
@@ -51,18 +51,18 @@ def test_triton_trace_profile(
 
     assert returncode == 0, "Profiling the Triton application failed"
 
-    marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
-    assert marker_api_trace_files, "No marker_api_trace.csv produced"
+    marker_api_trace_files = list(
+        Path(workload_dir).glob("**/*marker_api_trace.csv.gz")
+    )
+    assert marker_api_trace_files, "No marker_api_trace.csv.gz produced"
     assert all(
-        csv_compression.resolve_csv(
-            f.parent / f.name.replace("marker_api_trace", "counter_collection")
-        ).is_file()
+        (f.parent / f.name.replace("marker_api_trace", "counter_collection")).is_file()
         for f in marker_api_trace_files
-    ), "counter_collection CSV missing for a marker_api_trace.csv"
+    ), "counter_collection CSV missing for a marker_api_trace.csv.gz"
 
     found_triton_marker = False
     for marker_file in marker_api_trace_files:
-        with open(marker_file, newline="", encoding="utf-8") as f:
+        with gzip.open(marker_file, "rt", newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             assert reader.fieldnames is not None, f"No columns in {marker_file}"
             assert "Function" in reader.fieldnames, (
@@ -172,14 +172,14 @@ def test_ml_api_trace_torch_compile_triton(
 
     assert returncode == 0, "Profiling the torch.compile/Triton workload failed"
 
-    marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
-    assert marker_api_trace_files, "No marker_api_trace.csv produced"
+    marker_api_trace_files = list(
+        Path(workload_dir).glob("**/*marker_api_trace.csv.gz")
+    )
+    assert marker_api_trace_files, "No marker_api_trace.csv.gz produced"
     assert all(
-        csv_compression.resolve_csv(
-            f.parent / f.name.replace("marker_api_trace", "counter_collection")
-        ).is_file()
+        (f.parent / f.name.replace("marker_api_trace", "counter_collection")).is_file()
         for f in marker_api_trace_files
-    ), "counter_collection CSV missing for a marker_api_trace.csv"
+    ), "counter_collection CSV missing for a marker_api_trace.csv.gz"
 
     # Discard captured profiling output.
     capsys.readouterr()

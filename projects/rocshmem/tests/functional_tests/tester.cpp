@@ -78,6 +78,7 @@
 #include "tile_rma_tester.hpp"
 #include "tile_broadcast_tester.hpp"
 #include "tile_allgather_tester.hpp"
+#include "tile_reduce_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
 #include "host_ctx_create_tester.hpp"
 #include "team_split_2d_tester.hpp"
@@ -218,6 +219,14 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
 
   BackendType backend_type = rocshmem_query_backend_type();
   TestType type = (TestType)args.algorithm;
+
+  if (args.num_wf > 0) {
+    int device_id;
+    hipDeviceProp_t props;
+    CHECK_HIP(hipGetDevice(&device_id));
+    CHECK_HIP(hipGetDeviceProperties(&props, device_id));
+    args.wg_size = props.warpSize * args.num_wf;
+  }
 
   switch (type) {
     case InitTestType:
@@ -938,6 +947,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case HostCtxCreateTestType:
       test_name = "Host CTX Create";
       testers.push_back(new HostCtxCreateTester(args));
+      break;
     case TeamSplit2DTestType:
       test_name = "Team Split 2D";
       testers.push_back(new TeamSplit2DTester(args));
@@ -965,6 +975,18 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TileAllgatherWGTestType:
       test_name = "Tile Allgather Workgroup-Collective";
       testers.push_back(new TileAllgatherTester(args));
+      break;
+    case TileReduceTestType:
+      test_name = "Tile Reduce";
+      testers.push_back(new TileReduceTester(args));
+      break;
+    case TileReduceWaveTestType:
+      test_name = "Tile Reduce Wave-Collective";
+      testers.push_back(new TileReduceTester(args));
+      break;
+    case TileReduceWGTestType:
+      test_name = "Tile Reduce Workgroup-Collective";
+      testers.push_back(new TileReduceTester(args));
       break;
 #if defined(USE_GDA)
     case QpPingPongTestType:
@@ -1155,6 +1177,9 @@ bool Tester::peLaunchesKernel() {
     case TileAllgatherWGTestType:
     case BroadcastWaveTestType:
     case AllToAllWaveTestType:
+    case TileReduceTestType:
+    case TileReduceWaveTestType:
+    case TileReduceWGTestType:
     case QpPingPongTestType:
     case SdmaPingPongTestType:
       is_launcher = true;

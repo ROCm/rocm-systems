@@ -10,7 +10,7 @@ from typing import Any, Optional, Union
 import numpy as np
 import pandas as pd
 
-from utils import csv_compression
+from utils import csv_compression, schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -455,13 +455,13 @@ def process_ml_api_trace_output(
     """
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(
-        Path(workload_dir).glob("**/ml_api_trace*_marker_api_trace.csv")
+        Path(workload_dir).glob(
+            f"**/ml_api_trace*_marker_api_trace.csv{csv_compression.GZIP_SUFFIX}"
+        )
     )
     counter_collection_csvs = [
-        csv_compression.resolve_csv(
-            markers_file.parent
-            / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
-        )
+        markers_file.parent
+        / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
         for markers_file in marker_api_trace_csvs
     ]
     existing_csv_files = [
@@ -588,14 +588,17 @@ def process_ml_api_trace_output(
 def validate_workload(path: str) -> None:
     """Validate workload directory contains readable, non-empty profiling output."""
     workload_dir = Path(path)
-    pmc_perf_path = workload_dir / "pmc_perf.csv"
+    pmc_perf_path = csv_compression.compressed_name(
+        workload_dir / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+    )
 
     # Find PMC data files (merged or separate)
     if pmc_perf_path.is_file():
         files_to_check = [pmc_perf_path]
     else:
-        # read_csv infers gzip from the .gz suffix, so both forms read alike.
-        files_to_check = csv_compression.find_csvs(workload_dir, "results_*.csv")
+        files_to_check = sorted(
+            workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
+        )
 
     if not files_to_check:
         console_error("analysis", "No profiling data found.")
@@ -604,6 +607,7 @@ def validate_workload(path: str) -> None:
     # Validate files are not empty
     for file_path in files_to_check:
         try:
+            # read_csv infers gzip from the .gz suffix.
             temp_df = pd.read_csv(file_path)
         except pd.errors.EmptyDataError:
             console_error(

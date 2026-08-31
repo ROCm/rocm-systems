@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import csv
 import fcntl
 import importlib
 import os
@@ -283,7 +284,7 @@ def run_prof(
     ):
         for db_name in db_paths:
             pid = db_name.stem.split("_")[0]
-            native_counter_csv = csv_compression.resolve_csv(
+            native_counter_csv = csv_compression.compressed_name(
                 out_pmc_1 / f"{pid}_native_counter_collection.csv"
             )
             if not native_counter_csv.is_file():
@@ -301,10 +302,13 @@ def run_prof(
     counter_csv = csv_compression.compressed_name(
         out_pmc_1 / f"{fbase}_counter_collection.csv"
     )
+    marker_csv = csv_compression.compressed_name(
+        out_pmc_1 / f"{fbase}_marker_api_trace.csv"
+    )
     rocpd_data.convert_dbs_to_csv(
         [str(p) for p in db_paths],
         str(counter_csv),
-        str(out_pmc_1 / f"{fbase}_marker_api_trace.csv"),
+        str(marker_csv),
     )
 
     # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size, Workgroup_Size,
@@ -389,7 +393,12 @@ def gen_sysinfo(
         blocks.append("roofline")
     data["ip_blocks"] = "|".join(blocks)
 
-    csv_ops.write_csv_from_dicts(workload_dir + "/" + "sysinfo.csv", [data])
+    # sysinfo.csv is the one profile CSV that stays plain.
+    sysinfo_path = Path(workload_dir) / "sysinfo.csv"
+    with open(sysinfo_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(data.keys()))
+        writer.writeheader()
+        writer.writerow(data)
 
 
 def get_submodules(package_name: str) -> list[str]:
@@ -493,11 +502,15 @@ def save_ml_api_trace_inputs(
     """
     src_dir = Path(workload_dir) / "out" / "pmc_1"
     # Only one pair expected
-    src_marker = src_dir / f"{fbase}_marker_api_trace.csv"
+    src_marker = csv_compression.compressed_name(
+        src_dir / f"{fbase}_marker_api_trace.csv"
+    )
     dst_counter = csv_compression.compressed_name(
         Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv"
     )
-    dst_marker = Path(workload_dir) / f"ml_api_trace_{fbase}_marker_api_trace.csv"
+    dst_marker = csv_compression.compressed_name(
+        Path(workload_dir) / f"ml_api_trace_{fbase}_marker_api_trace.csv"
+    )
     # These files are expected to exist.
     shutil.copyfile(src_counter, dst_counter)
     _augment_marker_csv(str(src_marker), str(dst_marker))
