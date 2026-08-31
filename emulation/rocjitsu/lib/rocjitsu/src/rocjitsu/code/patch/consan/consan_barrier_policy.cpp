@@ -178,6 +178,17 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
                           std::ranges::none_of(names, [&](const std::string &name) {
                             return name.find(request.container_filter) != std::string::npos;
                           });
+    std::vector<uint64_t> owner_descriptors;
+    for (const ConSanSyncEvent *alias : aliases) {
+      for (const ConSanExecutionOwner &owner : alias->execution_owners) {
+        if (std::ranges::find(owner_descriptors, owner.descriptor_file_offset) ==
+            owner_descriptors.end()) {
+          owner_descriptors.push_back(owner.descriptor_file_offset);
+        }
+      }
+    }
+    const bool allowlist_filtered = !consan_site_matches_kernel_allowlist(
+        inventory, owner_descriptors, names, request.kernel_name_allowlist);
     const bool only_runtime_kernels = std::ranges::all_of(aliases, [](const auto *alias) {
       return alias->in_kernel && runtime_kernel(alias->container_name);
     });
@@ -229,7 +240,7 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
     } else if (request.engine == ConSanCapabilityEngine::SuperCollider ||
                capability == ConSanCapabilityDisposition::MutationOnly) {
       reason = ConSanBarrierPolicyReason::EngineMutationOnly;
-    } else if (filtered) {
+    } else if (filtered || allowlist_filtered) {
       reason = ConSanBarrierPolicyReason::ContainerFilterExcluded;
     } else if (only_runtime_kernels) {
       reason = ConSanBarrierPolicyReason::RuntimeKernelExcluded;

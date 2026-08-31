@@ -265,6 +265,7 @@ ConSanAtomicFencePolicyRequest atomic_request(ConSanCapabilityEngine engine) {
       .tracking_enabled = true,
       .sampled_access_window_available = true,
       .container_filter = {},
+      .kernel_name_allowlist = {},
   };
 }
 

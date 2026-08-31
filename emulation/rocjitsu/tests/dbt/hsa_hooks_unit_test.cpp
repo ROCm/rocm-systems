@@ -447,6 +447,7 @@ bool g_log_sink_writes_end_in_newline = true;
 std::string g_log_sink_bytes;
 std::vector<rocjitsu::ConSanFlavor> g_transform_override_flavors;
 std::vector<rocjitsu::ConSanMoiEngine> g_transform_override_engines;
+std::vector<std::vector<std::string>> g_transform_override_kernel_allowlists;
 std::vector<bool> g_transform_override_abort_unmatched_waits;
 std::vector<bool> g_transform_override_track_barriers;
 std::vector<bool> g_transform_override_track_atomics;
@@ -1008,6 +1009,7 @@ rocjitsu::TransformResult transform_override(std::span<const uint8_t> bytes,
     std::lock_guard lock(g_transform_observation_mutex);
     g_transform_override_flavors.push_back(*request.flavor);
     g_transform_override_engines.push_back(request.moi_engine);
+    g_transform_override_kernel_allowlists.push_back(request.kernel_name_allowlist);
     g_transform_override_abort_unmatched_waits.push_back(debug.abort_unmatched_barrier_wait);
     g_transform_override_track_barriers.push_back(request.moi_track_barriers);
     g_transform_override_track_atomics.push_back(request.moi_track_atomics);
@@ -1753,6 +1755,7 @@ void reset_code_object_observations() {
   g_loaded_executable_readers.clear();
   g_transform_override_flavors.clear();
   g_transform_override_engines.clear();
+  g_transform_override_kernel_allowlists.clear();
   g_transform_override_abort_unmatched_waits.clear();
   g_transform_override_track_barriers.clear();
   g_transform_override_track_atomics.clear();
@@ -3778,6 +3781,42 @@ TEST(HsaHooksUnitTest, ConSanRejectsInvalidMode) {
   ScopedEnvVar legacy_engine("RJ_CONSAN_MOI_BACKEND", nullptr);
 
   reset_code_object_observations();
+  FakeApiTable api;
+  const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
+  InstalledDbiHook hook(api);
+  EXPECT_FALSE(hook.installed());
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn, original_load);
+}
+
+TEST(HsaHooksUnitTest, ConSanParsesAndNormalizesExactKernelAllowlist) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST",
+                         " selected_kernel.kd,second_kernel,selected_kernel ");
+  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(g_transform_override_kernel_allowlists.size(), 1u);
+  EXPECT_EQ(g_transform_override_kernel_allowlists.front(),
+            (std::vector<std::string>{"selected_kernel", "second_kernel"}));
+}
+
+TEST(HsaHooksUnitTest, ConSanRejectsEmptyKernelAllowlistEntry) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "selected_kernel,,second_kernel");
+
   FakeApiTable api;
   const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
   InstalledDbiHook hook(api);
@@ -9239,6 +9278,71 @@ TEST(HsaHooksUnitTest, ConSanZeroRecordDiagnosticReportsNoDispatch) {
               }()),
               testing::ExitedWithCode(86),
               "zero visible records and no kernel dispatch packet was observed");
+}
+
+TEST(HsaHooksUnitTest, ConSanAllowlistReportsInstrumentedEntryThatNeverDispatched) {
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
+  ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "oversized_kernel.kd");
+  configure_consan_zero_record_case();
+
+  ASSERT_EXIT(([] {
+                run_consan_zero_record_case(/*iterate_symbol=*/false, /*dispatch_kernel=*/false);
+                std::_Exit(8);
+              }()),
+              testing::ExitedWithCode(86),
+              "ConSan kernel allowlist entry name=oversized_kernel loaded=true instrumented=true "
+              "dispatches=0 visible_records=0 status=instrumented-not-dispatched");
+}
+
+TEST(HsaHooksUnitTest, ConSanAllowlistReportsLoadedEntryThatWasNotInstrumented) {
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
+  ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", "0");
+  ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "oversized_kernel");
+  configure_consan_zero_record_case();
+  install_test_access_coverage(g_transform_override_result, 1u,
+                               rocjitsu::ConSanSiteDecisionKind::Admitted,
+                               rocjitsu::ConSanAccessPolicyReason::None,
+                               rocjitsu::ConSanLoweringOutcomeKind::PlacementRejected);
+
+  ASSERT_EXIT(([] {
+                run_consan_zero_record_case(/*iterate_symbol=*/false, /*dispatch_kernel=*/false);
+                std::_Exit(8);
+              }()),
+              testing::ExitedWithCode(86),
+              "ConSan kernel allowlist entry name=oversized_kernel loaded=true instrumented=false "
+              "dispatches=0 visible_records=0 status=loaded-not-instrumented");
+}
+
+TEST(HsaHooksUnitTest, ConSanAllowlistDistinguishesDispatchedEntryWithZeroRecords) {
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
+  ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "oversized_kernel");
+  configure_consan_zero_record_case();
+
+  ASSERT_EXIT(([] {
+                run_consan_zero_record_case(/*iterate_symbol=*/false, /*dispatch_kernel=*/true);
+                std::_Exit(8);
+              }()),
+              testing::ExitedWithCode(86),
+              "ConSan kernel allowlist entry name=oversized_kernel loaded=true instrumented=true "
+              "dispatches=1 visible_records=0 status=instrumented-dispatched");
+}
+
+TEST(HsaHooksUnitTest, ConSanAllowlistReportsEntryThatWasNeverLoaded) {
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
+  ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "missing_kernel");
+  configure_consan_zero_record_case();
+
+  ASSERT_EXIT(([] {
+                run_consan_zero_record_case(/*iterate_symbol=*/false, /*dispatch_kernel=*/false);
+                std::_Exit(8);
+              }()),
+              testing::ExitedWithCode(86),
+              "ConSan kernel allowlist entry name=missing_kernel loaded=false instrumented=false "
+              "dispatches=0 visible_records=0 status=not-loaded");
 }
 
 TEST(HsaHooksUnitTest, ConSanZeroRecordDiagnosticReportsDensePathGap) {

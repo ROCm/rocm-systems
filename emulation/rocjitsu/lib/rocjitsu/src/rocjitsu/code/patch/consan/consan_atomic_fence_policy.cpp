@@ -458,6 +458,15 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
     const ConSanCapabilityDisposition capability =
         form ? consan_capability_disposition(inventory.target(), request.engine, *form)
              : ConSanCapabilityDisposition::OutOfContract;
+    std::vector<uint64_t> owner_descriptors;
+    for (const ConSanSyncEvent *alias : aliases) {
+      for (const ConSanExecutionOwner &owner : alias->execution_owners) {
+        if (std::ranges::find(owner_descriptors, owner.descriptor_file_offset) ==
+            owner_descriptors.end()) {
+          owner_descriptors.push_back(owner.descriptor_file_offset);
+        }
+      }
+    }
     ConSanSiteDecisionKind kind = ConSanSiteDecisionKind::NotApplicable;
     ConSanAtomicPolicyReason reason = ConSanAtomicPolicyReason::TrackingDisabled;
     std::optional<ConSanAtomicLoweringForm> lowering_form;
@@ -466,7 +475,9 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
       reason = ConSanAtomicPolicyReason::TrackingDisabled;
     } else if (request.engine == ConSanCapabilityEngine::SuperCollider) {
       reason = ConSanAtomicPolicyReason::EngineMutationOnly;
-    } else if (!filter_matches(aliases, request.container_filter)) {
+    } else if (!filter_matches(aliases, request.container_filter) ||
+               !consan_site_matches_kernel_allowlist(inventory, owner_descriptors, names,
+                                                     request.kernel_name_allowlist)) {
       reason = ConSanAtomicPolicyReason::ContainerFilterExcluded;
     } else if (event.execution_owners.empty()) {
       reason = ConSanAtomicPolicyReason::MissingExecutionOwner;
@@ -575,12 +586,24 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
     };
     if (!fence.sequence_identity.empty())
       decision.association = ConSanSynchronizationAssociationId{fence.sequence_identity};
+    std::vector<uint64_t> owner_descriptors;
+    for (const ConSanSyncEvent *event : fence_events) {
+      for (const ConSanExecutionOwner &owner : event->execution_owners) {
+        if (std::ranges::find(owner_descriptors, owner.descriptor_file_offset) ==
+            owner_descriptors.end()) {
+          owner_descriptors.push_back(owner.descriptor_file_offset);
+        }
+      }
+    }
 
     if (!request.tracking_enabled) {
       decision.reason = ConSanFencePolicyReason::TrackingDisabled;
     } else if (request.engine == ConSanCapabilityEngine::SuperCollider) {
       decision.reason = ConSanFencePolicyReason::EngineMutationOnly;
-    } else if (!filter_matches(fence_events, request.container_filter)) {
+    } else if (!filter_matches(fence_events, request.container_filter) ||
+               !consan_site_matches_kernel_allowlist(inventory, owner_descriptors,
+                                                     decision.source_containers,
+                                                     request.kernel_name_allowlist)) {
       decision.reason = ConSanFencePolicyReason::ContainerFilterExcluded;
     } else if (conflicting_alias) {
       decision.kind = ConSanSiteDecisionKind::Unsupported;

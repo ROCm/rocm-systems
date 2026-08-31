@@ -58,8 +58,7 @@ void append_unmatched_barrier_waits(const Container &container, bool in_kernel,
                                     const ConSanOptions &options,
                                     const ConSanTransformArtifacts &result,
                                     std::vector<UnmatchedBarrierWait> &waits) {
-  if (!options.test_kernel_name_filter.empty() &&
-      container.name.find(options.test_kernel_name_filter) == std::string::npos)
+  if (!consan_container_selected(options, container.name))
     return;
   for (const ConSanBarrierSite &site : container.barrier_sites) {
     if (site.operation != ConSanBarrierSite::Operation::Wait || site.size != sizeof(uint32_t) ||

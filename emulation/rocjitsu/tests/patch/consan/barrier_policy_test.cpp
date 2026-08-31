@@ -104,6 +104,7 @@ ConSanBarrierPolicyRequest barrier_request(ConSanCapabilityEngine engine) {
       .engine = engine,
       .tracking_enabled = true,
       .container_filter = {},
+      .kernel_name_allowlist = {},
   };
 }
 

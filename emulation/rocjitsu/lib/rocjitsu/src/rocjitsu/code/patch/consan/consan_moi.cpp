@@ -211,7 +211,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     result.warnings.push_back(std::move(scalar_validation_failure->diagnostic));
   }
   if (result.outcome == ConSanTransformOutcome::Unsupported) {
-    publish_pending_moi_lowering_rejections(result);
+    publish_pending_moi_lowering_rejections(result, ConSanRegisterPlanReason::NoLegalWindow);
     return result;
   }
   // Sampled persistent-state demand depends on the immutable semantic sync
@@ -244,7 +244,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     result.warnings.push_back(std::move(scalar_validation_failure->diagnostic));
   }
   if (result.outcome == ConSanTransformOutcome::Unsupported) {
-    publish_pending_moi_lowering_rejections(result);
+    publish_pending_moi_lowering_rejections(result, ConSanRegisterPlanReason::NoLegalWindow);
     return result;
   }
   if (mode_plan.reserve_dynamic_stack_prologue_entry &&

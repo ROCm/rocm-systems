@@ -11,7 +11,9 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-void publish_pending_moi_lowering_rejections(ConSanTransformArtifacts &result);
+void publish_pending_moi_lowering_rejections(
+    ConSanTransformArtifacts &result,
+    std::optional<ConSanRegisterPlanReason> whole_transform_resource_failure = std::nullopt);
 
 [[nodiscard]] ConSanMoiResourcePlanningResult solve_automatic_moi_exec_save_resources(
     MoiResourcePlanningState &state, const ConSanOptions &input,

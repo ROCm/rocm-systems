@@ -328,8 +328,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   ScRangeIndex future_flat_probe_ranges;
   ScRangeIndex supported_lds_probe_ranges;
   const auto container_is_selected = [&](const auto &container) {
-    if (options.test_kernel_name_filter.empty() ||
-        container.name.find(options.test_kernel_name_filter) != std::string::npos)
+    if (consan_container_selected(options, container.name))
       return true;
     const auto owner_matches = [&](uint64_t descriptor_offset) {
       const ConSanKernelInfo *kernel =
@@ -840,15 +839,25 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     return caves;
   };
   for (const LdsSitePlanningContext &site_context : site_contexts) {
-    if (!options.test_kernel_name_filter.empty()) {
+    if (!options.test_kernel_name_filter.empty() || !options.kernel_name_allowlist.empty()) {
       const bool container_matches =
-          site_context.container_name.find(options.test_kernel_name_filter) != std::string::npos;
+          consan_container_selected(options, site_context.container_name);
       const bool owner_matches =
-          std::ranges::any_of(site_context.owner_descriptor_file_offsets, [&](uint64_t owner) {
-            const auto kernel = kernels_by_descriptor.find(owner);
-            return kernel != kernels_by_descriptor.end() &&
-                   kernel->second->name.find(options.test_kernel_name_filter) != std::string::npos;
-          });
+          !site_context.owner_descriptor_file_offsets.empty() &&
+          (options.kernel_name_allowlist.empty()
+               ? std::ranges::any_of(site_context.owner_descriptor_file_offsets,
+                                     [&](uint64_t owner) {
+                                       const auto kernel = kernels_by_descriptor.find(owner);
+                                       return kernel != kernels_by_descriptor.end() &&
+                                              consan_container_selected(options,
+                                                                        kernel->second->name);
+                                     })
+               : std::ranges::all_of(
+                     site_context.owner_descriptor_file_offsets, [&](uint64_t owner) {
+                       const auto kernel = kernels_by_descriptor.find(owner);
+                       return kernel != kernels_by_descriptor.end() &&
+                              consan_container_selected(options, kernel->second->name);
+                     }));
       if (!container_matches && !owner_matches)
         continue;
     }

@@ -99,6 +99,7 @@ ConSanAccessPolicyRequest policy_request(ConSanCapabilityEngine engine) {
       .group_flat_enabled = true,
       .flat_provenance_mode = ConSanFlatProvenanceMode::Likely,
       .container_filter = {},
+      .kernel_name_allowlist = {},
       .reserved_for_synchronization = {},
   };
 }
@@ -237,7 +238,8 @@ TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRela
   const ConSanBarrierPolicyResult policy = plan_consan_barrier_observation(
       builder.view(), {.engine = ConSanCapabilityEngine::RecordReplay,
                        .tracking_enabled = true,
-                       .container_filter = {}});
+                       .container_filter = {},
+                       .kernel_name_allowlist = {}});
   ASSERT_TRUE(policy.valid());
 
   ConSanObservationPlan broken = policy.plan;
@@ -855,6 +857,7 @@ TEST(ConSanObservationPolicy, OneAuthorityAssemblesPlanAndInitialLedgerForEveryE
                     .include_atomic_fence_policy = !supercollider,
                     .atomic_fence_tracking_enabled = !supercollider,
                     .container_filter = {},
+                    .kernel_name_allowlist = {},
                     .reserved_for_synchronization = {}});
     SCOPED_TRACE(consan_capability_engine_name(engine));
     ASSERT_TRUE(product.valid());
@@ -908,6 +911,7 @@ TEST(ConSanObservationPolicy, TypedRequestAssemblyMatchesTheExplicitPolicyContra
                     .include_atomic_fence_policy = !supercollider,
                     .atomic_fence_tracking_enabled = !supercollider,
                     .container_filter = {},
+                    .kernel_name_allowlist = {},
                     .reserved_for_synchronization = {}});
     SCOPED_TRACE(consan_capability_engine_name(engine));
     ASSERT_TRUE(typed.valid());
@@ -940,6 +944,7 @@ TEST(ConSanObservationPolicy, ConflictingAliasesFailInTheAssembledProduct) {
                                            .include_atomic_fence_policy = true,
                                            .atomic_fence_tracking_enabled = true,
                                            .container_filter = {},
+                                           .kernel_name_allowlist = {},
                                            .reserved_for_synchronization = {}});
   EXPECT_FALSE(product.valid());
   EXPECT_EQ(product.access_errors,

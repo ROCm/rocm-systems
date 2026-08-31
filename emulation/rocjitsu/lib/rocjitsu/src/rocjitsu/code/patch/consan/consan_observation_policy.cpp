@@ -138,6 +138,39 @@ ordinary_synchronization_reservations(const ProgramInventory &inventory) {
 
 } // namespace
 
+bool consan_site_matches_kernel_allowlist(const ProgramInventory &inventory,
+                                          std::span<const uint64_t> owner_descriptor_file_offsets,
+                                          std::span<const std::string> source_containers,
+                                          std::span<const std::string> kernel_name_allowlist) {
+  if (kernel_name_allowlist.empty())
+    return true;
+  const auto selected_name = [&](std::string_view candidate) {
+    const std::string_view normalized = consan_normalize_kernel_name(candidate);
+    return std::ranges::any_of(kernel_name_allowlist, [&](std::string_view allowed) {
+      return consan_normalize_kernel_name(allowed) == normalized;
+    });
+  };
+  if (!owner_descriptor_file_offsets.empty()) {
+    return std::ranges::all_of(owner_descriptor_file_offsets, [&](uint64_t descriptor) {
+      const ConSanKernelInfo *kernel = inventory.find_kernel_by_descriptor(descriptor);
+      return kernel != nullptr && selected_name(kernel->name);
+    });
+  }
+  return !source_containers.empty() && std::ranges::all_of(source_containers, selected_name);
+}
+
+bool consan_site_matches_kernel_allowlist(const ProgramInventory &inventory,
+                                          std::span<const ConSanExecutionOwner> execution_owners,
+                                          std::span<const std::string> source_containers,
+                                          std::span<const std::string> kernel_name_allowlist) {
+  std::vector<uint64_t> descriptors;
+  descriptors.reserve(execution_owners.size());
+  for (const ConSanExecutionOwner &owner : execution_owners)
+    descriptors.push_back(owner.descriptor_file_offset);
+  return consan_site_matches_kernel_allowlist(inventory, descriptors, source_containers,
+                                              kernel_name_allowlist);
+}
+
 ConSanObservationProduct
 assemble_consan_observation_product(const ProgramInventory &inventory,
                                     const ConSanObservationPolicyRequest &request) {
@@ -150,6 +183,7 @@ assemble_consan_observation_product(const ProgramInventory &inventory,
                   .group_flat_enabled = request.group_flat_enabled,
                   .flat_provenance_mode = request.flat_provenance_mode,
                   .container_filter = request.container_filter,
+                  .kernel_name_allowlist = request.kernel_name_allowlist,
                   .reserved_for_synchronization = request.reserved_for_synchronization});
   product.plan = std::move(access.plan);
   product.access_errors = std::move(access.errors);
@@ -157,7 +191,8 @@ assemble_consan_observation_product(const ProgramInventory &inventory,
   ConSanBarrierPolicyResult barrier = plan_consan_barrier_observation(
       inventory, {.engine = request.engine,
                   .tracking_enabled = request.barrier_tracking_enabled,
-                  .container_filter = request.container_filter});
+                  .container_filter = request.container_filter,
+                  .kernel_name_allowlist = request.kernel_name_allowlist});
   product.barrier_errors = std::move(barrier.errors);
   product.barrier_fragment_appended = product.plan.append(barrier.plan);
 
@@ -170,7 +205,8 @@ assemble_consan_observation_product(const ProgramInventory &inventory,
         inventory, {.engine = request.engine,
                     .tracking_enabled = request.atomic_fence_tracking_enabled,
                     .sampled_access_window_available = sampled_access_window_available,
-                    .container_filter = request.container_filter});
+                    .container_filter = request.container_filter,
+                    .kernel_name_allowlist = request.kernel_name_allowlist});
     product.atomic_errors = std::move(atomic_fence.atomic_errors);
     product.fence_errors = std::move(atomic_fence.fence_errors);
     product.atomic_fence_fragment_appended = product.plan.append(atomic_fence.plan);
@@ -224,6 +260,7 @@ ConSanObservationProduct assemble_consan_observation_product(const ProgramInvent
                      // explicit diagnostic-only policy input during this migration.
                      .container_filter =
                          moi ? std::string_view(debug.test_kernel_name_filter) : std::string_view{},
+                     .kernel_name_allowlist = request.kernel_name_allowlist,
                      .reserved_for_synchronization = synchronization_reservations,
                  });
 }

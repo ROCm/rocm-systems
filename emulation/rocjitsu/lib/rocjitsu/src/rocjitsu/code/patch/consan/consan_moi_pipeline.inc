@@ -110,7 +110,9 @@ void append_moi_operational_resource_plans(
 /// governed; all other still-pending intents receive an explicit placement
 /// rejection. This terminal path never searches patches, anchors, or graph
 /// geometry to rediscover what lowering attempted.
-void publish_pending_moi_lowering_rejections(ConSanTransformArtifacts &result) {
+void publish_pending_moi_lowering_rejections(
+    ConSanTransformArtifacts &result,
+    std::optional<ConSanRegisterPlanReason> whole_transform_resource_failure) {
   if (!result.publish_staged_moi_sync_lowerings()) {
     result.errors.emplace_back("ConSan MOI could not publish its synchronization transaction");
     return;
@@ -145,10 +147,17 @@ void publish_pending_moi_lowering_rejections(ConSanTransformArtifacts &result) {
     if (entry == nullptr || entry->lowering != ConSanLoweringOutcomeKind::Pending)
       continue;
     const std::array<ConSanProbeIntentId, 1> ids = {intent.id};
-    auto commit = make_consan_committed_lowering(
-        result.observation_plan, ids, std::span<const ConSanCommittedLoweringLocation>{},
-        ConSanLoweringOutcomeKind::PlacementRejected,
-        "MOI lowerer selected no placement for the admitted intent");
+    auto commit =
+        whole_transform_resource_failure
+            ? make_consan_committed_lowering(
+                  result.observation_plan, ids, std::span<const ConSanCommittedLoweringLocation>{},
+                  ConSanLoweringOutcomeKind::ResourceRejected,
+                  "MOI whole-transform resource validation rejected the admitted intent",
+                  ConSanRuntimeStaticMapping{}, *whole_transform_resource_failure)
+            : make_consan_committed_lowering(
+                  result.observation_plan, ids, std::span<const ConSanCommittedLoweringLocation>{},
+                  ConSanLoweringOutcomeKind::PlacementRejected,
+                  "MOI lowerer selected no placement for the admitted intent");
     if (!commit || !result.publish_lowering_commit(std::move(*commit))) {
       result.errors.emplace_back("ConSan MOI could not publish a placement rejection");
       return;

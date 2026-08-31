@@ -547,6 +547,11 @@ struct ConSanRequest {
   /// Zero disables automatic allocation without supplying an address.
   uint64_t moi_auto_report_buffer_size = 0;
 
+  /// Production exact-name allowlist. Kernel-local sites are selected by exact
+  /// entry name; a shared physical site is selected only when every known
+  /// execution owner is present, so an unselected entry is never modified.
+  std::vector<std::string> kernel_name_allowlist;
+
   bool operator==(const ConSanRequest &) const = default;
 };
 
@@ -910,6 +915,25 @@ struct ConSanOptions : ConSanRequest,
         RuntimeCapabilities(capabilities), BoundRuntimeResources(resources),
         TransformPolicy(transform_policy) {}
 };
+
+[[nodiscard]] inline std::string_view consan_normalize_kernel_name(std::string_view name) {
+  if (name.ends_with(".kd"))
+    name.remove_suffix(3);
+  return name;
+}
+
+[[nodiscard]] inline bool consan_container_selected(const ConSanOptions &options,
+                                                    std::string_view container_name) {
+  if (!options.test_kernel_name_filter.empty() &&
+      container_name.find(options.test_kernel_name_filter) == std::string_view::npos)
+    return false;
+  if (options.kernel_name_allowlist.empty())
+    return true;
+  const std::string_view normalized = consan_normalize_kernel_name(container_name);
+  return std::ranges::any_of(options.kernel_name_allowlist, [&](std::string_view allowed) {
+    return consan_normalize_kernel_name(allowed) == normalized;
+  });
+}
 
 /// Authoritative resource and persistent-state selection for one MOI attempt.
 ///

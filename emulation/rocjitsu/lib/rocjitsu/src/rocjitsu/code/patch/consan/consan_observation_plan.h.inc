@@ -863,6 +863,9 @@ struct ConSanAccessPolicyRequest {
   ConSanFlatProvenanceMode flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
   /// Optional diagnostic-only container substring filter.
   std::string_view container_filter;
+  /// Production exact kernel-entry allowlist. A shared physical site remains
+  /// excluded unless every known execution owner is selected.
+  std::span<const std::string> kernel_name_allowlist;
   /// Physical ordinary-memory sites delegated to synchronization policy.
   std::span<const PhysicalSiteId> reserved_for_synchronization;
 };
@@ -896,6 +899,8 @@ struct ConSanBarrierPolicyRequest {
   bool tracking_enabled = false;
   /// Optional diagnostic-only container substring filter.
   std::string_view container_filter;
+  /// Production exact kernel-entry allowlist.
+  std::span<const std::string> kernel_name_allowlist;
 };
 
 /// Pure barrier-policy output plus typed construction failures.
@@ -931,6 +936,8 @@ struct ConSanAtomicFencePolicyRequest {
   bool sampled_access_window_available = true;
   /// Optional diagnostic-only container substring filter.
   std::string_view container_filter;
+  /// Production exact kernel-entry allowlist.
+  std::span<const std::string> kernel_name_allowlist;
 };
 
 /// Pure atomic/fence-policy output plus typed construction failures.
@@ -1262,9 +1269,27 @@ struct ConSanObservationPolicyRequest {
   bool atomic_fence_tracking_enabled = false;
   /// Optional diagnostic-only container substring filter.
   std::string_view container_filter;
+  /// Production exact kernel-entry allowlist.
+  std::span<const std::string> kernel_name_allowlist;
   /// Physical ordinary-memory sites delegated to synchronization policy.
   std::span<const PhysicalSiteId> reserved_for_synchronization;
 };
+
+/// Decide whether a physical site belongs entirely to selected kernel entries.
+/// Descriptor ownership is authoritative when present. The source-container
+/// fallback supports legacy kernel-local inventory that predates ownership
+/// analysis without permitting substring matches.
+[[nodiscard]] bool
+consan_site_matches_kernel_allowlist(const ProgramInventory &inventory,
+                                     std::span<const uint64_t> owner_descriptor_file_offsets,
+                                     std::span<const std::string> source_containers,
+                                     std::span<const std::string> kernel_name_allowlist);
+
+[[nodiscard]] bool
+consan_site_matches_kernel_allowlist(const ProgramInventory &inventory,
+                                     std::span<const ConSanExecutionOwner> execution_owners,
+                                     std::span<const std::string> source_containers,
+                                     std::span<const std::string> kernel_name_allowlist);
 
 /// Validated composition of every semantic policy fragment for one engine.
 ///

@@ -4,9 +4,137 @@
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/gfx1250_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "test_paths.h"
+
+#include <fstream>
+#include <iterator>
 
 namespace rocjitsu {
 namespace {
+
+std::vector<uint8_t> load_consan_fixture_hsaco(std::string_view name) {
+  std::ifstream file(test::kernel_hsaco_path(std::string(name).c_str()), std::ios::binary);
+  if (!file)
+    return {};
+  return std::vector<uint8_t>(std::istreambuf_iterator<char>(file),
+                              std::istreambuf_iterator<char>());
+}
+
+ConSanTransformArtifacts
+patch_record_replay_fixture_with_auto_report(std::span<const uint8_t> bytes) {
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 65536u;
+  options.max_patches_is_expert_limit = false;
+  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, options);
+  if (!inventory.errors.empty())
+    return inventory;
+  const ConSanMoiAutoReportInventory report_inventory =
+      plan_test_moi_evidence_inventory(inventory, options);
+  const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(report_inventory);
+  if (!report_plan.complete())
+    return inventory;
+  const std::optional<ConSanMoiReportBufferLayout> layout = report_plan.complete_layout();
+  if (!layout)
+    return inventory;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = report_plan.required_bytes;
+  options.moi_report_layout = *layout;
+  return test_lower_consan(bytes, options);
+}
+
+TEST(ConSanMoi, Gfx950TritonAttentionRecordReplayLowersEverySupportedSite) {
+  constexpr std::array<std::string_view, 3> kFixtures = {
+      "triton_cdna4_matmul_buffer_async_1024",
+      "triton_cdna4_flash_attention_no_async_1024",
+      "triton_cdna4_flash_attention_buffer_async_1024",
+  };
+  for (const std::string_view fixture : kFixtures) {
+    SCOPED_TRACE(fixture);
+    const std::vector<uint8_t> bytes = load_consan_fixture_hsaco(fixture);
+    ASSERT_FALSE(bytes.empty());
+    const ConSanTransformArtifacts result = patch_record_replay_fixture_with_auto_report(bytes);
+    SCOPED_TRACE(testing::PrintToString(result.warnings));
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified());
+    ASSERT_FALSE(result.coverage_ledger.intent_entries().empty());
+    EXPECT_TRUE(std::ranges::all_of(result.coverage_ledger.intent_entries(),
+                                    [](const ConSanIntentCoverageEntry &entry) {
+                                      return entry.lowering ==
+                                             ConSanLoweringOutcomeKind::Instrumented;
+                                    }))
+        << testing::PrintToString(result.coverage_ledger.intent_entries());
+  }
+}
+
+TEST(ConSanMoi, KernelAllowlistUsesExactEntryNamesAndLeavesOtherKernelsUntouched) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.entry_nop_words = 8u;
+  fixture.unrelated_has_lds = true;
+  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.kernel_name_allowlist = {"unrelated_kernel.kd"};
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 30u;
+  options.set_moi_owner_epoch_vgprs(14u, 15u);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanTransformArtifacts selected = test_lower_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(selected)) << testing::PrintToString(selected.errors);
+  ASSERT_TRUE(selected.modified()) << testing::PrintToString(selected.warnings);
+  ASSERT_EQ(test_admitted_accesses(selected).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(selected).front().container.name, "unrelated_kernel");
+  const auto unrelated = std::ranges::find(selected.program_inventory.kernels(), "unrelated_kernel",
+                                           &ConSanKernelInfo::name);
+  ASSERT_NE(unrelated, selected.program_inventory.kernels().end());
+  const auto access_patch = std::ranges::find(
+      selected.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(access_patch, selected.patches.end());
+  ASSERT_EQ(access_patch->owner_descriptor_file_offsets.size(), 1u);
+  EXPECT_EQ(access_patch->owner_descriptor_file_offsets.front(), unrelated->descriptor_file_offset);
+  EXPECT_TRUE(std::ranges::all_of(selected.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.owner_descriptor_file_offsets.empty() ||
+           (patch.owner_descriptor_file_offsets.size() == 1u &&
+            patch.owner_descriptor_file_offsets.front() == unrelated->descriptor_file_offset);
+  }));
+
+  options.kernel_name_allowlist = {"unrelated"};
+  const ConSanTransformArtifacts no_substring_match = test_lower_consan(bytes, options);
+  ASSERT_TRUE(consan_patch_succeeded(no_substring_match))
+      << testing::PrintToString(no_substring_match.errors);
+  EXPECT_FALSE(no_substring_match.modified());
+  EXPECT_TRUE(test_admitted_accesses(no_substring_match).empty());
+  EXPECT_TRUE(no_substring_match.patches.empty());
+
+  options.kernel_name_allowlist = {"shared_owner_0"};
+  const ConSanTransformArtifacts partial_shared_ownership = test_lower_consan(bytes, options);
+  ASSERT_TRUE(consan_patch_succeeded(partial_shared_ownership))
+      << testing::PrintToString(partial_shared_ownership.errors);
+  EXPECT_FALSE(partial_shared_ownership.modified());
+  EXPECT_TRUE(test_admitted_accesses(partial_shared_ownership).empty());
+
+  options.kernel_name_allowlist = {"shared_owner_0", "shared_owner_1"};
+  const ConSanTransformArtifacts complete_shared_ownership = test_lower_consan(bytes, options);
+  ASSERT_TRUE(consan_patch_succeeded(complete_shared_ownership))
+      << testing::PrintToString(complete_shared_ownership.errors);
+  ASSERT_TRUE(complete_shared_ownership.modified())
+      << testing::PrintToString(complete_shared_ownership.warnings);
+  ASSERT_EQ(test_admitted_accesses(complete_shared_ownership).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(complete_shared_ownership).front().container.name,
+            "shared_lds_helper");
+  const auto shared_patch =
+      std::ranges::find(complete_shared_ownership.patches,
+                        ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(shared_patch, complete_shared_ownership.patches.end());
+  EXPECT_EQ(shared_patch->owner_descriptor_file_offsets.size(), 2u);
+}
 
 std::vector<uint32_t> make_expected_fetch_add_one_words(uint64_t address, uint16_t result_vgpr,
                                                         uint16_t scratch_vgpr) {
@@ -1336,6 +1464,8 @@ TEST(ConSanMoi, AutoRecordReplayRejectsDispatchIdentityWithoutPersistentVgprPair
   }
   text_words.push_back(0xD8340000u);
   text_words.push_back(0x00000000u); // ds_store_b32
+  text_words.push_back(0xBE804EC1u); // s_barrier_signal -1
+  text_words.push_back(0xBF94FFFFu); // s_barrier_wait -1
   for (uint16_t sgpr = 0u; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
     if (sgpr >= 90u)
       continue;
@@ -1353,8 +1483,10 @@ TEST(ConSanMoi, AutoRecordReplayRejectsDispatchIdentityWithoutPersistentVgprPair
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
   const std::vector<uint8_t> bytes =
       make_rdna4_lds_code_object(text_words, "record_replay_no_dispatch_vgpr_pair");
-  const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
-      {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1u});
+  const ConSanMoiAutoReportPlan report_plan =
+      plan_consan_moi_auto_report({.engine = ConSanMoiEngine::RecordReplay,
+                                   .access_range_count = 1u,
+                                   .barrier_event_count = 2u});
   ASSERT_TRUE(report_plan.complete());
   const auto bound_layout = report_plan.complete_layout();
   ASSERT_TRUE(bound_layout);
@@ -1362,7 +1494,7 @@ TEST(ConSanMoi, AutoRecordReplayRejectsDispatchIdentityWithoutPersistentVgprPair
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
   options.moi_report_layout = *bound_layout;
-  options.moi_track_barriers = false;
+  options.moi_track_barriers = true;
   options.moi_track_atomics = false;
   options.moi_exec_save_sgpr = 90u;
 
@@ -1375,6 +1507,35 @@ TEST(ConSanMoi, AutoRecordReplayRejectsDispatchIdentityWithoutPersistentVgprPair
                "cannot retain automatic Record/Replay dispatch identity without a persistent "
                "VGPR pair") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(std::ranges::any_of(
+      result.coverage_ledger.intent_entries(),
+      [](const ConSanIntentCoverageEntry &entry) {
+        return entry.intent.kind == ConSanProbeIntentKind::BarrierRecord &&
+               entry.lowering == ConSanLoweringOutcomeKind::ResourceRejected &&
+               entry.resource_rejection_reason == ConSanRegisterPlanReason::NoLegalWindow;
+      }))
+      << testing::PrintToString(result.coverage_ledger.intent_entries());
+  ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 3u)
+      << testing::PrintToString(result.coverage_ledger.intent_entries());
+  EXPECT_EQ(std::ranges::count_if(result.coverage_ledger.intent_entries(),
+                                  [](const ConSanIntentCoverageEntry &entry) {
+                                    return entry.intent.kind == ConSanProbeIntentKind::AccessRecord;
+                                  }),
+            1);
+  EXPECT_EQ(std::ranges::count_if(result.coverage_ledger.intent_entries(),
+                                  [](const ConSanIntentCoverageEntry &entry) {
+                                    return entry.intent.kind ==
+                                           ConSanProbeIntentKind::BarrierRecord;
+                                  }),
+            2);
+  EXPECT_TRUE(std::ranges::all_of(result.coverage_ledger.intent_entries(),
+                                  [](const ConSanIntentCoverageEntry &entry) {
+                                    return entry.lowering ==
+                                               ConSanLoweringOutcomeKind::ResourceRejected &&
+                                           entry.resource_rejection_reason ==
+                                               ConSanRegisterPlanReason::NoLegalWindow;
+                                  }))
+      << testing::PrintToString(result.coverage_ledger.intent_entries());
 }
 
 TEST(ConSanMoi, AutoRecordReplayAddsExactTupleToExplicitOwnerEpoch) {
