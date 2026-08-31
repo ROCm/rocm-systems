@@ -114,6 +114,13 @@ else()
   message(STATUS "NPU target: ${NPU_TARGET}")
 endif()
 
+# Full-ELF dispatch is aie2p only -- the design's npu_load_pdi has no aie2 equivalent -- so there
+# is nothing to build for an npu1 target even with a complete toolchain.
+if(AIE_FULL_ELF_SUPPORTED AND NOT NPU_TARGET STREQUAL "npu2")
+  set(AIE_FULL_ELF_SUPPORTED FALSE)
+  message(STATUS "Full-ELF kernel will not be built: it needs an npu2 target.")
+endif()
+
 # ---------------------------------------------------------------------------
 # Peano (llvm-aie) detection
 #
@@ -278,6 +285,27 @@ target_link_libraries(vector-scalar-add-hsa PRIVATE
   hsa-runtime64::hsa-runtime64
 )
 add_dependencies(vector-scalar-add-hsa aie_kernel_artifacts)
+
+# ---------------------------------------------------------------------------
+# HSA full-ELF benchmark
+# ---------------------------------------------------------------------------
+
+if(AIE_FULL_ELF_SUPPORTED)
+  add_executable(vector-scalar-add-hsa-elf vector_scalar_add_hsa_elf.cpp)
+  target_compile_features(vector-scalar-add-hsa-elf PRIVATE cxx_std_20)
+  target_compile_definitions(vector-scalar-add-hsa-elf PRIVATE
+    DEFAULT_ELF_PATH=${FULL_ELF}
+    DEFAULT_ELF_KERNEL_NAME="main:sequence"
+  )
+  # The full-ELF reader is shared with the aie suite rather than duplicated.
+  target_include_directories(vector-scalar-add-hsa-elf PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../aie")
+  target_link_libraries(vector-scalar-add-hsa-elf PRIVATE
+    benchmark::benchmark_main
+    hsa-runtime64::hsa-runtime64
+  )
+  add_dependencies(vector-scalar-add-hsa-elf aie_full_elf)
+endif()
 
 # ---------------------------------------------------------------------------
 # HSA vmem alloc/release microbenchmark

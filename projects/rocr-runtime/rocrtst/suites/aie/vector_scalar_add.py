@@ -11,18 +11,26 @@ import sys
 from aie.iron import ObjectFifo, Program, Runtime, Worker
 from aie.iron.device import NPU1Col1, NPU2Col1
 from aie.iron.controlflow import range_
+from aie.dialects.aiex import npu_load_pdi
 
 PROBLEM_SIZE = 1024
 MEM_TILE_WIDTH = 64
 AIE_TILE_WIDTH = 32
 
-if len(sys.argv) > 1:
-    if sys.argv[1] == "npu":
-        dev = NPU1Col1()
-    elif sys.argv[1] == "npu2":
-        dev = NPU2Col1()
-    else:
-        raise ValueError("[ERROR] Device name {} is unknown".format(sys.argv[1]))
+# With --full-elf the design is compiled into a standalone ELF instead of an
+# xclbin. Nothing then configures the AIE array out of band, so the runtime
+# sequence has to load its own PDI (see sequence() below).
+FULL_ELF = "--full-elf" in sys.argv[1:]
+positional = [a for a in sys.argv[1:] if not a.startswith("--")]
+
+if not positional:
+    raise ValueError("[ERROR] Expected a device name ('npu' or 'npu2')")
+if positional[0] == "npu":
+    dev = NPU1Col1()
+elif positional[0] == "npu2":
+    dev = NPU2Col1()
+else:
+    raise ValueError("[ERROR] Device name {} is unknown".format(positional[0]))
 
 
 def my_vector_bias_add():
@@ -52,6 +60,13 @@ def my_vector_bias_add():
 
     # Runtime operations to move data to/from the AIE-array
     def sequence(inTensor, outTensor, in_handle, out_handle):
+        # On the xclbin path the driver programs the array from the xclbin's
+        # AIE_PARTITION PDI before the sequence runs. A full ELF has no xclbin,
+        # so the sequence must load the PDI itself -- without this the cores
+        # never start and the closing DMA token wait never retires, which the
+        # driver reports as ERT_CMD_STATE_TIMEOUT.
+        if FULL_ELF:
+            npu_load_pdi(device_ref="main")
         in_handle.fill(inTensor)
         out_handle.drain(outTensor, wait=True)
 
@@ -66,4 +81,6 @@ res = module.operation.verify()
 if res == True:
     print(module)
 else:
-    print(res)
+    # Fail the build rather than writing the verifier diagnostic into aie.mlir.
+    print(res, file=sys.stderr)
+    sys.exit(1)
