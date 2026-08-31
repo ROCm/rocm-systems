@@ -27,7 +27,7 @@
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
-  
+
   int initialized;
   MPI_Initialized(&initialized);
   if (!initialized) {
@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
   }
 
   int ret_val = RUN_ALL_TESTS();
-  
+
   int finalized{0};
   MPI_Finalized(&finalized);
   if (!finalized) {
