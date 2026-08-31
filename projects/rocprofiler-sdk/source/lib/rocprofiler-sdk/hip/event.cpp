@@ -156,47 +156,44 @@ barrier_complete(tracing::tracing_data&                        tracing_data_v,
 
     const auto& _extern_corr_ids = tracing_data_v.external_correlation_ids;
 
-    if(barrier_time.status == HSA_STATUS_SUCCESS)
+    callback_record.start_timestamp = barrier_time.start;
+    callback_record.end_timestamp   = barrier_time.end;
+
+    if(!tracing_data_v.callback_contexts.empty())
     {
-        callback_record.start_timestamp = barrier_time.start;
-        callback_record.end_timestamp   = barrier_time.end;
+        auto tracer_data = callback_record;
+        tracing::execute_phase_none_callbacks(tracing_data_v.callback_contexts,
+                                              tid,
+                                              internal_corr_id,
+                                              _extern_corr_ids,
+                                              ancestor_corr_id,
+                                              ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
+                                              operation,
+                                              tracer_data);
+    }
 
-        if(!tracing_data_v.callback_contexts.empty())
-        {
-            auto tracer_data = callback_record;
-            tracing::execute_phase_none_callbacks(tracing_data_v.callback_contexts,
-                                                  tid,
-                                                  internal_corr_id,
-                                                  _extern_corr_ids,
-                                                  ancestor_corr_id,
-                                                  ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
-                                                  operation,
-                                                  tracer_data);
-        }
+    if(!tracing_data_v.buffered_contexts.empty())
+    {
+        auto record = hip_event_record_t{sizeof(hip_event_record_t),
+                                         ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
+                                         operation,
+                                         rocprofiler_async_correlation_id_t{},
+                                         tid,
+                                         callback_record.start_timestamp,
+                                         callback_record.end_timestamp,
+                                         callback_record.agent_id,
+                                         callback_record.queue_id,
+                                         callback_record.hip_event_handle,
+                                         callback_record.source_queue_id};
 
-        if(!tracing_data_v.buffered_contexts.empty())
-        {
-            auto record = hip_event_record_t{sizeof(hip_event_record_t),
-                                             ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
-                                             operation,
-                                             rocprofiler_async_correlation_id_t{},
-                                             tid,
-                                             callback_record.start_timestamp,
-                                             callback_record.end_timestamp,
-                                             callback_record.agent_id,
-                                             callback_record.queue_id,
-                                             callback_record.hip_event_handle,
-                                             callback_record.source_queue_id};
-
-            tracing::execute_buffer_record_emplace(tracing_data_v.buffered_contexts,
-                                                   tid,
-                                                   internal_corr_id,
-                                                   _extern_corr_ids,
-                                                   ancestor_corr_id,
-                                                   ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
-                                                   operation,
-                                                   record);
-        }
+        tracing::execute_buffer_record_emplace(tracing_data_v.buffered_contexts,
+                                               tid,
+                                               internal_corr_id,
+                                               _extern_corr_ids,
+                                               ancestor_corr_id,
+                                               ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
+                                               operation,
+                                               record);
     }
 }
 namespace
@@ -238,9 +235,12 @@ std::atomic<uint32_t> g_pending_wait_count{0};
 bool
 is_stream_capturing(hipStream_t stream)
 {
-    if(!g_original_stream_is_capturing_fn || stream == nullptr) return false;
-    auto status = hipStreamCaptureStatusNone;
-    auto err    = g_original_stream_is_capturing_fn(stream, &status);
+    if(!g_original_stream_is_capturing_fn) return false;
+    // Normalize nullptr to hipStreamPerThread: _spt variants resolve nullptr to the
+    // per-thread default stream at the CLR level, which may itself be in capture mode.
+    auto* resolved = (stream == nullptr) ? hipStreamPerThread : stream;
+    auto  status   = hipStreamCaptureStatusNone;
+    auto  err      = g_original_stream_is_capturing_fn(resolved, &status);
     return (err == hipSuccess && status == hipStreamCaptureStatusActive);
 }
 
@@ -435,7 +435,8 @@ stream_wait_event_impl(hipStream_t stream, hipEvent_t event, unsigned int flags)
     g_active_event_ctx = {ROCPROFILER_HIP_EVENT_WAIT, reinterpret_cast<uint64_t>(event), false};
     auto _cleanup      = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
     auto ret           = (get_saved_table().*SavedField)(stream, event, flags);
-    if(ret == hipSuccess) check_deferred_wait(reinterpret_cast<uint64_t>(event));
+    if(ret == hipSuccess && !is_stream_capturing(stream))
+        check_deferred_wait(reinterpret_cast<uint64_t>(event));
     return ret;
 }
 
@@ -598,43 +599,48 @@ update_table<::HipDispatchTable>(::HipDispatchTable* table)
 
     auto& saved = get_saved_table();
 
-    auto wrap = [&](auto& table_fn, auto& saved_fn, auto wrapper, auto abi_offset) {
+    // Access table fields only after confirming they exist within the runtime table's
+    // allocated size. The member pointer is dereferenced inside the lambda body, after
+    // the size guard, to avoid UB when loading an older HIP runtime with a shorter table.
+    auto wrap = [&](auto table_fn_ptr, auto saved_fn_ptr, auto wrapper, auto abi_offset) {
         if(common::abi::compute_table_offset(abi_offset) >= table->size) return;
+        auto& table_fn = table->*table_fn_ptr;
+        auto& saved_fn = saved.*saved_fn_ptr;
         if(!table_fn || table_fn == wrapper) return;
         ROCP_TRACE << "hip::event wrapping table entry at ABI offset " << abi_offset;
         saved_fn = table_fn;
         table_fn = wrapper;
     };
 
-    wrap(table->hipEventRecord_fn,
-         saved.hipEventRecord_fn,
+    wrap(&::HipDispatchTable::hipEventRecord_fn,
+         &saved_table_t::hipEventRecord_fn,
          &event_record_impl<&saved_table_t::hipEventRecord_fn>,
          ROCPROFILER_HIP_RUNTIME_API_ID_hipEventRecord);
 
-    wrap(table->hipEventRecord_spt_fn,
-         saved.hipEventRecord_spt_fn,
+    wrap(&::HipDispatchTable::hipEventRecord_spt_fn,
+         &saved_table_t::hipEventRecord_spt_fn,
          &event_record_impl<&saved_table_t::hipEventRecord_spt_fn>,
          ROCPROFILER_HIP_RUNTIME_API_ID_hipEventRecord_spt);
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
-    wrap(table->hipEventRecordWithFlags_fn,
-         saved.hipEventRecordWithFlags_fn,
+    wrap(&::HipDispatchTable::hipEventRecordWithFlags_fn,
+         &saved_table_t::hipEventRecordWithFlags_fn,
          &event_record_with_flags_impl,
          ROCPROFILER_HIP_RUNTIME_API_ID_hipEventRecordWithFlags);
 #endif
 
-    wrap(table->hipStreamWaitEvent_fn,
-         saved.hipStreamWaitEvent_fn,
+    wrap(&::HipDispatchTable::hipStreamWaitEvent_fn,
+         &saved_table_t::hipStreamWaitEvent_fn,
          &stream_wait_event_impl<&saved_table_t::hipStreamWaitEvent_fn>,
          ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent);
 
-    wrap(table->hipStreamWaitEvent_spt_fn,
-         saved.hipStreamWaitEvent_spt_fn,
+    wrap(&::HipDispatchTable::hipStreamWaitEvent_spt_fn,
+         &saved_table_t::hipStreamWaitEvent_spt_fn,
          &stream_wait_event_impl<&saved_table_t::hipStreamWaitEvent_spt_fn>,
          ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamWaitEvent_spt);
 
-    wrap(table->hipEventDestroy_fn,
-         saved.hipEventDestroy_fn,
+    wrap(&::HipDispatchTable::hipEventDestroy_fn,
+         &saved_table_t::hipEventDestroy_fn,
          &event_destroy_impl,
          ROCPROFILER_HIP_RUNTIME_API_ID_hipEventDestroy);
 

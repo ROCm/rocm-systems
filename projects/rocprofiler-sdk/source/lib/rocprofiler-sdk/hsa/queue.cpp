@@ -614,7 +614,8 @@ WriteInterceptor(const void* packets,
     // it out of the snapshot window and registers it with async_started() so the agent-wide drain
     // can see it. process_packet_batch increments gls->dispatch_count per dispatch packet, so the
     // graph summary is unaffected by which path runs.
-    if(graph_launch_active && no_real_consumers && !has_kernel_replay)
+    if(graph_launch_active && no_real_consumers && !has_kernel_replay &&
+       !hip::event::has_pending_waits())
     {
         gls->dispatch_count += num_dispatch_packets;
         writer(packets, pkt_count);
@@ -788,6 +789,9 @@ WriteInterceptor(const void* packets,
                         event_ctx->hip_event_handle,
                         source_queue};
 
+                    // ENTER/EXIT bracket the barrier enqueue moment (CPU-side, no GPU
+                    // timestamps yet). The PHASE_NONE completion callback fires later
+                    // from BarrierAsyncSignalHandler when the GPU signals completion.
                     {
                         auto tracer_data = _barrier_data.callback_record;
                         tracing::execute_phase_enter_callbacks(
@@ -832,6 +836,7 @@ WriteInterceptor(const void* packets,
                     }
 
                     {
+                        // EXIT: barrier has been staged in transformed_packets
                         auto tracer_data = _barrier_data.callback_record;
                         tracing::execute_phase_exit_callbacks(
                             _barrier_data.tracing_data.callback_contexts,
@@ -1219,7 +1224,9 @@ WriteInterceptor(const void* packets,
         // both kernel dispatch packets and barrier packets carrying event dep_signals.
         // When packet_data is non-empty, pending_waits are carried into the async handler
         // and emitted as WAIT records after the final kernel completes. When packet_data
-        // is empty (barrier-only batch), pending_waits are cleaned up to release ref counts.
+        // is empty but pending_waits is non-empty (barrier-only batch with deferred waits),
+        // append a synthetic barrier carrying a pooled signal so the async handler still
+        // fires and emits the WAIT records.
         if(!_info_session.packet_data.empty())
         {
             auto* last_pooled_signal     = _info_session.packet_data.back().pooled_signal;
@@ -1234,16 +1241,25 @@ WriteInterceptor(const void* packets,
                                        last_completion_signal,
                                        new std::shared_ptr<info_session_t>(shared));
         }
+        else if(!_info_session.pending_waits.empty())
+        {
+            hsa_signal_t pooled_sig{.handle = 0};
+            auto*        pooled = queue.create_signal(0, &pooled_sig, true);
+
+            auto barrier   = hsa_barrier_and_packet_t{};
+            barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+            barrier.header |= (1 << HSA_PACKET_HEADER_BARRIER);
+            barrier.completion_signal = pooled_sig;
+            transformed_packets.emplace_back(barrier);
+
+            auto shared = std::make_shared<info_session_t>(std::move(_info_session));
+            queue.async_started();
+            queue.signal_async_handler(
+                pooled, pooled_sig, new std::shared_ptr<info_session_t>(shared));
+        }
         else
         {
-            for(auto& pw : _info_session.pending_waits)
-            {
-                if(pw.corr_id_ref)
-                {
-                    pw.corr_id_ref->sub_kern_count();
-                    pw.corr_id_ref->sub_ref_count();
-                }
-            }
+            // No kernel dispatches, no pending waits -- nothing to track.
         }
 
         // Command is only executed if GLOG_v=2 or higher, otherwise it is a no-op
