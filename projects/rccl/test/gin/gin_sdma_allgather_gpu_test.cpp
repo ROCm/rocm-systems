@@ -145,9 +145,10 @@ void runGatherAddressingCase(int nRanks, size_t count) {
   const size_t recvElts = (size_t)nRanks * perPeer;
 
   std::vector<T> send((size_t)nRanks * count);
-  for (int r = 0; r < nRanks; ++r)
+  for (int r = 0; r < nRanks; ++r) {
     for (size_t i = 0; i < count; ++i)
       send[r * count + i] = (T)((r * 1315423911u + (uint32_t)i) & 0x7f);  // fits int8..double
+  }
 
   T *dSend = nullptr, *dRecv = nullptr;
   HIP_OK(hipMalloc(&dSend, send.size() * sizeof(T)));
