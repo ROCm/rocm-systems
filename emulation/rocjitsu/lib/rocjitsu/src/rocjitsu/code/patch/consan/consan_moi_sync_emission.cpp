@@ -4,6 +4,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_dynamic_record_emission.h"
@@ -136,14 +137,23 @@ make_moi_sync_lowering_commit(const ConSanObservationPlan &observation,
   return append_moi_sync_lowering_commit(result, ids, patch, probe_name, commits);
 }
 
-[[nodiscard]] bool publish_moi_sync_lowering_commits(ConSanTransformArtifacts &result,
-                                                     std::vector<ConSanCommittedLowering> commits,
-                                                     std::string_view probe_name) {
-  if (result.coverage_ledger.publish_coalescing_instrumented_commits(std::move(commits)))
-    return true;
-  result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
-                             " could not publish its semantic lowerings");
-  return false;
+[[nodiscard]] bool publish_moi_sync_patch(
+    ConSanTransformArtifacts &result, CodeObjectPatcher &patcher, std::span<const uint8_t> new_text,
+    const ConSanPatchedImageGrowthLimit &growth_limit, std::string_view replacement_name,
+    std::string_view probe_name, std::vector<ConSanCommittedLowering> commits,
+    std::vector<ConSanPatchInfo> patches) {
+  if (!replace_consan_text(patcher, new_text, growth_limit, replacement_name, result))
+    return false;
+  if (!result.coverage_ledger.publish_coalescing_instrumented_commits(std::move(commits))) {
+    result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                               " could not publish its semantic lowerings");
+    return false;
+  }
+  result.replacement = std::move(patcher).emit();
+  result.patches.insert(result.patches.end(), std::make_move_iterator(patches.begin()),
+                        std::make_move_iterator(patches.end()));
+  result.mark_modified();
+  return true;
 }
 
 [[nodiscard]] SampledAtomicSemanticsResult

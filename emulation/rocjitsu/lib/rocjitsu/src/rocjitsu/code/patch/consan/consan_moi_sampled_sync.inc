@@ -1464,32 +1464,18 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
         patches.push_back(std::move(info));
       }
     }
-    if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                             "MOI sampled barrier sync", result)) {
-      return;
-    }
-    if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),
-                                           "sampled barrier sync"))
-      return;
-    result.replacement = std::move(patcher).emit();
-    result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-    result.mark_modified();
+    (void)publish_moi_sync_patch(result, patcher, new_text, options.patched_image_growth_limit,
+                                 "MOI sampled barrier sync", "sampled barrier sync",
+                                 std::move(lowering_commits), std::move(patches));
     return;
   }
   for (size_t barrier_index = 0; barrier_index < selected.size(); ++barrier_index) {
     if (!try_emit_direct_barrier(barrier_index, /*allow_local_island=*/true))
       return;
   }
-  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                           "MOI sampled barrier sync", result)) {
-    return;
-  }
-  if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),
-                                         "sampled barrier sync"))
-    return;
-  result.replacement = std::move(patcher).emit();
-  result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-  result.mark_modified();
+  (void)publish_moi_sync_patch(result, patcher, new_text, options.patched_image_growth_limit,
+                               "MOI sampled barrier sync", "sampled barrier sync",
+                               std::move(lowering_commits), std::move(patches));
 }
 
 void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
@@ -2753,14 +2739,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                              preserve_guest_at_anchor))
       return;
   }
-  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                           "MOI sampled atomic sync", result)) {
-    return;
-  }
-  if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),
-                                         "sampled atomic sync"))
-    return;
-  result.replacement = std::move(patcher).emit();
-  result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-  result.mark_modified();
+  (void)publish_moi_sync_patch(result, patcher, new_text, options.patched_image_growth_limit,
+                               "MOI sampled atomic sync", "sampled atomic sync",
+                               std::move(lowering_commits), std::move(patches));
 }

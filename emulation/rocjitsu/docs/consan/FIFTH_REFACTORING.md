@@ -2575,3 +2575,63 @@ whole codebase. Section 14.4 remains complete through the checkpoint-17
 extension fixtures. Broad operating-point and transform-artifact surfaces,
 the other target and mode facets, material shrinkage, and the independent
 whole-codebase audit remain open.
+
+### 16.24 Convergence checkpoint 23: one synchronization publication transaction
+
+The required deletion pass traced the terminal half of every MOI
+synchronization mutation. Record/Replay atomic and fence records, Sampled
+barrier and atomic metadata, InlineShadow atomic ordering, and the common
+barrier paths each independently performed the same sequence: apply patched-
+image growth policy, replace executable text, publish the coalescing semantic
+commits, emit the replacement image, append patch proof, and mark the result
+modified. Planning, target emission, and diagnostics were mode-specific, but
+that six-step transaction was not. Eight copies made it possible for one mode
+to publish bytes or patch telemetry in a different order from another.
+
+`publish_moi_sync_patch` now owns that inseparable terminal transaction once.
+Mode and shared-barrier owners still build their exact bytes, typed patch
+products, and intent-bound commits; they move those completed products across
+the common boundary and retain no terminal publication policy. The former
+commit-only `publish_moi_sync_lowering_commits` API and all seven additional
+transaction implementations are gone. Patch products are moved rather than
+copied into the lasting artifact. The architecture-boundary gate prohibits
+the commit-only API from returning and permits direct coalescing publication
+only in the coverage-ledger implementation and this one transaction owner.
+
+| Signal | Checkpoint 23 | Cumulative change | Slice change from checkpoint 22 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,721 | +746 | **-35** |
+| Nonblank production lines | 99,444 | +361 | **-35** |
+| Production implementation lines | 91,739 | **+289** | **-38** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 241 / 58 | **-35 / +1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| Independent synchronization terminal implementations | 1 | n/a | **-7** |
+| Test inventory | 5,372 | +27 | 0 |
+
+This checkpoint exactly repays the 38 implementation lines added by
+checkpoint 22 while retaining its target/mode locality, and returns cumulative
+production to checkpoint 21's 289-line increase over baseline. It is therefore
+the promised immediate deletion payoff, not material whole-refactoring
+shrinkage. The next work must continue deleting from that cumulative total;
+restoring eight mode-local transaction copies would be both a size regression
+and a false form of mode locality.
+
+Validation includes a regenerated 69-step build and a 256-test focused atomic,
+fence, barrier, ledger, growth-policy, and structural-boundary gate. Two full
+`-j16` runs each exposed a different 60-second gfx1250 simulator timeout:
+InlineShadow scaled WMMA and SuperCollider reduction. Each passed immediately
+in serial isolation in 0.55 and 0.47 seconds respectively, so their individual
+budgets were raised to 120 seconds. The repeated complete 4,737-test
+nonphysical matrix, including all 2,908 simulator rows over five targets, then
+passed at `-j16` in 195.47 seconds. All 635 physical gfx1201 tests passed
+serialized at `-j1` in 108.85 seconds. No test was removed or disabled.
+
+The checkpoint strengthens Sections 14.3, 14.6, and 14.7 at one exact subset-
+shared boundary. It does not close the remaining broad operating-point and
+transform-artifact surfaces, prove locality for every mode and target facet,
+produce material net shrinkage, or replace the required independent deep-read
+audit. Section 14.4 remains complete through the checkpoint-17 extension
+fixtures.

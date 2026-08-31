@@ -505,13 +505,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     patches.push_back(std::move(info));
     ++record_index;
   }
-  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                           "MOI fence record patch", result)) {
-    return;
-  }
-  if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits), "fence record patch"))
-    return;
-  result.replacement = std::move(patcher).emit();
-  result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-  result.mark_modified();
+  (void)publish_moi_sync_patch(result, patcher, new_text, options.patched_image_growth_limit,
+                               "MOI fence record patch", "fence record patch",
+                               std::move(lowering_commits), std::move(patches));
 }

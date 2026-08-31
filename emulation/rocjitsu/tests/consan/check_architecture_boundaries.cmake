@@ -712,6 +712,20 @@ foreach(_file IN LISTS _consan_production_files)
         "staged_moi_sync_lowerings"
         "synchronization lowering must coalesce at the coverage-ledger owner"
     )
+    _consan_assert_no_match(
+        "${_file}"
+        "publish_moi_sync_lowering_commits"
+        "synchronization bytes and semantic commits must publish as one transaction"
+    )
+    if(NOT _file MATCHES
+       "(consan_access_policy.cpp|consan_observation_plan.h.inc|consan_moi_sync_emission.cpp)$"
+    )
+        _consan_assert_no_match(
+            "${_file}"
+            "publish_coalescing_instrumented_commits"
+            "only the shared synchronization transaction may publish coalescing commits"
+        )
+    endif()
 endforeach()
 foreach(_result_bus IN ITEMS consan_result.h.inc consan_pipeline.h)
     _consan_assert_no_match(

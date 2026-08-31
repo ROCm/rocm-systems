@@ -2148,18 +2148,12 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
                                            visible_evidence_private_requirements, result.errors) ||
       !apply_sgpr_descriptor_requirements(patcher, result, code_object,
-                                          visible_evidence_sgpr_requirements, result.errors) ||
-      !replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                           "MOI inline-shadow barrier epoch patch", result)) {
+                                          visible_evidence_sgpr_requirements, result.errors)) {
     return;
   }
-  if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),
-                                         "barrier epoch patch"))
-    return;
-
-  result.replacement = std::move(patcher).emit();
-  result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-  result.mark_modified();
+  (void)publish_moi_sync_patch(result, patcher, new_text, options.patched_image_growth_limit,
+                               "MOI inline-shadow barrier epoch patch", "barrier epoch patch",
+                               std::move(lowering_commits), std::move(patches));
 }
 
 void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes,
@@ -2777,15 +2771,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
                                           result.errors)) {
     return;
   }
-  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                           "MOI barrier record patch", result)) {
-    return;
-  }
-  if (!publish_moi_sync_lowering_commits(result, std::move(lowering_commits),
-                                         "barrier record patch"))
-    return;
-
-  result.replacement = std::move(patcher).emit();
-  result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-  result.mark_modified();
+  (void)publish_moi_sync_patch(result, patcher, new_text, options.patched_image_growth_limit,
+                               "MOI barrier record patch", "barrier record patch",
+                               std::move(lowering_commits), std::move(patches));
 }

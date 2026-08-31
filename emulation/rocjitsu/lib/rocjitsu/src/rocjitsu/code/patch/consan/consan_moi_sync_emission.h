@@ -11,6 +11,10 @@
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
 
+namespace rocjitsu {
+class CodeObjectPatcher;
+}
+
 namespace rocjitsu::consan_moi_impl {
 
 [[nodiscard]] bool append_moi_atomic_lowering_commit(
@@ -28,9 +32,14 @@ namespace rocjitsu::consan_moi_impl {
     const ConSanCommittedPatchGeometry &patch, std::string_view probe_name,
     std::vector<ConSanCommittedLowering> &commits);
 
-[[nodiscard]] bool publish_moi_sync_lowering_commits(ConSanTransformArtifacts &result,
-                                                     std::vector<ConSanCommittedLowering> commits,
-                                                     std::string_view probe_name);
+/// Atomically publish one completed synchronization mutation. Mode owners
+/// build bytes, patch proof, and intent-bound commits; this shared boundary
+/// applies growth policy and publishes their inseparable terminal result.
+[[nodiscard]] bool publish_moi_sync_patch(
+    ConSanTransformArtifacts &result, CodeObjectPatcher &patcher, std::span<const uint8_t> new_text,
+    const ConSanPatchedImageGrowthLimit &growth_limit, std::string_view replacement_name,
+    std::string_view probe_name, std::vector<ConSanCommittedLowering> commits,
+    std::vector<ConSanPatchInfo> patches);
 
 enum class SampledAtomicSemanticsReason : uint8_t {
   None,

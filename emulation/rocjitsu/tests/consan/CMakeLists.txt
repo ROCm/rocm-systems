@@ -765,9 +765,12 @@ function(rj_add_consan_device_conformance_cases)
             elseif(
                 _mode_value STREQUAL "supercollider"
                 AND _device_TARGET STREQUAL "gfx1250"
-                AND _workload_name STREQUAL "D16HighBytePublication"
+                AND (
+                    _workload_name STREQUAL "D16HighBytePublication"
+                    OR _workload_name STREQUAL "Reduction"
+                )
             )
-                # This is sub-second in isolation but can exceed the default
+                # These are sub-second in isolation but can exceed the default
                 # under the full -j16 simulator gate's gfx1250 contention.
                 set(_workload_timeout 120)
             elseif(
@@ -777,6 +780,14 @@ function(rj_add_consan_device_conformance_cases)
             )
                 # This is sub-second in isolation but can exceed the default
                 # during process teardown under the full -j16 simulator gate.
+                set(_workload_timeout 120)
+            elseif(
+                _mode_value STREQUAL "inline-shadow"
+                AND _device_TARGET STREQUAL "gfx1250"
+                AND _workload_name STREQUAL "Gfx1250ScaledWmmaPipeline"
+            )
+                # This is sub-second in isolation but can exceed the default
+                # while the full -j16 gate runs the large gfx1250 pipelines.
                 set(_workload_timeout 120)
             elseif(
                 _mode_value STREQUAL "record-replay"
