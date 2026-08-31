@@ -20,14 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// HIP-graph fork/join workload. Each replay executes a chain of "diamond" layers:
-// one root node fans out into `width` independent branch kernels that each depend
-// on the previous join, then those branches join back into one node. The graph is
-// launched on a single stream; HIP distributes the independent branch nodes of a
-// layer across hardware queues, so they run concurrently and their completions are
-// coupled by the join that follows. Stacking layers keeps a chain of such couplings
-// outstanding, so many mutually dependent completion signals are in flight at once,
-// which is what exercises the queue interposition completion path.
+// HIP-graph fork/join workload. Each replay runs a chain of "diamond" layers: one root node
+// fans out into `width` independent branch kernels, then those branches join back into one
+// node, which the next layer forks from. The graph is launched on a single stream; HIP spreads
+// a layer's independent branches across hardware queues, so they run at the same time and the
+// join that follows couples their completions. Stacking layers keeps many mutually dependent
+// completion signals in flight at once, which is what exercises the queue interposition
+// completion path.
 
 #include <hip/hip_runtime.h>
 
