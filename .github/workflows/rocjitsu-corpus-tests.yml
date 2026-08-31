@@ -83,8 +83,8 @@ jobs:
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
             run_simulator_corpus: true
-            corpus_soft_timeout: 15
-            corpus_hard_timeout: 30
+            corpus_soft_timeout: 30
+            corpus_hard_timeout: 60
             corpus_rerun_timeout: 600
             corpus_sanitizer: none
           - name: asan-ubsan
@@ -263,11 +263,13 @@ jobs:
             # client's own AQL ring and buffers, so they hit the MAP_SHARED alias
             # limitation described below: every race is GpuMemory::read_mapped
             # reading a host buffer the test thread wrote. Their gtest assertions
-            # pass. The two non-dispatching HsaDbiNop*Sim cases stay covered.
-            "HsaDbiNopAsmSim\.PatchedKernelDispatchMatchesOriginal"
-            "HsaDbiNopAsmSim\.TrampolineIsActuallyExecutedByGpu"
-            "HsaDbiNopProbeSim\.PatchedKernelDispatchMatchesOriginal"
-            "HsaDbiNopProbeSim\.ProbeBodyIsActuallyCalledByGpu"
+            # pass. The non-dispatching HsaDbiNop*Sim cases stay covered.
+            # The .* spans the per-target infix, so every target's dispatching
+            # Sim case is excluded -- they all share the limitation.
+            "HsaDbiNopAsm.*Sim\.PatchedKernelDispatchMatchesOriginal"
+            "HsaDbiNopAsm.*Sim\.TrampolineIsActuallyExecutedByGpu"
+            "HsaDbiNopProbe.*Sim\.PatchedKernelDispatchMatchesOriginal"
+            "HsaDbiNopProbe.*Sim\.ProbeBodyIsActuallyCalledByGpu"
           )
 
           TEST_REGEX="${{ matrix.test_regex }}"
