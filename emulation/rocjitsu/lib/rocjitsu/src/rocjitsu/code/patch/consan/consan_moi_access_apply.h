@@ -38,6 +38,15 @@ make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
                                 const ConSanMoiCandidate &candidate,
                                 const ConSanPatchLoweringProduct &patch);
 
+/// Atomically publish one completed access mutation. Mode owners build the
+/// replacement image, patch proof, and intent-bound commits; this boundary
+/// makes those products visible together.
+[[nodiscard]] bool publish_moi_access_patch(ConSanTransformArtifacts &result,
+                                            std::vector<uint8_t> replacement,
+                                            std::string_view probe_name,
+                                            std::vector<ConSanCommittedLowering> commits,
+                                            std::vector<ConSanPatchInfo> patches);
+
 template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
           typename ApplyExtraRequirements>
 [[nodiscard]] bool apply_inline_moi_access_patches(
@@ -46,38 +55,33 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
     const MoiDescriptorSgprRequirements &scalar_requirements, std::string_view probe_name,
     rj_code_arch_t arch, BuildWords build_words, MakePatchInfo make_patch_info,
     ApplyExtraRequirements apply_extra_requirements, ConSanTransformArtifacts &result) {
-  result.replacement.assign(bytes.begin(), bytes.end());
+  std::vector<uint8_t> replacement(bytes.begin(), bytes.end());
   for (const PlannedPatch &planned_patch : planned_patches) {
     const ConSanMoiCandidate &candidate = *planned_patch.candidate;
     auto words = build_words(planned_patch);
-    if (!words) {
-      result.replacement.clear();
+    if (!words)
       return false;
-    }
     const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t));
     if (patch_bytes != planned_patch.placement.body_size) {
       result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                                  " final patch size changed");
-      result.replacement.clear();
       return false;
     }
-    if (candidate.file_offset > result.replacement.size() ||
-        patch_bytes > result.replacement.size() - candidate.file_offset) {
+    if (candidate.file_offset > replacement.size() ||
+        patch_bytes > replacement.size() - candidate.file_offset) {
       result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                                  " inline patch exceeds the code object");
-      result.replacement.clear();
       return false;
     }
-    std::memcpy(result.replacement.data() + candidate.file_offset, words->data(),
+    std::memcpy(replacement.data() + candidate.file_offset, words->data(),
                 static_cast<size_t>(patch_bytes));
   }
 
-  if (!apply_descriptor_requirements(result.replacement, result, descriptor_requirements, arch,
+  if (!apply_descriptor_requirements(replacement, result, descriptor_requirements, arch,
                                      result.errors) ||
-      !apply_sgpr_descriptor_requirements(result.replacement, result, scalar_requirements,
+      !apply_sgpr_descriptor_requirements(replacement, result, scalar_requirements,
                                           result.errors) ||
-      !apply_extra_requirements(result.replacement, result)) {
-    result.replacement.clear();
+      !apply_extra_requirements(replacement, result)) {
     return false;
   }
 
@@ -92,22 +96,13 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
     if (!commit) {
       result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                                  " produced an invalid intent-bound lowering");
-      result.replacement.clear();
       return false;
     }
     patch_infos.push_back(std::move(patch));
     lowering_commits.push_back(std::move(*commit));
   }
-  if (!result.coverage_ledger.publish_lowering_commits(std::move(lowering_commits))) {
-    result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
-                               " could not commit its semantic lowerings");
-    result.replacement.clear();
-    return false;
-  }
-  result.patches.insert(result.patches.end(), std::make_move_iterator(patch_infos.begin()),
-                        std::make_move_iterator(patch_infos.end()));
-  result.mark_modified();
-  return true;
+  return publish_moi_access_patch(result, std::move(replacement), probe_name,
+                                  std::move(lowering_commits), std::move(patch_infos));
 }
 
 [[nodiscard]] bool apply_moi_appended_access_descriptor_requirements(

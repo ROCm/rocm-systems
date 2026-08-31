@@ -1518,14 +1518,10 @@ void try_apply_first_light_access_record_patch(
                              "MOI first-light probe", result)) {
       return;
     }
-    result.replacement = std::move(patcher).emit();
-    if (!result.coverage_ledger.publish_lowering_commits(std::move(lowering_commits))) {
-      result.errors.emplace_back(
-          "ConSan MOI first-light probe could not commit its semantic lowerings");
-      result.discard_candidate_modification();
+    if (!publish_moi_access_patch(result, std::move(patcher).emit(), "first-light probe",
+                                  std::move(lowering_commits), std::move(patches))) {
       return;
     }
-    result.patches.insert(result.patches.end(), patches.begin(), patches.end());
     if (reserved_sync_island_count != 0u) {
       access_output.reserved_sync_islands = MoiReservedBarrierIslandLayout{
           .begin = original_text_size,
@@ -1534,7 +1530,6 @@ void try_apply_first_light_access_record_patch(
       };
     }
     access_output.generated_branch_relay_ranges = std::move(generated_branch_relay_ranges);
-    result.mark_modified();
     return;
   }
 

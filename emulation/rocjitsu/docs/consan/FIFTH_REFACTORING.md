@@ -2635,3 +2635,73 @@ transform-artifact surfaces, prove locality for every mode and target facet,
 produce material net shrinkage, or replace the required independent deep-read
 audit. Section 14.4 remains complete through the checkpoint-17 extension
 fixtures.
+
+### 16.25 Convergence checkpoint 24: one access publication transaction
+
+A complete lifecycle read of MOI access application found four copies of the
+same terminal ownership policy. Record/Replay, Sampled, and InlineShadow each
+had an appended-probe path that independently emitted the replacement image,
+published ordinary intent-bound lowering commits, appended patch proof, and
+marked the transform modified. The shared inline byte-application template
+repeated the same publication sequence after its different in-place byte and
+descriptor strategy. The apparent failure-policy difference was not a mode
+contract: access application is the first mutation in all three engine
+orchestrators, and every later synchronization or prologue mutation consumes
+its published result.
+
+`publish_moi_access_patch` now owns the inseparable completed-access
+transaction once. Inline application builds its candidate replacement in a
+local value rather than using `ConSanTransformArtifacts::replacement` as
+scratch storage, and transfers that image together with its intent-bound
+commits and patch proof only after all construction succeeds. The three mode-
+local appended paths retain their distinct growth-policy label, byte
+construction, descriptor requirements, relocation geometry, and diagnostics,
+then move the same three completed products across the shared boundary.
+Record/Replay also retains its mode-private reserved barrier-island and relay-
+range continuation state after successful publication.
+
+The former four direct terminal implementations and their compensating
+replacement clears or whole-candidate discards are gone. The architecture-
+boundary gate now rejects direct ledger publication, direct replacement-bus
+mutation, direct modification marking, or candidate discard in each of the
+three mode-owned access bodies. That makes access publication a mechanically
+enforced shared mechanism without moving probe semantics out of their engine
+owners or duplicating them in a nominally local facade.
+
+| Signal | Checkpoint 24 | Cumulative change | Slice change from checkpoint 23 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,718 | +743 | **-3** |
+| Nonblank production lines | 99,439 | +356 | **-5** |
+| Production implementation lines | 91,731 | **+281** | **-8** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 243 / 58 | **-33 / +1** | +2 / 0 |
+| `ConSanPatchInfo` references / files | 202 / 28 | +2 / 0 | +2 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| Independent access terminal implementations | 1 | n/a | **-3** |
+| Test inventory | 5,372 | +27 | 0 |
+
+The new transaction signature costs two occurrences each of the broad
+transform-artifact and patch-proof types. That is explicit shared-boundary
+coupling rather than a hidden mode-to-mode peephole, but it remains part of the
+Section 14 broad-surface debt. In return, the slice deletes eight implementation
+lines and prevents three mode-local copies from regrowing. Cumulative
+production remains 281 implementation lines above baseline, so this is a
+directional deletion checkpoint, not the material whole-refactoring shrinkage
+or completion evidence required by Section 14.
+
+Validation includes a regenerated build and a 484-test focused Record/Replay,
+Sampled, InlineShadow, access, and structural-boundary gate. The complete
+4,737-test nonphysical matrix, including all 2,908 simulator rows over five
+targets, passed at `-j16` in 197.84 seconds. All 635 physical gfx1201 tests
+passed serialized at `-j1` in 109.05 seconds. No test was removed, disabled, or
+renamed. No behavior bug was discovered in this ownership slice, so the new
+coverage is the structural regression gate that makes the publication boundary
+durable rather than a behavior-specific regression fixture.
+
+This checkpoint strengthens Sections 14.2, 14.3, 14.6, and 14.7 at the common
+access-publication seam. It does not close the remaining wide operating-point
+and transform-artifact surfaces, prove locality for every target and mode
+facet, produce material net shrinkage, or replace the required independent
+whole-codebase audit. Section 14.4 remains complete through the checkpoint-17
+extension fixtures.

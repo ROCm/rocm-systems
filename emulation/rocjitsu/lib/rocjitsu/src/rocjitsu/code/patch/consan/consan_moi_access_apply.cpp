@@ -98,6 +98,23 @@ make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
                                         std::move(runtime_mapping));
 }
 
+[[nodiscard]] bool publish_moi_access_patch(ConSanTransformArtifacts &result,
+                                            std::vector<uint8_t> replacement,
+                                            std::string_view probe_name,
+                                            std::vector<ConSanCommittedLowering> commits,
+                                            std::vector<ConSanPatchInfo> patches) {
+  if (!result.coverage_ledger.publish_lowering_commits(std::move(commits))) {
+    result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                               " could not commit its semantic lowerings");
+    return false;
+  }
+  result.replacement = std::move(replacement);
+  result.patches.insert(result.patches.end(), std::make_move_iterator(patches.begin()),
+                        std::make_move_iterator(patches.end()));
+  result.mark_modified();
+  return true;
+}
+
 /// Apply the descriptor growth shared by every appended MOI access engine.
 ///
 /// VGPR, SGPR, and private-memory requirements come from the common access

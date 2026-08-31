@@ -1347,15 +1347,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                              "MOI inline-shadow probe", result)) {
       return;
     }
-    result.replacement = std::move(patcher).emit();
-    if (!result.coverage_ledger.publish_lowering_commits(std::move(lowering_commits))) {
-      result.errors.emplace_back(
-          "ConSan MOI inline-shadow probe could not commit its semantic lowerings");
-      result.discard_candidate_modification();
+    if (!publish_moi_access_patch(result, std::move(patcher).emit(), "inline-shadow probe",
+                                  std::move(lowering_commits), std::move(patches))) {
       return;
     }
-    result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-    result.mark_modified();
     return;
   }
 

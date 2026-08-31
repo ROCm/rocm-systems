@@ -727,6 +727,19 @@ foreach(_file IN LISTS _consan_production_files)
         )
     endif()
 endforeach()
+foreach(
+    _access_mode_source
+    IN ITEMS
+        consan_moi_record_replay.inc
+        consan_moi_sampled_access.inc
+        consan_moi_inline_shadow.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_access_mode_source}"
+        "publish_lowering_commits|result[.]replacement|result[.]mark_modified|discard_candidate_modification"
+        "mode-local access emission must publish bytes, proof, and lowering through the shared access transaction"
+    )
+endforeach()
 foreach(_result_bus IN ITEMS consan_result.h.inc consan_pipeline.h)
     _consan_assert_no_match(
         "${_consan_dir}/${_result_bus}"

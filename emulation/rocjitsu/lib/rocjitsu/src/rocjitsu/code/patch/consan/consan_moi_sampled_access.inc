@@ -1092,15 +1092,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                              "MOI sampled probe", result)) {
       return;
     }
-    result.replacement = std::move(patcher).emit();
-    if (!result.coverage_ledger.publish_lowering_commits(std::move(lowering_commits))) {
-      result.errors.emplace_back(
-          "ConSan MOI sampled probe could not commit its semantic lowerings");
-      result.discard_candidate_modification();
+    if (!publish_moi_access_patch(result, std::move(patcher).emit(), "sampled probe",
+                                  std::move(lowering_commits), std::move(patches))) {
       return;
     }
-    result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-    result.mark_modified();
     return;
   }
 
