@@ -27,7 +27,14 @@
  * HRR_TEST_EXE and HRR_PLAYBACK_EXE are required; CMakeLists.txt fails at
  * configure time if HRR_PLAYBACK_EXE is not found. Pass -DHRR_PLAYBACK_EXE=<path>
  * if hrr-playback is not installed under CMAKE_INSTALL_PREFIX or ROCM_PATH.
+ *
+ * HRR_CLR_LIB (hipamd/lib from a same-commit CLR build) is injected by CMake so
+ * capture subprocesses and hrr-playback load matching capture-enabled libamdhip64.
  */
+
+#ifndef HRR_CLR_LIB
+#define HRR_CLR_LIB ""
+#endif
 
 #include "hrr_test_common.hh"
 #include "hrr_test_process.hh"
@@ -55,14 +62,20 @@ static constexpr char kPathSep = ';';
 static constexpr char kPathSep = ':';
 #endif
 
-// Set PATH so the subprocess can find the ROCm runtime binaries.
+// Set PATH and (on Linux) LD_LIBRARY_PATH so capture/replay subprocesses load
+// capture-enabled libamdhip64 from the same commit as projects/hrr playback.
 // On Windows: DLLs are found via PATH.
-// On Linux:   fork() inherits LD_LIBRARY_PATH from the parent automatically;
-//             no explicit setEnv needed.
-static void set_proc_search_path(hrr::test::SpawnProc& proc) {
+static void set_proc_runtime_env(hrr::test::SpawnProc& proc) {
   const char* cur_path = getenv("PATH");
   proc.setEnv("PATH",
               std::string(ROCM_BIN_PATH) + kPathSep + (cur_path ? cur_path : ""));
+#if !defined(_WIN32)
+  if (HRR_CLR_LIB[0] != '\0') {
+    const char* cur_ld = getenv("LD_LIBRARY_PATH");
+    std::string ld = std::string(HRR_CLR_LIB) + kPathSep + (cur_ld ? cur_ld : "");
+    proc.setEnv("LD_LIBRARY_PATH", ld);
+  }
+#endif
 }
 
 // RAII guard: removes a directory tree on scope exit (even on REQUIRE failure).
@@ -218,7 +231,7 @@ static void hrr_run_playback(const fs::path& cap_path,
                              const std::string& extra_args = "",
                              bool require_d2h = true) {
   hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
-  set_proc_search_path(proc);
+  set_proc_runtime_env(proc);
   // On Windows, wrap the path in quotes so CreateProcess handles spaces.
   // On Linux, SpawnProc uses execvp (no shell), so quotes are literal characters
   // in the argument — pass the raw path without quoting.
@@ -289,7 +302,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
     // Prepend ROCm bin to PATH so the subprocess finds amdhip64_7.dll.
     // SpawnProc replaces PATH entirely, so we reconstruct the full value.
     {
-      set_proc_search_path(proc);
+      set_proc_runtime_env(proc);
     }
     int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
     INFO("Capture subprocess exit code: " << ret);
@@ -350,7 +363,7 @@ HRR_TEST_CASE(Unit_HRR_AllApisRoundtrip) {
     hrr::test::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     {
-      set_proc_search_path(proc);
+      set_proc_runtime_env(proc);
     }
     int ret = proc.run("\"Unit_HRR_AllApis_Direct\"");
     INFO("AllApis capture subprocess exit code: " << ret);
@@ -405,7 +418,7 @@ HRR_TEST_CASE(Unit_HRR_HostMemRoundtrip) {
     hrr::test::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     {
-      set_proc_search_path(proc);
+      set_proc_runtime_env(proc);
     }
     int ret = proc.run("\"Unit_HRR_HostMemWorkload_Direct\"");
     INFO("HostMem capture subprocess exit code: " << ret);
@@ -463,7 +476,7 @@ HRR_TEST_CASE(Unit_HRR_GraphRoundtrip) {
     // Prepend ROCm bin to PATH so the subprocess finds amdhip64_7.dll.
     // SpawnProc replaces PATH entirely, so we reconstruct the full value.
     {
-      set_proc_search_path(proc);
+      set_proc_runtime_env(proc);
     }
     int ret = proc.run("\"Unit_HRR_GraphWorkload_Direct\"");
     INFO("Graph capture subprocess exit code: " << ret);
@@ -514,7 +527,7 @@ HRR_TEST_CASE(Unit_HRR_StressApisRoundtrip) {
     hrr::test::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     {
-      set_proc_search_path(proc);
+      set_proc_runtime_env(proc);
     }
     int ret = proc.run("\"Unit_HRR_StressApis_Direct\"");
     INFO("Stress capture subprocess exit code: " << ret);
@@ -565,7 +578,7 @@ static void hrr_run_roundtrip(const std::string& direct_case,
                                bool require_d2h = true) {
   { hrr::test::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
-    { set_proc_search_path(proc); }
+    { set_proc_runtime_env(proc); }
     int ret = proc.run("\"" + direct_case + "\"");
     INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
   fs::path archive_path = hrr_single_process_archive(cap_path);
@@ -625,7 +638,7 @@ static void hrr_capture_direct(const std::string& direct_case,
                                size_t min_events = 5) {
   { hrr::test::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
-    { set_proc_search_path(proc); }
+    { set_proc_runtime_env(proc); }
     int ret = proc.run("\"" + direct_case + "\"");
     INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
   fs::path archive_path = hrr_single_process_archive(cap_path);
@@ -643,7 +656,7 @@ static std::pair<int, std::string> hrr_playback_env(
     const std::vector<std::pair<std::string, std::string>>& env,
     const std::string& extra_args = "") {
   hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
-  set_proc_search_path(proc);
+  set_proc_runtime_env(proc);
   for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
 #ifdef _WIN32
   std::string path_arg = "\"" + cap_path.string() + "\"";
@@ -1021,7 +1034,7 @@ HRR_TEST_CASE(Unit_HRR_MetadataManifest) {
   {
     hrr::test::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    set_proc_search_path(proc);
+    set_proc_runtime_env(proc);
     int ret = proc.run("\"Unit_HRR_DeviceInfo_Direct\"");
     INFO("Metadata capture subprocess exit code: " << ret);
     REQUIRE(ret == 0);
@@ -1093,7 +1106,7 @@ HRR_TEST_CASE(Unit_HRR_OccupancyRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_occupancy"};
   { hrr::test::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    { set_proc_search_path(proc); }
+    { set_proc_runtime_env(proc); }
     int ret = proc.run("\"Unit_HRR_Occupancy_Direct\"");
     INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
   fs::path archive_path = hrr_single_process_archive(cap.path);
@@ -1333,7 +1346,7 @@ HRR_TEST_CASE(Unit_HRR_MultiThreadRoundtrip) {
     hrr::test::SpawnProc proc(raw_trace_exe);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     {
-      set_proc_search_path(proc);
+      set_proc_runtime_env(proc);
     }
     int ret = proc.run("");
     INFO("hip_raw_trace capture exit code: " << ret);
@@ -1366,7 +1379,7 @@ HRR_TEST_CASE(Unit_HRR_MultiThreadRoundtrip) {
   // -------------------------------------------------------------------------
   auto run_mt_playback = [&](const std::string& extra_args) {
     hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
-    set_proc_search_path(proc);
+    set_proc_runtime_env(proc);
 #ifdef _WIN32
     std::string mt_path_arg = "\"" + cap.path.string() + "\"";
 #else
@@ -1465,7 +1478,7 @@ static std::string build_replacement_co(const fs::path& dir) {
 static std::pair<int, std::string> run_playback_raw(const fs::path& cap_path,
                                                     const std::string& extra_args) {
   hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
-  set_proc_search_path(proc);
+  set_proc_runtime_env(proc);
   std::string path_arg = cap_path.string();
   int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
   return {ret, proc.getOutput()};
@@ -1505,7 +1518,7 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelRoundtrip) {
   {
     hrr::test::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    set_proc_search_path(proc);
+    set_proc_runtime_env(proc);
     int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
     INFO("Capture exit: " << ret);
     REQUIRE(ret == 0);
@@ -1545,7 +1558,7 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelMissingCO) {
   {
     hrr::test::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    set_proc_search_path(proc);
+    set_proc_runtime_env(proc);
     int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
     INFO("Capture exit: " << ret);
     REQUIRE(ret == 0);
@@ -1579,7 +1592,7 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelBadSpec) {
   {
     hrr::test::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    set_proc_search_path(proc);
+    set_proc_runtime_env(proc);
     int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
     REQUIRE(ret == 0);
   }

@@ -703,6 +703,28 @@ cmake --build hrr-build --target hrr-playback -j"$(nproc)"
 #       installs to <prefix>/bin/hrr-playback)
 ```
 
+### Integration tests (GPU capture/replay round-trip)
+
+Capture (`libamdhip64`) and playback (`hrr-playback` / reader) **must be built from
+the same commit**. A prebuilt SDK `libamdhip64` often writes compact wire-format
+payloads that the in-tree reader rejects (`payload too small`).
+
+```bash
+# After building amdhip64 (see above):
+cmake -S projects/hrr -B hrr-build \
+  -DROCM_PATH=$ROCM_PATH \
+  -DCMAKE_PREFIX_PATH=$ROCM_PATH \
+  -DHRR_BUILD_PLAYBACK=ON -DHRR_BUILD_TESTS=ON \
+  -DHRR_CLR_LIB=$PWD/build/hipamd/lib \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build hrr-build -j"$(nproc)"
+ctest --test-dir hrr-build --output-on-failure
+```
+
+CMake option `-DHRR_CLR_LIB=<path/to/hipamd/lib>` (or env `HRR_CLR_LIB`) wires
+`LD_LIBRARY_PATH` for capture subprocesses and sets RUNPATH on test binaries.
+CI builds `amdhip64` before configuring HRR tests.
+
 ### Deploy
 ```bash
 # Make the freshly built capture runtime win over any system ROCm copy at run time
