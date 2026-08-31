@@ -398,8 +398,10 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   });
   ASSERT_TRUE(plan.valid());
   ConSanCoverageLedger coverage(plan);
-  ASSERT_TRUE(coverage.set_lowering_outcome({0u}, ConSanLoweringOutcomeKind::Instrumented));
-  ASSERT_TRUE(coverage.set_lowering_outcome({1u}, ConSanLoweringOutcomeKind::Instrumented));
+  ASSERT_TRUE(
+      publish_test_lowering_outcome(coverage, plan, {0u}, ConSanLoweringOutcomeKind::Instrumented));
+  ASSERT_TRUE(
+      publish_test_lowering_outcome(coverage, plan, {1u}, ConSanLoweringOutcomeKind::Instrumented));
 
   ConSanTransformArtifacts mechanism;
   mechanism.program_inventory = inventory;

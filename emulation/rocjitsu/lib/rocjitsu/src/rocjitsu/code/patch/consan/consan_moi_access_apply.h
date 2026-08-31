@@ -98,7 +98,7 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
     patch_infos.push_back(std::move(patch));
     lowering_commits.push_back(std::move(*commit));
   }
-  if (!result.publish_lowering_commits(std::move(lowering_commits))) {
+  if (!result.coverage_ledger.publish_lowering_commits(std::move(lowering_commits))) {
     result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                                " could not commit its semantic lowerings");
     result.replacement.clear();

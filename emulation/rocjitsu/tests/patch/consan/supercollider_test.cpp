@@ -1170,15 +1170,15 @@ TEST(ConSan, FlatCheckTrapKernelFilterDoesNotShrinkPhysicalCoverageLedger) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 0u);
-  ASSERT_EQ(result.committed_lowerings.size(), 2u);
-  const auto instrumented =
-      std::ranges::find(result.committed_lowerings, ConSanLoweringOutcomeKind::Instrumented,
-                        &ConSanCommittedLowering::outcome);
-  ASSERT_NE(instrumented, result.committed_lowerings.end());
+  const std::span<const ConSanCommittedLowering> commits =
+      result.coverage_ledger.lowering_commits();
+  ASSERT_EQ(commits.size(), 2u);
+  const auto instrumented = std::ranges::find(commits, ConSanLoweringOutcomeKind::Instrumented,
+                                              &ConSanCommittedLowering::outcome);
+  ASSERT_NE(instrumented, commits.end());
   EXPECT_FALSE(instrumented->intent_ids.empty());
   EXPECT_FALSE(instrumented->locations.empty());
-  EXPECT_EQ(std::ranges::count(result.committed_lowerings,
-                               ConSanLoweringOutcomeKind::PlacementRejected,
+  EXPECT_EQ(std::ranges::count(commits, ConSanLoweringOutcomeKind::PlacementRejected,
                                &ConSanCommittedLowering::outcome),
             1u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineFlatLoadCheckTrap,
@@ -5616,15 +5616,15 @@ TEST(ConSan, ProbeLdsCheckTrapKernelFilterDoesNotShrinkPhysicalCoverageLedger) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 0u);
-  ASSERT_EQ(result.committed_lowerings.size(), 2u);
-  const auto instrumented =
-      std::ranges::find(result.committed_lowerings, ConSanLoweringOutcomeKind::Instrumented,
-                        &ConSanCommittedLowering::outcome);
-  ASSERT_NE(instrumented, result.committed_lowerings.end());
+  const std::span<const ConSanCommittedLowering> commits =
+      result.coverage_ledger.lowering_commits();
+  ASSERT_EQ(commits.size(), 2u);
+  const auto instrumented = std::ranges::find(commits, ConSanLoweringOutcomeKind::Instrumented,
+                                              &ConSanCommittedLowering::outcome);
+  ASSERT_NE(instrumented, commits.end());
   EXPECT_FALSE(instrumented->intent_ids.empty());
   EXPECT_FALSE(instrumented->locations.empty());
-  EXPECT_EQ(std::ranges::count(result.committed_lowerings,
-                               ConSanLoweringOutcomeKind::PlacementRejected,
+  EXPECT_EQ(std::ranges::count(commits, ConSanLoweringOutcomeKind::PlacementRejected,
                                &ConSanCommittedLowering::outcome),
             1u);
   EXPECT_EQ(

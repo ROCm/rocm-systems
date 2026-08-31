@@ -229,13 +229,17 @@ TEST(ConSanMoi, DirectSampledProbeWritesPackedWatchpointEntry) {
                                                ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
                                   }),
             1u);
-  ASSERT_EQ(result.committed_lowerings.size(), 1u);
-  EXPECT_EQ(result.committed_lowerings.front().outcome, ConSanLoweringOutcomeKind::Instrumented);
-  EXPECT_EQ(result.committed_lowerings.front().locations.size(), 1u);
-  ASSERT_EQ(result.runtime_static_mapping.sampled_accesses.size(), 1u);
+  ASSERT_EQ(result.coverage_ledger.lowering_commits().size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().outcome,
+            ConSanLoweringOutcomeKind::Instrumented);
+  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().locations.size(), 1u);
+  const ConSanRuntimeStaticMapping runtime_static_mapping =
+      result.coverage_ledger.runtime_static_mapping();
+  ASSERT_EQ(runtime_static_mapping.sampled_accesses.size(), 1u);
   const ConSanSampledStaticAccessMapping &runtime_mapping =
-      result.runtime_static_mapping.sampled_accesses.front();
-  EXPECT_EQ(runtime_mapping.access.intent_ids, result.committed_lowerings.front().intent_ids);
+      runtime_static_mapping.sampled_accesses.front();
+  EXPECT_EQ(runtime_mapping.access.intent_ids,
+            result.coverage_ledger.lowering_commits().front().intent_ids);
   EXPECT_EQ(runtime_mapping.access.original_site.original_text_offset, access_patch->anchor_offset);
   EXPECT_EQ(runtime_mapping.first_slot, access_patch->sampled_first_slot);
   EXPECT_EQ(runtime_mapping.range_count, access_patch->sampled_access_range_count);
@@ -903,11 +907,12 @@ TEST(ConSanMoi, DirectSampledProbePublishesMultipleLdsAccessRanges) {
                                                ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
                                   }),
             1u);
-  ASSERT_EQ(result.committed_lowerings.size(), 1u);
-  EXPECT_EQ(result.committed_lowerings.front().outcome, ConSanLoweringOutcomeKind::Instrumented);
-  EXPECT_EQ(result.committed_lowerings.front().intent_ids.size(), 1u);
-  EXPECT_EQ(result.committed_lowerings.front().original_semantic_sites.size(), 2u);
-  EXPECT_EQ(result.committed_lowerings.front().locations.size(), 2u);
+  ASSERT_EQ(result.coverage_ledger.lowering_commits().size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().outcome,
+            ConSanLoweringOutcomeKind::Instrumented);
+  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().intent_ids.size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().original_semantic_sites.size(), 2u);
+  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().locations.size(), 2u);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto *text = patched.text_sections().front();
@@ -956,11 +961,11 @@ TEST(ConSanMoi, DirectSampledProbeRequiresCapacityForEveryLdsAccessRange) {
   ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 1u);
   EXPECT_EQ(result.coverage_ledger.intent_entries().front().lowering,
             ConSanLoweringOutcomeKind::PlacementRejected);
-  ASSERT_EQ(result.committed_lowerings.size(), 1u);
-  EXPECT_EQ(result.committed_lowerings.front().outcome,
+  ASSERT_EQ(result.coverage_ledger.lowering_commits().size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().outcome,
             ConSanLoweringOutcomeKind::PlacementRejected);
-  EXPECT_EQ(result.committed_lowerings.front().intent_ids.size(), 1u);
-  EXPECT_TRUE(result.committed_lowerings.front().locations.empty());
+  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().intent_ids.size(), 1u);
+  EXPECT_TRUE(result.coverage_ledger.lowering_commits().front().locations.empty());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("cannot retain every range") != std::string::npos;
   }));

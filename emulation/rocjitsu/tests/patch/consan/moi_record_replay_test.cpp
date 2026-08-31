@@ -376,9 +376,11 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   const auto access_patch = std::ranges::find_if(result.patches, is_access_patch);
   ASSERT_NE(access_patch, result.patches.end());
   EXPECT_EQ(access_patch->owner_descriptor_file_offsets.size(), 2u);
-  ASSERT_EQ(result.runtime_static_mapping.record_replay_accesses.size(), 1u);
+  const ConSanRuntimeStaticMapping runtime_static_mapping =
+      result.coverage_ledger.runtime_static_mapping();
+  ASSERT_EQ(runtime_static_mapping.record_replay_accesses.size(), 1u);
   const ConSanRecordReplayStaticAccessMapping &runtime_mapping =
-      result.runtime_static_mapping.record_replay_accesses.front();
+      runtime_static_mapping.record_replay_accesses.front();
   ASSERT_EQ(runtime_mapping.access.intent_ids.size(), 1u);
   EXPECT_EQ(runtime_mapping.access.original_site.original_text_offset, access_patch->anchor_offset);
   EXPECT_EQ(runtime_mapping.access.execution_owner_descriptor_file_offsets,
@@ -5335,8 +5337,8 @@ TEST(ConSanMoi, FirstLightProbeCanPatchTwoNativeLdsAccessRecords) {
   EXPECT_EQ(result.patches[1].kind, ConSanPatchKind::InlineMoiAccessRecordStore);
   EXPECT_EQ(result.patches[1].anchor_offset, kSecondSiteWord * sizeof(uint32_t));
   expect_bounded_static_record_replay_probe_size(result.patches[1].original_size);
-  ASSERT_EQ(result.committed_lowerings.size(), 2u);
-  for (const ConSanCommittedLowering &commit : result.committed_lowerings) {
+  ASSERT_EQ(result.coverage_ledger.lowering_commits().size(), 2u);
+  for (const ConSanCommittedLowering &commit : result.coverage_ledger.lowering_commits()) {
     EXPECT_EQ(commit.outcome, ConSanLoweringOutcomeKind::Instrumented);
     EXPECT_EQ(commit.intent_ids.size(), 1u);
     EXPECT_EQ(commit.locations.size(), 1u);

@@ -305,16 +305,21 @@ TEST(ConSanObservationPlan, CoverageLedgerSeparatesPolicyFromLoweringAndCopiesPl
   EXPECT_EQ(ledger.intent_entries().front().lowering, ConSanLoweringOutcomeKind::Pending);
   EXPECT_FALSE(ledger.all_intents_instrumented());
 
-  EXPECT_FALSE(ledger.set_lowering_outcome({}, ConSanLoweringOutcomeKind::Instrumented));
-  EXPECT_FALSE(ledger.set_lowering_outcome({7}, ConSanLoweringOutcomeKind::Instrumented));
-  EXPECT_FALSE(ledger.set_lowering_outcome({0}, ConSanLoweringOutcomeKind::Count));
-  EXPECT_TRUE(ledger.set_lowering_outcome({0}, ConSanLoweringOutcomeKind::Instrumented, "placed"));
+  ConSanCoverageLedger copied = ledger;
+  EXPECT_FALSE(publish_test_lowering_outcome(ledger, policy.plan, {},
+                                             ConSanLoweringOutcomeKind::Instrumented));
+  EXPECT_FALSE(publish_test_lowering_outcome(ledger, policy.plan, {7},
+                                             ConSanLoweringOutcomeKind::Instrumented));
+  EXPECT_FALSE(
+      publish_test_lowering_outcome(ledger, policy.plan, {0}, ConSanLoweringOutcomeKind::Count));
+  EXPECT_TRUE(publish_test_lowering_outcome(ledger, policy.plan, {0},
+                                            ConSanLoweringOutcomeKind::Instrumented, "placed"));
   EXPECT_TRUE(ledger.all_intents_instrumented());
   ASSERT_NE(ledger.intent_entry({0}), nullptr);
   EXPECT_EQ(ledger.intent_entry({0})->detail, "placed");
 
-  ConSanCoverageLedger copied = ledger;
-  EXPECT_TRUE(copied.set_lowering_outcome({0}, ConSanLoweringOutcomeKind::ResourceRejected));
+  EXPECT_TRUE(publish_test_lowering_outcome(copied, policy.plan, {0},
+                                            ConSanLoweringOutcomeKind::ResourceRejected));
   EXPECT_EQ(ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Instrumented);
   EXPECT_EQ(copied.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::ResourceRejected);
 }
@@ -380,11 +385,11 @@ TEST(ConSanObservationPlan, CommittedLoweringBindsSeveralIntentsToOneLocation) {
                                                ConSanLoweringOutcomeKind::Instrumented, "coalesced",
                                                record_replay_runtime_mapping_for(plan, intent_ids));
   ASSERT_TRUE(commit);
-  ASSERT_TRUE(result.publish_lowering_commit(std::move(*commit)));
-  ASSERT_EQ(result.committed_lowerings.size(), 1u);
-  EXPECT_EQ(result.committed_lowerings.front().intent_ids,
+  ASSERT_TRUE(result.coverage_ledger.publish_lowering_commit(std::move(*commit)));
+  ASSERT_EQ(result.coverage_ledger.lowering_commits().size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().intent_ids,
             (std::vector{ConSanProbeIntentId{0}, ConSanProbeIntentId{1}}));
-  EXPECT_EQ(result.committed_lowerings.front().original_physical_sites.size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().original_physical_sites.size(), 1u);
   EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering,
             ConSanLoweringOutcomeKind::Instrumented);
   EXPECT_EQ(result.coverage_ledger.intent_entry({1})->lowering,
@@ -452,15 +457,18 @@ TEST(ConSanObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransac
   ConSanTransformArtifacts result;
   result.observation_plan = policy.plan;
   result.coverage_ledger = ConSanCoverageLedger(policy.plan);
-  ASSERT_TRUE(result.publish_lowering_commit(std::move(*commit)));
-  EXPECT_EQ(result.runtime_static_mapping, expected_mapping);
-  EXPECT_TRUE(result.runtime_static_mapping_matches_commits());
-  ASSERT_EQ(result.committed_lowerings.size(), 1u);
-  EXPECT_EQ(result.committed_lowerings.front().runtime_mapping, expected_mapping);
+  ConSanCommittedLowering malformed_commit = *commit;
+  malformed_commit.runtime_mapping.record_replay_accesses.front()
+      .access.original_site.original_text_offset += 4u;
+  ConSanCoverageLedger malformed_ledger(policy.plan);
+  EXPECT_FALSE(malformed_ledger.publish_lowering_commit(std::move(malformed_commit)))
+      << "the ledger must reject a runtime projection outside its bound intents";
 
-  result.runtime_static_mapping = {};
-  EXPECT_FALSE(result.runtime_static_mapping_matches_commits());
-  result.runtime_static_mapping = expected_mapping;
+  ASSERT_TRUE(result.coverage_ledger.publish_lowering_commit(std::move(*commit)));
+  EXPECT_EQ(result.coverage_ledger.runtime_static_mapping(), expected_mapping);
+  ASSERT_EQ(result.coverage_ledger.lowering_commits().size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().runtime_mapping, expected_mapping);
+  EXPECT_TRUE(result.coverage_ledger.matches_plan(policy.plan));
 
   ConSanRuntimeStaticMapping malformed = expected_mapping;
   malformed.record_replay_accesses.front().access.original_site.original_text_offset += 4u;
@@ -488,7 +496,7 @@ TEST(ConSanObservationPlan, CommittedLoweringRejectsExactlyItsBoundIntents) {
       ConSanLoweringOutcomeKind::ResourceRejected, "no scratch registers",
       ConSanRuntimeStaticMapping{}, ConSanRegisterPlanReason::NoLegalWindow);
   ASSERT_TRUE(rejection);
-  ASSERT_TRUE(result.publish_lowering_commit(std::move(*rejection)));
+  ASSERT_TRUE(result.coverage_ledger.publish_lowering_commit(std::move(*rejection)));
   EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Pending);
   EXPECT_EQ(result.coverage_ledger.intent_entry({1})->lowering,
             ConSanLoweringOutcomeKind::ResourceRejected);
@@ -505,10 +513,10 @@ TEST(ConSanObservationPlan, CommittedLoweringRejectsExactlyItsBoundIntents) {
                                               std::span<const ConSanCommittedLoweringLocation>{},
                                               ConSanLoweringOutcomeKind::PlacementRejected);
   ASSERT_TRUE(stale);
-  EXPECT_FALSE(result.publish_lowering_commit(std::move(*stale)));
+  EXPECT_FALSE(result.coverage_ledger.publish_lowering_commit(std::move(*stale)));
   EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Pending)
       << "a mixed stale transaction must not partially update the ledger";
-  EXPECT_EQ(result.committed_lowerings.size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.lowering_commits().size(), 1u);
 }
 
 TEST(ConSanObservationPlan, CommittedLoweringBatchPublicationIsTransactional) {
@@ -534,10 +542,10 @@ TEST(ConSanObservationPlan, CommittedLoweringBatchPublicationIsTransactional) {
   second->intent_ids.assign(first_id.begin(), first_id.end());
 
   std::vector commits = {std::move(*first), std::move(*second)};
-  EXPECT_FALSE(result.publish_lowering_commits(std::move(commits)));
+  EXPECT_FALSE(result.coverage_ledger.publish_lowering_commits(std::move(commits)));
   EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Pending);
   EXPECT_EQ(result.coverage_ledger.intent_entry({1})->lowering, ConSanLoweringOutcomeKind::Pending);
-  EXPECT_TRUE(result.committed_lowerings.empty());
+  EXPECT_TRUE(result.coverage_ledger.lowering_commits().empty());
 }
 
 TEST(ConSanObservationPlan, DiscardedImageRetractsOnlyInstrumentedLoweringCommits) {
@@ -567,7 +575,7 @@ TEST(ConSanObservationPlan, DiscardedImageRetractsOnlyInstrumentedLoweringCommit
   ASSERT_TRUE(rejection);
   ASSERT_TRUE(instrumentation);
   std::vector commits = {std::move(*rejection), std::move(*instrumentation)};
-  ASSERT_TRUE(result.publish_lowering_commits(std::move(commits)));
+  ASSERT_TRUE(result.coverage_ledger.publish_lowering_commits(std::move(commits)));
   result.replacement.push_back(0u);
   result.patches.emplace_back();
 
@@ -575,8 +583,8 @@ TEST(ConSanObservationPlan, DiscardedImageRetractsOnlyInstrumentedLoweringCommit
 
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
-  ASSERT_EQ(result.committed_lowerings.size(), 1u);
-  EXPECT_EQ(result.committed_lowerings.front().outcome,
+  ASSERT_EQ(result.coverage_ledger.lowering_commits().size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.lowering_commits().front().outcome,
             ConSanLoweringOutcomeKind::ResourceRejected);
   EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering,
             ConSanLoweringOutcomeKind::ResourceRejected);
@@ -629,7 +637,8 @@ TEST(ConSanObservationPlan, CoverageLedgerOwnsBarrierDecisionsAlongsideAccessDec
   EXPECT_TRUE(std::ranges::equal(ledger.site_decisions(), plan.site_decisions));
   EXPECT_TRUE(std::ranges::equal(ledger.barrier_site_decisions(), plan.barrier_site_decisions));
   ASSERT_EQ(ledger.intent_entries().size(), 2u);
-  EXPECT_TRUE(ledger.set_lowering_outcome({1}, ConSanLoweringOutcomeKind::Instrumented));
+  EXPECT_TRUE(
+      publish_test_lowering_outcome(ledger, plan, {1}, ConSanLoweringOutcomeKind::Instrumented));
   EXPECT_EQ(ledger.intent_entry({1})->intent.kind, ConSanProbeIntentKind::BarrierRecord);
 }
 

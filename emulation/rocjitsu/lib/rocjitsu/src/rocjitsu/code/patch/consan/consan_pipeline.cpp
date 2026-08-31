@@ -563,8 +563,8 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
 void TransformResult::publish_lowering_artifacts(ConSanTransformArtifacts lowering) {
   program_inventory = std::move(lowering.program_inventory);
   observation_plan = std::move(lowering.observation_plan);
+  runtime_static_mapping = lowering.coverage_ledger.runtime_static_mapping();
   coverage_ledger = std::move(lowering.coverage_ledger);
-  runtime_static_mapping = std::move(lowering.runtime_static_mapping);
   mutation = std::move(lowering.mutation);
   replacement = std::move(lowering.replacement);
   outcome = lowering.outcome;
@@ -575,7 +575,6 @@ void TransformResult::publish_lowering_artifacts(ConSanTransformArtifacts loweri
   private_lowering_.fault_plans = std::move(lowering.fault_plans);
   private_lowering_.resource_plans = std::move(lowering.resource_plans);
   private_lowering_.moi_operating_point = std::move(lowering.moi_operating_point);
-  private_lowering_.committed_lowerings = std::move(lowering.committed_lowerings);
   private_lowering_.staged_moi_sync_lowerings = std::move(lowering.staged_moi_sync_lowerings);
   private_lowering_.patches = std::move(lowering.patches);
 }
@@ -585,7 +584,6 @@ ConSanTransformArtifacts TransformResult::take_lowering_artifacts() {
   lowering.program_inventory = std::move(program_inventory);
   lowering.observation_plan = std::move(observation_plan);
   lowering.coverage_ledger = std::move(coverage_ledger);
-  lowering.runtime_static_mapping = std::move(runtime_static_mapping);
   lowering.mutation = std::move(mutation);
   lowering.replacement = std::move(replacement);
   lowering.outcome = outcome;
@@ -596,7 +594,6 @@ ConSanTransformArtifacts TransformResult::take_lowering_artifacts() {
   lowering.fault_plans = std::move(private_lowering_.fault_plans);
   lowering.resource_plans = std::move(private_lowering_.resource_plans);
   lowering.moi_operating_point = std::move(private_lowering_.moi_operating_point);
-  lowering.committed_lowerings = std::move(private_lowering_.committed_lowerings);
   lowering.staged_moi_sync_lowerings = std::move(private_lowering_.staged_moi_sync_lowerings);
   lowering.patches = std::move(private_lowering_.patches);
   return lowering;
@@ -608,13 +605,8 @@ bool TransformResult::well_formed() const {
   }
   if (!private_lowering_.staged_moi_sync_lowerings.empty())
     return false;
-  ConSanRuntimeStaticMapping expected_runtime_mapping;
-  for (const ConSanCommittedLowering &commit : private_lowering_.committed_lowerings) {
-    if (!consan_runtime_static_mapping_matches_commit(observation_plan, commit))
-      return false;
-    expected_runtime_mapping.append(commit.runtime_mapping);
-  }
-  if (expected_runtime_mapping != runtime_static_mapping)
+  if (!coverage_ledger.matches_plan(observation_plan) ||
+      coverage_ledger.runtime_static_mapping() != runtime_static_mapping)
     return false;
   for (size_t index = 0; index < stages.size(); ++index) {
     if (!stages[index].well_formed(kConSanPipelineStages[index])) {
@@ -687,12 +679,7 @@ void TransformResult::discard_replacement(std::string warning) {
   private_lowering_.patches.clear();
   runtime_static_mapping = {};
   private_lowering_.staged_moi_sync_lowerings.clear();
-  std::erase_if(private_lowering_.committed_lowerings, [](const ConSanCommittedLowering &commit) {
-    return commit.outcome == ConSanLoweringOutcomeKind::Instrumented;
-  });
-  coverage_ledger = ConSanCoverageLedger(observation_plan);
-  for (const ConSanCommittedLowering &commit : private_lowering_.committed_lowerings)
-    (void)coverage_ledger.publish_lowering_commit(commit);
+  coverage_ledger.discard_instrumented_lowerings();
   std::vector<ConSanCommittedLowering> rejections;
   for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
     const ConSanIntentCoverageEntry *entry = coverage_ledger.intent_entry(intent.id);
@@ -710,21 +697,12 @@ void TransformResult::discard_replacement(std::string warning) {
   }
   ConSanCoverageLedger rejected_coverage = coverage_ledger;
   bool rejections_valid = true;
-  for (const ConSanCommittedLowering &rejection : rejections) {
-    if (!consan_runtime_static_mapping_matches_commit(observation_plan, rejection) ||
-        !rejected_coverage.publish_lowering_commit(rejection)) {
-      errors.emplace_back("ConSan runtime binding could not publish intent rejections");
-      rejections_valid = false;
-      break;
-    }
+  if (!rejected_coverage.publish_lowering_commits(std::move(rejections))) {
+    errors.emplace_back("ConSan runtime binding could not publish intent rejections");
+    rejections_valid = false;
   }
   if (rejections_valid) {
     coverage_ledger = std::move(rejected_coverage);
-    private_lowering_.committed_lowerings.reserve(private_lowering_.committed_lowerings.size() +
-                                                  rejections.size());
-    private_lowering_.committed_lowerings.insert(private_lowering_.committed_lowerings.end(),
-                                                 std::make_move_iterator(rejections.begin()),
-                                                 std::make_move_iterator(rejections.end()));
   }
   dispatch_requirements = {};
   warnings.push_back(std::move(warning));
@@ -1169,13 +1147,7 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
       result.private_lowering_.patches.clear();
       result.runtime_static_mapping = {};
       result.private_lowering_.staged_moi_sync_lowerings.clear();
-      std::erase_if(result.private_lowering_.committed_lowerings,
-                    [](const ConSanCommittedLowering &commit) {
-                      return commit.outcome == ConSanLoweringOutcomeKind::Instrumented;
-                    });
-      result.coverage_ledger = ConSanCoverageLedger(result.observation_plan);
-      for (const ConSanCommittedLowering &commit : result.private_lowering_.committed_lowerings)
-        (void)result.coverage_ledger.publish_lowering_commit(commit);
+      result.coverage_ledger.discard_instrumented_lowerings();
       result.dispatch_requirements = {};
     }
   }

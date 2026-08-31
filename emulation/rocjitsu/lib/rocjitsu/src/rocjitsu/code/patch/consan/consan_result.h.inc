@@ -233,11 +233,6 @@ struct ConSanTransformArtifacts {
   /// Accepted MOI operating point consumed by emitted mechanisms and final
   /// semantic validation. Non-MOI transforms leave this value empty.
   ConSanMoiOperatingPoint moi_operating_point;
-  /// Authoritative intent-bound lowering results published by placement.
-  std::vector<ConSanCommittedLowering> committed_lowerings;
-  /// Validated runtime-facing projection accumulated from committed lowering
-  /// transactions. Hooks consume this product instead of patch telemetry.
-  ConSanRuntimeStaticMapping runtime_static_mapping;
   /// Intent-bound synchronization products staged across the MOI atomic,
   /// fence, and barrier emitters. A shared address-capture intent can serve
   /// more than one emitted record, so the pipeline merges all of its machine
@@ -265,40 +260,6 @@ struct ConSanTransformArtifacts {
   void mark_modified() {
     if (outcome == ConSanTransformOutcome::Unchanged)
       outcome = ConSanTransformOutcome::ModifiedValid;
-  }
-  /// Publish and retain one authoritative intent-bound lowering result.
-  [[nodiscard]] bool publish_lowering_commit(ConSanCommittedLowering commit) {
-    std::vector<ConSanCommittedLowering> commits;
-    commits.push_back(std::move(commit));
-    return publish_lowering_commits(std::move(commits));
-  }
-  /// Atomically publish and retain a complete group of lowering results.
-  [[nodiscard]] bool publish_lowering_commits(std::vector<ConSanCommittedLowering> commits) {
-    ConSanCoverageLedger next_ledger = coverage_ledger;
-    ConSanRuntimeStaticMapping next_mapping = runtime_static_mapping;
-    for (const ConSanCommittedLowering &commit : commits) {
-      if (!consan_runtime_static_mapping_matches_commit(observation_plan, commit) ||
-          !next_ledger.publish_lowering_commit(commit))
-        return false;
-      next_mapping.append(commit.runtime_mapping);
-    }
-    coverage_ledger = std::move(next_ledger);
-    runtime_static_mapping = std::move(next_mapping);
-    committed_lowerings.reserve(committed_lowerings.size() + commits.size());
-    committed_lowerings.insert(committed_lowerings.end(), std::make_move_iterator(commits.begin()),
-                               std::make_move_iterator(commits.end()));
-    return true;
-  }
-  /// Verify that the runtime projection is exactly the ordered projection of
-  /// authoritative committed lowering transactions.
-  [[nodiscard]] bool runtime_static_mapping_matches_commits() const {
-    ConSanRuntimeStaticMapping expected;
-    for (const ConSanCommittedLowering &commit : committed_lowerings) {
-      if (!consan_runtime_static_mapping_matches_commit(observation_plan, commit))
-        return false;
-      expected.append(commit.runtime_mapping);
-    }
-    return expected == runtime_static_mapping;
   }
   /// Stage and transitively merge MOI synchronization commits that share an
   /// intent. Publication is deferred until every synchronization emitter has
@@ -344,7 +305,7 @@ struct ConSanTransformArtifacts {
   /// Publish the complete synchronization transaction after every emitter has
   /// contributed its locations.
   [[nodiscard]] bool publish_staged_moi_sync_lowerings() {
-    if (!publish_lowering_commits(staged_moi_sync_lowerings))
+    if (!coverage_ledger.publish_lowering_commits(staged_moi_sync_lowerings))
       return false;
     staged_moi_sync_lowerings.clear();
     return true;
@@ -354,14 +315,8 @@ struct ConSanTransformArtifacts {
   void discard_candidate_modification() {
     replacement.clear();
     patches.clear();
-    runtime_static_mapping = {};
     staged_moi_sync_lowerings.clear();
-    std::erase_if(committed_lowerings, [](const ConSanCommittedLowering &commit) {
-      return commit.outcome == ConSanLoweringOutcomeKind::Instrumented;
-    });
-    coverage_ledger = ConSanCoverageLedger(observation_plan);
-    for (const ConSanCommittedLowering &commit : committed_lowerings)
-      (void)coverage_ledger.publish_lowering_commit(commit);
+    coverage_ledger.discard_instrumented_lowerings();
   }
 };
 

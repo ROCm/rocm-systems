@@ -1519,7 +1519,7 @@ void try_apply_first_light_access_record_patch(
       return;
     }
     result.replacement = std::move(patcher).emit();
-    if (!result.publish_lowering_commits(std::move(lowering_commits))) {
+    if (!result.coverage_ledger.publish_lowering_commits(std::move(lowering_commits))) {
       result.errors.emplace_back(
           "ConSan MOI first-light probe could not commit its semantic lowerings");
       result.discard_candidate_modification();

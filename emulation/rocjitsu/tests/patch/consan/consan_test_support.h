@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "lowering_commit_test_support.h"
+
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_vgpr_bank_state.h"
 
@@ -512,11 +514,12 @@ consan_access_coverage_at(const ConSanTransformArtifacts &result, uint64_t text_
 [[nodiscard]] const ConSanCommittedLowering *
 consan_committed_lowering_for_intent_kind(const ConSanTransformArtifacts &result,
                                           ConSanProbeIntentKind kind) {
-  const auto commit = std::ranges::find_if(
-      result.committed_lowerings, [&](const ConSanCommittedLowering &candidate) {
-        return consan_committed_lowering_has_intent_kind(result, candidate, kind);
-      });
-  return commit == result.committed_lowerings.end() ? nullptr : &*commit;
+  const std::span<const ConSanCommittedLowering> commits =
+      result.coverage_ledger.lowering_commits();
+  const auto commit = std::ranges::find_if(commits, [&](const ConSanCommittedLowering &candidate) {
+    return consan_committed_lowering_has_intent_kind(result, candidate, kind);
+  });
+  return commit == commits.end() ? nullptr : &*commit;
 }
 
 [[nodiscard]] const ConSanBarrierSiteDecision *

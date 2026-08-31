@@ -4379,10 +4379,8 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   }
   if (result.patches.empty())
     errors.emplace_back("ConSan final validation found no patch inventory for a modified result");
-  if (!result.runtime_static_mapping_matches_commits()) {
-    errors.emplace_back(
-        "ConSan final validation found runtime static mapping outside committed lowering");
-  }
+  if (!result.coverage_ledger.matches_plan(result.observation_plan))
+    errors.emplace_back("ConSan final validation found coverage outside the observation plan");
   FinalValidationEnvironment environment(original, replacement);
   validate_patch_byte_accounting(environment, result, errors);
   validate_patch_decoding(environment, result, errors);

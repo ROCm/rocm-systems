@@ -678,6 +678,34 @@ foreach(
     )
 endforeach()
 
+# Accepted lowering transactions have one owner. The transformation bus may
+# stage an incomplete synchronization transaction, but it must not regain a
+# parallel committed-lowering inventory or accumulated runtime projection.
+foreach(_file IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_file}"
+        "committed_lowerings"
+        "accepted lowering transactions must remain owned by the coverage ledger"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_result.h.inc"
+    "ConSanRuntimeStaticMapping[ \t]+runtime_static_mapping[ \t]*;"
+    "the transformation bus must derive runtime attribution from committed lowering"
+)
+file(READ "${_consan_dir}/consan_observation_plan.h.inc" _coverage_ledger_contract)
+foreach(
+    _owned_lowering_operation
+    IN ITEMS lowering_commits_ runtime_static_mapping discard_instrumented_lowerings
+)
+    if(NOT _coverage_ledger_contract MATCHES "${_owned_lowering_operation}")
+        message(
+            FATAL_ERROR
+            "ConSan coverage ledger lost lowering ownership: ${_owned_lowering_operation}"
+        )
+    endif()
+endforeach()
+
 # Immutable semantic selection and exact synchronization proof consume narrow
 # inventory views, never the mutable transformation transaction.
 foreach(

@@ -1910,7 +1910,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
     lowering_commits.push_back(std::move(*commit));
   }
-  if (!result.publish_lowering_commits(std::move(lowering_commits))) {
+  if (!result.coverage_ledger.publish_lowering_commits(std::move(lowering_commits))) {
     result.errors.emplace_back(
         "ConSan flat check/trap proof could not commit its semantic lowerings");
     result.discard_candidate_modification();

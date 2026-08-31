@@ -40,7 +40,7 @@ sc_pending_access_intent_ids(const ConSanTransformArtifacts &result, const Physi
   auto commit = make_consan_committed_lowering(result.observation_plan, intent_ids,
                                                std::span<const ConSanCommittedLoweringLocation>{},
                                                outcome, std::move(detail));
-  if (!commit || !result.publish_lowering_commit(std::move(*commit))) {
+  if (!commit || !result.coverage_ledger.publish_lowering_commit(std::move(*commit))) {
     result.errors.emplace_back(
         "ConSan SuperCollider could not publish an intent-bound access rejection");
     return false;

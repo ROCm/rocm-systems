@@ -1153,12 +1153,6 @@ struct ConSanCommittedLowering {
     std::string detail = {}, ConSanRuntimeStaticMapping runtime_mapping = {},
     std::optional<ConSanRegisterPlanReason> resource_rejection_reason = std::nullopt);
 
-/// Verify that every runtime mapping member is owned by the intents and
-/// original sites of the same committed-lowering transaction.
-[[nodiscard]] bool
-consan_runtime_static_mapping_matches_commit(const ConSanObservationPlan &plan,
-                                             const ConSanCommittedLowering &commit);
-
 /// One admitted intent joined to its current lowering result.
 ///
 /// `detail` is diagnostic context only; control flow and trust evaluation use
@@ -1217,16 +1211,31 @@ public:
   /// Resolve one admitted intent entry by its plan-local identifier.
   [[nodiscard]] const ConSanIntentCoverageEntry *intent_entry(ConSanProbeIntentId id) const;
 
-  /// Publish a final or pending mechanism outcome for one known intent.
-  /// Returns false for an invalid/stale identifier or invalid enum value.
-  [[nodiscard]] bool set_lowering_outcome(
-      ConSanProbeIntentId id, ConSanLoweringOutcomeKind outcome, std::string detail = {},
-      std::optional<ConSanRegisterPlanReason> resource_rejection_reason = std::nullopt);
-
   /// Publish one prepared lowering transaction directly against its intents.
   /// The operation validates every bound identity before changing any entry
-  /// and refuses to overwrite an already finalized intent.
-  [[nodiscard]] bool publish_lowering_commit(const ConSanCommittedLowering &commit);
+  /// and refuses to overwrite an already finalized intent. Accepted commits
+  /// remain owned by this ledger so coverage, proof, and runtime attribution
+  /// cannot diverge into independently mutable representations.
+  [[nodiscard]] bool publish_lowering_commit(ConSanCommittedLowering commit);
+
+  /// Atomically publish a complete group of lowering transactions. No entry
+  /// changes when any transaction is stale or malformed.
+  [[nodiscard]] bool publish_lowering_commits(std::vector<ConSanCommittedLowering> commits);
+
+  /// Return the authoritative lowering transactions in publication order.
+  [[nodiscard]] std::span<const ConSanCommittedLowering> lowering_commits() const {
+    return lowering_commits_;
+  }
+
+  /// Project runtime attribution from the authoritative lowering transactions.
+  [[nodiscard]] ConSanRuntimeStaticMapping runtime_static_mapping() const;
+
+  /// Verify that this ledger was initialized from the supplied immutable plan.
+  [[nodiscard]] bool matches_plan(const ConSanObservationPlan &plan) const;
+
+  /// Forget emitted transactions while retaining explicit rejections. This is
+  /// the one rollback operation used when candidate bytes are discarded.
+  void discard_instrumented_lowerings();
 
   /// Return whether every admitted intent has been instrumented.
   /// This deliberately makes no claim about runtime selection or retained
@@ -1241,6 +1250,7 @@ private:
   std::vector<ConSanAtomicSiteDecision> atomic_site_decisions_;
   std::vector<ConSanFenceSiteDecision> fence_site_decisions_;
   std::vector<ConSanIntentCoverageEntry> intent_entries_;
+  std::vector<ConSanCommittedLowering> lowering_commits_;
 };
 
 /// Complete engine-policy request consumed by observation assembly.

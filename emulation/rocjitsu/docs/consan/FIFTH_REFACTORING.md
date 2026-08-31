@@ -2262,3 +2262,69 @@ all four modes, the breadth of the mutable transaction and operating-point
 surfaces, the smallness of surviving mode/target interactions, legacy
 harvesting, material code shrinkage, and the required independent deep-read
 audit remain open.
+
+### 16.19 Convergence checkpoint 18: one lowering-commit authority
+
+The resumed branch contains two intentionally separate measurement intervals.
+Checkpoint 17 was followed by the urgent issue fixes and the merge of
+`origin/develop`; those intervening changes enlarged the declared production
+scope by 283 physical, 271 nonblank, and 257 implementation lines before this
+refactoring slice began at merge commit `8a6b4dd2f39`. They are retained in the
+cumulative totals below but are not attributed to this slice. Against that
+exact merged starting tree, this checkpoint removes 14 physical, 21 nonblank,
+and 19 implementation lines.
+
+The slice deep-traced every accepted lowering from each mode-owned emitter
+through staging, final validation, public result publication, runtime mapping,
+and candidate rollback. `ConSanTransformArtifacts` and
+`TransformResult::PrivateLoweringArtifacts` both carried parallel accepted
+commit inventories, while the transform artifact also carried a separately
+mutable runtime-mapping projection. The coverage ledger is now the sole owner
+of accepted `ConSanCommittedLowering` transactions. It validates and publishes
+single or batched transactions atomically, derives runtime mapping from its
+owned commits, verifies its immutable relationship to the observation plan,
+and owns the operation that retracts instrumented commits when candidate bytes
+are discarded. Mode emitters explicitly publish to that authority; final
+validation, result publication, runtime-binding failure, and rollback no
+longer reconstruct or synchronize parallel representations.
+
+The public `TransformResult` still publishes the runtime mapping needed by
+hooks, but it is a derived output of the ledger and `well_formed()` rejects any
+divergence. Tests no longer bypass the production owner with a public
+outcome-only mutation API: test-only support constructs complete synthetic
+commits, including their required runtime attribution. Owner-level regressions
+cover malformed mapping rejection, atomic batch publication, and selective
+rollback. The architecture-boundary gate prohibits a second
+`committed_lowerings` inventory or transform-artifact runtime-mapping field
+from returning and requires the ledger-owned projection and rollback contract.
+
+| Signal | Checkpoint 18 | Cumulative change | Slice change from `8a6b4dd2f39` |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,748 | +773 | **-14** |
+| Nonblank production lines | 99,480 | +397 | **-21** |
+| Production implementation lines | 91,776 | **+326** | **-19** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 241 / 58 | **-35 / +1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 | 0 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | **0** | **-95** | 0 |
+| Explicit mode-enum references in `consan_moi_report_plan.cpp` | **0** | **-18** | 0 |
+| Explicit mode-enum references in `consan_pipeline.cpp` | **0** | n/a | 0 |
+| Test inventory | 5,371 | +26 | 0 |
+
+Validation includes a clean incremental rebuild; 74 focused owner, policy,
+pipeline, and engine-conformance tests; 26 focused runtime-hook mapping tests;
+the structural architecture-boundary test; the complete 4,736-test
+nonphysical ConSan matrix at `-j16`, including all 2,908 simulated-device rows
+over five architectures; and all 635 physical gfx1201 tests serialized at
+`-j1`. No test was removed or disabled.
+
+This closes one broad mutable-transaction violation and immediately harvests
+the superseded synchronization code, rather than leaving the typed owner beside
+the legacy representations. It is useful local size payback, not the material
+whole-refactoring shrinkage required by Section 14.8. The cumulative production
+scope remains 326 implementation lines above the fifth-refactoring baseline,
+and the remaining Section 14 gaps still require a new deep-read after this
+checkpoint.

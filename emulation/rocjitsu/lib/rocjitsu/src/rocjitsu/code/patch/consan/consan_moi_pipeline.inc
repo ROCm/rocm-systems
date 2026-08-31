@@ -136,7 +136,7 @@ void publish_pending_moi_lowering_rejections(
         "MOI resource plan rejected intents: " +
             std::string(consan_register_plan_reason_name(plan.reason)),
         ConSanRuntimeStaticMapping{}, plan.reason);
-    if (!commit || !result.publish_lowering_commit(std::move(*commit))) {
+    if (!commit || !result.coverage_ledger.publish_lowering_commit(std::move(*commit))) {
       result.errors.emplace_back("ConSan MOI could not publish a resource rejection");
       return;
     }
@@ -158,7 +158,7 @@ void publish_pending_moi_lowering_rejections(
                   result.observation_plan, ids, std::span<const ConSanCommittedLoweringLocation>{},
                   ConSanLoweringOutcomeKind::PlacementRejected,
                   "MOI lowerer selected no placement for the admitted intent");
-    if (!commit || !result.publish_lowering_commit(std::move(*commit))) {
+    if (!commit || !result.coverage_ledger.publish_lowering_commit(std::move(*commit))) {
       result.errors.emplace_back("ConSan MOI could not publish a placement rejection");
       return;
     }

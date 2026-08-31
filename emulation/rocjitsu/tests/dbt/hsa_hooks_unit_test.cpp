@@ -32,6 +32,7 @@
 #include <dlfcn.h>
 
 #include "hsa/hsa_api_trace_minimal.h"
+#include "patch/consan/lowering_commit_test_support.h"
 #include "patch/consan/transform_result_test_access.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
@@ -1920,8 +1921,10 @@ void install_test_access_coverage(
   ASSERT_TRUE(plan.valid());
   result.observation_plan = std::move(plan);
   result.coverage_ledger = rocjitsu::ConSanCoverageLedger(result.observation_plan);
-  for (const rocjitsu::ConSanProbeIntent &intent : result.observation_plan.probe_intents)
-    ASSERT_TRUE(result.coverage_ledger.set_lowering_outcome(intent.id, lowering));
+  for (const rocjitsu::ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+    ASSERT_TRUE(rocjitsu::publish_test_lowering_outcome(
+        result.coverage_ledger, result.observation_plan, intent.id, lowering));
+  }
 }
 
 rocjitsu::ConSanTransformArtifacts process_growth_replacement_result(size_t replacement_size = 12) {
@@ -4492,8 +4495,9 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchUsesTypedSuperColliderCoverageLedger) {
                      HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u, {}, false, false, nullptr, 2u);
 
   rocjitsu::ConSanTransformArtifacts placement_rejected = structural_only;
-  ASSERT_TRUE(placement_rejected.coverage_ledger.set_lowering_outcome(
-      {0u}, rocjitsu::ConSanLoweringOutcomeKind::PlacementRejected));
+  ASSERT_TRUE(rocjitsu::publish_test_lowering_outcome(
+      placement_rejected.coverage_ledger, placement_rejected.observation_plan, {0u},
+      rocjitsu::ConSanLoweringOutcomeKind::PlacementRejected));
   run_hook_load_case(kConSanHookProfiles[0], false, placement_rejected,
                      HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u, {}, false, false, nullptr, 2u);
 
@@ -4512,8 +4516,9 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchUsesTypedSuperColliderCoverageLedger) {
                      valid_empty.replacement);
 
   rocjitsu::ConSanTransformArtifacts resource_rejected = structural_only;
-  ASSERT_TRUE(resource_rejected.coverage_ledger.set_lowering_outcome(
-      {0u}, rocjitsu::ConSanLoweringOutcomeKind::ResourceRejected));
+  ASSERT_TRUE(rocjitsu::publish_test_lowering_outcome(
+      resource_rejected.coverage_ledger, resource_rejected.observation_plan, {0u},
+      rocjitsu::ConSanLoweringOutcomeKind::ResourceRejected));
   run_hook_load_case(kConSanHookProfiles[0], false, resource_rejected, HSA_STATUS_SUCCESS, 102u,
                      resource_rejected.replacement, false, false, nullptr, 2u);
 }
@@ -5143,12 +5148,15 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
   };
   EXPECT_TRUE(result.observation_plan.valid());
   result.coverage_ledger = rocjitsu::ConSanCoverageLedger(result.observation_plan);
-  EXPECT_TRUE(result.coverage_ledger.set_lowering_outcome(
-      {0u}, rocjitsu::ConSanLoweringOutcomeKind::ResourceRejected));
-  EXPECT_TRUE(result.coverage_ledger.set_lowering_outcome(
-      {1u}, rocjitsu::ConSanLoweringOutcomeKind::PlacementRejected));
-  EXPECT_TRUE(result.coverage_ledger.set_lowering_outcome(
-      {2u}, rocjitsu::ConSanLoweringOutcomeKind::Instrumented));
+  EXPECT_TRUE(rocjitsu::publish_test_lowering_outcome(
+      result.coverage_ledger, result.observation_plan, {0u},
+      rocjitsu::ConSanLoweringOutcomeKind::ResourceRejected));
+  EXPECT_TRUE(rocjitsu::publish_test_lowering_outcome(
+      result.coverage_ledger, result.observation_plan, {1u},
+      rocjitsu::ConSanLoweringOutcomeKind::PlacementRejected));
+  EXPECT_TRUE(
+      rocjitsu::publish_test_lowering_outcome(result.coverage_ledger, result.observation_plan, {2u},
+                                              rocjitsu::ConSanLoweringOutcomeKind::Instrumented));
   return result;
 }
 
@@ -5194,8 +5202,9 @@ rocjitsu::ConSanTransformArtifacts typed_coverage_transform_result() {
       }},
   };
   result.coverage_ledger = rocjitsu::ConSanCoverageLedger(result.observation_plan);
-  EXPECT_TRUE(result.coverage_ledger.set_lowering_outcome(
-      {0u}, rocjitsu::ConSanLoweringOutcomeKind::Instrumented));
+  EXPECT_TRUE(
+      rocjitsu::publish_test_lowering_outcome(result.coverage_ledger, result.observation_plan, {0u},
+                                              rocjitsu::ConSanLoweringOutcomeKind::Instrumented));
   return result;
 }
 
@@ -5502,8 +5511,9 @@ rocjitsu::ConSanTransformArtifacts auto_report_atomic_transform_result() {
   };
   EXPECT_TRUE(result.observation_plan.valid());
   result.coverage_ledger = rocjitsu::ConSanCoverageLedger(result.observation_plan);
-  EXPECT_TRUE(result.coverage_ledger.set_lowering_outcome(
-      {0u}, rocjitsu::ConSanLoweringOutcomeKind::Instrumented));
+  EXPECT_TRUE(
+      rocjitsu::publish_test_lowering_outcome(result.coverage_ledger, result.observation_plan, {0u},
+                                              rocjitsu::ConSanLoweringOutcomeKind::Instrumented));
   return result;
 }
 
@@ -5552,10 +5562,6 @@ void install_auto_report_access_coverage(rocjitsu::ConSanTransformArtifacts &res
   ASSERT_TRUE(plan.valid());
   result.observation_plan = std::move(plan);
   result.coverage_ledger = rocjitsu::ConSanCoverageLedger(result.observation_plan);
-  for (const rocjitsu::ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
-    ASSERT_TRUE(result.coverage_ledger.set_lowering_outcome(
-        intent.id, rocjitsu::ConSanLoweringOutcomeKind::Instrumented));
-  }
 }
 
 rocjitsu::ConSanStaticAccessAttribution
@@ -5589,10 +5595,25 @@ rocjitsu::ConSanTransformArtifacts auto_report_replay_transform_result(
       owners.push_back(
           index == 1u && owner_scope == AutoReplayOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u);
     }
-    result.runtime_static_mapping.record_replay_accesses.push_back({
+    rocjitsu::ConSanRuntimeStaticMapping runtime_mapping;
+    runtime_mapping.record_replay_accesses.push_back({
         .access = auto_report_static_access_attribution(result, index, std::move(owners),
                                                         owner_provenance_complete),
     });
+    const rocjitsu::ConSanProbeIntent &intent = result.observation_plan.probe_intents[index];
+    const std::array intent_ids = {intent.id};
+    const std::array locations = {rocjitsu::ConSanCommittedLoweringLocation{
+        .original_site = intent.physical_site,
+        .emitted_text_offset = instruction_offsets[index],
+        .emitted_size = 4u,
+        .relocated_guest_text_offset = std::nullopt,
+    }};
+    auto commit = rocjitsu::make_consan_committed_lowering(
+        result.observation_plan, intent_ids, locations,
+        rocjitsu::ConSanLoweringOutcomeKind::Instrumented, {}, std::move(runtime_mapping));
+    EXPECT_TRUE(commit.has_value());
+    if (commit)
+      EXPECT_TRUE(result.coverage_ledger.publish_lowering_commit(std::move(*commit)));
   }
   return result;
 }
@@ -5622,7 +5643,8 @@ rocjitsu::ConSanTransformArtifacts auto_report_sampled_transform_result(
       owners.push_back(
           index == 1u && owner_scope == AutoSampledOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u);
     }
-    result.runtime_static_mapping.sampled_accesses.push_back({
+    rocjitsu::ConSanRuntimeStaticMapping runtime_mapping;
+    runtime_mapping.sampled_accesses.push_back({
         .access = auto_report_static_access_attribution(result, index, std::move(owners),
                                                         owner_provenance_complete),
         .first_slot = malformed_mapping && index == 0u ? std::numeric_limits<uint32_t>::max()
@@ -5633,6 +5655,20 @@ rocjitsu::ConSanTransformArtifacts auto_report_sampled_transform_result(
         .relocated_guest_text_offset = 0x448u + index * 0x20u,
         .scratch_vgpr = 12u,
     });
+    const rocjitsu::ConSanProbeIntent &intent = result.observation_plan.probe_intents[index];
+    const std::array intent_ids = {intent.id};
+    const std::array locations = {rocjitsu::ConSanCommittedLoweringLocation{
+        .original_site = intent.physical_site,
+        .emitted_text_offset = 0x440u + index * 0x20u,
+        .emitted_size = 4u,
+        .relocated_guest_text_offset = 0x448u + index * 0x20u,
+    }};
+    auto commit = rocjitsu::make_consan_committed_lowering(
+        result.observation_plan, intent_ids, locations,
+        rocjitsu::ConSanLoweringOutcomeKind::Instrumented, {}, std::move(runtime_mapping));
+    EXPECT_TRUE(commit.has_value());
+    if (commit)
+      EXPECT_TRUE(result.coverage_ledger.publish_lowering_commit(std::move(*commit)));
   }
   return result;
 }
@@ -7095,7 +7131,7 @@ TEST(HsaHooksUnitTest, AutoSampledReportDoesNotInferAttributionFromRawPatchTelem
   reset_code_object_observations();
   reset_core_memory_observations();
   g_transform_override_result = auto_report_sampled_transform_result();
-  g_transform_override_result.runtime_static_mapping = {};
+  g_transform_override_result.coverage_ledger.discard_instrumented_lowerings();
   rocjitsu::ConSanPatchInfo raw_patch_telemetry;
   raw_patch_telemetry.kind = rocjitsu::ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
   raw_patch_telemetry.anchor_offset = 0x120u;
