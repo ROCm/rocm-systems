@@ -74,6 +74,28 @@ generate_db_output_path(int pid)
     return rocprofsys::get_database_absolute_path(db_name, tag);
 }
 
+// Ensure queue_id is registered in profiler-hub before inserting an event that
+// references it. post_process_metadata() registers queues as a point-in-time
+// snapshot; queues created after that snapshot (e.g. during framework teardown)
+// are missing from the registry and cause a runtime_error on insert.
+// register_queue_info() is idempotent: it returns immediately if the queue is
+// already present, so calling it on every event is safe.
+// Thread-safety: handle() is driven by a single parser thread per config
+// (see post_processor.cpp), so there is no TOCTOU race here.
+void
+ensure_queue_registered(profiler_hub::writer_t& writer,
+                        std::uint64_t           queue_id,
+                        std::size_t             node_id,
+                        std::size_t             process_id)
+{
+    profiler_hub::writer_types::queue_info_t qi;
+    qi.queue_id   = queue_id;
+    qi.name       = fmt::format("Queue {}", queue_id);
+    qi.node_id    = node_id;
+    qi.process_id = process_id;
+    writer.register_queue_info(qi);
+}
+
 }  // namespace
 
 void
@@ -114,6 +136,8 @@ rocpd_processor_t::handle(const kernel_dispatch_sample& kds)
         n_info.id, process.pid, kds.thread_id, agent_ref, kds.queue_id_handle,
         kds.stream_handle);
 
+    ensure_queue_registered(*m_writer, kds.queue_id_handle, n_info.id, process.pid);
+
     m_writer->insert_kernel_dispatch_data(kernel_dispatch, env);
 }
 
@@ -148,6 +172,8 @@ rocpd_processor_t::handle(const scratch_memory_sample& sms)
     auto env = make_trace_env_with_agent_queue_stream(
         n_info.id, process.pid, sms.thread_id, agent_ref, sms.queue_id_handle,
         sms.stream_handle);
+
+    ensure_queue_registered(*m_writer, sms.queue_id_handle, n_info.id, process.pid);
 
     m_writer->insert_memory_alloc_data(ma, env);
 }
