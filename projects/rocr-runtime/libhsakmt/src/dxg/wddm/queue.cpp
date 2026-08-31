@@ -1149,6 +1149,7 @@ SDMAQueue::SDMAQueue(WDDMDevice* device, void* ring, uint64_t cmdbuf_size, uint3
       thread_stop_(false),
       ib_size(0),
       ib_start_addr(0) {
+  needs_cwsr_ = false;
   bool ret = device->CreateQueue(this);
   assert(ret);
 

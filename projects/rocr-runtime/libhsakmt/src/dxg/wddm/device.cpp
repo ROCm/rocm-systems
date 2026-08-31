@@ -973,8 +973,9 @@ uint64_t WDDMDevice::AllocateCwsrSize(uint64_t* out_ctx_size, uint64_t* out_debu
 //   [wg_data_offset]    Wave/WG state  (wg_data_size bytes,  page-aligned)
 //   [debug_offset]      Debugger area  (debug_memory_size bytes, 64-byte aligned)
 //
-// DebugOffset and DebugSize are expressed relative to the start of the *first*
-// XCC slot (matching the Linux convention used by the debugger).
+// DebugOffset in each slot's header is relative to that slot's own base address,
+// not the start of the allocation.  It points forward to the debug area at the end
+// of the last XCC slot: (NumXcc - i) * ctx_save_restore_size from slot i's base.
 void WDDMDevice::FillCwsrHeader(void* cpu_addr, uint64_t ctx_save_restore_size,
                                  uint64_t debug_memory_size, uint32_t num_xcc,
                                  volatile HSAint64* error_reason, HSAuint32 error_event_id) {
@@ -1022,7 +1023,9 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   // Matches Linux: anonymous mmap + register_svm_range(alwaysMapped=true).
   // locked keeps pages pinned (HSA_SVM_FLAG_GPU_ALWAYS_MAPPED equivalent).
   // The allocation handle is passed to KMD via UMDKMDIF_CREATEHWQUEUE_PRIVATE_DATA::CwsrMemHandle.
-  if (queue->cwsr_mem_ == nullptr) {
+  // SDMA queues skip CWSR — mirrors Linux handle_concrete_asic() which returns
+  // early for KFD_IOC_QUEUE_TYPE_SDMA/SDMA_XGMI before allocating ctx_save_restore.
+  if (queue->cwsr_mem_ == nullptr && queue->needs_cwsr_) {
     uint64_t ctx_save_restore_size = 0;
     uint64_t debug_memory_size = 0;
     GpuMemoryCreateInfo cwsr_create_info{};
