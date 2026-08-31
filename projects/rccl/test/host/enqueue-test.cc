@@ -226,7 +226,11 @@ TEST_F(EnqueueMicrotest, TestBudget_ZeroWorkZeroBatches_Fits) {
 // ===========================================================================
 
 TEST_F(EnqueueMicrotest, ShmemScratchWarpSize_IsSixteenByteAligned) {
-  // The `+15 & -16` pad is the last operation; dropping it changes these.
+  // HONEST SCOPE: the `+15 & -16` pad at :67-68 is an EQUIVALENT MUTANT -- every
+  // term entering the max is already a multiple of 16 (LL 0; LL128 64*WarpSize;
+  // SIMPLE (unroll*WarpSize + 1)*16; NVLS 64*WarpSize + 16), so dropping the pad
+  // changes nothing and this cannot fail on it. It pins the alignment contract
+  // the callers rely on, not the pad.
   static_assert(rcclShmemScratchWarpSize(942, 32) % 16 == 0, "must be 16B aligned");
   static_assert(rcclShmemScratchWarpSize(950, 32) % 16 == 0, "must be 16B aligned");
   EXPECT_EQ(0, rcclShmemScratchWarpSize(942, 32) % 16);
@@ -572,7 +576,7 @@ TEST_F(EnqueueMicrotest, HostToDevRedOp_AvgIntegral_SignedFallthroughCoversAllIn
   AvgComm comm(4);
   const struct { ncclDataType_t dt; bool sgn; } kCases[] = {
       {ncclInt8, true},  {ncclInt32, true},  {ncclInt64, true},
-      {ncclUint8, false},{ncclUint32, false},{ncclUint64, false}};
+      {ncclUint8, false}, {ncclUint32, false}, {ncclUint64, false}};
   for (auto c : kCases) {
     auto out = MakeRedOpOut();
     ASSERT_EQ(ncclSuccess, hostToDevRedOp(&out, ncclAvg, c.dt, comm.get())) << "dtype=" << int(c.dt);
@@ -1318,7 +1322,9 @@ TEST_F(EnqueueMicrotest, GetCollNetSupport_OrdinaryOp_UsesHostOpNotSum) {
 TEST_F(EnqueueMicrotest, InitCollCostTable_MarksEveryCellIgnored) {
   float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
   // Poison every cell first: a partial fill must be detectable.
-  for (auto& row : table) for (auto& v : row) v = -1.0f;
+  for (auto& row : table) {
+    for (auto& v : row) v = -1.0f;
+  }
 
   initCollCostTable((float**)table);
 
@@ -1331,12 +1337,16 @@ TEST_F(EnqueueMicrotest, InitCollCostTable_MarksEveryCellIgnored) {
 
 TEST_F(EnqueueMicrotest, InitCollCostTable_DoesNotWritePastTheTable) {
   // Guard rows on both sides catch a wrong stride in the (float(*)[N]) cast.
-  struct { float before[NCCL_NUM_PROTOCOLS];
-           float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
-           float after[NCCL_NUM_PROTOCOLS]; } buf;
+  struct {
+    float before[NCCL_NUM_PROTOCOLS];
+    float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+    float after[NCCL_NUM_PROTOCOLS];
+  } buf;
   for (auto& v : buf.before) v = 42.0f;
   for (auto& v : buf.after) v = 42.0f;
-  for (auto& row : buf.table) for (auto& v : row) v = -1.0f;
+  for (auto& row : buf.table) {
+    for (auto& v : row) v = -1.0f;
+  }
 
   initCollCostTable((float**)buf.table);
 
@@ -1500,6 +1510,19 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_NvlsUnsupported_SkipsNvlsAlgorithms
     EXPECT_FALSE(tbl.written(NCCL_ALGO_NVLS, p)) << "p=" << p;
     EXPECT_FALSE(tbl.written(NCCL_ALGO_NVLS_TREE, p)) << "p=" << p;
   }
+
+  // Control: the negative above passes just as well if the skip at :2503 is
+  // unconditional. Flipping only nvlsSupport must populate the same rows, which
+  // is what makes this a test of the guard rather than of NVLS being absent.
+  CostTable on;
+  auto task2 = CostTask(ncclFuncAllReduce);
+  ScriptAllTimes(1.0f);
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task2, 1 << 20, /*collNet=*/0,
+                                             /*nvls=*/1, 1, 0, on.ptr()));
+  bool anyNvls = false;
+  for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p)
+    anyNvls |= on.written(NCCL_ALGO_NVLS, p) || on.written(NCCL_ALGO_NVLS_TREE, p);
+  EXPECT_TRUE(anyNvls) << "with nvlsSupport=1 the NVLS rows must be populated";
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_TopoGetAlgoTimeFailure_Propagates) {
@@ -1940,9 +1963,11 @@ TEST_F(EnqueueMicrotest, GetImplicitOrder_ParamEnabled_IsSerialOnAmd) {
 }
 
 TEST_F(EnqueueMicrotest, GetImplicitOrder_CapturingIsIrrelevantOnAmd) {
-  // The `capturing` parameter only matters inside the #if'd-out CUDA block, so
-  // on AMD both values must give the same answer. Pins that the AMD arm really
-  // is unconditional -- if the #if ever changes, this fails.
+  // HONEST SCOPE: this pins that `capturing` does not change the answer; it does
+  // NOT prove the AMD arm is what produced it. Under the seam's driver 12000 the
+  // CUDA arm returns Serial for both values too (:2002 12000 < 12090; :2006
+  // 12030 <= min(CUDART, 12000) is false), so an #if change would not fail here.
+  // getImplicitOrder's third parameter (driver, :1996) is what separates the arms.
   SetParam("LAUNCH_ORDER_IMPLICIT", 1);
   auto a = ncclImplicitOrderNone;
   auto b = ncclImplicitOrderNone;
@@ -2053,12 +2078,27 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_SecondContiguousP2p_AppendsToSameBatch) {
 }
 
 TEST_F(EnqueueMicrotest, AddWorkBatch_DifferentWorkType_ForcesNewBatch) {
-  // `newBatch |= batch->workType != workType`.
+  // `newBatch |= batch->workType != workType` must be the ONLY splitter here, so
+  // every other path to a second node has to be shut off first:
+  //   byte budget (:242)  p2p 64 + bcast 48 = 112 < 192, so it cannot fire
+  //   bcast cap  (:238)   nBcasts 1 != maxitem 341
+  //   extension  (:248-9) offset must be a MULTIPLE of the bcast work size, or
+  //                       `0 != offset % workSize` enqueues a node anyway --
+  //                       this is what made the p2p size (64 % 48 = 16) wrong.
+  // A Coll->CollReg version cannot work at all: two coll items are 320 B against
+  // the 192 B budget, so :242 splits them whatever the workType guard does.
+  // Verified by mutation: `newBatch |= false` leaves 1 batch here.
   BatchPlanComm bp;
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, 0);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeCollReg, 7, 0);
+  const size_t bcastSize = ncclDevWorkSize(ncclDevWorkTypeBcast);
+  ASSERT_LT(ncclDevWorkSize(ncclDevWorkTypeP2p) + bcastSize,
+            size_t(NCCL_MAX_DEV_WORK_BATCH_BYTES))
+      << "both items must fit one batch, or the byte budget is the splitter";
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, uint32_t(bcastSize));
   EXPECT_EQ(2, bp.queueLength());
   EXPECT_EQ(2, bp.p()->nWorkBatches);
+  EXPECT_EQ(0, bp.chan()->workBatchQueue.head->batch.nextExtends)
+      << "must be a NEW batch, not an extension of the p2p one";
 }
 
 // The funcId guard is covered by
@@ -2341,6 +2381,10 @@ TEST_F(EnqueueMicrotest, FinishPlan_OversizedPlan_KeepsFifoStorage) {
   f.addBatches(0, 1, 100);
   finishPlan(f.c(), f.p());
   EXPECT_EQ(ncclDevWorkStorageTypeFifo, f.p()->workStorageType);
+  // The kernel reads storage type off kernelArgs, so the copy at :316 must carry
+  // it. Non-zero here, so unlike the small-plan case this can see a dropped store.
+  ASSERT_NE(nullptr, f.p()->kernelArgs);
+  EXPECT_EQ(ncclDevWorkStorageTypeFifo, f.p()->kernelArgs->workStorageType);
 }
 
 TEST_F(EnqueueMicrotest, FinishPlan_KernelArgsSizeIsSixteenByteAligned) {
@@ -2366,7 +2410,11 @@ TEST_F(EnqueueMicrotest, FinishPlan_StampsChannelMaskAndStorageTypeIntoKernelArg
   finishPlan(f.c(), f.p());
   ASSERT_NE(nullptr, f.p()->kernelArgs);
   EXPECT_EQ(f.p()->channelMask.masks[0], f.p()->kernelArgs->channelMask.masks[0]);
-  EXPECT_EQ(f.p()->workStorageType, f.p()->kernelArgs->workStorageType);
+  // HONEST SCOPE: workStorageType is NOT checked here. On this path it is
+  // ncclDevWorkStorageTypeArgs, enumerator 0 (device.h:650), and kernelArgs comes
+  // from ncclMemoryStackAlloc (:313) which memsets to 0 (utils.h:283), so the
+  // comparison is 0 == 0 and deleting the store at :316 kills nothing. The
+  // oversized-plan test below stamps a non-zero value and does check it.
 }
 
 TEST_F(EnqueueMicrotest, FinishPlan_OneBatchPerChannel_LandsAtItsOwnSlot) {
@@ -2734,17 +2782,19 @@ TEST_F(EnqueueMicrotest, AddProxyOpIfNeeded_Needed_EnqueuesACopy) {
 }
 
 TEST_F(EnqueueMicrotest, AddProxyOpIfNeeded_InquiresBeforeAllocating) {
-  // The protocol is "ask first, allocate second". Production seeds justInquire
-  // to true on the way in (:199), which is what tells ncclProxySaveOp it is
-  // being asked rather than told. Pin the incoming value, not just the outgoing.
+  // The protocol is "ask first, allocate second", and what signals inquiry is
+  // passing a NON-NULL justInquire pointer -- not its pointee. Real
+  // ncclProxySaveOp overwrites it with false as its first statement (proxy.cc:631),
+  // so the `bool needed = true` seed at :199 is never read and asserting on the
+  // incoming value would pin our fake rather than production.
   BatchPlanComm bp;
   ncclProxyOp op{};
   op.channelId = 2;
   op.opCount = 0x77;
   g_proxySaveOpJustInquire = false;
   ASSERT_EQ(ncclSuccess, ncclAddProxyOpIfNeeded(bp.c(), bp.p(), &op));
-  EXPECT_TRUE(g_proxySaveOpSawJustInquireIn)
-      << "production must seed justInquire=true before asking";
+  EXPECT_TRUE(g_proxySaveOpSawNonNullJustInquire)
+      << "production must ask (non-null justInquire), not tell";
   EXPECT_EQ(2, g_proxySaveOpLastChannelId) << "and must inquire about the op's own channel";
 }
 
@@ -2985,8 +3035,8 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ConsultsEveryRcclTuningHookExactlyOnce)
 
   EXPECT_EQ(1, g_rcclUpdateCollectiveProtocolCalls) << "rcclUpdateCollectiveProtocol (:2608)";
   EXPECT_EQ(1, g_rcclSetPipeliningCalls) << "rcclSetPipelining (:2610)";
-  EXPECT_EQ(1, g_rcclUpdateThreadThresholdCalls) << "rcclUpdateThreadThreshold";
-  EXPECT_EQ(1, g_rcclOptThreadBlockSizeCalls) << "rcclOptThreadBlockSize";
+  EXPECT_EQ(1, g_rcclUpdateThreadThresholdCalls) << "rcclUpdateThreadThreshold (:2649)";
+  EXPECT_EQ(1, g_rcclOptThreadBlockSizeCalls) << "rcclOptThreadBlockSize (:2731)";
   EXPECT_EQ(1, g_rcclOverrideChannelsCalls) << "rcclOverrideChannels (:2659)";
   // The tuner-table overrides at :2733-2734. Omitting these made the test name
   // a lie: deleting either call site was invisible.
@@ -3096,4 +3146,5 @@ TEST_F(EnqueueMicrotest, RedOpCreate_RecorderFailure_Propagates) {
             ncclRedOpCreatePreMulSum_impl(&op, &s, ncclFloat32,
                                           ncclScalarHostImmediate, rc.get()));
 }
+
 

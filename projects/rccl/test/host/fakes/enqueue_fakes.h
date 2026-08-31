@@ -143,7 +143,11 @@ extern struct ncclComm* g_proxySaveOpLastComm;
 extern struct ncclProxyOp* g_proxySaveOpLastOp;
 extern int g_proxySaveOpLastChannelId;
 extern uint64_t g_proxySaveOpLastOpCount;
-extern bool g_proxySaveOpSawJustInquireIn;
+// What signals inquiry is a NON-NULL justInquire pointer, not its pointee: real
+// ncclProxySaveOp overwrites the pointee with false as its first statement
+// (proxy.cc:631), so the caller's seed is never read and recording it would let a
+// test pin this fake instead of production.
+extern bool g_proxySaveOpSawNonNullJustInquire;
 extern ncclResult_t g_proxyStartResult;  // UNDRIVEN
 
 // waitWorkFifoAvailable escapes its spin loop via ncclCommPollEventCallbacks,

@@ -208,7 +208,7 @@ struct ncclComm* g_proxySaveOpLastComm = nullptr;
 struct ncclProxyOp* g_proxySaveOpLastOp = nullptr;
 int g_proxySaveOpLastChannelId = -1;
 uint64_t g_proxySaveOpLastOpCount = 0;
-bool g_proxySaveOpSawJustInquireIn = false;
+bool g_proxySaveOpSawNonNullJustInquire = false;
 
 // Records its arguments. Without this, addProxyOpIfNeeded could hand the
 // transport the wrong communicator or a different op and every proxy test would
@@ -232,7 +232,8 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
   }
   g_proxySaveOpLastChannelId = op->channelId;
   g_proxySaveOpLastOpCount = op->opCount;
-  g_proxySaveOpSawJustInquireIn = *justInquire;
+  g_proxySaveOpSawNonNullJustInquire = true;  // null already aborted above
+  // Mirror production: overwrite the pointee before deciding (proxy.cc:631).
   *justInquire = g_proxySaveOpJustInquire;
   return g_proxySaveOpResult;
 }
@@ -291,7 +292,7 @@ void ResetEnqueueFakes() {
   g_proxySaveOpLastOp = nullptr;
   g_proxySaveOpLastChannelId = -1;
   g_proxySaveOpLastOpCount = 0;
-  g_proxySaveOpSawJustInquireIn = false;
+  g_proxySaveOpSawNonNullJustInquire = false;
   // g_hipAsyncOpsResult belongs to hip_fakes and is restored by ResetHipFakes()
   // at the top of this function.
   g_proxyStartResult = ncclSuccess;
@@ -312,6 +313,10 @@ const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = {
     "Tree", "Ring", "CollNetDirect", "CollNetChain", "NVLS", "NVLSTree", "PAT"};
 const char* ncclProtoStr[NCCL_NUM_PROTOCOLS] = {"LL", "LL128", "Simple"};
 
+// Deliberately NOT in ResetEnqueueFakes(): these are read-only process state.
+// Nothing in enqueue.cc writes them and no test assigns them, so there is no
+// per-test state to restore. Reset them the moment a test starts scripting one --
+// an unrestored global that a test DOES write is an order-dependent flake.
 int ncclCudaDriverVersionCache = 12000;
 bool ncclCudaLaunchBlocking = false;
 int ncclProfilerEventMask = 0;
