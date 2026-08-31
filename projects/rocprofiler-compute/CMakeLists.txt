@@ -974,15 +974,15 @@ endif()
 # only exists when torch and the Python development files were found.
 if(TARGET test-torch-trace-collector)
     if(TEST_FROM_INSTALL)
-        set(_rcfn_launcher tests/roctx_recordfn_launcher.py)
-        set(_rcfn_test_cmd tests/test-torch-trace-collector)
+        set(_ttc_launcher tests/torch_trace_collector_launcher.py)
+        set(_ttc_test_cmd tests/test-torch-trace-collector)
     else()
-        set(_rcfn_launcher ${PROJECT_SOURCE_DIR}/tests/roctx_recordfn_launcher.py)
-        set(_rcfn_test_cmd $<TARGET_FILE:test-torch-trace-collector>)
+        set(_ttc_launcher ${PROJECT_SOURCE_DIR}/tests/torch_trace_collector_launcher.py)
+        set(_ttc_test_cmd $<TARGET_FILE:test-torch-trace-collector>)
     endif()
     add_test(
         NAME test-torch-trace-collector
-        COMMAND ${PYTHON_TEST_COMMAND} ${_rcfn_launcher} ${_rcfn_test_cmd}
+        COMMAND ${PYTHON_TEST_COMMAND} ${_ttc_launcher} ${_ttc_test_cmd}
     )
     set_tests_properties(test-torch-trace-collector PROPERTIES SKIP_RETURN_CODE 125)
 endif()
