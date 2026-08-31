@@ -537,7 +537,8 @@ main(int argc, char** argv)
             else
             {
                 _config_file = _p.get<std::string>("generate-config");
-                if(rocprofsys::to_bool(_config_file, false) && !_out.empty())
+                if(rocprofsys::utility::string::to_bool(_config_file, false) &&
+                   !_out.empty())
                 {
                     _config_file = _out;
                 }

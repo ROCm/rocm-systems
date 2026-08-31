@@ -266,7 +266,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                           << "' exists. Overwrite? " << std::flush;
                 std::string _response = {};
                 std::cin >> _response;
-                if(!rocprofsys::to_bool(_response, false))
+                if(!rocprofsys::utility::string::to_bool(_response, false))
                 {
                     std::exit(EXIT_FAILURE);
                 }

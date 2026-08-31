@@ -33,25 +33,6 @@ std::string
 include_process_id_in_filename(std::string_view filename);
 }  // namespace logger_detail
 
-namespace
-{
-
-inline bool
-parse_boolean_env(const char* env)
-{
-    if(!env)
-    {
-        return false;
-    }
-    constexpr std::array<const char*, 4> true_values = { "1", "on", "true", "yes" };
-
-    auto lower = utility::string::to_lower(env);
-    return std::any_of(true_values.begin(), true_values.end(),
-                       [&](const std::string& value) { return value == lower; });
-}
-
-}  // namespace
-
 struct logger_settings_t
 {
     logger_settings_t()
@@ -62,8 +43,8 @@ struct logger_settings_t
         const char* monochrome_env            = std::getenv("MONOCHROME");
         if(rocprofsys_monochrome_env || monochrome_env)
         {
-            m_monochrome = parse_boolean_env(rocprofsys_monochrome_env) ||
-                           parse_boolean_env(monochrome_env);
+            m_monochrome = utility::string::to_bool(rocprofsys_monochrome_env) ||
+                           utility::string::to_bool(monochrome_env);
         }
     }
 

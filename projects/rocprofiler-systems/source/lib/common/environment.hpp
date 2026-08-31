@@ -6,6 +6,7 @@
 #include "common/defines.h"
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "logger/debug.hpp"
 #include <spdlog/fmt/fmt.h>
 
@@ -56,48 +57,6 @@ struct posix_env
     static char* getenv(const char* name) { return ::getenv(name); }
 };
 
-/// @brief Parse a string into a boolean.
-///
-/// Leading and trailing whitespace is trimmed before interpretation. All-digit
-/// strings are truthy when non-zero (an overflowing digit string is also truthy);
-/// other values are matched case-insensitively against the false tokens
-/// off/false/no/n/f/0 (anything else is truthy). An empty or all-whitespace string
-/// yields @p fallback.
-/// @param value    The string to interpret.
-/// @param fallback Returned when @p value is empty or all whitespace.
-/// @return The parsed boolean.
-[[nodiscard]] inline bool
-to_bool(std::string_view value, bool fallback = false)
-{
-    // trim leading/trailing whitespace before interpreting
-    constexpr std::string_view whitespace = " \t\n\r\f\v";
-    const auto                 first_pos  = value.find_first_not_of(whitespace);
-    if(first_pos == std::string_view::npos) return fallback;  // empty or all whitespace
-    const auto last_pos = value.find_last_not_of(whitespace);
-    value               = value.substr(first_pos, last_pos - first_pos + 1);
-
-    if(value.find_first_not_of("0123456789") == std::string_view::npos)
-    {
-        std::uint64_t numeric{};
-        const auto*   last   = value.data() + value.size();
-        const auto [ptr, ec] = std::from_chars(value.data(), last, numeric);
-        if(ec == std::errc::result_out_of_range) return true;
-        if(ec == std::errc{} && ptr == last) return numeric != 0;
-        return true;
-    }
-
-    std::string lower{ value };
-    std::transform(lower.begin(), lower.end(), lower.begin(),
-                   [](unsigned char chr) { return std::tolower(chr); });
-
-    constexpr auto false_values = std::array{
-        std::string_view{ "off" }, std::string_view{ "false" }, std::string_view{ "no" },
-        std::string_view{ "n" },   std::string_view{ "f" },
-    };
-    return !std::any_of(false_values.begin(), false_values.end(),
-                        [&lower](std::string_view val) { return lower == val; });
-}
-
 /// @brief Environment variable read/write facade, parameterised over the backend.
 ///
 /// All conversion and parsing logic lives here. Use @c environment<posix_env> (the
@@ -133,7 +92,7 @@ private:
             throw std::runtime_error(
                 std::string{ "No boolean value provided for " }.append(env_id));
         }
-        return to_bool(env_sv, fallback);
+        return rocprofsys::utility::string::to_bool(env_sv, fallback);
     }
 
     template <typename Tp>
