@@ -2623,9 +2623,8 @@ __global__ void alltoallPureKernel(
 
   // Cross-rank sync ensures every rank's sendbuf is registered before any
   // peer reads from it via gin.put below.
-  ncclGinBarrierSession<ncclCoopCta> bar{
-      ncclCoopCta(), gin, ncclTeamWorld(devComm),
-      devComm.railGinBarrier, blockIdx.x};
+  ncclBarrierSession<ncclCoopCta> bar{
+      ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x};
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
 
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -2670,15 +2669,16 @@ TEST_F(GinMPIDeviceTests, Alltoall_PureReference) {
   ASSERT_GE(nRanks, 2);
   ASSERT_LE(nRanks, 8);
 
-  // ginSignalCount=1 covers signalIndex=0; railGinBarrierCount=1 matches
-  // our single-CTA launch.
+  // The world-team ncclBarrierSession sizes its hybrid LSA+rail-GIN barriers from
+  // reqs.barrierCount (not lsa/railGinBarrierCount), and 0 hangs the rail arm.
+  // ginSignalCount=1 covers the kernel's own signalIndex=0.
   ncclDevCommRequirements reqs = defaultGinReqs();
-  reqs.railGinBarrierCount = 1;
+  reqs.barrierCount        = 1;
   reqs.ginSignalCount      = 1;
 
   // 1 (alignment/tail edges), 1024 (medium), 65536 (saturating).
   const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
-  constexpr int kCTAs          = 1;   // == railGinBarrierCount
+  constexpr int kCTAs          = 1;   // == barrierCount
   constexpr int kThreadsPerCTA = 512; // matches the production example launch
 
   // Register windows ONCE (largest count) and reuse, BEFORE ncclDevCommCreate

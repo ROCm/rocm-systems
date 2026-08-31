@@ -195,6 +195,28 @@
       "env_variables": {
         "NCCL_GIN_TYPE": "6"
       }
+    },
+
+    "gin_a2a_eligibility": {
+      "extends": "default",
+      "description": "Host-only ncclAllToAllGinSdmaEligible unit tests, single process, no GPU.",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "tests": [
+        { "name": "A2A_Eligibility_Gates", "description": "All comm-state eligibility gates at default params", "test_filter": "GinAlltoAllEligibilityTest.*" },
+        {
+          "name": "A2A_Eligibility_Disabled", "description": "Negative: NCCL_GIN_A2A_ENABLE=0 makes the path ineligible", "test_filter": "GinAlltoAllEligibilityTest.A2ADisabledByParam",
+          "env_variables": { "NCCL_GIN_A2A_ENABLE": "0" }
+        },
+        {
+          "name": "A2A_Eligibility_MinBytes", "description": "Negative: 64 MiB floor rejects the 8 MiB/peer call", "test_filter": "GinAlltoAllEligibilityTest.BelowMinBytesParam",
+          "env_variables": { "NCCL_GIN_A2A_MIN_BYTES": "67108864" }
+        }
+      ]
     }
   },
   "test_suites": [
@@ -232,6 +254,12 @@
       "name": "GIN Device MPI Tests - SDMA (single node)",
       "description": "Every GinMPIDeviceTests case, one mpirun per test, on the SDMA backend (single node)",
       "config": "gin_devmpi_sdma",
+      "enabled": true
+    },
+    {
+      "name": "GIN alltoall eligibility (host-only)",
+      "description": "Host-only eligibility unit tests for the GIN-SDMA alltoall path",
+      "config": "gin_a2a_eligibility",
       "enabled": true
     }
   ]

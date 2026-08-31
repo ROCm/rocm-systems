@@ -524,6 +524,7 @@ if(BUILD_TESTS)
       DdaFabricEligibilityTests.cpp
       CeAllReduceEligibilityTests.cpp
       CeAlltoAllvEligibilityTests.cpp
+      GinAlltoAllEligibilityTests.cpp
       EnqueueTests.cpp
       LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
@@ -575,6 +576,12 @@ if(BUILD_TESTS)
     # so they can build the path.
     target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
       RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+    # GinAlltoAllEligibilityTests.cpp calls ncclAllToAllGinSdmaEligible() only
+    # when ENABLE_ROCSHMEM_GIN is defined (otherwise it GTEST_SKIPs). Match librccl.
+    if(ENABLE_ROCSHMEM_GIN)
+      target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE ENABLE_ROCSHMEM_GIN)
+    endif()
 
     # PluginCompatV10_test.cpp / PluginCompatV11_test.cpp resolve their in-process
     # mock plugin symbols via dlsym(dlopen(NULL), ...), which only sees the
