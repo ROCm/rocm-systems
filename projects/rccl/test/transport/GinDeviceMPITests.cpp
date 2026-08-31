@@ -160,6 +160,12 @@ std::string sdmaInternalA2AEnvSkipReason() {
            std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA);
   if (const char* e = std::getenv("NCCL_GIN_A2A_ENABLE"); e && std::strcmp(e, "0") == 0)
     return "GIN-SDMA alltoall disabled (NCCL_GIN_A2A_ENABLE=0)";
+  // The count sweep needs both thresholds at their defaults: a raised floor drops
+  // the smallest count, a raised SDMA cutoff keeps the largest on the LSA kernel.
+  if (std::getenv("NCCL_GIN_A2A_MIN_BYTES"))
+    return "count sweep assumes the default NCCL_GIN_A2A_MIN_BYTES";
+  if (std::getenv("NCCL_GIN_A2A_SDMA_MIN_BYTES"))
+    return "SDMA tier coverage assumes the default NCCL_GIN_A2A_SDMA_MIN_BYTES";
   return "";
 }
 
@@ -181,6 +187,28 @@ ncclDevCommRequirements defaultGinReqs() {
   r.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
   return r;
 }
+
+// No-ops on backends other than anvil-sdma. acquire() asserts, so callers wrap
+// it in ASSERT_NO_FATAL_FAILURE.
+struct SdmaScratchWindow {
+  ncclComm_t   comm = nullptr;
+  void*        buf  = nullptr;
+  ncclWindow_t win  = nullptr;
+
+  ~SdmaScratchWindow() {
+    if (win) (void)ncclCommWindowDeregister(comm, win);
+    if (buf) (void)ncclMemFree(buf);
+  }
+
+  void acquire(ncclComm_t c) {
+    if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return;
+    constexpr size_t kBytes = 4 * 1024;
+    comm = c;
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&buf, kBytes));
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclCommWindowRegister(c, buf, kBytes, &win, NCCL_WIN_COLL_SYMMETRIC));
+  }
+};
 
 // Bounded stream drain: poll with a deadline so a device-side hang becomes a
 // reported timeout instead of an infinite hipStreamSynchronize. Returns the
@@ -1094,18 +1122,8 @@ TEST_F(GinMPIDeviceTests, Signal_NoPayload) {
 
   // anvil-sdma binds signal routes only when >=1 window is registered
   // (dev_runtime.cc gates on winSortedCount>0). Proxy backends need no window.
-  void*            scratchBuf   = nullptr;
-  ncclWindow_t     scratchWin   = nullptr;
-  constexpr size_t kScratchBytes = 4 * 1024;
-  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA) {
-    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&scratchBuf, kScratchBytes));
-    ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, scratchBuf, kScratchBytes,
-                                                      &scratchWin, NCCL_WIN_COLL_SYMMETRIC));
-  }
-  auto scratchCleanup = makeScopeGuard([&]() {
-    if (scratchWin) (void)ncclCommWindowDeregister(comm, scratchWin);
-    if (scratchBuf) (void)ncclMemFree(scratchBuf);
-  });
+  SdmaScratchWindow scratch;
+  ASSERT_NO_FATAL_FAILURE(scratch.acquire(comm));
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
@@ -1168,20 +1186,10 @@ TEST_F(GinMPIDeviceTests, Signal_HighIdNoOverflow) {
   constexpr uint32_t        kSignalPoolCount = 65537;
   constexpr int             kPeer            = 1;       // rank 0 -> rank 1
 
-  // anvil-sdma needs >=1 window for signal routes to bind (see
-  // Signal_NoPayload). Proxy backends keep the no-window path.
-  void*            scratchBuf   = nullptr;
-  ncclWindow_t     scratchWin   = nullptr;
-  constexpr size_t kScratchBytes = 4 * 1024;
-  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA) {
-    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&scratchBuf, kScratchBytes));
-    ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, scratchBuf, kScratchBytes,
-                                                      &scratchWin, NCCL_WIN_COLL_SYMMETRIC));
-  }
-  auto scratchCleanup = makeScopeGuard([&]() {
-    if (scratchWin) (void)ncclCommWindowDeregister(comm, scratchWin);
-    if (scratchBuf) (void)ncclMemFree(scratchBuf);
-  });
+  // anvil-sdma needs >=1 window for signal routes to bind (see Signal_NoPayload).
+  // Proxy backends keep the no-window path.
+  SdmaScratchWindow scratch;
+  ASSERT_NO_FATAL_FAILURE(scratch.acquire(comm));
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
@@ -3298,12 +3306,12 @@ TEST_F(GinMPIDeviceTests, Alltoall_SdmaInternal) {
   ASSERT_GE(nRanks, 2);
   ASSERT_LE(nRanks, 8);
 
-  // Per-peer bytes select the kernel inside ncclAllToAllGinSdma: below
-  // NCCL_GIN_A2A_SDMA_MIN_BYTES (default 8 MiB) it runs ncclGinA2AKernel<false>,
-  // at or above it runs ncclGinA2AKernel<true>.
+  // Mirrors the NCCL_GIN_A2A_SDMA_MIN_BYTES default (enforced by the env skip).
+  // Below it ncclAllToAllGinSdma runs ncclGinA2AKernel<false>, at or above <true>.
+  constexpr size_t kSdmaMinBytesPerPeer = size_t{8} << 20;
   const std::vector<size_t> counts = {
-      1, 1024, size_t{1} << 16,            // 4 B / 4 KiB / 256 KiB per peer -> LSA
-      (size_t{8} << 20) / sizeof(float)};  // 8 MiB per peer -> SDMA engine
+      1, 1024, size_t{1} << 16,               // 4 B / 4 KiB / 256 KiB per peer -> LSA
+      kSdmaMinBytesPerPeer / sizeof(float)};  // 8 MiB per peer -> SDMA engine
 
   // No ncclDevCommCreate here: the path lazily builds its own private devComm.
   const size_t maxBytes = counts.back() * static_cast<size_t>(nRanks) * sizeof(float);
@@ -3328,7 +3336,8 @@ TEST_F(GinMPIDeviceTests, Alltoall_SdmaInternal) {
     if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
   });
 
-  for (size_t count : counts) {
+  for (size_t idx = 0; idx < counts.size(); idx++) {
+    const size_t count = counts[idx];
     SCOPED_TRACE(::testing::Message() << "count=" << count);
 
     const size_t totalElements = count * static_cast<size_t>(nRanks);
@@ -3354,9 +3363,11 @@ TEST_F(GinMPIDeviceTests, Alltoall_SdmaInternal) {
         ncclAlltoAll(dSend, dRecv, count, ncclFloat, comm, stream));
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
-    // Set by ncclGinA2AInitOnce and sticky for the comm's lifetime: this catches a
-    // fallback on the first dispatch, but cannot tell the LSA and SDMA tiers apart.
-    ASSERT_MPI_TRUE(comm->ginA2AState.initialized);
+    // Set by ncclGinA2AInitOnce and sticky for the comm's lifetime, so the first
+    // dispatch is the only one that can fail this. Checking it here reports a
+    // fallback before the sweep reaches the larger sizes, but it cannot tell the
+    // LSA and SDMA tiers apart.
+    if (idx == 0) ASSERT_MPI_TRUE(comm->ginA2AState.initialized);
 
     MPI_Barrier(MPI_COMM_WORLD);
 
