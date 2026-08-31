@@ -1067,8 +1067,6 @@ The Torch trace feature currently has the following limitations:
 
 * The ``--torch-trace`` option requires the application to be a Python command or Python script.
 
-* Requires PyTorch 2.13 or 2.14 in the workload environment.
-
 * The workload’s Python version must match the Python version used by ``roctx``.
 
 * This feature adds instrumentation overhead to track operator boundaries. For performance-critical measurements, consider profiling without this option first.

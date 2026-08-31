@@ -23,7 +23,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 import pandas as pd
 import pytest
 import torch
-from torch_trace_kernel_names import normalize_kernel_names
+from common import normalize_kernel_names
 
 
 class CoverageTensorArg(NamedTuple):

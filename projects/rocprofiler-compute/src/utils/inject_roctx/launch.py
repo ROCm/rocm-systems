@@ -71,4 +71,8 @@ sys.argv = [target_script] + script_args
 try:
     runpy.run_path(target_script, run_name="__main__")
 finally:
-    _report_torch_trace_callback_errors()
+    # Never let reporting replace the workload's exception.
+    try:
+        _report_torch_trace_callback_errors()
+    except Exception:
+        pass
