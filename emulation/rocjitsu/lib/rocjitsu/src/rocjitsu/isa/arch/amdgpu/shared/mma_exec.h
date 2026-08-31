@@ -1349,10 +1349,51 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
   std::vector<Result> results;
   results.reserve(M * N * B);
 
+  constexpr size_t MAX_AB = 2048;      // max M*K over all MFMA shapes
+  constexpr size_t MAX_BSTRIDE = 4096; // max K*stride over all MFMA shapes
+  constexpr size_t MAX_C = 1024;       // max M*stride over all MFMA shapes
+  static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(float) <= 48 * 1024,
+                "MFMA staging buffers exceed the 48 KiB stack budget");
+
+  auto stage_operands = [&](uint32_t block, uint32_t b_stride, float *a_values, float *b_values) {
+    for (uint32_t row = 0; row < M; ++row) {
+      for (uint32_t k = 0; k < K; ++k) {
+        auto al = input_loc(M, K, B, row, k, block, a_bits);
+        if (cbsz != 0)
+          al.lane = permute_a_lane(al.lane, cbsz, abid);
+        a_values[static_cast<size_t>(row) * K + k] = ea(cu, s0, physicalize_loc(al, wf));
+      }
+    }
+    for (uint32_t k = 0; k < K; ++k) {
+      for (uint32_t col = 0; col < N; ++col) {
+        auto bl = input_loc(N, K, B, col, k, block, b_bits);
+        if (blgp != 0)
+          bl.lane = permute_b_lane(bl.lane, blgp);
+        b_values[static_cast<size_t>(k) * b_stride + col] = eb(cu, s1, physicalize_loc(bl, wf));
+      }
+    }
+  };
+
   // Scalar reference: D[i][j] = C[i][j] + sum_k A[i][k] * B[k][j], accumulated
   // per output in K order (non-fused multiply-add).
   auto run_scalar = [&]() {
+    const size_t a_count = static_cast<size_t>(M) * K;
+    const size_t b_count = static_cast<size_t>(K) * N;
+    // Real ISA shapes use bounded per-block stack storage. Preserve support
+    // for direct callers with larger dimensions through one overflow buffer.
+    alignas(64) float a_stack[MAX_AB];
+    alignas(64) float b_stack[MAX_BSTRIDE];
+    std::vector<float> overflow;
+    float *a_values = a_stack;
+    float *b_values = b_stack;
+    if (a_count > MAX_AB || b_count > MAX_BSTRIDE) {
+      overflow.resize(a_count + b_count);
+      a_values = overflow.data();
+      b_values = overflow.data() + a_count;
+    }
+
     for (uint32_t b = 0; b < B; ++b) {
+      stage_operands(b, N, a_values, b_values);
       for (uint32_t row = 0; row < M; ++row) {
         for (uint32_t col = 0; col < N; ++col) {
           // AMD convention: i=row (register dimension), j=col (lane dimension).
@@ -1362,17 +1403,8 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
                   ? std::bit_cast<float>(const_acc)
                   : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
           for (uint32_t k = 0; k < K; ++k) {
-            auto al = input_loc(M, K, B, row, k, b, a_bits);
-            auto bl = input_loc(N, K, B, col, k, b, b_bits);
-            // Apply cbsz/abid lane permutation to A input.
-            if (cbsz != 0)
-              al.lane = permute_a_lane(al.lane, cbsz, abid);
-            // Apply blgp lane permutation to B input.
-            if (blgp != 0)
-              bl.lane = permute_b_lane(bl.lane, blgp);
-            float a_val = ea(cu, s0, physicalize_loc(al, wf));
-            float b_val = eb(cu, s1, physicalize_loc(bl, wf));
-            acc += a_val * b_val;
+            acc += a_values[static_cast<size_t>(row) * K + k] *
+                   b_values[static_cast<size_t>(k) * N + col];
           }
           results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
         }
@@ -1395,13 +1427,6 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
     // (no per-call heap allocation). MAX_* bound every real MFMA shape;
     // anything larger (or a forced-scalar run) falls back to the scalar path.
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
-    constexpr size_t MAX_AB = 2048;      // max M*K over all MFMA shapes
-    constexpr size_t MAX_BSTRIDE = 4096; // max K*stride
-    constexpr size_t MAX_C = 1024;       // max M*stride
-    // Combined stack frame for the three staging buffers below (currently 28
-    // KiB); tripwire so an added/larger shape can't silently blow the stack.
-    static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(float) <= 48 * 1024,
-                  "MFMA SIMD staging buffers exceed the 48 KiB stack budget");
     const uint32_t stride = ((N + W - 1) / W) * W;
     if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
         static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * stride > MAX_C) {
@@ -1414,6 +1439,7 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
       alignas(64) float Bbuf[MAX_BSTRIDE] = {};
       alignas(64) float Cbuf[MAX_C] = {};
       for (uint32_t b = 0; b < B; ++b) {
+        stage_operands(b, stride, Abuf, Bbuf);
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t col = 0; col < N; ++col) {
             auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
@@ -1421,20 +1447,6 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
                 (const_acc != ACC_FROM_VGPR)
                     ? std::bit_cast<float>(const_acc)
                     : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
-          }
-        for (uint32_t row = 0; row < M; ++row)
-          for (uint32_t k = 0; k < K; ++k) {
-            auto al = input_loc(M, K, B, row, k, b, a_bits);
-            if (cbsz != 0)
-              al.lane = permute_a_lane(al.lane, cbsz, abid);
-            Abuf[row * K + k] = ea(cu, s0, physicalize_loc(al, wf));
-          }
-        for (uint32_t k = 0; k < K; ++k)
-          for (uint32_t col = 0; col < N; ++col) {
-            auto bl = input_loc(N, K, B, col, k, b, b_bits);
-            if (blgp != 0)
-              bl.lane = permute_b_lane(bl.lane, blgp);
-            Bbuf[k * stride + col] = eb(cu, s1, physicalize_loc(bl, wf));
           }
         wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
         for (uint32_t row = 0; row < M; ++row)
@@ -2322,29 +2334,34 @@ void exec_wmma_f32_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
   }
 }
 
+constexpr bool wmma_f32_f32_native_width_supported(uint32_t n, uint32_t width) {
+  return width > 1 && n % width == 0;
+}
+
 /// Fast path for the f32-input WMMA shapes (v_wmma_f32_*_f32). f32 inputs, so no
 /// F16C convert — the hoist reads each operand word straight through observed
-/// register-access regions.
-/// Compile-time M/N/K fully unroll the matmul, looped over N in zmm-width chunks
-/// (N a multiple of 16). Falls back to generic exec_wmma_f32 without AVX-512 /
-/// under force-scalar.
+/// register-access regions. Compile-time M/N/K fully unroll the matmul, looped
+/// over N in native-width chunks. The specialization is bypassed when host SIMD
+/// is unavailable, the native width is one or does not evenly divide N, or
+/// force-scalar is enabled. The generic exec_wmma_f32 path may still use
+/// native-width SIMD with a scalar tail when SIMD is available but N is not
+/// divisible by the native width.
 template <uint32_t M, uint32_t N, uint32_t K>
 void exec_wmma_f32_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc = ACC_FROM_VGPR, uint32_t c_modifier = 0) {
   constexpr uint32_t in_bits = 32;
-  static_assert(N % 16 == 0, "specialized f32 WMMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
                   const_acc, c_modifier);
     return;
   } else {
-    if (util::force_scalar() || util::native<float>::size() != 16) {
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || !wmma_f32_f32_native_width_supported(N, W)) {
       exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
                     const_acc, c_modifier);
       return;
     }
     require_wmma_wave32(cu);
-    constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
     auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
                                              const_acc, wf);
@@ -4250,47 +4267,30 @@ void exec_smfmac_f32_32x32x64_fp8(auto &cu, uint32_t dst, uint32_t s0, uint32_t 
     RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
-/// Fast path for v_mfma_f32_16x16x32_f16. This single MFMA shape is the only
-/// MFMA variant fired by OPT-125M fp16 eager forward (488k invocations per
-/// forward; ~4B internal MACs). Kept as a dedicated specialization (rather
-/// than forwarding to generic exec_f32) because the compile-time M/N/K/B let
-/// the compiler fully unroll the 16-row x 32-K inner matmul into straight-line
-/// AVX-512 FMAs — a runtime-dimension loop is materially slower on this hot
-/// path. Hoists A and B into dense f32 buffers via extract_f16, runs the
-/// matmul as 16 zmm-wide f32 FMA rows (512 zmm FMAs per MFMA). Batched shapes
-/// stage every result on the stack and publish only after all operand reads,
-/// preserving destructive-overlap semantics without a heap-backed Result
-/// vector. VGPR access is batched through observed register-access regions
-/// (one view per operand, no per-element virtual read_vgpr/write_vgpr). Falls
-/// back to the generic exec_f32 when:
-///   - <experimental/simd> is unavailable
-///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
-///   - cbsz/blgp lane permutation is non-default
-///   - RJ_FORCE_SCALAR is set
 /// Fast path for the f32-input MFMA shapes (v_mfma_f32_*_f32). Like the f16
 /// specialization but the inputs are already f32, so there is no F16C convert —
 /// the hoist reads each operand word straight through observed register-access
-/// regions. BATCH covers the batched shapes (e.g. 32x32x1x2). Compile-time M/N/K/BATCH fully unroll
-/// the matmul; it loops over N in zmm-width chunks (N must be a multiple of 16,
-/// so the 4x4 shape stays on the generic path). Falls back to the generic
-/// exec_f32 without AVX-512 / under force-scalar / with cbsz|blgp.
+/// regions. BATCH covers the batched shapes (e.g. 32x32x1x2). Compile-time
+/// M/N/K/BATCH fully unroll the matmul; it loops over N in native-width chunks.
+/// Falls back to the generic exec_f32 without host SIMD, when the native width
+/// is one or does not divide N, for non-wave64 execution, under force-scalar,
+/// or with cbsz/blgp.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH>
 void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t in_bits = 32;
-  static_assert(N % 16 == 0, "specialized f32 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, BATCH, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
              const_acc, cbsz, abid, blgp);
     return;
   } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || cbsz != 0 || blgp != 0 || W <= 1 || N % W != 0 ||
         cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, BATCH, in_bits, dst, s0, s1, s2, amdgpu::extract_f32,
                amdgpu::extract_f32, const_acc, cbsz, abid, blgp);
       return;
     }
-    constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
     auto reads =
         read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, BATCH, in_bits, const_acc, wf);
@@ -4359,6 +4359,23 @@ void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
   }
 }
 
+/// Fast path for v_mfma_f32_16x16x32_f16. This single MFMA shape is the only
+/// MFMA variant fired by OPT-125M fp16 eager forward (488k invocations per
+/// forward; ~4B internal MACs). Kept as a dedicated specialization (rather
+/// than forwarding to generic exec_f32) because the compile-time M/N/K/B let
+/// the compiler fully unroll the 16-row x 32-K inner matmul into straight-line
+/// AVX-512 FMAs — a runtime-dimension loop is materially slower on this hot
+/// path. Hoists A and B into dense f32 buffers via extract_f16, runs the
+/// matmul as 16 zmm-wide f32 FMA rows (512 zmm FMAs per MFMA). Batched shapes
+/// stage every result on the stack and publish only after all operand reads,
+/// preserving destructive-overlap semantics without a heap-backed Result
+/// vector. VGPR access is batched through observed register-access regions
+/// (one view per operand, no per-element virtual read_vgpr/write_vgpr). Falls
+/// back to the generic exec_f32 when:
+///   - <experimental/simd> is unavailable
+///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
+///   - cbsz/blgp lane permutation is non-default
+///   - RJ_FORCE_SCALAR is set
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
 void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {

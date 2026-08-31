@@ -42,6 +42,10 @@ public:
     /// @return true if unsupported file systems are allowed, false if only supported file systems are
     /// permitted (default)
     virtual bool unsupportedFileSystems() const noexcept;
+
+    /// @brief Gets the size of the async buffer used for I/O operations
+    /// @return the size of the async buffer in bytes
+    virtual size_t asyncBufferSize() const noexcept;
 };
 
 }
