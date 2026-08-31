@@ -142,7 +142,7 @@ jobs:
         with:
           ref: ${{ inputs.coco_ref }}
           path: ${{ env.COCO_DIR }}/tRCCL
-          app-id: ${{ secrets.APP_ID }}
+          client-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - name: Set up Python

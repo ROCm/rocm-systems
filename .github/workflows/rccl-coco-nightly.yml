@@ -79,7 +79,7 @@ jobs:
         with:
           ref: ${{ inputs.coco_ref || 'main' }}
           path: _coco
-          app-id: ${{ secrets.APP_ID }}
+          client-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - name: Resolve run parameters
@@ -204,7 +204,7 @@ jobs:
         with:
           ref: ${{ inputs.coco_ref || 'main' }}
           path: _coco
-          app-id: ${{ secrets.APP_ID }}
+          client-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - name: Resolve run parameters
