@@ -28,6 +28,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - For `mclk` and `fclk` ONLY, which expose a discrete DPM table, the requested `max` is now rounded down to the nearest selectable clock level, so the enforced limit never exceeds the requested value.
   - `sclk` supports a continuous frequency range, so its requested `max` is honored exactly (e.g. `600` enforces a limit of 600MHz) and is not snapped.
 
+- **Fixed `amdsmi_get_gpu_pm_metrics_info()` and `amdsmi_get_gpu_reg_table_info()` returning blank names and zeroed values**.  
+  - The Python name/value decoder walked the returned buffer with a 72-byte stride instead of the 264-byte `amdsmi_name_value_t`, so each value was read from inside the preceding name buffer. Only the first entry's name survived and every value came back as `0`. Both APIs now return the complete set of pairs.
+
 ### Upcoming Changes
 
 - **UUIDs will be replaced by CUIDs in an upcoming version**.  

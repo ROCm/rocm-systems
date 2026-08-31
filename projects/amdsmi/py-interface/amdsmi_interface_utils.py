@@ -43,8 +43,7 @@ __all__ = [
     "_validate_if_max_uint",
 ]
 
-# Re-export the constant used by _get_name_value so callers don't need a
-# separate import.
+# Mirrors AMDSMI_MAX_STRING_LENGTH in amdsmi.h.
 AMDSMI_MAX_STRING_LENGTH = 256
 
 
@@ -193,61 +192,19 @@ def _get_name_value(num, data) -> List[Dict[str, int]]:
     """
     Extracts a list of name-value pairs from a ctypes array buffer.
 
-    This function works around a ctypes array issue where direct field access
-    to the `amdsmi_name_value_t` structure is unreliable. Instead, it uses
-    memory operations to extract the 'name' (a 64-byte char array) and 'value'
-    (a uint64) from each structure in the array.
-
     Parameters:
         num (ctypes.c_uint32): Number of elements in the array.
-        data (ctypes.c_void_p): Pointer to the start of the array buffer containing
-            `amdsmi_name_value_t` structures.
+        data (POINTER(amdsmi_name_value_t)): Pointer to the start of the array
+            buffer containing `amdsmi_name_value_t` structures.
 
     Returns:
         List[Dict[str, int]]: A list of dictionaries, each with keys 'name' (str)
             and 'value' (int) extracted from the buffer.
-
-    Workaround:
-        Direct access to the fields of the ctypes array is broken, so the function
-        uses memory alignment and pointer arithmetic to extract the fields manually.
     """
-
-    # Work around ctypes array issue by using memory access
-    # Use 4 byte alignment for amdsmi_name_value_t.name char array,  64=256/4
-    # Use 8 bytes for amdsmi_name_value_t.value uint64
-    aligned_name_size = int(AMDSMI_MAX_STRING_LENGTH / 4)
-    value_size_bytes = 8
-    struct_alignment = aligned_name_size + value_size_bytes
-
-    # Access name,value field using memory operations since direct access is broken
-    struct_ptr = ctypes.cast(data, ctypes.POINTER(ctypes.c_char * struct_alignment))
-
-    results = []
-    for i in range(num.value):
-        # Offset into structure array
-        current_struct = struct_ptr[i]
-
-        # Cast address for name member with max chars to read
-        name_ptr = ctypes.cast(
-            ctypes.addressof(current_struct),
-            ctypes.POINTER(ctypes.c_char * AMDSMI_MAX_STRING_LENGTH),
-        )
-        # Data buffer in bytes
-        name_bytes = ctypes.string_at(name_ptr.contents)
-        # Get string
-        name_str = name_bytes.rstrip(b"\x00").decode("utf-8", errors="replace")
-
-        # Address for value member
-        addr_value = ctypes.addressof(current_struct) + struct_alignment
-        # Cast data buffer to a uint64
-        int64_ptr = ctypes.cast(addr_value, ctypes.POINTER(ctypes.c_uint64))
-        # Get value
-        value = int64_ptr.contents.value
-
-        item = {"name": name_str, "value": value}
-        results.append(item)
-
-    return results
+    return [
+        {"name": data[i].name.decode("utf-8", errors="replace"), "value": data[i].value}
+        for i in range(num.value)
+    ]
 
 
 def _format_transfer_rate(transfer_rate):
