@@ -2454,12 +2454,12 @@ TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPolicyButNotLoweringCandidates)
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().lowering.replay_guest_access.reason,
             ConSanAccessClassifierReason::UnsupportedMnemonic);
-  ASSERT_EQ(result.observation_plan.site_decisions.size(), 1u);
-  EXPECT_EQ(result.observation_plan.site_decisions.front().kind,
+  ASSERT_EQ(result.observation_plan().site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan().site_decisions.front().kind,
             ConSanSiteDecisionKind::Unsupported);
-  EXPECT_EQ(result.observation_plan.site_decisions.front().reason,
+  EXPECT_EQ(result.observation_plan().site_decisions.front().reason,
             ConSanAccessPolicyReason::UnsupportedMnemonic);
-  EXPECT_TRUE(result.observation_plan.probe_intents.empty());
+  EXPECT_TRUE(result.observation_plan().probe_intents.empty());
   EXPECT_TRUE(result.coverage_ledger.intent_entries().empty());
 }
 
@@ -2484,8 +2484,8 @@ TEST(ConSan, Cdna4SuperColliderEmitsGroupFlatCheckAndReport) {
   EXPECT_EQ(result.patches.front().anchor_offset, 3u * sizeof(uint32_t));
   EXPECT_EQ(result.patches.front().scratch_vgpr, 3u);
   EXPECT_EQ(result.patches.front().original_size, 17u * sizeof(uint32_t));
-  ASSERT_EQ(result.observation_plan.probe_intents.size(), 1u);
-  EXPECT_EQ(result.observation_plan.probe_intents.front().kind,
+  ASSERT_EQ(result.observation_plan().probe_intents.size(), 1u);
+  EXPECT_EQ(result.observation_plan().probe_intents.front().kind,
             ConSanProbeIntentKind::RedundantAccessObservation);
   ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 1u);
   EXPECT_EQ(result.coverage_ledger.intent_entries().front().lowering,

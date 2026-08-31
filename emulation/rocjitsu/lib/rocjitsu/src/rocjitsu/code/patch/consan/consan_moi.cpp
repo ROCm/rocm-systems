@@ -53,7 +53,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   if (execution != nullptr)
     execution->note_resource_solving_and_lowering();
   std::vector<ConSanMoiCandidate> moi_candidates = consan_detail::build_moi_candidates(
-      result.program_inventory, result.observation_plan, result.errors);
+      result.program_inventory, result.observation_plan(), result.errors);
   if (!result.errors.empty())
     return result;
   if (consan_arch_has_selectable_vgpr_bank(arch)) {
@@ -69,16 +69,17 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   }
   MoiObjectFacts object_facts;
   object_facts.has_access_candidate = !moi_candidates.empty();
-  object_facts.has_admitted_atomic = std::ranges::any_of(
-      result.observation_plan.atomic_site_decisions, [](const ConSanAtomicSiteDecision &decision) {
-        return decision.kind == ConSanSiteDecisionKind::Admitted;
-      });
+  object_facts.has_admitted_atomic =
+      std::ranges::any_of(result.observation_plan().atomic_site_decisions,
+                          [](const ConSanAtomicSiteDecision &decision) {
+                            return decision.kind == ConSanSiteDecisionKind::Admitted;
+                          });
   object_facts.has_admitted_fence = std::ranges::any_of(
-      result.observation_plan.fence_site_decisions, [](const ConSanFenceSiteDecision &decision) {
+      result.observation_plan().fence_site_decisions, [](const ConSanFenceSiteDecision &decision) {
         return decision.kind == ConSanSiteDecisionKind::Admitted;
       });
   object_facts.admitted_barrier_count =
-      std::ranges::count_if(result.observation_plan.barrier_site_decisions,
+      std::ranges::count_if(result.observation_plan().barrier_site_decisions,
                             [](const ConSanBarrierSiteDecision &decision) {
                               return decision.kind == ConSanSiteDecisionKind::Admitted;
                             });
@@ -92,7 +93,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                                           : 0u;
   object_facts.has_stranded_admitted_barrier =
       original_text_size != 0u &&
-      std::ranges::any_of(result.observation_plan.barrier_site_decisions,
+      std::ranges::any_of(result.observation_plan().barrier_site_decisions,
                           [&](const ConSanBarrierSiteDecision &decision) {
                             return decision.kind == ConSanSiteDecisionKind::Admitted &&
                                    !compute_sopp_branch_simm16(
@@ -100,7 +101,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                                        original_text_size);
                           });
   MoiObjectModePlan mode_plan = plan_moi_object_mode(effective_options, effective_options,
-                                                     object_facts, result.observation_plan);
+                                                     object_facts, result.observation_plan());
   effective_options.moi_owner_source = mode_plan.owner_source;
   effective_options.moi_track_atomics = mode_plan.track_atomics;
   effective_options.moi_track_barriers = mode_plan.track_barriers;
@@ -120,7 +121,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // of rebuilding the full instruction graph for every option refinement.
   const MoiResourceProblem resource_problem(code_object_bytes, arch, effective_options,
                                             effective_options, result.program_inventory,
-                                            result.observation_plan, moi_candidates);
+                                            result.observation_plan(), moi_candidates);
   MoiResourcePlanningStatePtr resource_planning_state_owner =
       make_moi_resource_planning_state(resource_problem, effective_options, result.resource_plans);
   MoiResourcePlanningState &resource_planning_state = *resource_planning_state_owner;

@@ -686,9 +686,9 @@ TEST(ConSanAtomicFencePolicy, AppendAndCoverageLedgerOwnAndRebaseBothDecisionFam
   EXPECT_TRUE(std::ranges::equal(ledger.atomic_site_decisions(), combined.atomic_site_decisions));
   EXPECT_TRUE(std::ranges::equal(ledger.fence_site_decisions(), combined.fence_site_decisions));
   ASSERT_EQ(ledger.intent_entries().size(), combined.probe_intents.size());
-  EXPECT_TRUE(publish_test_lowering_outcome(ledger, combined, {3},
-                                            ConSanLoweringOutcomeKind::Instrumented));
-  EXPECT_EQ(ledger.intent_entry({3})->intent.kind, ConSanProbeIntentKind::FenceRecord);
+  EXPECT_TRUE(publish_test_lowering_outcome(ledger, {3}, ConSanLoweringOutcomeKind::Instrumented));
+  ASSERT_NE(ledger.intent({3}), nullptr);
+  EXPECT_EQ(ledger.intent({3})->kind, ConSanProbeIntentKind::FenceRecord);
 }
 
 TEST(ConSanAtomicFencePolicy, OrdinaryFenceAssociationDefinesEachEngineEvidenceContract) {

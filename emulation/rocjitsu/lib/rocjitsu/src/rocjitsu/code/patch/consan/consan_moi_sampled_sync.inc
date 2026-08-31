@@ -664,7 +664,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
   }
 
   const std::vector<MoiBarrierEvidenceSitePlan> barrier_plans =
-      build_moi_barrier_evidence_site_plans(result.program_inventory, result.observation_plan,
+      build_moi_barrier_evidence_site_plans(result.program_inventory, result.observation_plan(),
                                             ConSanProbeIntentKind::SampledBarrierEpoch,
                                             result.errors);
   if (!result.errors.empty())
@@ -1528,7 +1528,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
   };
   std::vector<Candidate> candidates;
   const SynchronizationInventoryView graph = result.program_inventory.sync();
-  for (const ConSanAtomicSiteDecision &decision : result.observation_plan.atomic_site_decisions) {
+  for (const ConSanAtomicSiteDecision &decision : result.observation_plan().atomic_site_decisions) {
     if (decision.reason != ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable)
       continue;
     for (const std::string &container_name : decision.source_containers) {
@@ -1537,7 +1537,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     }
   }
   std::vector<MoiAtomicEvidenceSitePlan> admitted = build_moi_atomic_evidence_site_plans(
-      result.program_inventory, result.observation_plan,
+      result.program_inventory, result.observation_plan(),
       ConSanProbeIntentKind::SampledAtomicOrdering, result.errors);
   if (!result.errors.empty())
     return;
@@ -2021,9 +2021,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                                           ? original_code_object.text_sections().front()->size()
                                           : 0u;
   const uint64_t reserved_barrier_island_count =
-      sampled_reserved_barrier_island_count(result.observation_plan, options, options);
+      sampled_reserved_barrier_island_count(result.observation_plan(), options, options);
   const uint64_t reserved_atomic_island_count =
-      sampled_reserved_atomic_island_count(result.observation_plan, options, options, options);
+      sampled_reserved_atomic_island_count(result.observation_plan(), options, options, options);
   const uint64_t reserved_atomic_island_begin =
       original_text_size +
       reserved_barrier_island_count * kMoiRecordReplayIndirectIslandWords * sizeof(uint32_t);

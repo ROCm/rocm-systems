@@ -19,9 +19,10 @@ namespace rocjitsu {
 /// machine-code geometry use this adapter to create the smallest valid
 /// transaction, including the runtime attribution required by access intents.
 [[nodiscard]] inline bool publish_test_lowering_outcome(
-    ConSanCoverageLedger &ledger, const ConSanObservationPlan &plan, ConSanProbeIntentId id,
-    ConSanLoweringOutcomeKind outcome, std::string detail = {},
+    ConSanCoverageLedger &ledger, ConSanProbeIntentId id, ConSanLoweringOutcomeKind outcome,
+    std::string detail = {},
     std::optional<ConSanRegisterPlanReason> resource_rejection_reason = std::nullopt) {
+  const ConSanObservationPlan &plan = ledger.observation_plan();
   const ConSanProbeIntent *intent = plan.intent(id);
   if (intent == nullptr)
     return false;

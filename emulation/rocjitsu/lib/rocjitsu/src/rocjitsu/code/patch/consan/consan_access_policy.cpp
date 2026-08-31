@@ -380,14 +380,12 @@ bool ConSanObservationPlan::append(const ConSanObservationPlan &fragment) {
   return true;
 }
 
-ConSanCoverageLedger::ConSanCoverageLedger(const ConSanObservationPlan &plan)
-    : site_decisions_(plan.site_decisions), barrier_site_decisions_(plan.barrier_site_decisions),
-      atomic_site_decisions_(plan.atomic_site_decisions),
-      fence_site_decisions_(plan.fence_site_decisions) {
-  intent_entries_.reserve(plan.probe_intents.size());
-  for (const ConSanProbeIntent &intent : plan.probe_intents)
+ConSanCoverageLedger::ConSanCoverageLedger(ConSanObservationPlan plan)
+    : observation_plan_(std::move(plan)) {
+  intent_entries_.reserve(observation_plan_.probe_intents.size());
+  for (const ConSanProbeIntent &intent : observation_plan_.probe_intents)
     intent_entries_.push_back({
-        .intent = intent,
+        .intent_id = intent.id,
         .lowering = ConSanLoweringOutcomeKind::Pending,
         .resource_rejection_reason = std::nullopt,
         .detail = {},
@@ -398,7 +396,7 @@ const ConSanIntentCoverageEntry *ConSanCoverageLedger::intent_entry(ConSanProbeI
   if (!id.valid() || id.value >= intent_entries_.size())
     return nullptr;
   const ConSanIntentCoverageEntry &entry = intent_entries_[id.value];
-  return entry.intent.id == id ? &entry : nullptr;
+  return entry.intent_id == id ? &entry : nullptr;
 }
 
 template <typename ResolveIntent>
@@ -573,10 +571,8 @@ bool committed_lowering_is_valid(const ConSanCommittedLowering &commit,
 }
 
 bool ConSanCoverageLedger::publish_lowering_commit(ConSanCommittedLowering commit) {
-  if (!committed_lowering_is_valid(commit, [&](ConSanProbeIntentId id) {
-        const ConSanIntentCoverageEntry *entry = intent_entry(id);
-        return entry == nullptr ? nullptr : &entry->intent;
-      })) {
+  if (!committed_lowering_is_valid(
+          commit, [&](ConSanProbeIntentId id) { return observation_plan_.intent(id); })) {
     return false;
   }
   for (ConSanProbeIntentId id : commit.intent_ids) {
@@ -615,10 +611,8 @@ bool ConSanCoverageLedger::publish_coalescing_instrumented_commits(
   };
   for (ConSanCommittedLowering &incoming : commits) {
     if (incoming.outcome != ConSanLoweringOutcomeKind::Instrumented ||
-        !committed_lowering_is_valid(incoming, [&](ConSanProbeIntentId id) {
-          const ConSanIntentCoverageEntry *entry = next.intent_entry(id);
-          return entry == nullptr ? nullptr : &entry->intent;
-        })) {
+        !committed_lowering_is_valid(
+            incoming, [&](ConSanProbeIntentId id) { return next.observation_plan_.intent(id); })) {
       return false;
     }
     for (size_t index = 0; index < next.lowering_commits_.size();) {
@@ -660,21 +654,6 @@ ConSanRuntimeStaticMapping ConSanCoverageLedger::runtime_static_mapping() const 
   for (const ConSanCommittedLowering &commit : lowering_commits_)
     mapping.append(commit.runtime_mapping);
   return mapping;
-}
-
-bool ConSanCoverageLedger::matches_plan(const ConSanObservationPlan &plan) const {
-  if (site_decisions_ != plan.site_decisions ||
-      barrier_site_decisions_ != plan.barrier_site_decisions ||
-      atomic_site_decisions_ != plan.atomic_site_decisions ||
-      fence_site_decisions_ != plan.fence_site_decisions ||
-      intent_entries_.size() != plan.probe_intents.size()) {
-    return false;
-  }
-  for (size_t index = 0; index < intent_entries_.size(); ++index) {
-    if (intent_entries_[index].intent != plan.probe_intents[index])
-      return false;
-  }
-  return true;
 }
 
 void ConSanCoverageLedger::discard_instrumented_lowerings() {

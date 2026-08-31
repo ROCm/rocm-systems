@@ -99,7 +99,7 @@ make_moi_sync_lowering_commit(const ConSanObservationPlan &observation,
                                                    const ConSanCommittedPatchGeometry &patch,
                                                    std::string_view probe_name,
                                                    std::vector<ConSanCommittedLowering> &commits) {
-  auto commit = make_moi_sync_lowering_commit(result.observation_plan, intent_ids, patch);
+  auto commit = make_moi_sync_lowering_commit(result.observation_plan(), intent_ids, patch);
   if (!commit) {
     result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                                " produced an invalid intent-bound lowering");

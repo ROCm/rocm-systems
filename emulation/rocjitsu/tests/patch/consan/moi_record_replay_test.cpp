@@ -187,7 +187,7 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_FALSE(result.modified());
-  EXPECT_EQ(result.observation_plan.engine, ConSanCapabilityEngine::RecordReplay);
+  EXPECT_EQ(result.observation_plan().engine, ConSanCapabilityEngine::RecordReplay);
   EXPECT_TRUE(result.replacement.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
@@ -335,21 +335,21 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().sync_events.front().kind, ConSanSyncEventKind::Barrier);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
-  ASSERT_EQ(std::ranges::count(result.observation_plan.site_decisions,
+  ASSERT_EQ(std::ranges::count(result.observation_plan().site_decisions,
                                ConSanSiteDecisionKind::Admitted, &ConSanSiteDecision::kind),
             1u);
-  ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 1u);
-  EXPECT_EQ(result.observation_plan.barrier_site_decisions.front().kind,
+  ASSERT_EQ(result.observation_plan().barrier_site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan().barrier_site_decisions.front().kind,
             ConSanSiteDecisionKind::Admitted);
-  EXPECT_EQ(result.observation_plan.barrier_site_decisions.front().reason,
+  EXPECT_EQ(result.observation_plan().barrier_site_decisions.front().reason,
             ConSanBarrierPolicyReason::None);
-  EXPECT_EQ(result.observation_plan.barrier_site_decisions.front().source_containers,
+  EXPECT_EQ(result.observation_plan().barrier_site_decisions.front().source_containers,
             (std::vector<std::string>{"shared_owner_0", "shared_owner_1"}));
-  ASSERT_EQ(result.observation_plan.probe_intents.size(), 2u);
+  ASSERT_EQ(result.observation_plan().probe_intents.size(), 2u);
   const auto access_decision =
-      std::ranges::find(result.observation_plan.site_decisions, ConSanSiteDecisionKind::Admitted,
+      std::ranges::find(result.observation_plan().site_decisions, ConSanSiteDecisionKind::Admitted,
                         &ConSanSiteDecision::kind);
-  ASSERT_NE(access_decision, result.observation_plan.site_decisions.end());
+  ASSERT_NE(access_decision, result.observation_plan().site_decisions.end());
   EXPECT_EQ(access_decision->source_containers,
             (std::vector<std::string>{"shared_owner_0", "shared_owner_1"}));
   ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 2u);
@@ -508,10 +508,10 @@ TEST(ConSanMoi, RecordReplayDenseAliasedKernelBarriersUseKernelRelayBounds) {
                                &ConSanPatchInfo::kind),
             2u * kSiteCount)
       << testing::PrintToString(result.warnings);
-  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.barrier_site_decisions,
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan().barrier_site_decisions,
                                            ConSanLoweringOutcomeKind::Instrumented),
             2u * kSiteCount);
-  EXPECT_TRUE(std::ranges::all_of(result.observation_plan.barrier_site_decisions,
+  EXPECT_TRUE(std::ranges::all_of(result.observation_plan().barrier_site_decisions,
                                   [](const ConSanBarrierSiteDecision &decision) {
                                     return decision.source_containers.size() == 2u;
                                   }));
@@ -660,15 +660,15 @@ TEST(ConSanMoi, ReportBufferRetryHandlesRecordReplaySyncInventory) {
   EXPECT_NE(std::ranges::find(retried.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                               &ConSanPatchInfo::kind),
             retried.patches.end());
-  EXPECT_EQ(retried.observation_plan, fresh.observation_plan);
-  EXPECT_EQ(consan_decision_count(retried.observation_plan.barrier_site_decisions,
+  EXPECT_EQ(retried.observation_plan(), fresh.observation_plan());
+  EXPECT_EQ(consan_decision_count(retried.observation_plan().barrier_site_decisions,
                                   ConSanSiteDecisionKind::Admitted),
             2u);
-  ASSERT_EQ(retried.observation_plan.barrier_site_decisions.size(), 2u);
-  ASSERT_EQ(retried.observation_plan.barrier_site_decisions.front().intent_ids.size(), 1u);
-  ASSERT_EQ(retried.observation_plan.barrier_site_decisions.back().intent_ids.size(), 1u);
-  EXPECT_NE(retried.observation_plan.barrier_site_decisions.front().intent_ids,
-            retried.observation_plan.barrier_site_decisions.back().intent_ids);
+  ASSERT_EQ(retried.observation_plan().barrier_site_decisions.size(), 2u);
+  ASSERT_EQ(retried.observation_plan().barrier_site_decisions.front().intent_ids.size(), 1u);
+  ASSERT_EQ(retried.observation_plan().barrier_site_decisions.back().intent_ids.size(), 1u);
+  EXPECT_NE(retried.observation_plan().barrier_site_decisions.front().intent_ids,
+            retried.observation_plan().barrier_site_decisions.back().intent_ids);
   EXPECT_EQ(retried.coverage_ledger, fresh.coverage_ledger);
   EXPECT_TRUE(std::ranges::none_of(retried.coverage_ledger.intent_entries(), [](const auto &entry) {
     return entry.lowering == ConSanLoweringOutcomeKind::Pending;
@@ -709,7 +709,9 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
   expect_invalid(pristine, wrong_bytes, "code-object bytes");
 
   ConSanTransformArtifacts wrong_engine = pristine;
-  wrong_engine.observation_plan.engine = ConSanCapabilityEngine::Sampled;
+  ConSanObservationPlan wrong_engine_plan = pristine.observation_plan();
+  wrong_engine_plan.engine = ConSanCapabilityEngine::Sampled;
+  wrong_engine.coverage_ledger = ConSanCoverageLedger(std::move(wrong_engine_plan));
   expect_invalid(std::move(wrong_engine), bytes, "requested engine");
 
   ConSanTransformArtifacts wrong_target = pristine;
@@ -1511,8 +1513,9 @@ TEST(ConSanMoi, AutoRecordReplayRejectsDispatchIdentityWithoutPersistentVgprPair
   })) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(std::ranges::any_of(
       result.coverage_ledger.intent_entries(),
-      [](const ConSanIntentCoverageEntry &entry) {
-        return entry.intent.kind == ConSanProbeIntentKind::BarrierRecord &&
+      [&](const ConSanIntentCoverageEntry &entry) {
+        const ConSanProbeIntent *intent = result.coverage_ledger.intent(entry.intent_id);
+        return intent != nullptr && intent->kind == ConSanProbeIntentKind::BarrierRecord &&
                entry.lowering == ConSanLoweringOutcomeKind::ResourceRejected &&
                entry.resource_rejection_reason == ConSanRegisterPlanReason::NoLegalWindow;
       }))
@@ -1520,14 +1523,19 @@ TEST(ConSanMoi, AutoRecordReplayRejectsDispatchIdentityWithoutPersistentVgprPair
   ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 3u)
       << testing::PrintToString(result.coverage_ledger.intent_entries());
   EXPECT_EQ(std::ranges::count_if(result.coverage_ledger.intent_entries(),
-                                  [](const ConSanIntentCoverageEntry &entry) {
-                                    return entry.intent.kind == ConSanProbeIntentKind::AccessRecord;
+                                  [&](const ConSanIntentCoverageEntry &entry) {
+                                    const ConSanProbeIntent *intent =
+                                        result.coverage_ledger.intent(entry.intent_id);
+                                    return intent != nullptr &&
+                                           intent->kind == ConSanProbeIntentKind::AccessRecord;
                                   }),
             1);
   EXPECT_EQ(std::ranges::count_if(result.coverage_ledger.intent_entries(),
-                                  [](const ConSanIntentCoverageEntry &entry) {
-                                    return entry.intent.kind ==
-                                           ConSanProbeIntentKind::BarrierRecord;
+                                  [&](const ConSanIntentCoverageEntry &entry) {
+                                    const ConSanProbeIntent *intent =
+                                        result.coverage_ledger.intent(entry.intent_id);
+                                    return intent != nullptr &&
+                                           intent->kind == ConSanProbeIntentKind::BarrierRecord;
                                   }),
             2);
   EXPECT_TRUE(std::ranges::all_of(result.coverage_ledger.intent_entries(),
@@ -7101,13 +7109,13 @@ TEST(ConSanMoi, BarrierRecordPatchTrampolinesBarrierAndWritesRecord) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified());
-  ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 1u);
-  EXPECT_EQ(result.observation_plan.barrier_site_decisions.front().kind,
+  ASSERT_EQ(result.observation_plan().barrier_site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan().barrier_site_decisions.front().kind,
             ConSanSiteDecisionKind::Admitted);
   const auto barrier_intent =
-      std::ranges::find(result.observation_plan.probe_intents, ConSanProbeIntentKind::BarrierRecord,
-                        &ConSanProbeIntent::kind);
-  ASSERT_NE(barrier_intent, result.observation_plan.probe_intents.end());
+      std::ranges::find(result.observation_plan().probe_intents,
+                        ConSanProbeIntentKind::BarrierRecord, &ConSanProbeIntent::kind);
+  ASSERT_NE(barrier_intent, result.observation_plan().probe_intents.end());
   const ConSanIntentCoverageEntry *barrier_coverage =
       result.coverage_ledger.intent_entry(barrier_intent->id);
   ASSERT_NE(barrier_coverage, nullptr);
@@ -7241,14 +7249,14 @@ TEST(ConSanMoi, Cdna4AdjacentFullBarriersShareOneRecordProbe) {
       sizeof(uint32_t));
   ASSERT_EQ(second_barrier.size(), 1u);
   EXPECT_EQ(second_barrier.front(), *barrier);
-  ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 2u);
-  EXPECT_EQ(result.observation_plan.barrier_site_decisions[0].kind,
+  ASSERT_EQ(result.observation_plan().barrier_site_decisions.size(), 2u);
+  EXPECT_EQ(result.observation_plan().barrier_site_decisions[0].kind,
             ConSanSiteDecisionKind::Admitted);
-  EXPECT_EQ(result.observation_plan.barrier_site_decisions[1].kind,
+  EXPECT_EQ(result.observation_plan().barrier_site_decisions[1].kind,
             ConSanSiteDecisionKind::NotApplicable);
-  EXPECT_EQ(result.observation_plan.barrier_site_decisions[1].reason,
+  EXPECT_EQ(result.observation_plan().barrier_site_decisions[1].reason,
             ConSanBarrierPolicyReason::RedundantAdjacentFullBarrier);
-  EXPECT_EQ(std::ranges::count(result.observation_plan.probe_intents,
+  EXPECT_EQ(std::ranges::count(result.observation_plan().probe_intents,
                                ConSanProbeIntentKind::BarrierRecord, &ConSanProbeIntent::kind),
             1u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -8741,18 +8749,18 @@ TEST(ConSanMoi, Cdna4RecordReplayCarriesMixedPersistentStateAcrossAtomicAndFence
     EXPECT_FALSE(patch->persistent_owner_private_offset);
     EXPECT_FALSE(patch->persistent_record_replay_workgroup_private_offsets.complete());
   }
-  EXPECT_EQ(consan_decision_count(result.observation_plan.atomic_site_decisions,
+  EXPECT_EQ(consan_decision_count(result.observation_plan().atomic_site_decisions,
                                   ConSanSiteDecisionKind::Admitted),
-            result.observation_plan.atomic_site_decisions.size());
-  EXPECT_EQ(consan_decision_count(result.observation_plan.fence_site_decisions,
+            result.observation_plan().atomic_site_decisions.size());
+  EXPECT_EQ(consan_decision_count(result.observation_plan().fence_site_decisions,
                                   ConSanSiteDecisionKind::Admitted),
-            result.observation_plan.fence_site_decisions.size());
-  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.atomic_site_decisions,
+            result.observation_plan().fence_site_decisions.size());
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan().atomic_site_decisions,
                                            ConSanLoweringOutcomeKind::Instrumented),
-            result.observation_plan.atomic_site_decisions.size());
-  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.fence_site_decisions,
+            result.observation_plan().atomic_site_decisions.size());
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan().fence_site_decisions,
                                            ConSanLoweringOutcomeKind::Instrumented),
-            result.observation_plan.fence_site_decisions.size());
+            result.observation_plan().fence_site_decisions.size());
 }
 
 TEST(ConSanMoi, Cdna4RecordReplayRoutesWithoutDeadTransientScalarRegisters) {
@@ -10415,10 +10423,10 @@ TEST(ConSanMoi, Gfx1250WaveScopeAtomicIsTypedNotApplicable) {
       test_lower_consan(make_gfx1250_code_object(text_words, "gfx1250_wave_atomic"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.observation_plan.atomic_site_decisions.size(), 1u);
-  EXPECT_EQ(result.observation_plan.atomic_site_decisions.front().kind,
+  ASSERT_EQ(result.observation_plan().atomic_site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan().atomic_site_decisions.front().kind,
             ConSanSiteDecisionKind::NotApplicable);
-  EXPECT_EQ(result.observation_plan.atomic_site_decisions.front().reason,
+  EXPECT_EQ(result.observation_plan().atomic_site_decisions.front().reason,
             ConSanAtomicPolicyReason::UnsupportedScope);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
                                &ConSanPatchInfo::kind),
@@ -10458,7 +10466,7 @@ TEST(ConSanMoi, Gfx1250IsolatedLdsReleaseIsRetainedWithAccessReplay) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             1u);
-  EXPECT_EQ(consan_decision_count(result.observation_plan.atomic_site_decisions,
+  EXPECT_EQ(consan_decision_count(result.observation_plan().atomic_site_decisions,
                                   ConSanSiteDecisionKind::Admitted),
             1u);
 }
@@ -11415,7 +11423,7 @@ TEST(ConSanMoi, Rdna4DenseFunctionBarriersUseRelocatableRouter) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
                                &ConSanPatchInfo::kind),
             2u * kSiteCount);
-  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.barrier_site_decisions,
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan().barrier_site_decisions,
                                            ConSanLoweringOutcomeKind::Instrumented),
             2u * kSiteCount);
 }
@@ -12185,10 +12193,10 @@ TEST(ConSanMoi, FenceRecordAcceptsSupportedRdna4OrdinaryAcquireAddress) {
   EXPECT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
   EXPECT_EQ(result.program_inventory.kernels().front().ordinary_memory_sites.front().support_reason,
             ConSanOrdinaryMemorySupportReason::Supported);
-  ASSERT_EQ(result.observation_plan.fence_site_decisions.size(), 1u);
-  EXPECT_EQ(result.observation_plan.fence_site_decisions.front().kind,
+  ASSERT_EQ(result.observation_plan().fence_site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan().fence_site_decisions.front().kind,
             ConSanSiteDecisionKind::Admitted);
-  EXPECT_EQ(result.observation_plan.fence_site_decisions.front().reason,
+  EXPECT_EQ(result.observation_plan().fence_site_decisions.front().reason,
             ConSanFencePolicyReason::None);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                &ConSanPatchInfo::kind),
@@ -12270,8 +12278,8 @@ TEST(ConSanMoi, FenceRecordPatchRejectsStaleCommunicationIdentityWithoutGuessing
   EXPECT_EQ(std::ranges::count(result.resource_plans, ConSanResourceSiteKind::Fence,
                                &ConSanCandidateResourcePlan::site_kind),
             0);
-  ASSERT_EQ(result.observation_plan.fence_site_decisions.size(), 2u);
-  for (const ConSanFenceSiteDecision &decision : result.observation_plan.fence_site_decisions) {
+  ASSERT_EQ(result.observation_plan().fence_site_decisions.size(), 2u);
+  for (const ConSanFenceSiteDecision &decision : result.observation_plan().fence_site_decisions) {
     EXPECT_EQ(decision.kind, ConSanSiteDecisionKind::Unsupported);
     EXPECT_EQ(decision.reason, ConSanFencePolicyReason::MissingCommunicationEvent);
   }
@@ -12320,8 +12328,8 @@ TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
   EXPECT_EQ(std::ranges::count(result.resource_plans, ConSanResourceSiteKind::Fence,
                                &ConSanCandidateResourcePlan::site_kind),
             0);
-  ASSERT_EQ(result.observation_plan.fence_site_decisions.size(), 2u);
-  for (const ConSanFenceSiteDecision &decision : result.observation_plan.fence_site_decisions) {
+  ASSERT_EQ(result.observation_plan().fence_site_decisions.size(), 2u);
+  for (const ConSanFenceSiteDecision &decision : result.observation_plan().fence_site_decisions) {
     EXPECT_EQ(decision.kind, ConSanSiteDecisionKind::NotApplicable);
     EXPECT_EQ(decision.reason, ConSanFencePolicyReason::MissingExecutionOwner);
   }
@@ -12703,11 +12711,11 @@ TEST(ConSanMoi, Cdna4AtomicRecordForcedSpillUsesNativePrivateWindow) {
     return warning.find("fence record patch rejected communication address: "
                         "scratch-operand-alias") != std::string::npos;
   }));
-  EXPECT_EQ(result.observation_plan.fence_site_decisions.size(), 2u);
-  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.fence_site_decisions,
+  EXPECT_EQ(result.observation_plan().fence_site_decisions.size(), 2u);
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan().fence_site_decisions,
                                            ConSanLoweringOutcomeKind::PlacementRejected),
             1u)
-      << "decisions=" << testing::PrintToString(result.observation_plan.fence_site_decisions)
+      << "decisions=" << testing::PrintToString(result.observation_plan().fence_site_decisions)
       << " ledger=" << testing::PrintToString(result.coverage_ledger.intent_entries());
 }
 
@@ -12871,7 +12879,7 @@ TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesAccessAndOrderingRecords) {
   EXPECT_EQ(access->anchor_offset, atomic->anchor_offset);
   EXPECT_NE(*access->relocated_guest_instruction_offset,
             *atomic->relocated_guest_instruction_offset);
-  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.atomic_site_decisions,
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan().atomic_site_decisions,
                                            ConSanLoweringOutcomeKind::Instrumented),
             1u);
 }

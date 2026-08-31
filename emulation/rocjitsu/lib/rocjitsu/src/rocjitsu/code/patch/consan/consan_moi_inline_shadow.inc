@@ -109,10 +109,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       options.moi_exec_save_sgpr.has_value() &&
       (candidates.size() >= 8u || has_function_candidate || has_branch_only_scalar_assignment);
   const uint64_t reserved_barrier_island_count =
-      use_indirect_appended
-          ? moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan,
-                                                  options, options, options)
-          : 0u;
+      use_indirect_appended ? moi_reserved_access_sync_island_count(result.program_inventory,
+                                                                    result.observation_plan(),
+                                                                    options, options, options)
+                            : 0u;
   const uint64_t indirect_body_begin =
       original_text_size + reserved_barrier_island_count * kIndirectIslandWords * sizeof(uint32_t) +
       candidates.size() * access_relay_words * sizeof(uint32_t);
@@ -1306,7 +1306,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
               (words->size() - planned_patch.guest_instruction_word_count) * sizeof(uint32_t);
         }
       }
-      auto commit = make_moi_access_lowering_commit(result.observation_plan, candidate, info);
+      auto commit = make_moi_access_lowering_commit(result.observation_plan(), candidate, info);
       if (!commit) {
         result.errors.emplace_back(
             "ConSan MOI inline-shadow probe produced an invalid intent-bound lowering");

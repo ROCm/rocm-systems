@@ -47,7 +47,7 @@ void try_apply_first_light_access_record_patch(
   // one-word branch anchors remain in direct reach of the appended ordering
   // caves even for very large code objects.
   std::vector<const ConSanMoiCandidate *> candidates = order_moi_replay_access_candidates(
-      admitted, result.observation_plan, options.moi_track_atomics);
+      admitted, result.observation_plan(), options.moi_track_atomics);
   if (candidates.empty()) {
     result.warnings.emplace_back("ConSan MOI first-light probe found no native LDS or likely group "
                                  "flat load/store candidate");
@@ -141,10 +141,10 @@ void try_apply_first_light_access_record_patch(
   // plus every fence candidate; otherwise the access pass can consume every
   // reachable island before a later synchronization pass runs.
   const uint64_t reserved_sync_island_count =
-      use_indirect_appended
-          ? moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan,
-                                                  options, options, options)
-          : 0u;
+      use_indirect_appended ? moi_reserved_access_sync_island_count(result.program_inventory,
+                                                                    result.observation_plan(),
+                                                                    options, options, options)
+                            : 0u;
   const uint64_t reserved_sync_slot_words =
       has_branch_only_scalar_assignment
           ? kMoiRecordReplayBarrierRelaySlotWords
@@ -1064,7 +1064,7 @@ void try_apply_first_light_access_record_patch(
   // passes are independent downstream consumers of that frontier. Preserve
   // every planned reservoir when synchronization is enabled; otherwise an
   // access batch that happens not to claim one can strand a later pass.
-  if (moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan,
+  if (moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan(),
                                             options, options, options) != 0u) {
     for (BranchOnlyDirectRelayReservoir &reservoir : direct_branch_reservoirs.reservoirs)
       reservoir.used = true;
@@ -1477,7 +1477,7 @@ void try_apply_first_light_access_record_patch(
         if (selected_record_replay_anchor_relay_offsets.contains(offset))
           info.branch_relay_offsets.push_back(offset);
       }
-      auto commit = make_moi_access_lowering_commit(result.observation_plan, candidate, info);
+      auto commit = make_moi_access_lowering_commit(result.observation_plan(), candidate, info);
       if (!commit) {
         result.errors.emplace_back(
             "ConSan MOI first-light probe produced an invalid intent-bound lowering");

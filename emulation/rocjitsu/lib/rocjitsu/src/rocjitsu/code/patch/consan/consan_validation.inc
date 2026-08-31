@@ -3151,7 +3151,7 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
       continue;
     }
     const bool has_semantic_system_sgpr_restore =
-        consan_detail::patch_requires_full_workgroup_id_payload(result.observation_plan.engine,
+        consan_detail::patch_requires_full_workgroup_id_payload(result.observation_plan().engine,
                                                                 arch, patch);
     validate_entry(patch,
                    patch.dispatch_id_primary_prologue_offset.value_or(patch.trampoline_offset),
@@ -3308,12 +3308,12 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
     };
     if (patch.workgroup_shadow_size != 0u) {
       const auto intent = std::ranges::find_if(
-          result.observation_plan.probe_intents, [&](const ConSanProbeIntent &candidate) {
+          result.observation_plan().probe_intents, [&](const ConSanProbeIntent &candidate) {
             return candidate.kind == ConSanProbeIntentKind::ExactShadowAccess &&
                    candidate.physical_site.original_text_offset == patch.anchor_offset;
           });
       const auto access =
-          intent == result.observation_plan.probe_intents.end()
+          intent == result.observation_plan().probe_intents.end()
               ? result.program_inventory.access_sites().end()
               : std::ranges::find(result.program_inventory.access_sites(), intent->physical_site,
                                   &ConSanAccessInventorySite::physical_id);
@@ -3923,7 +3923,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   }
   for (const ConSanPatchInfo &patch : result.patches) {
     const bool requires_full_workgroup_id = consan_detail::patch_requires_full_workgroup_id_payload(
-        result.observation_plan.engine, arch, patch);
+        result.observation_plan().engine, arch, patch);
     if (patch.persistent_dispatch_id_private_offset) {
       const uint32_t offset = *patch.persistent_dispatch_id_private_offset;
       if (!patch.persistent_epoch_private_offset || !patch.persistent_private_state_end ||
@@ -4379,8 +4379,6 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   }
   if (result.patches.empty())
     errors.emplace_back("ConSan final validation found no patch inventory for a modified result");
-  if (!result.coverage_ledger.matches_plan(result.observation_plan))
-    errors.emplace_back("ConSan final validation found coverage outside the observation plan");
   FinalValidationEnvironment environment(original, replacement);
   validate_patch_byte_accounting(environment, result, errors);
   validate_patch_decoding(environment, result, errors);

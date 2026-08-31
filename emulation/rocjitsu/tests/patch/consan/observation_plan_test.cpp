@@ -328,31 +328,31 @@ TEST(ConSanObservationPlan, AppendRebasesBothDecisionFamiliesAndIsTransactional)
   EXPECT_EQ(combined, before);
 }
 
-TEST(ConSanObservationPlan, CoverageLedgerSeparatesPolicyFromLoweringAndCopiesPlan) {
+TEST(ConSanObservationPlan, CoverageLedgerSolelyOwnsPlanAndJoinedLoweringState) {
   const ConSanAccessPolicyResult policy = plan_consan_access_observation(
       one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
   ASSERT_TRUE(policy.valid());
   ConSanCoverageLedger ledger(policy.plan);
+  EXPECT_EQ(ledger.observation_plan(), policy.plan);
   ASSERT_TRUE(std::ranges::equal(ledger.site_decisions(), policy.plan.site_decisions));
   ASSERT_EQ(ledger.intent_entries().size(), 1u);
+  EXPECT_EQ(ledger.intent_entries().front().intent_id, policy.plan.probe_intents.front().id);
+  EXPECT_EQ(ledger.intent({0}), &ledger.observation_plan().probe_intents.front());
   EXPECT_EQ(ledger.intent_entries().front().lowering, ConSanLoweringOutcomeKind::Pending);
   EXPECT_FALSE(ledger.all_intents_instrumented());
 
   ConSanCoverageLedger copied = ledger;
-  EXPECT_FALSE(publish_test_lowering_outcome(ledger, policy.plan, {},
-                                             ConSanLoweringOutcomeKind::Instrumented));
-  EXPECT_FALSE(publish_test_lowering_outcome(ledger, policy.plan, {7},
-                                             ConSanLoweringOutcomeKind::Instrumented));
-  EXPECT_FALSE(
-      publish_test_lowering_outcome(ledger, policy.plan, {0}, ConSanLoweringOutcomeKind::Count));
-  EXPECT_TRUE(publish_test_lowering_outcome(ledger, policy.plan, {0},
-                                            ConSanLoweringOutcomeKind::Instrumented, "placed"));
+  EXPECT_FALSE(publish_test_lowering_outcome(ledger, {}, ConSanLoweringOutcomeKind::Instrumented));
+  EXPECT_FALSE(publish_test_lowering_outcome(ledger, {7}, ConSanLoweringOutcomeKind::Instrumented));
+  EXPECT_FALSE(publish_test_lowering_outcome(ledger, {0}, ConSanLoweringOutcomeKind::Count));
+  EXPECT_TRUE(publish_test_lowering_outcome(ledger, {0}, ConSanLoweringOutcomeKind::Instrumented,
+                                            "placed"));
   EXPECT_TRUE(ledger.all_intents_instrumented());
   ASSERT_NE(ledger.intent_entry({0}), nullptr);
   EXPECT_EQ(ledger.intent_entry({0})->detail, "placed");
 
-  EXPECT_TRUE(publish_test_lowering_outcome(copied, policy.plan, {0},
-                                            ConSanLoweringOutcomeKind::ResourceRejected));
+  EXPECT_TRUE(
+      publish_test_lowering_outcome(copied, {0}, ConSanLoweringOutcomeKind::ResourceRejected));
   EXPECT_EQ(ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Instrumented);
   EXPECT_EQ(copied.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::ResourceRejected);
 }
@@ -397,7 +397,6 @@ TEST(ConSanObservationPlan, CommittedLoweringBindsSeveralIntentsToOneLocation) {
   ASSERT_EQ(plan.probe_intents[0].physical_site, plan.probe_intents[1].physical_site);
 
   ConSanTransformArtifacts result;
-  result.observation_plan = plan;
   result.coverage_ledger = ConSanCoverageLedger(plan);
   ConSanPatchInfo unrelated_patch;
   unrelated_patch.kind = ConSanPatchKind::InlineNopRewrite;
@@ -488,7 +487,6 @@ TEST(ConSanObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransac
   ASSERT_TRUE(commit);
 
   ConSanTransformArtifacts result;
-  result.observation_plan = policy.plan;
   result.coverage_ledger = ConSanCoverageLedger(policy.plan);
   ConSanCommittedLowering malformed_commit = *commit;
   malformed_commit.runtime_mapping.record_replay_accesses.front()
@@ -501,7 +499,7 @@ TEST(ConSanObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransac
   EXPECT_EQ(result.coverage_ledger.runtime_static_mapping(), expected_mapping);
   ASSERT_EQ(result.coverage_ledger.lowering_commits().size(), 1u);
   EXPECT_EQ(result.coverage_ledger.lowering_commits().front().runtime_mapping, expected_mapping);
-  EXPECT_TRUE(result.coverage_ledger.matches_plan(policy.plan));
+  EXPECT_EQ(result.coverage_ledger.observation_plan(), policy.plan);
 
   ConSanRuntimeStaticMapping malformed = expected_mapping;
   malformed.record_replay_accesses.front().access.original_site.original_text_offset += 4u;
@@ -520,7 +518,6 @@ TEST(ConSanObservationPlan, CommittedLoweringRejectsExactlyItsBoundIntents) {
   ConSanObservationPlan plan = policy.plan;
   ASSERT_TRUE(plan.append(policy.plan));
   ConSanTransformArtifacts result;
-  result.observation_plan = plan;
   result.coverage_ledger = ConSanCoverageLedger(plan);
 
   const std::array rejected_id = {ConSanProbeIntentId{1}};
@@ -559,7 +556,6 @@ TEST(ConSanObservationPlan, CommittedLoweringBatchPublicationIsTransactional) {
   ConSanObservationPlan plan = policy.plan;
   ASSERT_TRUE(plan.append(policy.plan));
   ConSanTransformArtifacts result;
-  result.observation_plan = plan;
   result.coverage_ledger = ConSanCoverageLedger(plan);
 
   const std::array first_id = {ConSanProbeIntentId{0}};
@@ -630,7 +626,7 @@ TEST(ConSanObservationPlan, CoalescingPublicationOwnsMultiLocationSyncTransactio
   EXPECT_EQ(ledger.lowering_commits().front().locations,
             (std::vector{second_location.front(), first_location.front()}));
   EXPECT_EQ(ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Instrumented);
-  EXPECT_TRUE(ledger.matches_plan(plan));
+  EXPECT_EQ(ledger.observation_plan(), plan);
 }
 
 TEST(ConSanObservationPlan, DiscardedImageRetractsOnlyInstrumentedLoweringCommits) {
@@ -640,7 +636,6 @@ TEST(ConSanObservationPlan, DiscardedImageRetractsOnlyInstrumentedLoweringCommit
   ConSanObservationPlan plan = policy.plan;
   ASSERT_TRUE(plan.append(policy.plan));
   ConSanTransformArtifacts result;
-  result.observation_plan = plan;
   result.coverage_ledger = ConSanCoverageLedger(plan);
 
   const std::array rejected_id = {ConSanProbeIntentId{0}};
@@ -689,9 +684,9 @@ TEST(ConSanObservationPlan, CoverageLedgerOwnsBarrierDecisionsAlongsideAccessDec
   EXPECT_TRUE(std::ranges::equal(ledger.site_decisions(), plan.site_decisions));
   EXPECT_TRUE(std::ranges::equal(ledger.barrier_site_decisions(), plan.barrier_site_decisions));
   ASSERT_EQ(ledger.intent_entries().size(), 2u);
-  EXPECT_TRUE(
-      publish_test_lowering_outcome(ledger, plan, {1}, ConSanLoweringOutcomeKind::Instrumented));
-  EXPECT_EQ(ledger.intent_entry({1})->intent.kind, ConSanProbeIntentKind::BarrierRecord);
+  EXPECT_TRUE(publish_test_lowering_outcome(ledger, {1}, ConSanLoweringOutcomeKind::Instrumented));
+  ASSERT_NE(ledger.intent({1}), nullptr);
+  EXPECT_EQ(ledger.intent({1})->kind, ConSanProbeIntentKind::BarrierRecord);
 }
 
 TEST(ConSanAccessPolicy, AllFourEnginesMapOneAccessToTheirOwnEvidenceIntent) {
@@ -922,15 +917,15 @@ TEST(ConSanObservationPolicy, OneAuthorityAssemblesPlanAndInitialLedgerForEveryE
                     .reserved_for_synchronization = {}});
     SCOPED_TRACE(consan_capability_engine_name(engine));
     ASSERT_TRUE(product.valid());
-    EXPECT_EQ(product.plan.engine, engine);
-    EXPECT_EQ(product.initial_coverage, ConSanCoverageLedger(product.plan));
+    EXPECT_EQ(product.plan().engine, engine);
+    EXPECT_EQ(product.initial_coverage, ConSanCoverageLedger(product.plan()));
     EXPECT_TRUE(product.barrier_fragment_appended);
     EXPECT_EQ(product.atomic_fence_fragment_required, !supercollider);
     EXPECT_EQ(product.atomic_fence_fragment_appended, !supercollider);
-    ASSERT_EQ(product.plan.probe_intents.size(), 1u);
+    ASSERT_EQ(product.plan().probe_intents.size(), 1u);
     ASSERT_EQ(product.initial_coverage.intent_entries().size(), 1u);
-    EXPECT_EQ(product.initial_coverage.intent_entries().front().intent,
-              product.plan.probe_intents.front());
+    EXPECT_EQ(product.initial_coverage.intent_entries().front().intent_id,
+              product.plan().probe_intents.front().id);
   }
 }
 
@@ -1014,7 +1009,7 @@ TEST(ConSanObservationPolicy, ConflictingAliasesFailInTheAssembledProduct) {
   EXPECT_EQ(product.diagnostics.front(),
             "ConSan MOI physical access at original text offset 32 was decoded inconsistently "
             "through aliases 'first_alias', 'second_alias'");
-  EXPECT_EQ(product.initial_coverage, ConSanCoverageLedger(product.plan));
+  EXPECT_EQ(product.initial_coverage, ConSanCoverageLedger(product.plan()));
 }
 
 TEST(ConSanAccessPolicy, PolicyIsDeterministicAndDoesNotMutatePublishedInventory) {

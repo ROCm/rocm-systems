@@ -88,7 +88,7 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
   for (const PlannedPatch &planned_patch : planned_patches) {
     ConSanPatchInfo patch = make_patch_info(planned_patch);
     auto commit =
-        make_moi_access_lowering_commit(result.observation_plan, *planned_patch.candidate, patch);
+        make_moi_access_lowering_commit(result.observation_plan(), *planned_patch.candidate, patch);
     if (!commit) {
       result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                                  " produced an invalid intent-bound lowering");

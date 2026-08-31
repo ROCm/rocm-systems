@@ -27,7 +27,7 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
     ConSanTransformArtifacts inventory = std::move(inventory_artifacts);
     if (options.flavor != ConSanFlavor::Moi)
       inventory.errors.emplace_back("ConSan MOI inventory retry requires the MOI flavor");
-    if (inventory.observation_plan.engine !=
+    if (inventory.observation_plan().engine !=
         consan_capability_engine(ConSanFlavor::Moi, options.moi_engine)) {
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry does not match the requested engine");

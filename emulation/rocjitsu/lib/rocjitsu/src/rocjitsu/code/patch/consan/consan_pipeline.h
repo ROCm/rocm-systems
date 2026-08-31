@@ -283,9 +283,8 @@ public:
   ConSanDispatchRequirements dispatch_requirements;
   /// Immutable ownership of original code-object/container/access facts.
   ProgramInventory program_inventory;
-  /// Target-neutral policy result assembled once for the selected engine.
-  ConSanObservationPlan observation_plan;
-  /// Joined semantic-policy and authoritative lowering outcomes.
+  /// Sole ownership of target-neutral semantic policy and authoritative
+  /// lowering outcomes.
   ConSanCoverageLedger coverage_ledger;
   /// Validated runtime-facing projection of committed lowerings.
   ConSanRuntimeStaticMapping runtime_static_mapping;
@@ -302,6 +301,11 @@ public:
 
   /// Return the state for one stage, or null when `value` is not a real stage.
   [[nodiscard]] const ConSanPipelineStageState *stage(ConSanPipelineStage value) const;
+
+  /// Return the immutable semantic plan owned by the coverage ledger.
+  [[nodiscard]] const ConSanObservationPlan &observation_plan() const {
+    return coverage_ledger.observation_plan();
+  }
 
   /// Verify fixed-stage status, artifact relationships, result identity, and
   /// replacement-image invariants without consulting mutable global state.
@@ -388,7 +392,7 @@ public:
     return inventory_result_.program_inventory;
   }
   [[nodiscard]] const ConSanObservationPlan &observation_plan() const {
-    return inventory_result_.observation_plan;
+    return inventory_result_.observation_plan();
   }
   [[nodiscard]] const std::optional<ConSanEvidenceIntentPlan> &evidence_intent_plan() const {
     return inventory_result_.evidence_intent_plan;

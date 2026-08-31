@@ -1623,7 +1623,7 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
 
   std::unordered_set<std::string_view> owner_names;
   for (const ConSanPatchLoweringProduct &patch : result.patches) {
-    if (!consan_detail::patch_requires_full_workgroup_id_payload(result.observation_plan.engine,
+    if (!consan_detail::patch_requires_full_workgroup_id_payload(result.observation_plan().engine,
                                                                  arch, patch))
       continue;
     for (uint64_t descriptor_offset : patch.owner_descriptor_file_offsets) {

@@ -1,8 +1,8 @@
 [[nodiscard]] std::unordered_set<uint64_t>
 sc_admitted_access_file_offsets(const ConSanTransformArtifacts &result, ConSanAccessOrigin origin) {
   std::unordered_set<uint64_t> admitted_text_offsets;
-  admitted_text_offsets.reserve(result.observation_plan.probe_intents.size());
-  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+  admitted_text_offsets.reserve(result.observation_plan().probe_intents.size());
+  for (const ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
     if (intent.physical_site.code_object == result.program_inventory.code_object_id())
       admitted_text_offsets.insert(intent.physical_site.original_text_offset);
   }
@@ -19,7 +19,7 @@ sc_admitted_access_file_offsets(const ConSanTransformArtifacts &result, ConSanAc
 [[nodiscard]] std::vector<ConSanProbeIntentId>
 sc_pending_access_intent_ids(const ConSanTransformArtifacts &result, const PhysicalSiteId &site) {
   std::vector<ConSanProbeIntentId> intent_ids;
-  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+  for (const ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
     if (intent.kind != ConSanProbeIntentKind::RedundantAccessObservation ||
         intent.physical_site != site)
       continue;
@@ -37,7 +37,7 @@ sc_pending_access_intent_ids(const ConSanTransformArtifacts &result, const Physi
   std::vector<ConSanProbeIntentId> intent_ids = sc_pending_access_intent_ids(result, site);
   if (intent_ids.empty())
     return true;
-  auto commit = make_consan_committed_lowering(result.observation_plan, intent_ids,
+  auto commit = make_consan_committed_lowering(result.observation_plan(), intent_ids,
                                                std::span<const ConSanCommittedLoweringLocation>{},
                                                outcome, std::move(detail));
   if (!commit || !result.coverage_ledger.publish_lowering_commit(std::move(*commit))) {
@@ -67,7 +67,7 @@ sc_pending_access_intent_ids(const ConSanTransformArtifacts &result, const Physi
         .relocated_guest_text_offset = patch.relocated_guest_instruction_offset,
     });
   }
-  return make_consan_committed_lowering(result.observation_plan, intent_ids, locations,
+  return make_consan_committed_lowering(result.observation_plan(), intent_ids, locations,
                                         ConSanLoweringOutcomeKind::Instrumented);
 }
 
@@ -76,7 +76,7 @@ sc_pending_access_intent_ids(const ConSanTransformArtifacts &result, const Physi
 /// consults only immutable intent identity and the ledger's pending state; it
 /// never reconstructs success or failure from patch telemetry.
 void publish_unplaced_sc_access_rejections(ConSanTransformArtifacts &result) {
-  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+  for (const ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
     if (intent.kind != ConSanProbeIntentKind::RedundantAccessObservation)
       continue;
     const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(intent.id);

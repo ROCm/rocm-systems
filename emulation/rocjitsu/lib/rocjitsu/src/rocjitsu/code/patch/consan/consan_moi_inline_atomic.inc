@@ -31,8 +31,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return;
 
   std::vector<MoiAtomicEvidenceSitePlan> candidates = build_moi_atomic_evidence_site_plans(
-      result.program_inventory, result.observation_plan, ConSanProbeIntentKind::ExactAtomicOrdering,
-      result.errors);
+      result.program_inventory, result.observation_plan(),
+      ConSanProbeIntentKind::ExactAtomicOrdering, result.errors);
   if (!result.errors.empty())
     return;
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
@@ -59,7 +59,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   };
   std::vector<PlannedInlineAtomic> planned_candidates;
   MoiResourcePlanningStatePtr resource_state = make_moi_resource_planning_state(
-      bytes, arch, result.program_inventory, result.observation_plan, result.resource_plans,
+      bytes, arch, result.program_inventory, result.observation_plan(), result.resource_plans,
       options, options, options);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;

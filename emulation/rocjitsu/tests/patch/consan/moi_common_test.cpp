@@ -856,53 +856,50 @@ TEST(ConSanMoi, WorkgroupSourcesRejectAnyAmbiguousCoordinate) {
 }
 
 TEST(ConSanMoi, FullWorkgroupPayloadRequirementUsesMoiPatchSemantics) {
-  ConSanTransformArtifacts result;
-  result.observation_plan.engine = ConSanCapabilityEngine::RecordReplay;
+  constexpr ConSanCapabilityEngine engine = ConSanCapabilityEngine::RecordReplay;
   ConSanPatchInfo patch;
   patch.owner_descriptor_file_offsets.push_back(64u);
   patch.kind = ConSanPatchKind::InlineMoiAccessRecordStore;
 
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
-      result.observation_plan.engine, ROCJITSU_CODE_ARCH_RDNA4, patch));
+      engine, ROCJITSU_CODE_ARCH_RDNA4, patch));
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
-      result.observation_plan.engine, ROCJITSU_CODE_ARCH_CDNA5, patch));
+      engine, ROCJITSU_CODE_ARCH_CDNA5, patch));
   EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
-      result.observation_plan.engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
+      engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
   EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
-      result.observation_plan.engine, ROCJITSU_CODE_ARCH_INVALID, patch));
+      engine, ROCJITSU_CODE_ARCH_INVALID, patch));
 
   patch.kind = ConSanPatchKind::InlineMalformedBarrierAbort;
   EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
-      result.observation_plan.engine, ROCJITSU_CODE_ARCH_RDNA4, patch));
+      engine, ROCJITSU_CODE_ARCH_RDNA4, patch));
   patch.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
-      result.observation_plan.engine, ROCJITSU_CODE_ARCH_RDNA4, patch));
+      engine, ROCJITSU_CODE_ARCH_RDNA4, patch));
 
   patch.kind = ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
   EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
-      result.observation_plan.engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
+      engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
   patch.persistent_sgpr_state.record_replay_workgroup =
       ConSanMoiPersistentWorkgroupRegisters{20u, 21u, 22u};
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
-      result.observation_plan.engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
+      engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
   patch.persistent_sgpr_state = {};
   patch.persistent_record_replay_workgroup_vgprs =
       ConSanMoiPersistentWorkgroupRegisters{20u, 21u, 22u};
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
-      result.observation_plan.engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
+      engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
   patch.persistent_record_replay_workgroup_vgprs = {};
   patch.persistent_record_replay_workgroup_private_offsets =
       ConSanMoiPersistentWorkgroupPrivateOffsets{0u, 4u, 8u};
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
-      result.observation_plan.engine, ROCJITSU_CODE_ARCH_CDNA3, patch));
+      engine, ROCJITSU_CODE_ARCH_CDNA3, patch));
 
-  result.observation_plan.engine = ConSanCapabilityEngine::SuperCollider;
   EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
-      result.observation_plan.engine, ROCJITSU_CODE_ARCH_RDNA4, patch));
-  result.observation_plan.engine = ConSanCapabilityEngine::RecordReplay;
+      ConSanCapabilityEngine::SuperCollider, ROCJITSU_CODE_ARCH_RDNA4, patch));
   patch.owner_descriptor_file_offsets.clear();
   EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
-      result.observation_plan.engine, ROCJITSU_CODE_ARCH_RDNA4, patch));
+      engine, ROCJITSU_CODE_ARCH_RDNA4, patch));
 }
 
 TEST(ConSanMoi, DynamicRecordAddressExecutesExactStrideOnEveryTarget) {
@@ -1739,10 +1736,10 @@ TEST(ConSanMoi, Gfx1250RelaxedLdsAtomicIsAccessButNotSynchronization) {
   EXPECT_EQ(test_admitted_accesses(result).front().kind, ConSanLdsAccessKind::Atomic);
   EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "ds_cmpstore_rtn_b32");
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
-  ASSERT_EQ(result.observation_plan.atomic_site_decisions.size(), 1u);
-  EXPECT_EQ(result.observation_plan.atomic_site_decisions.front().kind,
+  ASSERT_EQ(result.observation_plan().atomic_site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan().atomic_site_decisions.front().kind,
             ConSanSiteDecisionKind::NotApplicable);
-  EXPECT_EQ(result.observation_plan.atomic_site_decisions.front().reason,
+  EXPECT_EQ(result.observation_plan().atomic_site_decisions.front().reason,
             ConSanAtomicPolicyReason::UnqualifiedSyncSequence);
 }
 
@@ -1819,10 +1816,10 @@ TEST(ConSanMoi, UnassociatedFenceIsNotApplicableOnEverySupportedTarget) {
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
     EXPECT_FALSE(result.program_inventory.sync().moi_fence_candidates.front().eligible());
-    ASSERT_EQ(result.observation_plan.fence_site_decisions.size(), 1u);
-    EXPECT_EQ(result.observation_plan.fence_site_decisions.front().kind,
+    ASSERT_EQ(result.observation_plan().fence_site_decisions.size(), 1u);
+    EXPECT_EQ(result.observation_plan().fence_site_decisions.front().kind,
               ConSanSiteDecisionKind::NotApplicable);
-    EXPECT_EQ(result.observation_plan.fence_site_decisions.front().reason,
+    EXPECT_EQ(result.observation_plan().fence_site_decisions.front().reason,
               ConSanFencePolicyReason::AssociationUnavailable);
   }
 }
@@ -1841,10 +1838,10 @@ TEST(ConSanMoi, Cdna4UnassociatedFenceIsNotApplicable) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
   EXPECT_FALSE(result.program_inventory.sync().moi_fence_candidates.front().eligible());
-  ASSERT_EQ(result.observation_plan.fence_site_decisions.size(), 1u);
-  EXPECT_EQ(result.observation_plan.fence_site_decisions.front().kind,
+  ASSERT_EQ(result.observation_plan().fence_site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan().fence_site_decisions.front().kind,
             ConSanSiteDecisionKind::NotApplicable);
-  EXPECT_EQ(result.observation_plan.fence_site_decisions.front().reason,
+  EXPECT_EQ(result.observation_plan().fence_site_decisions.front().reason,
             ConSanFencePolicyReason::AssociationUnavailable);
 }
 
@@ -2573,7 +2570,7 @@ TEST(ConSanMoi, InventorySkipsUnknownFlatSites) {
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
   EXPECT_TRUE(test_admitted_accesses(result).empty());
 
-  EXPECT_EQ(std::ranges::count(result.observation_plan.site_decisions,
+  EXPECT_EQ(std::ranges::count(result.observation_plan().site_decisions,
                                ConSanAccessPolicyReason::FlatProvenancePolicyExcluded,
                                &ConSanSiteDecision::reason),
             2u);
@@ -3073,7 +3070,7 @@ TEST(ConSanMoi, InventorySkipsUnsupportedNativeLdsSites) {
   ASSERT_EQ(test_admitted_accesses(result).size(), 2u);
   EXPECT_EQ(test_admitted_accesses(result)[0].mnemonic, "ds_store_b32");
   EXPECT_EQ(test_admitted_accesses(result)[1].mnemonic, "ds_load_b32");
-  EXPECT_EQ(std::ranges::count(result.observation_plan.site_decisions,
+  EXPECT_EQ(std::ranges::count(result.observation_plan().site_decisions,
                                ConSanAccessPolicyReason::OperationKindExcluded,
                                &ConSanSiteDecision::reason),
             1u);
@@ -3088,7 +3085,7 @@ TEST(ConSanMoi, LoweringCandidatesAreExactlyTheAdmittedAccessIntents) {
     ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
 
     std::set<uint64_t> intended_offsets;
-    for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+    for (const ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
       if (intent.kind == ConSanProbeIntentKind::AccessRecord ||
           intent.kind == ConSanProbeIntentKind::SampledAccess ||
           intent.kind == ConSanProbeIntentKind::ExactShadowAccess) {
@@ -3259,8 +3256,8 @@ TEST(ConSanMoi, UnsupportedOnlyAccessRemainsApplicableInPreFilterLedger) {
 
     ASSERT_TRUE(consan_patch_succeeded(result));
     EXPECT_TRUE(test_admitted_accesses(result).empty());
-    ASSERT_EQ(result.observation_plan.site_decisions.size(), 1u);
-    const ConSanSiteDecision &decision = result.observation_plan.site_decisions.front();
+    ASSERT_EQ(result.observation_plan().site_decisions.size(), 1u);
+    const ConSanSiteDecision &decision = result.observation_plan().site_decisions.front();
     EXPECT_EQ(decision.kind, ConSanSiteDecisionKind::Unsupported);
     EXPECT_EQ(decision.reason, ConSanAccessPolicyReason::MissingAddressOperand);
     EXPECT_TRUE(decision.intent_ids.empty());
@@ -3279,11 +3276,11 @@ TEST(ConSanMoi, MixedAccessLedgerRetainsSupportedAndUnsupportedFinalCodeSites) {
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.observation_plan.site_decisions.size(), 2u);
-  EXPECT_EQ(result.observation_plan.site_decisions[0].kind, ConSanSiteDecisionKind::Admitted);
-  EXPECT_EQ(result.observation_plan.site_decisions[0].reason, ConSanAccessPolicyReason::None);
-  EXPECT_EQ(result.observation_plan.site_decisions[1].kind, ConSanSiteDecisionKind::Unsupported);
-  EXPECT_EQ(result.observation_plan.site_decisions[1].reason,
+  ASSERT_EQ(result.observation_plan().site_decisions.size(), 2u);
+  EXPECT_EQ(result.observation_plan().site_decisions[0].kind, ConSanSiteDecisionKind::Admitted);
+  EXPECT_EQ(result.observation_plan().site_decisions[0].reason, ConSanAccessPolicyReason::None);
+  EXPECT_EQ(result.observation_plan().site_decisions[1].kind, ConSanSiteDecisionKind::Unsupported);
+  EXPECT_EQ(result.observation_plan().site_decisions[1].reason,
             ConSanAccessPolicyReason::MissingAddressOperand);
   ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 1u);
   EXPECT_EQ(result.coverage_ledger.intent_entries().front().lowering,
@@ -4011,8 +4008,8 @@ TEST(ConSanMoi, StrictFlatProvenanceExcludesMaybeGroupCandidates) {
   const auto strict_result = test_lower_consan(bytes, strict_options);
   ASSERT_TRUE(strict_result.errors.empty());
   EXPECT_TRUE(test_admitted_accesses(strict_result).empty());
-  ASSERT_EQ(strict_result.observation_plan.site_decisions.size(), 1u);
-  EXPECT_EQ(strict_result.observation_plan.site_decisions.front().reason,
+  ASSERT_EQ(strict_result.observation_plan().site_decisions.size(), 1u);
+  EXPECT_EQ(strict_result.observation_plan().site_decisions.front().reason,
             ConSanAccessPolicyReason::FlatProvenancePolicyExcluded);
 }
 

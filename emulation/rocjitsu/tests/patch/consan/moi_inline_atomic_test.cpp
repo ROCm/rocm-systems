@@ -3297,7 +3297,7 @@ TEST(ConSanMoi, SampledAtomicTrackingRequiresSelectedReadyCausalWindow) {
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("no selected LDS access candidates") != std::string::npos;
   }));
-  EXPECT_EQ(consan_decision_count(result.observation_plan.atomic_site_decisions,
+  EXPECT_EQ(consan_decision_count(result.observation_plan().atomic_site_decisions,
                                   ConSanSiteDecisionKind::Admitted),
             0u);
 }
@@ -3386,7 +3386,7 @@ TEST(ConSanMoi, FenceRecordsDynamicallyPublishExactAtomicAddresses) {
   EXPECT_EQ(std::ranges::count_if(fence_commit->intent_ids,
                                   [&](ConSanProbeIntentId id) {
                                     const ConSanProbeIntent *intent =
-                                        result.observation_plan.intent(id);
+                                        result.observation_plan().intent(id);
                                     return intent != nullptr &&
                                            intent->kind == ConSanProbeIntentKind::FenceRecord;
                                   }),

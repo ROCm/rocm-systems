@@ -784,7 +784,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                                   ? ConSanProbeIntentKind::BarrierRecord
                                                   : ConSanProbeIntentKind::ExactBarrierEpoch;
   std::vector<MoiBarrierEvidenceSitePlan> candidates = build_moi_barrier_evidence_site_plans(
-      result.program_inventory, result.observation_plan, evidence_kind, result.errors);
+      result.program_inventory, result.observation_plan(), evidence_kind, result.errors);
   if (!result.errors.empty())
     return;
   if (candidates.empty()) {
@@ -1205,7 +1205,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           ? find_record_replay_reserved_barrier_island_begin(
                 old_text, result, arch, access_output, planned_candidates.size(),
                 moi_reserved_access_sync_island_count(
-                    result.program_inventory, result.observation_plan, options, options, options))
+                    result.program_inventory, result.observation_plan(), options, options, options))
           : std::nullopt;
   if (barrier_island_layout) {
     const uint64_t reserved_words =
@@ -2271,7 +2271,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   }
 
   std::vector<MoiBarrierEvidenceSitePlan> candidates =
-      build_moi_barrier_evidence_site_plans(result.program_inventory, result.observation_plan,
+      build_moi_barrier_evidence_site_plans(result.program_inventory, result.observation_plan(),
                                             ConSanProbeIntentKind::BarrierRecord, result.errors);
   if (!result.errors.empty())
     return;
@@ -2296,7 +2296,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   std::unordered_set<uint64_t> selected_offsets;
   const MoiPatchAnchorRangeIndex occupied_anchors(result);
   MoiResourcePlanningStatePtr standalone_resource_state = make_moi_resource_planning_state(
-      bytes, arch, result.program_inventory, result.observation_plan, result.resource_plans,
+      bytes, arch, result.program_inventory, result.observation_plan(), result.resource_plans,
       options, options, options);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
@@ -2372,7 +2372,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   if (options.moi_exec_save_sgpr) {
     const auto reserved_barrier_island_layout = find_record_replay_reserved_barrier_island_begin(
         old_text, result, arch, access_output, selected_candidates.size(),
-        moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan,
+        moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan(),
                                               options, options, options));
     if (reserved_barrier_island_layout) {
       const uint64_t reserved_words = reserved_barrier_island_layout->reserved_slot_count *

@@ -22,7 +22,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
     result.warnings.emplace_back("ConSan MOI atomic record patch has no atomic record capacity");
     return;
   }
-  for (const ConSanAtomicSiteDecision &decision : result.observation_plan.atomic_site_decisions) {
+  for (const ConSanAtomicSiteDecision &decision : result.observation_plan().atomic_site_decisions) {
     if (decision.reason != ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable)
       continue;
     for (const std::string &container_name : decision.source_containers) {
@@ -32,7 +32,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
     }
   }
   std::vector<MoiAtomicEvidenceSitePlan> candidates =
-      build_moi_atomic_evidence_site_plans(result.program_inventory, result.observation_plan,
+      build_moi_atomic_evidence_site_plans(result.program_inventory, result.observation_plan(),
                                            ConSanProbeIntentKind::AtomicRecord, result.errors);
   if (!result.errors.empty())
     return;
@@ -56,7 +56,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
   std::vector<PlannedAtomicRecord> selected_candidates;
   selected_candidates.reserve(max_candidates);
   MoiResourcePlanningStatePtr resource_state = make_moi_resource_planning_state(
-      bytes, arch, result.program_inventory, result.observation_plan, result.resource_plans,
+      bytes, arch, result.program_inventory, result.observation_plan(), result.resource_plans,
       options, options, options);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;

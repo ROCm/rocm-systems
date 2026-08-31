@@ -399,13 +399,12 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   ASSERT_TRUE(plan.valid());
   ConSanCoverageLedger coverage(plan);
   ASSERT_TRUE(
-      publish_test_lowering_outcome(coverage, plan, {0u}, ConSanLoweringOutcomeKind::Instrumented));
+      publish_test_lowering_outcome(coverage, {0u}, ConSanLoweringOutcomeKind::Instrumented));
   ASSERT_TRUE(
-      publish_test_lowering_outcome(coverage, plan, {1u}, ConSanLoweringOutcomeKind::Instrumented));
+      publish_test_lowering_outcome(coverage, {1u}, ConSanLoweringOutcomeKind::Instrumented));
 
   ConSanTransformArtifacts mechanism;
   mechanism.program_inventory = inventory;
-  mechanism.observation_plan = plan;
   mechanism.coverage_ledger = coverage;
   mechanism.outcome = ConSanTransformOutcome::ModifiedValid;
   mechanism.replacement = {0x7f, 'E', 'L', 'F'};
@@ -576,7 +575,7 @@ TEST(ConSanPipeline, RuntimeFailurePolicyDoesNotChangeStaticTransform) {
             closed.program_inventory.code_object_parsed());
   EXPECT_EQ(open.program_inventory.arch(), closed.program_inventory.arch());
   EXPECT_EQ(open.program_inventory.target(), closed.program_inventory.target());
-  EXPECT_EQ(open.observation_plan, closed.observation_plan);
+  EXPECT_EQ(open.observation_plan(), closed.observation_plan());
   EXPECT_EQ(open.evidence_intent_plan, closed.evidence_intent_plan);
   EXPECT_EQ(open.coverage_ledger, closed.coverage_ledger);
   EXPECT_EQ(open.replacement, closed.replacement);
@@ -597,7 +596,8 @@ TEST(ConSanPipeline, EveryEnginePublishesItsTypedEvidenceContractBeforeBinding) 
     ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.evidence_intent_plan) << testing::PrintToString(result.errors);
     EXPECT_TRUE(result.evidence_intent_plan->well_formed());
-    EXPECT_EQ(*result.evidence_intent_plan, plan_consan_evidence_intents(result.observation_plan));
+    EXPECT_EQ(*result.evidence_intent_plan,
+              plan_consan_evidence_intents(result.observation_plan()));
     ASSERT_TRUE(result.evidence_requirements) << testing::PrintToString(result.errors);
     EXPECT_TRUE(std::holds_alternative<ExpectedEvidence>(*result.evidence_requirements));
     EXPECT_EQ(result.stage(ConSanPipelineStage::ProgramInventory)->status,
@@ -648,7 +648,7 @@ TEST(ConSanPipeline, MoiEvidenceCapacityComesDirectlyFromTypedRequestPolicyAndCa
 
       ASSERT_TRUE(result.evidence_requirements) << testing::PrintToString(result.errors);
       const ConSanEvidenceIntentPlan evidence_intents =
-          plan_consan_evidence_intents(result.observation_plan);
+          plan_consan_evidence_intents(result.observation_plan());
       switch (engine) {
       case ConSanMoiEngine::RecordReplay:
         EXPECT_EQ(
@@ -918,9 +918,9 @@ TEST(ConSanPipeline, ProductionResultOwnsAllPublishedTransformArtifacts) {
 
   EXPECT_TRUE(split.program_inventory.code_object_parsed());
   EXPECT_EQ(split.program_inventory.code_object_id(), split.code_object);
-  EXPECT_FALSE(split.observation_plan.probe_intents.empty());
+  EXPECT_FALSE(split.observation_plan().probe_intents.empty());
   EXPECT_EQ(split.coverage_ledger.intent_entries().size(),
-            split.observation_plan.probe_intents.size());
+            split.observation_plan().probe_intents.size());
   EXPECT_FALSE(split.replacement.empty());
   EXPECT_FALSE(TransformResultTestAccess::diagnostic_report(split).patches.empty());
   EXPECT_NE(TransformResultTestAccess::diagnostic_report(split).resource_summary,
@@ -1021,7 +1021,7 @@ TEST(ConSanPipeline, AutomaticMoiResumeRemainsInsideTypedPipelineBoundary) {
   ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(retried.install_action(false), ConSanInstallAction::LoadReplacement);
   EXPECT_EQ(retried.code_object, direct.code_object);
-  EXPECT_EQ(retried.observation_plan, direct.observation_plan);
+  EXPECT_EQ(retried.observation_plan(), direct.observation_plan());
   EXPECT_EQ(retried.coverage_ledger, direct.coverage_ledger);
   EXPECT_EQ(retried.replacement, direct.replacement);
   const ConSanTransformDiagnosticReport retried_diagnostics =
@@ -1136,7 +1136,7 @@ TEST(ConSanPipeline, AutomaticMoiBindingPublishesImmutableTokenAndLibraryOwnedRe
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::FinalValidation)->execution_count, 1u);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResultPublication)->execution_count, 2u);
   EXPECT_EQ(resumed.outcome, direct.outcome);
-  EXPECT_EQ(resumed.observation_plan, direct.observation_plan);
+  EXPECT_EQ(resumed.observation_plan(), direct.observation_plan());
   EXPECT_EQ(resumed.coverage_ledger, direct.coverage_ledger);
   EXPECT_EQ(resumed.runtime_static_mapping, direct.runtime_static_mapping);
   EXPECT_EQ(resumed.replacement, direct.replacement);
@@ -1188,7 +1188,7 @@ TEST(ConSanPipeline, AutomaticSuperColliderBindingRelowersThroughLibraryStrategy
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::FinalValidation)->execution_count, 1u);
   EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResultPublication)->execution_count, 2u);
   EXPECT_EQ(resumed.outcome, direct.outcome);
-  EXPECT_EQ(resumed.observation_plan, direct.observation_plan);
+  EXPECT_EQ(resumed.observation_plan(), direct.observation_plan());
   EXPECT_EQ(resumed.coverage_ledger, direct.coverage_ledger);
   EXPECT_EQ(resumed.replacement, direct.replacement);
 }
@@ -1286,7 +1286,7 @@ TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) 
   ASSERT_TRUE(second.well_formed()) << testing::PrintToString(second.errors);
   EXPECT_EQ(first.code_object, second.code_object);
   EXPECT_EQ(first.stages, second.stages);
-  EXPECT_EQ(first.observation_plan, second.observation_plan);
+  EXPECT_EQ(first.observation_plan(), second.observation_plan());
   EXPECT_EQ(first.evidence_requirements, second.evidence_requirements);
   EXPECT_EQ(first.outcome, second.outcome);
   EXPECT_EQ(first.replacement, second.replacement);

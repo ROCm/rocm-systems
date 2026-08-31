@@ -19,7 +19,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
   }
 
   std::vector<MoiFenceEvidenceSitePlan> candidates = build_moi_fence_evidence_site_plans(
-      result.program_inventory, result.observation_plan, result.errors);
+      result.program_inventory, result.observation_plan(), result.errors);
   if (!result.errors.empty())
     return;
   if (candidates.empty()) {
@@ -42,7 +42,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
   };
   std::vector<PlannedFenceRecord> selected;
   MoiResourcePlanningStatePtr resource_state = make_moi_resource_planning_state(
-      bytes, arch, result.program_inventory, result.observation_plan, result.resource_plans,
+      bytes, arch, result.program_inventory, result.observation_plan(), result.resource_plans,
       options, options, options);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;

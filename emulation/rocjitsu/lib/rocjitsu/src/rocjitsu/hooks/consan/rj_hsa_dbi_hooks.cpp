@@ -338,7 +338,7 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
   if (!has_selected_access)
     return false;
   if (result.coverage_ledger.site_decisions().empty())
-    return !result.observation_plan.valid();
+    return !result.observation_plan().valid();
   return std::ranges::any_of(
       result.coverage_ledger.site_decisions(), [&](const rocjitsu::ConSanSiteDecision &decision) {
         if (decision.kind != rocjitsu::ConSanSiteDecisionKind::Admitted ||
@@ -354,7 +354,7 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
 }
 
 [[nodiscard]] bool require_moi_patch_applies_to(const rocjitsu::TransformResult &result) {
-  return !result.observation_plan.probe_intents.empty();
+  return !result.observation_plan().probe_intents.empty();
 }
 
 [[nodiscard]] bool has_instrumented_consan_site(const rocjitsu::TransformResult &result) {

@@ -55,7 +55,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
 
   const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
   const uint32_t reserved_atomic_slots =
-      sampled_reserved_atomic_island_count(result.observation_plan, options, options, options);
+      sampled_reserved_atomic_island_count(result.observation_plan(), options, options, options);
   const uint32_t max_access_record_slots =
       layout.sampled_watchpoint_capacity - reserved_atomic_slots;
   if (max_access_record_slots == 0) {
@@ -85,7 +85,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   // second text-growth pass. Keep dual-role access/ordering sites at the tail
   // so their one-word nested anchors remain branch-reachable in large images.
   std::vector<const ConSanMoiCandidate *> candidates = order_moi_replay_access_candidates(
-      admitted, result.observation_plan, options.moi_track_atomics);
+      admitted, result.observation_plan(), options.moi_track_atomics);
   if (candidates.empty()) {
     result.warnings.emplace_back(
         "ConSan MOI sampled probe found no native LDS or likely group flat load/store candidate");
@@ -196,7 +196,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
        has_branch_only_scalar_assignment);
   const uint64_t reserved_barrier_island_count =
       use_indirect_appended
-          ? sampled_reserved_barrier_island_count(result.observation_plan, options, options)
+          ? sampled_reserved_barrier_island_count(result.observation_plan(), options, options)
           : 0u;
   const uint64_t reserved_atomic_island_count = use_indirect_appended ? reserved_atomic_slots : 0u;
   const uint64_t reserved_sync_island_bytes =
@@ -1057,7 +1057,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         info.relocated_guest_instruction_offset =
             candidate.anchor() + planned_patch.probe_guest_instruction_offset;
       }
-      auto commit = make_moi_access_lowering_commit(result.observation_plan, candidate, info);
+      auto commit = make_moi_access_lowering_commit(result.observation_plan(), candidate, info);
       if (!commit) {
         result.errors.emplace_back(
             "ConSan MOI sampled probe produced an invalid intent-bound lowering");

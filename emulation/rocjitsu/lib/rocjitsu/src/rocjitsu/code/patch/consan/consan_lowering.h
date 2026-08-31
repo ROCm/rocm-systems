@@ -17,11 +17,14 @@ namespace rocjitsu {
 /// binding. A lowerer may consume it but cannot append policy fragments or
 /// initialize a different coverage ledger.
 struct ConSanLoweringObservation {
-  ConSanObservationPlan plan;
   ConSanCoverageLedger initial_coverage;
 
+  [[nodiscard]] const ConSanObservationPlan &plan() const {
+    return initial_coverage.observation_plan();
+  }
+
   [[nodiscard]] bool well_formed() const {
-    return plan.valid() && initial_coverage == ConSanCoverageLedger(plan);
+    return plan().valid() && initial_coverage == ConSanCoverageLedger(plan());
   }
 };
 

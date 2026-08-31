@@ -26,12 +26,12 @@ namespace {
 
 void render_observation_diagnostics(const ProgramInventory &inventory,
                                     ConSanObservationProduct &product) {
-  const bool supercollider = product.plan.engine == ConSanCapabilityEngine::SuperCollider;
+  const bool supercollider = product.plan().engine == ConSanCapabilityEngine::SuperCollider;
   const std::string engine_name =
       supercollider ? "SuperCollider"
-                    : std::string(consan_capability_engine_name(product.plan.engine));
+                    : std::string(consan_capability_engine_name(product.plan().engine));
 
-  for (const ConSanSiteDecision &decision : product.plan.site_decisions) {
+  for (const ConSanSiteDecision &decision : product.plan().site_decisions) {
     if (decision.reason != ConSanAccessPolicyReason::ConflictingPhysicalAliases)
       continue;
     if (supercollider) {
@@ -56,7 +56,7 @@ void render_observation_diagnostics(const ProgramInventory &inventory,
           quoted_aliases(decision.source_containers) + "'");
     }
   }
-  for (const ConSanBarrierSiteDecision &decision : product.plan.barrier_site_decisions) {
+  for (const ConSanBarrierSiteDecision &decision : product.plan().barrier_site_decisions) {
     if (decision.reason != ConSanBarrierPolicyReason::ConflictingPhysicalAliases)
       continue;
     std::string message = "ConSan " + engine_name + " ";
@@ -69,7 +69,7 @@ void render_observation_diagnostics(const ProgramInventory &inventory,
                              : "aliases '" + quoted_aliases(decision.source_containers) + "'";
     product.diagnostics.push_back(std::move(message));
   }
-  for (const ConSanAtomicSiteDecision &decision : product.plan.atomic_site_decisions) {
+  for (const ConSanAtomicSiteDecision &decision : product.plan().atomic_site_decisions) {
     if (decision.reason != ConSanAtomicPolicyReason::ConflictingPhysicalAliases)
       continue;
     product.diagnostics.emplace_back(
@@ -78,7 +78,7 @@ void render_observation_diagnostics(const ProgramInventory &inventory,
         " was decoded inconsistently through aliases '" +
         quoted_aliases(decision.source_containers) + "'");
   }
-  for (const ConSanFenceSiteDecision &decision : product.plan.fence_site_decisions) {
+  for (const ConSanFenceSiteDecision &decision : product.plan().fence_site_decisions) {
     if (decision.reason != ConSanFencePolicyReason::ConflictingPhysicalAliases)
       continue;
     product.diagnostics.emplace_back(
@@ -176,6 +176,7 @@ assemble_consan_observation_product(const ProgramInventory &inventory,
                                     const ConSanObservationPolicyRequest &request) {
   ConSanObservationProduct product;
   product.atomic_fence_fragment_required = request.include_atomic_fence_policy;
+  ConSanObservationPlan plan;
 
   ConSanAccessPolicyResult access = plan_consan_access_observation(
       inventory, {.engine = request.engine,
@@ -185,7 +186,7 @@ assemble_consan_observation_product(const ProgramInventory &inventory,
                   .container_filter = request.container_filter,
                   .kernel_name_allowlist = request.kernel_name_allowlist,
                   .reserved_for_synchronization = request.reserved_for_synchronization});
-  product.plan = std::move(access.plan);
+  plan = std::move(access.plan);
   product.access_errors = std::move(access.errors);
 
   ConSanBarrierPolicyResult barrier = plan_consan_barrier_observation(
@@ -194,11 +195,11 @@ assemble_consan_observation_product(const ProgramInventory &inventory,
                   .container_filter = request.container_filter,
                   .kernel_name_allowlist = request.kernel_name_allowlist});
   product.barrier_errors = std::move(barrier.errors);
-  product.barrier_fragment_appended = product.plan.append(barrier.plan);
+  product.barrier_fragment_appended = plan.append(barrier.plan);
 
   if (request.include_atomic_fence_policy) {
     const bool sampled_access_window_available =
-        std::ranges::any_of(product.plan.probe_intents, [](const ConSanProbeIntent &intent) {
+        std::ranges::any_of(plan.probe_intents, [](const ConSanProbeIntent &intent) {
           return intent.kind == ConSanProbeIntentKind::SampledAccess;
         });
     ConSanAtomicFencePolicyResult atomic_fence = plan_consan_atomic_fence_observation(
@@ -209,16 +210,16 @@ assemble_consan_observation_product(const ProgramInventory &inventory,
                     .kernel_name_allowlist = request.kernel_name_allowlist});
     product.atomic_errors = std::move(atomic_fence.atomic_errors);
     product.fence_errors = std::move(atomic_fence.fence_errors);
-    product.atomic_fence_fragment_appended = product.plan.append(atomic_fence.plan);
+    product.atomic_fence_fragment_appended = plan.append(atomic_fence.plan);
   }
 
-  product.initial_coverage = ConSanCoverageLedger(product.plan);
   const bool structurally_valid =
       product.access_errors.empty() && product.barrier_errors.empty() &&
       product.atomic_errors.empty() && product.fence_errors.empty() &&
       product.barrier_fragment_appended &&
       (!product.atomic_fence_fragment_required || product.atomic_fence_fragment_appended) &&
-      product.plan.valid();
+      plan.valid();
+  product.initial_coverage = ConSanCoverageLedger(std::move(plan));
   if (!structurally_valid) {
     render_observation_diagnostics(inventory, product);
     if (product.diagnostics.empty()) {

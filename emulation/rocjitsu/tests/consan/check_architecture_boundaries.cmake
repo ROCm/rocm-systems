@@ -678,9 +678,9 @@ foreach(
     )
 endforeach()
 
-# Accepted lowering transactions have one owner. The transformation bus may
-# stage an incomplete synchronization transaction, but it must not regain a
-# parallel committed-lowering inventory or accumulated runtime projection.
+# Accepted lowering transactions have one owner. The transformation bus must
+# not regain a synchronization staging inventory, parallel committed-lowering
+# inventory, or accumulated runtime projection.
 foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_file}"
@@ -702,6 +702,7 @@ file(READ "${_consan_dir}/consan_observation_plan.h.inc" _coverage_ledger_contra
 foreach(
     _owned_lowering_operation
     IN ITEMS
+        observation_plan_
         lowering_commits_
         runtime_static_mapping
         publish_coalescing_instrumented_commits
@@ -713,6 +714,28 @@ foreach(
             "ConSan coverage ledger lost lowering ownership: ${_owned_lowering_operation}"
         )
     endif()
+endforeach()
+foreach(_parallel_plan_holder IN ITEMS consan_result.h.inc consan_pipeline.h)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_parallel_plan_holder}"
+        "ConSanObservationPlan[ \t]+observation_plan[ \t]*;"
+        "immutable observation policy must remain owned once by the coverage ledger"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_observation_plan.h.inc"
+    "matches_plan"
+    "the coverage ledger must not regain a second plan representation to compare"
+)
+foreach(
+    _parallel_decision_inventory
+    IN ITEMS site_decisions_ barrier_site_decisions_ atomic_site_decisions_ fence_site_decisions_
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/consan_observation_plan.h.inc"
+        "${_parallel_decision_inventory}"
+        "semantic decisions must remain in the ledger-owned observation plan"
+    )
 endforeach()
 
 # Immutable semantic selection and exact synchronization proof consume narrow

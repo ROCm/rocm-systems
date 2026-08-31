@@ -2391,3 +2391,71 @@ is still 308 implementation lines above the starting baseline; architecture
 and mode locality across every facet, the remaining broad operating-point and
 transform-artifact surfaces, smallness of the surviving cross-axis composition,
 and an independent whole-codebase audit remain open.
+
+### 16.21 Convergence checkpoint 20: one immutable observation-plan authority
+
+The post-checkpoint-19 dataflow audit found a parallel immutable authority next
+to the newly centralized lowering authority. `ConSanObservationPlan` was stored
+separately on the observation product, lowering input, private transform
+artifacts, and public pipeline result. `ConSanCoverageLedger` then copied every
+decision inventory and every complete probe intent into its own representation.
+The two representations had to be transported and rolled forward together and
+validated by `matches_plan()`. Immutability prevented arbitrary mutation, but
+the duplicate ownership still admitted divergence at every construction and
+publication boundary.
+
+The coverage ledger now solely owns the composed observation plan by value.
+Observation assembly builds the policy fragments in a local plan and moves the
+completed value once into the initial ledger. Observation products, lowering
+inputs, private artifacts, and public results expose narrow const accessors to
+that owner rather than retaining another plan field. Ledger lowering entries
+retain only their stable plan-local intent IDs; validation, coverage queries,
+dispatch-requirement construction, runtime hooks, lowerers, and tests resolve
+the immutable intent through the ledger. The four copied decision vectors, the
+copied intent values, all duplicate plan transport, and `matches_plan()` have
+been removed.
+
+The architecture-boundary gate now requires the ledger-owned plan, rejects a
+plan field on either result bus, rejects the four duplicate decision
+inventories, and rejects restoration of a plan-comparison operation. The owner
+regression proves that lowering state is joined to plan-local IDs while both
+the immutable plan and accepted commits remain available from the one ledger.
+During the first full gate, the conversion also exposed an incorrect attempted
+replacement for `matches_plan()`: final validation required `plan.valid()` even
+for fault-only transforms whose observation stage is intentionally not
+applicable. That new check was removed rather than preserving obsolete
+validation for a representation that no longer exists; all 81 affected fault,
+composition, and simulator regressions then passed.
+
+| Signal | Checkpoint 20 | Cumulative change | Slice change from checkpoint 19 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,716 | +741 | **-12** |
+| Nonblank production lines | 99,441 | +358 | **-16** |
+| Production implementation lines | 91,742 | **+292** | **-16** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 241 / 58 | **-35 / +1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 | 0 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | **0** | **-95** | 0 |
+| Explicit mode-enum references in `consan_moi_report_plan.cpp` | **0** | **-18** | 0 |
+| Explicit mode-enum references in `consan_pipeline.cpp` | **0** | n/a | 0 |
+| Test inventory | 5,372 | +27 | 0 |
+
+Validation includes a clean 160-step incremental rebuild; all 18 observation-
+plan and observation-policy tests; all 94 ConSan runtime-hook unit tests; the
+structural architecture-boundary test; a focused rerun of all 81 cases affected
+by the fault-only validation error; a fresh complete 4,737-test nonphysical
+ConSan matrix at `-j16`, including all 2,908 simulated-device rows over five
+architectures; and all 635 physical gfx1201 tests serialized at `-j1`. No test
+was removed or disabled.
+
+This slice removes another whole parallel representation from the main semantic
+spine and immediately harvests its validation and transport machinery. It is
+forward-only and deletion-bearing, but it is not completion evidence for the
+whole refactoring. Production remains 292 implementation lines above the
+starting baseline, and the remaining broad operating-point and transform-
+artifact surfaces, full architecture and mode locality, smallness of surviving
+cross-axis composition, both extension exercises, and an independent Section
+14 audit remain open.

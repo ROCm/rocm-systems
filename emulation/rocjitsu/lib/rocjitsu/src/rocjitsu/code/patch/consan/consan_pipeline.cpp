@@ -264,14 +264,17 @@ build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCover
   for (const ConSanIntentCoverageEntry &entry : coverage.intent_entries()) {
     if (entry.lowering != ConSanLoweringOutcomeKind::Instrumented)
       continue;
+    const ConSanProbeIntent *intent = coverage.intent(entry.intent_id);
+    if (intent == nullptr)
+      continue;
     const auto mark_instrumented = [](ConSanKernelDispatchRequirement &requirement) {
       requirement.has_instrumented_probe = true;
     };
-    if (entry.intent.covered_semantic_sites.empty()) {
-      note_physical_site(entry.intent.physical_site, mark_instrumented);
+    if (intent->covered_semantic_sites.empty()) {
+      note_physical_site(intent->physical_site, mark_instrumented);
       continue;
     }
-    for (const SemanticSiteId &semantic : entry.intent.covered_semantic_sites)
+    for (const SemanticSiteId &semantic : intent->covered_semantic_sites)
       note_physical_site(semantic.physical, mark_instrumented);
   }
 
@@ -562,7 +565,6 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
 
 void TransformResult::publish_lowering_artifacts(ConSanTransformArtifacts lowering) {
   program_inventory = std::move(lowering.program_inventory);
-  observation_plan = std::move(lowering.observation_plan);
   runtime_static_mapping = lowering.coverage_ledger.runtime_static_mapping();
   coverage_ledger = std::move(lowering.coverage_ledger);
   mutation = std::move(lowering.mutation);
@@ -581,7 +583,6 @@ void TransformResult::publish_lowering_artifacts(ConSanTransformArtifacts loweri
 ConSanTransformArtifacts TransformResult::take_lowering_artifacts() {
   ConSanTransformArtifacts lowering;
   lowering.program_inventory = std::move(program_inventory);
-  lowering.observation_plan = std::move(observation_plan);
   lowering.coverage_ledger = std::move(coverage_ledger);
   lowering.mutation = std::move(mutation);
   lowering.replacement = std::move(replacement);
@@ -601,8 +602,7 @@ bool TransformResult::well_formed() const {
   if (!code_object.valid() || !dispatch_requirements.well_formed()) {
     return false;
   }
-  if (!coverage_ledger.matches_plan(observation_plan) ||
-      coverage_ledger.runtime_static_mapping() != runtime_static_mapping)
+  if (coverage_ledger.runtime_static_mapping() != runtime_static_mapping)
     return false;
   for (size_t index = 0; index < stages.size(); ++index) {
     if (!stages[index].well_formed(kConSanPipelineStages[index])) {
@@ -629,8 +629,8 @@ bool TransformResult::well_formed() const {
   if (evidence_intent_plan.has_value() != evidence_requirements.has_value())
     return false;
   if (evidence_intent_plan &&
-      (!observation_plan.valid() || !evidence_intent_plan->well_formed() ||
-       *evidence_intent_plan != plan_consan_evidence_intents(observation_plan) ||
+      (!observation_plan().valid() || !evidence_intent_plan->well_formed() ||
+       *evidence_intent_plan != plan_consan_evidence_intents(observation_plan()) ||
        !consan_evidence_requirements_well_formed(*evidence_requirements))) {
     return false;
   }
@@ -676,13 +676,13 @@ void TransformResult::discard_replacement(std::string warning) {
   runtime_static_mapping = {};
   coverage_ledger.discard_instrumented_lowerings();
   std::vector<ConSanCommittedLowering> rejections;
-  for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
+  for (const ConSanProbeIntent &intent : observation_plan().probe_intents) {
     const ConSanIntentCoverageEntry *entry = coverage_ledger.intent_entry(intent.id);
     if (entry == nullptr || entry->lowering != ConSanLoweringOutcomeKind::Pending)
       continue;
     const std::array<ConSanProbeIntentId, 1> ids = {intent.id};
     auto rejection = make_consan_committed_lowering(
-        observation_plan, ids, std::span<const ConSanCommittedLoweringLocation>{},
+        observation_plan(), ids, std::span<const ConSanCommittedLoweringLocation>{},
         ConSanLoweringOutcomeKind::ResourceRejected, "runtime-owned report allocation failed");
     if (!rejection) {
       errors.emplace_back("ConSan runtime binding produced an invalid intent rejection");
@@ -736,7 +736,7 @@ bool ConSanDeferredBinding::well_formed() const {
   const auto engine = request_.flavor
                           ? consan_capability_engine(*request_.flavor, request_.moi_engine)
                           : std::nullopt;
-  if (!engine || inventory_result_.observation_plan.engine != *engine)
+  if (!engine || inventory_result_.observation_plan().engine != *engine)
     return false;
   switch (strategy_) {
   case ResumeStrategy::RelowerFromInput:
@@ -848,7 +848,6 @@ TransformResult resume_consan_automatic_transform(std::span<const uint8_t> code_
   ++binding.execution_count;
   binding.status = ConSanPipelineStageStatus::Completed;
   const ConSanLoweringObservation observation = {
-      .plan = result.observation_plan,
       .initial_coverage = result.coverage_ledger,
   };
   ConSanLoweringExecution execution;
@@ -1000,7 +999,6 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
       consan_target_profile(lowering.program_inventory.target()) != nullptr) {
     ConSanObservationProduct observation =
         assemble_consan_observation_product(lowering.program_inventory, request, debug);
-    lowering.observation_plan = std::move(observation.plan);
     lowering.coverage_ledger = std::move(observation.initial_coverage);
     lowering.errors.insert(lowering.errors.end(),
                            std::make_move_iterator(observation.diagnostics.begin()),
@@ -1044,7 +1042,7 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
     observation_stage.status = ConSanPipelineStageStatus::NotApplicable;
   } else if (execution.observation_plan_passes == 0u) {
     observation_stage.status = ConSanPipelineStageStatus::Blocked;
-  } else if (result.observation_plan.valid()) {
+  } else if (result.observation_plan().valid()) {
     observation_stage.status = ConSanPipelineStageStatus::Completed;
   } else if (result.outcome == ConSanTransformOutcome::Unsupported) {
     observation_stage.status = ConSanPipelineStageStatus::Unsupported;
@@ -1055,7 +1053,7 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
   }
 
   if (observation_stage.status == ConSanPipelineStageStatus::Completed) {
-    result.evidence_intent_plan = plan_consan_evidence_intents(result.observation_plan);
+    result.evidence_intent_plan = plan_consan_evidence_intents(result.observation_plan());
     const std::optional<uint64_t> maximum_access_probe_count =
         transform_policy.max_patches_is_expert_limit
             ? std::optional<uint64_t>{transform_policy.max_patches}
@@ -1152,7 +1150,6 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
       result.outcome != ConSanTransformOutcome::Invalid &&
       result.outcome != ConSanTransformOutcome::Unsupported) {
     ConSanLoweringObservation observation = {
-        .plan = result.observation_plan,
         .initial_coverage = result.coverage_ledger,
     };
     const ConSanOptions lowering_options(request, transform_policy, debug, mutation, capabilities,

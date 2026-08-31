@@ -48,7 +48,6 @@ using ConSanDescriptorOwnerIndex = std::unordered_map<uint64_t, uint64_t>;
       result.errors.emplace_back("ConSan received an invalid prepared observation product");
       return false;
     }
-    result.observation_plan = prepared_observation->plan;
     result.coverage_ledger = prepared_observation->initial_coverage;
     return true;
   }
@@ -57,7 +56,6 @@ using ConSanDescriptorOwnerIndex = std::unordered_map<uint64_t, uint64_t>;
       result.program_inventory, static_cast<const ConSanRequest &>(options),
       static_cast<const ConSanDebugOverrides &>(options));
   const bool valid = observation.valid();
-  result.observation_plan = std::move(observation.plan);
   result.coverage_ledger = std::move(observation.initial_coverage);
   result.errors.insert(result.errors.end(),
                        std::make_move_iterator(observation.diagnostics.begin()),

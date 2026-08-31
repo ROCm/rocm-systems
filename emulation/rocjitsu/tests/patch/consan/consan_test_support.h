@@ -275,7 +275,7 @@ plan_test_moi_evidence_inventory(const ConSanTransformArtifacts &result,
       options.max_patches_is_expert_limit ? std::optional<uint64_t>{options.max_patches}
                                           : std::nullopt;
   const ConSanEvidenceIntentPlan evidence_intents =
-      plan_consan_evidence_intents(result.observation_plan);
+      plan_consan_evidence_intents(result.observation_plan());
   switch (options.moi_engine) {
   case ConSanMoiEngine::RecordReplay:
     return plan_consan_record_replay_evidence(
@@ -413,7 +413,7 @@ test_moi_transient_sgpr_assignment(const ConSanTransformArtifacts &result,
 test_admitted_accesses(const ConSanTransformArtifacts &result) {
   std::vector<ConSanAccessInventorySite> candidates;
   std::unordered_set<uint64_t> admitted_offsets;
-  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+  for (const ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
     if (intent.kind != ConSanProbeIntentKind::AccessRecord &&
         intent.kind != ConSanProbeIntentKind::SampledAccess &&
         intent.kind != ConSanProbeIntentKind::ExactShadowAccess) {
@@ -454,13 +454,13 @@ test_selectable_vgpr_bank_mode(std::span<const uint8_t> bytes,
 
 [[nodiscard]] size_t consan_access_decision_count(const ConSanTransformArtifacts &result,
                                                   ConSanSiteDecisionKind kind) {
-  return std::ranges::count(result.observation_plan.site_decisions, kind,
+  return std::ranges::count(result.observation_plan().site_decisions, kind,
                             &ConSanSiteDecision::kind);
 }
 
 [[nodiscard]] size_t
 consan_applicable_access_decision_count(const ConSanTransformArtifacts &result) {
-  return std::ranges::count_if(result.observation_plan.site_decisions,
+  return std::ranges::count_if(result.observation_plan().site_decisions,
                                [](const ConSanSiteDecision &decision) {
                                  return decision.kind != ConSanSiteDecisionKind::NotApplicable;
                                });
@@ -469,10 +469,10 @@ consan_applicable_access_decision_count(const ConSanTransformArtifacts &result) 
 [[nodiscard]] const ConSanSiteDecision *
 consan_access_decision_at(const ConSanTransformArtifacts &result, uint64_t text_offset) {
   const auto decision = std::ranges::find_if(
-      result.observation_plan.site_decisions, [&](const ConSanSiteDecision &candidate) {
+      result.observation_plan().site_decisions, [&](const ConSanSiteDecision &candidate) {
         return candidate.semantic_site.physical.original_text_offset == text_offset;
       });
-  return decision == result.observation_plan.site_decisions.end() ? nullptr : &*decision;
+  return decision == result.observation_plan().site_decisions.end() ? nullptr : &*decision;
 }
 
 [[nodiscard]] const ConSanSiteDecision *
@@ -489,8 +489,9 @@ consan_access_decision_at_file_offset(const ConSanTransformArtifacts &result,
 consan_access_coverage_at(const ConSanTransformArtifacts &result, uint64_t text_offset) {
   const auto entry =
       std::ranges::find_if(result.coverage_ledger.intent_entries(), [&](const auto &candidate) {
-        return is_consan_access_intent(candidate.intent.kind) &&
-               candidate.intent.physical_site.original_text_offset == text_offset;
+        const ConSanProbeIntent *intent = result.coverage_ledger.intent(candidate.intent_id);
+        return intent != nullptr && is_consan_access_intent(intent->kind) &&
+               intent->physical_site.original_text_offset == text_offset;
       });
   return entry == result.coverage_ledger.intent_entries().end() ? nullptr : &*entry;
 }
@@ -498,7 +499,8 @@ consan_access_coverage_at(const ConSanTransformArtifacts &result, uint64_t text_
 [[nodiscard]] size_t consan_access_lowering_count(const ConSanTransformArtifacts &result,
                                                   ConSanLoweringOutcomeKind outcome) {
   return std::ranges::count_if(result.coverage_ledger.intent_entries(), [&](const auto &entry) {
-    return is_consan_access_intent(entry.intent.kind) && entry.lowering == outcome;
+    const ConSanProbeIntent *intent = result.coverage_ledger.intent(entry.intent_id);
+    return intent != nullptr && is_consan_access_intent(intent->kind) && entry.lowering == outcome;
   });
 }
 
@@ -506,7 +508,7 @@ consan_access_coverage_at(const ConSanTransformArtifacts &result, uint64_t text_
                                                              const ConSanCommittedLowering &commit,
                                                              ConSanProbeIntentKind kind) {
   return std::ranges::any_of(commit.intent_ids, [&](ConSanProbeIntentId id) {
-    const ConSanProbeIntent *intent = result.observation_plan.intent(id);
+    const ConSanProbeIntent *intent = result.observation_plan().intent(id);
     return intent != nullptr && intent->kind == kind;
   });
 }
@@ -525,30 +527,31 @@ consan_committed_lowering_for_intent_kind(const ConSanTransformArtifacts &result
 [[nodiscard]] const ConSanBarrierSiteDecision *
 consan_barrier_decision_at(const ConSanTransformArtifacts &result, uint64_t text_offset) {
   const auto decision = std::ranges::find_if(
-      result.observation_plan.barrier_site_decisions,
+      result.observation_plan().barrier_site_decisions,
       [&](const ConSanBarrierSiteDecision &candidate) {
         return candidate.semantic_site.physical.original_text_offset == text_offset;
       });
-  return decision == result.observation_plan.barrier_site_decisions.end() ? nullptr : &*decision;
+  return decision == result.observation_plan().barrier_site_decisions.end() ? nullptr : &*decision;
 }
 
 [[nodiscard]] const ConSanAtomicSiteDecision *
 consan_atomic_decision_at(const ConSanTransformArtifacts &result, uint64_t text_offset) {
   const auto decision = std::ranges::find_if(
-      result.observation_plan.atomic_site_decisions,
+      result.observation_plan().atomic_site_decisions,
       [&](const ConSanAtomicSiteDecision &candidate) {
         return candidate.semantic_site.physical.original_text_offset == text_offset;
       });
-  return decision == result.observation_plan.atomic_site_decisions.end() ? nullptr : &*decision;
+  return decision == result.observation_plan().atomic_site_decisions.end() ? nullptr : &*decision;
 }
 
 [[nodiscard]] const ConSanFenceSiteDecision *
 consan_fence_decision_at(const ConSanTransformArtifacts &result, uint64_t text_offset) {
   const auto decision = std::ranges::find_if(
-      result.observation_plan.fence_site_decisions, [&](const ConSanFenceSiteDecision &candidate) {
+      result.observation_plan().fence_site_decisions,
+      [&](const ConSanFenceSiteDecision &candidate) {
         return candidate.semantic_site.physical.original_text_offset == text_offset;
       });
-  return decision == result.observation_plan.fence_site_decisions.end() ? nullptr : &*decision;
+  return decision == result.observation_plan().fence_site_decisions.end() ? nullptr : &*decision;
 }
 
 template <typename Decision>

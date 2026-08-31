@@ -52,7 +52,7 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.observation_plan.engine, ConSanCapabilityEngine::InlineShadow);
+  EXPECT_EQ(result.observation_plan().engine, ConSanCapabilityEngine::InlineShadow);
   ASSERT_FALSE(result.replacement.empty());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineMoiExactShadowStore);
@@ -2351,8 +2351,8 @@ TEST(ConSanMoi, Rdna4AccessOnlyInlineShadowUsesInitializedWorkgroupLocalLdsMirro
   // The owner/epoch prologue contains two instrumentation-owned barriers.
   // They initialize the local shadow but are not guest synchronization sites,
   // so the immutable source plan must not invent barrier obligations for them.
-  EXPECT_TRUE(result.observation_plan.barrier_site_decisions.empty());
-  EXPECT_EQ(std::ranges::count(result.observation_plan.probe_intents,
+  EXPECT_TRUE(result.observation_plan().barrier_site_decisions.empty());
+  EXPECT_EQ(std::ranges::count(result.observation_plan().probe_intents,
                                ConSanProbeIntentKind::ExactBarrierEpoch, &ConSanProbeIntent::kind),
             0u);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
@@ -8901,7 +8901,7 @@ TEST(ConSanMoi, InlineBarrierOnlyObjectPatchesBarrierWithoutEntryPrologue) {
   ASSERT_TRUE(visible_atomic);
   EXPECT_GE(count_subsequence(barrier_words, *visible_atomic), 1u);
   EXPECT_TRUE(validate_consan_modified_elf(make_rdna4_lds_code_object(text_words), result).empty());
-  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.barrier_site_decisions,
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan().barrier_site_decisions,
                                            ConSanLoweringOutcomeKind::Instrumented),
             1u);
 }
@@ -8933,7 +8933,7 @@ TEST(ConSanMoi, InlineBarrierOnlySharedOwnerSkipsUnobservedEntryPrologue) {
                patch.owner_descriptor_file_offsets.end();
   });
   EXPECT_EQ(prologue, result.patches.end());
-  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.barrier_site_decisions,
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan().barrier_site_decisions,
                                            ConSanLoweringOutcomeKind::Instrumented),
             1u);
 }
@@ -8960,13 +8960,13 @@ TEST(ConSanMoi, InlineShadowBarrierEpochPatchTrampolinesBarrierAndSaturatesEpoch
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified());
-  ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 1u);
-  EXPECT_EQ(result.observation_plan.barrier_site_decisions.front().kind,
+  ASSERT_EQ(result.observation_plan().barrier_site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan().barrier_site_decisions.front().kind,
             ConSanSiteDecisionKind::Admitted);
   const auto epoch_intent =
-      std::ranges::find(result.observation_plan.probe_intents,
+      std::ranges::find(result.observation_plan().probe_intents,
                         ConSanProbeIntentKind::ExactBarrierEpoch, &ConSanProbeIntent::kind);
-  ASSERT_NE(epoch_intent, result.observation_plan.probe_intents.end());
+  ASSERT_NE(epoch_intent, result.observation_plan().probe_intents.end());
   EXPECT_EQ(epoch_intent->physical_site.original_text_offset, 2u * sizeof(uint32_t));
   const ConSanIntentCoverageEntry *epoch_coverage =
       result.coverage_ledger.intent_entry(epoch_intent->id);

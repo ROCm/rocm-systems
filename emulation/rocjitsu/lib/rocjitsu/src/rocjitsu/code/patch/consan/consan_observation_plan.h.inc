@@ -1153,14 +1153,15 @@ struct ConSanCommittedLowering {
     std::string detail = {}, ConSanRuntimeStaticMapping runtime_mapping = {},
     std::optional<ConSanRegisterPlanReason> resource_rejection_reason = std::nullopt);
 
-/// One admitted intent joined to its current lowering result.
+/// Lowering state for one plan-owned admitted intent.
 ///
-/// `detail` is diagnostic context only; control flow and trust evaluation use
-/// the typed outcome. Retaining the complete intent makes ledger inspection
-/// independent of candidate-vector or patch-vector lifetime.
+/// The immutable intent itself remains in the ledger-owned observation plan;
+/// this entry stores only its stable plan-local identity and mutable lowering
+/// state. `detail` is diagnostic context only; control flow and trust
+/// evaluation use the typed outcome.
 struct ConSanIntentCoverageEntry {
-  /// Target-neutral intent whose mechanism status is being tracked.
-  ConSanProbeIntent intent;
+  /// Plan-local intent whose mechanism status is being tracked.
+  ConSanProbeIntentId intent_id;
   /// Current finalization state for that intent.
   ConSanLoweringOutcomeKind lowering = ConSanLoweringOutcomeKind::Pending;
   /// Resource-planner reason published by the same lowering transaction.
@@ -1173,34 +1174,41 @@ struct ConSanIntentCoverageEntry {
 
 /// Joined semantic coverage state without conflating policy and lowering.
 ///
-/// The ledger owns copies of semantic decisions and admitted intents. Runtime
-/// selection and published-evidence axes will be added by later slices; this
-/// first slice establishes the static-policy/lowering boundary. Callers may
-/// update only a known admitted intent, and queries never infer success from a
-/// patch kind or warning string.
+/// The ledger is the sole owner of the immutable observation plan and the
+/// lowering state joined to its admitted intents. Callers may update only a
+/// known admitted intent, and queries never infer success from a patch kind or
+/// warning string.
 class ConSanCoverageLedger {
 public:
   ConSanCoverageLedger() = default;
-  explicit ConSanCoverageLedger(const ConSanObservationPlan &plan);
+  explicit ConSanCoverageLedger(ConSanObservationPlan plan);
 
-  /// Return immutable semantic decisions copied from the observation plan.
+  /// Return the one immutable semantic plan owned by this ledger.
+  [[nodiscard]] const ConSanObservationPlan &observation_plan() const { return observation_plan_; }
+
+  /// Resolve one admitted intent from the immutable owned plan.
+  [[nodiscard]] const ConSanProbeIntent *intent(ConSanProbeIntentId id) const {
+    return observation_plan_.intent(id);
+  }
+
+  /// Return immutable semantic decisions from the owned observation plan.
   [[nodiscard]] std::span<const ConSanSiteDecision> site_decisions() const {
-    return site_decisions_;
+    return observation_plan_.site_decisions;
   }
 
-  /// Return immutable barrier-event decisions copied from the plan.
+  /// Return immutable barrier-event decisions from the owned plan.
   [[nodiscard]] std::span<const ConSanBarrierSiteDecision> barrier_site_decisions() const {
-    return barrier_site_decisions_;
+    return observation_plan_.barrier_site_decisions;
   }
 
-  /// Return immutable ordered-communication decisions copied from the plan.
+  /// Return immutable ordered-communication decisions from the owned plan.
   [[nodiscard]] std::span<const ConSanAtomicSiteDecision> atomic_site_decisions() const {
-    return atomic_site_decisions_;
+    return observation_plan_.atomic_site_decisions;
   }
 
-  /// Return immutable fence decisions copied from the observation plan.
+  /// Return immutable fence decisions from the owned observation plan.
   [[nodiscard]] std::span<const ConSanFenceSiteDecision> fence_site_decisions() const {
-    return fence_site_decisions_;
+    return observation_plan_.fence_site_decisions;
   }
 
   /// Return immutable joined intent/lowering entries.
@@ -1238,9 +1246,6 @@ public:
   /// Project runtime attribution from the authoritative lowering transactions.
   [[nodiscard]] ConSanRuntimeStaticMapping runtime_static_mapping() const;
 
-  /// Verify that this ledger was initialized from the supplied immutable plan.
-  [[nodiscard]] bool matches_plan(const ConSanObservationPlan &plan) const;
-
   /// Forget emitted transactions while retaining explicit rejections. This is
   /// the one rollback operation used when candidate bytes are discarded.
   void discard_instrumented_lowerings();
@@ -1253,10 +1258,7 @@ public:
   bool operator==(const ConSanCoverageLedger &) const = default;
 
 private:
-  std::vector<ConSanSiteDecision> site_decisions_;
-  std::vector<ConSanBarrierSiteDecision> barrier_site_decisions_;
-  std::vector<ConSanAtomicSiteDecision> atomic_site_decisions_;
-  std::vector<ConSanFenceSiteDecision> fence_site_decisions_;
+  ConSanObservationPlan observation_plan_;
   std::vector<ConSanIntentCoverageEntry> intent_entries_;
   std::vector<ConSanCommittedLowering> lowering_commits_;
 };
@@ -1311,12 +1313,11 @@ consan_site_matches_kernel_allowlist(const ProgramInventory &inventory,
 
 /// Validated composition of every semantic policy fragment for one engine.
 ///
-/// The plan and its initial ledger are published together so engine lowerers
-/// cannot append another policy fragment or initialize a ledger independently.
+/// The initial ledger owns the one composed plan so engine lowerers cannot
+/// append another policy fragment or initialize parallel policy state.
 /// Typed fragment failures remain available for invariant tests; diagnostics
 /// are rendered once at this boundary for transform consumers.
 struct ConSanObservationProduct {
-  ConSanObservationPlan plan;
   ConSanCoverageLedger initial_coverage;
   std::vector<ConSanAccessPolicyReason> access_errors;
   std::vector<ConSanBarrierPolicyReason> barrier_errors;
@@ -1327,13 +1328,17 @@ struct ConSanObservationProduct {
   bool atomic_fence_fragment_required = false;
   std::vector<std::string> diagnostics;
 
+  [[nodiscard]] const ConSanObservationPlan &plan() const {
+    return initial_coverage.observation_plan();
+  }
+
   /// Return whether every requested fragment composed into one valid plan and
   /// the initial ledger is exactly the projection of that plan.
   [[nodiscard]] bool valid() const {
     return access_errors.empty() && barrier_errors.empty() && atomic_errors.empty() &&
            fence_errors.empty() && barrier_fragment_appended &&
-           (!atomic_fence_fragment_required || atomic_fence_fragment_appended) && plan.valid() &&
-           initial_coverage == ConSanCoverageLedger(plan) && diagnostics.empty();
+           (!atomic_fence_fragment_required || atomic_fence_fragment_appended) && plan().valid() &&
+           initial_coverage == ConSanCoverageLedger(plan()) && diagnostics.empty();
   }
 
   bool operator==(const ConSanObservationProduct &) const = default;

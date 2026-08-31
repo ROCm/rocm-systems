@@ -214,12 +214,13 @@ struct ConSanMutationOutcome {
 struct ConSanTransformArtifacts {
   /// Immutable ownership of original code-object/container/access facts.
   ProgramInventory program_inventory;
-  /// Target-neutral policy output retained independently of current lowering
-  /// candidates and patch telemetry.
-  ConSanObservationPlan observation_plan;
-  /// Joined static policy and lowering state initialized from the observation
-  /// plan rather than inferred from emitted patch kinds.
+  /// Sole ownership of immutable semantic policy and its joined lowering
+  /// state, independent of current candidates and patch telemetry.
   ConSanCoverageLedger coverage_ledger;
+
+  [[nodiscard]] const ConSanObservationPlan &observation_plan() const {
+    return coverage_ledger.observation_plan();
+  }
   /// Stable semantic sites eligible for validation-only fault selection.
   std::vector<ConSanFaultSite> fault_sites;
   /// Candidate destinations for a barrier-move validation mutation.

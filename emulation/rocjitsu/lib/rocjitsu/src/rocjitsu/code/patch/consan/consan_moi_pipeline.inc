@@ -17,7 +17,7 @@ void append_moi_operational_resource_plans(
       break;
     }
     std::vector<MoiBarrierEvidenceSitePlan> candidates = build_moi_barrier_evidence_site_plans(
-        result.program_inventory, result.observation_plan, evidence_kind, errors);
+        result.program_inventory, result.observation_plan(), evidence_kind, errors);
     if (!errors.empty())
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
@@ -67,7 +67,7 @@ void append_moi_operational_resource_plans(
       break;
     }
     std::vector<MoiAtomicEvidenceSitePlan> candidates = build_moi_atomic_evidence_site_plans(
-        result.program_inventory, result.observation_plan, evidence_kind, errors);
+        result.program_inventory, result.observation_plan(), evidence_kind, errors);
     if (!errors.empty())
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
@@ -87,7 +87,7 @@ void append_moi_operational_resource_plans(
   }
   if (request.moi_track_atomics && request.moi_engine == ConSanMoiEngine::RecordReplay) {
     std::vector<MoiFenceEvidenceSitePlan> candidates = build_moi_fence_evidence_site_plans(
-        result.program_inventory, result.observation_plan, errors);
+        result.program_inventory, result.observation_plan(), errors);
     if (!errors.empty())
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
@@ -127,7 +127,7 @@ void publish_pending_moi_lowering_rejections(
     if (pending.empty())
       continue;
     auto commit = make_consan_committed_lowering(
-        result.observation_plan, pending, std::span<const ConSanCommittedLoweringLocation>{},
+        result.observation_plan(), pending, std::span<const ConSanCommittedLoweringLocation>{},
         ConSanLoweringOutcomeKind::ResourceRejected,
         "MOI resource plan rejected intents: " +
             std::string(consan_register_plan_reason_name(plan.reason)),
@@ -138,22 +138,23 @@ void publish_pending_moi_lowering_rejections(
     }
   }
 
-  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+  for (const ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
     const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(intent.id);
     if (entry == nullptr || entry->lowering != ConSanLoweringOutcomeKind::Pending)
       continue;
     const std::array<ConSanProbeIntentId, 1> ids = {intent.id};
-    auto commit =
-        whole_transform_resource_failure
-            ? make_consan_committed_lowering(
-                  result.observation_plan, ids, std::span<const ConSanCommittedLoweringLocation>{},
-                  ConSanLoweringOutcomeKind::ResourceRejected,
-                  "MOI whole-transform resource validation rejected the admitted intent",
-                  ConSanRuntimeStaticMapping{}, *whole_transform_resource_failure)
-            : make_consan_committed_lowering(
-                  result.observation_plan, ids, std::span<const ConSanCommittedLoweringLocation>{},
-                  ConSanLoweringOutcomeKind::PlacementRejected,
-                  "MOI lowerer selected no placement for the admitted intent");
+    auto commit = whole_transform_resource_failure
+                      ? make_consan_committed_lowering(
+                            result.observation_plan(), ids,
+                            std::span<const ConSanCommittedLoweringLocation>{},
+                            ConSanLoweringOutcomeKind::ResourceRejected,
+                            "MOI whole-transform resource validation rejected the admitted intent",
+                            ConSanRuntimeStaticMapping{}, *whole_transform_resource_failure)
+                      : make_consan_committed_lowering(
+                            result.observation_plan(), ids,
+                            std::span<const ConSanCommittedLoweringLocation>{},
+                            ConSanLoweringOutcomeKind::PlacementRejected,
+                            "MOI lowerer selected no placement for the admitted intent");
     if (!commit || !result.coverage_ledger.publish_lowering_commit(std::move(*commit))) {
       result.errors.emplace_back("ConSan MOI could not publish a placement rejection");
       return;
