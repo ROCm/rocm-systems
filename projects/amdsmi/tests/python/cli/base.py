@@ -116,15 +116,36 @@ class TestCliBase(unittest.TestCase):
 
     # TODO(amdsmi_team): drop these once the CLI tests supports automated
     #                     input
-    SWEEP_EXCLUDED_ARGS = {"set": {"--compute-partition": "waits for confirmation"}}
+    SWEEP_EXCLUDED_ARGS = {
+        "set": {"--compute-partition": "waits for confirmation"},
+        "reset": {
+            # --gtt reaches reset.py's prompt_reboot(), which calls `systemctl reboot` on "y"
+            "--gtt": "prompts to reboot the host",
+            "--gpureset": "can hang the host",
+        },
+    }
 
     # TODO(amdsmi_team): User input is not a problem, we just need to test above ^
     PROMPT_ANSWERS = {"set": {"--fan": "y\n", "--memory-partition": "y\n"}}
 
     # Commands whose sweep also accepts NOT_SUPPORTED. A write may legitimately
     # refuse a feature the ASIC lacks, but a read answering NOT_SUPPORTED is a
-    # regression the sweep should catch. Add "reset" when that suite is enabled.
-    NOT_SUPPORTED_TOLERANT_COMMANDS = {"set"}
+    # regression the sweep should catch.
+    NOT_SUPPORTED_TOLERANT_COMMANDS = {"set", "reset"}
+
+    # Exit codes a single argument may also answer with, beyond NOT_SUPPORTED
+    SWEEP_TOLERATED_CODES = {
+        # Not all ASICs support setting all modes, which is an invalid set option
+        "set": {"--memory-partition": amdsmi.AmdSmiStatus.INVAL},
+        # This reset is a read -- the kernel clears xgmi_error when it is read --
+        # so the read's errno becomes the reset's status, and some drivers reject
+        # it with EINVAL.
+        "reset": {"--xgmierr": amdsmi.AmdSmiStatus.INVAL},
+    }
+
+    # Order for the amd-smi reset commands, putting --clocks last since
+    # it resets clocks and overdrive to default
+    SWEEP_ARG_ORDER = {"reset": {"first": "--fans", "last": "--clocks"}}
 
     # Scaffolding shared across every CLI test class.  setUpClass populates
     # these once, directly on ``TestCliBase``; subclasses then resolve them
@@ -511,8 +532,11 @@ class TestCliBase(unittest.TestCase):
                                 options.append(f"{items[item_index]} 0")
                                 options.append(f"{items[item_index]} 1")
                             else:
+                                # Reached when no branch above recognises the
+                                # placeholder, so no values can be generated.
                                 self.common.print(
-                                    f"TODO: set {items[item_index]} sub_arg={sub_arg}  match_str={match_str}"
+                                    f"{self.tab}Untested (no sweep values for {sub_arg}): "
+                                    f"amd-smi {cmd.split()[1]} {items[item_index]}"
                                 )
                     if not sub_found:
                         # Put in sub_arg if it was not found
@@ -529,7 +553,7 @@ class TestCliBase(unittest.TestCase):
 
     def CreateCmds(self, cmd_name, list1_name, list2_name, list3_name, list4_name):
         cmd = f"amd-smi {cmd_name} --help"
-        list1_args = self.FindArgs(cmd, list1_name)
+        list1_args = self._order_sweep_args(cmd_name, self.FindArgs(cmd, list1_name))
         list2_args = self.FindArgs(cmd, list2_name)
         list3_args = self.FindArgs(cmd, list3_name)
         list4_args = self.FindArgs(cmd, list4_name)
@@ -588,10 +612,9 @@ class TestCliBase(unittest.TestCase):
         # Removes cmds that are invalid
         for index, cmd_cond in enumerate(cmds):
             cmd, cond = cmd_cond
-            if "--memory-partition" in cmd:
-                # An ASIC which may support some modes, but not others - thus invalid
-                # is an acceptable response
-                cond = [*ok, amdsmi.AmdSmiStatus.INVAL]
+            tolerated = self._lookup(self.SWEEP_TOLERATED_CODES, cmd)
+            if tolerated is not None:
+                cond = [*ok, tolerated]
             while self.openCurlyBrace in cmd:
                 items = cmd.split()
                 # Find gpu index. No --gpu, "all" or a bdf all target every device.
@@ -779,7 +802,7 @@ class TestCliBase(unittest.TestCase):
 
                 # No explicit gpu infers a gpu=0
                 gpu_index = "0"
-                if "--gpu" in cmd:
+                if "--gpu" in items:
                     try:
                         i = items.index("--gpu")
                         gpu_index = items[i + 1]
@@ -792,7 +815,8 @@ class TestCliBase(unittest.TestCase):
                 if cmd and found_sub_arg:
                     sub_arg = items[2]
                     if sub_arg != found_sub_arg:
-                        if "--gpu" in cmd:
+                        # Whole word matches only: i.e. remove "--gpu", not "--gpureset"
+                        if "--gpu" in items:
                             cmd = ""
 
                 # Remove all file and watch modifiers except for gpu 0
@@ -825,10 +849,21 @@ class TestCliBase(unittest.TestCase):
                 cmds[index] = (cmd, cond)
 
         # Remove commands the sweep must not run
+        announced = set()
         for index, cmd_cond in enumerate(cmds):
             cmd, cond = cmd_cond
-            if cmd and self._lookup(self.SWEEP_EXCLUDED_ARGS, cmd) is not None:
-                cmds[index] = ("", cond)
+            if not cmd:
+                continue
+            reason = self._lookup(self.SWEEP_EXCLUDED_ARGS, cmd)
+            if reason is None:
+                continue
+            # Name what went untested; a sweep that drops commands silently
+            # reads as coverage it never had.
+            key = " ".join(cmd.split()[1:3])
+            if key not in announced:
+                announced.add(key)
+                self.common.print(f"{self.tab}Excluded ({reason}): amd-smi {key}")
+            cmds[index] = ("", cond)
 
         # Remove empty (cmd,cond) arguments
         cmds = [cmd_cond for cmd_cond in cmds if cmd_cond[0] != ""]
@@ -843,6 +878,36 @@ class TestCliBase(unittest.TestCase):
             print(f"cmds: {'*' * 80}")
             print(json.dumps(cmds, sort_keys=False, indent=4), flush=True)
         return cmds
+
+    def _order_sweep_args(self, cmd_name, args):
+        """Move one of *args* to the front and one to the back, per SWEEP_ARG_ORDER.
+
+        Args:
+            cmd_name: the amd-smi command being swept, e.g. ``"reset"``.
+            args: that command's own arguments as FindArgs returned them, each
+                either a bare flag (``"--gpureset"``) or a flag and its value
+                (``"--fan 50%"``).
+
+        Returns:
+            list: the same arguments, reordered. Anything the table does not
+            name keeps the position the help text gave it.
+        """
+        order = self.SWEEP_ARG_ORDER.get(cmd_name)
+        if not order:
+            return args
+
+        goes_first = order.get("first")
+        goes_last = order.get("last")
+        head, middle, tail = [], [], []
+        for arg in args:
+            flag = arg.split(" ")[0]
+            if flag == goes_first:
+                head.append(arg)
+            elif flag == goes_last:
+                tail.append(arg)
+            else:
+                middle.append(arg)
+        return head + middle + tail
 
     @staticmethod
     def _lookup(table, cmd):
