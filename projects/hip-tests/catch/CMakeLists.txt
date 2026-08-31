@@ -427,6 +427,14 @@ unset(_catch_already_patched)
 # "microsoft" is not mistaken for WSL.  It is cached in _hip_on_wsl so it runs
 # once per binary rather than once per test.  list(FIND) is used instead of
 # IN_LIST because CMP0057 is not set in the context ctest evaluates this in.
+#
+# parse_config.py emits [exclude_<reason>] for every disable reason regardless
+# of the build platform, so an amd_wsl entry also lands in nvidia binaries.  The
+# patch is therefore applied only for AMD builds, and only when the caller has
+# not asked for normally-skipped tests to run via HIP_TESTS_RUN_DISABLED.  When
+# either condition fails the patch is reversed instead, so reconfiguring an
+# existing build directory with changed options leaves Catch2's script in the
+# state those options imply.
 set(_wsl_old_snippet [==[          LABELS "${tag_list}"
         )
       endif()
@@ -464,10 +472,17 @@ set(_wsl_new_snippet [==[          LABELS "${tag_list}"
         endif()
       endif()
     endif(add_tags)]==])
+if(HIP_PLATFORM STREQUAL "amd" AND NOT HIP_TESTS_RUN_DISABLED)
+  set(_wsl_from "${_wsl_old_snippet}")
+  set(_wsl_to "${_wsl_new_snippet}")
+else()
+  set(_wsl_from "${_wsl_new_snippet}")
+  set(_wsl_to "${_wsl_old_snippet}")
+endif()
 file(READ "${CATCH_ADD_TESTS_SCRIPT}" _wsl_content)
-string(FIND "${_wsl_content}" "${_wsl_new_snippet}" _wsl_already_patched)
+string(FIND "${_wsl_content}" "${_wsl_to}" _wsl_already_patched)
 if(_wsl_already_patched EQUAL -1)
-  string(REPLACE "${_wsl_old_snippet}" "${_wsl_new_snippet}" _wsl_patched "${_wsl_content}")
+  string(REPLACE "${_wsl_from}" "${_wsl_to}" _wsl_patched "${_wsl_content}")
   if("${_wsl_patched}" STREQUAL "${_wsl_content}")
     message(FATAL_ERROR
       "Failed to patch CatchAddTests.cmake for WSL: expected snippet not found.\n"
@@ -477,6 +492,8 @@ if(_wsl_already_patched EQUAL -1)
 endif()
 unset(_wsl_old_snippet)
 unset(_wsl_new_snippet)
+unset(_wsl_from)
+unset(_wsl_to)
 unset(_wsl_content)
 unset(_wsl_patched)
 unset(_wsl_already_patched)
