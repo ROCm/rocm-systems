@@ -5183,8 +5183,10 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
     case AMDSMI_CLK_TYPE_SOC:
       info->clk = metrics.current_socclk;
       break;
-    // fclk/df not supported by gpu metrics so providing default value which cannot be contrued to
-    // be valid
+    // gpu metrics carries no fclk, so report the documented not-supported value
+    // rather than a plausible-looking frequency. min_clk/max_clk still come from
+    // pp_dpm_fclk above, and the CLI sources the current fclk via
+    // amdsmi_get_clk_freq.
     case AMDSMI_CLK_TYPE_DF:
       info->clk = UINT32_MAX;
       break;
