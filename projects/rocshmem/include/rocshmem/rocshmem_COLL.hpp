@@ -392,6 +392,16 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_alltoallv_wg(rocshmem_team_t t
                                                              const size_t dest_displs[],
                                                              unsigned long long *source, const size_t source_nelems[],
                                                              const size_t source_displs[]);
+__device__ ATTR_NO_INLINE void rocshmem_half_alltoallv_wg(rocshmem_team_t team,
+                                                             __half *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             __half *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_alltoallv_wg(rocshmem_team_t team,
+                                                             __hip_bfloat16 *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             __hip_bfloat16 *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 
 __device__ ATTR_NO_INLINE void rocshmem_half_alltoallv_wg(rocshmem_team_t team,
                                                           __half *dest, const size_t dest_nelems[],
