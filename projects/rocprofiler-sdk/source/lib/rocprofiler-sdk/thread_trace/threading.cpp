@@ -225,7 +225,7 @@ producer_loop(
         buffer.flags            = flags;
         buffer.size             = size;
         buffer.se_id            = shader_engine_id;
-        buffer.chunk_index      = next_chunk_id(next_chunk_indices, shader_engine_id);
+        buffer.chunk_index      = next_chunk_indices[shader_engine_id]++;
         buffer.read_offset      = read_offset;
 
         if(!isHeader)

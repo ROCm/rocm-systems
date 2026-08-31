@@ -253,7 +253,7 @@ public:
 
         for(uint64_t se_index = 0; se_index < se_number_total; se_index++)
         {
-            bool bMaskedIn                     = ((uint64_t{1} << se_index) & config->se_mask) != 0;
+            bool bMaskedIn                     = ((config->se_mask >> se_index) & 1) != 0;
             config->target_cu_per_se[se_index] = bMaskedIn ? config->targetCu : -1;
         }
 
@@ -299,7 +299,7 @@ public:
                 if(config->target_cu_per_se.at(se_index) < 0) continue;
 
                 uint32_t token_mask2_value = Primitives::sqtt_token_mask2_value();
-                if(((uint64_t{1} << se_index) & config->se_mask) == 0) token_mask2_value = 0;
+                if(((config->se_mask >> se_index) & 1) == 0) token_mask2_value = 0;
 
                 uint64_t xcc_index    = se_index / se_number_xcc;
                 uint64_t se_index_xcc = se_index % se_number_xcc;
@@ -432,7 +432,7 @@ public:
                         (config->occupancy_mode)
                             ? Primitives::sqtt_token_mask_occupancy_value()
                             : Primitives::sqtt_token_mask_on_value(xcc_number_ <= 1);
-                    if(((uint64_t{1} << global_se) & config->se_mask) == 0)
+                    if(((config->se_mask >> global_se) & 1) == 0)
                         token_mask = Primitives::sqtt_token_mask_off_value();
 
                     WriteConfigPacket(

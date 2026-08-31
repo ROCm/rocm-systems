@@ -125,8 +125,8 @@ TEST_F(TraceConfigTest, ConcurrentConfiguration)
     // Setup multiple SEs with different target CUs
     for(uint32_t se = 0; se < config.se_number; se++)
     {
-        config.target_cu_per_se[se]  = se % 2 ? -1 : se;  // Alternate between enabled/disabled
-        config.buffer_data[se] = {reinterpret_cast<void*>(0x1000 * (se + 1))};
+        config.target_cu_per_se[se] = se % 2 ? -1 : se;  // Alternate between enabled/disabled
+        config.buffer_data[se]      = {reinterpret_cast<void*>(0x1000 * (se + 1))};
     }
 
     EXPECT_EQ(config.concurrent, 2);

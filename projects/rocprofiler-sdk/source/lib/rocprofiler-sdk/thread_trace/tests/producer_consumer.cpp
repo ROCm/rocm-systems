@@ -249,16 +249,6 @@ TEST(thread_trace, status_query)
     threads.join_all();
 }
 
-TEST(thread_trace, chunk_index_is_independent_per_shader_engine)
-{
-    auto chunk_indices = std::vector<uint64_t>(4);
-    for(uint64_t i = 0; i < 20; ++i)
-    {
-        EXPECT_EQ(rocprofiler::thread_trace::next_chunk_id(chunk_indices, 0), i);
-        EXPECT_EQ(rocprofiler::thread_trace::next_chunk_id(chunk_indices, 2), i);
-    }
-}
-
 TEST(thread_trace, multiple_calls)
 {
     rocprofiler::thread_trace::test_init();

@@ -335,7 +335,7 @@ public:
     }
 
     pm4_builder::TraceConfig config{};
-    std::vector<size_t> buffer_swaps{};
+    std::vector<size_t>      buffer_swaps{};
 
 protected:
     int                                             target_cu = -1;
