@@ -4,10 +4,12 @@
 #include "common/path.hpp"
 #include "filesystem.hpp"
 
+#include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
 #include <sys/stat.h>
+#include <system_error>
 #include <unistd.h>
 
 using namespace rocprofsys::common::path;
@@ -501,4 +503,108 @@ TEST_F(PathTest, Filename_RelativePath) { EXPECT_EQ(filename("a/b/c"), "c"); }
 TEST_F(PathTest, Filename_AcceptsTemporary)
 {
     EXPECT_EQ(filename(std::string("/a/b/c.so")), "c.so");
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_CreatesParentTree)
+{
+    const std::string file_path = m_test_dir + "/new/nested/tree/out.txt";
+
+    std::ofstream out_fstream;
+    EXPECT_TRUE(create_parent_dirs_and_open_ofstream(out_fstream, file_path));
+    EXPECT_TRUE(out_fstream.is_open());
+    out_fstream << "hello";
+    out_fstream.close();
+
+    EXPECT_TRUE(is_directory(m_test_dir + "/new/nested/tree"));
+    EXPECT_TRUE(is_regular_file(file_path));
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_ExistingDirectoryIsNotAnError)
+{
+    const std::string existing_dir = create_subdir("already_here");
+
+    std::ofstream out_fstream;
+    EXPECT_TRUE(
+        create_parent_dirs_and_open_ofstream(out_fstream, existing_dir + "/out.txt"));
+    EXPECT_TRUE(out_fstream.is_open());
+    out_fstream.close();
+
+    EXPECT_TRUE(is_regular_file(existing_dir + "/out.txt"));
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_BareFilenameCreatesNoDirectory)
+{
+    const auto previous_cwd = std::filesystem::current_path();
+    std::filesystem::current_path(m_test_dir);
+
+    std::ofstream out_fstream;
+    EXPECT_TRUE(create_parent_dirs_and_open_ofstream(out_fstream, "bare.txt"));
+    EXPECT_TRUE(out_fstream.is_open());
+    out_fstream.close();
+
+    EXPECT_TRUE(is_regular_file(m_test_dir + "/bare.txt"));
+
+    std::filesystem::current_path(previous_cwd);
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_UncreatableParentReturnsFalse)
+{
+    // a regular file as an intermediate component makes create_directories fail
+    const std::string blocker = create_file("blocker");
+
+    const auto previous_cwd = std::filesystem::current_path();
+    std::filesystem::current_path(m_test_dir);
+
+    std::ofstream out_fstream;
+    EXPECT_FALSE(
+        create_parent_dirs_and_open_ofstream(out_fstream, blocker + "/sub/out.txt"));
+    EXPECT_FALSE(out_fstream.is_open());
+    EXPECT_FALSE(is_regular_file(m_test_dir + "/out.txt"));
+
+    std::filesystem::current_path(previous_cwd);
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_TargetIsDirectoryReturnsFalse)
+{
+    const std::string existing_dir = create_subdir("a_directory");
+
+    std::ofstream out_fstream;
+    EXPECT_FALSE(create_parent_dirs_and_open_ofstream(out_fstream, existing_dir));
+    EXPECT_FALSE(out_fstream.is_open());
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_EmptyPathReturnsFalse)
+{
+    std::ofstream out_fstream;
+    EXPECT_FALSE(create_parent_dirs_and_open_ofstream(out_fstream, ""));
+    EXPECT_FALSE(out_fstream.is_open());
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_BackslashIsNotASeparator)
+{
+    // POSIX-correct: a backslash is an ordinary filename character, so this writes one
+    // file named "out\data.txt" rather than creating an "out" directory
+    const std::string file_path = m_test_dir + "/out\\data.txt";
+
+    std::ofstream out_fstream;
+    EXPECT_TRUE(create_parent_dirs_and_open_ofstream(out_fstream, file_path));
+    out_fstream.close();
+
+    EXPECT_TRUE(is_regular_file(file_path));
+    EXPECT_FALSE(is_directory(m_test_dir + "/out"));
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_TruncatesExistingFile)
+{
+    const std::string file_path = create_file("truncate_me.txt", "0123456789");
+
+    std::ofstream out_fstream;
+    EXPECT_TRUE(create_parent_dirs_and_open_ofstream(out_fstream, file_path));
+    out_fstream << "ab";
+    out_fstream.close();
+
+    std::ifstream in_fstream{ file_path };
+    std::string   content;
+    std::getline(in_fstream, content);
+    EXPECT_EQ(content, "ab");
 }
