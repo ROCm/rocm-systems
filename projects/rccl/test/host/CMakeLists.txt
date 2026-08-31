@@ -538,7 +538,7 @@ function(rccl_standalone_setup)
       message(FATAL_ERROR "GenerateEmbeddedTunerConfigs.cmake failed: ${_gen_tuner_error}")
     endif()
   endif()
-  message(STATUS "hipcc: ${CMAKE_CXX_COMPILER}")
+  message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER}")
   message(STATUS "Hipified sources: ${RCCL_HIPIFY_DIR}")
 
   # --- Detect whether the system amdsmi.h exposes the UALoE fabric struct ---
