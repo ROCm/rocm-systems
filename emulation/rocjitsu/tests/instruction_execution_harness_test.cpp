@@ -327,7 +327,13 @@ public:
     read_registers.push_back(physical_reg);
   }
 
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *, uint32_t physical_reg, uint64_t,
+                              uint8_t) override {
+    write_registers.push_back(physical_reg);
+  }
+
   std::vector<uint32_t> read_registers;
+  std::vector<uint32_t> write_registers;
 };
 
 /// @brief Check if a mnemonic should be skipped in the execution harness.
@@ -6853,6 +6859,150 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
   cu->execute_instruction(pk16_inst.get(), *wf);
   for (uint32_t i = 18; i <= 33; ++i)
     EXPECT_EQ(cu->read_vgpr(vb + i, 0), std::bit_cast<uint32_t>(2.0f)) << "vgpr=" << i;
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Gfx1250CvtScaleTest, WideUnpackRejectsDestinationRangeBeforeWriting) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_cvt_scale_boundary_mem");
+  amdgpu::L2Cache l2("gfx1250_cvt_scale_boundary_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 1024;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  wf->set_vgpr_msb_mode(0xC0u); // Destination bank 3.
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + 0, 0, 0x08208208u);
+  cu->write_vgpr(vb + 1, 0, 0x82082082u);
+  cu->write_vgpr(vb + 2, 0, 0x20820820u);
+  cu->write_vgpr(vb + 10, 0, std::bit_cast<uint32_t>(1.0f));
+
+  constexpr uint32_t kDestinationBase = 3 * 256 + 250;
+  constexpr uint32_t kSentinel = 0xA5A5A5A5u;
+  for (uint32_t reg = kDestinationBase; reg < cfg.vgprs_per_wf; ++reg)
+    cu->write_vgpr(vb + reg, 0, kSentinel);
+
+  // v_cvt_scale_pk16_f32_fp6 v[1018:1033], v[0:2], v10 scale_sel:1.
+  // The complete 16-register destination does not fit in this wave.
+  const uint32_t words[] = {0xD6C908FAU, 0x02021500U};
+  auto decoded = decoder->decode(words);
+  ASSERT_TRUE(decoded.succeeded());
+  std::unique_ptr<Instruction> inst = std::move(decoded).value();
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_scale_pk16_f32_fp6");
+  cu->execute_instruction(inst.get(), *wf);
+
+  for (uint32_t reg = kDestinationBase; reg < cfg.vgprs_per_wf; ++reg)
+    EXPECT_EQ(cu->read_vgpr(vb + reg, 0), kSentinel) << "vgpr=" << reg;
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_cvt_scale_region_boundary_mem");
+  amdgpu::L2Cache l2("gfx1250_cvt_scale_region_boundary_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 1024;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto recorder = std::make_unique<Gfx1250VgprReadRecorder>();
+  auto *recorder_ptr = recorder.get();
+  plugin_group->add(std::move(recorder));
+  cu->set_plugin_group(plugin_group);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t kSentinel = 0xA5A5A5A5u;
+  cu->write_vgpr(vb + 10, 0, std::bit_cast<uint32_t>(1.0f));
+
+  // Unpack source v[1022:1024] does not fit. The valid destination must remain
+  // untouched instead of consuming zero/foreign source words.
+  wf->set_vgpr_msb_mode(0x03u); // Source 0 bank 3.
+  for (uint32_t reg = 20; reg < 36; ++reg)
+    cu->write_vgpr(vb + reg, 0, kSentinel);
+  const auto unpack_words = cdna5::build_vop3(
+      cdna5::kVCvtScalePk16F32Fp6Vop3, {.vdst = 20, .src0 = vgpr_src(254), .src1 = vgpr_src(10)});
+  auto decoded_unpack = decoder->decode(unpack_words.data());
+  ASSERT_TRUE(decoded_unpack.succeeded());
+  std::unique_ptr<Instruction> unpack = std::move(decoded_unpack).value();
+  ASSERT_NE(unpack, nullptr);
+  ASSERT_EQ(std::string_view(unpack->mnemonic()), "v_cvt_scale_pk16_f32_fp6");
+  recorder_ptr->read_registers.clear();
+  recorder_ptr->write_registers.clear();
+  cu->execute_instruction(unpack.get(), *wf);
+  for (uint32_t reg = 20; reg < 36; ++reg)
+    EXPECT_EQ(cu->read_vgpr_storage(vb + reg, 0), kSentinel) << "unpack dst vgpr=" << reg;
+  EXPECT_TRUE(recorder_ptr->read_registers.empty());
+  EXPECT_TRUE(recorder_ptr->write_registers.empty());
+
+  // Pack source v[1018:1033] does not fit. Its valid three-register
+  // destination must remain untouched.
+  wf->set_vgpr_msb_mode(0x03u); // Source 0 bank 3.
+  for (uint32_t reg = 40; reg < 43; ++reg)
+    cu->write_vgpr(vb + reg, 0, kSentinel);
+  const auto pack_source_words =
+      cdna5::build_vop3(cdna5::kVCvtScalef32Pk16Fp6F32Vop3,
+                        {.vdst = 40, .src0 = vgpr_src(250), .src1 = vgpr_src(10)});
+  auto decoded_pack_source = decoder->decode(pack_source_words.data());
+  ASSERT_TRUE(decoded_pack_source.succeeded());
+  std::unique_ptr<Instruction> pack_source = std::move(decoded_pack_source).value();
+  ASSERT_NE(pack_source, nullptr);
+  ASSERT_EQ(std::string_view(pack_source->mnemonic()), "v_cvt_scalef32_pk16_fp6_f32");
+  recorder_ptr->read_registers.clear();
+  recorder_ptr->write_registers.clear();
+  cu->execute_instruction(pack_source.get(), *wf);
+  for (uint32_t reg = 40; reg < 43; ++reg)
+    EXPECT_EQ(cu->read_vgpr_storage(vb + reg, 0), kSentinel) << "pack source dst vgpr=" << reg;
+  EXPECT_TRUE(recorder_ptr->read_registers.empty());
+  EXPECT_TRUE(recorder_ptr->write_registers.empty());
+
+  // Pack destination v[1022:1024] does not fit. The in-range portion must not
+  // be modified.
+  wf->set_vgpr_msb_mode(0xC0u); // Destination bank 3.
+  for (uint32_t reg = 0; reg < 16; ++reg)
+    cu->write_vgpr(vb + reg, 0, std::bit_cast<uint32_t>(1.0f));
+  cu->write_vgpr(vb + 1022, 0, kSentinel);
+  cu->write_vgpr(vb + 1023, 0, kSentinel);
+  const auto pack_destination_words = cdna5::build_vop3(
+      cdna5::kVCvtScalef32Pk16Fp6F32Vop3, {.vdst = 254, .src0 = vgpr_src(0), .src1 = vgpr_src(10)});
+  auto decoded_pack_destination = decoder->decode(pack_destination_words.data());
+  ASSERT_TRUE(decoded_pack_destination.succeeded());
+  std::unique_ptr<Instruction> pack_destination = std::move(decoded_pack_destination).value();
+  ASSERT_NE(pack_destination, nullptr);
+  ASSERT_EQ(std::string_view(pack_destination->mnemonic()), "v_cvt_scalef32_pk16_fp6_f32");
+  recorder_ptr->read_registers.clear();
+  recorder_ptr->write_registers.clear();
+  cu->execute_instruction(pack_destination.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + 1022, 0), kSentinel);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + 1023, 0), kSentinel);
+  EXPECT_TRUE(recorder_ptr->read_registers.empty());
+  EXPECT_TRUE(recorder_ptr->write_registers.empty());
 
   if (!wf->is_halted())
     wf->halt();
