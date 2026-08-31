@@ -44,6 +44,7 @@ THE SOFTWARE.
 #include <d3d12.h>
 #include <dxgi1_2.h>
 #include <va/va_win32.h>
+#include "d3d12_interop.h"
 #else
 #include <fcntl.h>
 #include <unistd.h>
@@ -123,23 +124,10 @@ public:
     rocDecStatus SubmitDecode(RocdecPicParams *pPicParams);
     rocDecStatus GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode_status);
 #ifdef _WIN32
-    // Surface layout info (computed from decoder config, matches GetSurfaceStrideInternal).
-    struct SurfaceLayout {
-        uint32_t pitch;             // Row pitch in bytes (luma and chroma share this for NV12/P016)
-        uint32_t vstride;           // Aligned height
-        uint32_t num_planes;        // Total planes (luma + chroma): 1 for mono, 2 for NV12/P016, 3 for planar YUV
-        uint32_t plane_offset[3];   // Byte offset of each plane
-        uint32_t plane_pitch[3];    // Byte pitch of each plane
-        uint32_t plane_height[3];   // Row count of each plane
-        uint64_t total_size;        // Total buffer size in bytes
-    };
-    SurfaceLayout GetSurfaceLayout() const;
-
-    // Interop path: tiled D3D12 decode texture -> linear staging buffer -> HIP import.
+    // Interop path (forwarders into D3D12Interop): tiled D3D12 decode texture ->
+    // linear staging buffer -> HIP import. Implementation lives in d3d12_interop.cpp.
     rocDecStatus CopyToStagingBuffer(int pic_idx);
-    rocDecStatus ExportStagingBufferHandle(int pic_idx, HANDLE &nt_handle);
-    uint64_t GetStagingBufferSize(int pic_idx);
-    void GetD3D12ResourceLayout(int pic_idx, uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes);
+    rocDecStatus ExportStagingInterop(int pic_idx, D3D12Interop::StagingInteropInfo &out);
 #else
     rocDecStatus ExportSurface(int pic_idx, VADRMPRIMESurfaceDescriptor &va_drm_prime_surface_desc);
 #endif
@@ -157,16 +145,8 @@ private:
     std::vector<VASurfaceID> va_surface_ids_;
     bool supports_modifiers_;
 #ifdef _WIN32
-    ID3D12Device* d3d12_device_;                         // D3D12 device for creating shared resources
-    std::vector<ID3D12Resource*> d3d12_shared_resources_; // Shared D3D12 textures used as VA surfaces
-    // D3D12 copy infrastructure: tiled texture → linear staging buffer
-    ID3D12CommandQueue* d3d12_copy_queue_;
-    ID3D12CommandAllocator* d3d12_cmd_allocator_;
-    ID3D12GraphicsCommandList* d3d12_cmd_list_;
-    ID3D12Fence* d3d12_fence_;
-    HANDLE d3d12_fence_event_;
-    uint64_t d3d12_fence_value_;
-    std::vector<ID3D12Resource*> d3d12_staging_buffers_;  // Linear staging buffers (shared, for HIP import)
+    // All D3D12 device/resource/staging state lives in this helper (see d3d12_interop.h).
+    std::unique_ptr<D3D12Interop> d3d12_interop_;
 #endif
 
     VABufferID pic_params_buf_id_;
