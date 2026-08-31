@@ -135,15 +135,23 @@ bool AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* re
 // Host-resolve the AllGather LSA<->SDMA crossover (bytes/rank). Parsed once per
 // process; see gin_sdma_allgather::resolveSdmaThresholdFromEnv().
 static inline size_t AllGatherResolveSdmaThreshold() {
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+  return gin_sdma_allgather::kAllGatherSdmaThresholdDefault;
+#else
   static const size_t cached = gin_sdma_allgather::resolveSdmaThresholdFromEnv();
   return cached;
+#endif
 }
 
 // Parse NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS once per process (deprecated alias
 // NCCL_GIN_ANVIL_AG_CTAS still honored in the policy helper).
 static inline size_t AllGatherResolveCtasEnv() {
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+  return gin_sdma_allgather::kAllGatherCtasUnset;
+#else
   static const size_t cached = gin_sdma_allgather::parseAllGatherCtasEnv();
   return cached;
+#endif
 }
 
 static inline int AllGatherResolveLaunchCtas(size_t chunkBytes, size_t sdmaThreshold, int poolCtas) {
@@ -167,7 +175,9 @@ __device__ void AllGatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, nccl
 // Single-node hybrid AllGather body (-D 3), factored out so both the production
 // kernel and the device-timing kernel share one implementation:
 //   chunkBytes <= sdmaThreshold: direct LSA (all CTAs).
-//   chunkBytes >  sdmaThreshold: direct all-peers GIN puts (proven MI355X path).
+//   chunkBytes >  sdmaThreshold: one GIN put per peer, issued by a single thread
+//     (peer p is sent by CTA p % gridDim.x, thread p / gridDim.x); only the
+//     receiving CTA waits on its signal (AllToAll pattern).
 // Each invocation re-derives its entry barrier (LSA barrier for the small tier,
 // GIN world barrier + signal read for the large tier), so back-to-back calls are
 // self-synchronizing -- the timed kernel loops this body with no extra bookkeeping.
@@ -193,20 +203,34 @@ __device__ void ginAllGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWi
   const uint64_t signalValue = gin.readSignal(signalIndex);
 
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
 
-  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  const int nthreads = blockDim.x * gridDim.x;
-
-  for (int r = tid; r < devComm.nRanks; r += nthreads) {
+  // One put per (sender rank, peer), issued by exactly ONE thread. gin.put()
+  // defaults to Coop = ncclCoopThread, i.e. it is a per-thread call: every thread
+  // that reaches it submits its own SDMA descriptor and its own SignalInc. Peer r
+  // is therefore owned by CTA (r % gridDim.x) -- so inbound completion for this
+  // rank lands on signal (rank % gridDim.x) and only that CTA calls waitSignal
+  // (the receivingCta idea from GinAlltoAllKernel) -- and, within that CTA, by
+  // thread (r / gridDim.x). Dropping the threadIdx.x term would submit blockDim.x
+  // duplicate puts per peer onto that peer's single SDMA queue and inflate its
+  // signal by blockDim.x, making waitSignal return before the data landed.
+  const int peerStride = gridDim.x;
+  for (int r = blockIdx.x + (int)threadIdx.x * peerStride; r < devComm.nRanks;
+       r += peerStride * (int)blockDim.x) {
     gin.put(ncclTeamWorld(devComm), r,
         recvwin, recvoffset + (size_t)devComm.rank * chunkBytes,
         sendwin, sendoffset,
         chunkBytes, ncclGin_SignalInc{signalIndex});
   }
+  // The puts above are per-thread; the flush below is CTA-collective and must not
+  // run until every issuing thread in this CTA has submitted.
+  __syncthreads();
 
-  gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
+  if (blockIdx.x == (devComm.rank % peerStride))
+    gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
   gin.flush(ncclCoopCta());
+
+  bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
 }
 
 // Single-node hybrid AllGather (-D 3): one AllGather via the shared body.
