@@ -21,7 +21,7 @@ on:
         default: "windows-gfx1151-gpu-rocm"
       build_runs_on:
         type: string
-        default: "azure-windows-scale-rocm"
+        default: "aws-windows-scale-rocm-prod-mix"
 
 permissions:
   contents: read
