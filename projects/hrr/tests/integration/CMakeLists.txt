@@ -2,8 +2,6 @@
 #
 # SPDX-License-Identifier: MIT
 
-include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/HrrCaptureLib.cmake")
-
 # HRR GPU capture/replay integration tests.
 #
 # hrr_roundtrip_test.cc is the driver: it sets HIP_HRR_CAPTURE_OUTPUT, spawns the
@@ -86,21 +84,6 @@ if(NOT DEFINED HRR_RAW_TRACE_EXE)
   endif()
 endif()
 
-# Capture-enabled libamdhip64 must match this branch's wire format. Fail at
-# configure time rather than at replay with opaque payload-size errors.
-hrr_resolve_capture_lib(HRR_CAPTURE_LIB_DIR)
-if(NOT HRR_CAPTURE_LIB_DIR)
-  message(FATAL_ERROR
-    "HRR integration tests require capture-enabled libamdhip64 from the same tree.\n"
-    "Build amdhip64, then reconfigure with -DHRR_CLR_LIB=<clr-build>/hipamd/lib:\n"
-    "  cmake -S projects/clr -B build/clr -GNinja "
-    "-DHIP_COMMON_DIR=projects/hip -DROCM_PATH=\$ROCM_PATH "
-    "-DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=OFF -DHIP_PLATFORM=amd\n"
-    "  ninja -C build/clr amdhip64\n"
-    "  cmake ... -DHRR_CLR_LIB=\$PWD/build/clr/hipamd/lib")
-endif()
-message(STATUS "HRR capture lib: ${HRR_CAPTURE_LIB_DIR}")
-
 target_compile_definitions(hrr-integration-tests PRIVATE
   HRR_API_ARGS_IMPLEMENTATION
   __HIP_PLATFORM_AMD__
@@ -108,16 +91,9 @@ target_compile_definitions(hrr-integration-tests PRIVATE
   HRR_PLAYBACK_EXE="$<TARGET_FILE:hrr-playback>"
   HRR_RAW_TRACE_EXE="${HRR_RAW_TRACE_EXE}"
   ROCM_BIN_PATH="${ROCM_PATH}/bin"
-  HRR_CLR_LIB="${HRR_CAPTURE_LIB_DIR}"
 )
-
-hrr_apply_capture_lib_rpath("${HRR_CAPTURE_LIB_DIR}" hrr-integration-tests hrr-playback)
 
 # The integration tests spawn hrr-playback; make sure it is built first.
 add_dependencies(hrr-integration-tests hrr-playback)
 
 add_test(NAME hrr-integration-tests COMMAND hrr-integration-tests)
-if(CMAKE_HOST_UNIX)
-  set_tests_properties(hrr-integration-tests PROPERTIES
-    ENVIRONMENT "LD_LIBRARY_PATH=${HRR_CAPTURE_LIB_DIR}")
-endif()
