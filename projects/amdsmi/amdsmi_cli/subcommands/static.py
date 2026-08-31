@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import functools
 import logging
@@ -347,26 +330,26 @@ class StaticCommands:
                 bus_info["max_pcie_speed"] = pcie_static["max_pcie_speed"]
                 bus_info["pcie_interface_version"] = pcie_static["pcie_interface_version"]
                 bus_info["slot_type"] = pcie_static["slot_type"]
-                if bus_info["max_pcie_speed"] % 1000 != 0:
-                    pcie_speed_GTs_value = round(bus_info["max_pcie_speed"] / 1000, 1)
-                else:
-                    pcie_speed_GTs_value = round(bus_info["max_pcie_speed"] / 1000)
+                if bus_info["max_pcie_speed"] != "N/A":
+                    if bus_info["max_pcie_speed"] % 1000 != 0:
+                        pcie_speed_GTs_value = round(bus_info["max_pcie_speed"] / 1000, 1)
+                    else:
+                        pcie_speed_GTs_value = round(bus_info["max_pcie_speed"] / 1000)
 
-                bus_info["max_pcie_speed"] = pcie_speed_GTs_value
+                    bus_info["max_pcie_speed"] = pcie_speed_GTs_value
 
-                if bus_info["pcie_interface_version"] > 0:
+                pcie_interface_version_valid = (
+                    bus_info["pcie_interface_version"] != "N/A"
+                    and bus_info["pcie_interface_version"] > 0
+                )
+                if pcie_interface_version_valid:
                     bus_info["pcie_interface_version"] = f"Gen {bus_info['pcie_interface_version']}"
 
                 # Set the unit for pcie_speed
                 pcie_speed_unit = "GT/s"
-                if self.logger.is_human_readable_format():
-                    bus_info["max_pcie_speed"] = f"{bus_info['max_pcie_speed']} {pcie_speed_unit}"
-
-                if self.logger.is_json_format():
-                    bus_info["max_pcie_speed"] = {
-                        "value": bus_info["max_pcie_speed"],
-                        "unit": pcie_speed_unit,
-                    }
+                bus_info["max_pcie_speed"] = self.helpers.unit_format(
+                    self.logger, bus_info["max_pcie_speed"], pcie_speed_unit
+                )
 
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get bus info for gpu %s | %s", gpu_id, e.get_error_info())
