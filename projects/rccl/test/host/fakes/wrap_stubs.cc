@@ -124,16 +124,17 @@ char* real_getenv(const char* name) {
   static Fn next = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "getenv"));
   return next ? next(name) : nullptr;
 }
-}  // namespace
 
 // Strict: a name the test hasn't scripted reads as unset, so no test can
-// depend on the ambient environment. ncclGetEnv routes here.
+// depend on the ambient environment. ncclGetEnv (below, same TU) routes
+// here; no caller outside this file, so it stays out of wrap_stubs.h.
 const char* micro_getenv(const char* name) {
   if (name == nullptr) return nullptr;
   auto& m = microEnvMap();
   auto it = m.find(name);
   return (it != m.end() && it->second) ? it->second->c_str() : nullptr;
 }
+}  // namespace
 
 // Link-level override rather than a scoped macro: rccl_wrap.cc's several
 // bare getenv() sites can't be caught by a macro. Process-wide, so
