@@ -38,7 +38,7 @@ testResult_t  BroadcastGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclD
   return testSuccess;
 }
 
-void BroadcastGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
+void BroadcastGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize) / 1.0E9 / sec;
 
   *algBw = baseBw;
@@ -115,7 +115,7 @@ testResult_t BroadcastRunTest(struct threadArgs* args, int root, ncclDataType_t 
   return testSuccess;
 }
 
-struct testEngine ncclTestEngine = {
-  .getBuffSize = BroadcastGetBuffSize,
-  .runTest = BroadcastRunTest
+NCCL_WEAK struct testEngine ncclTestEngine = {
+  /* .getBuffSize = */ BroadcastGetBuffSize,
+  /* .runTest = */ BroadcastRunTest
 };

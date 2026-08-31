@@ -1,0 +1,57 @@
+# rccl-UnitTestsMicro — shared/ctest schema.
+# Host-only micro-tests (no GPU, no librccl/HIP runtime); build in Release and Debug.
+# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
+#
+# Tiers:
+#   quick — canonical anchor.
+#   standard — merge quick; override labels.
+#   comprehensive — merge quick; override labels.
+#   full — merge quick; override labels.
+
+test_categories:
+  quick: &micro_quick
+    description: "Smoke — host-only micro-tests, sub-second."
+    test_patterns:
+      - "P2pMicrotest.*"
+      - "FreshRegistrationMicrotest.*"
+      - "FreshRegistrationLegacyIpcSucceedsFixture.*"
+      - "RmaProxyProgressTest.*"
+      - "GroupEndInternalTest.*"
+      - "Devcomm*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *micro_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *micro_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *micro_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600

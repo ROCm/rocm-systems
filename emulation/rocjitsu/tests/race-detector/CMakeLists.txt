@@ -3,7 +3,7 @@
 
 # --- Race detection HIP tests ---
 # Uses a lightweight config (race_test_config.json) with 1 XCD and 4 CUs
-# instead of the full MI350X topology (8 XCDs, 256 CUs). Each race test
+# instead of the full MI350X topology (8 XCDs, 288 physical / 256 active CUs). Each race test
 # spawns a complete simulation engine, and with ctest -j the full config
 # causes OOM kills at moderate parallelism (~15+ concurrent tests). The
 # race detector only needs a few CUs to exercise cross-wave and
@@ -11,8 +11,22 @@
 # The gfx950 race detector cases include CDNA-specific inline assembly
 # sequences for LDS and waitcnt coverage. Keep that binary on gfx950 even when
 # generic HIP smoke tests are overridden for local validation on another ISA.
-rj_add_hip_test(hip_race_tests_gfx950 ARCH gfx950 SOURCE hip_race_gfx950_test.hip)
-rj_add_hip_test(hip_race_tests_gfx1151 ARCH gfx1151 SOURCE hip_race_gfx1151_test.hip)
+set(RJ_RACE_TEST_SUPPORT_HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/race_log_expectation.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/race_test_support.hpp
+)
+rj_add_hip_test(
+    hip_race_tests_gfx950
+    ARCH gfx950
+    SOURCE hip_race_gfx950_test.hip
+    DEPENDENCIES ${RJ_RACE_TEST_SUPPORT_HEADERS}
+)
+rj_add_hip_test(
+    hip_race_tests_gfx1151
+    ARCH gfx1151
+    SOURCE hip_race_gfx1151_test.hip
+    DEPENDENCIES ${RJ_RACE_TEST_SUPPORT_HEADERS}
+)
 set(RJ_RACE_GFX950_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/race_test_config.json)
 if(RJ_INSTALL_TESTS)
     install(
@@ -120,6 +134,7 @@ rj_add_gfx950_race_test_case(sgpr_waitcnt)
 rj_add_gfx950_race_test_case(sgpr_waitcnt_race)
 rj_add_gfx950_race_test_case(lds_cross_wave)
 rj_add_gfx950_race_test_case(lds_cross_wave_race)
+rj_add_gfx950_race_test_case(lds_same_wave_order)
 rj_add_gfx950_race_test_case(global_to_lds_buffer)
 rj_add_gfx950_race_test_case(global_to_lds_buffer_race)
 rj_add_gfx950_race_test_case(partial_vmcnt_race)

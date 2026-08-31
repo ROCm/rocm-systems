@@ -17,6 +17,7 @@ pytestmark = [
     pytest.mark.rocshmem,
     pytest.mark.mpi,
     pytest.mark.gpu,
+    pytest.mark.multi_gpu(2),
     pytest.mark.rocprofiler_sdk_min_version("1.3.4"),
 ]
 

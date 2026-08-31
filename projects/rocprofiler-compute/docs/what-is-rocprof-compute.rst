@@ -54,12 +54,13 @@ Additionally, ROCm Compute Profiler provides in-depth memory chart analysis, roo
 analysis, baseline comparisons, and more, ensuring a thorough understanding of
 system performance.
 
-ROCm Compute Profiler supports analysis through both the :doc:`command line </how-to/analyze/cli>`.
+ROCm Compute Profiler supports several analysis options. See
+:doc:`analyze mode </how-to/analyze/mode>` for the full list and guidance on
+choosing between them.
+
 The following list describes ROCm Compute Profiler's features at a high level.
 
 * :doc:`Support for AMD Instinct MI300, MI200, and MI100 accelerators <reference/compatible-accelerators>`
-
-* :doc:`Standalone GUI analyzer </how-to/analyze/standalone-gui>` (experimental)
 
 * :ref:`Filtering <filtering>` to reduce profiling time
 

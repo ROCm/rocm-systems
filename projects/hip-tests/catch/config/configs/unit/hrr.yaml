@@ -78,6 +78,10 @@ hrr:
   Unit_HRR_StressApisRoundtrip:
     <<: *level_2
     tags: [capture, stress, playback, roundtrip]
+  Unit_HRR_StreamWriteValueRoundtrip:
+    <<: *level_2
+    tags: [capture, stream, playback, roundtrip]
+    disabled: [amd_windows]
   Unit_HRR_MemsetVariantsRoundtrip:
     <<: *level_2
     tags: [capture, memset, playback, roundtrip]
@@ -159,6 +163,11 @@ hrr:
   Unit_HRR_DrvMemcpy3DRoundtrip:
     <<: *level_2
     tags: [capture, memcpy, playback, roundtrip]
+    disabled: [amd_windows]
+  Unit_HRR_DrvMemcpy2DUnalignedRoundtrip:
+    <<: *level_2
+    tags: [capture, memcpy, playback, roundtrip]
+    disabled: [amd_windows]
   Unit_HRR_TextureRoundtrip:
     <<: *level_2
     tags: [capture, texture, playback, roundtrip]
@@ -225,6 +234,11 @@ hrr:
   Unit_HRR_DrvMemcpy3D_Direct:
     <<: *level_2
     tags: [direct, memcpy]
+    disabled: [amd_windows]
+  Unit_HRR_DrvMemcpy2DUnaligned_Direct:
+    <<: *level_2
+    tags: [direct, memcpy]
+    disabled: [amd_windows]
   Unit_HRR_DrvMemcpy_Direct:
     <<: *level_2
     tags: [direct, memcpy]
@@ -288,6 +302,28 @@ hrr:
   Unit_HRR_MemsetExtra_Direct:
     <<: *level_2
     tags: [direct, memset]
+  Unit_HRR_StreamWriteValue_Direct:
+    <<: *level_2
+    tags: [direct, stream]
+    disabled: [amd_windows]
+  Unit_HRR_MemsetD2D_Direct:
+    <<: *level_2
+    tags: [direct, memset]
+  Unit_HRR_MemsetD2DPitchAlloc_Direct:
+    <<: *level_2
+    tags: [direct, memset]
+  Unit_HRR_MemsetD2DRoundtrip:
+    <<: *level_2
+    tags: [capture, memset, playback, roundtrip]
+  Unit_HRR_MemsetD2DPitchAllocRoundtrip:
+    <<: *level_2
+    tags: [capture, memset, playback, roundtrip]
+  Unit_HRR_MemsetSpt_Direct:
+    <<: *level_2
+    tags: [direct, memset]
+  Unit_HRR_MemsetSptRoundtrip:
+    <<: *level_2
+    tags: [capture, memset, playback, roundtrip]
   Unit_HRR_MemsetVariants_Direct:
     <<: *level_2
     tags: [direct, memset]
