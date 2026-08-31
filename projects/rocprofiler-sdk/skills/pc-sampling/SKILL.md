@@ -1,6 +1,6 @@
 ---
 name: pc-sampling
-description: Profiles a target application using rocprofv3 with program counter sampling enabled and then analyzes the results. Use when the user has a program that runs on an AMD GPU and asks to perform PC sampling, to determine the runtime performance characteristics of their application, to determine stall reasons, or to determine hotspots in the code.
+description: Profiles a target application using rocprofv3 with program counter sampling enabled and then analyzes the results. Use when the user has Ga program that runs on an AMD PU and asks to perform PC sampling, to determine the runtime performance characteristics of their application, to determine stall reasons, or to determine hotspots in the code.
 ---
 
 # PC Sampling
@@ -9,7 +9,7 @@ description: Profiles a target application using rocprofv3 with program counter 
 
 - The system must have a ROCm installation and an accessible AMD GPU; that is, `amd-smi` should return at least one valid device.
 - The GPU must support PC sampling. Available PC sampling configurations can be determined via `rocprofv3-avail info --pc-sampling` or `rocprofv3 -L`. Your sampling method and interval must align with the outputs of this command. Also pay attention to any flags reported for a given configuration; at time of writing, stochastic sampling intervals must be powers of two.
-- The application should be built with debug symbols in order to get source line attribution AND optimization flags (e.g. `-g -O3`). Otherwise you will only have total instruction counts for the whole program and/or your stalls will not be representative of the real application.
+- The application should be built with debug symbols AND optimization flags (e.g. `-g -O3`) in order to get source line attribution and a representative execution profile.
 
 ## How to use PC Sampling
 
@@ -20,7 +20,7 @@ To run rocprofv3 with PC sampling:
 - specify the interval unit for the sampling with `--pc-sampling-unit`: `time` for host_trap and `cycles` for stochastic
 - specify the sampling interval with `--pc-sampling-interval`: an integer representing microseconds if you specified `time` or cycles if you specified `cycles`.
 - add the `--kernel-trace` flag to track kernel launches for attribution
-- specify either the `json` or `csv` output format with `--output-format`; there is currently no `rocpd` output writer for PC sampling.
+- specify either the `json` or `csv` output format with `--output-format`; the default output format, `rocpd`, does not currently support PC sampling output.
 
 A typical command will look like the following:
 
@@ -29,7 +29,7 @@ rocprofv3 \
   --pc-sampling-beta-enabled \
   --pc-sampling-method stochastic \
   --pc-sampling-unit cycles \
-  --pc-sampling-interval 131072 \
+  --pc-sampling-interval 1048576 \
   --kernel-trace \
   --output-format json \
   -- <target app>
@@ -62,15 +62,14 @@ The default output format, rocpd, does not currently support pc sampling, so you
 
 - Prefer stochastic sampling unless the sampling interval needs to be larger than what stochastic can support.
 - Prefer the json output format since it will carry richer information when using stochastic sampling.
-- Prefer larger sampling intervals (2^16^ - 2^18^) unless the workload requires you change it. For example because the kernel workloads are too short for 2^16^ to capture enough samples, or because they are too long and it produces an unreasonable amount of data.
+- Prefer larger stochastic sampling intervals (2^18^-2^20^; often the maximum) unless the workload is short enough that this does not produce sufficient samples. Shorter intervals will quickly produce huge amounts of data.
+- Prefer host trap intervals on the order of 1000 microseconds, decreasing if needed.
 
 ## Analyzing PC Sampling Results
 
-Inside this skill's folder is an analysis script : scripts/analyze_pc_sampling.py. When passed the output sample file (.json or .csv) it will report the top sample locations and top stall reasons. You may also filter results to a particular kernel -with `--kernel <kernel name>`.
+Inside this skill's folder is an analysis script: scripts/analyze_pc_sampling.py. When passed the output sample file (.json or .csv) it will report the top sample locations and top stall reasons. You may also filter results to a particular kernel -with `--kernel <kernel name>`.
 
-Run the included python script to perform basic analysis of the output files. Use its output to analyze the user's code, explain its performance, and help give specific and relevant suggestions for improvements. Inform the user of hot spots, the causes of the the hotspots (if available), and possible improvements if any. If there are no notable potential improvements, briefly explain why. For example, transpose operations are heavily memory bound and a profile of a well-written transpose kernel will exhibit large amounts of WAITCNT stalls. This is inherent from the task itself and is not *necessarily* a failing of the kernel. However, a naive transpose kernel may exhibit scattered reads or writes, causing far more memory traffic and thus WAITCNT stalls than is necessary.
-
-report the results to the user and use the results to help determine whether the user can make any changes to their code to improve performance. 
+Run the included python script to perform basic analysis of the output files. Use its output to analyze the user's code, explain its performance, and help give specific and relevant suggestions for improvements. Inform the user of hot spots, the causes of the hotspots (if available), and possible improvements if any. If there are no notable potential improvements, briefly explain why. For example, transpose operations are heavily memory bound and a profile of a well-written transpose kernel will exhibit large amounts of WAITCNT stalls. This is inherent from the task itself and is not *necessarily* a failing of the kernel. However, a naive transpose kernel may exhibit scattered reads or writes, causing far more memory traffic and thus WAITCNT stalls than is necessary.
 
 ## Procedure Checklist
 
@@ -83,8 +82,12 @@ report the results to the user and use the results to help determine whether the
 
 ## Misc. Tips
 
-Tiny workloads may produce too few samples. Ensure the workload is large enough to get a representative sample count.
+Tiny workloads may produce too few samples. Ensure the workload is large enough to get a representative sample count. If source code is available and the workload is too small, consider modifying the code to invoke the kernel multiple times, and then restoring it to its original state after the profiling run.
 
-Host-trap sampling can have an instruction "skid" of one or two instructions; if sample attribution does not make sense, look at the surrounding instructions.
+Host-trap sampling can have an instruction "skid" of one or two instructions; if sample attribution does not make sense, look at the surrounding instructions and branch targets.
 
-If you have access to a copy of the rocm-systems repository you may check its documentation on PC sampling (cdna3-cdna4-pc-sampling.rst and using-pc-sampling.rst) in this folder: projects/rocprofiler-sdk/source/docs/how-to/
+A brief overview of stall types and their causes is available in this skill's resources/stall-reasons.md.
+
+The rocm-systems repository has several PC sampling documentation files in this folder: projects/rocprofiler-sdk/source/docs/how-to/. You may also access them here: https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/develop/how-to/cdna3-cdna4-pc-sampling.html
+
+Only one PC sampling configurations is supported at a time, so if exactly one valid configuration is reported then PC sampling is probably being actively used by another process.

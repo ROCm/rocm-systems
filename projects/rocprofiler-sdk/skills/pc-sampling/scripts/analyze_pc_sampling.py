@@ -1,4 +1,27 @@
 #!/usr/bin/env python3
+
+# MIT License
+#
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
 """Parse rocprofv3 PC sampling output into a human-readable hotspot report.
 
 Maps samples to kernels, ranks top instruction locations, and summarizes stall
@@ -12,7 +35,7 @@ import argparse
 import csv
 import json
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -99,18 +122,32 @@ class Report:
     source_files: list[str]
     kernels: dict[str, KernelStats] = field(default_factory=dict)
     unmapped_dispatch_ids: set[int] = field(default_factory=set)
+    undecodable_samples: int = 0
 
     @property
     def total_samples(self) -> int:
         return sum(k.sample_count for k in self.kernels.values())
 
     def add(self, sample: Sample, kernel_name: str | None) -> None:
+        if is_undecodable_sample(sample):
+            self.undecodable_samples += 1
         name = kernel_name or f"<unknown dispatch {sample.dispatch_id}>"
         if kernel_name is None:
             self.unmapped_dispatch_ids.add(sample.dispatch_id)
         if name not in self.kernels:
             self.kernels[name] = KernelStats(name=name)
         self.kernels[name].add(sample)
+
+
+def is_undecodable_sample(sample: Sample) -> bool:
+    return sample.source.startswith("unrecognized code object")
+
+
+def parse_code_object_id(pc: dict[str, Any]) -> int | None:
+    # code_object_id 0 is valid; do not use truthiness checks here.
+    if "code_object_id" not in pc:
+        return None
+    return int(pc["code_object_id"])
 
 
 def load_tool_record(path: Path) -> dict[str, Any]:
@@ -222,7 +259,7 @@ def iter_json_samples(tool: dict[str, Any], method: str) -> Iterable[Sample]:
             dispatch_id=int(record["dispatch_id"]),
             instruction=instruction,
             source=source,
-            code_object_id=int(record["pc"].get("code_object_id", 0)) or None,
+            code_object_id=parse_code_object_id(record["pc"]),
             offset=int(record["pc"].get("code_object_offset", 0)),
             issued=issued,
             stall_reason=stall_reason,
@@ -320,11 +357,26 @@ def parse_inputs(path: Path) -> Report:
     return report
 
 
-def truncate(text: str, width: int) -> str:
-    text = " ".join(text.split())
-    if len(text) <= width:
-        return text
-    return text[: width - 3] + "..."
+def format_pct(count: int, total: int) -> str:
+    if total == 0:
+        return "0.0%"
+    return f"{100.0 * count / total:.1f}%"
+
+
+def format_stall_reasons(loc: LocationStats, max_reasons: int = 3) -> str:
+    if not loc.stall_reasons:
+        return ""
+    return ", ".join(
+        f"{reason} ({count})" for reason, count in loc.stall_reasons.most_common(max_reasons)
+    )
+
+
+def format_source_cell(loc: LocationStats) -> str:
+    if loc.source:
+        return format_table_cell(loc.source)
+    if loc.offset is not None:
+        return format_table_cell(f"(no source; offset={format_offset(loc.offset)})")
+    return ""
 
 
 def format_table_cell(text: str) -> str:
@@ -352,6 +404,12 @@ def render_report(report: Report, top_n: int, kernel_filter: str | None) -> str:
             f"- Warning: {len(report.unmapped_dispatch_ids)} dispatch id(s) had no kernel "
             f"trace mapping ({ids}). Re-run with `--kernel-trace` for kernel names."
         )
+    if report.undecodable_samples:
+        lines.append(
+            f"- Note: **{report.undecodable_samples}** sample(s) could not be decoded to a "
+            "known code object (e.g. runtime blit kernels or self-modifying code). These "
+            "appear with an offset-only placeholder in the Source column."
+        )
     lines.append("")
 
     kernels = sorted(report.kernels.values(), key=lambda k: k.sample_count, reverse=True)
@@ -378,10 +436,12 @@ def render_report(report: Report, top_n: int, kernel_filter: str | None) -> str:
 
         if report.method == "stochastic":
             lines.append(
-                "| Rank | Count | Issued | Stalled | Offset | Instruction | Source |"
+                "| Rank | Source | Instruction | Count | % Samples | Issued | % Issued | "
+                "Stalled | % Stalled | Stall reasons |"
             )
             lines.append(
-                "|------|-------|--------|---------|--------|-------------|--------|"
+                "|------|--------|-------------|-------|-----------|--------|----------|"
+                "---------|-----------|---------------|"
             )
             for rank, loc in enumerate(ranked, start=1):
                 lines.append(
@@ -389,29 +449,32 @@ def render_report(report: Report, top_n: int, kernel_filter: str | None) -> str:
                     + " | ".join(
                         [
                             str(rank),
+                            format_source_cell(loc),
+                            format_table_cell(loc.instruction),
                             str(loc.count),
+                            format_pct(loc.count, kernel.sample_count),
                             str(loc.issued),
+                            format_pct(loc.issued, loc.count),
                             str(loc.stalled),
-                            format_offset(loc.offset),
-                            truncate(loc.instruction, 48),
-                            format_table_cell(loc.source),
+                            format_pct(loc.stalled, loc.count),
+                            format_table_cell(format_stall_reasons(loc)),
                         ]
                     )
                     + " |"
                 )
         else:
-            lines.append("| Rank | Count | Offset | Instruction | Source |")
-            lines.append("|------|-------|--------|-------------|--------|")
+            lines.append("| Rank | Source | Instruction | Count | % Samples |")
+            lines.append("|------|--------|-------------|-------|-----------|")
             for rank, loc in enumerate(ranked, start=1):
                 lines.append(
                     "| "
                     + " | ".join(
                         [
                             str(rank),
+                            format_source_cell(loc),
+                            format_table_cell(loc.instruction),
                             str(loc.count),
-                            format_offset(loc.offset),
-                            truncate(loc.instruction, 48),
-                            format_table_cell(loc.source),
+                            format_pct(loc.count, kernel.sample_count),
                         ]
                     )
                     + " |"
@@ -428,20 +491,6 @@ def render_report(report: Report, top_n: int, kernel_filter: str | None) -> str:
             for reason, count in kernel.stall_reasons.most_common(top_n):
                 pct = (100.0 * count / total_stalled) if total_stalled else 0.0
                 lines.append(f"| {reason} | {count} | {pct:.1f}% |")
-            lines.append("")
-
-            lines.append("### Top stall reasons by instruction")
-            lines.append("")
-            for loc in ranked[: min(5, len(ranked))]:
-                if not loc.stall_reasons:
-                    continue
-                reasons = ", ".join(
-                    f"{reason} ({count})"
-                    for reason, count in loc.stall_reasons.most_common(3)
-                )
-                lines.append(
-                    f"- `{truncate(loc.instruction, 60)}` @ {format_offset(loc.offset)}: {reasons}"
-                )
             lines.append("")
 
         lines.append("---")
