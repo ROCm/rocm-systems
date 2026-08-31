@@ -246,6 +246,13 @@ jobs:
           import subprocess
           import sys
 
+          SUPPORTED_TORCH_RELEASES = frozenset({(2, 13), (2, 14)})
+
+          def torch_release(version: str) -> tuple[int, int]:
+              base = version.split("+", 1)[0]
+              major, minor, *_ = base.split(".")
+              return int(major), int(minor)
+
           def torch_sort_key(version: str) -> tuple[int, ...]:
               base = version.split("+", 1)[0]
               return tuple(int(part) for part in base.split("."))
@@ -273,10 +280,20 @@ jobs:
               key=lambda version: (rocm_suffix(version), torch_sort_key(version)),
               reverse=True,
           )
+          supported_versions = [
+              version
+              for version in all_versions
+              if torch_release(version) in SUPPORTED_TORCH_RELEASES
+          ]
+          if not supported_versions:
+              raise SystemExit(
+                  "No supported torch wheel (2.13.x or 2.14.x) found on "
+                  "https://rocm.nightlies.amd.com/whl-multi-arch/"
+              )
 
           exact = [
               version
-              for version in all_versions
+              for version in supported_versions
               if version.endswith(f"+rocm{rocm_tag}")
           ]
           if exact:
@@ -285,13 +302,13 @@ jobs:
 
           fallback = [
               version
-              for version in all_versions
+              for version in supported_versions
               if rocm_suffix(version).startswith(rocm_base)
           ]
           if not fallback:
               raise SystemExit(
-                  "No torch wheel found for ROCm package version "
-                  f"{rocm_tag!r} or ROCm line {rocm_base!r}"
+                  "No supported torch wheel (2.13.x or 2.14.x) found for "
+                  f"ROCm package version {rocm_tag!r} or ROCm line {rocm_base!r}"
               )
 
           chosen = fallback[0]
@@ -305,13 +322,23 @@ jobs:
           )
           echo "Installing torch ${TORCH_VERSION} for ROCm ${ROCM_PACKAGE_VERSION} (${DEVICE_EXTRA})"
 
+          torch_installed=0
           for i in 1 2 3; do
-            pip install --break-system-packages \
+            if pip install --break-system-packages \
               --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
-              "torch[${DEVICE_EXTRA}]==${TORCH_VERSION}" --timeout 120 && break
-            echo "⚠️ PyTorch install attempt $i failed, retrying..."
-            sleep 10
+              "torch[${DEVICE_EXTRA}]==${TORCH_VERSION}" --timeout 120; then
+              torch_installed=1
+              break
+            fi
+            if [ "$i" -lt 3 ]; then
+              echo "⚠️ PyTorch install attempt $i failed, retrying..."
+              sleep 10
+            fi
           done
+          if [ "$torch_installed" -ne 1 ]; then
+            echo "::error::PyTorch install failed after 3 attempts"
+            exit 1
+          fi
 
           python3 -c "import torch; print(f'torch {torch.__version__}, cuda={torch.cuda.is_available()}')"
           echo "✅ PyTorch installed!"
