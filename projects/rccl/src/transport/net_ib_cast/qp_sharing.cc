@@ -12,6 +12,7 @@
 RCCL_PARAM(IbCastQpSharingEnable, "IB_QP_SHARING_ENABLE", 0);  // master switch: 0=off, 1=on
 RCCL_PARAM(IbCastCommNGroups, "IB_COMM_NGROUPS", 4);            // number of sharing groups (effective only when master switch is on)
 RCCL_PARAM(IbCastQpDepthMultiplier, "IB_QP_DEPTH_MULTIPLIER", 8); // CQ/WR depth multiplier for shared QPs
+RCCL_PARAM(IbCastQpSharingValidatePool, "IB_QP_SHARING_VALIDATE_POOL", 0); // 1 = validate pool at shutdown for leaks
 
 // Global runtime enable flag — initialized from master switch param,
 // can be cleared during init if configuration is invalid (e.g. NGROUPS < 1).
