@@ -23,41 +23,6 @@ export LD_LIBRARY_PATH=<clr-build>/hipamd/lib:$LD_LIBRARY_PATH
 HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app
 ```
 
-**Capture/playback pairing:** Capture is compiled into `libamdhip64` (CLR). Playback
-and the archive reader live in `projects/hrr`. Both must come from the **same commit** —
-mixing a prebuilt ROCm SDK `libamdhip64` with an in-tree `hrr-playback` produces
-`payload too small` replay failures. Point `LD_LIBRARY_PATH` at your CLR build's
-`hipamd/lib` for capture, replay, and tests.
-
-## Build and test (integration)
-
-Integration tests require a capture-enabled `libamdhip64` built from the same tree:
-
-```bash
-export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
-
-# 1. Build capture runtime
-cmake -S projects/clr -B build/clr -GNinja \
-  -DHIP_COMMON_DIR=projects/hip \
-  -DROCM_PATH="$ROCM_PATH" \
-  -DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=OFF -DHIP_PLATFORM=amd \
-  -DCMAKE_BUILD_TYPE=Release
-ninja -C build/clr amdhip64
-
-# 2. Build and run HRR tests (unit + integration)
-cmake -S projects/hrr -B build/hrr \
-  -DROCM_PATH="$ROCM_PATH" \
-  -DCMAKE_PREFIX_PATH="$ROCM_PATH" \
-  -DHRR_BUILD_PLAYBACK=ON -DHRR_BUILD_TESTS=ON \
-  -DHRR_CLR_LIB="$PWD/build/clr/hipamd/lib" \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build build/hrr -j"$(nproc)"
-ctest --test-dir build/hrr --output-on-failure
-```
-
-`HRR_CLR_LIB` may also be exported in the environment before configuring; CMake
-auto-detects `build/clr/hipamd/lib` when present.
-
 ## Build `hrr-playback`
 
 `hrr-playback` builds standalone from `projects/hrr` against a capture-enabled
