@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include "param.h"
 #include "core.h"
 #include "rccl_decision.h"
+#include "sym_kernels.h"
 
 typedef enum RcclTunableColls {
   RCCL_UNSUPPORTED_TUNABLE = -1,
@@ -268,7 +269,11 @@ RCCL_PARAM_DECLARE(DdaEnable);
 // Value of RCCL_DDA_THRESHOLD / RCCL_DDA_LL_THRESHOLD / RCCL_DDA_LL128_THRESHOLD
 // meaning "the user did not set this". 0 already means "disable this tier", so
 // unset needs a value of its own for the arch tables to act as defaults.
-constexpr int64_t kDdaThresholdUnset = -1;
+constexpr int64_t kDdaThresholdUnset  = -1;
+// Pre-arch-table env var defaults, used as fallbacks when RCCL_IGNORE_ARCH_TABLE=1.
+constexpr size_t  kDdaLLBaseDefault   =    32768;  // 32 KiB
+constexpr size_t  kDdaLL128BaseDefault = 33554432;  // 32 MiB
+constexpr size_t  kDdaVmmBaseDefault  = 134217728;  // 128 MiB
 
 // Per-tier DDA size caps for this collective: env var (when set) else arch table.
 // Return 0 when the env var is unset and there is no table entry -- either the

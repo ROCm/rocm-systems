@@ -83,6 +83,19 @@ RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024
 RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(16) * 1024 * 1024); // 16 MiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 1);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
+// When set, bypass the per-arch tuning table entirely and use base-commit
+// env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
+// isolating arch-table effects without rebuilding.
+RCCL_PARAM(IgnoreArchTable, "IGNORE_ARCH_TABLE", 0);
+// Returns true when the user has restricted the algorithm set via NCCL_ALGO.
+// When true, CE / DDA / Symmetric dispatch is skipped so getAlgoInfo() reaches
+// Ring/Tree exactly as the user requested.  Cached to avoid repeated getenv().
+static bool rcclNcclAlgoEnvIsSet() {
+  static int cached = -1;
+  if (cached == -1) cached = (ncclGetEnv("NCCL_ALGO") != nullptr) ? 1 : 0;
+  return cached == 1;
+}
+
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
@@ -701,6 +714,7 @@ namespace {
 // by hand (unit tests) so they resolve exactly like production ones.
 inline const rcclArchThresholds* ddaArchTable(const ncclComm* comm) {
   if (comm == nullptr) return nullptr;
+  if (rcclParamIgnoreArchTable()) return nullptr;
   return comm->archThresholds != nullptr ? comm->archThresholds : rcclGetArchThresholds(comm->archName);
 }
 
@@ -779,7 +793,7 @@ size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &threshold)) return threshold;
   const rcclArchThresholds* table = ddaArchTable(comm);
-  if (table == nullptr) return 0;
+  if (table == nullptr) return kDdaLLBaseDefault;
   return ddaThresholdFromTable(table->ddaLLMax, func);
 }
 
@@ -787,7 +801,7 @@ size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &threshold)) return threshold;
   const rcclArchThresholds* table = ddaArchTable(comm);
-  if (table == nullptr) return 0;
+  if (table == nullptr) return kDdaLL128BaseDefault;
   return ddaThresholdFromTable(table->ddaLL128Max, func);
 }
 
@@ -795,7 +809,7 @@ size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &threshold)) return threshold;
   const rcclArchThresholds* table = ddaArchTable(comm);
-  if (table == nullptr) return 0;
+  if (table == nullptr) return kDdaVmmBaseDefault;
   return ddaThresholdFromTable(table->ddaVmmMax, func);
 }
 
@@ -1108,6 +1122,31 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   decision->nMaxChannels = 0;
 
   const size_t msgBytes = count * ncclTypeSize(datatype);
+  // When NCCL_ALGO is set, skip CE/DDA/Symmetric and let getAlgoInfo() pick Ring/Tree.
+  if (rcclNcclAlgoEnvIsSet()) {
+    decision->algo = NCCL_ALGO_RING;
+    decision->protocol = NCCL_PROTO_SIMPLE;
+    if (query) {
+      struct ncclTaskColl task;
+      memset(&task, 0, sizeof(task));
+      task.func = ncclFuncAllReduce;
+      task.sendbuff = sendbuff;
+      task.recvbuff = recvbuff;
+      task.count = count;
+      task.datatype = datatype;
+      NCCLCHECK(getAlgoInfo(comm, &task, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1, /*simInfo=*/nullptr));
+      decision->protocol = task.protocol;
+      int packed = rcclKernelPackedChannels(comm, ncclFuncAllReduce, count, datatype, task.protocol, task.nMaxChannels);
+#ifdef ENABLE_WARP_SPEED
+      decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : packed;
+      decision->algo = task.useWarpSpeed ? rcclAddonAlgos_t::RCCL_WARP_SPEED : task.algorithm;
+#else
+      decision->nMaxChannels = packed;
+      decision->algo = task.algorithm;
+#endif
+    }
+    return ncclSuccess;
+  }
 
   // Symmetric-window lookup hoisted ahead of the symk signals: winRegType is needed
   // for the symMaxR2 gate below, and the lookup is unconditional regardless, so
@@ -1311,6 +1350,32 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   const size_t totalBytes = (size_t)comm->nRanks * sendcount * typeSize;
   size_t msgSize = totalBytes;
 
+  // When NCCL_ALGO is set, skip CE/DDA/Symmetric and let getAlgoInfo() pick Ring/Tree.
+  if (rcclNcclAlgoEnvIsSet()) {
+    decision->algo = NCCL_ALGO_RING;
+    decision->protocol = NCCL_PROTO_SIMPLE;
+    if (query) {
+      struct ncclTaskColl task;
+      memset(&task, 0, sizeof(task));
+      task.func = ncclFuncAllGather;
+      task.sendbuff = sendbuff;
+      task.recvbuff = recvbuff;
+      task.count = sendcount;
+      task.datatype = datatype;
+      NCCLCHECK(getAlgoInfo(comm, &task, 0, 0, 1));
+      decision->protocol = task.protocol;
+      int packed = rcclKernelPackedChannels(comm, ncclFuncAllGather, sendcount, datatype, task.protocol, task.nMaxChannels);
+#ifdef ENABLE_WARP_SPEED
+      decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : packed;
+      decision->algo = task.useWarpSpeed ? rcclAddonAlgos_t::RCCL_WARP_SPEED : task.algorithm;
+#else
+      decision->nMaxChannels = packed;
+      decision->algo = task.algorithm;
+#endif
+    }
+    return ncclSuccess;
+  }
+
   // (1) DDA fast paths. Symmetric-registered buffers defer to the symmetric
   // kernel (extracted downstream), so DDA is gated on !symEligible, as before.
   const bool symEligible =
@@ -1501,6 +1566,32 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   const size_t typeSize = ncclTypeSize(datatype);
   const size_t totalBytes = (size_t)comm->nRanks * recvcount * typeSize;
   const size_t rsShardBytes = recvcount * typeSize;
+
+  // When NCCL_ALGO is set, skip CE/DDA/Symmetric and let getAlgoInfo() pick Ring/Tree.
+  if (rcclNcclAlgoEnvIsSet()) {
+    decision->algo = NCCL_ALGO_RING;
+    decision->protocol = NCCL_PROTO_SIMPLE;
+    if (query) {
+      struct ncclTaskColl task;
+      memset(&task, 0, sizeof(task));
+      task.func = ncclFuncReduceScatter;
+      task.sendbuff = sendbuff;
+      task.recvbuff = recvbuff;
+      task.count = recvcount;
+      task.datatype = datatype;
+      NCCLCHECK(getAlgoInfo(comm, &task, 0, 0, 1));
+      decision->protocol = task.protocol;
+      int packed = rcclKernelPackedChannels(comm, ncclFuncReduceScatter, recvcount, datatype, task.protocol, task.nMaxChannels);
+#ifdef ENABLE_WARP_SPEED
+      decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : packed;
+      decision->algo = task.useWarpSpeed ? rcclAddonAlgos_t::RCCL_WARP_SPEED : task.algorithm;
+#else
+      decision->nMaxChannels = packed;
+      decision->algo = task.algorithm;
+#endif
+    }
+    return ncclSuccess;
+  }
 
   // (1) Symmetric eligibility (sum/avg). Reported last but gates DDA IPC / Direct here.
   const bool symEligible =
