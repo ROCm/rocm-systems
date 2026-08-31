@@ -1226,7 +1226,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                               source_snapshot,
                               pkt_count,
                               ring_buffer_writer,
-                              &deferred_async_tasks);
+                              &deferred_async_tasks,
+                              start_submit_pos);
         }
         else
         {

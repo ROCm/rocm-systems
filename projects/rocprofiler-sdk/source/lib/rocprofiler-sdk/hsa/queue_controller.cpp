@@ -42,9 +42,9 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <shared_mutex>
 #include <optional>
 #include <set>
+#include <shared_mutex>
 
 namespace rocprofiler
 {
