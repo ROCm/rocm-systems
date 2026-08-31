@@ -77,6 +77,8 @@ TEAM_INT_REDUCE_SCATTER_WAVE_DEF_GEN(long, long)
 TEAM_INT_REDUCE_SCATTER_WAVE_DEF_GEN(long long, longlong)
 TEAM_FLOAT_REDUCE_SCATTER_WAVE_DEF_GEN(float, float)
 TEAM_FLOAT_REDUCE_SCATTER_WAVE_DEF_GEN(double, double)
+TEAM_FLOAT_REDUCE_SCATTER_WAVE_DEF_GEN(__half, half)
+TEAM_FLOAT_REDUCE_SCATTER_WAVE_DEF_GEN(__hip_bfloat16, bfloat16)
 
 /******************************************************************************
  * DEVICE TEST KERNEL
