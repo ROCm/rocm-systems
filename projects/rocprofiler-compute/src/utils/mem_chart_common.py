@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Shared helpers for memory chart renderers (gfx9, gfx11)."""
+"""Shared helpers for memory chart renderers (gfx9, gfx11, gfx1250)."""
 
 import argparse
 import json
@@ -278,15 +278,27 @@ def build_ip_block(
     )
 
 
-def build_bw_edge_column(
+def build_bw_edges(
+    entries: list[tuple[str, Any, str, str]],  # noqa: ANN401
+    arrows: dict[str, str],
+) -> Text:
+    """BW edge column from ``(label, raw_value, arrow_key, color)`` tuples.
+
+    Formats each raw value as ``Bytes/s`` and delegates to the
+    low-level edge column builder.
+    """
+    resolved: list[tuple[str, str, str, str]] = []
+    for label, value, arrow_key, color in entries:
+        value_str = format_value(value, "Bytes/s")
+        resolved.append((label, value_str, arrow_key, color))
+    return _build_bw_edge_column(resolved, arrows)
+
+
+def _build_bw_edge_column(
     entries: list[tuple[str, str, str, str]],
     arrows: dict[str, str],
 ) -> Text:
-    """Vertical edge column with labeled BW arrows.
-
-    Vertical centering is handled by the parent grid's
-    ``vertical="middle"`` column setting.
-    """
+    """Low-level edge column from pre-formatted entries."""
     content: list[str] = []
     for i, (label, value_str, arrow_key, color) in enumerate(entries):
         if i > 0:
