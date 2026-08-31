@@ -1584,7 +1584,8 @@ thread_local std::optional<uint64_t> tl_current_replay_pass;
 
 // The two 32-bit fields that share the single 64-bit user_data slot: the enqueuing thread id (a
 // Linux tid, i.e. 32-bit pid_t) and the replay pass index. Modeled as a struct so pack/unpack is a
-// plain field access instead of hand-rolled shifts and masks.
+// plain field access instead of hand-rolled shifts and masks. The width of each field is asserted
+// below rather than assumed.
 struct replay_user_data_t
 {
     uint32_t tid;
@@ -1595,16 +1596,23 @@ static_assert(sizeof(replay_user_data_t) == sizeof(uint64_t),
               "replay_user_data_t must exactly fill the 64-bit user_data slot");
 static_assert(std::is_trivial<replay_user_data_t>::value,
               "replay_user_data_t must remain trivial for memcpy pack/unpack");
+// The tid half of the slot cannot truncate: common::get_tid() returns gettid(), whose value is a
+// kernel pid_t. Asserting the width here makes that a compile-time guarantee rather than something
+// the pack path has to test for and report on every dispatch.
+static_assert(sizeof(pid_t) == 4,
+              "kernel replay packs a thread id into a uint32_t field of user_data, which assumes "
+              "the kernel's pid_t is 32-bit");
 
 inline uint64_t
 pack_replay_user_data(uint64_t tid, uint64_t pass_index)
 {
-    // tid is a Linux tid (32-bit pid_t) and pass counts are tiny, so each fits in a uint32_t field.
-    // If that ever stops holding the record callback would silently read a truncated tid or pass,
-    // so treat it as a broken invariant.
-    ROCP_CI_LOG_IF(ERROR, (tid >> 32) != 0U || (pass_index >> 32) != 0U)
-        << "kernel replay: cannot pack tid=" << tid << " and pass=" << pass_index
-        << " into user_data without truncation";
+    // The pass index has no equivalent compile-time bound -- it comes from the SDK at runtime --
+    // so it stays checked. Truncating it would put a pass that was never collected into the
+    // record, and from there into the output, so a broken invariant is reported rather than
+    // packed. ROCP_CI_LOG_IF keeps this fatal under ROCPROFILER_CI and logs at ERROR otherwise.
+    ROCP_CI_LOG_IF(ERROR, (pass_index >> 32) != 0U)
+        << "kernel replay: cannot pack pass=" << pass_index
+        << " into user_data without truncation (tid=" << tid << ")";
 
     const auto fields =
         replay_user_data_t{static_cast<uint32_t>(tid), static_cast<uint32_t>(pass_index)};
