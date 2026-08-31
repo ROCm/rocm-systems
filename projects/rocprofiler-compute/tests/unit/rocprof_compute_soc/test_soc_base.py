@@ -8,9 +8,10 @@ Tests LimitedSet, CounterFile, and the bin-packing helpers used by
 perfmon_coalesce — no GPU hardware required.
 """
 
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -429,10 +430,26 @@ def _cp_util_metric_rows():
     ])
 
 
-def test_metric_aware_coalesce_packs_regular_counters_into_accum_bucket():
+@pytest.fixture
+def gfx1250_soc() -> OmniSoC_Base:
+    """Minimal gfx1250 OmniSoC for metric-aware coalesce tests."""
     soc = _make_soc(GFX1250_PERFMON_CONFIG, arch="gfx1250")
     soc._mspec.gpu_series = "MI300"
+    return soc
 
+
+@contextmanager
+def _patch_cp_util_coalesce(soc: OmniSoC_Base) -> Iterator[None]:
+    with patch.object(
+        soc, "_same_bucket_priority_metric_ids", return_value=("17.1.1",)
+    ):
+        with patch.object(
+            soc, "_iter_arch_analysis_yaml_metrics", return_value=_cp_util_metric_rows()
+        ):
+            yield
+
+
+def test_metric_aware_coalesce_packs_regular_counters_into_accum_bucket(gfx1250_soc):
     accum = CounterFile("SQ_INST_LEVEL_LDS_ACCUM", GFX1250_PERFMON_CONFIG)
     accum.add("SQ_INST_LEVEL_LDS_ACCUM")
     accum.reserve("SQ_INST_LEVEL_LDS_ACCUM", 1)
@@ -443,13 +460,8 @@ def test_metric_aware_coalesce_packs_regular_counters_into_accum_bucket():
         "SQ_INST_LEVEL_LDS_ACCUM",
     }
 
-    with patch.object(
-        soc, "_same_bucket_priority_metric_ids", return_value=("17.1.1",)
-    ):
-        with patch.object(
-            soc, "_iter_arch_analysis_yaml_metrics", return_value=_cp_util_metric_rows()
-        ):
-            remaining, files, _ = soc._metric_aware_coalesce_pass(work, [accum], 0)
+    with _patch_cp_util_coalesce(gfx1250_soc):
+        remaining, files, _ = gfx1250_soc._metric_aware_coalesce_pass(work, [accum], 0)
 
     assert remaining == {"SQ_INST_LEVEL_LDS_ACCUM"}
     flat = set(flat_counters_in_perfmon_file(files[0]))
@@ -460,19 +472,14 @@ def test_metric_aware_coalesce_packs_regular_counters_into_accum_bucket():
     }.issubset(flat)
 
 
-def test_allocate_priority_ratio_partners_share_bucket_despite_global_denom():
+def test_allocate_priority_ratio_partners_share_bucket_despite_global_denom(
+    gfx1250_soc,
+):
     """Ratio partners co-locate; SUPPORTED_DENOM spill may use other buckets."""
-    soc = _make_soc(GFX1250_PERFMON_CONFIG, arch="gfx1250")
-    soc._mspec.gpu_series = "MI300"
     counters = {"GRBM_CP_BUSY_sum", "GRBM_GUI_ACTIVE_sum", "SQ_WAVES"}
 
-    with patch.object(
-        soc, "_same_bucket_priority_metric_ids", return_value=("17.1.1",)
-    ):
-        with patch.object(
-            soc, "_iter_arch_analysis_yaml_metrics", return_value=_cp_util_metric_rows()
-        ):
-            files, _, _ = soc._allocate_perfmon_counter_files(counters)
+    with _patch_cp_util_coalesce(gfx1250_soc):
+        files, _, _ = gfx1250_soc._allocate_perfmon_counter_files(counters)
 
     def bucket_for(counter: str) -> str:
         for f in files:
