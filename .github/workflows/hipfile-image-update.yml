@@ -55,7 +55,7 @@ jobs:
           - suse
           - ubuntu
         rocm_versions:
-          - 7.2.2
+          - 7.2.4
         include:
           - supported_platforms: ubuntu
             rocm_versions: 7.13.0
