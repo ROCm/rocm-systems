@@ -63,7 +63,7 @@ jobs:
   setup:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/raramakr/asan-presubmit-test # 2026-08-26
     with:
-      build_variant: "asan"
+      build_variant: "host-asan"
       # Only applies to workflow_dispatch; a pull_request trigger starts from
       # TheRock's presubmit family defaults and drops every family that has no
       # host-asan variant, which leaves gfx94X either way.
