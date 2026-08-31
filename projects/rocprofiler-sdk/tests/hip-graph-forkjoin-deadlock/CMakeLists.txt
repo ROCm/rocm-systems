@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -21,12 +21,11 @@
 # SOFTWARE.
 
 #
-# Queue-interposition completion path under concurrency: a multi-stream HIP-graph
-# fork/join workload produces many mutually dependent completion signals in flight at
-# once. The execute step asserts the workload still makes progress when the number of
-# concurrent completions far exceeds any fixed number of handler threads -- a handler
-# design that blocks one thread per signal cannot complete this workload and hits TIMEOUT.
-# The validate step confirms every dispatch record was emitted.
+# Queue-interposition completion path under concurrency: a HIP-graph fork/join workload
+# produces many mutually dependent completion signals in flight at once. The execute step
+# asserts the workload runs to completion, with TIMEOUT as the failure signal; it does not
+# complete if each outstanding completion needs a thread of its own to wait on it. The
+# validate step confirms every dispatch record was emitted.
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
@@ -37,13 +36,18 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-# width=8 depth=8 replays=30: enough concurrent barrier-coupled branches to saturate the
-# completion path. The TIMEOUT is the failure signal -- the workload completes in a few
-# seconds when healthy.
+# Workload geometry. Both steps read it from here: the execute step runs with it and the
+# validate step derives the minimum dispatch count it expects from it, so the two cannot
+# drift. The values are empirical, chosen to keep enough completions outstanding at once
+# for the concurrency this test is about. A healthy run finishes in a few seconds.
+set(FORKJOIN_WIDTH 8)
+set(FORKJOIN_DEPTH 8)
+set(FORKJOIN_REPLAYS 30)
+
 rocprofiler_add_integration_execute_test(
     hip-graph-forkjoin-deadlock
     TARGET hip-graph-forkjoin
-    ARGS 8 8 30
+    ARGS ${FORKJOIN_WIDTH} ${FORKJOIN_DEPTH} ${FORKJOIN_REPLAYS}
     TIMEOUT 60
     LABELS "integration-tests"
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
@@ -64,4 +68,6 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests"
     TIMEOUT 45
     FIXTURES_REQUIRED hip-graph-forkjoin-deadlock
-    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/hip-graph-forkjoin-deadlock-test.json)
+    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/hip-graph-forkjoin-deadlock-test.json
+         --width ${FORKJOIN_WIDTH} --depth ${FORKJOIN_DEPTH} --replays
+         ${FORKJOIN_REPLAYS})

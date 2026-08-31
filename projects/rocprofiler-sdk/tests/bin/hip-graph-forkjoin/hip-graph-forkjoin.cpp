@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,20 +20,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Multi-stream HIP-graph fork/join workload. Each replay executes a chain of
-// "diamond" layers: one root node fans out into WIDTH independent branch kernels
-// that each depend on the previous join, then those branches join back into one
-// node. Independent branches within a layer become concurrent, barrier-coupled
-// segments across streams; a depth greater than four keeps the graph from being
-// collapsed onto a single stream. The structure produces many completion signals
-// that are in flight and mutually dependent at once, exercising the queue
-// interposition completion path under concurrency.
+// HIP-graph fork/join workload. Each replay executes a chain of "diamond" layers:
+// one root node fans out into `width` independent branch kernels that each depend
+// on the previous join, then those branches join back into one node. The graph is
+// launched on a single stream; HIP distributes the independent branch nodes of a
+// layer across hardware queues, so they run concurrently and their completions are
+// coupled by the join that follows. Stacking layers keeps a chain of such couplings
+// outstanding, so many mutually dependent completion signals are in flight at once,
+// which is what exercises the queue interposition completion path.
 
 #include <hip/hip_runtime.h>
 
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -56,6 +57,10 @@
 
 namespace
 {
+// One block per kernel node. Buffers are sized to match, so every element is touched;
+// kernel cost is set by the spin count, not by the buffer size.
+constexpr int block_size = 256;
+
 __global__ void
 spin_kernel(float* buf, int n, int iters)
 {
@@ -82,13 +87,29 @@ add_kernel_node(hipGraph_t                         graph,
 
     params.func           = reinterpret_cast<void*>(spin_kernel);
     params.gridDim        = dim3(1);
-    params.blockDim       = dim3(256);
+    params.blockDim       = dim3(block_size);
     params.sharedMemBytes = 0;
     params.kernelParams   = args;
     params.extra          = nullptr;
 
     HIP_CHECK(hipGraphAddKernelNode(&node, graph, deps.data(), deps.size(), &params));
     return node;
+}
+
+// Every dimension indexes something, so zero is rejected along with non-numeric input.
+uint64_t
+parse_dimension(const char* text, const char* name)
+{
+    try
+    {
+        const auto value = std::stoul(text);
+        if(value > 0) return value;
+    } catch(const std::exception&)
+    {}
+
+    std::cerr << "[hip-graph-forkjoin] " << name << " must be a positive integer, got '" << text
+              << "'" << std::endl;
+    exit(EXIT_FAILURE);
 }
 }  // namespace
 
@@ -99,19 +120,25 @@ main(int argc, char** argv)
     auto depth   = uint64_t{8};
     auto replays = uint64_t{50};
 
-    if(argc > 1) width = std::stoul(argv[1]);
-    if(argc > 2) depth = std::stoul(argv[2]);
-    if(argc > 3) replays = std::stoul(argv[3]);
+    if(argc > 1) width = parse_dimension(argv[1], "width");
+    if(argc > 2) depth = parse_dimension(argv[2], "depth");
+    if(argc > 3) replays = parse_dimension(argv[3], "replays");
 
     std::cout << "[hip-graph-forkjoin] width=" << width << " depth=" << depth
               << " replays=" << replays << std::endl;
 
-    auto n     = 1 << 16;
+    auto n     = block_size;
     auto iters = 2000;
 
+    // Zeroed before the first kernel reads them: uninitialized device memory can hold
+    // denormals, and the spin loop takes longer on those, which moves kernel duration in a
+    // test whose failure signal is a timeout.
     auto bufs = std::vector<float*>(width, nullptr);
     for(auto& buf : bufs)
+    {
         HIP_CHECK(hipMalloc(&buf, n * sizeof(float)));
+        HIP_CHECK(hipMemset(buf, 0, n * sizeof(float)));
+    }
 
     hipGraph_t graph = nullptr;
     HIP_CHECK(hipGraphCreate(&graph, 0));

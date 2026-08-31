@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,20 +25,12 @@
 import sys
 import pytest
 
-# Workload geometry, kept in sync with the execute step's `ARGS 8 8 30`
-# (hip-graph-forkjoin <width> <depth> <replays>). Each replay dispatches one
-# root node plus, per layer, `width` branch kernels and one join kernel.
-WIDTH = 8
-DEPTH = 8
-REPLAYS = 30
-EXPECTED_DISPATCHES = REPLAYS * (1 + DEPTH * (WIDTH + 1))
 
-
-def node_exists(name, data, min_len=1):
+def node_exists(name, data):
     assert name in data
     assert data[name] is not None
     if isinstance(data[name], (list, tuple, dict, set)):
-        assert len(data[name]) >= min_len
+        assert len(data[name]) > 0
 
 
 def test_data_structure(input_data):
@@ -56,16 +48,17 @@ def test_data_structure(input_data):
     node_exists("kernel_dispatch", sdk_data["buffer_records"])
 
 
-def test_dispatch_count(input_data):
-    """Every graph kernel dispatch was captured. The workload synchronizes each
-    replay, so every completion retires before the process exits and the count is
-    exact; a dropped completion leaves records missing."""
+def test_dispatch_count(input_data, expected_dispatches):
+    """Every graph kernel dispatch was captured. The workload synchronizes each replay,
+    so every completion retires before the process exits and none of the graph's own
+    dispatches may be missing. The graph geometry is a floor rather than an exact count:
+    a run can also contain dispatches the workload did not launch itself."""
     sdk_data = input_data["rocprofiler-sdk-json-tool"]
     dispatches = sdk_data["buffer_records"]["kernel_dispatch"]
 
     assert (
-        len(dispatches) == EXPECTED_DISPATCHES
-    ), f"expected {EXPECTED_DISPATCHES} dispatches, got {len(dispatches)}"
+        len(dispatches) >= expected_dispatches
+    ), f"expected at least {expected_dispatches} dispatches, got {len(dispatches)}"
 
 
 def test_dispatch_records_well_formed(input_data):
