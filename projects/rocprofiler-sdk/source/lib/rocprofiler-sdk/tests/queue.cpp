@@ -23,6 +23,8 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 
 #include <gtest/gtest.h>
 
@@ -217,6 +219,116 @@ TEST(queue, write_interceptor_stress_under_concurrent_destroy)
 
     GTEST_LOG_(INFO) << "dispatches=" << dispatch_count.load()
                      << " exclusive_acquisitions=" << exclusive_acquisitions.load();
+}
+
+// A real QueueController::destroy_queue() -- which runs the real ~Queue() under the
+// exclusive lock -- racing real doorbell traffic, so the destroy path itself is covered and
+// not just a stand-in critical section. Liveness and integrity only: with no active tracing
+// context write_interceptor() returns before it ever dereferences the queue, so this cannot
+// observe a use-after-free even with the lock removed (confirmed under ASan). The blocking
+// and overlap tests remain the guards for the lock itself.
+TEST(queue, real_destroy_queue_races_doorbell_lookup)
+{
+    constexpr auto num_producers        = size_t{4};
+    constexpr auto dispatches_per_queue = uint64_t{4000};
+    constexpr auto ring_slots           = uint64_t{256};
+
+    auto* qc = get_queue_controller();
+    ASSERT_NE(qc, nullptr);
+
+    // one HSA queue id, repeatedly registered and destroyed under the producers' feet
+    auto hsa_queue = hsa_queue_t{};
+    hsa_queue.id   = 4242;
+
+    auto register_queue = [&]() {
+        qc->add_queue(
+            &hsa_queue,
+            std::make_unique<FakeQueue>(fake_agent_cache(), rocprofiler_queue_id_t{.handle = 4242}),
+            /*is_compute=*/false,
+            /*is_attach=*/false);
+    };
+    register_queue();
+
+    struct producer_ring
+    {
+        std::shared_ptr<queue_interposition::QueueState> state =
+            std::make_shared<queue_interposition::QueueState>();
+        std::vector<char> ring      = std::vector<char>(64 * ring_slots, 0);
+        uint64_t          real_wdid = 0;
+        uint64_t          real_rdid = 0;
+    };
+
+    auto producers = std::vector<std::unique_ptr<producer_ring>>{};
+    producers.reserve(num_producers);
+    for(size_t p = 0; p < num_producers; ++p)
+    {
+        auto _v              = std::make_unique<producer_ring>();
+        _v->state->ring_buf  = _v->ring.data();
+        _v->state->ring_size = ring_slots;
+        _v->state->ring_mask = ring_slots - 1;
+        _v->state->real_wdid = &_v->real_wdid;
+        _v->state->real_rdid = &_v->real_rdid;
+        _v->state->hsa_queue = &hsa_queue;  // every lookup targets the cycled Queue
+        producers.emplace_back(std::move(_v));
+    }
+
+    std::atomic<bool> stop_destroyer{false};
+    std::atomic<int>  destroy_cycles{0};
+
+    std::thread destroyer([&]() {
+        while(!stop_destroyer.load(std::memory_order_acquire))
+        {
+            qc->destroy_queue(&hsa_queue);  // real ~Queue() under the exclusive lock
+            register_queue();
+            destroy_cycles.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    auto workers = std::vector<std::thread>{};
+    workers.reserve(num_producers);
+    for(size_t p = 0; p < num_producers; ++p)
+    {
+        workers.emplace_back([&, p]() {
+            auto* pr = producers[p].get();
+            for(uint64_t n = 0; n < dispatches_per_queue; ++n)
+            {
+                auto* pkt = &reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
+                    pr->ring.data())[n & (ring_slots - 1)];
+                pkt->kernel_object = 0xE000 + n;
+                __atomic_store_n(&pkt->header,
+                                 static_cast<uint16_t>(HSA_PACKET_TYPE_KERNEL_DISPATCH
+                                                       << HSA_PACKET_HEADER_TYPE),
+                                 __ATOMIC_RELEASE);
+                pr->state->virtual_wptr.store(n + 1, std::memory_order_release);
+
+                queue_interposition::process_doorbell_impl(
+                    pr->state, n, [](hsa_signal_t, hsa_signal_value_t) {});
+
+                __atomic_store_n(&pr->real_rdid, n + 1, __ATOMIC_RELEASE);
+            }
+        });
+    }
+
+    for(auto& itr : workers)
+        itr.join();
+    stop_destroyer.store(true, std::memory_order_release);
+    destroyer.join();
+    qc->destroy_queue(&hsa_queue);
+
+    EXPECT_GT(destroy_cycles.load(), 0)
+        << "no queue was ever destroyed, so the lifetime race was never exercised";
+
+    // published either through the interceptor (queue found) or the passthrough (erased);
+    // both routes must still publish every packet exactly once
+    for(size_t p = 0; p < num_producers; ++p)
+    {
+        EXPECT_EQ(producers[p]->real_wdid, dispatches_per_queue) << "producer " << p;
+        EXPECT_EQ(producers[p]->state->next_submit_pos, dispatches_per_queue) << "producer " << p;
+    }
+
+    GTEST_LOG_(INFO) << "producers=" << num_producers
+                     << " dispatches/producer=" << dispatches_per_queue
+                     << " destroy_cycles=" << destroy_cycles.load();
 }
 }  // namespace hsa
 }  // namespace rocprofiler
