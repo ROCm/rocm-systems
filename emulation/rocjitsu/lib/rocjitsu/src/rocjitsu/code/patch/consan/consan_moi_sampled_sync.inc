@@ -1816,10 +1816,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     const uint64_t sequence_end = atomic.ordered_sequence_end_text_offset;
     candidates.push_back({std::move(atomic), semantics, sequence_end, 0, 1, false, std::nullopt});
   }
-  if (!options.test_kernel_name_filter.empty()) {
+  if (!options.test_kernel_name_filter.empty() || !options.kernel_name_allowlist.empty()) {
     std::erase_if(candidates, [&](const Candidate &candidate) {
-      return candidate.atomic.container_name.find(options.test_kernel_name_filter) ==
-             std::string::npos;
+      return !consan_container_selected(options, candidate.atomic.container_name);
     });
   }
   if (!consan_detail::canonicalize_physical_site_aliases(

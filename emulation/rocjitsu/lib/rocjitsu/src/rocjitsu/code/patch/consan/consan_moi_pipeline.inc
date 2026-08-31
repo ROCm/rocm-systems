@@ -27,10 +27,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
   std::vector<FenceRecordCandidate> candidates;
   const MoiSyncInventoryIndex sync_index(result);
   append_fence_record_candidates(result, sync_index, candidates);
-  if (!options.test_kernel_name_filter.empty()) {
+  if (!options.test_kernel_name_filter.empty() || !options.kernel_name_allowlist.empty()) {
     std::erase_if(candidates, [&](const FenceRecordCandidate &candidate) {
-      return candidate.fence.container_name.find(options.test_kernel_name_filter) ==
-             std::string::npos;
+      return !consan_container_selected(options, candidate.fence.container_name);
     });
   }
   std::ranges::sort(candidates, {}, [](const FenceRecordCandidate &candidate) {
@@ -737,10 +736,9 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
   if (options.moi_track_atomics && options.moi_engine == ConSanMoiEngine::RecordReplay) {
     std::vector<FenceRecordCandidate> candidates;
     append_fence_record_candidates(result, sync_index, candidates);
-    if (!options.test_kernel_name_filter.empty()) {
+    if (!options.test_kernel_name_filter.empty() || !options.kernel_name_allowlist.empty()) {
       std::erase_if(candidates, [&](const FenceRecordCandidate &candidate) {
-        return candidate.fence.container_name.find(options.test_kernel_name_filter) ==
-               std::string::npos;
+        return !consan_container_selected(options, candidate.fence.container_name);
       });
     }
     for (size_t index = 0; index < candidates.size(); ++index) {
@@ -853,9 +851,7 @@ void append_moi_atomic_site_dispositions(const Container &container, const ConSa
                                          const ConSanResult &semantic_result,
                                          const MoiSyncInventoryIndex &sync_index,
                                          ConSanResult &result) {
-  if (!options.moi_track_atomics ||
-      (!options.test_kernel_name_filter.empty() &&
-       container.name.find(options.test_kernel_name_filter) == std::string::npos))
+  if (!options.moi_track_atomics || !consan_container_selected(options, container.name))
     return;
   const bool in_kernel = std::is_same_v<Container, ConSanKernelInfo>;
   const bool allow_ordered_lds_atomic = consan_arch_supports_capability_form(
@@ -921,8 +917,7 @@ void append_moi_ordered_ordinary_site_dispositions(const ConSanOptions &options,
         in_kernel ? std::string_view("kernel:").size() : std::string_view("function:").size();
     const std::string_view container_name(candidate.container_name.data() + prefix_size,
                                           candidate.container_name.size() - prefix_size);
-    if ((!options.test_kernel_name_filter.empty() &&
-         container_name.find(options.test_kernel_name_filter) == std::string_view::npos) ||
+    if (!consan_container_selected(options, container_name) ||
         (in_kernel && is_rocclr_runtime_kernel_name(container_name))) {
       continue;
     }
@@ -940,9 +935,7 @@ template <typename Container>
 void append_moi_barrier_site_dispositions(const Container &container, const ConSanOptions &options,
                                           const MoiSyncInventoryIndex &sync_index,
                                           ConSanResult &result) {
-  if (!options.moi_track_barriers ||
-      (!options.test_kernel_name_filter.empty() &&
-       container.name.find(options.test_kernel_name_filter) == std::string::npos))
+  if (!options.moi_track_barriers || !consan_container_selected(options, container.name))
     return;
   const bool in_kernel = std::is_same_v<Container, ConSanKernelInfo>;
   if (in_kernel && is_rocclr_runtime_kernel_name(container.name))
@@ -1014,8 +1007,7 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
   for (const FenceRecordCandidate &candidate : admitted)
     admitted_identities.insert(candidate.fence.identity);
   for (const ConSanMoiFenceCandidate &fence : result.moi_fence_candidates) {
-    if ((!options.test_kernel_name_filter.empty() &&
-         fence.container_name.find(options.test_kernel_name_filter) == std::string::npos) ||
+    if (!consan_container_selected(options, fence.container_name) ||
         (fence.in_kernel && is_rocclr_runtime_kernel_name(fence.container_name)))
       continue;
     ConSanSiteDispositionReason reason = ConSanSiteDispositionReason::None;
@@ -1069,7 +1061,9 @@ moi_instrumentation_patch_site_kind(const ConSanPatchInfo &patch) {
   }
 }
 
-void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
+void finalize_moi_site_lowering_outcomes(
+    ConSanResult &result,
+    std::optional<ConSanRegisterPlanReason> whole_transform_resource_failure = std::nullopt) {
   struct SiteKey {
     ConSanResourceSiteKind kind = ConSanResourceSiteKind::Access;
     uint64_t text_offset = 0;
@@ -1179,6 +1173,13 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
       site.lowering_outcome = ConSanSiteLoweringOutcome::ResourceFailed;
       site.lowering_reason = ConSanSiteLoweringReason::UnsupportedResourcePlan;
       site.resource_reason = failed->second;
+      continue;
+    }
+
+    if (whole_transform_resource_failure) {
+      site.lowering_outcome = ConSanSiteLoweringOutcome::ResourceFailed;
+      site.lowering_reason = ConSanSiteLoweringReason::UnsupportedResourcePlan;
+      site.resource_reason = *whole_transform_resource_failure;
       continue;
     }
 

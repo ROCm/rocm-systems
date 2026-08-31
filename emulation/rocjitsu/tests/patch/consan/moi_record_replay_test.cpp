@@ -4,9 +4,153 @@
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/gfx1250_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "test_paths.h"
+
+#include <fstream>
+#include <iterator>
 
 namespace rocjitsu {
 namespace {
+
+std::vector<uint8_t> load_consan_fixture_hsaco(std::string_view name) {
+  std::ifstream file(test::kernel_hsaco_path(std::string(name).c_str()), std::ios::binary);
+  if (!file)
+    return {};
+  return std::vector<uint8_t>(std::istreambuf_iterator<char>(file),
+                              std::istreambuf_iterator<char>());
+}
+
+ConSanResult patch_record_replay_fixture_with_auto_report(std::span<const uint8_t> bytes) {
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 65536u;
+  options.max_patches_is_expert_limit = false;
+  ConSanResult inventory = try_patch_consan(bytes, options);
+  if (!inventory.errors.empty())
+    return inventory;
+  const ConSanMoiAutoReportInventory report_inventory =
+      inventory_consan_moi_auto_report(inventory, options, bytes);
+  const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(report_inventory);
+  if (!report_plan.complete())
+    return inventory;
+  const std::optional<ConSanMoiReportLayoutOverride> layout =
+      consan_moi_auto_report_layout_override(report_plan);
+  if (!layout)
+    return inventory;
+  const ConSanMoiReportRetryConfig report{
+      .buffer_address = 0x123456780000ull,
+      .buffer_size = report_plan.required_bytes,
+      .layout = *layout,
+      .generation = 1u,
+      .dispatch_id = 1u,
+  };
+  return retry_patch_consan_moi_from_inventory(
+      std::move(inventory), ConSanMoiInventoryRetryConfig{.report = report, .fault = std::nullopt},
+      bytes);
+}
+
+TEST(ConSanMoi, Gfx950TritonAttentionRecordReplayLowersEverySupportedSite) {
+  constexpr std::array<std::string_view, 3> kFixtures = {
+      "triton_cdna4_matmul_buffer_async_1024",
+      "triton_cdna4_flash_attention_no_async_1024",
+      "triton_cdna4_flash_attention_buffer_async_1024",
+  };
+  for (const std::string_view fixture : kFixtures) {
+    SCOPED_TRACE(fixture);
+    const std::vector<uint8_t> bytes = load_consan_fixture_hsaco(fixture);
+    ASSERT_FALSE(bytes.empty());
+    const ConSanResult result = patch_record_replay_fixture_with_auto_report(bytes);
+    SCOPED_TRACE(testing::PrintToString(result.warnings));
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified);
+    EXPECT_TRUE(result.final_validation_passed);
+    const auto supported = [&](ConSanResourceSiteKind kind) {
+      return std::ranges::count_if(result.site_dispositions, [&](const auto &site) {
+        return site.site_kind == kind && site.disposition == ConSanSiteDisposition::Supported;
+      });
+    };
+    const auto patched = [&](ConSanResourceSiteKind kind) {
+      return std::ranges::count_if(result.site_dispositions, [&](const auto &site) {
+        return site.site_kind == kind && site.disposition == ConSanSiteDisposition::Supported &&
+               site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
+      });
+    };
+    EXPECT_EQ(patched(ConSanResourceSiteKind::Access), supported(ConSanResourceSiteKind::Access));
+    EXPECT_EQ(patched(ConSanResourceSiteKind::Barrier), supported(ConSanResourceSiteKind::Barrier));
+  }
+}
+
+TEST(ConSanMoi, KernelAllowlistUsesExactEntryNamesAndLeavesOtherKernelsUntouched) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.entry_nop_words = 8u;
+  fixture.unrelated_has_lds = true;
+  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.kernel_name_allowlist = {"unrelated_kernel.kd"};
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 30u;
+  options.moi_owner_vgpr = 14u;
+  options.moi_epoch_vgpr = 15u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanResult selected = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(selected)) << testing::PrintToString(selected.errors);
+  ASSERT_TRUE(selected.modified) << testing::PrintToString(selected.warnings);
+  ASSERT_EQ(selected.moi_candidates.size(), 1u);
+  EXPECT_EQ(selected.moi_candidates.front().container_name, "unrelated_kernel");
+  ASSERT_EQ(selected.site_dispositions.size(), 1u);
+  EXPECT_EQ(selected.site_dispositions.front().container_name, "unrelated_kernel");
+  const auto unrelated =
+      std::ranges::find(selected.kernels, "unrelated_kernel", &ConSanKernelInfo::name);
+  ASSERT_NE(unrelated, selected.kernels.end());
+  const auto access_patch = std::ranges::find(
+      selected.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(access_patch, selected.patches.end());
+  ASSERT_EQ(access_patch->owner_descriptor_file_offsets.size(), 1u);
+  EXPECT_EQ(access_patch->owner_descriptor_file_offsets.front(), unrelated->descriptor_file_offset);
+  EXPECT_TRUE(std::ranges::all_of(selected.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.owner_descriptor_file_offsets.empty() ||
+           (patch.owner_descriptor_file_offsets.size() == 1u &&
+            patch.owner_descriptor_file_offsets.front() == unrelated->descriptor_file_offset);
+  }));
+
+  options.kernel_name_allowlist = {"unrelated"};
+  const ConSanResult no_substring_match = try_patch_consan(bytes, options);
+  ASSERT_TRUE(consan_patch_succeeded(no_substring_match))
+      << testing::PrintToString(no_substring_match.errors);
+  EXPECT_FALSE(no_substring_match.modified);
+  EXPECT_TRUE(no_substring_match.moi_candidates.empty());
+  EXPECT_TRUE(no_substring_match.site_dispositions.empty());
+  EXPECT_TRUE(no_substring_match.patches.empty());
+
+  options.kernel_name_allowlist = {"shared_owner_0"};
+  const ConSanResult partial_shared_ownership = try_patch_consan(bytes, options);
+  ASSERT_TRUE(consan_patch_succeeded(partial_shared_ownership))
+      << testing::PrintToString(partial_shared_ownership.errors);
+  EXPECT_FALSE(partial_shared_ownership.modified);
+  EXPECT_TRUE(partial_shared_ownership.moi_candidates.empty());
+
+  options.kernel_name_allowlist = {"shared_owner_0", "shared_owner_1"};
+  const ConSanResult complete_shared_ownership = try_patch_consan(bytes, options);
+  ASSERT_TRUE(consan_patch_succeeded(complete_shared_ownership))
+      << testing::PrintToString(complete_shared_ownership.errors);
+  ASSERT_TRUE(complete_shared_ownership.modified)
+      << testing::PrintToString(complete_shared_ownership.warnings);
+  ASSERT_EQ(complete_shared_ownership.moi_candidates.size(), 1u);
+  EXPECT_EQ(complete_shared_ownership.moi_candidates.front().container_name, "shared_lds_helper");
+  const auto shared_patch =
+      std::ranges::find(complete_shared_ownership.patches,
+                        ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(shared_patch, complete_shared_ownership.patches.end());
+  EXPECT_EQ(shared_patch->owner_descriptor_file_offsets.size(), 2u);
+}
 
 std::vector<uint32_t> make_expected_fetch_add_one_words(uint64_t address, uint16_t result_vgpr,
                                                         uint16_t scratch_vgpr) {
@@ -1327,6 +1471,8 @@ TEST(ConSanMoi, AutoRecordReplayRejectsDispatchIdentityWithoutPersistentVgprPair
   }
   text_words.push_back(0xD8340000u);
   text_words.push_back(0x00000000u); // ds_store_b32
+  text_words.push_back(0xBE804EC1u); // s_barrier_signal -1
+  text_words.push_back(0xBF94FFFFu); // s_barrier_wait -1
   for (uint16_t sgpr = 0u; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
     if (sgpr >= 90u)
       continue;
@@ -1353,7 +1499,7 @@ TEST(ConSanMoi, AutoRecordReplayRejectsDispatchIdentityWithoutPersistentVgprPair
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
   options.moi_report_layout = *layout_override;
-  options.moi_track_barriers = false;
+  options.moi_track_barriers = true;
   options.moi_track_atomics = false;
   options.moi_exec_save_sgpr = 90u;
 
@@ -1366,6 +1512,19 @@ TEST(ConSanMoi, AutoRecordReplayRejectsDispatchIdentityWithoutPersistentVgprPair
                "cannot retain automatic Record/Replay dispatch identity without a persistent "
                "VGPR pair") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
+    return site.site_kind == ConSanResourceSiteKind::Barrier &&
+           site.disposition == ConSanSiteDisposition::Supported &&
+           site.lowering_outcome == ConSanSiteLoweringOutcome::ResourceFailed &&
+           site.lowering_reason == ConSanSiteLoweringReason::UnsupportedResourcePlan &&
+           site.resource_reason == ConSanRegisterPlanReason::NoLegalWindow;
+  })) << testing::PrintToString(result.site_dispositions);
+  EXPECT_TRUE(std::ranges::all_of(result.site_dispositions, [](const auto &site) {
+    return site.disposition != ConSanSiteDisposition::Supported ||
+           (site.lowering_outcome == ConSanSiteLoweringOutcome::ResourceFailed &&
+            site.lowering_reason == ConSanSiteLoweringReason::UnsupportedResourcePlan &&
+            site.resource_reason == ConSanRegisterPlanReason::NoLegalWindow);
+  })) << testing::PrintToString(result.site_dispositions);
 }
 
 TEST(ConSanMoi, AutoRecordReplayAddsExactTupleToExplicitOwnerEpoch) {

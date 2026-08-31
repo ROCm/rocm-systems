@@ -409,17 +409,18 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   ScRangeIndex future_flat_probe_ranges;
   ScRangeIndex supported_lds_probe_ranges;
   const auto container_is_selected = [&](const auto &container) {
-    if (options.test_kernel_name_filter.empty() ||
-        container.name.find(options.test_kernel_name_filter) != std::string::npos)
+    if (consan_container_selected(options, container.name))
       return true;
     const auto owner_matches = [&](uint64_t descriptor_offset) {
       const auto kernel = std::ranges::find(result.kernels, descriptor_offset,
                                             &ConSanKernelInfo::descriptor_file_offset);
-      return kernel != result.kernels.end() &&
-             kernel->name.find(options.test_kernel_name_filter) != std::string::npos;
+      return kernel != result.kernels.end() && consan_container_selected(options, kernel->name);
     };
     const auto site_has_matching_owner = [&](const auto &site) {
-      return std::ranges::any_of(site.owner_descriptor_file_offsets, owner_matches);
+      return !site.owner_descriptor_file_offsets.empty() &&
+             (options.kernel_name_allowlist.empty()
+                  ? std::ranges::any_of(site.owner_descriptor_file_offsets, owner_matches)
+                  : std::ranges::all_of(site.owner_descriptor_file_offsets, owner_matches));
     };
     return std::ranges::any_of(container.lds_sites, site_has_matching_owner) ||
            std::ranges::any_of(container.flat_sites, site_has_matching_owner);
@@ -930,15 +931,25 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     return caves;
   };
   for (const LdsSitePlanningContext &site_context : site_contexts) {
-    if (!options.test_kernel_name_filter.empty()) {
+    if (!options.test_kernel_name_filter.empty() || !options.kernel_name_allowlist.empty()) {
       const bool container_matches =
-          site_context.container_name.find(options.test_kernel_name_filter) != std::string::npos;
+          consan_container_selected(options, site_context.container_name);
       const bool owner_matches =
-          std::ranges::any_of(site_context.owner_descriptor_file_offsets, [&](uint64_t owner) {
-            const auto kernel = kernels_by_descriptor.find(owner);
-            return kernel != kernels_by_descriptor.end() &&
-                   kernel->second->name.find(options.test_kernel_name_filter) != std::string::npos;
-          });
+          !site_context.owner_descriptor_file_offsets.empty() &&
+          (options.kernel_name_allowlist.empty()
+               ? std::ranges::any_of(site_context.owner_descriptor_file_offsets,
+                                     [&](uint64_t owner) {
+                                       const auto kernel = kernels_by_descriptor.find(owner);
+                                       return kernel != kernels_by_descriptor.end() &&
+                                              consan_container_selected(options,
+                                                                        kernel->second->name);
+                                     })
+               : std::ranges::all_of(
+                     site_context.owner_descriptor_file_offsets, [&](uint64_t owner) {
+                       const auto kernel = kernels_by_descriptor.find(owner);
+                       return kernel != kernels_by_descriptor.end() &&
+                              consan_container_selected(options, kernel->second->name);
+                     }));
       if (!container_matches && !owner_matches)
         continue;
     }

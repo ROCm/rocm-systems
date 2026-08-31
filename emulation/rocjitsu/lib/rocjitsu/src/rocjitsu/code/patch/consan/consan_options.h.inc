@@ -453,6 +453,10 @@ struct ConSanOptions {
   bool force_private_epoch = false;
   /// Test-only substring filter for selecting MOI candidates from one kernel.
   std::string test_kernel_name_filter;
+  /// Production exact-name allowlist. When nonempty, kernel-local sites are
+  /// selected by exact entry name; shared physical sites require every known
+  /// owner entry to be selected.
+  std::vector<std::string> kernel_name_allowlist;
   /// Internal marker set after ConSan assigns persistent owner/epoch VGPRs.
   bool automatic_moi_persistent_vgprs = false;
   /// Internal per-owner assignments used when one CDNA4 code-object-wide
@@ -627,6 +631,25 @@ struct ConSanOptions {
   uint32_t moi_runtime_sample_offset = 0;
   uint32_t report_marker = 1;
 };
+
+[[nodiscard]] inline std::string_view consan_normalize_kernel_name(std::string_view name) {
+  if (name.ends_with(".kd"))
+    name.remove_suffix(3);
+  return name;
+}
+
+[[nodiscard]] inline bool consan_container_selected(const ConSanOptions &options,
+                                                    std::string_view container_name) {
+  if (!options.test_kernel_name_filter.empty() &&
+      container_name.find(options.test_kernel_name_filter) == std::string_view::npos)
+    return false;
+  if (options.kernel_name_allowlist.empty())
+    return true;
+  const std::string_view normalized = consan_normalize_kernel_name(container_name);
+  return std::ranges::any_of(options.kernel_name_allowlist, [&](std::string_view allowed) {
+    return consan_normalize_kernel_name(allowed) == normalized;
+  });
+}
 
 [[nodiscard]] inline bool consan_qualifies_extended_barrier_pairs(const ConSanOptions &options) {
   return options.qualify_extended_barrier_pairs || options.fault_drop_barrier ||

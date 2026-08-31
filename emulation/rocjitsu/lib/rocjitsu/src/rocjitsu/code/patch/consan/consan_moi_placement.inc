@@ -3637,21 +3637,22 @@ resolve_moi_scratch(const ConSanResult &result, const ConSanMoiCandidate &candid
 }
 
 void apply_test_kernel_filter(std::vector<const ConSanMoiCandidate *> &candidates,
-                              const ConSanOptions &options) {
-  if (options.test_kernel_name_filter.empty())
+                              const ConSanOptions &options, const ConSanResult &result) {
+  if (options.test_kernel_name_filter.empty() && options.kernel_name_allowlist.empty())
     return;
   std::erase_if(candidates, [&](const ConSanMoiCandidate *candidate) {
     return candidate == nullptr ||
-           candidate->container_name.find(options.test_kernel_name_filter) == std::string::npos;
+           !moi_physical_site_selected(options, candidate->container_name,
+                                       candidate->owner_descriptor_file_offsets, result);
   });
 }
 
 template <typename Candidate>
 void apply_test_container_filter(std::vector<Candidate> &candidates, const ConSanOptions &options) {
-  if (options.test_kernel_name_filter.empty())
+  if (options.test_kernel_name_filter.empty() && options.kernel_name_allowlist.empty())
     return;
   std::erase_if(candidates, [&](const Candidate &candidate) {
-    return candidate.container_name.find(options.test_kernel_name_filter) == std::string::npos;
+    return !consan_container_selected(options, candidate.container_name);
   });
 }
 

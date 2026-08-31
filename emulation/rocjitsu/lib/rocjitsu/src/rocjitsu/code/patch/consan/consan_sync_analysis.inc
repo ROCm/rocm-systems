@@ -3150,8 +3150,7 @@ void build_perturbation_plan(const ConSanOptions &options, ConSanResult &result,
   for (const ConSanPerturbationCandidate &candidate : result.perturbation_candidates) {
     if (!candidate.eligible || candidate.kind != options.sc_perturb_kind ||
         candidate.edge != options.sc_perturb_edge ||
-        (!options.test_kernel_name_filter.empty() &&
-         candidate.container_name.find(options.test_kernel_name_filter) == std::string::npos))
+        !consan_container_selected(options, candidate.container_name))
       continue;
     if (!options.sc_perturb_identity.empty() && candidate.identity != options.sc_perturb_identity)
       continue;
@@ -3786,12 +3785,20 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
 [[nodiscard]] bool owned_by_requested_kernel(std::span<const ConSanExecutionOwner> owners,
                                              const ConSanResult &result,
                                              const ConSanOptions &options) {
-  if (options.test_kernel_name_filter.empty())
+  if (options.test_kernel_name_filter.empty() && options.kernel_name_allowlist.empty())
     return true;
-  const ConSanKernelInfo *kernel = requested_kernel_owner(result, options.test_kernel_name_filter);
-  return kernel != nullptr &&
-         std::ranges::find(owners, kernel->descriptor_file_offset,
-                           &ConSanExecutionOwner::descriptor_file_offset) != owners.end();
+  if (!options.test_kernel_name_filter.empty()) {
+    const ConSanKernelInfo *kernel =
+        requested_kernel_owner(result, options.test_kernel_name_filter);
+    return kernel != nullptr &&
+           std::ranges::find(owners, kernel->descriptor_file_offset,
+                             &ConSanExecutionOwner::descriptor_file_offset) != owners.end();
+  }
+  return !owners.empty() && std::ranges::all_of(owners, [&](const ConSanExecutionOwner &owner) {
+    const auto kernel = std::ranges::find(result.kernels, owner.descriptor_file_offset,
+                                          &ConSanKernelInfo::descriptor_file_offset);
+    return kernel != result.kernels.end() && consan_container_selected(options, kernel->name);
+  });
 }
 
 [[nodiscard]] const ConSanFaultSite *select_fault_site_for_plan(const ConSanResult &result,

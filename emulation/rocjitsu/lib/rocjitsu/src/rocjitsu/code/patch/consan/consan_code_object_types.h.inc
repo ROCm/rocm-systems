@@ -354,6 +354,10 @@ struct ConSanMoiCandidate {
   std::optional<uint16_t> data_vgpr;
   std::optional<uint16_t> second_data_vgpr;
   std::optional<uint64_t> kernel_descriptor_file_offset;
+  /// Every kernel entry whose dispatch can execute this physical site. A
+  /// shared helper is eligible for production allowlisting only when all of
+  /// its owners are selected.
+  std::vector<uint64_t> owner_descriptor_file_offsets;
   bool uses_gfx1250_cluster_workgroup_id = false;
   std::optional<uint32_t> raw_op;
   std::optional<uint32_t> raw_saddr;

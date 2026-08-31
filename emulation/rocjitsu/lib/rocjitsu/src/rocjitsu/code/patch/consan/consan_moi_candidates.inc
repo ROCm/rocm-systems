@@ -485,6 +485,7 @@ void warn_skipped_moi_flat_candidates(std::string_view container_name, bool in_k
   candidate.data_vgpr = site.data_vgpr;
   candidate.second_data_vgpr = site.second_data_vgpr;
   candidate.kernel_descriptor_file_offset = descriptor_file_offset;
+  candidate.owner_descriptor_file_offsets = site.owner_descriptor_file_offsets;
   candidate.uses_gfx1250_cluster_workgroup_id = uses_gfx1250_cluster_workgroup_id;
   candidate.mnemonic = site.mnemonic;
   return candidate;
@@ -512,6 +513,7 @@ void warn_skipped_moi_flat_candidates(std::string_view container_name, bool in_k
   candidate.addr_vgpr = site.addr_vgpr;
   candidate.data_vgpr = site.data_vgpr;
   candidate.kernel_descriptor_file_offset = descriptor_file_offset;
+  candidate.owner_descriptor_file_offsets = site.owner_descriptor_file_offsets;
   candidate.uses_gfx1250_cluster_workgroup_id = uses_gfx1250_cluster_workgroup_id;
   candidate.raw_op = site.raw_op;
   candidate.raw_saddr = site.raw_saddr;
@@ -595,15 +597,30 @@ void append_moi_access_site_disposition(std::span<const uint8_t> bytes,
   result.site_dispositions.push_back(std::move(record));
 }
 
+[[nodiscard]] bool moi_physical_site_selected(const ConSanOptions &options,
+                                              std::string_view container_name,
+                                              std::span<const uint64_t> owner_descriptors,
+                                              const ConSanResult &result) {
+  if (consan_container_selected(options, container_name))
+    return true;
+  if (owner_descriptors.empty())
+    return false;
+  const auto owner_selected = [&](uint64_t descriptor) {
+    const auto kernel =
+        std::ranges::find(result.kernels, descriptor, &ConSanKernelInfo::descriptor_file_offset);
+    return kernel != result.kernels.end() && consan_container_selected(options, kernel->name);
+  };
+  return options.kernel_name_allowlist.empty()
+             ? std::ranges::any_of(owner_descriptors, owner_selected)
+             : std::ranges::all_of(owner_descriptors, owner_selected);
+}
+
 template <typename Container>
 void append_moi_access_site_dispositions(
     std::span<const uint8_t> bytes, const Container &container, ConSanFlatProvenanceMode mode,
     const ConSanOptions &options, rj_code_arch_t arch,
     const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites, ConSanResult &result) {
   const bool in_kernel = std::is_same_v<Container, ConSanKernelInfo>;
-  if (!options.test_kernel_name_filter.empty() &&
-      container.name.find(options.test_kernel_name_filter) == std::string::npos)
-    return;
   const std::optional<uint64_t> descriptor = [&]() -> std::optional<uint64_t> {
     if constexpr (std::is_same_v<Container, ConSanKernelInfo>)
       return container.descriptor_file_offset;
@@ -611,6 +628,9 @@ void append_moi_access_site_dispositions(
   }();
 
   for (const ConSanLdsSite &site : container.lds_sites) {
+    if (!moi_physical_site_selected(options, container.name, site.owner_descriptor_file_offsets,
+                                    result))
+      continue;
     if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write &&
         !(consan_arch_supports_capability_form(arch,
                                                ConSanCapabilityForm::RelaxedLdsAtomicAccess) &&
@@ -620,6 +640,9 @@ void append_moi_access_site_dispositions(
         bytes, make_moi_candidate(container.name, in_kernel, descriptor, site), arch, result);
   }
   for (const ConSanFlatSite &site : container.flat_sites) {
+    if (!moi_physical_site_selected(options, container.name, site.owner_descriptor_file_offsets,
+                                    result))
+      continue;
     // A compiler-lowered language-level atomic load/store is represented by
     // an ordinary FLAT instruction in the ISA, but it is not an ordinary data
     // access. Its complete load/store + ordering-suffix sequence is owned by
@@ -736,7 +759,15 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
       moi_candidate_semantics_equal,
       // Clearing the single-owner hint makes plan_moi_resource_site derive the
       // complete owner set from the shared CFG block.
-      consan_detail::invalidate_physical_site_single_owner_hint);
+      [](ConSanMoiCandidate &retained, const ConSanMoiCandidate &alias) {
+        retained.kernel_descriptor_file_offset.reset();
+        retained.owner_descriptor_file_offsets.insert(retained.owner_descriptor_file_offsets.end(),
+                                                      alias.owner_descriptor_file_offsets.begin(),
+                                                      alias.owner_descriptor_file_offsets.end());
+        std::ranges::sort(retained.owner_descriptor_file_offsets);
+        const auto unique = std::ranges::unique(retained.owner_descriptor_file_offsets);
+        retained.owner_descriptor_file_offsets.erase(unique.begin(), unique.end());
+      });
 }
 
 [[nodiscard]] uint32_t count_nop_padding(std::span<const uint8_t> bytes, uint64_t offset,

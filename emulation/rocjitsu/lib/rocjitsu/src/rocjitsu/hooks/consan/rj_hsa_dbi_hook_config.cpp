@@ -53,6 +53,47 @@ namespace rocjitsu::consan_hook {
   return true;
 }
 
+[[nodiscard]] bool parse_kernel_allowlist_env(std::vector<std::string> *out) {
+  out->clear();
+  const char *value = std::getenv("RJ_CONSAN_KERNEL_ALLOWLIST");
+  if (value == nullptr || *value == '\0')
+    return true;
+  std::string_view remaining(value);
+  while (!remaining.empty()) {
+    const size_t comma = remaining.find(',');
+    std::string_view item = remaining.substr(0, comma);
+    while (!item.empty() && std::isspace(static_cast<unsigned char>(item.front())))
+      item.remove_prefix(1);
+    while (!item.empty() && std::isspace(static_cast<unsigned char>(item.back())))
+      item.remove_suffix(1);
+    if (item.empty()) {
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_KERNEL_ALLOWLIST='%s'; "
+                   "expected comma-separated nonempty exact kernel names\n",
+                   value);
+      out->clear();
+      return false;
+    }
+    std::string normalized(item);
+    if (normalized.ends_with(".kd"))
+      normalized.resize(normalized.size() - 3u);
+    if (std::ranges::find(*out, normalized) == out->end())
+      out->push_back(std::move(normalized));
+    if (comma == std::string_view::npos)
+      break;
+    remaining.remove_prefix(comma + 1u);
+    if (remaining.empty()) {
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_KERNEL_ALLOWLIST='%s'; "
+                   "expected comma-separated nonempty exact kernel names\n",
+                   value);
+      out->clear();
+      return false;
+    }
+  }
+  return true;
+}
+
 [[nodiscard]] bool parse_u32_env(const char *name, uint32_t default_value, uint32_t *out) {
   const char *value = std::getenv(name);
   if (value == nullptr || *value == '\0') {
@@ -927,6 +968,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   }
   if (const char *test_filter = std::getenv("RJ_CONSAN_TEST_KERNEL_FILTER"))
     config.test_kernel_name_filter = test_filter;
+  if (!parse_kernel_allowlist_env(&config.kernel_name_allowlist))
+    return std::nullopt;
   const bool strict_moi_policy = strict_policy && config.flavor == rocjitsu::ConSanFlavor::Moi;
   if (!parse_bool_env("RJ_CONSAN_MOI_REQUIRE_RECORDS", strict_moi_policy,
                       &config.moi_require_records))

@@ -543,14 +543,15 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   for (const ConSanFunctionInfo &function : result.functions)
     append_moi_candidates(function, effective_options.flat_provenance_mode, arch,
                           ordered_sync_sites, result);
-  if (!effective_options.test_kernel_name_filter.empty()) {
-    std::erase_if(result.moi_candidates, [&](const ConSanMoiCandidate &candidate) {
-      return candidate.container_name.find(effective_options.test_kernel_name_filter) ==
-             std::string::npos;
-    });
-  }
   if (!canonicalize_moi_candidates_by_physical_site(result))
     return result;
+  if (!effective_options.test_kernel_name_filter.empty() ||
+      !effective_options.kernel_name_allowlist.empty()) {
+    std::erase_if(result.moi_candidates, [&](const ConSanMoiCandidate &candidate) {
+      return !moi_physical_site_selected(effective_options, candidate.container_name,
+                                         candidate.owner_descriptor_file_offsets, result);
+    });
+  }
   if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     for (ConSanMoiCandidate &candidate : result.moi_candidates) {
       if (candidate.text_offset < candidate.container_entry_text_offset ||
@@ -705,7 +706,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow) {
     std::vector<const ConSanMoiCandidate *> inline_access_candidates =
         find_inline_shadow_access_candidates(result, code_object_bytes, arch);
-    apply_test_kernel_filter(inline_access_candidates, effective_options);
+    apply_test_kernel_filter(inline_access_candidates, effective_options, result);
     effective_options.moi_inline_access_present = !inline_access_candidates.empty();
     inline_atomic_without_access = inline_access_candidates.empty() &&
                                    effective_options.moi_track_atomics && atomic_or_fence_relevant;
@@ -776,10 +777,20 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (configure_moi_dispatch_id_overrides(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
-  if (result.outcome == ConSanTransformOutcome::Unsupported ||
-      !validate_moi_dispatch_id_sgprs(effective_options, result, arch) ||
+  if (result.outcome == ConSanTransformOutcome::Unsupported) {
+    append_moi_sync_site_dispositions(effective_options, result);
+    finalize_moi_site_lowering_outcomes(result, ConSanRegisterPlanReason::NoLegalWindow);
+    summarize_moi_resource_plans(result);
+    return result;
+  }
+  if (!validate_moi_dispatch_id_sgprs(effective_options, result, arch) ||
       !validate_moi_ordinary_scalar_state(effective_options, result, arch)) {
-    finalize_moi_site_lowering_outcomes(result);
+    // Synchronization dispositions were admitted above to drive resource
+    // planning and then removed so refined options could rebuild them. Keep
+    // the durable per-site ledger complete even when scalar-state validation
+    // rejects the transform before that normal rebuild point.
+    append_moi_sync_site_dispositions(effective_options, result);
+    finalize_moi_site_lowering_outcomes(result, ConSanRegisterPlanReason::NoLegalWindow);
     summarize_moi_resource_plans(result);
     return result;
   }
@@ -791,9 +802,17 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     append_moi_sync_site_dispositions(effective_options, result);
   if (configure_automatic_moi_persistent_vgprs(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
-  if (result.outcome == ConSanTransformOutcome::Unsupported ||
-      !validate_moi_dispatch_id_vgprs(effective_options, result)) {
-    finalize_moi_site_lowering_outcomes(result);
+  if (result.outcome == ConSanTransformOutcome::Unsupported) {
+    if (effective_options.moi_engine != ConSanMoiEngine::Sampled)
+      append_moi_sync_site_dispositions(effective_options, result);
+    finalize_moi_site_lowering_outcomes(result, ConSanRegisterPlanReason::NoLegalWindow);
+    summarize_moi_resource_plans(result);
+    return result;
+  }
+  if (!validate_moi_dispatch_id_vgprs(effective_options, result)) {
+    if (effective_options.moi_engine != ConSanMoiEngine::Sampled)
+      append_moi_sync_site_dispositions(effective_options, result);
+    finalize_moi_site_lowering_outcomes(result, ConSanRegisterPlanReason::NoLegalWindow);
     summarize_moi_resource_plans(result);
     return result;
   }

@@ -632,6 +632,16 @@ if(HAS_DEVICE_KERNELS)
             dbt/device_kernels_translate_tests.cpp
             dbt/multikernel_indirect_branch_test.cpp
     )
+    target_compile_definitions(
+        rocjitsu_tests
+        PRIVATE KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
+    )
+    add_dependencies(
+        rocjitsu_tests
+        kernel_triton_cdna4_matmul_buffer_async_1024
+        kernel_triton_cdna4_flash_attention_no_async_1024
+        kernel_triton_cdna4_flash_attention_buffer_async_1024
+    )
 endif()
 if(HAS_GFX1250_DEVICE_KERNELS)
     target_sources(

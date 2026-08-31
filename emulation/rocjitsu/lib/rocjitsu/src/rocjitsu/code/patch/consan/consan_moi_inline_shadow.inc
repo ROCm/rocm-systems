@@ -103,7 +103,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   }
   std::vector<const ConSanMoiCandidate *> candidates =
       find_inline_shadow_access_candidates(result, bytes, arch);
-  apply_test_kernel_filter(candidates, options);
+  apply_test_kernel_filter(candidates, options, result);
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
     return lhs->text_offset < rhs->text_offset;
   });

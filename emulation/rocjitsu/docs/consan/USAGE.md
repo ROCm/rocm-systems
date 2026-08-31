@@ -158,6 +158,7 @@ continues to return the HSA error to callers that correctly handle it.
 | `RJ_CONSAN_LOG=N` | disabled | Enable compact logs at `1`; larger values add inventory detail. |
 | `RJ_CONSAN_FAIL_CLOSED=0|1` | `0` | Reject unsupported/invalid transformation outcomes instead of loading the original. |
 | `RJ_CONSAN_REQUIRE_PATCH=0|1` | `0` | Reject an applicable code object when no real access/barrier/atomic/fence instrumentation patch is emitted. Prologues and metadata-only changes do not satisfy it. |
+| `RJ_CONSAN_KERNEL_ALLOWLIST=name[,name...]` | unset (all entries) | Instrument only the named HSA kernel entries. Names are exact, comma-separated, and may optionally include the `.kd` suffix. |
 | `RJ_CONSAN_FLAT_PROVENANCE=likely|strict` | `likely` | Admit proven `Group` plus heuristic `MaybeGroup` flat LDS sites, or only proven `Group` sites. |
 | `RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES=N` | `419430400` (400 MiB) | Bound total additional ELF bytes, including alignment padding, across one code-object transformation. `N` is unsigned decimal; zero permits only no-growth rewrites. |
 | `RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT=N` | unset (absolute policy applies) | Use an alternative bound relative to the original code object: total additional ELF bytes may not exceed `floor(original input bytes * N / 100)`. `N` is unsigned decimal in `0..4294967295`; values above 100 intentionally allow growth larger than the original image. |
@@ -165,6 +166,24 @@ continues to return the HSA error to callers that correctly handle it.
 | `RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES=N` | unset (unlimited) | Bound the live aggregate of full retained replacement images. `N` is unsigned decimal; zero rejects every nonempty replacement, including a no-growth rewrite. Bytes are released when a replacement load fails or its executable is destroyed. Retained ownership and its charge survive hook unload/reload because unload does not quiesce runtime loads or invalidate existing executables. |
 | `RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES=N` | unset (unlimited) | Additionally bound the live aggregate of alignment-inclusive ELF growth across retained replacement code objects in this process. `N` is unsigned decimal; zero permits only no-growth replacements. Growth is released when a replacement load fails or its executable is destroyed and, like full-image ownership, survives hook unload/reload. In fail-open mode, an over-budget code object runs uninstrumented and makes the final analysis verdict incomplete; use fail-closed mode when every applicable object must be instrumented. |
 | `RJ_CONSAN_DUMP_DIR=PATH` | unset | Write original and transformed `.hsaco` objects for inspection. |
+
+The kernel allowlist is a production scoping control, not a substring filter.
+For example, `RJ_CONSAN_KERNEL_ALLOWLIST=attention_fwd,attention_bwd.kd`
+selects exactly those two entries and does not select `attention_fwd_debug`.
+Code objects containing no matching entry are loaded without ConSan changes.
+Kernel-local sites owned by unlisted entries remain untouched. A physical site
+in a shared helper is instrumented only when every kernel entry that can reach
+it is allowlisted; this avoids silently instrumenting an unselected dispatch.
+Consequently, selecting only one owner of a shared helper can intentionally
+report less static coverage than selecting all of its owners.
+
+At unload, ConSan emits one `ConSan kernel allowlist entry` record per requested
+name. Its `loaded`, `instrumented`, `dispatches`, and `visible_records` fields,
+plus the typed `status`, distinguish an entry that was never loaded, one that
+loaded but had no supported instrumentation, one that was instrumented but
+never dispatched, and one that dispatched yet produced no visible evidence.
+The last state should be interpreted together with the ordinary MOI zero-record
+diagnostic and runtime sampling settings.
 
 The three process controls are independent. The concurrent-transform control is
 acquired before semantic inventory. It is a conservative admission unit for

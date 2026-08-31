@@ -846,14 +846,17 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     if (is_supported_flat_check_trap_site(site, options.flat_provenance_mode))
       supported_physical_sites.insert(site.file_offset);
 
+    const auto owner_selected = [&](uint64_t owner) {
+      const auto kernel = kernels_by_descriptor.find(owner);
+      return kernel != kernels_by_descriptor.end() &&
+             consan_container_selected(options, kernel->second->name);
+    };
+    const bool owners_selected =
+        !owners.empty() &&
+        (options.kernel_name_allowlist.empty() ? std::ranges::any_of(owners, owner_selected)
+                                               : std::ranges::all_of(owners, owner_selected));
     const bool selected_by_filter =
-        options.test_kernel_name_filter.empty() ||
-        canonical.container_name.find(options.test_kernel_name_filter) != std::string::npos ||
-        std::ranges::any_of(owners, [&](uint64_t owner) {
-          const auto kernel = kernels_by_descriptor.find(owner);
-          return kernel != kernels_by_descriptor.end() &&
-                 kernel->second->name.find(options.test_kernel_name_filter) != std::string::npos;
-        });
+        consan_container_selected(options, canonical.container_name) || owners_selected;
     if (!selected_by_filter)
       continue;
 

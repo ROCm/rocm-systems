@@ -480,6 +480,7 @@ std::vector<bool> g_transform_override_fault_mutations;
 std::vector<bool> g_transform_override_fault_dry_runs;
 std::vector<rocjitsu::ConSanPatchedImageGrowthLimit>
     g_transform_override_patched_image_growth_limits;
+std::vector<std::vector<std::string>> g_transform_override_kernel_allowlists;
 bool g_transform_override_uses_production = false;
 bool g_transform_override_models_fault_application = false;
 size_t g_transform_override_actual_fault_applications = 1;
@@ -1035,6 +1036,7 @@ rocjitsu::ConSanResult transform_override(std::span<const uint8_t> bytes,
     g_transform_override_fault_mutations.push_back(fault_mutation_enabled);
     g_transform_override_fault_dry_runs.push_back(options.fault_dry_run);
     g_transform_override_patched_image_growth_limits.push_back(options.patched_image_growth_limit);
+    g_transform_override_kernel_allowlists.push_back(options.kernel_name_allowlist);
     g_transform_override_runtime_sample_strides.push_back(options.moi_runtime_sample_stride);
     g_transform_override_sc_report_addresses.push_back(options.report_buffer_address);
     g_transform_override_report_sizes.push_back(options.moi_report_buffer_size);
@@ -1782,6 +1784,7 @@ void reset_code_object_observations() {
   g_transform_override_fault_mutations.clear();
   g_transform_override_fault_dry_runs.clear();
   g_transform_override_patched_image_growth_limits.clear();
+  g_transform_override_kernel_allowlists.clear();
   g_transform_override_uses_production = false;
   g_transform_override_models_fault_application = false;
   g_transform_override_actual_fault_applications = 1;
@@ -3772,6 +3775,42 @@ TEST(HsaHooksUnitTest, ConSanRejectsInvalidMode) {
   ScopedEnvVar legacy_engine("RJ_CONSAN_MOI_BACKEND", nullptr);
 
   reset_code_object_observations();
+  FakeApiTable api;
+  const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
+  InstalledDbiHook hook(api);
+  EXPECT_FALSE(hook.installed());
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn, original_load);
+}
+
+TEST(HsaHooksUnitTest, ConSanParsesAndNormalizesExactKernelAllowlist) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST",
+                         " selected_kernel.kd,second_kernel,selected_kernel ");
+  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(g_transform_override_kernel_allowlists.size(), 1u);
+  EXPECT_EQ(g_transform_override_kernel_allowlists.front(),
+            (std::vector<std::string>{"selected_kernel", "second_kernel"}));
+}
+
+TEST(HsaHooksUnitTest, ConSanRejectsEmptyKernelAllowlistEntry) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "selected_kernel,,second_kernel");
+
   FakeApiTable api;
   const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
   InstalledDbiHook hook(api);
@@ -8794,6 +8833,51 @@ TEST(HsaHooksUnitTest, ConSanZeroRecordDiagnosticReportsNoDispatch) {
               }()),
               testing::ExitedWithCode(86),
               "zero visible records and no kernel dispatch packet was observed");
+}
+
+TEST(HsaHooksUnitTest, ConSanAllowlistReportsInstrumentedEntryThatNeverDispatched) {
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
+  ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "oversized_kernel.kd");
+  configure_consan_zero_record_case();
+
+  ASSERT_EXIT(([] {
+                run_consan_zero_record_case(/*iterate_symbol=*/false, /*dispatch_kernel=*/false);
+                std::_Exit(8);
+              }()),
+              testing::ExitedWithCode(86),
+              "ConSan kernel allowlist entry name=oversized_kernel loaded=true instrumented=true "
+              "dispatches=0 visible_records=0 status=instrumented-not-dispatched");
+}
+
+TEST(HsaHooksUnitTest, ConSanAllowlistDistinguishesDispatchedEntryWithZeroRecords) {
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
+  ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "oversized_kernel");
+  configure_consan_zero_record_case();
+
+  ASSERT_EXIT(([] {
+                run_consan_zero_record_case(/*iterate_symbol=*/false, /*dispatch_kernel=*/true);
+                std::_Exit(8);
+              }()),
+              testing::ExitedWithCode(86),
+              "ConSan kernel allowlist entry name=oversized_kernel loaded=true instrumented=true "
+              "dispatches=1 visible_records=0 status=instrumented-dispatched");
+}
+
+TEST(HsaHooksUnitTest, ConSanAllowlistReportsEntryThatWasNeverLoaded) {
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
+  ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "missing_kernel");
+  configure_consan_zero_record_case();
+
+  ASSERT_EXIT(([] {
+                run_consan_zero_record_case(/*iterate_symbol=*/false, /*dispatch_kernel=*/false);
+                std::_Exit(8);
+              }()),
+              testing::ExitedWithCode(86),
+              "ConSan kernel allowlist entry name=missing_kernel loaded=false instrumented=false "
+              "dispatches=0 visible_records=0 status=not-loaded");
 }
 
 TEST(HsaHooksUnitTest, ConSanZeroRecordDiagnosticReportsDensePathGap) {

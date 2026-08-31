@@ -127,6 +127,7 @@ struct HookConfig {
   bool test_force_private_epoch = false;
   bool test_seed_inline_exact_odd = false;
   std::string test_kernel_name_filter;
+  std::vector<std::string> kernel_name_allowlist;
   bool moi_require_records = false;
   bool moi_require_diagnostics = false;
   bool moi_forbid_diagnostics = false;

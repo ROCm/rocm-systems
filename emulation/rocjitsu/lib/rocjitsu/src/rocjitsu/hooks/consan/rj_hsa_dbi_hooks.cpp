@@ -1910,6 +1910,13 @@ public:
     uint64_t instrumented_packet_count = 0;
   };
 
+  struct AllowlistEntrySummary {
+    std::string kernel_name;
+    bool loaded = false;
+    bool instrumented = false;
+    uint64_t dispatch_count = 0;
+  };
+
   static KernelPrivateDispatchRegistry &instance() {
     // The HSA runtime may call OnUnload from a shared-library finalizer after
     // ordinary function-local statics have already been destroyed. Keep the
@@ -1917,6 +1924,23 @@ public:
     // when the hook layer is uninstalled.
     static auto *registry = new KernelPrivateDispatchRegistry;
     return *registry;
+  }
+
+  void configure_allowlist(std::span<const std::string> kernel_names) {
+    std::lock_guard lock(mutex_);
+    allowlist_.clear();
+    allowlist_.reserve(kernel_names.size());
+    for (const std::string &kernel_name : kernel_names)
+      allowlist_.push_back({std::string(normalize_kernel_name(kernel_name))});
+  }
+
+  void note_code_object(const rocjitsu::ConSanResult &result) {
+    std::lock_guard lock(mutex_);
+    for (AllowlistEntry &entry : allowlist_) {
+      entry.loaded |= std::ranges::any_of(result.kernels, [&](const auto &kernel) {
+        return normalize_kernel_name(kernel.name) == normalize_kernel_name(entry.kernel_name);
+      });
+    }
   }
 
   void note_patch_requirements(hsa_executable_t executable, const rocjitsu::ConSanResult &result) {
@@ -1931,6 +1955,15 @@ public:
         continue;
       }
       const auto note_kernel = [&](const auto &kernel) {
+        if (records_moi_site) {
+          const auto allowlisted =
+              std::ranges::find_if(allowlist_, [&](const AllowlistEntry &entry) {
+                return normalize_kernel_name(entry.kernel_name) ==
+                       normalize_kernel_name(kernel.name);
+              });
+          if (allowlisted != allowlist_.end())
+            allowlisted->instrumented = true;
+        }
         const auto pending = std::ranges::find_if(pending_, [&](const Pending &candidate) {
           return candidate.executable == executable.handle && candidate.kernel_name == kernel.name;
         });
@@ -1982,7 +2015,10 @@ public:
       return candidate.executable == executable.handle &&
              normalize_kernel_name(candidate.kernel_name) == normalized;
     });
-    if (pending == pending_.end())
+    const auto allowlisted = std::ranges::find_if(allowlist_, [&](const AllowlistEntry &entry) {
+      return normalize_kernel_name(entry.kernel_name) == normalized;
+    });
+    if (pending == pending_.end() && allowlisted == allowlist_.end())
       return;
 
     uint64_t kernel_object = 0;
@@ -1994,10 +2030,12 @@ public:
         .executable = executable.handle,
         .symbol = symbol.handle,
         .kernel_object = kernel_object,
-        .required_private_bytes = pending->required_private_bytes,
-        .dynamic_private_addend = pending->dynamic_private_addend,
-        .required_group_bytes = pending->required_group_bytes,
-        .records_moi_site = pending->records_moi_site,
+        .required_private_bytes = pending == pending_.end() ? 0u : pending->required_private_bytes,
+        .dynamic_private_addend = pending == pending_.end() ? 0u : pending->dynamic_private_addend,
+        .required_group_bytes = pending == pending_.end() ? 0u : pending->required_group_bytes,
+        .records_moi_site = pending != pending_.end() && pending->records_moi_site,
+        .allowlisted_kernel_name =
+            allowlisted == allowlist_.end() ? std::string() : allowlisted->kernel_name,
     };
     const auto bound = std::ranges::find_if(
         bound_, [&](const Bound &candidate) { return candidate.symbol == symbol.handle; });
@@ -2007,16 +2045,21 @@ public:
       *bound = observed;
     } else {
       bound->kernel_object = kernel_object;
-      bound->required_private_bytes =
-          std::max(bound->required_private_bytes, pending->required_private_bytes);
-      bound->dynamic_private_addend =
-          std::max(bound->dynamic_private_addend, pending->dynamic_private_addend);
-      bound->required_group_bytes =
-          std::max(bound->required_group_bytes, pending->required_group_bytes);
-      bound->records_moi_site |= pending->records_moi_site;
+      if (pending != pending_.end()) {
+        bound->required_private_bytes =
+            std::max(bound->required_private_bytes, pending->required_private_bytes);
+        bound->dynamic_private_addend =
+            std::max(bound->dynamic_private_addend, pending->dynamic_private_addend);
+        bound->required_group_bytes =
+            std::max(bound->required_group_bytes, pending->required_group_bytes);
+        bound->records_moi_site |= pending->records_moi_site;
+      }
+      if (allowlisted != allowlist_.end())
+        bound->allowlisted_kernel_name = allowlisted->kernel_name;
     }
-    if (pending->required_private_bytes != 0u || pending->dynamic_private_addend != 0u ||
-        pending->required_group_bytes != 0u) {
+    if (pending != pending_.end() &&
+        (pending->required_private_bytes != 0u || pending->dynamic_private_addend != 0u ||
+         pending->required_group_bytes != 0u)) {
       log_message(
           kLogInfo,
           "ConSan dispatch-segment binding executable=%llu symbol=%llu kernel_object=0x%llx "
@@ -2064,6 +2107,13 @@ public:
         bound_, [&](const Bound &candidate) { return candidate.kernel_object == kernel_object; });
     if (bound == bound_.end())
       return {};
+    if (!bound->allowlisted_kernel_name.empty()) {
+      const auto allowlisted = std::ranges::find(allowlist_, bound->allowlisted_kernel_name,
+                                                 &AllowlistEntry::kernel_name);
+      if (allowlisted != allowlist_.end() &&
+          allowlisted->dispatch_count != std::numeric_limits<uint64_t>::max())
+        ++allowlisted->dispatch_count;
+    }
     if (bound->records_moi_site &&
         instrumented_dispatch_count_ != std::numeric_limits<uint64_t>::max())
       ++instrumented_dispatch_count_;
@@ -2082,15 +2132,33 @@ public:
     };
   }
 
+  [[nodiscard]] std::vector<AllowlistEntrySummary> allowlist_summary() const {
+    std::lock_guard lock(mutex_);
+    std::vector<AllowlistEntrySummary> summary;
+    summary.reserve(allowlist_.size());
+    for (const AllowlistEntry &entry : allowlist_) {
+      summary.push_back(
+          {entry.kernel_name, entry.loaded, entry.instrumented, entry.dispatch_count});
+    }
+    return summary;
+  }
+
   void clear() {
     std::lock_guard lock(mutex_);
     pending_.clear();
     bound_.clear();
+    allowlist_.clear();
     dispatch_packet_count_ = 0;
     instrumented_dispatch_count_ = 0;
   }
 
 private:
+  struct AllowlistEntry {
+    std::string kernel_name;
+    bool loaded = false;
+    bool instrumented = false;
+    uint64_t dispatch_count = 0;
+  };
   struct Pending {
     uint64_t executable = 0;
     std::string kernel_name;
@@ -2107,6 +2175,7 @@ private:
     uint32_t dynamic_private_addend = 0;
     uint32_t required_group_bytes = 0;
     bool records_moi_site = false;
+    std::string allowlisted_kernel_name;
   };
 
   [[nodiscard]] static std::string_view normalize_kernel_name(std::string_view name) {
@@ -2118,6 +2187,7 @@ private:
   mutable std::mutex mutex_;
   std::vector<Pending> pending_;
   std::vector<Bound> bound_;
+  std::vector<AllowlistEntry> allowlist_;
   uint64_t dispatch_packet_count_ = 0;
   uint64_t instrumented_dispatch_count_ = 0;
 };
@@ -2257,6 +2327,7 @@ public:
       if (original_amd_queue_create_ != nullptr)
         amd_ext_->hsa_amd_queue_create_fn = rj_dbi_amd_queue_create;
     }
+    KernelPrivateDispatchRegistry::instance().configure_allowlist(config.kernel_name_allowlist);
     active_ = true;
     ConSanStaticCoverageRegistry::instance().clear();
 
@@ -2356,6 +2427,9 @@ public:
     }
     if (!config.dump_dir.empty())
       log_message(kLogInfo, "DBI code-object dumps enabled dir=%s", config.dump_dir.c_str());
+    if (!config.kernel_name_allowlist.empty())
+      log_message(kLogInfo, "ConSan kernel allowlist enabled entries=%zu",
+                  config.kernel_name_allowlist.size());
     return true;
   }
 
@@ -2430,6 +2504,8 @@ public:
     const uint32_t moi_runtime_sample_offset = moi_runtime_sample_offset_;
     const KernelPrivateDispatchRegistry::DispatchSummary dispatch_summary =
         KernelPrivateDispatchRegistry::instance().dispatch_summary();
+    const std::vector<KernelPrivateDispatchRegistry::AllowlistEntrySummary> allowlist_summary =
+        KernelPrivateDispatchRegistry::instance().allowlist_summary();
     const rocjitsu::ConSanMoiEngine moi_engine =
         config_ ? config_->moi_engine : rocjitsu::ConSanMoiEngine::RecordReplay;
     const bool fault_require_exactly_one = config_ && config_->fault_require_exactly_one;
@@ -2485,6 +2561,19 @@ public:
                                             moi_report_summary.visible_inline_acquired_token_count +
                                             moi_report_summary.visible_sampled_watchpoint_count;
     const bool required_records_missing = moi_require_records && visible_evidence_count == 0;
+    for (const KernelPrivateDispatchRegistry::AllowlistEntrySummary &entry : allowlist_summary) {
+      const char *status = !entry.loaded                ? "not-loaded"
+                           : !entry.instrumented        ? "loaded-not-instrumented"
+                           : entry.dispatch_count == 0u ? "instrumented-not-dispatched"
+                                                        : "instrumented-dispatched";
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] ConSan kernel allowlist entry name=%s loaded=%s "
+                   "instrumented=%s dispatches=%llu visible_records=%llu status=%s\n",
+                   entry.kernel_name.c_str(), entry.loaded ? "true" : "false",
+                   entry.instrumented ? "true" : "false",
+                   static_cast<unsigned long long>(entry.dispatch_count),
+                   static_cast<unsigned long long>(visible_evidence_count), status);
+    }
     std::fprintf(
         stderr,
         "[rocjitsu-dbi-hooks] ConSan MOI report memory required_bytes=%llu "
@@ -3797,6 +3886,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.force_vgpr_spill = config->test_force_vgpr_spill;
     patch_options.force_private_epoch = config->test_force_private_epoch;
     patch_options.test_kernel_name_filter = config->test_kernel_name_filter;
+    patch_options.kernel_name_allowlist = config->kernel_name_allowlist;
     patch_options.fault_barrier_index = config->fault_barrier_index;
     patch_options.fault_atomic_index = config->fault_atomic_index;
     patch_options.fault_lds_index = config->fault_lds_index;
@@ -5675,6 +5765,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   }
   if (load_status != HSA_STATUS_SUCCESS)
     release_replacement_storage();
+  if (load_status == HSA_STATUS_SUCCESS && patch_result_storage)
+    KernelPrivateDispatchRegistry::instance().note_code_object(*patch_result_storage);
   record_static_coverage(load_status == HSA_STATUS_SUCCESS && using_replacement_reader);
   return load_status;
 }
