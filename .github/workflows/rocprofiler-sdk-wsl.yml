@@ -87,8 +87,37 @@ jobs:
           sparse-checkout: |
             projects/rocprofiler-sdk
             projects/rocr-runtime
+            shared/amdgpu-windows-interop/wkmi
+            .dvc
           sparse-checkout-cone-mode: true
           submodules: false
+
+      # libhsakmt's wkmi dependency lives in shared/amdgpu-windows-interop/wkmi, and its
+      # static archive is committed only as a DVC pointer, so it has to be pulled on the
+      # Windows side before the tree is copied into the guest.
+      - name: Set up DVC
+        uses: iterative/setup-dvc@4bdfd2b0f6f1ad7e08afadb03b1a895c352a5239 # v2.0.0
+        with:
+          version: '3.62.0'
+
+      - name: Pull DVC files
+        run: |
+          cd ${{ github.workspace }}
+          dvc pull shared/amdgpu-windows-interop/wkmi/lnx/lib/libwkmi.a.dvc
+
+          # A failed pull leaves the pointer behind rather than the archive, which would
+          # otherwise surface much later as an unrelated-looking link error.
+          $lib = "shared\amdgpu-windows-interop\wkmi\lnx\lib\libwkmi.a"
+          if (-not (Test-Path $lib)) {
+            Write-Error "dvc pull finished but $lib is missing."
+            exit 1
+          }
+          $size = (Get-Item $lib).Length
+          Write-Host "libwkmi.a: $size bytes"
+          if ($size -lt 1024) {
+            Write-Error "$lib is only $size bytes - that is a pointer or a truncated file, not the archive."
+            exit 1
+          }
 
       - name: Detect Windows SDK version
         id: detect-sdk
@@ -108,8 +137,8 @@ jobs:
         uses: Vampire/setup-wsl@6a8db447be7ed35f2f499c02c6e60ff77ef11278 # v6.0.0
         with:
           distribution: ${{ env.WSL_DISTRIBUTION }}
-          # Deliberately not updating: this distro carries a pinned ROCm for WSL install
-          # and a dist-upgrade could move ROCm out from under the build.
+          # A dist-upgrade on every run costs minutes and can move the toolchain out from
+          # under a tree this job provisions itself; the packages below are pinned enough.
           update: false
           additional-packages: build-essential cmake ninja-build git python3 python3-pip
             python3-venv pkg-config libdw-dev libelf-dev libdrm-dev libsqlite3-dev
