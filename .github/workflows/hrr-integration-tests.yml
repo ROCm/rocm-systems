@@ -1,0 +1,129 @@
+# HRR integration tests: build capture-enabled amdhip64 (CLR) before projects/hrr
+# playback/tests so capture and replay share the same wire-format commit.
+name: HRR Integration Tests
+
+on:
+  pull_request:
+    paths:
+      - "projects/hrr/**"
+      - "projects/clr/hipamd/src/hrr/**"
+      - "projects/hip/**"
+      - ".github/workflows/hrr-integration-tests.yml"
+  push:
+    branches:
+      - develop
+    paths:
+      - "projects/hrr/**"
+      - "projects/clr/hipamd/src/hrr/**"
+      - "projects/hip/**"
+      - ".github/workflows/hrr-integration-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hrr-integration-${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  hrr-integration-setup:
+    name: Setup
+    runs-on: ubuntu-24.04
+    outputs:
+      should_run: ${{ steps.check_paths.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 2
+
+      - name: Check if relevant paths changed
+        id: check_paths
+        run: |
+          SHOULD_RUN=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SHOULD_RUN=true
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            SHOULD_RUN=true
+          else
+            SHOULD_RUN=true
+          fi
+          echo "should_run=${SHOULD_RUN}" >> "${GITHUB_OUTPUT}"
+
+  hrr-integration-tests:
+    name: Build CLR + HRR tests
+    needs: hrr-integration-setup
+    if: needs.hrr-integration-setup.outputs.should_run == 'true'
+    runs-on: azure-linux-scale-rocm
+    env:
+      ROCM_PATH: /opt/rocm
+      BUILD_DIR: ${{ github.workspace }}/build
+      REPO: ${{ github.workspace }}/rocm-systems
+    steps:
+      - name: Checkout rocm-systems
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: rocm-systems
+          sparse-checkout: |
+            projects/clr
+            projects/hip
+            projects/hrr
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build libnuma-dev libelf-dev python3-pip
+          pip3 install --break-system-packages CppHeaderParser || pip3 install CppHeaderParser
+
+      - name: Build capture-enabled amdhip64 (CLR)
+        run: |
+          cmake -B "${BUILD_DIR}/clr" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DHIP_PLATFORM=amd \
+            -DCLR_BUILD_HIP=ON \
+            -DCLR_BUILD_OCL=OFF \
+            -DHIP_COMMON_DIR="${REPO}/projects/hip" \
+            -DROCM_PATH="${ROCM_PATH}" \
+            -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
+            "${REPO}/projects/clr"
+          cmake --build "${BUILD_DIR}/clr" --target amdhip64 --parallel
+
+      - name: Configure HRR tests
+        run: |
+          cmake -B "${BUILD_DIR}/hrr" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DROCM_PATH="${ROCM_PATH}" \
+            -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
+            -DHRR_BUILD_PLAYBACK=ON \
+            -DHRR_BUILD_TESTS=ON \
+            -DHRR_BUILD_INTEGRATION_TESTS=ON \
+            -DHRR_CLR_LIB="${BUILD_DIR}/clr/hipamd/lib" \
+            "${REPO}/projects/hrr"
+
+      - name: Build HRR tests
+        run: cmake --build "${BUILD_DIR}/hrr" --parallel
+
+      - name: Run HRR unit tests
+        run: ctest --test-dir "${BUILD_DIR}/hrr" -R hrr-unit-tests --output-on-failure
+
+      - name: Run HRR integration tests
+        env:
+          LD_LIBRARY_PATH: ${{ env.BUILD_DIR }}/clr/hipamd/lib
+        run: ctest --test-dir "${BUILD_DIR}/hrr" -R hrr-integration-tests --output-on-failure
+
+  hrr-integration-summary:
+    name: Summary
+    if: always()
+    needs: [hrr-integration-setup, hrr-integration-tests]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check results
+        run: |
+          echo '${{ toJson(needs) }}'
+          FAILED="$(echo '${{ toJson(needs) }}' \
+            | jq -r 'map_values(select(.result != "success" and .result != "skipped")) | keys | join(",")')"
+          if [ -n "${FAILED}" ]; then
+            echo "Failed jobs: ${FAILED}"
+            exit 1
+          fi
