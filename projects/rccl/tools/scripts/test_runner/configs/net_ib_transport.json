@@ -64,6 +64,23 @@
       ]
     },
 
+    "net_plugin_selection": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "description": "NCCL_NET name resolution. Pure logic, single rank, no NIC/GPU required.",
+      "tests": [
+        {
+          "name": "NetPlugin_Selection",
+          "description": "NCCL_NET resolves case-insensitively, ROCM-IB selects the ib-cast plugin, unset follows the detected NIC, and unknown names resolve to nothing instead of falling back to plain IB",
+          "test_filter": "NetPluginSelection.*"
+        }
+      ]
+    },
+
     "net_ib_base": {
       "extends": "default",
       "is_gtest": true,
@@ -135,6 +152,11 @@
           "name": "NetIB_Init_GetDeviceCount",
           "description": "Query and validate InfiniBand device count",
           "test_filter": "NetIbMPITest.GetDeviceCount"
+        },
+        {
+          "name": "NetIB_Init_PluginMatchesEnv",
+          "description": "The plugin the fixture loaded is the one NCCL_NET names; inherited by the ib-cast variant, which is where the strcmp mismatch used to go unnoticed",
+          "test_filter": "NetIbMPITest.PluginMatchesNcclNetEnv"
         }
       ]
     },
@@ -1014,6 +1036,12 @@
       "name": "Bootstrap socket poll - no busy loop",
       "description": "AICOMRCCL-1322: NCCL_SOCKET_POLL_TIMEOUT_MSEC makes a blocked bootstrap socket recv wait in poll() instead of busy-spinning a CPU core (Debug only, no NIC/GPU required)",
       "config": "socket_poll_bootstrap",
+      "enabled": true
+    },
+    {
+      "name": "NET - Plugin selection from NCCL_NET",
+      "description": "NCCL_NET name resolution guardrails: case-insensitive matching, the ROCM-IB alias, and no silent fallback to plain IB on an unknown name (single rank, no NIC/GPU required)",
+      "config": "net_plugin_selection",
       "enabled": true
     },
     {
