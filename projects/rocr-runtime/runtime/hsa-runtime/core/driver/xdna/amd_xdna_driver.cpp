@@ -232,12 +232,14 @@ constexpr uint32_t devnode_max_minor_num = 64;
 constexpr uint32_t DEV_ADDR_BASE = 0x04000000;
 constexpr uint32_t DEV_ADDR_OFFSET_MASK = 0x02FFFFFF;
 
-/// @brief The driver places a structure before each command in a command chain.
-/// Need to increase the size of the command by the size of this structure.
-/// In the following xdna driver source can see where this is implemented:
-/// https://github.com/amd/xdna-driver/blob/eddd92c0f61592c576a500f16efa24eb23667c23/src/driver/amdxdna/aie2_msg_priv.h#L387
-/// https://github.com/amd/xdna-driver/blob/eddd92c0f61592c576a500f16efa24eb23667c23/src/driver/amdxdna/aie2_message.c#L637
-constexpr uint32_t CMD_COUNT_SIZE_INCREASE = 3;
+/// @brief Dwords of padding declared on a PDI + instruction sequence command's payload.
+///
+/// The firmware aborts a command chain whose slot carries an odd argument count below 15. The
+/// driver takes that count straight from this command: amdxdna_cmd_get_payload() reports
+/// (count - 1) dwords and aie2_cmdlist_fill_one_slot_cf() uses it as arg_cnt. This command's real
+/// payload after the CU mask is an odd number of dwords, so it needs an odd amount of padding to
+/// come out even, and one dword is the least that does it.
+constexpr uint32_t CMD_COUNT_SIZE_INCREASE = 1;
 
 /// @brief Size of the driver's per-command chain buffer, from MAX_CHAIN_CMDBUF_SIZE in
 /// xdna-driver (aie2_msg_priv.h). Every command in a chain has to fit in one of these.
@@ -1432,7 +1434,9 @@ static hsa_status_t BuildPdiInstsCommand(int fd, const void* heap_base, const vo
     // under-size the slot and overflow the chain buffer.
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
-  const uint32_t cmd_data_bytesize = cmd_dwords * sizeof(uint32_t);
+  // The padding is declared to the driver, so it has to be allocated and zeroed too -- the driver
+  // memcpy()s the full declared payload into the chain slot.
+  const uint32_t cmd_data_bytesize = (cmd_dwords + CMD_COUNT_SIZE_INCREASE) * sizeof(uint32_t);
   const uint32_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + cmd_data_bytesize;
   err = CreateCmdBO(fd, heap_base, cmd_bytesize, *cmd_bo);
   if (err != HSA_STATUS_SUCCESS) {

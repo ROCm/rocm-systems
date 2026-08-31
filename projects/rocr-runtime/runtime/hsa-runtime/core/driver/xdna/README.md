@@ -116,6 +116,11 @@ batch has been accepted, so a rejected submission cannot pin an otherwise-unused
   firmware on a supported part can only surface as an error at submit.
 - **A design with no preemption sections leaves the save and restore buffers null**, which aie2p
   firmware accepts.
+- **The firmware aborts a command chain whose slot carries an odd argument count below 15.** The
+  driver takes that count from the command's declared payload length, so a command whose real
+  payload is an odd number of dwords has to declare one dword of padding. This affects the PDI +
+  instruction sequence shape, whose payload is odd; full ELF has an argument count of 2 and is
+  unaffected. Verified on npu4: with no padding the chain comes back in state `abort`.
 
 ## What has been implemented
 
@@ -134,7 +139,11 @@ batch has been accepted, so a rejected submission cannot pin an otherwise-unused
 - Command chains bounded to the driver's 4 KiB chain buffer and split when longer, instead of
   letting the driver reject one oversized chain. The per-slot cost is
   `52 + 4 * arg_cnt`, giving `floor(4096 / (52 + 4 * arg_cnt))` commands: 68 for full ELF
-  (`arg_cnt = 2`) and 40 for PDI + instruction sequence at two kernel arguments (`arg_cnt = 12`).
+  (`arg_cnt = 2`) and 44 for PDI + instruction sequence at two kernel arguments (`arg_cnt = 10`).
+- Reduced the padding declared on a PDI + instruction sequence command from three dwords to the
+  one the parity rule actually requires, and allocated it. The driver copies the whole declared
+  payload into the chain slot, so the extra dwords were both uninitialised memory and wasted slot
+  space; this raises the chain capacity from 40 commands to 44.
 - PDI cache rollback when a batch fails partway, so cached entries can never claim compute units
   the hardware context was not given.
 - Chain-failure diagnostics: on failure the device's `submit_index` and `error_index` are
