@@ -1435,11 +1435,26 @@ supports_queue_interposition()
 
 namespace
 {
+// Serializes the 0->1 transition so resync completes before intercept re-engages.
+std::mutex s_consumer_transition_mutex;
+
+void
+drain_intercept_work()
+{
+    // Match signal-less teardown order: wait for in-flight doorbell workers
+    // first, then join async completion handlers they may have queued.
+    fence_all_queue_gates();
+    interposition_sync();
+}
+
 void
 resync_queue_shadow_state(QueueState* state)
 {
     if(!state || !state->real_wdid) return;
 
+    // Hold gate_lock so resync never races with process_doorbell_impl, which
+    // reads and updates next_scan_pos / next_submit_pos under the same lock.
+    auto           lk   = std::lock_guard<std::mutex>{state->gate_lock};
     const uint64_t wdid = __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE);
     state->virtual_wptr.store(wdid, std::memory_order_release);
     state->next_scan_pos   = wdid;
@@ -1461,22 +1476,38 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
 {
     if(!context_needs_queue_interposition_tracing(ctx)) return;
 
-    const auto prev = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
-    if(prev == 0 && s_intercept_installed.load(std::memory_order_acquire))
-        resync_all_queue_shadow_states();
+    // Resync while the consumer count is still zero (bypass active), then
+    // increment.  Increment-before-resync closes the old bypass window but
+    // enables intercept on stale shadow state; resync-then-increment without
+    // a lock recreates the bypass window Ian reported (ROCM-29631).
+    if(s_active_queue_interposition_consumers.load(std::memory_order_acquire) == 0 &&
+       s_intercept_installed.load(std::memory_order_acquire))
+    {
+        auto lk = std::lock_guard<std::mutex>{s_consumer_transition_mutex};
+        if(s_active_queue_interposition_consumers.load(std::memory_order_acquire) == 0)
+        {
+            drain_intercept_work();
+            resync_all_queue_shadow_states();
+        }
+    }
 
-    s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_release);
+    s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_acq_rel);
 }
 
 void
 notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
 {
     if(!context_needs_queue_interposition_tracing(ctx)) return;
-    auto cur = s_active_queue_interposition_consumers.load(std::memory_order_relaxed);
+    auto cur = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
     while(cur > 0)
     {
+        // Last consumer: drain in-flight intercept work before the count hits
+        // zero and bypass re-enables on the hot path.
+        if(cur == 1 && s_intercept_installed.load(std::memory_order_acquire))
+            drain_intercept_work();
+
         if(s_active_queue_interposition_consumers.compare_exchange_weak(
-               cur, cur - 1, std::memory_order_release, std::memory_order_relaxed))
+               cur, cur - 1, std::memory_order_acq_rel, std::memory_order_acquire))
         {
             return;
         }
