@@ -758,8 +758,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   CUDACHECK(hipEventCreateWithFlags(&doneEvent, hipEventDisableTiming));
 
   comm->doneEvent = doneEvent;
-  comm->lastStream = nullptr;
-  comm->lastStreamValid = false;
+  comm->lastStreamTag = 0;
 
   // RCCL: acquire a scoped side stream for init-time allocations. It is
   // released once init completes (see ncclCommInitRankFunc) so it does not hold
@@ -1091,7 +1090,10 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   // is mlopart N (CPX uses N=1..7).
   if (info->mloPart == NCCL_TOPO_UNDEF) {
     int fn = (int)(info->busId & 0xf);
-    if (fn < NCCL_TOPO_MLOPART_DEV_MAX) {
+    // Only stamp mlopart for HIP alias functions that are not GPUs in sysfs.
+    // fn=0 physical GPUs must stay UNDEF so non-partitioned parts do not get
+    // the MLOPart DEV overlay (breaks Rome gpuId matching and disables GIN/GDR).
+    if (fn > 0 && fn < NCCL_TOPO_MLOPART_DEV_MAX) {
       char busIdStr[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
       char deviceClass[MAX_STR_LEN];
       deviceClass[0] = '\0';
@@ -1099,9 +1101,7 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
         (void)ncclOsGetPciDeviceClassByBusId(busIdStr, deviceClass, sizeof(deviceClass));
         int isGpu = strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0 ||
                     strncmp(deviceClass, "0x03", 4) == 0;
-        if (fn == 0) {
-          if (isGpu) info->mloPart = 0;
-        } else if (!isGpu) {
+        if (!isGpu) {
           info->mloPart = fn;
         }
       }
