@@ -643,7 +643,7 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
         index=pd.Index(["7.1.0"], name="Metric_ID"),
     )
     arch_config = schema.ArchConfig()
-    # Table 1 has no Metric/Channel column and is skipped; table 701 maps to
+    # Table 1 has no Metric column and is skipped; table 701 maps to
     # panel 700 (table_name) and sub-table 701 (sub_table_name).
     arch_config.dfs = {
         1: pd.DataFrame({"from_csv": ["pmc_kernel_top.csv"]}),
@@ -715,6 +715,51 @@ def test_calc_pmc_df_data_skips_workload_without_a_merge(tmp_path):
     analyzer._profiling_config = {}
 
     assert analyzer.calc_pmc_df_data() == {}
+
+
+def test_calc_metrics_data_exports_qualified_per_channel_names():
+    """
+    Panel 18's per-channel rows reach the database as "Channel N", not as a
+    bare index.
+    """
+    workload_path = "/fake/workload"
+    metric_df = pd.DataFrame(
+        {
+            "Metric": ["Channel 0", "Channel 1"],
+            "Min": [" 33.29 ", " 33.33 "],
+            "Max": [" 33.51 ", " 33.33 "],
+        },
+        index=pd.Index(["18.2.0", "18.2.1"], name="Metric_ID"),
+    )
+    arch_config = schema.ArchConfig()
+    arch_config.dfs = {1802: metric_df}
+    arch_config.panel_configs = {
+        1800: {
+            "id": 1800,
+            "title": "L2 Cache (per Channel)",
+            "data source": [
+                {"metric_table": {"id": 1802, "title": "L2 Cache Hit Rate (Percent)"}}
+            ],
+        }
+    }
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
+    analyzer._runs = {
+        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+    }
+    analyzer._arch_configs = {"gfx942": arch_config}
+
+    metrics_info, expressions = analyzer.calc_metrics_data()
+
+    info = metrics_info[workload_path]
+    assert list(info["name"]) == ["Channel 0", "Channel 1"]
+    assert list(info["table_name"]) == ["L2 Cache (per Channel)"] * 2
+    assert list(info["sub_table_name"]) == ["L2 Cache Hit Rate (Percent)"] * 2
+
+    # The label column is non-expression, so only Min/Max become expressions.
+    exprs = expressions[workload_path]
+    assert set(exprs["value_name"]) == {"Min", "Max"}
 
 
 # =============================================================================
