@@ -15,7 +15,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Context.h>
 #include <ATen/ThreadLocalState.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/record_function.h>
 #include <gtest/gtest.h>
 
@@ -87,10 +86,6 @@ protected:
         if (!at::hasCUDA())
         {
             GTEST_SKIP() << "ATen built without CUDA support";
-        }
-        if (!at::cuda::is_available())
-        {
-            GTEST_SKIP() << "CUDA is not available";
         }
     }
 };
