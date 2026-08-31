@@ -4006,7 +4006,6 @@ hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uin
 
   // Operation context
   struct DiscardAndPrefetchOp {
-    std::vector<uint32_t> target_cpus;    // per-region nearest cpu node for discard
     std::vector<uint32_t> target_gpus;    // per-region dest gpu node for prefetch
     std::vector<std::pair<void*, size_t>> regions;
     std::atomic<uint32_t> remaining_deps;
@@ -4018,10 +4017,9 @@ hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uin
 
   op->completion = completion_signal;
   op->regions.reserve(count);
-  op->target_cpus.reserve(count);
   op->target_gpus.reserve(count);
 
-  // Build page-aligned region list, resolve per-range GPU node, and query nearest CPU
+  // Build page-aligned region list, resolve gpus for every region
   for (uint32_t i = 0; i < count; i++) {
     uint8_t* base = AlignDown((uint8_t*)ptrs[i], kPageSize);
     uint8_t* end = AlignUp((uint8_t*)ptrs[i] + sizes[i], kPageSize);
@@ -4029,31 +4027,6 @@ hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uin
 
     op->regions.emplace_back(std::make_pair(reinterpret_cast<void*>(base), len));
     op->target_gpus.push_back(gpu_nodes[i]);
-
-    // Query preferred location to find nearest CPU for the discard
-    HSA_SVM_ATTRIBUTE attr;
-    attr.type = HSA_SVM_ATTR_PREFERRED_LOC;
-    attr.value = 0;
-
-    Agent* cpu_agent = nullptr;
-    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, 1, &attr));
-
-    if (status == HSAKMT_STATUS_SUCCESS &&
-        (attr.value != 0xFFFFFFFF && attr.value != INVALID_NODEID)) {
-      core::Agent* agent = agents_by_node_[attr.value][0];
-      if (agent->device_type() == core::Agent::kAmdCpuDevice) {
-        // skip prefetch if preferred location is already CPU 
-        op->target_cpus.push_back(UINT32_MAX);
-        continue;
-      } else {
-        cpu_agent = agent->GetNearestCpuAgent();
-      }
-    }
-    if (!cpu_agent) {
-      // Fallback to first available CPU agent when nearest cannot be determined
-      cpu_agent = cpu_agents_[0];
-    }
-    op->target_cpus.push_back(cpu_agent->node_id());
   }
 
   // Filter out dependency signals already at 0
@@ -4068,18 +4041,8 @@ hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uin
     for (size_t i = 0; i < op->regions.size(); i++) {
       void* base = op->regions[i].first;
       size_t size = op->regions[i].second;
-      uint32_t target_cpu = op->target_cpus[i];
       uint32_t target_gpu = op->target_gpus[i];
 
-      // migrate to CPU if not already there
-      if (target_cpu != UINT32_MAX) {
-        HSA_SVM_ATTRIBUTE cpu_attr;
-        cpu_attr.type = HSA_SVM_ATTR_PREFETCH_LOC;
-        cpu_attr.value = target_cpu;
-        HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtSVMSetAttr(base, size, 1, &cpu_attr));
-        if (err != HSAKMT_STATUS_SUCCESS)
-          debug_warning(false && "hsaKmtSVMSetAttr cpu prefetch failed in SvmDiscardAndPrefetchBatch");
-      }
       int res = madvise(base, size, MADV_DONTNEED);
       if (res != 0)
         debug_warning(false && "madvise MADV_DONTNEED failed in SvmDiscardAndPrefetchBatch");
