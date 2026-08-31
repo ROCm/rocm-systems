@@ -23,7 +23,6 @@
 #include <timemory/tpls/cereal/cereal/archives/json.hpp>
 #include <timemory/tpls/cereal/cereal/archives/xml.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <cstddef>
@@ -32,9 +31,8 @@
 #include <sstream>
 #include <string>
 
-namespace cereal   = ::tim::cereal;
-namespace filepath = ::tim::filepath;
-using settings     = ::tim::settings;
+namespace cereal = ::tim::cereal;
+using ::tim::settings;
 using ::tim::tsettings;
 using ::tim::type_list;
 using ::tim::policy::output_archive;

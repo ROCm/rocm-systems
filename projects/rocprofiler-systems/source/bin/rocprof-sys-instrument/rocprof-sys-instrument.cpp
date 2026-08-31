@@ -24,7 +24,6 @@
 #include <timemory/settings.hpp>
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/utility/console.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 
 #include <algorithm>
@@ -152,10 +151,9 @@ std::unique_ptr<std::ofstream> log_ofs = {};
 
 namespace
 {
-namespace process  = tim::process;  // NOLINT
-namespace signals  = tim::signals;
-namespace filepath = tim::filepath;
-namespace path     = rocprofsys::common::path;
+namespace process = tim::process;  // NOLINT
+namespace signals = tim::signals;
+namespace path    = rocprofsys::common::path;
 
 using signal_settings = tim::signals::signal_settings;
 using sys_signal      = tim::signals::sys_signal;
