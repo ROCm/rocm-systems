@@ -2168,3 +2168,97 @@ cuts survive the remaining migrations. Full target-facet locality, both
 extension exercises, the broad transaction and operating-point surfaces,
 material code shrinkage, and the final independent deep-read audit remain
 open.
+
+### 16.18 Convergence checkpoint 17: additive extension proof and typed MOI state
+
+This checkpoint, through commit `3c19d7ec3c`, closes the previously open
+extension exercises and continues replacing the MOI operating point's loose
+scalar fields with semantic allocations. It is a substantial locality and
+dataflow investment, but its accounting is also an explicit warning: the
+checkpoint adds 160 implementation lines relative to checkpoint 16 and leaves
+production 88 lines above the fifth-refactoring baseline. It therefore does
+not satisfy the material-shrinkage criterion, and the next work must harvest
+the typed model rather than continue accumulating wrappers.
+
+On the target axis, CDNA descriptor validation now lives in
+`consan_validation_gfx9_cdna_target_ops.cpp`. Common final validation asks a
+target operation to validate and normalize descriptor state; it no longer
+owns the gfx9 register-field recipe. A focused hypothetical target registers
+an already-represented program-analysis operation through the target registry
+and proves `HypotheticalTargetRegistersNormalizedAnalysisWithoutModeChanges`
+without editing a mode implementation. On the orthogonal axis, a hypothetical
+mode registers its semantic MOI demand through the mode registry and proves
+`HypotheticalModeRegistersWithoutConcreteTargetChanges` without editing a
+concrete target package. The architecture-boundary gate requires both
+extension fixtures and their additive registration paths. These are now
+concrete evidence for Section 14.4 rather than proposed exercises.
+
+The larger slice follows accepted MOI register state from mode demand through
+placement, prologue planning, relocation, emission, and validation. Scalar
+router state, its call and jump allocations, branch-only preservation,
+dispatch identity, owner-scalar provenance, persistent workgroup tuples, and
+owner/epoch pairs now have typed owners. Invalid half-present tuples cannot be
+constructed through their public interfaces. Accepted code-object-wide
+owner/epoch allocation is distinct from effective site-local materialization;
+materialized sources no longer ride on the broad `MoiOptions` transaction.
+The last migration centralizes the one optional raw owner/epoch pair in
+`ConSanMoiOwnerEpochRegisterState`, reuses it in both accepted vector and
+persistent scalar state, and removes generic `moi_owner_vgpr` and
+`moi_epoch_vgpr` projection peepholes. Structural checks prohibit those free
+projections and duplicate optional-pair storage from returning.
+
+The deep trace exposed one real authority bug while accepted and materialized
+state were being separated. Required-prologue-VGPR calculation reread the
+broad accepted allocation after the site-local plan had selected scalar
+persistent state, allowing router state to alias the epoch source. The
+calculation now consumes the materialized plan, and
+`Gfx1100RecordReplayRouteKeyDoesNotAliasPersistentEpoch` keeps the failure at
+its owning boundary. This is the only behavior bug found in the checkpoint;
+new focused tests cover the two extension exercises and typed-state contracts,
+and the test inventory grows by five after two former contract cases were
+replaced by their stricter typed-state forms.
+
+| Signal | Checkpoint 17 | Cumulative change |
+| --- | ---: | ---: |
+| Production files | 262 | +33 |
+| Physical production lines | 105,479 | +504 |
+| Nonblank production lines | 99,230 | +147 |
+| Production implementation lines | 91,538 | **+88** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 |
+| `ConSanTransformArtifacts` references / files | 241 / 58 | **-35 / +1** |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | **0** | **-95** |
+| Explicit mode-enum references in `consan_moi_report_plan.cpp` | **0** | **-18** |
+| Explicit mode-enum references in `consan_pipeline.cpp` | **0** | n/a |
+| Test inventory | 5,363 | +18 |
+
+Relative to checkpoint 16, the operating-point work removes eleven direct
+`ConSanMoiOperatingPoint` references and seventeen implementation lines from
+the final accepted-versus-materialized cleanup, after the earlier typed-state
+slices paid for stronger invariants. The checkpoint as a whole nevertheless
+adds one target-owned production file, 236 physical lines, 189 nonblank lines,
+and 160 implementation lines. This fails checkpoint 16's requested immediate
+size payback. The result is retained because it closes an explicit completion
+criterion, fixes a demonstrated bug, and replaces representable invalid states
+on a main production path; it is not evidence that Section 14.8 is complete.
+The next convergence work must turn the new typed seams into deletion and
+narrower APIs, with the broad operating point and transform transaction as
+primary evidence to inspect rather than assumptions about where savings lie.
+
+Validation includes a complete rebuild; a 582-test focused component gate; a
+1,780-test affected device matrix over gfx942, gfx950, gfx1100, gfx1201, and
+gfx1250; the complete 4,728-test nonphysical matrix at `-j16`; and all 635
+serialized physical gfx1201 tests at `-j1`. Two sub-second simulator cases
+exceeded their 60-second budgets only under full-gate contention, passed
+immediately in isolation, and received 120-second budgets before the entire
+nonphysical gate was repeated successfully. No test was removed or disabled.
+
+Section 14.4 now has direct evidence, and the typed state removes several
+opportunistic cross-layer reads. Completion remains unproved. In particular,
+the physical locality of every target facet, reader-skippable ownership across
+all four modes, the breadth of the mutable transaction and operating-point
+surfaces, the smallness of surviving mode/target interactions, legacy
+harvesting, material code shrinkage, and the required independent deep-read
+audit remain open.
