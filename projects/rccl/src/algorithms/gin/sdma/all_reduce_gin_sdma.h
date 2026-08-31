@@ -270,20 +270,25 @@ __launch_bounds__(512)
   const unsigned int signalIndex = static_cast<unsigned int>(blockIdx.x);
   const uint64_t signalValue = gin.readSignal(signalIndex);
   ncclBarrierSession<ncclCoopCta> ginBar{cta, ncclTeamTagWorld(), gin, blockIdx.x};
-  ginBar.sync(cta, cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
+  ginBar.sync(cta, cuda::memory_order_acquire, ncclGinFenceLevel::None);
 
+  // The 56-CTA grid is required for the reduce-scatter above. Puts are one per
+  // destination rank (nRanks <= 8), so only global tids 0..nRanks-1 — all in CTA 0 —
+  // issue them. Remaining CTAs skip this loop and join flush / the world barrier.
   for (int dst = tid; dst < nRanks; dst += nthreads) {
     gin.put(world, dst, recvWin, sliceRecvByteOff, recvWin, sliceRecvByteOff, chunkBytes,
             ncclGin_SignalInc{signalIndex});
   }
 
-  const int receivingCta = (devComm.rank % nthreads) / blockDim.x;
-  if (blockIdx.x == receivingCta) {
+  // Puts use this CTA's signalIndex. Only CTA 0 puts, so only signal 0 is incremented.
+  // Waiting on every CTA's own signal would hang; (rank % nthreads) / blockDim.x is
+  // also always 0 here because nthreads = 56*512 >> nRanks.
+  if (blockIdx.x == 0) {
     gin.waitSignal(cta, signalIndex, signalValue + static_cast<uint64_t>(nRanks));
   }
   gin.flush(cta);
 
-  ginBar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
+  ginBar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::None);
 
 }
 

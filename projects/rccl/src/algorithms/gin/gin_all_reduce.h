@@ -12,25 +12,17 @@
 #ifndef GIN_ALL_REDUCE_H_
 #define GIN_ALL_REDUCE_H_
 
+#include "algorithms/gin/gin_all_reduce_policy.h"
 #include "nccl.h"
 #include "nccl_device.h"
 
 struct ncclComm;
 
+// Size and CTA constants live in gin_all_reduce_policy.h so host unit tests and
+// ncclAllReduceGinSdmaEligible() share one definition.
 // LSA one-shot for messages <= kGinAllReduceLsaOneShotMaxBytes (force-enable only).
 // LSA two-shot for (8 MiB, 256 MiB) (force-enable only).
 // GIN two-shot for messages >= kGinAllReduceGinTwoShotMinBytes (default path).
-constexpr int kGinAllReduceLsaCtas = 56;
-constexpr int kGinAllReduceLsaTwoShotCtasPerPeer = 8;
-constexpr int kGinAllReduceLsaTwoShotMaxCtas = kGinAllReduceLsaTwoShotCtasPerPeer * 16;
-
-constexpr int kGinAllReduceMinBytes = 512ULL * 1024;
-constexpr int kGinAllReduceLsaThreadsPerCta = 512;
-constexpr size_t kGinAllReduceLsaOneShotMaxBytes = 8ULL * 1024 * 1024;
-constexpr size_t kGinAllReduceLsaTwoShotMidBytes = 32ULL * 1024 * 1024;
-constexpr size_t kGinAllReduceGinTwoShotMinBytes = 256ULL * 1024 * 1024;
-
-constexpr size_t kGinAllReduceMinPutBytes = 128;
 
 // Lazily created on the first eligible AllReduce and torn down with the comm.
 // Declared unconditionally: ncclComm embeds this even when ENABLE_ROCSHMEM_GIN is off.

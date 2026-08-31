@@ -40,7 +40,6 @@ NCCL_PARAM(GinAllReduceLsaTwoShotOverlap, "GIN_ALLREDUCE_LSA_TWOSHOT_OVERLAP", 0
 namespace {
 
 constexpr bool kSdmaDeviceBackendCompiled = (NCCL_GIN_ANVIL_SDMA_ENABLE != 0);
-constexpr int kGinAllReduceMaxRanks = 8;
 
 // Runs on the first eligible AllReduce, which may itself be inside a graph capture. Everything
 // here has to stay out of the captured graph and must not disturb the capture in progress:
@@ -133,8 +132,6 @@ template <typename T, int NRANKS_CT>
 static void ginAllReduceLaunchLsaTwoShot(ncclComm* comm, cudaStream_t stream, struct ncclDevrWindow* sendWin,
                                          size_t sendOff, struct ncclDevrWindow* recvWin, size_t recvOff,
                                          size_t countPerRank, int gridCtas) {
-  size_t msgSize = countPerRank * sizeof(T) * comm->nRanks;  
-
   gin::sdma::lsaAllReduceTwoShotKernel<T, NRANKS_CT><<<gridCtas, kGinAllReduceLsaThreadsPerCta, 0, stream>>>(
       comm->ginAllReduceState.devComm, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, countPerRank, comm->nRanks);
 }
@@ -195,7 +192,9 @@ static ncclResult_t ncclAllReduceGinSdmaTyped(const void* sendbuff, void* recvbu
                                               cudaStream_t stream, struct ncclDevrWindow* sendWin,
                                               struct ncclDevrWindow* recvWin) {
   const size_t bytes = count * sizeof(T);
-  if (bytes < kGinAllReduceLsaOneShotMaxBytes) {
+  // Inclusive of 8 MiB so dispatch matches ginAllReduceSizePolicyEligible() and the
+  // documented LSA one-shot band. Two-shot starts strictly above this threshold.
+  if (bytes <= kGinAllReduceLsaOneShotMaxBytes) {
     return ncclAllReduceGinSdmaOneShotTyped<T>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin);
   }
   if (bytes >= kGinAllReduceGinTwoShotMinBytes) {
@@ -204,28 +203,8 @@ static ncclResult_t ncclAllReduceGinSdmaTyped(const void* sendbuff, void* recvbu
   return ncclAllReduceGinSdmaLsaTwoShotTyped<T>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin);
 }
 
-static bool ginAllReduceTwoShotEligible(size_t count, ncclDataType_t datatype, int nRanks) {
-  if (count % static_cast<size_t>(nRanks) != 0) {
-    return false;
-  }
-  const size_t countPerRank = count / static_cast<size_t>(nRanks);
-  const size_t typeSize = ncclTypeSize(datatype);
-  if ((countPerRank * typeSize) % 16 != 0) {
-    return false;
-  }
-  return true;
-}
-
-static bool ginAllReduceGinTwoShotEligible(size_t count, ncclDataType_t datatype, int nRanks) {
-  if (!ginAllReduceTwoShotEligible(count, datatype, nRanks)) {
-    return false;
-  }
-  const size_t chunkBytes = (count / static_cast<size_t>(nRanks)) * ncclTypeSize(datatype);
-  return chunkBytes >= kGinAllReduceMinPutBytes;
-}
-
 // Comm / buffer / datatype gates shared by eligibility and the DDA fallback.
-// Size policy is applied by the callers.
+// Size policy lives in gin_all_reduce_policy.h so unit tests cover the same gates.
 static bool ginAllReduceBaseEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                      ncclDataType_t datatype, ncclRedOp_t op) {
   if (!kSdmaDeviceBackendCompiled) return false;
@@ -256,30 +235,14 @@ static bool ginAllReduceBaseEligible(ncclComm* comm, const void* sendbuff, void*
 bool ncclAllReduceGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                   ncclDataType_t datatype, ncclRedOp_t op) {
   if (!ginAllReduceBaseEligible(comm, sendbuff, recvbuff, count, datatype, op)) return false;
-
-  const size_t bytes = count * ncclTypeSize(datatype);
-  // Default: GIN AllReduce only at >= 256 MiB (GIN two-shot). Smaller messages
-  // fall through to DDA AllReduce unless RCCL_GIN_ALLREDUCE_FORCE_ENABLE=1.
-  if (bytes < kGinAllReduceGinTwoShotMinBytes && rcclParamGinAllReduceForceEnable() != 1) {
-    return false;
-  }
-  if (bytes < kGinAllReduceMinBytes) {
-    return false;
-  }
-  if (bytes <= kGinAllReduceLsaOneShotMaxBytes) {
-    return true;
-  }
-  if (bytes >= kGinAllReduceGinTwoShotMinBytes) {
-    return ginAllReduceGinTwoShotEligible(count, datatype, comm->nRanks);
-  }
-  return ginAllReduceTwoShotEligible(count, datatype, comm->nRanks);
+  return ginAllReduceSizePolicyEligible(count, ncclTypeSize(datatype), comm->nRanks,
+                                       rcclParamGinAllReduceForceEnable() == 1);
 }
 
 bool ncclAllReduceGinSdmaYieldToDda(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                     ncclDataType_t datatype, ncclRedOp_t op) {
-  if (rcclParamGinAllReduceForceEnable() == 1) return false;
   if (!ginAllReduceBaseEligible(comm, sendbuff, recvbuff, count, datatype, op)) return false;
-  return count * ncclTypeSize(datatype) < kGinAllReduceGinTwoShotMinBytes;
+  return ginAllReduceYieldToDdaBySize(count, ncclTypeSize(datatype), rcclParamGinAllReduceForceEnable() == 1);
 }
 
 ncclResult_t ncclAllReduceGinSdma(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,

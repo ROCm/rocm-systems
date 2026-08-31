@@ -56,7 +56,13 @@ TEST(GinAllReducePolicy, ForceRejectsBelowMinBytes) {
 TEST(GinAllReducePolicy, ForceAcceptsOneShotBand) {
   EXPECT_TRUE(ginAllReduceSizePolicyEligible(countForBytes(512 * kKiB), kFloat, kRanks, true));
   EXPECT_TRUE(ginAllReduceSizePolicyEligible(countForBytes(4 * kMiB), kFloat, kRanks, true));
+  // Inclusive 8 MiB: one-shot, so no two-shot alignment check.
   EXPECT_TRUE(ginAllReduceSizePolicyEligible(countForBytes(8 * kMiB), kFloat, kRanks, true));
+}
+
+TEST(GinAllReducePolicy, ForceJustAbove8MiBRequiresTwoShotAlignment) {
+  // 8 MiB + 16 of float32 is two-shot; per-rank slice is not 16-byte aligned.
+  EXPECT_FALSE(ginAllReduceSizePolicyEligible(countForBytes(8 * kMiB + 16), kFloat, kRanks, true));
 }
 
 TEST(GinAllReducePolicy, ForceAcceptsAlignedTwoShotBand) {

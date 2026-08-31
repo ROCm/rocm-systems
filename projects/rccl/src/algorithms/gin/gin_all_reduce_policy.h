@@ -1,9 +1,9 @@
 /*************************************************************************
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
- * Size and alignment policy for GIN-SDMA AllReduce. Pure host header so unit
- * tests can exercise the same gates ncclAllReduceGinSdmaEligible() uses after
- * the comm / buffer / gfx950 checks pass.
+ * Size and alignment policy for GIN-SDMA AllReduce. Pure host header included by
+ * gin_all_reduce.h so unit tests exercise the same gates
+ * ncclAllReduceGinSdmaEligible() uses after the comm / buffer / gfx950 checks pass.
  * See LICENSE.txt for license information.
  ******************************************************************************/
 
@@ -47,6 +47,8 @@ inline bool ginAllReduceSizePolicyEligible(size_t count, size_t typeSize, int nR
   const size_t bytes = count * typeSize;
   if (bytes < kGinAllReduceGinTwoShotMinBytes && !forceEnable) return false;
   if (bytes < static_cast<size_t>(kGinAllReduceMinBytes)) return false;
+  // Inclusive 8 MiB: one-shot has no per-rank alignment requirement. Two-shot
+  // starts strictly above this, matching ncclAllReduceGinSdmaTyped().
   if (bytes <= kGinAllReduceLsaOneShotMaxBytes) return true;
   if (bytes >= kGinAllReduceGinTwoShotMinBytes) {
     return ginAllReduceGinTwoShotEligible(count, typeSize, nRanks);
