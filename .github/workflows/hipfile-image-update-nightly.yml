@@ -58,8 +58,16 @@ jobs:
 
   update_nightly_AIS_CI_image:
     needs: resolve_nightly
+    strategy:
+      fail-fast: false
+      matrix:
+        supported_platforms:
+          - rocky
+          - rocky8
+          - suse
+          - ubuntu
     env:
-      AIS_CI_IMAGE_NAME: ais_ci_ubuntu
+      AIS_CI_IMAGE_NAME: ais_ci_${{ matrix.supported_platforms }}
       AIS_NIGHTLY_BUILD: ${{ needs.resolve_nightly.outputs.nightly_build }}
       AIS_NIGHTLY_ROCM_VERSION: ${{ needs.resolve_nightly.outputs.nightly_rocm_version }}
     runs-on: [ubuntu-24.04]
