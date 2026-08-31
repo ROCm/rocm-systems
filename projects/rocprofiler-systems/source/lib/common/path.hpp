@@ -104,6 +104,10 @@ is_directory(std::string_view path) ROCPROFSYS_INTERNAL_API;
 [[nodiscard]] inline bool
 is_regular_file(std::string_view path) ROCPROFSYS_INTERNAL_API;
 
+[[nodiscard]] inline bool
+create_parent_dirs_and_open_ofstream(std::ofstream&     out_fstream,
+                                     const std::string& filepath) ROCPROFSYS_INTERNAL_API;
+
 inline std::string
 get_rocprofsys_root() ROCPROFSYS_INTERNAL_API;
 
@@ -341,6 +345,36 @@ is_text_file(const std::string& filename)
     }
 
     return true;
+}
+
+/**
+ * @brief Create the parent directory of @p filepath, then open @p out_fstream on it.
+ * The parent directory tree is created if absent; an already-existing
+ * directory is not an error. A @p filepath with no directory component (e.g.
+ * "out.txt") creates nothing and is opened relative to the current directory.
+ * The stream is opened for output only, truncating any existing file.
+ * @param out_fstream Closed output stream to open. Left closed if the parent directory
+ *                    could not be created.
+ * @param filepath    Path of the file to open.
+ * @return true if the parent directory is in place and @p out_fstream is open and good.
+ */
+bool
+create_parent_dirs_and_open_ofstream(std::ofstream&     out_fstream,
+                                     const std::string& filepath)
+{
+    const auto parent = parent_path(filepath);
+    if(!parent.empty())
+    {
+        std::error_code error;
+        std::filesystem::create_directories(parent, error);
+        if(error)
+        {
+            return false;
+        }
+    }
+
+    out_fstream.open(filepath);
+    return out_fstream.is_open() && out_fstream.good();
 }
 
 std::vector<std::string>
