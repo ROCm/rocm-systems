@@ -203,7 +203,7 @@ void TeamBroadcastTester<T1>::verifyResults(size_t size) {
   int idx = 0;
   T1 expected;
 
-  // Verify correctness: all PEs (including root) receive source 
+  // Verify correctness: all PEs (including root) receive source
   // buffer data in dest buffer
   for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for (int i = 0; i < num_elems; i++) {
