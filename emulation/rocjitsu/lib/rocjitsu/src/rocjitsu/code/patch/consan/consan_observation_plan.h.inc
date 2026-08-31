@@ -1222,6 +1222,14 @@ public:
   /// changes when any transaction is stale or malformed.
   [[nodiscard]] bool publish_lowering_commits(std::vector<ConSanCommittedLowering> commits);
 
+  /// Atomically publish instrumented synchronization transactions, merging
+  /// accepted transactions that share an intent. One semantic synchronization
+  /// intent may require several emitted locations, but its complete accepted
+  /// transaction remains owned by this ledger rather than a caller-side
+  /// staging inventory.
+  [[nodiscard]] bool
+  publish_coalescing_instrumented_commits(std::vector<ConSanCommittedLowering> commits);
+
   /// Return the authoritative lowering transactions in publication order.
   [[nodiscard]] std::span<const ConSanCommittedLowering> lowering_commits() const {
     return lowering_commits_;

@@ -3408,7 +3408,6 @@ TEST(ConSanMoi, FenceRecordsDynamicallyPublishExactAtomicAddresses) {
       return location.emitted_text_offset == fence->trampoline_offset;
     }));
   }
-  EXPECT_TRUE(result.staged_moi_sync_lowerings.empty());
   EXPECT_EQ(fences[0]->anchor_offset, result.program_inventory.sync()
                                           .moi_fence_candidates[0]
                                           .fence_event.physical.original_text_offset);

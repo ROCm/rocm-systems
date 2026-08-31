@@ -361,7 +361,6 @@ private:
     std::vector<ConSanFaultMutationPlan> fault_plans;
     std::vector<ConSanCandidateResourcePlan> resource_plans;
     ConSanMoiOperatingPoint moi_operating_point;
-    std::vector<ConSanCommittedLowering> staged_moi_sync_lowerings;
     std::vector<ConSanPatchInfo> patches;
   } private_lowering_;
 };

@@ -687,6 +687,11 @@ foreach(_file IN LISTS _consan_production_files)
         "committed_lowerings"
         "accepted lowering transactions must remain owned by the coverage ledger"
     )
+    _consan_assert_no_match(
+        "${_file}"
+        "staged_moi_sync_lowerings"
+        "synchronization lowering must coalesce at the coverage-ledger owner"
+    )
 endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_result.h.inc"
@@ -696,7 +701,11 @@ _consan_assert_no_match(
 file(READ "${_consan_dir}/consan_observation_plan.h.inc" _coverage_ledger_contract)
 foreach(
     _owned_lowering_operation
-    IN ITEMS lowering_commits_ runtime_static_mapping discard_instrumented_lowerings
+    IN ITEMS
+        lowering_commits_
+        runtime_static_mapping
+        publish_coalescing_instrumented_commits
+        discard_instrumented_lowerings
 )
     if(NOT _coverage_ledger_contract MATCHES "${_owned_lowering_operation}")
         message(

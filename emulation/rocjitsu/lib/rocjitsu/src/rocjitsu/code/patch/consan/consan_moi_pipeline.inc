@@ -113,10 +113,6 @@ void append_moi_operational_resource_plans(
 void publish_pending_moi_lowering_rejections(
     ConSanTransformArtifacts &result,
     std::optional<ConSanRegisterPlanReason> whole_transform_resource_failure) {
-  if (!result.publish_staged_moi_sync_lowerings()) {
-    result.errors.emplace_back("ConSan MOI could not publish its synchronization transaction");
-    return;
-  }
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
     if (plan.source != ConSanRegisterAllocationSource::Unsupported || plan.intent_ids.empty())
       continue;

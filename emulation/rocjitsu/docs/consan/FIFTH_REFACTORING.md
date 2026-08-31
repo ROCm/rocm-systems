@@ -2328,3 +2328,66 @@ whole-refactoring shrinkage required by Section 14.8. The cumulative production
 scope remains 326 implementation lines above the fifth-refactoring baseline,
 and the remaining Section 14 gaps still require a new deep-read after this
 checkpoint.
+
+### 16.20 Convergence checkpoint 19: no synchronization staging authority
+
+The lowering-commit deep read continued through the one apparent exception to
+checkpoint 18 ownership: atomic, fence, and barrier emitters still accumulated
+accepted commits in `ConSanTransformArtifacts::staged_moi_sync_lowerings`.
+That inventory existed because a capture intent may contribute to more than one
+emitted synchronization operation. It nevertheless constituted a second
+mutable commit authority. It crossed the public-to-private transform-result
+boundary, required a separate terminal publication phase, and had to be cleared
+independently on every rollback path.
+
+The coverage ledger now owns that composition directly. Its explicit
+coalescing publication operation validates every incoming instrumented
+transaction, transitively merges accepted transactions that share an intent,
+and republishes the merged transaction on a private ledger copy. A malformed or
+stale member therefore leaves the original ledger unchanged. Ordinary strict
+publication still cannot reopen an accepted intent; only the named
+synchronization composition operation can do so. Common commit construction and
+ledger publication now share one structural validator instead of maintaining
+two nearly identical sets of outcome, geometry, intent, and runtime-mapping
+checks.
+
+The old staging vector, its inline merge and terminal-publication methods, all
+`TransformResult` transport, the terminal MOI publication step, rollback
+clearing, and tests that inspected the incidental staging container have been
+removed. Atomic, fence, and barrier emitters publish to the ledger at their
+existing common synchronization boundary. An owner-level regression proves
+strict rejection, multi-location coalescing, whole-batch rollback, and final
+plan/ledger consistency. The architecture-boundary gate now prohibits the old
+staging inventory anywhere in production and requires the coalescing operation
+to remain on the ledger contract.
+
+| Signal | Checkpoint 19 | Cumulative change | Slice change from checkpoint 18 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,728 | +753 | **-20** |
+| Nonblank production lines | 99,457 | +374 | **-23** |
+| Production implementation lines | 91,758 | **+308** | **-18** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 241 / 58 | **-35 / +1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| Explicit mode-enum references in `consan_moi.cpp` | 0 | -20 | 0 |
+| Explicit mode-enum references in `consan_moi_placement.inc` | **0** | **-95** | 0 |
+| Explicit mode-enum references in `consan_moi_report_plan.cpp` | **0** | **-18** | 0 |
+| Explicit mode-enum references in `consan_pipeline.cpp` | **0** | n/a | 0 |
+| Test inventory | 5,372 | +27 | +1 |
+
+Validation includes a clean incremental rebuild; all 15 observation-plan and
+coverage-ledger owner tests; the structural architecture-boundary test; the
+complete 4,737-test nonphysical ConSan matrix at `-j16`, including all 2,908
+simulated-device rows over five architectures; and all 635 physical gfx1201
+tests serialized at `-j1`. No test was removed or disabled.
+
+This slice eliminates the final caller-owned lowering-commit inventory and
+leaves accepted semantic lowering transactions with one authority throughout
+their lifetime. It continues the required forward-only and deletion-bearing
+direction, but it does not prove the remaining Section 14 criteria. Production
+is still 308 implementation lines above the starting baseline; architecture
+and mode locality across every facet, the remaining broad operating-point and
+transform-artifact surfaces, smallness of the surviving cross-axis composition,
+and an independent whole-codebase audit remain open.

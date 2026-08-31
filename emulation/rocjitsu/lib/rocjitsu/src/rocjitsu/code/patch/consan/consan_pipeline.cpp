@@ -575,7 +575,6 @@ void TransformResult::publish_lowering_artifacts(ConSanTransformArtifacts loweri
   private_lowering_.fault_plans = std::move(lowering.fault_plans);
   private_lowering_.resource_plans = std::move(lowering.resource_plans);
   private_lowering_.moi_operating_point = std::move(lowering.moi_operating_point);
-  private_lowering_.staged_moi_sync_lowerings = std::move(lowering.staged_moi_sync_lowerings);
   private_lowering_.patches = std::move(lowering.patches);
 }
 
@@ -594,7 +593,6 @@ ConSanTransformArtifacts TransformResult::take_lowering_artifacts() {
   lowering.fault_plans = std::move(private_lowering_.fault_plans);
   lowering.resource_plans = std::move(private_lowering_.resource_plans);
   lowering.moi_operating_point = std::move(private_lowering_.moi_operating_point);
-  lowering.staged_moi_sync_lowerings = std::move(private_lowering_.staged_moi_sync_lowerings);
   lowering.patches = std::move(private_lowering_.patches);
   return lowering;
 }
@@ -603,8 +601,6 @@ bool TransformResult::well_formed() const {
   if (!code_object.valid() || !dispatch_requirements.well_formed()) {
     return false;
   }
-  if (!private_lowering_.staged_moi_sync_lowerings.empty())
-    return false;
   if (!coverage_ledger.matches_plan(observation_plan) ||
       coverage_ledger.runtime_static_mapping() != runtime_static_mapping)
     return false;
@@ -678,7 +674,6 @@ void TransformResult::discard_replacement(std::string warning) {
   replacement.clear();
   private_lowering_.patches.clear();
   runtime_static_mapping = {};
-  private_lowering_.staged_moi_sync_lowerings.clear();
   coverage_ledger.discard_instrumented_lowerings();
   std::vector<ConSanCommittedLowering> rejections;
   for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
@@ -1146,7 +1141,6 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
       result.replacement.clear();
       result.private_lowering_.patches.clear();
       result.runtime_static_mapping = {};
-      result.private_lowering_.staged_moi_sync_lowerings.clear();
       result.coverage_ledger.discard_instrumented_lowerings();
       result.dispatch_requirements = {};
     }

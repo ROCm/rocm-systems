@@ -1066,7 +1066,6 @@ TEST(ConSanMoi, SampledAtomicTrackingPublishesQualifiedTypedMetadata) {
   EXPECT_EQ(atomic_commit->intent_ids.size(), 2u);
   ASSERT_EQ(atomic_commit->locations.size(), 1u);
   EXPECT_EQ(atomic_commit->locations.front().emitted_text_offset, patch->trampoline_offset);
-  EXPECT_TRUE(result.staged_moi_sync_lowerings.empty());
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -6278,7 +6277,6 @@ TEST(ConSanMoi, SampledQualifiedBarrierPublishesSelectedEpochTransition) {
   EXPECT_EQ(barrier_commit->locations.size(), 2u);
   EXPECT_EQ(barrier_commit->locations.front().emitted_text_offset, patch->anchor_offset);
   EXPECT_EQ(barrier_commit->locations.back().emitted_text_offset, patch->trampoline_offset);
-  EXPECT_TRUE(result.staged_moi_sync_lowerings.empty());
   ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 2u);
   EXPECT_TRUE(std::ranges::all_of(result.observation_plan.barrier_site_decisions,
                                   [&](const ConSanBarrierSiteDecision &decision) {

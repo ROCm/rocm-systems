@@ -112,6 +112,39 @@ ProgramInventory one_native_access_inventory(std::string mnemonic = "ds_store_b3
   return build_policy_inventory(std::move(input));
 }
 
+ConSanObservationPlan one_barrier_observation_plan(PhysicalSiteId physical_site) {
+  const SemanticSiteId semantic_site{
+      .physical = physical_site,
+      .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+      .member_ordinal = 0,
+      .range_ordinal = 0,
+  };
+  return {
+      .engine = ConSanCapabilityEngine::RecordReplay,
+      .site_decisions = {},
+      .barrier_site_decisions = {{
+          .engine = ConSanCapabilityEngine::RecordReplay,
+          .semantic_site = semantic_site,
+          .kind = ConSanSiteDecisionKind::Admitted,
+          .reason = ConSanBarrierPolicyReason::None,
+          .intent_ids = {{0}},
+          .source_containers = {"kernel"},
+      }},
+      .atomic_site_decisions = {},
+      .fence_site_decisions = {},
+      .probe_intents = {{
+          .id = {0},
+          .engine = ConSanCapabilityEngine::RecordReplay,
+          .physical_site = physical_site,
+          .covered_semantic_sites = {semantic_site},
+          .kind = ConSanProbeIntentKind::BarrierRecord,
+          .position = ConSanProbePosition::After,
+          .synchronization_association = std::nullopt,
+          .dynamic_result = ConSanDynamicResultRequirement::None,
+      }},
+  };
+}
+
 TEST(ConSanObservationPlan, EnumContractsAreExhaustiveNamedAndRejectInvalidValues) {
   expect_observation_enum_contract(kConSanSiteDecisionKinds, ConSanSiteDecisionKind::Count,
                                    consan_site_decision_kind_name, "invalid-site-decision-kind");
@@ -548,6 +581,58 @@ TEST(ConSanObservationPlan, CommittedLoweringBatchPublicationIsTransactional) {
   EXPECT_TRUE(result.coverage_ledger.lowering_commits().empty());
 }
 
+TEST(ConSanObservationPlan, CoalescingPublicationOwnsMultiLocationSyncTransactions) {
+  const ConSanAccessPolicyResult access = plan_consan_access_observation(
+      one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
+  ASSERT_TRUE(access.valid());
+  const ConSanObservationPlan plan =
+      one_barrier_observation_plan(access.plan.probe_intents.front().physical_site);
+  ASSERT_TRUE(plan.valid());
+
+  const std::array intent_ids = {ConSanProbeIntentId{0}};
+  const std::array first_location = {ConSanCommittedLoweringLocation{
+      .original_site = plan.probe_intents.front().physical_site,
+      .emitted_text_offset = 0x200,
+      .emitted_size = 8,
+      .relocated_guest_text_offset = std::nullopt,
+  }};
+  const std::array second_location = {ConSanCommittedLoweringLocation{
+      .original_site = plan.probe_intents.front().physical_site,
+      .emitted_text_offset = 0x300,
+      .emitted_size = 12,
+      .relocated_guest_text_offset = 0x308,
+  }};
+  auto first = make_consan_committed_lowering(plan, intent_ids, first_location,
+                                              ConSanLoweringOutcomeKind::Instrumented, "first");
+  auto second = make_consan_committed_lowering(plan, intent_ids, second_location,
+                                               ConSanLoweringOutcomeKind::Instrumented, "second");
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+
+  ConSanCoverageLedger ledger(plan);
+  ASSERT_TRUE(ledger.publish_coalescing_instrumented_commits({*first}));
+  ASSERT_EQ(ledger.lowering_commits().size(), 1u);
+  const std::vector before_failed_batch(ledger.lowering_commits().begin(),
+                                        ledger.lowering_commits().end());
+
+  EXPECT_FALSE(ledger.publish_lowering_commit(*second))
+      << "ordinary publication must not silently reopen an accepted intent";
+  ConSanCommittedLowering malformed = *second;
+  malformed.locations.front().emitted_size = 0;
+  EXPECT_FALSE(ledger.publish_coalescing_instrumented_commits({*second, malformed}));
+  EXPECT_EQ(std::vector(ledger.lowering_commits().begin(), ledger.lowering_commits().end()),
+            before_failed_batch)
+      << "a malformed later transaction must roll back the entire coalescing batch";
+
+  ASSERT_TRUE(ledger.publish_coalescing_instrumented_commits({*second}));
+  ASSERT_EQ(ledger.lowering_commits().size(), 1u);
+  EXPECT_EQ(ledger.lowering_commits().front().intent_ids, (std::vector{ConSanProbeIntentId{0}}));
+  EXPECT_EQ(ledger.lowering_commits().front().locations,
+            (std::vector{second_location.front(), first_location.front()}));
+  EXPECT_EQ(ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Instrumented);
+  EXPECT_TRUE(ledger.matches_plan(plan));
+}
+
 TEST(ConSanObservationPlan, DiscardedImageRetractsOnlyInstrumentedLoweringCommits) {
   const ConSanAccessPolicyResult policy = plan_consan_access_observation(
       one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
@@ -596,41 +681,8 @@ TEST(ConSanObservationPlan, CoverageLedgerOwnsBarrierDecisionsAlongsideAccessDec
       one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
   ASSERT_TRUE(access.valid());
   ConSanObservationPlan plan = access.plan;
-  ConSanObservationPlan barrier_fragment{
-      .engine = ConSanCapabilityEngine::RecordReplay,
-      .site_decisions = {},
-      .barrier_site_decisions = {{
-          .engine = ConSanCapabilityEngine::RecordReplay,
-          .semantic_site =
-              {
-                  .physical = plan.probe_intents.front().physical_site,
-                  .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
-                  .member_ordinal = 0,
-                  .range_ordinal = 0,
-              },
-          .kind = ConSanSiteDecisionKind::Admitted,
-          .reason = ConSanBarrierPolicyReason::None,
-          .intent_ids = {{0}},
-          .source_containers = {"kernel"},
-      }},
-      .atomic_site_decisions = {},
-      .fence_site_decisions = {},
-      .probe_intents = {{
-          .id = {0},
-          .engine = ConSanCapabilityEngine::RecordReplay,
-          .physical_site = plan.probe_intents.front().physical_site,
-          .covered_semantic_sites = {{
-              .physical = plan.probe_intents.front().physical_site,
-              .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
-              .member_ordinal = 0,
-              .range_ordinal = 0,
-          }},
-          .kind = ConSanProbeIntentKind::BarrierRecord,
-          .position = ConSanProbePosition::After,
-          .synchronization_association = std::nullopt,
-          .dynamic_result = ConSanDynamicResultRequirement::None,
-      }},
-  };
+  ConSanObservationPlan barrier_fragment =
+      one_barrier_observation_plan(plan.probe_intents.front().physical_site);
   ASSERT_TRUE(barrier_fragment.valid());
   ASSERT_TRUE(plan.append(barrier_fragment));
   ConSanCoverageLedger ledger(plan);

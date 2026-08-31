@@ -139,10 +139,10 @@ make_moi_sync_lowering_commit(const ConSanObservationPlan &observation,
 [[nodiscard]] bool publish_moi_sync_lowering_commits(ConSanTransformArtifacts &result,
                                                      std::vector<ConSanCommittedLowering> commits,
                                                      std::string_view probe_name) {
-  if (result.stage_moi_sync_lowering_commits(std::move(commits)))
+  if (result.coverage_ledger.publish_coalescing_instrumented_commits(std::move(commits)))
     return true;
   result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
-                             " could not stage its semantic lowerings");
+                             " could not publish its semantic lowerings");
   return false;
 }
 
