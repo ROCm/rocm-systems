@@ -224,14 +224,16 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 {
     auto output_dir = get_output_directory();
 
-    bool tracing_on   = true;
-    bool profiling_on = true;
+    bool tracing_on   = false;
+    bool profiling_on = false;
+    bool rocpd_on     = true;
 
     if(!preset_mode.empty() && !tool_name.empty())
     {
         auto normalized = strip_flag_prefix(preset_mode);
-        tracing_on      = registry.is_section_enabled(normalized, "tracing", true);
-        profiling_on    = registry.is_section_enabled(normalized, "profiling", true);
+        tracing_on      = registry.is_section_enabled(normalized, "tracing");
+        profiling_on    = registry.is_section_enabled(normalized, "profiling");
+        rocpd_on        = registry.is_rocpd_output_enabled(normalized);
 
         constexpr size_t box_width       = 60;
         constexpr size_t box_inner_width = box_width - 2;
@@ -274,18 +276,31 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
     std::cerr << "\nResults will be available in:\n";
     if(profiling_on)
     {
-        std::cerr << "  \u2022 Text profile:  " << output_dir << "/wall_clock.txt\n"
+        std::cerr << "  \u2022 Text profile:   " << output_dir << "/wall_clock.txt\n"
                   << "  \u2022 JSON data:      " << output_dir << "/wall_clock.json\n";
     }
-    if(tracing_on)
+    if(rocpd_on)
     {
-        std::cerr << "  \u2022 Trace (visual): " << output_dir
-                  << "/perfetto-trace.proto\n";
+        std::cerr << "  \u2022 rocpd output:   " << output_dir << "/rocpd.db\n";
     }
     if(tracing_on)
     {
-        std::cerr << "\nTo visualize trace:\n"
-                  << "  Open " << output_dir
+        std::cerr << "  \u2022 Perfetto trace: " << output_dir
+                  << "/perfetto-trace.proto\n";
+    }
+
+    if(rocpd_on || tracing_on)
+    {
+        std::cerr << "\nTo visualize results:\n";
+    }
+    if(rocpd_on)
+    {
+        std::cerr << "  \u2022 rocpd:    Open " << output_dir
+                  << "/rocpd.db in ROCm Optiq.\n";
+    }
+    if(tracing_on)
+    {
+        std::cerr << "  \u2022 Perfetto: Open " << output_dir
                   << "/perfetto-trace.proto in https://ui.perfetto.dev\n";
     }
     std::cerr << "\n";

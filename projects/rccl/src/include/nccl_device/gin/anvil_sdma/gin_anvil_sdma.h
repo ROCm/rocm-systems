@@ -183,8 +183,10 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     if (!anvilCtxValid(rsCtx)) return;
     const int blockId = blockIdx.x + blockIdx.y * gridDim.x;
 
-    if ((required == cuda::thread_scope_system) && (given > required)) {
-      __threadfence_system();
+    // HIP thread_scope (hip_compat.h): system is the MAX value, so a caller that
+    // only guaranteed a weaker scope has given < required -> add a system fence.
+    if ((required == cuda::thread_scope_system) && (given < required)) {
+      NCCL_GIN_THREADFENCE_SYSTEM();
     }
 
     size_t threshold = loadConst(&rsCtx->sdmaThreshold);
@@ -293,8 +295,10 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     ncclGinAnvilSdmaMemHandle* dstMh = (ncclGinAnvilSdmaMemHandle*)dstWin;
     T tmp = srcVal;
 
-    if ((required == cuda::thread_scope_system) && (given > required)) {
-      __threadfence_system();
+    // HIP thread_scope (hip_compat.h): system is the MAX value, so a caller that
+    // only guaranteed a weaker scope has given < required -> add a system fence.
+    if ((required == cuda::thread_scope_system) && (given < required)) {
+      NCCL_GIN_THREADFENCE_SYSTEM();
     }
 
     size_t threshold = loadConst(&rsCtx->sdmaThreshold);
