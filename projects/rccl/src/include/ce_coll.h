@@ -65,6 +65,11 @@ struct ncclCeColl {
   size_t baseUCSymReadyOffset;
   size_t baseUCSymComplOffset;
   uint32_t ceSeqNum;
+  // Device buffer sourcing the UC barrier flag value. Slot [0]: running seq
+  // (stored per non-capture barrier); slot [1]: constant GRAPH_SYNC_VALUE used
+  // during graph capture. Peer writes memcpy from here so they can be issued
+  // as a separate stream op ahead of the wait/reset batch (see ncclPrepUCSync).
+  uint32_t* ceSeqNumDev;
   bool useCompletePtr;
   uint32_t intraBatchSyncFreq;
   uint64_t intraBatchSyncMsgThreshold;
