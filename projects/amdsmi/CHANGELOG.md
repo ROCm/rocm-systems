@@ -18,6 +18,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Added blocks: from `AMDSMI_GPU_BLOCK_MMSCH` to `AMDSMI_GPU_BLOCK_UCIE_PCS` at bit positions 19-38.
   - Updated `AMDSMI_GPU_BLOCK_LAST` to `AMDSMI_GPU_BLOCK_UCIE_PCS`.
 
+- **An empty nested section now renders as `N/A` in human-readable CLI output**.  
+  - Any `amd-smi` command whose output contains an empty sub-section printed a bare `SECTION:` header with nothing under it. It now prints `SECTION: N/A`, matching how empty lists are already rendered.
+  - This covers every subcommand that uses the standard human-readable renderer, not only the AI-NIC `RDMA_DEVICES` case that prompted it.
+  - `monitor`, `partition`, `topology`, `xgmi`, and the default no-argument output print tables and are unchanged.
+
 ### Optimized
 
 ### Resolved Issues
@@ -34,6 +39,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi set -L/--clk-limit <clk> max <value>` not enforcing caps that fall between clock levels**.  
   - For `mclk` and `fclk` ONLY, which expose a discrete DPM table, the requested `max` is now rounded down to the nearest selectable clock level, so the enforced limit never exceeds the requested value.
   - `sclk` supports a continuous frequency range, so its requested `max` is honored exactly (e.g. `600` enforces a limit of 600MHz) and is not snapped.
+
+- **Fixed AI-NICs disappearing from `amd-smi` when the RDMA driver is unavailable**.  
+  - Discovery treated a missing RDMA device list as a fatal error for the whole NIC, so a host with `ionic_rdma` blacklisted (or otherwise not loaded) dropped the NIC entirely and reported no AI-NIC at all.
+  - The NIC is now enumerated with an empty `rdma_dev`.
+  - `amdsmi_get_nic_rdma_dev_info()` returns `AMDSMI_STATUS_SUCCESS` with `num_rdma_dev` set to 0.
+  - `amd-smi static` reports `RDMA_DEVICES: N/A` instead of omitting the device. All other NIC information is reported as usual.
 
 ### Upcoming Changes
 
