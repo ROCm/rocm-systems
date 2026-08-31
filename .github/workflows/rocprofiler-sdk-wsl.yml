@@ -1,0 +1,351 @@
+name: rocprofiler-sdk WSL
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - 'projects/rocr-runtime/libhsakmt/**'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/core/util/**'
+      - '.github/workflows/rocprofiler-sdk-wsl.yml'
+      - '!**/*.md'
+      - '!**/*.rst'
+      - '!**/*.rtf'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
+  push:
+    branches: [ develop ]
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - 'projects/rocr-runtime/libhsakmt/**'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/core/util/**'
+      - '.github/workflows/rocprofiler-sdk-wsl.yml'
+      - '!**/*.md'
+      - '!**/*.rst'
+      - '!**/*.rtf'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ## WSL distribution on the self-hosted runner. This distro is expected to already have
+  ## ROCm for WSL installed at ROCM_PATH; the job verifies that and fails loudly if not.
+  WSL_DISTRIBUTION: "Ubuntu-24.04"
+  ROCM_PATH: "/opt/rocm"
+
+  ## Used only when rocminfo cannot enumerate a GPU agent at configure time. Keep this in
+  ## sync with the GPU actually installed in the runner.
+  GPU_TARGET_FALLBACK: "gfx1150"
+
+  ## Runtime gates for the WSL/dxg counter-collection path. GPU_ENABLE_PAL=0 keeps HIP on
+  ## the ROCr path and WSLKMT_VENDOR_PACKET=1 routes PM4 counter programming through the
+  ## librocdxg vendor-packet path; without them PMC collection silently produces no data.
+  GPU_ENABLE_PAL: "0"
+  WSLKMT_VENDOR_PACKET: "1"
+
+  ## No tests should be excluded here except for extreme emergencies; tests that cannot run
+  ## on the WSL/dxg path should be disabled in CMake (see the /dev/kfd and gfx-info gating
+  ## in tests/rocprofv3-avail/CMakeLists.txt) so the reason lives next to the test.
+  wsl_EXCLUDE_TESTS_REGEX: ""
+  wsl_EXCLUDE_LABEL_REGEX: ""
+
+jobs:
+  rocprofiler-sdk-wsl:
+    # Never schedule a fork PR onto the self-hosted Windows runner.
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    name: rocprofiler-sdk WSL Build & Test
+    runs-on: rocr-runtime-libhsakmt-wsl
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Preserve LF line endings
+        run: |
+          # The checkout happens on Windows but everything is compiled and executed inside
+          # WSL. CRLF would break the shell scripts, pytest configs and validate.py helpers.
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-sdk
+            projects/rocr-runtime
+          sparse-checkout-cone-mode: true
+          submodules: false
+
+      - name: Detect Windows SDK version
+        id: detect-sdk
+        run: |
+          $sdkPath = "C:\Program Files (x86)\Windows Kits\10\Include"
+          if (Test-Path $sdkPath) {
+            $versions = Get-ChildItem $sdkPath -Directory | Sort-Object Name -Descending
+            $latestVersion = $versions[0].Name
+            echo "Found Windows SDK version: $latestVersion"
+            echo "SDK_VERSION=$latestVersion" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "Windows SDK not found at $sdkPath"
+            exit 1
+          }
+
+      - name: Set up WSL
+        uses: Vampire/setup-wsl@6a8db447be7ed35f2f499c02c6e60ff77ef11278 # v6.0.0
+        with:
+          distribution: ${{ env.WSL_DISTRIBUTION }}
+          # Deliberately not updating: this distro carries a pinned ROCm for WSL install
+          # and a dist-upgrade could move ROCm out from under the build.
+          update: false
+          additional-packages: build-essential cmake ninja-build git python3 python3-pip
+            python3-venv pkg-config libdw-dev libelf-dev libdrm-dev libsqlite3-dev
+            libzstd-dev
+
+      - name: Copy repository into WSL
+        shell: wsl-bash {0}
+        env:
+          WORKSPACE_WIN: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # Building on /mnt/c is an order of magnitude slower than the WSL filesystem.
+          SRC="$(wslpath -a -u "${WORKSPACE_WIN}")"
+          rm -rf "${HOME}/rocm-systems"
+          cp -r "${SRC}" "${HOME}/rocm-systems"
+          git config --global --add safe.directory '*'
+          ls -la "${HOME}/rocm-systems/projects/rocprofiler-sdk"
+
+      - name: Verify WSL environment
+        shell: wsl-bash {0}
+        env:
+          ROCM_PATH: ${{ env.ROCM_PATH }}
+          WSL_DISTRIBUTION: ${{ env.WSL_DISTRIBUTION }}
+        run: |
+          set -euo pipefail
+
+          fail=0
+
+          if [ ! -e /dev/dxg ]; then
+            echo "ERROR: /dev/dxg is missing - this runner is not a GPU-enabled WSL2 guest."
+            fail=1
+          fi
+
+          if [ -e /dev/kfd ]; then
+            echo "WARNING: /dev/kfd is present. This job is meant to exercise the WSL/dxg"
+            echo "         platform path; with a real KFD device the runtime will select"
+            echo "         the gnulinux platform instead and the WSL path goes untested."
+          fi
+
+          if [ ! -d "${ROCM_PATH}" ]; then
+            echo "ERROR: ROCm not found at ${ROCM_PATH}."
+            echo "       This job expects ROCm for WSL to be preinstalled in the"
+            echo "       '${WSL_DISTRIBUTION}' distro on the runner."
+            fail=1
+          fi
+
+          [ "${fail}" -eq 0 ] || exit 1
+
+          echo "ROCm: $(readlink -f "${ROCM_PATH}")"
+          cmake --version | head -1
+          ninja --version
+          python3 --version
+
+      - name: Initialize submodules
+        shell: wsl-bash {0}
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          cd "${HOME}/rocm-systems"
+          git submodule update --init --recursive --jobs 8 -- projects/rocprofiler-sdk
+
+      - name: Install Python requirements
+        shell: wsl-bash {0}
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          cd "${HOME}/rocm-systems/projects/rocprofiler-sdk"
+          python3 -m venv "${HOME}/rocprofiler-sdk-venv"
+          # shellcheck disable=SC1091
+          source "${HOME}/rocprofiler-sdk-venv/bin/activate"
+          python3 -m pip install -U pip
+          python3 -m pip install -U -r requirements.txt
+
+      - name: Prepare build environment
+        shell: wsl-bash {0}
+        env:
+          ROCM_PATH: ${{ env.ROCM_PATH }}
+          GPU_TARGET_FALLBACK: ${{ env.GPU_TARGET_FALLBACK }}
+          WIN_SDK_VERSION: ${{ steps.detect-sdk.outputs.SDK_VERSION }}
+        run: |
+          set -euo pipefail
+
+          WIN_SDK="/mnt/c/Program Files (x86)/Windows Kits/10/Include/${WIN_SDK_VERSION}"
+          if [ ! -d "${WIN_SDK}/shared" ]; then
+            echo "ERROR: Windows SDK not reachable from WSL at ${WIN_SDK}/shared"
+            ls -la "/mnt/c/Program Files (x86)/Windows Kits/10/Include/" || true
+            exit 1
+          fi
+
+          # rocminfo enumerates no GPU agent when /dev/kfd is absent on some ROCm-for-WSL
+          # builds; fall back to the configured target rather than configuring for nothing.
+          GPU_TARGET="$("${ROCM_PATH}/bin/rocminfo" 2>/dev/null \
+            | awk '/^[[:space:]]*Name:[[:space:]]+gfx/ { print $2; exit }' || true)"
+          if [ -z "${GPU_TARGET}" ]; then
+            echo "rocminfo enumerated no GPU agent; using GPU_TARGET_FALLBACK"
+            GPU_TARGET="${GPU_TARGET_FALLBACK}"
+          fi
+          echo "GPU target: ${GPU_TARGET}"
+
+          ROCM_SYSTEMS="${HOME}/rocm-systems"
+          LIBHSAKMT_ROOT="${ROCM_SYSTEMS}/projects/rocr-runtime/libhsakmt"
+
+          # Sourced by every subsequent wsl-bash step. Written to a file rather than
+          # $GITHUB_ENV because that path lives on the Windows side of the boundary.
+          cat > "${HOME}/rocprof-wsl-env.sh" <<EOF
+          export ROCM_PATH="${ROCM_PATH}"
+          export ROCM_SYSTEMS="${ROCM_SYSTEMS}"
+          export SDK_SOURCE_DIR="${ROCM_SYSTEMS}/projects/rocprofiler-sdk"
+          export SDK_BUILD_DIR="${ROCM_SYSTEMS}/projects/rocprofiler-sdk/build"
+          export LIBHSAKMT_ROOT="${LIBHSAKMT_ROOT}"
+          export LIBROCDXG_BUILD_DIR="${LIBHSAKMT_ROOT}/build"
+          export LIBROCDXG_LIBRARY="${LIBHSAKMT_ROOT}/build/librocdxg.so"
+          export WIN_SDK="${WIN_SDK}"
+          export GPU_TARGET="${GPU_TARGET}"
+          export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:\${PATH}"
+          # The freshly built librocdxg must win over any copy installed under
+          # ${ROCM_PATH}/lib - the HSA runtime dlopens it by soname.
+          export LD_LIBRARY_PATH="${LIBHSAKMT_ROOT}/build:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:\${LD_LIBRARY_PATH:-}"
+          # set -u is on in the consuming steps; venv activate scripts are not
+          # uniformly safe under it.
+          set +u
+          source "${HOME}/rocprofiler-sdk-venv/bin/activate"
+          set -u
+          EOF
+
+          cat "${HOME}/rocprof-wsl-env.sh"
+
+      - name: Build librocdxg
+        shell: wsl-bash {0}
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source "${HOME}/rocprof-wsl-env.sh"
+
+          cd "${LIBHSAKMT_ROOT}"
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DWIN_SDK="${WIN_SDK}/shared"
+          cmake --build build --parallel "$(nproc)"
+
+          if [ ! -e "${LIBROCDXG_LIBRARY}" ]; then
+            echo "ERROR: librocdxg was not produced at ${LIBROCDXG_LIBRARY}"
+            ls -la build
+            exit 1
+          fi
+          ls -la "${LIBROCDXG_BUILD_DIR}"/librocdxg*
+
+      - name: Configure rocprofiler-sdk
+        shell: wsl-bash {0}
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source "${HOME}/rocprof-wsl-env.sh"
+
+          cd "${SDK_SOURCE_DIR}"
+          cmake -B "${SDK_BUILD_DIR}" -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH="${ROCM_PATH};${ROCM_PATH}/llvm" \
+            -DPython3_EXECUTABLE="$(which python3)" \
+            -DGPU_TARGETS="${GPU_TARGET}" \
+            -DROCPROFILER_BUILD_TESTS=ON \
+            -DROCPROFILER_BUILD_SAMPLES=ON \
+            -DROCPROFILER_BUILD_DOCS=OFF \
+            -DROCPROFILER_USE_LIBHSAKMT_WINDOWS=ON \
+            -DROCPROFILER_LIBHSAKMT_WINDOWS_ROOT="${LIBHSAKMT_ROOT}" \
+            -DROCPROFILER_LIBROCDXG_LIBRARY="${LIBROCDXG_LIBRARY}"
+
+      - name: Build rocprofiler-sdk
+        shell: wsl-bash {0}
+        timeout-minutes: 60
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source "${HOME}/rocprof-wsl-env.sh"
+          cmake --build "${SDK_BUILD_DIR}" --parallel "$(nproc)"
+
+      - name: Test - unit tests
+        shell: wsl-bash {0}
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source "${HOME}/rocprof-wsl-env.sh"
+          # Includes platform-dispatch-tests, which is the direct coverage for the
+          # gnulinux/wsl platform selection this job exists to protect.
+          ctest --test-dir "${SDK_BUILD_DIR}" \
+            --output-on-failure --no-tests=error \
+            -L unittests
+
+      - name: Test - integration tests
+        shell: wsl-bash {0}
+        timeout-minutes: 60
+        env:
+          GPU_ENABLE_PAL: ${{ env.GPU_ENABLE_PAL }}
+          WSLKMT_VENDOR_PACKET: ${{ env.WSLKMT_VENDOR_PACKET }}
+          EXCLUDE_TESTS_REGEX: ${{ env.wsl_EXCLUDE_TESTS_REGEX }}
+          EXCLUDE_LABEL_REGEX: ${{ env.wsl_EXCLUDE_LABEL_REGEX }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source "${HOME}/rocprof-wsl-env.sh"
+
+          # An empty -E/-LE regex matches every test name, so only pass the flags when the
+          # corresponding workflow variable is actually set.
+          ctest_args=()
+          if [ -n "${EXCLUDE_TESTS_REGEX}" ]; then
+            ctest_args+=(-E "${EXCLUDE_TESTS_REGEX}")
+          fi
+          if [ -n "${EXCLUDE_LABEL_REGEX}" ]; then
+            ctest_args+=(-LE "${EXCLUDE_LABEL_REGEX}")
+          fi
+
+          ctest --test-dir "${SDK_BUILD_DIR}" \
+            --output-on-failure --no-tests=error \
+            --parallel 1 \
+            -L "integration-tests|samples" \
+            ${ctest_args[@]+"${ctest_args[@]}"}
+
+      - name: Collect logs
+        if: ${{ always() }}
+        shell: wsl-bash {0}
+        env:
+          WORKSPACE_WIN: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          DEST="$(wslpath -a -u "${WORKSPACE_WIN}")/wsl-logs"
+          rm -rf "${DEST}"
+          mkdir -p "${DEST}"
+          BUILD="${HOME}/rocm-systems/projects/rocprofiler-sdk/build"
+          for f in "${BUILD}/CMakeCache.txt" \
+                   "${BUILD}/CMakeFiles/CMakeConfigureLog.yaml" \
+                   "${BUILD}/Testing/Temporary/LastTest.log" \
+                   "${BUILD}/Testing/Temporary/LastTestsFailed.log"; do
+            [ -f "${f}" ] && cp "${f}" "${DEST}/" || true
+          done
+          ls -la "${DEST}"
+
+      - name: Upload logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: rocprofiler-sdk-wsl-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: wsl-logs
+          if-no-files-found: ignore
+          retention-days: 7
