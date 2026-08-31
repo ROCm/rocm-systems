@@ -410,10 +410,13 @@ def probe_host_replay_env_linux() -> ReplayEnvironment:
             env.gpu_archs = archs
             env.gpu_names = names
 
-    hip_config = shutil.which("hipconfig")
-    if hip_config:
-        proc = _run([hip_config, "--version"], timeout=15)
-        env.hip_runtime_version = _parse_hip_version(proc.stdout + proc.stderr)
+    rocm_path = os.environ.get("HIP_PATH") or os.environ.get("ROCM_PATH", "/opt/rocm")
+    version_file = os.path.join(rocm_path, ".info", "version")
+    try:
+        with open(version_file, encoding="utf-8") as _vf:
+            env.hip_runtime_version = _parse_hip_version(_vf.read())
+    except OSError:
+        pass
 
     env.comgr_version = probe_comgr_version()
     return env
@@ -435,7 +438,7 @@ def probe_host_replay_env_windows() -> ReplayEnvironment:
         env.gpu_archs = archs
         env.gpu_names = names
 
-    # HIP version via amd-smi > hipconfig.bat > amdhip64.dll
+    # HIP version via amd-smi > .info/version > amdhip64.dll
     amd_smi = _find_hip_exe("amd-smi")
     if amd_smi:
         proc2 = _run([amd_smi, "--version"], timeout=15)
@@ -444,10 +447,14 @@ def probe_host_replay_env_windows() -> ReplayEnvironment:
             env.hip_runtime_version = v
 
     if not env.hip_runtime_version:
-        hip_config = _find_hip_exe("hipconfig")
-        if hip_config:
-            proc3 = _run([hip_config, "--version"], timeout=15)
-            env.hip_runtime_version = _parse_hip_version(proc3.stdout + proc3.stderr)
+        hip_root = os.environ.get("HIP_PATH") or os.environ.get("ROCM_PATH", "")
+        if hip_root:
+            version_file = os.path.join(hip_root, ".info", "version")
+            try:
+                with open(version_file, encoding="utf-8") as _vf:
+                    env.hip_runtime_version = _parse_hip_version(_vf.read())
+            except OSError:
+                pass
 
     if not env.hip_runtime_version:
         proc4 = _run([py, "-c", _PROBE_HIP_VERSION_WIN_PY], timeout=15)
@@ -628,7 +635,7 @@ def probe_docker_replay_env(
     probe_shell = (
         f"export LD_LIBRARY_PATH={ld_inside}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}; "
         "rocm-smi --showid --showproductname 2>/dev/null || true; "
-        "hipconfig --version 2>/dev/null || true"
+        "cat ${ROCM_PATH:-/opt/rocm}/.info/version 2>/dev/null || true"
     )
     docker_args = [
         "run", "--rm",

@@ -224,8 +224,8 @@ if(BUILD_TESTS)
   return()
 endif()
 
-# --- hipcc is mandatory ---
-# Auto-detect hipcc via ROCM_PATH, or pass -DCMAKE_CXX_COMPILER=hipcc.
+# --- amdclang++ is required ---
+# Auto-detect amdclang++ via ROCM_PATH, or pass -DCMAKE_CXX_COMPILER=amdclang++.
 if(NOT DEFINED CMAKE_CXX_COMPILER OR CMAKE_CXX_COMPILER STREQUAL "")
   if(NOT ROCM_PATH)
     if(DEFINED ENV{ROCM_PATH})
@@ -234,17 +234,17 @@ if(NOT DEFINED CMAKE_CXX_COMPILER OR CMAKE_CXX_COMPILER STREQUAL "")
       set(ROCM_PATH "/opt/rocm")
     endif()
   endif()
-  find_program(_hipcc hipcc HINTS ${ROCM_PATH} PATH_SUFFIXES bin NO_CMAKE_FIND_ROOT_PATH)
-  if(NOT _hipcc)
-    find_program(_hipcc hipcc)
+  find_program(_amdclangpp amdclang++ HINTS ${ROCM_PATH} PATH_SUFFIXES bin NO_CMAKE_FIND_ROOT_PATH)
+  if(NOT _amdclangpp)
+    find_program(_amdclangpp amdclang++)
   endif()
-  if(_hipcc)
-    set(CMAKE_CXX_COMPILER "${_hipcc}")
+  if(_amdclangpp)
+    set(CMAKE_CXX_COMPILER "${_amdclangpp}")
   else()
     message(FATAL_ERROR
-      "hipcc not found. Either:\n"
-      "  cmake -B build -DCMAKE_CXX_COMPILER=/path/to/hipcc\n"
-      "  cmake -B build -DROCM_PATH=/opt/rocm-6.x")
+      "amdclang++ not found. Either:\n"
+      "  cmake -B build -DCMAKE_CXX_COMPILER=/path/to/amdclang++\n"
+      "  cmake -B build -DROCM_PATH=/opt/rocm")
   endif()
 endif()
 
@@ -333,7 +333,7 @@ set(RCCL_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
 if(NOT EXISTS "${RCCL_HIPIFY_DIR}/src/graph/search.cc")
   message(FATAL_ERROR "Hipified sources not found at ${RCCL_HIPIFY_DIR}. Run the RCCL build first.")
 endif()
-message(STATUS "hipcc: ${CMAKE_CXX_COMPILER}")
+message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER}")
 message(STATUS "Hipified sources: ${RCCL_HIPIFY_DIR}")
 
 # --- Detect whether the system amdsmi.h exposes the UALoE fabric struct ---
