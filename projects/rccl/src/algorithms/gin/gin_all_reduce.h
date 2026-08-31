@@ -12,7 +12,7 @@
 #ifndef GIN_ALL_REDUCE_H_
 #define GIN_ALL_REDUCE_H_
 
-#include "algorithms/gin/gin_all_reduce_policy.h"
+#include "gin_all_reduce_policy.h"
 #include "nccl.h"
 #include "nccl_device.h"
 
