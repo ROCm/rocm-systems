@@ -352,6 +352,24 @@ class ConfigureCITest(unittest.TestCase):
         self.assertGreaterEqual(len(projects), 1)
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
 
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_rccl_ci_not_triggered_by_docs_only_change_pull_request(
+        self, mock_get_modified
+    ):
+        """PR with only skippable RCCL doc paths should skip both regular and RCCL CI."""
+        args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
+    
+        mock_get_modified.return_value = [
+            "projects/rccl/README.md",
+            "projects/rccl/docs/install/building-installing.rst",
+            "projects/rccl/.readthedocs.yaml",
+        ]
+    
+        outputs = therock_configure_ci.run(args)
+        projects = json.loads(outputs["projects"])
+        self.assertEqual(len(projects), 0)
+        self.assertEqual(outputs["run_linux_rccl_ci"], "false")
+
     def test_rccl_ci_triggered_nightly(self):
         """A nightly event should run both regular and RCCL CI."""
         args = {"is_nightly": True, "base_ref": "HEAD^", "platform": "linux"}
@@ -532,7 +550,7 @@ class ConfigureCITest(unittest.TestCase):
             "sanity", "hip-tests", "hipfile", "rocblas", "rocroller",
             "tensilelite", "origami", "hipblas", "amdsmi", "hipblaslt",
             "hipsolver", "rocsolver", "rocprim", "hipcub", "rocgdb-cpu",
-            "rocgdb-gpu", "rocr-debug-agent", "rocthrust", "hipsparse",
+            "rocgdb-gpu", "rocgdb-corefile", "rocr-debug-agent", "rocthrust", "hipsparse",
             "rocsparse", "hipsparselt", "rocrand", "hiprand", "rocfft",
             "hipfft", "miopen", "rccl", "rocshmem", "rocprofiler-sdk",
             "hipdnn", "hipdnn_install", "hipdnn-integration-tests",
