@@ -157,6 +157,8 @@ class ThunkLoader {
                                       HSAuint64 SizeInBytes);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtAvailableMemory))(HSAuint32 Node, \
                                       HSAuint64 *AvailableBytes);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetDefaultHostGpu))(HSAuint32 *NodeId, \
+                                      HSAuint32 *GpuId);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtRegisterMemory))(void* MemoryAddress, \
                                       HSAuint64 MemorySizeInBytes);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtRegisterMemoryToNodes))(void *MemoryAddress, \
@@ -506,6 +508,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtAllocMemoryAlign) * HSAKMT_PFN(hsaKmtAllocMemoryAlign) = nullptr;
     HSAKMT_DEF(hsaKmtFreeMemory) * HSAKMT_PFN(hsaKmtFreeMemory) = nullptr;
     HSAKMT_DEF(hsaKmtAvailableMemory) * HSAKMT_PFN(hsaKmtAvailableMemory) = nullptr;
+    HSAKMT_DEF(hsaKmtGetDefaultHostGpu) * HSAKMT_PFN(hsaKmtGetDefaultHostGpu) = nullptr;
     HSAKMT_DEF(hsaKmtRegisterMemory) * HSAKMT_PFN(hsaKmtRegisterMemory) = nullptr;
     HSAKMT_DEF(hsaKmtRegisterMemoryToNodes) * HSAKMT_PFN(hsaKmtRegisterMemoryToNodes) = nullptr;
     HSAKMT_DEF(hsaKmtRegisterMemoryWithFlags) * HSAKMT_PFN(hsaKmtRegisterMemoryWithFlags) = nullptr;

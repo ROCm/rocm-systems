@@ -14,7 +14,6 @@
 ///   - MtbufMachineInst    — same coherency field evolution
 ///   - FlatMachineInst     — same coherency field evolution
 ///   - FlatGlblMachineInst / FlatScratchMachineInst — same
-///   - Vop3pMachineInst    — CDNA4 renames `op_sel_hi_2` to `pad_14`
 ///   - Vop3pMfmaMachineInst — CDNA1 uses `pad_15`, CDNA2/3/4 use `acc_cd`
 ///   - ExpMachineInst      — only present on CDNA1/2 (GFX9 export path)
 ///   - MimgMachineInst     — only present on CDNA1/2; fields differ between them

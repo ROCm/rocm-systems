@@ -203,6 +203,8 @@ TEST(MfmaSimdExact, F32Spec_AllShapes) {
       fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
     });
   };
+  spec(amdgpu::exec_f32_mfma_f32_spec<16, 16, 8, 1>, "spec_f32_16x16x8");
+  spec(amdgpu::exec_f32_mfma_f32_spec<32, 32, 4, 1>, "spec_f32_32x32x4");
   spec(amdgpu::exec_f32_mfma_f32_spec<32, 32, 2, 1>, "spec_f32_32x32x2");
   spec(amdgpu::exec_f32_mfma_f32_spec<16, 16, 4, 1>, "spec_f32_16x16x4");
   spec(amdgpu::exec_f32_mfma_f32_spec<32, 32, 1, 2>, "spec_f32_32x32x1x2");
@@ -211,8 +213,9 @@ TEST(MfmaSimdExact, F32Spec_AllShapes) {
 
 TEST(MfmaSimdExact, F32SpecDestructiveSourceOverlap) {
   SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "test requires the 16-lane matrix fast path";
+  constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+  if (W <= 1 || 32 % W != 0)
+    GTEST_SKIP() << "test requires a supported native SIMD width";
   constexpr uint32_t source_b = 0;
   constexpr uint32_t destination_and_source_a = 64;
   constexpr uint32_t accumulator = 128;
@@ -321,9 +324,10 @@ TEST(MfmaSimdExact, F32Scaled) {
     run_case(label, fmt, Fmt::F32, [=](MfmaFixture &fx, uint32_t const_acc) {
       fx.seed_words(SCALE_A, 4, 0xA5);
       fx.seed_words(SCALE_B, 4, 0x5A);
-      amdgpu::exec_f32_scaled(*fx.cu, m, n, k, 1, 8, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1,
-                              fx.vbase + ACC, ex, ex, const_acc, 0, 0, 0, fx.vbase + SCALE_A,
-                              fx.vbase + SCALE_B);
+      amdgpu::exec_f32_scaled_mixed(*fx.cu, m, n, k, 1, 8, 8, fx.vbase + DST, fx.vbase + S0,
+                                    fx.vbase + S1, fx.vbase + ACC, ex, ex, const_acc, fx.vbase,
+                                    256u + SCALE_A, 256u + SCALE_B,
+                                    /*scale_a_byte=*/0, /*scale_b_byte=*/0);
     });
   };
   scaled("scaled_fp8_16x16x128", Fmt::FP8, 16, 16, 128, amdgpu::extract_fp8);

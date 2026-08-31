@@ -1015,6 +1015,8 @@ enum hipLimit_t {
 #define hipDeviceScheduleMask 0x7
 #define hipDeviceMapHost 0x8
 #define hipDeviceLmemResizeToMax 0x10
+/** Indicates that the deviceFlags passed to hipInitDevice() are valid and should be applied.*/
+#define hipInitDeviceFlagsAreValid 0x1
 /** Default HIP array allocation flag.*/
 #define hipArrayDefault 0x00
 #define hipArrayLayered 0x01
@@ -2678,6 +2680,30 @@ hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config);
  *
  */
 hipError_t hipSetDeviceFlags(unsigned flags);
+/**
+ * @brief Initialize the specified device to be used for GPU executions.
+ *
+ * @param [in] device       Ordinal of the device to initialize.
+ * @param [in] deviceFlags  Scheduling/context flags to apply to the device. Uses the same values
+ *                          as hipSetDeviceFlags (e.g. #hipDeviceScheduleSpin,
+ *                          #hipDeviceScheduleYield, #hipDeviceScheduleBlockingSync,
+ *                          #hipDeviceScheduleAuto). Only honored when @p flags is
+ *                          #hipInitDeviceFlagsAreValid.
+ * @param [in] flags        Must be either 0 or #hipInitDeviceFlagsAreValid. When
+ *                          #hipInitDeviceFlagsAreValid, @p deviceFlags are applied to the device;
+ *                          when 0, @p deviceFlags are ignored.
+ *
+ * Initializes the runtime state for the requested device. Unlike hipSetDevice, this API
+ * does NOT make the device current for the calling thread. On the ROCm platform the primary
+ * context of every device is created eagerly during runtime initialization, so this call mainly
+ * validates the device, applies the requested flags, and ensures the device's default stream is
+ * created.
+ *
+ * @returns #hipSuccess, #hipErrorNoDevice, #hipErrorInvalidDevice, #hipErrorInvalidValue
+ *
+ * @see hipSetDevice, hipSetDeviceFlags
+ */
+hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags);
 /**
  * @brief Device which matches hipDeviceProp_t is returned
  *

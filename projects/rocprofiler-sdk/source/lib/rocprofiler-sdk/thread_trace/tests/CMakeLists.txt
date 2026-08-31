@@ -16,6 +16,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             rocprofiler-sdk::rocprofiler-sdk-hip
             rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             GTest::gtest
             GTest::gtest_main
             rocprofiler-sdk::counter-test-constants)
