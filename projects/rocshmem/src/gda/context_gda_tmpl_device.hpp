@@ -1423,9 +1423,10 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
  ******************** TILE API RMA IMPLEMENTATIONS ****************************
  *****************************************************************************/
 
-// Multi-WQE requires every worker to post the same number of WQEs. When the
-// chunk count is smaller than the worker count, callers should use a
-// leader-sequential path instead.
+// Whether it is worth striping the chunks across workers. Below one chunk per
+// worker, callers fall back to a leader-sequential path rather than leave most
+// workers idle. Unequal per-worker chunk counts are safe either way: each
+// posting round is a collective over whichever lanes are still in the loop.
 __device__ __forceinline__ bool gda_tile_use_multi_wqe(size_t num_chunks,
                                                        int worker_count) {
   return worker_count > 1 &&
@@ -1450,22 +1451,29 @@ __device__ __forceinline__ void GDAContext::tile_finish_get(int pe, int qp_index
 }
 
 __device__ inline void GDAContext::tile_put_chunk_nbi(char *dst, const char *src,
-                                                     size_t bytes,
+                                                     size_t bytes, int pe,
                                                      int qp_index) {
+  /*
+   * Built here rather than by the caller: in a striped loop the set of lanes
+   * still posting shrinks on the final round, and the group must match the
+   * execution mask at the point the WQEs are written.
+   */
+  ActiveWFInfo wf_info(pe);
   auto [dst_raddr, dst_rkey] = qps[qp_index].get_raddr_info(dst);
   uint32_t src_lkey =
       (static_cast<int32_t>(bytes) <=
        static_cast<int32_t>(qps[qp_index].inline_threshold))
           ? 0
           : qps[qp_index].get_lkey(reinterpret_cast<uintptr_t>(src));
-  qps[qp_index].put_nbi_single(reinterpret_cast<void *>(dst_raddr), dst_rkey,
-                               src, src_lkey, bytes, true);
+  qps[qp_index].put_nbi(reinterpret_cast<void *>(dst_raddr), dst_rkey,
+                        src, src_lkey, bytes, wf_info, true);
 }
 
 __device__ inline void GDAContext::tile_get_chunk_nbi(char *dst, const char *src,
-                                                     size_t bytes,
+                                                     size_t bytes, int pe,
                                                      int qp_index) {
-  qps[qp_index].get_nbi_single(dst, src, bytes, true);
+  ActiveWFInfo wf_info(pe);
+  qps[qp_index].get_nbi(dst, src, bytes, wf_info);
 }
 
 __device__ inline int GDAContext::tile_qp_index_for_worker(int pe, int worker_id,
@@ -1508,12 +1516,12 @@ __device__ inline void GDAContext::tile_quiet_gda_workers(int pe, int worker_id,
 }
 
 __device__ inline void GDAContext::tile_put_contig_slices_nbi(
-    char *dst, const char *src, size_t bytes, int qp_index, int worker_id,
-    int worker_count) {
+    char *dst, const char *src, size_t bytes, int pe, int qp_index,
+    int worker_id, int worker_count) {
   constexpr size_t kMinSlice = 64;
   if (worker_count == 1 || bytes < kMinSlice * static_cast<size_t>(worker_count)) {
     if (worker_id == 0 && bytes != 0) {
-      tile_put_chunk_nbi(dst, src, bytes, qp_index);
+      tile_put_chunk_nbi(dst, src, bytes, pe, qp_index);
     }
     return;
   }
@@ -1523,17 +1531,17 @@ __device__ inline void GDAContext::tile_put_contig_slices_nbi(
   const size_t len =
       (worker_id == worker_count - 1) ? (bytes - start) : chunk;
   if (len != 0) {
-    tile_put_chunk_nbi(dst + start, src + start, len, qp_index);
+    tile_put_chunk_nbi(dst + start, src + start, len, pe, qp_index);
   }
 }
 
 __device__ inline void GDAContext::tile_get_contig_slices_nbi(
-    char *dst, const char *src, size_t bytes, int qp_index, int worker_id,
-    int worker_count) {
+    char *dst, const char *src, size_t bytes, int pe, int qp_index,
+    int worker_id, int worker_count) {
   constexpr size_t kMinSlice = 64;
   if (worker_count == 1 || bytes < kMinSlice * static_cast<size_t>(worker_count)) {
     if (worker_id == 0 && bytes != 0) {
-      tile_get_chunk_nbi(dst, src, bytes, qp_index);
+      tile_get_chunk_nbi(dst, src, bytes, pe, qp_index);
     }
     return;
   }
@@ -1543,62 +1551,63 @@ __device__ inline void GDAContext::tile_get_contig_slices_nbi(
   const size_t len =
       (worker_id == worker_count - 1) ? (bytes - start) : chunk;
   if (len != 0) {
-    tile_get_chunk_nbi(dst + start, src + start, len, qp_index);
+    tile_get_chunk_nbi(dst + start, src + start, len, pe, qp_index);
   }
 }
 
 __device__ inline void GDAContext::tile_put_rows_nbi(
     char *dst_base, const char *src_base, size_t dst_row_stride_bytes,
     size_t src_row_stride_bytes, size_t num_rows, size_t row_bytes,
-    int qp_index, int worker_id, int worker_count,
-    [[maybe_unused]] ActiveWFInfo &wf_info) {
+    int pe, int qp_index, int worker_id, int worker_count) {
   for (size_t i = static_cast<size_t>(worker_id); i < num_rows;
        i += static_cast<size_t>(worker_count)) {
     tile_put_chunk_nbi(dst_base + i * dst_row_stride_bytes,
-                       src_base + i * src_row_stride_bytes, row_bytes, qp_index);
+                       src_base + i * src_row_stride_bytes, row_bytes, pe,
+                       qp_index);
   }
 }
 
 __device__ inline void GDAContext::tile_put_cols_nbi(
     char *dst_base, const char *src_base, size_t dst_col_stride_bytes,
     size_t src_col_stride_bytes, size_t num_cols, size_t col_bytes,
-    int qp_index, int worker_id, int worker_count,
-    [[maybe_unused]] ActiveWFInfo &wf_info) {
+    int pe, int qp_index, int worker_id, int worker_count) {
   for (size_t j = static_cast<size_t>(worker_id); j < num_cols;
        j += static_cast<size_t>(worker_count)) {
     tile_put_chunk_nbi(dst_base + j * dst_col_stride_bytes,
-                       src_base + j * src_col_stride_bytes, col_bytes, qp_index);
+                       src_base + j * src_col_stride_bytes, col_bytes, pe,
+                       qp_index);
   }
 }
 
 __device__ inline void GDAContext::tile_get_rows_nbi(
     char *dst_base, const char *src_base, size_t dst_row_stride_bytes,
     size_t src_row_stride_bytes, size_t num_rows, size_t row_bytes,
-    int qp_index, int worker_id, int worker_count,
-    [[maybe_unused]] ActiveWFInfo &wf_info) {
+    int pe, int qp_index, int worker_id, int worker_count) {
   for (size_t i = static_cast<size_t>(worker_id); i < num_rows;
        i += static_cast<size_t>(worker_count)) {
     tile_get_chunk_nbi(dst_base + i * dst_row_stride_bytes,
-                       src_base + i * src_row_stride_bytes, row_bytes, qp_index);
+                       src_base + i * src_row_stride_bytes, row_bytes, pe,
+                       qp_index);
   }
 }
 
 __device__ inline void GDAContext::tile_get_cols_nbi(
     char *dst_base, const char *src_base, size_t dst_col_stride_bytes,
     size_t src_col_stride_bytes, size_t num_cols, size_t col_bytes,
-    int qp_index, int worker_id, int worker_count,
-    [[maybe_unused]] ActiveWFInfo &wf_info) {
+    int pe, int qp_index, int worker_id, int worker_count) {
   for (size_t j = static_cast<size_t>(worker_id); j < num_cols;
        j += static_cast<size_t>(worker_count)) {
     tile_get_chunk_nbi(dst_base + j * dst_col_stride_bytes,
-                       src_base + j * src_col_stride_bytes, col_bytes, qp_index);
+                       src_base + j * src_col_stride_bytes, col_bytes, pe,
+                       qp_index);
   }
 }
 
 __device__ inline void GDAContext::tile_put_strided_2d_nbi(
     char *dst_base, const char *src_base, size_t dst_s0, size_t dst_s1,
     size_t src_s0, size_t src_s1, size_t extent0, size_t extent1,
-    size_t element_size, int qp_index, int worker_id, int worker_count) {
+    size_t element_size, int pe, int qp_index, int worker_id,
+    int worker_count) {
   const size_t n = extent0 * extent1;
   for (size_t idx = static_cast<size_t>(worker_id); idx < n;
        idx += static_cast<size_t>(worker_count)) {
@@ -1606,14 +1615,15 @@ __device__ inline void GDAContext::tile_put_strided_2d_nbi(
     const size_t j = idx % extent1;
     tile_put_chunk_nbi(dst_base + (i * dst_s0 + j * dst_s1) * element_size,
                        src_base + (i * src_s0 + j * src_s1) * element_size,
-                       element_size, qp_index);
+                       element_size, pe, qp_index);
   }
 }
 
 __device__ inline void GDAContext::tile_get_strided_2d_nbi(
     char *dst_base, const char *src_base, size_t dst_s0, size_t dst_s1,
     size_t src_s0, size_t src_s1, size_t extent0, size_t extent1,
-    size_t element_size, int qp_index, int worker_id, int worker_count) {
+    size_t element_size, int pe, int qp_index, int worker_id,
+    int worker_count) {
   const size_t n = extent0 * extent1;
   for (size_t idx = static_cast<size_t>(worker_id); idx < n;
        idx += static_cast<size_t>(worker_count)) {
@@ -1621,7 +1631,7 @@ __device__ inline void GDAContext::tile_get_strided_2d_nbi(
     const size_t j = idx % extent1;
     tile_get_chunk_nbi(dst_base + (i * dst_s0 + j * dst_s1) * element_size,
                        src_base + (i * src_s0 + j * src_s1) * element_size,
-                       element_size, qp_index);
+                       element_size, pe, qp_index);
   }
 }
 
@@ -1630,7 +1640,6 @@ __device__ inline void GDAContext::tile_put_gda_workers(
     const size_t *src_strides, const size_t *start_coord,
     const size_t *boundary, int ndim, size_t element_size, int pe,
     int worker_id, int worker_count) {
-  ActiveWFInfo unused(pe);
   const int qp_index = tile_qp_index_for_worker(pe, worker_id, worker_count);
 
   if (ndim == 2) {
@@ -1650,19 +1659,19 @@ __device__ inline void GDAContext::tile_put_gda_workers(
     switch (layout) {
       case TileLayout::Contiguous:
         tile_put_contig_slices_nbi(dst_base, src_base, ext0 * ext1 * element_size,
-                                   qp_index, worker_id, worker_count);
+                                   pe, qp_index, worker_id, worker_count);
         break;
       case TileLayout::RowContig: {
         const size_t row_bytes = ext1 * element_size;
         if (gda_tile_use_multi_wqe(ext0, worker_count)) {
           tile_put_rows_nbi(dst_base, src_base, dst_s0 * element_size,
-                            src_s0 * element_size, ext0, row_bytes, qp_index,
-                            worker_id, worker_count, unused);
+                            src_s0 * element_size, ext0, row_bytes, pe,
+                            qp_index, worker_id, worker_count);
         } else if (worker_id == 0) {
           for (size_t i = 0; i < ext0; i++) {
             tile_put_chunk_nbi(dst_base + i * dst_s0 * element_size,
                                src_base + i * src_s0 * element_size, row_bytes,
-                               qp_index);
+                               pe, qp_index);
           }
         }
         break;
@@ -1671,13 +1680,13 @@ __device__ inline void GDAContext::tile_put_gda_workers(
         const size_t col_bytes = ext0 * element_size;
         if (gda_tile_use_multi_wqe(ext1, worker_count)) {
           tile_put_cols_nbi(dst_base, src_base, dst_s1 * element_size,
-                            src_s1 * element_size, ext1, col_bytes, qp_index,
-                            worker_id, worker_count, unused);
+                            src_s1 * element_size, ext1, col_bytes, pe,
+                            qp_index, worker_id, worker_count);
         } else if (worker_id == 0) {
           for (size_t j = 0; j < ext1; j++) {
             tile_put_chunk_nbi(dst_base + j * dst_s1 * element_size,
                                src_base + j * src_s1 * element_size, col_bytes,
-                               qp_index);
+                               pe, qp_index);
           }
         }
         break;
@@ -1687,12 +1696,12 @@ __device__ inline void GDAContext::tile_put_gda_workers(
         const size_t n = ext0 * ext1;
         if (gda_tile_use_multi_wqe(n, worker_count)) {
           tile_put_strided_2d_nbi(dst_base, src_base, dst_s0, dst_s1, src_s0,
-                                  src_s1, ext0, ext1, element_size, qp_index,
-                                  worker_id, worker_count);
+                                  src_s1, ext0, ext1, element_size, pe,
+                                  qp_index, worker_id, worker_count);
         } else if (worker_id == 0) {
           tile_put_strided_2d_nbi(dst_base, src_base, dst_s0, dst_s1, src_s0,
-                                  src_s1, ext0, ext1, element_size, qp_index, 0,
-                                  1);
+                                  src_s1, ext0, ext1, element_size, pe,
+                                  qp_index, 0, 1);
         }
         break;
       }
@@ -1705,16 +1714,16 @@ __device__ inline void GDAContext::tile_put_gda_workers(
     char *src_ptr = view.src_base;
     char *dst_ptr = view.dst_base;
     if (view.src_s0 == 1 && view.dst_s0 == 1) {
-      tile_put_contig_slices_nbi(dst_ptr, src_ptr, ext * element_size, qp_index,
-                                 worker_id, worker_count);
+      tile_put_contig_slices_nbi(dst_ptr, src_ptr, ext * element_size, pe,
+                                 qp_index, worker_id, worker_count);
     } else if (gda_tile_use_multi_wqe(ext, worker_count)) {
       tile_put_rows_nbi(dst_ptr, src_ptr, view.dst_s0 * element_size,
                         view.src_s0 * element_size, ext, element_size,
-                        qp_index, worker_id, worker_count, unused);
+                        pe, qp_index, worker_id, worker_count);
     } else if (worker_id == 0) {
       tile_put_rows_nbi(dst_ptr, src_ptr, view.dst_s0 * element_size,
                         view.src_s0 * element_size, ext, element_size,
-                        qp_index, 0, 1, unused);
+                        pe, qp_index, 0, 1);
     }
   }
 
@@ -1726,7 +1735,6 @@ __device__ inline void GDAContext::tile_get_gda_workers(
     const size_t *src_strides, const size_t *start_coord,
     const size_t *boundary, int ndim, size_t element_size, int pe,
     int worker_id, int worker_count) {
-  ActiveWFInfo unused(pe);
   const int qp_index = tile_qp_index_for_worker(pe, worker_id, worker_count);
 
   if (ndim == 2) {
@@ -1746,19 +1754,19 @@ __device__ inline void GDAContext::tile_get_gda_workers(
     switch (layout) {
       case TileLayout::Contiguous:
         tile_get_contig_slices_nbi(dst_base, src_base, ext0 * ext1 * element_size,
-                                   qp_index, worker_id, worker_count);
+                                   pe, qp_index, worker_id, worker_count);
         break;
       case TileLayout::RowContig: {
         const size_t row_bytes = ext1 * element_size;
         if (gda_tile_use_multi_wqe(ext0, worker_count)) {
           tile_get_rows_nbi(dst_base, src_base, dst_s0 * element_size,
-                            src_s0 * element_size, ext0, row_bytes, qp_index,
-                            worker_id, worker_count, unused);
+                            src_s0 * element_size, ext0, row_bytes, pe,
+                            qp_index, worker_id, worker_count);
         } else if (worker_id == 0) {
           for (size_t i = 0; i < ext0; i++) {
             tile_get_chunk_nbi(dst_base + i * dst_s0 * element_size,
                                src_base + i * src_s0 * element_size, row_bytes,
-                               qp_index);
+                               pe, qp_index);
           }
         }
         break;
@@ -1767,13 +1775,13 @@ __device__ inline void GDAContext::tile_get_gda_workers(
         const size_t col_bytes = ext0 * element_size;
         if (gda_tile_use_multi_wqe(ext1, worker_count)) {
           tile_get_cols_nbi(dst_base, src_base, dst_s1 * element_size,
-                            src_s1 * element_size, ext1, col_bytes, qp_index,
-                            worker_id, worker_count, unused);
+                            src_s1 * element_size, ext1, col_bytes, pe,
+                            qp_index, worker_id, worker_count);
         } else if (worker_id == 0) {
           for (size_t j = 0; j < ext1; j++) {
             tile_get_chunk_nbi(dst_base + j * dst_s1 * element_size,
                                src_base + j * src_s1 * element_size, col_bytes,
-                               qp_index);
+                               pe, qp_index);
           }
         }
         break;
@@ -1783,12 +1791,12 @@ __device__ inline void GDAContext::tile_get_gda_workers(
         const size_t n = ext0 * ext1;
         if (gda_tile_use_multi_wqe(n, worker_count)) {
           tile_get_strided_2d_nbi(dst_base, src_base, dst_s0, dst_s1, src_s0,
-                                  src_s1, ext0, ext1, element_size, qp_index,
-                                  worker_id, worker_count);
+                                  src_s1, ext0, ext1, element_size, pe,
+                                  qp_index, worker_id, worker_count);
         } else if (worker_id == 0) {
           tile_get_strided_2d_nbi(dst_base, src_base, dst_s0, dst_s1, src_s0,
-                                  src_s1, ext0, ext1, element_size, qp_index, 0,
-                                  1);
+                                  src_s1, ext0, ext1, element_size, pe,
+                                  qp_index, 0, 1);
         }
         break;
       }
@@ -1801,16 +1809,16 @@ __device__ inline void GDAContext::tile_get_gda_workers(
     char *src_ptr = view.src_base;
     char *dst_ptr = view.dst_base;
     if (view.src_s0 == 1 && view.dst_s0 == 1) {
-      tile_get_contig_slices_nbi(dst_ptr, src_ptr, ext * element_size, qp_index,
-                                 worker_id, worker_count);
+      tile_get_contig_slices_nbi(dst_ptr, src_ptr, ext * element_size, pe,
+                                 qp_index, worker_id, worker_count);
     } else if (gda_tile_use_multi_wqe(ext, worker_count)) {
       tile_get_rows_nbi(dst_ptr, src_ptr, view.dst_s0 * element_size,
                         view.src_s0 * element_size, ext, element_size,
-                        qp_index, worker_id, worker_count, unused);
+                        pe, qp_index, worker_id, worker_count);
     } else if (worker_id == 0) {
       tile_get_rows_nbi(dst_ptr, src_ptr, view.dst_s0 * element_size,
                         view.src_s0 * element_size, ext, element_size,
-                        qp_index, 0, 1, unused);
+                        pe, qp_index, 0, 1);
     }
   }
 
@@ -2382,8 +2390,8 @@ __device__ inline int GDAContext::tile_reduce_typed_impl(
 
   if (src_contiguous && my_pe_in_team != root) {
     tile_put_contig_slices_nbi(reinterpret_cast<char *>(my_pWrk), src_base,
-                               segment_bytes, qp_index, worker_id,
-                               worker_count);
+                               segment_bytes, root_pe_world, qp_index,
+                               worker_id, worker_count);
     tile_quiet_gda_workers(root_pe_world, worker_id, worker_count, qp_index);
   } else if (src_contiguous && my_pe_in_team == root) {
     const T *src_typed = reinterpret_cast<const T *>(src_base);
@@ -2412,8 +2420,8 @@ __device__ inline int GDAContext::tile_reduce_typed_impl(
       }
       tile_put_contig_slices_nbi(reinterpret_cast<char *>(my_pWrk),
                                  reinterpret_cast<const char *>(my_pWrk),
-                                 segment_bytes, qp_index, worker_id,
-                                 worker_count);
+                                 segment_bytes, root_pe_world, qp_index,
+                                 worker_id, worker_count);
       tile_quiet_gda_workers(root_pe_world, worker_id, worker_count, qp_index);
     }
   }
