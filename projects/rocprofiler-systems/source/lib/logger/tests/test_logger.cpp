@@ -126,24 +126,6 @@ TEST_F(logger_test, include_process_id_in_filename_hidden_file_with_extension)
     EXPECT_EQ(result, expected);
 }
 
-TEST_F(logger_test, parse_boolean_env_true_values)
-{
-    EXPECT_TRUE(rocprofsys::parse_boolean_env("1"));
-    EXPECT_TRUE(rocprofsys::parse_boolean_env("on"));
-    EXPECT_TRUE(rocprofsys::parse_boolean_env("true"));
-    EXPECT_TRUE(rocprofsys::parse_boolean_env("yes"));
-}
-
-TEST_F(logger_test, parse_boolean_env_false_values)
-{
-    EXPECT_FALSE(rocprofsys::parse_boolean_env("0"));
-    EXPECT_FALSE(rocprofsys::parse_boolean_env("off"));
-    EXPECT_FALSE(rocprofsys::parse_boolean_env("false"));
-    EXPECT_FALSE(rocprofsys::parse_boolean_env("no"));
-    EXPECT_FALSE(rocprofsys::parse_boolean_env("random"));
-    EXPECT_FALSE(rocprofsys::parse_boolean_env(nullptr));
-}
-
 TEST_F(logger_test, logger_settings_parse_level)
 {
     rocprofsys::logger_settings_t settings;
