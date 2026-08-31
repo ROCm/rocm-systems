@@ -57,7 +57,7 @@ jobs:
   # commit it resolves below is checked out from the same pool perf and
   # coverage will run on, then hands that commit to both.
   setup:
-    name: Ruby Setup 
+    name: Ruby Setup
     runs-on: ruby-linux-slurm-scale-runner
     outputs:
       coco_ref: ${{ steps.resolve.outputs.coco_ref }}
@@ -79,7 +79,7 @@ jobs:
         with:
           ref: ${{ inputs.coco_ref || 'main' }}
           path: _coco
-          app-id: ${{ secrets.APP_ID }}
+          client-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - name: Resolve run parameters
@@ -168,27 +168,23 @@ jobs:
       concurrency_group: rccl-coco-nightly-coverage
 
   ruby-unit:
-        name: 'Coverage (ruby64-rccl-unit-nightly)'
-        needs: setup
-        uses: ./.github/workflows/rccl-coco-run.yml
-        permissions:
-          contents: read
-        secrets:
-          APP_ID: ${{ secrets.APP_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
-          RCCL_COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
-        with:
-          job: ruby64-rccl-unit-nightly
-          runs_on: ruby-linux-slurm-scale-runner
-          coco_ref: ${{ needs.setup.outputs.coco_ref }}
-          trigger_kind: ${{ needs.setup.outputs.trigger_kind }}
-          coco_args: ${{ needs.setup.outputs.coco_args }}
-          # Many unit-test lanes on an instrumented build; instrumented gtest is
-          # substantially slower than release, so this also expects an upward-of-
-          # six-hour run. Same margin as perf; tune down once real times are in
-          # hand.
-          timeout_minutes: 720
-          concurrency_group: rccl-coco-nightly-coverage
+    name: 'Unit (ruby64-rccl-unit-nightly)'
+    needs: setup
+    uses: ./.github/workflows/rccl-coco-run.yml
+    permissions:
+      contents: read
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+      RCCL_COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
+    with:
+      job: ruby64-rccl-unit-nightly
+      runs_on: ruby-linux-slurm-scale-runner
+      coco_ref: ${{ needs.setup.outputs.coco_ref }}
+      trigger_kind: ${{ needs.setup.outputs.trigger_kind }}
+      coco_args: ${{ needs.setup.outputs.coco_args }}
+      timeout_minutes: 720
+      concurrency_group: rccl-coco-nightly-unit
 
   oci-setup:
     name: OCI Setup
@@ -208,7 +204,7 @@ jobs:
         with:
           ref: ${{ inputs.coco_ref || 'main' }}
           path: _coco
-          app-id: ${{ secrets.APP_ID }}
+          client-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - name: Resolve run parameters
@@ -272,20 +268,20 @@ jobs:
       concurrency_group: rccl-coco-nightly-oci-unit
 
   oci-nixl:
-        name: 'Unit (oci-nixl-nightly)'
-        needs: oci-setup
-        uses: ./.github/workflows/rccl-coco-run.yml
-        permissions:
-          contents: read
-        secrets:
-          APP_ID: ${{ secrets.APP_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
-          RCCL_COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
-        with:
-          job: oci-nixl-nightly
-          runs_on: oci-linux-slurm-scale-runner
-          coco_ref: ${{ needs.oci-setup.outputs.coco_ref }}
-          trigger_kind: ${{ needs.oci-setup.outputs.trigger_kind }}
-          coco_args: ${{ needs.oci-setup.outputs.coco_args }}
-          timeout_minutes: 120
-          concurrency_group: rccl-coco-nightly-oci-unit
+    name: 'NIXL (oci-nixl-nightly)'
+    needs: oci-setup
+    uses: ./.github/workflows/rccl-coco-run.yml
+    permissions:
+      contents: read
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+      RCCL_COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
+    with:
+      job: oci-nixl-nightly
+      runs_on: oci-linux-slurm-scale-runner
+      coco_ref: ${{ needs.oci-setup.outputs.coco_ref }}
+      trigger_kind: ${{ needs.oci-setup.outputs.trigger_kind }}
+      coco_args: ${{ needs.oci-setup.outputs.coco_args }}
+      timeout_minutes: 120
+      concurrency_group: rccl-coco-nightly-oci-nixl
