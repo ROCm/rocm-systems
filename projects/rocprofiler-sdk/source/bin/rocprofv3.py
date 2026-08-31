@@ -1404,38 +1404,6 @@ def has_set_attr(obj, key):
         return False
 
 
-def conflicting_input_settings(inp_args, ignore=()):
-    """Settings that would be lost by collapsing several input-file jobs down to the first one.
-
-    An input file holds a list of jobs, one per pass. Kernel replay merges them into a single
-    run, so only the first job's settings survive. A setting is reported when a later job sets
-    it to something the first job does not already say -- either a different value, or a value
-    the first job never set at all. Settings named in `ignore` are merged separately by the
-    caller and are not reported.
-
-    Returns the sorted names of the clashing settings; an empty list means collapsing is
-    lossless.
-    """
-    if not inp_args:
-        return []
-
-    ignored = set(ignore)
-    first = inp_args[0]
-    conflicts = set()
-
-    for later in inp_args[1:]:
-        if not later:
-            continue
-        for key in later.keys():
-            if key in ignored or not has_set_attr(later, key):
-                continue
-            base = getattr(first, key) if has_set_attr(first, key) else None
-            if getattr(later, key) != base:
-                conflicts.add(key)
-
-    return sorted(conflicts)
-
-
 def services_conflicting_with_kernel_replay(args, environ=None):
     """Services that kernel replay cannot collect correctly in the same run.
 
@@ -2590,62 +2558,28 @@ def main(argv=None):
     # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
     cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
     input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
-    input_has_pmc_any = any(has_set_attr(inp, "pmc") for inp in inp_args)
-    has_pmc_groups = getattr(cmd_args, "pmc_groups", None) is not None
+    # pmc_groups only ever arrives from an input file, so look for it there rather than on
+    # cmd_args, where it is never set.
+    input_has_counters = any(
+        has_set_attr(inp, "pmc") or has_set_attr(inp, "pmc_groups") for inp in inp_args
+    )
 
-    if getattr(cmd_args, "kernel_replay_beta_enabled", None):
-        if not (cli_has_pmc or input_has_pmc_any or has_pmc_groups):
-            fatal_error(
-                "--kernel-replay-beta-enabled requires counter collection "
-                "(--pmc, input-file pmc, or pmc_groups)"
-            )
+    replay_enabled = bool(getattr(cmd_args, "kernel_replay_beta_enabled", None))
+    if replay_enabled and not (cli_has_pmc or input_has_counters):
+        fatal_error(
+            "--kernel-replay-beta-enabled requires counter collection "
+            "(--pmc, input-file pmc, or pmc_groups)"
+        )
 
-    # Kernel replay collects all counter groups within a SINGLE application run (the SDK replays
-    # each dispatch once per group), so it must not use the per-group child-process relaunch. Merge
-    # every counter group (from CLI --pmc and/or input-file pmc lines) into cmd_args.pmc as a
-    # list-of-lists; process_args then emits ROCPROF_COUNTER_GROUPS and the app runs once.
-    if getattr(cmd_args, "kernel_replay_beta_enabled", None):
-        replay_groups = []
-        if cli_has_pmc:
-            for g in cmd_args.pmc:
-                replay_groups.append(g if isinstance(g, list) else [g])
-        for inp_arg in inp_args:
-            if has_set_attr(inp_arg, "pmc"):
-                pmc = inp_arg.pmc
-                replay_groups.append(pmc if isinstance(pmc, list) else [pmc])
-        if has_pmc_groups:
-            for row in cmd_args.pmc_groups:
-                replay_groups.append(row if isinstance(row, list) else list(row))
-        if not replay_groups:
-            fatal_error(
-                "--kernel-replay-beta-enabled requires at least one counter group "
-                "(--pmc, input-file pmc, or pmc_groups)"
-            )
-        cmd_args.pmc = replay_groups
-        cmd_args.pmc_groups = None
-        # The pmc lines from every input-file job were merged into replay_groups above, but only
-        # one job can supply the remaining settings, because kernel replay produces a single
-        # application run. Keeping the first job and discarding the rest would silently drop their
-        # output configuration, kernel filters and ranges. Collapsing is lossless only when the
-        # jobs agree on everything outside pmc; when they disagree there is no single run that
-        # satisfies all of them, so name the settings that clash instead of quietly picking one.
-        if inp_args:
-            conflicts = conflicting_input_settings(inp_args, ignore=("pmc",))
-            if conflicts:
-                fatal_error(
-                    "--kernel-replay-beta-enabled replays each dispatch within a single "
-                    "application run, so it cannot honor {} input-file jobs that disagree. "
-                    "These settings differ between them: {}. Give every job the same settings "
-                    "and vary only pmc, or drop --kernel-replay-beta-enabled to run each job "
-                    "as its own pass.".format(len(inp_args), ", ".join(conflicts))
-                )
-            inp_args = inp_args[:1]
-        else:
-            inp_args = [dotdict({})]
-        if has_set_attr(inp_args[0], "pmc"):
-            inp_args[0].pmc = None
-        cli_has_pmc = cmd_args.pmc is not None
-        input_has_pmc = False
+    # Kernel replay replays each dispatch once per counter group within one application run, so
+    # the groups given on the command line are passes of a single run rather than the per-group
+    # child-process relaunch application replay uses. Normalize them to the list-of-lists shape
+    # process_args turns into ROCPROF_COUNTER_GROUPS. Input-file jobs are left alone: a job is a
+    # unit of configuration in its own right, so each one still runs as its own job with its own
+    # output configuration, kernel filters and ranges, and replay applies to the groups that job
+    # asks for.
+    if replay_enabled and cli_has_pmc:
+        cmd_args.pmc = [g if isinstance(g, list) else [g] for g in cmd_args.pmc]
         cli_multipass = False
 
     use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
@@ -2752,6 +2686,10 @@ def main(argv=None):
             # Normalize: action="append" creates [['GRBM_COUNT']] for single --pmc
             if len(cli_pmc_groups) == 1 and isinstance(cli_pmc_groups[0], list):
                 all_pass_configs.append({"pmc": cli_pmc_groups[0], "from_cli": True})
+            elif replay_enabled:
+                # Replay covers every command-line group inside one run, so they are one config
+                # here rather than one per group.
+                all_pass_configs.append({"pmc": cli_pmc_groups, "from_cli": True})
             else:
                 # Multiple --pmc flags: already a list of lists
                 for pmc_group in cli_pmc_groups:

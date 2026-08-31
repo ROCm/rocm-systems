@@ -26,10 +26,10 @@ rocprofiler_configure_pytest_files(
                            test_kernel_replay_cli.py)
 
 # Unit test for the rocprofv3 kernel-replay CLI logic. Imports rocprofv3.py directly, so
-# it needs no GPU, no application run and no fixtures -- it guards the input-file
-# collapse, where every job's counter groups are merged but only one job's remaining
-# settings can survive. Run as a plain script rather than under pytest because conftest.py
-# in this directory requires the integration-test arguments (--json-input, --passes).
+# it needs no GPU, no application run and no fixtures -- it guards which services replay
+# rejects and how counter groups and input-file jobs turn into application runs. Run as a
+# plain script rather than under pytest because conftest.py in this directory requires the
+# integration-test arguments (--json-input, --passes).
 add_test(
     NAME rocprofv3-test-kernel-replay-cli-unit
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_kernel_replay_cli.py
