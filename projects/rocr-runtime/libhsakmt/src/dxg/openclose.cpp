@@ -746,7 +746,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) {
   std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
 
   if (dxg_runtime->dxg_open_count > 0) {
-    if (--dxg_runtime->dxg_open_count == 0) {
+    /* Recognize the last reference without consuming it yet. The teardown below
+     * releases GPU memory through hsaKmtFreeMemoryInternal(), whose
+     * CHECK_DXG_OPEN() rejects every call once the count reads zero. Decrementing
+     * first would therefore make each of those frees fail and leak the very
+     * allocations the teardown runs to release, so the decrement follows it.
+     */
+    if (dxg_runtime->dxg_open_count == 1) {
       /* Before DXCore goes, and so before the WDDMDevice objects a snapshot
        * names become pointers into a dead session.
        */
@@ -760,6 +766,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) {
       wsl::thunk::dxcore::DxcoreLoader::Instance().Shutdown();
     }
 
+    --dxg_runtime->dxg_open_count;
     result = HSAKMT_STATUS_SUCCESS;
   } else
     result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
