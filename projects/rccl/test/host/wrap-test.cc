@@ -984,6 +984,140 @@ TEST(WrapMicrotestIsolated, UpdateThreadThreshold_ThirdEnvProbeAloneOverrides) {
 }
 
 // ===========================================================================
+// rcclSetPipelining -- rccl_wrap.cc:358-387. Gated on RCCL_PARAM
+// disableReduceCopyPipelining and PipelineAllDTypes, both already routed
+// through g_loadParam by this file's own RCCL_PARAM redirect above -- no new
+// seam needed. No caching, no isolation needed.
+// ===========================================================================
+
+TEST(WrapMicrotest, SetPipelining_ParamDisabledLeavesPipelineOff) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) {
+    return std::strcmp(env, "RCCL_DISABLE_REDUCE_COPY_PIPELINING") == 0 ? int64_t(1) : deft;
+  });
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(0, info.pipeline); // would be 1 without the disable check short-circuiting first
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx950ArchLeavesPipelineOffRegardlessOfParam) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(0, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942Bf16AllReduceSingleNodeSetsPipeline) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(1, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942Bf16AllReduceMultiNodeAtLimitSetsPipeline) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 2; // log2i(2) == 1, so the bf16 limit equation gives exactly 512MB
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/(1ULL << 29), &info);
+  EXPECT_EQ(1, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942Bf16AllReduceMultiNodeAboveLimitLeavesPipelineOff) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 2; // same 512MB limit as above, one byte past it
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/(1ULL << 29) + 1, &info);
+  EXPECT_EQ(0, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942Bf16ReduceScatterSetsPipelineRegardlessOfSize) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 4; // arbitrary >1: no size gate applies to this func, unlike AllReduce
+  ncclTaskColl info{};
+  info.func = ncclFuncReduceScatter;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/(1ULL << 40), &info); // deliberately huge
+  EXPECT_EQ(1, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942Bf16ReduceSetsPipeline) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncReduce;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(1, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942Bf16OtherFuncDefaultArmLeavesPipelineOff) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllGather; // not AllReduce/ReduceScatter/Reduce -- falls to switch's default: arm
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(0, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942NonBf16WithoutOverrideLeavesPipelineOff) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclFloat32; // not bf16; PipelineAllDTypes defaults to 0, so dtypeOK is false
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(0, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942NonBf16WithAllDTypesOverrideSetsPipeline) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) {
+    return std::strcmp(env, "RCCL_PIPELINE_ALL_DATA_TYPES") == 0 ? int64_t(1) : deft;
+  });
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclFloat32; // not bf16, but the override makes dtypeOK true anyway
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(1, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_NonGfx942ArchLeavesPipelineOff) {
+  ncclComm* comm = MakeCommWithArch("gfx90a"); // not gfx942, not gfx950
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(0, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+// ===========================================================================
 // rcclOverrideProtocol / rcclOverrideAlgorithm -- rccl_wrap.cc:279-331. Both
 // cache their env var and its parsed table index in function-local statics;
 // isolated per case. rcclOverrideAlgorithm is structurally identical (same
