@@ -346,6 +346,32 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
                                                    ", Expect " +
                                                    std::to_string(n_pes));
           }));
+      testers.push_back(new TeamReductionTester<__half, ROCSHMEM_SUM>(
+          args,
+          [](__half& f1, __half& f2) {
+            f1 = static_cast<__half>(1);
+            f2 = static_cast<__half>(1);
+          },
+          [](__half v, __half n_pes) {
+            return (static_cast<float>(v) == static_cast<float>(n_pes))
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false,
+                             "Got " + std::to_string(static_cast<float>(v)) +
+                             ", Expect " + std::to_string(static_cast<float>(n_pes)));
+          }));
+      testers.push_back(new TeamReductionTester<__hip_bfloat16, ROCSHMEM_SUM>(
+          args,
+          [](__hip_bfloat16& f1, __hip_bfloat16& f2) {
+            f1 = static_cast<__hip_bfloat16>(1);
+            f2 = static_cast<__hip_bfloat16>(1);
+          },
+          [](__hip_bfloat16 v, __hip_bfloat16 n_pes) {
+            return (static_cast<float>(v) == static_cast<float>(n_pes))
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false,
+                             "Got " + std::to_string(static_cast<float>(v)) +
+                             ", Expect " + std::to_string(static_cast<float>(n_pes)));
+          }));
       break;
     case TeamReduceScatterTestType:
       test_name = "Team-based Reduce-Scatter";
@@ -378,6 +404,32 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
                                                    ", Expect " +
                                                    std::to_string(n_pes));
           }));
+      testers.push_back(new ReduceWaveTester<__half, ROCSHMEM_SUM>(
+          args,
+          [](__half& f1, __half& f2) {
+            f1 = static_cast<__half>(1);
+            f2 = static_cast<__half>(1);
+          },
+          [](__half v, __half n_pes) {
+            return (static_cast<float>(v) == static_cast<float>(n_pes))
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false,
+                             "Got " + std::to_string(static_cast<float>(v)) +
+                             ", Expect " + std::to_string(static_cast<float>(n_pes)));
+          }));
+      testers.push_back(new ReduceWaveTester<__hip_bfloat16, ROCSHMEM_SUM>(
+          args,
+          [](__hip_bfloat16& f1, __hip_bfloat16& f2) {
+            f1 = static_cast<__hip_bfloat16>(1);
+            f2 = static_cast<__hip_bfloat16>(1);
+          },
+          [](__hip_bfloat16 v, __hip_bfloat16 n_pes) {
+            return (static_cast<float>(v) == static_cast<float>(n_pes))
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false,
+                             "Got " + std::to_string(static_cast<float>(v)) +
+                             ", Expect " + std::to_string(static_cast<float>(n_pes)));
+          }));
       break;
     case TeamReduceScatterWaveTestType:
       test_name = "Team-based Reduce-Scatter Wave";
@@ -393,6 +445,32 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
                        : std::make_pair(false, "Got " + std::to_string(v) +
                                                    ", Expect " +
                                                    std::to_string(n_pes));
+          }));
+      testers.push_back(new TeamReduceScatterWaveTester<__half, ROCSHMEM_SUM>(
+          args,
+          [](__half& f1, __half& f2) {
+            f1 = static_cast<__half>(1);
+            f2 = static_cast<__half>(0);
+          },
+          [](__half v, __half n_pes) {
+            return (static_cast<float>(v) == static_cast<float>(n_pes))
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false,
+                             "Got " + std::to_string(static_cast<float>(v)) +
+                             ", Expect " + std::to_string(static_cast<float>(n_pes)));
+          }));
+      testers.push_back(new TeamReduceScatterWaveTester<__hip_bfloat16, ROCSHMEM_SUM>(
+          args,
+          [](__hip_bfloat16& f1, __hip_bfloat16& f2) {
+            f1 = static_cast<__hip_bfloat16>(1);
+            f2 = static_cast<__hip_bfloat16>(0);
+          },
+          [](__hip_bfloat16 v, __hip_bfloat16 n_pes) {
+            return (static_cast<float>(v) == static_cast<float>(n_pes))
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false,
+                             "Got " + std::to_string(static_cast<float>(v)) +
+                             ", Expect " + std::to_string(static_cast<float>(n_pes)));
           }));
       break;
     case TeamBroadcastTestType:
@@ -425,6 +503,8 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TeamAllToAllvTestType:
       test_name = "Alltoallv Test";
       testers.push_back(new TeamAlltoallvTester<float>(args));
+      testers.push_back(new TeamAlltoallvTester<__half>(args));
+      testers.push_back(new TeamAlltoallvTester<__hip_bfloat16>(args));
       break;
     case TeamAlltoallmemOnStreamTestType:
       test_name = "Alltoallmem_On_Stream";
@@ -967,7 +1047,9 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case ReduceOnStreamTestType:
       test_name = "Reduce On Stream";
-      testers.push_back(new ReduceOnStreamTester(args));
+      testers.push_back(new ReduceOnStreamTester<int>(args));
+      testers.push_back(new ReduceOnStreamTester<__half>(args));
+      testers.push_back(new ReduceOnStreamTester<__hip_bfloat16>(args));
       break;
     case HostCtxCreateTestType:
       test_name = "Host CTX Create";

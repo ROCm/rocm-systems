@@ -22,50 +22,38 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef _REDUCE_ON_STREAM_TESTER_HPP_
-#define _REDUCE_ON_STREAM_TESTER_HPP_
+#ifndef _TYPED_RMA_TESTER_HPP_
+#define _TYPED_RMA_TESTER_HPP_
 
 #include "tester.hpp"
-#include <vector>
-#include <hip/hip_runtime.h>
-
-using namespace rocshmem;
 
 /******************************************************************************
  * HOST TESTER CLASS
+ *
+ * Exercises the typed RMA device APIs (rocshmem_ctx_T_put/get/put_nbi/get_nbi
+ * and rocshmem_ctx_T_p/g) for a specific element type T.  Used to provide
+ * __half and __hip_bfloat16 coverage for GetTestType, GetNBITestType,
+ * PutTestType, PutNBITestType, PTestType, and GTestType.
  *****************************************************************************/
 template <typename T>
-class ReduceOnStreamTester : public Tester {
+class TypedRMATester : public Tester {
  public:
-  explicit ReduceOnStreamTester(TesterArguments args);
-  virtual ~ReduceOnStreamTester();
+  explicit TypedRMATester(TesterArguments args);
+  virtual ~TypedRMATester();
 
  protected:
   virtual void resetBuffers(size_t size) override;
 
-  virtual void preLaunchKernel() override;
-
   virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                             size_t size) override;
 
-  virtual void postLaunchKernel() override;
-
   virtual void verifyResults(size_t size) override;
 
- private:
-  T *source_buf;
-  T *dest_buf;
-  int my_pe;
-  int n_pes;
-  size_t buf_elems;
-  int num_streams;
-  std::vector<rocshmem_team_t> team_world_dup;
-  std::vector<rocshmem_ctx_t> ctxs;
-  std::vector<hipStream_t> streams;
-  std::vector<hipEvent_t> start_events_timed;
-  std::vector<hipEvent_t> stop_events_timed;
+  T *source = nullptr;
+  T *dest   = nullptr;
+  int *grid_psync = nullptr;
 };
 
-#include "reduce_on_stream_tester.cpp"
+#include "typed_rma_tester.cpp"
 
 #endif
