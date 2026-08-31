@@ -86,12 +86,12 @@ void
 ensure_queue_registered(profiler_hub::writer_t& writer, std::uint64_t queue_id,
                         std::size_t node_id, std::size_t process_id)
 {
-    profiler_hub::writer_types::queue_info_t qi;
-    qi.queue_id   = queue_id;
-    qi.name       = fmt::format("Queue {}", queue_id);
-    qi.node_id    = node_id;
-    qi.process_id = process_id;
-    writer.register_queue_info(qi);
+    profiler_hub::writer_types::queue_info_t qinfo;
+    qinfo.queue_id   = queue_id;
+    qinfo.name       = fmt::format("Queue {}", queue_id);
+    qinfo.node_id    = node_id;
+    qinfo.process_id = process_id;
+    writer.register_queue_info(qinfo);
 }
 
 }  // namespace

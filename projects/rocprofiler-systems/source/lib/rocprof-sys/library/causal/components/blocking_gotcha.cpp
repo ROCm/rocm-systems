@@ -195,7 +195,7 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>,
 
     sigset_t set = *set_v;
     causal_gotcha::remove_signals(&set);
-    siginfo_t _info;  // NOLINT(misc-include-cleaner)
+    siginfo_t info;  // NOLINT(misc-include-cleaner)
 
     const std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
 
@@ -203,7 +203,7 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>,
     auto  f_sigwaitinfo = reinterpret_cast<decltype(&sigwaitinfo)>(_data->wrappee);
 
     causal::sampling::block_backtrace_samples();
-    auto ret = (*f_sigwaitinfo)(&set, &_info);
+    auto ret = (*f_sigwaitinfo)(&set, &info);
     causal::sampling::unblock_backtrace_samples();
 
     // Woken up by another thread if the call did not fail and this is waking process
