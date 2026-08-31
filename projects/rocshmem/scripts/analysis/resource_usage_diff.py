@@ -21,7 +21,7 @@ panel by its own delta (more waves/SIMD = better) independently of how the
 VGPR/SGPR/scratch/LDS panels are colored (less usage = better).
 
 Usage:
-    python3 scripts/functional_tests/resource_usage_diff.py \\
+    python3 scripts/analysis/resource_usage_diff.py \\
         --baseline resource_usage_commitA.csv \\
         --branch   resource_usage_commitB.csv \\
         --out      resource_usage_diff.csv \\

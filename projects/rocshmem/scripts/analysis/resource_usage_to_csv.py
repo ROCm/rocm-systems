@@ -8,7 +8,7 @@
 -Rpass-analysis=kernel-resource-usage) into a normalized CSV, one row per kernel.
 
 Usage:
-    python3 scripts/functional_tests/resource_usage_to_csv.py \\
+    python3 scripts/analysis/resource_usage_to_csv.py \\
         --log build/resource_usage_summary.log \\
         --arch gfx950 --build-config ipc_single \\
         --out resource_usage.csv
@@ -71,6 +71,9 @@ KEY_TO_COLUMN = {
 # the value so that corruption produces a discarded row instead of a bogus
 # kernel with a garbage name.
 _VALID_SYMBOL_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.$]*$")
+
+# Every non-name metric value is either a plain integer or True/False.
+_VALID_METRIC_VALUE = re.compile(r"^(?:\d+|True|False)$")
 
 # Columns a real remark block always populates (everything but the identity
 # fields set when the row is opened). A row that reaches finalization with
@@ -156,6 +159,17 @@ def parse_log(log_path: Path):
                 # A metric line with no open row at its own location means the
                 # "Function Name" line that should have opened it was itself
                 # lost to interleaving corruption -- nothing to attach this to.
+                continue
+            if not _VALID_METRIC_VALUE.match(value):
+                # Splicing can also merge two metric lines (same location
+                # prefix) into one physical line, not just corrupt "Function
+                # Name:" -- drop just this field, not the whole row.
+                print(
+                    f"warning: discarding corrupted {key!r} value at "
+                    f"{loc[0]}:{loc[1]} (likely spliced with a following "
+                    f"build-log line): {value!r}",
+                    file=sys.stderr,
+                )
                 continue
             row[column] = value
     for loc in list(open_rows):

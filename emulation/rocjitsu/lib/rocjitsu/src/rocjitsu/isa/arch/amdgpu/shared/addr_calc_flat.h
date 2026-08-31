@@ -75,7 +75,12 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     int64_t saddr_val = 0;
     if (inst.saddr != 0x7F) {
       const uint32_t sb_sel = inst.saddr;
-      saddr_val = static_cast<int32_t>(amdgpu::read_scalar_selector(wf, sb_sel));
+      auto saddr = amdgpu::try_read_scalar_selector(wf, sb_sel);
+      if (!saddr) {
+        reject_vector_memory_access(d);
+        return;
+      }
+      saddr_val = static_cast<int32_t>(*saddr);
     }
     bool has_vaddr = true;
     if constexpr (requires { inst.sve; })
@@ -106,7 +111,12 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     uint64_t saddr_val = 0;
     if (inst.saddr != 0x7F) {
       const uint32_t sb_sel = inst.saddr;
-      saddr_val = amdgpu::read_scalar_selector64(wf, sb_sel);
+      auto saddr = amdgpu::try_read_scalar_selector64(wf, sb_sel);
+      if (!saddr) {
+        reject_vector_memory_access(d);
+        return;
+      }
+      saddr_val = *saddr;
     }
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     auto vaddr_region = regs.read_vgpr_region(vbase, inst.saddr != 0x7F ? 1 : 2, exec);
