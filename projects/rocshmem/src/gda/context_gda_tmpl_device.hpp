@@ -444,7 +444,6 @@ __device__ int GDAContext::reduce_wave(rocshmem_team_t team, T *dest,
 
       int n_seg = nreduce / seg_size;
       int n_seg_up = (nreduce - 1) / seg_size + 1;
-      chunk_size = seg_size / PE_size;
 
       if (n_seg > 0) {
         internal_ring_allreduce_wave<T, Op>(dest, source, nreduce, team_obj,
@@ -568,10 +567,10 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
       internal_putmem_wg(reinterpret_cast<void *>(&pWrk[off_send]),
         reinterpret_cast<void *>(&dst[off_send + off_seg]),
         chunk_size * sizeof(T), send_pe, send_pe, wf_info);
+      
+      fence();
 
       if (is_thread_zero_in_block()) {
-        fence();
-
         wait_val = seg + 100;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
           send_pe, wf_info);
@@ -580,6 +579,7 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
 #endif /* __gfx90a__ */
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
+      fence();
       __syncthreads();
       gda_compute_reduce<T, Op>(&pWrk[off_recv], &dst[off_seg + off_recv],
                                 chunk_size, wg_id, wg_size);
@@ -591,10 +591,9 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
       internal_putmem_nbi_wg(reinterpret_cast<void *>(&dst[off_send + off_seg]),
         reinterpret_cast<void *>(&dst[off_send + off_seg]),
         chunk_size * sizeof(T), send_pe, send_pe, wf_info);
-
+      fence();
       if (is_thread_zero_in_block()) {
-        fence();
-        wait_val = seg + 100;
+        wait_val = seg + 10;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
           send_pe, wf_info);
 #if defined(__gfx90a__)
@@ -602,6 +601,7 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
 #endif /* __gfx90a__ */
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
+      fence();
       __syncthreads();
     }
   }
@@ -644,7 +644,7 @@ __device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
       internal_putmem_wave(reinterpret_cast<void *>(&pWrk[off_send]),
         reinterpret_cast<void *>(&dst[off_send + off_seg]),
         chunk_size * sizeof(T), send_pe, send_pe, wf_info);
-
+      fence();
       if (is_thread_zero_in_wave()) {
         qps[send_pe].quiet(wf_info);
         wait_val = seg + 100;
@@ -655,6 +655,7 @@ __device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
 #endif /* __gfx90a__ */
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
+      fence();
       for (int j = wf_tid; j < chunk_size; j += WF_SIZE) {
         OpWrap<Op>::Calc(&pWrk[off_recv], &dst[off_seg + off_recv], j);
       }
@@ -666,7 +667,7 @@ __device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
       internal_putmem_nbi_wave(reinterpret_cast<void *>(&dst[off_send + off_seg]),
         reinterpret_cast<void *>(&dst[off_send + off_seg]),
         chunk_size * sizeof(T), send_pe, send_pe, wf_info);
-
+      fence();
       if (is_thread_zero_in_wave()) {
         qps[send_pe].quiet(wf_info);
         wait_val = seg + 10;
@@ -716,8 +717,6 @@ __device__ int GDAContext::reduce_wg(rocshmem_team_t team, T *dest,
       int n_seg = nreduce / seg_size;
       // integer division rounding up
       int n_seg_up = (nreduce - 1) / seg_size + 1;
-      // recalculate chunk_size
-      chunk_size = seg_size / PE_size;
 
       if (n_seg > 0) {
         internal_ring_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, n_seg,
@@ -1049,12 +1048,12 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    size_t nelems = source_nelems[dest_pe] * sizeof(T);
+    size_t nelems = source_nelems[j] * sizeof(T);
     long *amo_dst = &pSync[alltoall_pSync_offset + my_pe_in_team];
 
     if (nelems != 0) {
       T *src = &source[source_displs[j]];
-      T *dst = &tmp_buf[constmem.my_pe * tmp_buf_off];
+      T *dst = &tmp_buf[my_pe_in_team * tmp_buf_off];
       qps[dest_pe].put_nbi_single(dst, src, nelems, PostOpt{RingDB<false>});
     }
 
@@ -1065,12 +1064,12 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   // Copy out of staging buffer
@@ -1103,11 +1102,11 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
   int my_pe_in_team = team_obj->my_pe;
   uint64_t a2a_sn   = team_obj->alltoall_sequence_number;
   uint64_t alltoall_pSync_offset = (a2a_sn % 2) * pe_size;
-  uint64_t *tmp_buf = (uint64_t*)team_obj->pWrk;
+  uint64_t *tmp_buf = reinterpret_cast<uint64_t*>(team_obj->pWrk);
 
-  const uint64_t displs_mask = 0x0000'FFFF'FFFF'FFFF;
-  const uint64_t seq_mask = 0xFFFF;
-  const uint64_t seq_shift = 48;
+  static constexpr uint64_t displs_mask = 0x0000'FFFF'FFFF'FFFF;
+  static constexpr uint64_t seq_mask = 0xFFFF;
+  static constexpr uint64_t seq_shift = 48;
 
   int tid = get_flat_block_id();
   int step_size = min(get_flat_block_size(), WF_SIZE);
@@ -1118,12 +1117,12 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 
     /* Pack Ctrl Message * 16 bits seq | 48bit displ */
     uint64_t seq_bits = (seq_mask & (a2a_sn + 1)) << seq_shift;
-    uint64_t displ_bits = (displs_mask & source_displs[dest_pe]);
+    uint64_t displ_bits = (displs_mask & source_displs[j]);
     uint64_t ctrl_msg = seq_bits | displ_bits;
 
     /* Prepare Ctrl Message */
     uint64_t *ctrl_src = &ctrl_msg;
-    uint64_t *ctrl_dst = &tmp_buf[constmem.my_pe];
+    uint64_t *ctrl_dst = &tmp_buf[my_pe_in_team];
 
     static_assert(QueuePair::can_inline<QueuePair::OpCode::RDMA_WRITE>(sizeof(ctrl_msg)),
                   "alltoallv_get control message must be posted inline");
@@ -1131,7 +1130,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 
     /* Wait for Ctrl Message */
     uint64_t ctrl_value;
-    uint64_t *vol_ctrl = &tmp_buf[dest_pe];
+    uint64_t *vol_ctrl = &tmp_buf[j];
 
     do {
       ctrl_value = uncached_load(vol_ctrl);
@@ -1140,7 +1139,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     } while (seq_bits != ((a2a_sn + 1) & seq_mask));
 
     /* Get data */
-    size_t nelems = dest_nelems[dest_pe] * sizeof(T);
+    size_t nelems = dest_nelems[j] * sizeof(T);
     T *src = &source[displ_bits];
     T *dst = &dest[dest_displs[j]];
 
@@ -1150,12 +1149,12 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     long *amo_dst = &pSync[alltoall_pSync_offset + my_pe_in_team];
     qps[dest_pe].atomic_add_single(amo_dst, 1);
 
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   if (is_thread_zero_in_block()) {

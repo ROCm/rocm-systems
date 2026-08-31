@@ -327,7 +327,13 @@ public:
     read_registers.push_back(physical_reg);
   }
 
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *, uint32_t physical_reg, uint64_t,
+                              uint8_t) override {
+    write_registers.push_back(physical_reg);
+  }
+
   std::vector<uint32_t> read_registers;
+  std::vector<uint32_t> write_registers;
 };
 
 /// @brief Check if a mnemonic should be skipped in the execution harness.
@@ -2983,8 +2989,8 @@ TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
   };
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, add_f16_dpp8_words));
   ASSERT_NE(inst, nullptr);
-  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f16_dpp");
-  EXPECT_EQ(inst->disassemble(), "v_add_f16_dpp v4.l, v2, v3.l dpp8:[7,0,3,2,5,4,1,6]");
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f16_e32");
+  EXPECT_EQ(inst->disassemble(), "v_add_f16_dpp v4.l, v2.l, v3.l dpp8:[7,0,3,2,5,4,1,6]");
   cu->execute_instruction(inst.get(), *wf);
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -4326,8 +4332,8 @@ TEST(Rdna4True16Vop3Test, UnaryDpp8ScalarAndSimdMatchPermutedLanes) {
     std::unique_ptr<Instruction> inst(
         decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
     ASSERT_NE(inst, nullptr);
-    ASSERT_EQ(std::string_view(inst->mnemonic()), "v_rcp_f16_e64_dpp");
-    EXPECT_EQ(inst->disassemble(), "v_rcp_f16_e64_dpp v2, v0 dpp8:[7,0,5,2,3,6,1,4] fi:1");
+    ASSERT_EQ(std::string_view(inst->mnemonic()), "v_rcp_f16");
+    EXPECT_EQ(inst->disassemble(), "v_rcp_f16_e64_dpp v2.l, v0.l dpp8:[7,0,5,2,3,6,1,4] fi:1");
     cu->execute_instruction(inst.get(), *wf);
     for (uint32_t lane = 0; lane < kWaveSize; ++lane)
       outputs[mode][lane] = cu->read_vgpr(vb + kDst, lane);
@@ -5183,6 +5189,44 @@ TEST(Rdna3True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
   cu->execute_instruction(inst.get(), *wf);
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x12345555u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Rdna35True16Vop1Test, SwapHighSourcePreservesBothUnselectedHalves) {
+  amdgpu::GpuMemory gpu_mem("rdna35_true16_vop1_mem");
+  amdgpu::L2Cache l2("rdna35_true16_vop1_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna3_5", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + 5, 0, 0xAAAA1111u);
+  cu->write_vgpr(vb + 1, 0, 0x2222BBBBu);
+
+  // v_swap_b16 v5.l, v1.h
+  const uint32_t words[] = {0x7E0ACD81u, 0u};
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->disassemble(), "v_swap_b16 v5.l, v1.h");
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(cu->read_vgpr(vb + 5, 0), 0xAAAA2222u);
+  EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x1111BBBBu);
 
   if (!wf->is_halted())
     wf->halt();
@@ -6820,6 +6864,150 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
     wf->halt();
 }
 
+TEST(Gfx1250CvtScaleTest, WideUnpackRejectsDestinationRangeBeforeWriting) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_cvt_scale_boundary_mem");
+  amdgpu::L2Cache l2("gfx1250_cvt_scale_boundary_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 1024;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  wf->set_vgpr_msb_mode(0xC0u); // Destination bank 3.
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + 0, 0, 0x08208208u);
+  cu->write_vgpr(vb + 1, 0, 0x82082082u);
+  cu->write_vgpr(vb + 2, 0, 0x20820820u);
+  cu->write_vgpr(vb + 10, 0, std::bit_cast<uint32_t>(1.0f));
+
+  constexpr uint32_t kDestinationBase = 3 * 256 + 250;
+  constexpr uint32_t kSentinel = 0xA5A5A5A5u;
+  for (uint32_t reg = kDestinationBase; reg < cfg.vgprs_per_wf; ++reg)
+    cu->write_vgpr(vb + reg, 0, kSentinel);
+
+  // v_cvt_scale_pk16_f32_fp6 v[1018:1033], v[0:2], v10 scale_sel:1.
+  // The complete 16-register destination does not fit in this wave.
+  const uint32_t words[] = {0xD6C908FAU, 0x02021500U};
+  auto decoded = decoder->decode(words);
+  ASSERT_TRUE(decoded.succeeded());
+  std::unique_ptr<Instruction> inst = std::move(decoded).value();
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_scale_pk16_f32_fp6");
+  cu->execute_instruction(inst.get(), *wf);
+
+  for (uint32_t reg = kDestinationBase; reg < cfg.vgprs_per_wf; ++reg)
+    EXPECT_EQ(cu->read_vgpr(vb + reg, 0), kSentinel) << "vgpr=" << reg;
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_cvt_scale_region_boundary_mem");
+  amdgpu::L2Cache l2("gfx1250_cvt_scale_region_boundary_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 1024;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto recorder = std::make_unique<Gfx1250VgprReadRecorder>();
+  auto *recorder_ptr = recorder.get();
+  plugin_group->add(std::move(recorder));
+  cu->set_plugin_group(plugin_group);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t kSentinel = 0xA5A5A5A5u;
+  cu->write_vgpr(vb + 10, 0, std::bit_cast<uint32_t>(1.0f));
+
+  // Unpack source v[1022:1024] does not fit. The valid destination must remain
+  // untouched instead of consuming zero/foreign source words.
+  wf->set_vgpr_msb_mode(0x03u); // Source 0 bank 3.
+  for (uint32_t reg = 20; reg < 36; ++reg)
+    cu->write_vgpr(vb + reg, 0, kSentinel);
+  const auto unpack_words = cdna5::build_vop3(
+      cdna5::kVCvtScalePk16F32Fp6Vop3, {.vdst = 20, .src0 = vgpr_src(254), .src1 = vgpr_src(10)});
+  auto decoded_unpack = decoder->decode(unpack_words.data());
+  ASSERT_TRUE(decoded_unpack.succeeded());
+  std::unique_ptr<Instruction> unpack = std::move(decoded_unpack).value();
+  ASSERT_NE(unpack, nullptr);
+  ASSERT_EQ(std::string_view(unpack->mnemonic()), "v_cvt_scale_pk16_f32_fp6");
+  recorder_ptr->read_registers.clear();
+  recorder_ptr->write_registers.clear();
+  cu->execute_instruction(unpack.get(), *wf);
+  for (uint32_t reg = 20; reg < 36; ++reg)
+    EXPECT_EQ(cu->read_vgpr_storage(vb + reg, 0), kSentinel) << "unpack dst vgpr=" << reg;
+  EXPECT_TRUE(recorder_ptr->read_registers.empty());
+  EXPECT_TRUE(recorder_ptr->write_registers.empty());
+
+  // Pack source v[1018:1033] does not fit. Its valid three-register
+  // destination must remain untouched.
+  wf->set_vgpr_msb_mode(0x03u); // Source 0 bank 3.
+  for (uint32_t reg = 40; reg < 43; ++reg)
+    cu->write_vgpr(vb + reg, 0, kSentinel);
+  const auto pack_source_words =
+      cdna5::build_vop3(cdna5::kVCvtScalef32Pk16Fp6F32Vop3,
+                        {.vdst = 40, .src0 = vgpr_src(250), .src1 = vgpr_src(10)});
+  auto decoded_pack_source = decoder->decode(pack_source_words.data());
+  ASSERT_TRUE(decoded_pack_source.succeeded());
+  std::unique_ptr<Instruction> pack_source = std::move(decoded_pack_source).value();
+  ASSERT_NE(pack_source, nullptr);
+  ASSERT_EQ(std::string_view(pack_source->mnemonic()), "v_cvt_scalef32_pk16_fp6_f32");
+  recorder_ptr->read_registers.clear();
+  recorder_ptr->write_registers.clear();
+  cu->execute_instruction(pack_source.get(), *wf);
+  for (uint32_t reg = 40; reg < 43; ++reg)
+    EXPECT_EQ(cu->read_vgpr_storage(vb + reg, 0), kSentinel) << "pack source dst vgpr=" << reg;
+  EXPECT_TRUE(recorder_ptr->read_registers.empty());
+  EXPECT_TRUE(recorder_ptr->write_registers.empty());
+
+  // Pack destination v[1022:1024] does not fit. The in-range portion must not
+  // be modified.
+  wf->set_vgpr_msb_mode(0xC0u); // Destination bank 3.
+  for (uint32_t reg = 0; reg < 16; ++reg)
+    cu->write_vgpr(vb + reg, 0, std::bit_cast<uint32_t>(1.0f));
+  cu->write_vgpr(vb + 1022, 0, kSentinel);
+  cu->write_vgpr(vb + 1023, 0, kSentinel);
+  const auto pack_destination_words = cdna5::build_vop3(
+      cdna5::kVCvtScalef32Pk16Fp6F32Vop3, {.vdst = 254, .src0 = vgpr_src(0), .src1 = vgpr_src(10)});
+  auto decoded_pack_destination = decoder->decode(pack_destination_words.data());
+  ASSERT_TRUE(decoded_pack_destination.succeeded());
+  std::unique_ptr<Instruction> pack_destination = std::move(decoded_pack_destination).value();
+  ASSERT_NE(pack_destination, nullptr);
+  ASSERT_EQ(std::string_view(pack_destination->mnemonic()), "v_cvt_scalef32_pk16_fp6_f32");
+  recorder_ptr->read_registers.clear();
+  recorder_ptr->write_registers.clear();
+  cu->execute_instruction(pack_destination.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + 1022, 0), kSentinel);
+  EXPECT_EQ(cu->read_vgpr_storage(vb + 1023, 0), kSentinel);
+  EXPECT_TRUE(recorder_ptr->read_registers.empty());
+  EXPECT_TRUE(recorder_ptr->write_registers.empty());
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
 TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
   amdgpu::GpuMemory gpu_mem("gfx1250_ds_swizzle_vds_mem");
   amdgpu::L2Cache l2("gfx1250_ds_swizzle_vds_l2");
@@ -7140,7 +7328,7 @@ TEST(HwregHelperTest, ReportsReadWriteResultContracts) {
             amdgpu::HwregAccessResult::ReadOnly);
   EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(4), 1u),
             amdgpu::HwregAccessResult::Privileged);
-  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(18), 1u),
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(63), 1u),
             amdgpu::HwregAccessResult::Unsupported);
   EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(63), value),
             amdgpu::HwregAccessResult::Unsupported);
@@ -7183,6 +7371,116 @@ TEST(HwregHelperTest, Gfx1250PreservesWaveSchedModeHwreg) {
             amdgpu::HwregAccessResult::Success);
   EXPECT_EQ(wf->wave_sched_mode_raw(), 0xA5A55A3Au);
 
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(HwregHelperTest, Gfx1250TrapHandlerRegistersRoundTripArchitectedFields) {
+  amdgpu::GpuMemory gpu_mem("hwreg_helper_gfx1250_trap_regs_mem");
+  amdgpu::L2Cache l2("hwreg_helper_gfx1250_trap_regs_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint32_t kExcpPriv = 0xC0001FFFu;
+  constexpr uint32_t kExcpUser = 0xC000007Fu;
+  constexpr uint32_t kTrapCtrl = 0x3FFu;
+  constexpr uint32_t kMode = (1u << 25) | (0xA5u << amdgpu::VGPR_MSB_MODE_SHIFT) | 0xF0u;
+  constexpr uint32_t kXnackState = 0x00057F7Fu;
+  constexpr uint32_t kXnackMask = 0xA5A55A5Au;
+  uint32_t value = 0;
+
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(17), kExcpPriv),
+            amdgpu::HwregAccessResult::Privileged);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(19), kTrapCtrl),
+            amdgpu::HwregAccessResult::Privileged);
+
+  wf->set_in_trap_handler(true);
+  wf->set_mode_raw(kMode);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(17), kExcpPriv),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(18), kExcpUser),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(19), kTrapCtrl),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(wf->mode_raw(), kMode);
+  EXPECT_EQ(wf->vgpr_msb_mode(), amdgpu::mode_layout_to_set_vgpr_msb(0xA5u));
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(33), kXnackState),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(34), kXnackMask),
+            amdgpu::HwregAccessResult::Success);
+
+  for (const auto &[id, expected] :
+       std::array<std::pair<uint32_t, uint32_t>, 5>{{{17, kExcpPriv},
+                                                     {18, kExcpUser},
+                                                     {19, kTrapCtrl},
+                                                     {33, kXnackState},
+                                                     {34, kXnackMask}}}) {
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(id), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, expected) << "HWREG id " << id;
+  }
+
+  // Partial writes are what ROCr's gfx12.5 trap handler uses to restore
+  // SAVE_CONTEXT and the XNACK replay fields before S_RFE_I64.
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(17, 5, 1), 0u),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(17, 5, 1), value),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(value, 0u);
+  EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(33, 16, 1), 0u),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(33, 16, 1), value),
+            amdgpu::HwregAccessResult::Success);
+  EXPECT_EQ(value, 0u);
+
+  wf->set_in_trap_handler(false);
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(HwregHelperTest, Rdna4UsesTheCommonGfx12WaveStateRegisters) {
+  amdgpu::GpuMemory gpu_mem("hwreg_helper_rdna4_trap_regs_mem");
+  amdgpu::L2Cache l2("hwreg_helper_rdna4_trap_regs_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_trap_regs", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_TRUE(wf->uses_separate_trap_ctrl());
+
+  constexpr uint32_t kExcpPriv = 0x00001FFFu;
+  constexpr uint32_t kExcpUser = 0xC000007Fu;
+  constexpr uint32_t kTrapCtrl = 0x3FFu;
+  uint32_t value = 0;
+  wf->set_in_trap_handler(true);
+
+  for (const auto &[id, expected] : std::array<std::pair<uint32_t, uint32_t>, 3>{
+           {{17, kExcpPriv}, {18, kExcpUser}, {19, kTrapCtrl}}}) {
+    EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(id), expected),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(id), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, expected) << "HWREG id " << id;
+  }
+
+  wf->set_in_trap_handler(false);
   if (!wf->is_halted())
     wf->halt();
 }
@@ -7849,6 +8147,123 @@ TEST(Cdna4FlatMixedApertureTest, ScratchSwizzleDoesNotStrideGlobalLanes) {
   EXPECT_EQ(gpu_mem.read32(kScratchBase), kScratchWord0);
   EXPECT_EQ(gpu_mem.read32(kScratchBase + stride), kScratchWord1);
   EXPECT_EQ(gpu_mem.read32(kScratchBase + 4), 0u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Cdna5VopdCndmaskTest, Wave32LaneMaskIsReadAtWaveWidth) {
+  // A wave32 VOPD cndmask whose mask operand is VCC_HI. Reading that mask as a
+  // 64-bit scalar aborts the model: VCC_HI (selector 107) cannot begin a
+  // register pair, so resolve_src_scalar64 throws. _topk_topp_kernel on gfx1250
+  // hit this in all eight of its shapes. The mask must be read at wf_size().
+  amdgpu::GpuMemory gpu_mem("cdna5_vopd_cndmask_mem");
+  amdgpu::L2Cache l2("cdna5_vopd_cndmask_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna5_vopd_cndmask", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+
+  // The two halves of VCC differ, so a read of the wrong half is visible in the
+  // result rather than being masked by a lucky value.
+  constexpr uint64_t kVccHi = 0x5u; // lanes 0 and 2
+  constexpr uint64_t kVccLo = 0xAu; // lanes 1 and 3
+  wf->set_vcc_raw((kVccHi << 32) | kVccLo);
+  wf->set_exec(0xFu);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < 4; ++lane) {
+    cu->write_vgpr(vb + 1, lane, 0x11110000u + lane); // src0
+    cu->write_vgpr(vb + 2, lane, 0x22220000u + lane); // src1
+    cu->write_vgpr(vb + 0, lane, 0xDEADBEEFu);        // dst
+    cu->write_vgpr(vb + 4, lane, 0xC0FFEE00u + lane);
+    cu->write_vgpr(vb + 3, lane, 0xDEADBEEFu);
+  }
+
+  // LLVM gfx1250: v_dual_cndmask_b32 v0, v1, v2, vcc_hi :: v_dual_mov_b32 v3, v4
+  const uint32_t words[] = {0xCF248101u, 0x6B020104u, 0x03000000u};
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_TRUE(std::string_view(inst->mnemonic()).starts_with("v_dual_cndmask_b32"));
+
+  // Before the fix this call terminates the process:
+  //   std::logic_error: Unsupported encoding value for scalar64 read: 107
+  cu->execute_instruction(inst.get(), *wf);
+
+  // VCC_HI selects src1 on lanes 0 and 2, src0 on lanes 1 and 3. Had the model
+  // read VCC_LO, or the whole 64-bit VCC, the pattern would be inverted.
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x22220000u);
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 1), 0x11110001u);
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 2), 0x22220002u);
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 3), 0x11110003u);
+
+  // The paired slot still runs.
+  EXPECT_EQ(cu->read_vgpr(vb + 3, 0), 0xC0FFEE00u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Cdna5VopdCndmaskTest, Wave32LaneMaskIgnoresTheNeighbouringScalar) {
+  // An odd-numbered SGPR mask is legal in wave32 and names one register. A
+  // 64-bit read of it also pulls in the next SGPR, which the instruction never
+  // named. That read is invisible in the result for lanes 0..31, but it is a
+  // register dependency the machine does not have. Pin the operand to one SGPR.
+  amdgpu::GpuMemory gpu_mem("cdna5_vopd_cndmask_sgpr_mem");
+  amdgpu::L2Cache l2("cdna5_vopd_cndmask_sgpr_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna5_vopd_cndmask_sgpr", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  const uint32_t sb = wf->sgpr_alloc().base;
+  cu->write_sgpr(sb + 1, 0x5u);        // the named mask: lanes 0 and 2
+  cu->write_sgpr(sb + 2, 0xFFFFFFFFu); // the neighbour, which must not matter
+  wf->set_exec(0xFu);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < 4; ++lane) {
+    cu->write_vgpr(vb + 1, lane, 0x11110000u + lane);
+    cu->write_vgpr(vb + 2, lane, 0x22220000u + lane);
+    cu->write_vgpr(vb + 0, lane, 0xDEADBEEFu);
+    cu->write_vgpr(vb + 4, lane, 0xC0FFEE00u + lane);
+  }
+
+  // LLVM gfx1250: v_dual_cndmask_b32 v0, v1, v2, s1 :: v_dual_mov_b32 v3, v4
+  const uint32_t words[] = {0xCF248101u, 0x01020104u, 0x03000000u};
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x22220000u);
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 1), 0x11110001u);
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 2), 0x22220002u);
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 3), 0x11110003u);
 
   if (!wf->is_halted())
     wf->halt();
