@@ -728,18 +728,18 @@ std::string Operand::name() const {
     return std::to_string(encoding_value_);
   case OperandType::OPR_VERSION:
     return std::to_string(encoding_value_);
-  case OperandType::OPR_WAITCNT: {
-    uint32_t expcnt = encoding_value_ & 0x7;
-    uint32_t lgkmcnt = (encoding_value_ >> 4) & 0x3F;
-    uint32_t vmcnt = (encoding_value_ >> 10) & 0x3F;
-    return std::format("vmcnt({}) expcnt({}) lgkmcnt({})", vmcnt, expcnt, lgkmcnt);
-  }
   case OperandType::OPR_WAIT_ALU:
     return std::to_string(encoding_value_);
   case OperandType::OPR_WAIT_EVENT:
     return std::to_string(encoding_value_);
   case OperandType::OPR_WAIT_MEM_DS:
     return std::to_string(encoding_value_);
+  case OperandType::OPR_WAITCNT: {
+    uint32_t expcnt = encoding_value_ & 0x7;
+    uint32_t lgkmcnt = (encoding_value_ >> 4) & 0x3F;
+    uint32_t vmcnt = (encoding_value_ >> 10) & 0x3F;
+    return std::format("vmcnt({}) expcnt({}) lgkmcnt({})", vmcnt, expcnt, lgkmcnt);
+  }
   }
   return std::to_string(encoding_value_);
 }
@@ -789,6 +789,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ >= OpSelSdst::OPR_SDST_TTMP_MIN &&
+        encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_TTMP_MIN),
+                         reg_width};
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
@@ -812,6 +817,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN &&
+        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN),
+          reg_width};
     break;
   }
   case OperandType::OPR_SMEM_OFFSET_NOK: {
@@ -821,6 +832,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP_MIN &&
+        encoding_value_ <= OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP_MIN),
+          reg_width};
     break;
   }
   case OperandType::OPR_SRC: {
@@ -828,6 +845,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
         encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX)
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN),
+                         reg_width};
+    if (encoding_value_ >= OpSelSrc::OPR_SRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_TTMP_MIN),
                          reg_width};
     if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
@@ -864,6 +886,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSreg::OPR_SREG_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ >= OpSelSreg::OPR_SREG_TTMP_MIN &&
+        encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSreg::OPR_SREG_TTMP_MIN),
+                         reg_width};
     break;
   }
   case OperandType::OPR_SREG_LITERAL: {
@@ -873,6 +900,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSregLiteral::OPR_SREG_LITERAL_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSregLiteral::OPR_SREG_LITERAL_TTMP_MIN &&
+        encoding_value_ <= OpSelSregLiteral::OPR_SREG_LITERAL_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSregLiteral::OPR_SREG_LITERAL_TTMP_MIN),
+          reg_width};
     break;
   }
   case OperandType::OPR_SREG_M0: {
@@ -881,6 +914,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSregM0::OPR_SREG_M0_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ >= OpSelSregM0::OPR_SREG_M0_TTMP_MIN &&
+        encoding_value_ <= OpSelSregM0::OPR_SREG_M0_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSregM0::OPR_SREG_M0_TTMP_MIN),
+                         reg_width};
     break;
   }
   case OperandType::OPR_SSRC: {
@@ -888,6 +926,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
         encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX)
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN),
+                         reg_width};
+    if (encoding_value_ >= OpSelSsrc::OPR_SSRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_TTMP_MIN),
                          reg_width};
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
@@ -904,6 +947,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN),
+          reg_width};
+    if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN),
           reg_width};
     break;
   }

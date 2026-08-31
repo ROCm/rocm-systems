@@ -77,9 +77,9 @@
 
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
-#include "dda_all_reduce.h"
-#include "ipc_init.h"
-#include "fabric_init.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/ipc/ipc_init.h"
+#include "algorithms/dda/fabric/fabric_init.h"
 #include <cpuid.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -119,6 +119,10 @@ NCCL_PARAM(CommBlocking, "COMM_BLOCKING", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(RuntimeConnect, "RUNTIME_CONNECT", 0);
 // When enabled (default), defer PAT QP creation until PAT is first selected by an AG/RS; NCCL_PAT_LAZY_INIT=0 restores eager connect at init.
 NCCL_PARAM(PatLazyInit, "PAT_LAZY_INIT", 1);
+// When enabled (default), PAT ReduceScatter and AllGather share one connection set.
+// RCCL_PAT_SHARED_QPS=0 restores a separate set per collective. The value must be identical on
+// every rank, otherwise peers disagree on direction and the first PAT collective hangs.
+RCCL_PARAM(PatSharedQps, "PAT_SHARED_QPS", 1);
 NCCL_PARAM(WinEnable, "WIN_ENABLE", 1);
 NCCL_PARAM(CollnetEnable, "COLLNET_ENABLE", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(CtaPolicy, "CTA_POLICY", NCCL_CONFIG_UNDEF_INT);
@@ -261,9 +265,8 @@ ncclResult_t checkHostUncacheMemSetting(struct ncclComm* comm) {
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
     ERROR("Build flag HIP_HOST_UNCACHED_MEMORY must be set to avoid memory corruption on mi350x");
     return ncclSystemError;
-  } else {
-    return ncclSuccess;
   }
+  return ncclSuccess;
 #endif
 }
 
@@ -710,6 +713,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->hierarchicalTempBuffer = nullptr;
   // Enable PAT for interComm hierarchical collectives
   comm->forcePatEnable = (parent != nullptr) ? parent->forcePatEnable : false;
+  comm->patSharedQps = rcclParamPatSharedQps() != 0;
 
   // Try to create a CUDA object right away. If there is something wrong with
   // the device we're on (failure cause #1) , better know it early.
@@ -754,8 +758,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   CUDACHECK(hipEventCreateWithFlags(&doneEvent, hipEventDisableTiming));
 
   comm->doneEvent = doneEvent;
-  comm->lastStream = nullptr;
-  comm->lastStreamValid = false;
+  comm->lastStreamTag = 0;
 
   // RCCL: acquire a scoped side stream for init-time allocations. It is
   // released once init completes (see ncclCommInitRankFunc) so it does not hold
@@ -783,7 +786,6 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   TRACE(NCCL_INIT, "comm %p rank %d nranks %d cudaDev %d busId %lx compCap %d", comm, rank, ndev, comm->cudaDev,
         comm->busId, comm->compCap);
 
-  comm->checkMode = ncclParamCheckPointers() == 1 ? ncclCheckModeDebugLocal : ncclCheckModeDefault;
   comm->dmaBufSupport = (dmaBufSupported(comm) == ncclSuccess) ? true : false;
 
   // Initialize memory manager
@@ -891,6 +893,7 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   tmpCommAndChans.comm.isAllNvlink = comm->isAllNvlink;
   tmpCommAndChans.comm.p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
   tmpCommAndChans.comm.cheapPostSendFenceOff = comm->cheapPostSendFenceOff;
+  tmpCommAndChans.comm.patSharedQps = comm->patSharedQps ? 1 : 0;
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     tmpCommAndChans.comm.buffSizes[p] = comm->buffSizes[p];
   }
@@ -1078,6 +1081,33 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   info->shmDev = statbuf.st_dev;
 #endif
   info->busId = comm->busId;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // HIP names do not contain "MLOPart". DPX/XCP/CPX logical GPUs are still
+  // exposed as PCI function .N while sysfs at that BDF is not a GPU (often the
+  // BDF is missing entirely). Use the PCI function as the partition index so
+  // ranks share the physical function-0 PCI node (see ncclTopoFillGpu) with
+  // distinct overlay DEV ids: function 0 is mlopart 0, a fake non-GPU function
+  // is mlopart N (CPX uses N=1..7).
+  if (info->mloPart == NCCL_TOPO_UNDEF) {
+    int fn = (int)(info->busId & 0xf);
+    // Only stamp mlopart for HIP alias functions that are not GPUs in sysfs.
+    // fn=0 physical GPUs must stay UNDEF so non-partitioned parts do not get
+    // the MLOPart DEV overlay (breaks Rome gpuId matching and disables GIN/GDR).
+    if (fn > 0 && fn < NCCL_TOPO_MLOPART_DEV_MAX) {
+      char busIdStr[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+      char deviceClass[MAX_STR_LEN];
+      deviceClass[0] = '\0';
+      if (int64ToBusId(info->busId, busIdStr) == ncclSuccess) {
+        (void)ncclOsGetPciDeviceClassByBusId(busIdStr, deviceClass, sizeof(deviceClass));
+        int isGpu = strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0 ||
+                    strncmp(deviceClass, "0x03", 4) == 0;
+        if (!isGpu) {
+          info->mloPart = fn;
+        }
+      }
+    }
+  }
+#endif
   CUCHECK(cuDeviceGetUuid((CUuuid*)&info->gpuUuid, (CUdevice)comm->cudaDev));
 
   // detect if fine grained memory is available on this GPU
@@ -1636,7 +1666,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 
-  comm->topo->skipPresetTopoMatching = !uniformRanksPerHost(comm, nranks);
+  {
+    bool nonUniformRanks = !uniformRanksPerHost(comm, nranks);
+    bool isGfx1250 = comm->topo->nodes[GPU].count > 0 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
+    comm->topo->skipPresetTopoMatching = nonUniformRanks || isGfx1250;
+    if (comm->topo->skipPresetTopoMatching) {
+      INFO(NCCL_INIT, "Rome model matching disabled %s", isGfx1250 ? "on gfx1250" : "due to non-uniform ranks per host");
+    }
+  }
 
   timers[TIMER_INIT_GRAPHS] = clockNano();
   // Get rings and trees
@@ -1785,7 +1822,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // AllGather3 - begin
   NCCLCHECKGOTO(ncclCalloc(&allGather3Data, nranks), ret, fail);
   int idx;
-  NCCLCHECK(ncclTopoIdToIndex(comm->topo, GPU, NCCL_TOPO_ID(comm->topo->systemId, comm->busId), &idx));
+  // GPU node ids include the MLOPart overlay (and a local-rank-on-DEV field), so they
+  // no longer match the raw PCI busId. Look up this rank's GPU node instead.
+  NCCLCHECK(ncclTopoRankToIndex(comm->topo, rank, &idx, /*showWarn=*/true));
   allGather3Data[rank].nc = 2;
   if (comm->topo->nodes[GPU].count == comm->topo->nRanks &&
       IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx906") && allXgmi)

@@ -23,6 +23,7 @@
 #include "ptrace_session.hpp"
 
 #include "lib/common/environment.hpp"
+#include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 
@@ -30,7 +31,6 @@
 #include <rocprofiler-sdk-rocattach/rocattach.h>
 #include <rocprofiler-sdk-rocattach/types.h>
 
-#include <filesystem>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -45,6 +45,8 @@ namespace rocattach
 {
 namespace
 {
+namespace fs = common::filesystem;
+
 using session_t = rocprofiler::rocattach::PTraceSession;
 
 struct pid_entry_t
@@ -215,7 +217,7 @@ resolve_attach_tid(pid_t pid)
 {
     auto            task_dir = "/proc/" + std::to_string(pid) + "/task";
     std::error_code ec;
-    for(const auto& entry : std::filesystem::directory_iterator(task_dir, ec))
+    for(const auto& entry : fs::directory_iterator(task_dir, ec))
     {
         if(!entry.is_directory()) continue;
 
@@ -246,12 +248,11 @@ resolve_attach_tid(pid_t pid)
 }
 
 rocattach_status_t
-validate_target_absolute_tool_path(pid_t pid, const std::filesystem::path& tool_path)
+validate_target_absolute_tool_path(pid_t pid, const fs::path& tool_path)
 {
-    auto target_path =
-        std::filesystem::path{fmt::format("/proc/{}/root", pid)} / tool_path.relative_path();
+    auto target_path = fs::path{fmt::format("/proc/{}/root", pid)} / tool_path.relative_path();
     std::error_code ec;
-    if(!std::filesystem::exists(target_path, ec))
+    if(!fs::exists(target_path, ec))
     {
         if(ec)
         {
@@ -272,7 +273,7 @@ validate_target_absolute_tool_path(pid_t pid, const std::filesystem::path& tool_
         return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    if(!std::filesystem::is_regular_file(target_path, ec))
+    if(!fs::is_regular_file(target_path, ec))
     {
         if(ec)
         {
@@ -329,7 +330,7 @@ setup(int pid)
     const char* tool_lib_path = tool_lib_path_env.c_str();
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
 
-    auto tool_path = std::filesystem::path{tool_lib_path_env};
+    auto tool_path = fs::path{tool_lib_path_env};
     if(tool_path.empty())
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path must not be empty.";
@@ -478,7 +479,7 @@ collect_process_tree(pid_t root_pid)
 
         auto            task_dir = "/proc/" + std::to_string(pid) + "/task";
         std::error_code ec;
-        for(const auto& entry : std::filesystem::directory_iterator(task_dir, ec))
+        for(const auto& entry : fs::directory_iterator(task_dir, ec))
         {
             if(!entry.is_directory()) continue;
             auto          children_path = entry.path() / "children";
