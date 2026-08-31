@@ -617,12 +617,10 @@ class MetricCommands:
                     for key, value in apu_usage_fields.items():
                         activity_unit = "%"
                         if value != "N/A":
-                            if "dram" in key:
+                            if "reads" in key or "writes" in key:
                                 values_dict["usage"][key] = self.helpers.unit_format(
                                     self.logger, value, "MB/s"
                                 )
-                            elif "reads" in key or "writes" in key:
-                                values_dict["usage"][key] = value
                             elif isinstance(value, list):
                                 if self.logger.is_human_readable_format():
                                     formatted = [

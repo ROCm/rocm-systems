@@ -83,6 +83,13 @@ def _install_fake_amdsmi():
     interface.amdsmi_get_gpu_metrics_info = lambda _handle: _ApuMetrics(is_apu=True)
     interface._NA_amdsmi_get_gpu_metrics_info = lambda: _ApuMetrics(is_apu=True)
     interface.amdsmi_get_gpu_partition_metrics_info = lambda _handle: None
+    # Activity succeeds on a real APU, so the usage section is a dict the
+    # APU-specific fields can be merged into.
+    interface.amdsmi_get_gpu_activity = lambda _handle: {
+        "gfx_activity": "N/A",
+        "umc_activity": "N/A",
+        "mm_activity": "N/A",
+    }
     interface.AmdSmiLibraryException = _FakeLibraryException
 
     def _unsupported(name):
@@ -246,8 +253,17 @@ class TestCliMetricApuSections(unittest.TestCase):
         cls.interface = _install_fake_amdsmi()
         cls.metric_module = _load_metric_module()
 
-    def _run_metric(self, **arg_overrides):
-        """Drive ``metric_gpu`` and return the stored ``values`` payload."""
+    def _run_metric(self, metrics=None, **arg_overrides):
+        """Drive ``metric_gpu`` and return the stored ``values`` payload.
+
+        ``metrics`` seeds extra ``gpu_metrics`` fields for the run; anything not
+        named there resolves to N/A.
+        """
+        payload = _ApuMetrics(is_apu=True)
+        if metrics:
+            payload.update(metrics)
+        self.interface.amdsmi_get_gpu_metrics_info = lambda _handle: payload
+
         commands = object.__new__(self.metric_module.MetricCommands)
         commands.logger = _FakeLogger()
         commands.helpers = _FakeHelpers()
@@ -297,6 +313,30 @@ class TestCliMetricApuSections(unittest.TestCase):
         for section in _SCALAR_NA_SECTIONS + ("pcie", "voltage_curve", "fan"):
             with self.subTest(section=section):
                 self.assertNotIn(section, captured)
+
+    def test_apu_bandwidth_counters_report_mb_per_second(self):
+        # DRAM and IPU read/write counters are both bandwidth in MB/s; the IPU
+        # pair previously printed bare numbers while DRAM carried the unit.
+        usage = self._run_metric(
+            metrics={
+                "apu_metrics.average_dram_reads": 428,
+                "apu_metrics.average_dram_writes": 57,
+                "apu_metrics.average_ipu_reads": 12,
+                "apu_metrics.average_ipu_writes": 4,
+            },
+            usage=True,
+        )["usage"]
+
+        self.assertEqual(usage["apu_average_dram_reads"], "428 MB/s")
+        self.assertEqual(usage["apu_average_dram_writes"], "57 MB/s")
+        self.assertEqual(usage["apu_average_ipu_reads"], "12 MB/s")
+        self.assertEqual(usage["apu_average_ipu_writes"], "4 MB/s")
+
+    def test_zero_bandwidth_still_carries_unit(self):
+        # 0 is a real reading, not an absent one, so it keeps its unit.
+        usage = self._run_metric(metrics={"apu_metrics.average_ipu_reads": 0}, usage=True)["usage"]
+
+        self.assertEqual(usage["apu_average_ipu_reads"], "0 MB/s")
 
 
 if __name__ == "__main__":
