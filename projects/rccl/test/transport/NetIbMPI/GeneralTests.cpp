@@ -26,12 +26,21 @@ TEST(NetPluginSelection, ResolvesNameCaseInsensitively) {
     EXPECT_EQ(ResolveNetPlugin("Ib-Cast"), &netIbCast);
 }
 
-TEST(NetPluginSelection, RocmIbIsAnAliasForIbCast) {
+TEST(NetPluginSelection, RocmIbSelectsTheIbCastPlugin) {
     EXPECT_EQ(ResolveNetPlugin("ROCM-IB"), &netIbCast);
     EXPECT_EQ(ResolveNetPlugin("rocm-ib"), &netIbCast);
     EXPECT_STRCASEEQ(CanonicalNetName("ROCM-IB"), netIbCast.name);
     EXPECT_EQ(ResolveNetPlugin("ROCM-IB"), ResolveNetPlugin("IB-CAST"))
         << "ROCM-IB and IB-CAST must select the same plugin";
+}
+
+TEST(NetPluginSelection, LibraryMapperBacksThePluginChoice) {
+    EXPECT_STRCASEEQ(rcclCanonicalNetName("ROCM-IB"), netIbCast.name);
+    EXPECT_STRCASEEQ(rcclCanonicalNetName("rocm-ib"), netIbCast.name);
+    EXPECT_STRCASEEQ(rcclCanonicalNetName("IB-CAST"), netIbCast.name);
+    EXPECT_STRCASEEQ(rcclCanonicalNetName("IB"), ncclNetIb.name);
+    EXPECT_EQ(rcclCanonicalNetName(nullptr), nullptr);
+    EXPECT_STREQ(rcclCanonicalNetName(""), "") << "empty must not be mapped to unset";
 }
 
 TEST(NetPluginSelection, UnsetFollowsAinicDefault) {
