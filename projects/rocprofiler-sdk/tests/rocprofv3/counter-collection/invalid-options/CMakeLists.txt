@@ -32,42 +32,43 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-# The counter-collection option conflicts in this file are rejected while parsing
-# arguments, so the application never launches. PASS_REGULAR_EXPRESSION strictly asserts
-# the rejection message (WILL_FAIL would accept any non-zero exit). The tolerated case
-# below reuses the no-op as a workload that issues no dispatches.
 set(_NOOP_APPLICATION ${CMAKE_COMMAND} -E true)
+# CTest's PASS_REGULAR_EXPRESSION ignores exit status, so check both in a wrapper.
+set(_CHECK_COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/check_command.py)
 
 # Conflict: SPM + pmc counter collection
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-spm-with-pmc-will-fail
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm-beta-enabled --spm SQ_WAVES
-            --pmc SQ_WAVES -- ${_NOOP_APPLICATION}
+    COMMAND
+        ${_CHECK_COMMAND} --expected-exit-code 1 --expected-output
+        "SPM feature cannot be enabled along with pc sampling or pmc counter collection"
+        -- $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm-beta-enabled --spm SQ_WAVES
+        --pmc SQ_WAVES -- ${_NOOP_APPLICATION}
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
-    LABELS "counter-collection"
-    PASS_REGULAR_EXPRESSION
-        "SPM feature cannot be enabled along with pc sampling or pmc counter collection")
+    LABELS "counter-collection")
 
 # Invalid: a --pmc flag with no counters
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-empty-pmc-group-will-fail
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES --pmc --
-            ${_NOOP_APPLICATION}
+    COMMAND
+        ${_CHECK_COMMAND} --expected-exit-code 1 --expected-output
+        "Each --pmc must specify at least one counter" --
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES --pmc --
+        ${_NOOP_APPLICATION}
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
-    LABELS "counter-collection"
-    PASS_REGULAR_EXPRESSION "Each --pmc must specify at least one counter")
+    LABELS "counter-collection")
 
 # Tolerated: a device qualifier naming a GPU index that does not exist
-# PASS_REGULAR_EXPRESSION disables the exit-code check, so nothing may require it
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-out-of-range-device-qualifier
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES
-            SQ_CYCLES:device=16384 -- ${_NOOP_APPLICATION}
+    COMMAND
+        ${_CHECK_COMMAND} --expected-exit-code 0 --expected-output
+        "Device ID not found for PMC counter 'SQ_CYCLES:device=16384'" --
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_CYCLES:device=16384 --
+        ${_NOOP_APPLICATION}
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "counter-collection"
-    ENVIRONMENT "ROCPROF_LOG_LEVEL=warning"
-    PASS_REGULAR_EXPRESSION "Device ID not found for PMC counter 'SQ_CYCLES:device=16384'"
-    )
+    ENVIRONMENT "ROCPROF_LOG_LEVEL=warning")
