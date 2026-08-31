@@ -144,13 +144,17 @@ RUN . /etc/rocm-build.env && \
             amdrocm-runtime-devel${ROCM_MAJOR}.${ROCM_MINOR}; \
     fi
 
-# Point amdclang++ at the gcc-toolset-13 libstdc++.
-# clang locates its C++ standard library by scanning a fixed set of prefixes
-# (essentially /usr) for the newest GCC; it does NOT consult PATH. The default
-# el9 GCC (11) is older than the GCC 13 used on Ubuntu24/SUSE, and
-# gcc-toolset-13 lives under /opt/rh, which clang's scanner doesn't search on
-# this toolchain. Append --gcc-install-dir to the ROCm config file that
-# amdclang++ auto-loads so it selects the gcc-toolset-13 libstdc++.
+# Pin the gcc-13 version of libstdc++ for amdclang++ to use.
+# By default, Clang scans a fixed set of paths for the C++ standard library,
+# and picks the newest version available. This includes RHEL's /opt/rh path.
+# On legacy ROCm (~clang-22), this set of paths to scan stops at gcc-12.
+# As such, it will default to the system toolchain (gcc-11 on el9) which is
+# too old for the needed C++20 features. However, on ROCm 10.1, amdclang searches
+# up to the gcc-15 toolchain which will be quietly picked over the desired gcc-13
+# version.
+# (At time of writing, the `clang` package pulls in the gcc-15 C++ standard library.)
+# Pinning keeps all ROCm bands on the same toolset version.
+# See: https://github.com/ROCm/llvm-project/blob/94c74897d01e15aa542b0b7b5cab459761cb06b3/clang/lib/Driver/ToolChains/Gnu.cpp#L2307-L2329
 RUN . /etc/rocm-build.env && \
     printf '\n%s\n' \
         '--gcc-install-dir=/opt/rh/gcc-toolset-13/root/usr/lib/gcc/x86_64-redhat-linux/13' \
