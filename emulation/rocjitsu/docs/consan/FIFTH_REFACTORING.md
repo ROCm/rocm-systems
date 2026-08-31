@@ -2457,8 +2457,9 @@ forward-only and deletion-bearing, but it is not completion evidence for the
 whole refactoring. Production remains 292 implementation lines above the
 starting baseline, and the remaining broad operating-point and transform-
 artifact surfaces, full architecture and mode locality, smallness of surviving
-cross-axis composition, both extension exercises, and an independent Section
-14 audit remain open.
+cross-axis composition, and an independent Section 14 audit remain open. The
+two extension exercises have remained closed and enforced since checkpoint 17;
+they are not part of this remaining-work list.
 
 ### 16.22 Convergence checkpoint 21: derive the runtime mapping projection
 
@@ -2501,5 +2502,76 @@ This closes the last independently stored static runtime projection found on
 the main observation-to-runtime spine, but it is only a small deletion payoff.
 The fifth refactoring remains incomplete: production is 289 implementation
 lines above baseline, and the wider Section 14 architecture, locality,
-extension, cross-axis-composition, size, and independent-audit evidence remains
-open.
+cross-axis-composition, size, and independent-audit evidence remains open.
+Section 14.4's two extension exercises remain closed and enforced by the
+checkpoint-17 fixtures.
+
+### 16.23 Convergence checkpoint 22: target-owned dispatch-identity placement
+
+The next cross-axis trace followed report dispatch identity from each mode's
+semantic demand through scalar search, persistent-vector capture, literal
+fallback, private entry capture, and final resource validation. The mode
+registry already owned whether an engine needed the identity and which
+lossless fallback it allowed. Target profiles already owned the source of that
+identity. Nevertheless, the shared placement routine rediscovered gfx9, CDNA,
+RDNA, gfx11, and gfx12 families at each overflow step and performed a second
+mode-registry lookup to recognize InlineShadow's private-capture permission.
+Those branches made one common register-search mechanism jointly interpret
+both extension axes.
+
+Every target profile now selects one normalized
+`ConSanMoiDispatchIdentityPlacement` strategy:
+`PreloadedScalar`, `PersistentVectorPreferred`, `ScalarThenLiteral`, or
+`ScalarThenPersistentVector`. The default is deliberately `Unsupported`, and
+profile validation rejects both that fail-closed default and inconsistent
+source/strategy combinations from the five-entry production registry. The
+profiles also state whether access reports need explicit dispatch identity;
+mode planning consumes that semantic fact without learning the target family.
+Conversely, the InlineShadow plan alone grants private entry capture, while
+Record/Replay and Sampled do not. Shared placement now composes those two
+products and continues to own the one scalar/VGPR search implementation.
+
+The boundary gate isolates the complete automatic-dispatch placement
+subroutine and rejects target-family predicates or a second mode-registry
+lookup inside it. Exact target-row and malformed-profile tests cover all five
+target rows, all four supported strategies, and the rejected default;
+mode-planning tests cover the three dispatch consumers and the InlineShadow-
+only private permission. Across the larger placement component, target-family
+predicate references fall from 36 to 28 and mode-registry lookups fall from 11
+to 10. The subroutine itself now has neither.
+
+| Signal | Checkpoint 22 | Cumulative change | Slice change from checkpoint 21 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,756 | +781 | **+42** |
+| Nonblank production lines | 99,479 | +396 | **+41** |
+| Production implementation lines | 91,777 | **+327** | **+38** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 241 / 58 | **-35 / +1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| Target-family predicates in `consan_moi_placement.inc` | 28 | n/a | **-8** |
+| Mode-registry lookups in `consan_moi_placement.inc` | 10 | n/a | **-1** |
+| Test inventory | 5,372 | +27 | 0 |
+
+This is a locality investment, not a deletion-bearing or material-shrinkage
+checkpoint. It adds 38 implementation lines and moves cumulative production
+to 327 lines above baseline. Its concrete deletion leverage is that all four
+dispatch-placement variants can now be simplified or separated by semantic
+strategy without repeating family inference, and no future target needs to
+add another branch to this common solver. The next checkpoint must harvest
+that leverage or another already-established typed seam; it must not make a
+second consecutive schema investment that postpones the same size payoff.
+
+Validation includes a 167-step incremental rebuild and an exact-final-tree
+74-test capability, mode-planning, dispatch-placement, and structural-boundary
+gate. The complete exact-final-tree 4,737-test nonphysical matrix, including all
+2,908 simulator rows over five targets, passed at `-j16` in 195.69 seconds. All
+635 physical gfx1201 tests passed on the exact final tree serialized at `-j1`
+in 109.23 seconds. No test was removed or disabled.
+
+The slice improves Section 14.2 and 14.6 but does not prove either across the
+whole codebase. Section 14.4 remains complete through the checkpoint-17
+extension fixtures. Broad operating-point and transform-artifact surfaces,
+the other target and mode facets, material shrinkage, and the independent
+whole-codebase audit remain open.

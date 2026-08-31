@@ -193,8 +193,9 @@ plan_inline_shadow_dispatch_identity(const ConSanRequest &request,
                                      const MoiDispatchIdentityFacts &facts) {
   MoiDispatchIdentityPlan plan;
   plan.needs_dispatch_id =
-      !(facts.target_uses_gfx12_cdna_execution && !request.moi_track_atomics) &&
+      (facts.access_reports_need_explicit_identity || request.moi_track_atomics) &&
       facts.has_access_or_atomic_consumer;
+  plan.permits_private_entry_capture = true;
   return plan;
 }
 

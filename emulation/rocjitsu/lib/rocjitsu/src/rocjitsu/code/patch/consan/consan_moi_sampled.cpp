@@ -238,7 +238,7 @@ MoiDispatchIdentityPlan plan_sampled_dispatch_identity(const ConSanRequest &requ
                                                        const MoiDispatchIdentityFacts &facts) {
   return {
       .needs_dispatch_id =
-          request.moi_runtime_sample_stride > 1u && !facts.target_uses_gfx12_cdna_execution,
+          request.moi_runtime_sample_stride > 1u && facts.access_reports_need_explicit_identity,
       .fallback_kind = ConSanMoiFallbackKind::SampledLiteralDispatchId,
       .fallback_replans_dispatch_only = true,
       .fallback_diagnostic =

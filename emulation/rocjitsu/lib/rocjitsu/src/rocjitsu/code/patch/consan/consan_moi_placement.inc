@@ -4401,6 +4401,10 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
   const ConSanRequest &request = problem.request();
   const BoundRuntimeResources &resources = problem.resources();
   const rj_code_arch_t arch = state.arch;
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  const ConSanMoiDispatchIdentityPlacement target_placement =
+      target ? target->moi_dispatch_identity_placement
+             : ConSanMoiDispatchIdentityPlacement::Unsupported;
   const bool has_access_or_atomic_consumer =
       std::ranges::any_of(site_plans, [](const ConSanCandidateResourcePlan &plan) {
         return !plan.owner_descriptor_file_offsets.empty() &&
@@ -4408,7 +4412,8 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
                 plan.site_kind == ConSanResourceSiteKind::Atomic);
       });
   const MoiDispatchIdentityPlan dispatch_identity = plan_moi_dispatch_identity(
-      request, {.target_uses_gfx12_cdna_execution = consan_uses_gfx12_cdna_execution(arch),
+      request, {.access_reports_need_explicit_identity =
+                    !target || target->moi_access_reports_need_explicit_dispatch_identity,
                 .has_access_or_atomic_consumer = has_access_or_atomic_consumer});
   if (!dispatch_identity.needs_dispatch_id || !resources.moi_report_buffer_address ||
       options.moi_dispatch_identity.sgpr() || options.moi_dispatch_identity.vgpr()) {
@@ -4432,12 +4437,11 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
     return update;
   }
 
-  // gfx11 normally captures dispatch identity in descriptor-grown persistent
-  // VGPRs, avoiding a long-lived reservation in the guest scalar file. A
-  // kernel that references the complete VGPR file has no such pair, however.
-  // In that capacity case, continue into the same complete-owner SGPR proof
-  // used by gfx12 instead of rejecting an otherwise instrumentable kernel.
-  if (consan_uses_gfx11_encoding(arch)) {
+  // A target may prefer descriptor-grown persistent VGPRs to a long-lived
+  // reservation in the guest scalar file. A kernel that references the
+  // complete VGPR file has no such pair; in that capacity case, continue into
+  // the target's other qualified scalar searches.
+  if (target_placement == ConSanMoiDispatchIdentityPlacement::PersistentVectorPreferred) {
     const bool lacks_persistent_dispatch_vgpr_pair =
         std::ranges::any_of(scalar_contexts.contexts, [](const MoiKernelResourceContext *context) {
           const uint32_t safe_base = context->has_indirect_vgpr_access
@@ -4505,7 +4509,8 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
   // owner and let resource-plan rebuilding reject only incompatible groups.
   // The pair remains code-object-wide, so this does not change the report ABI
   // or any emitted probe sequence.
-  if (consan_arch_is_cdna(arch)) {
+  if (target_placement == ConSanMoiDispatchIdentityPlacement::PreloadedScalar ||
+      target_placement == ConSanMoiDispatchIdentityPlacement::ScalarThenPersistentVector) {
     const int32_t last_base =
         static_cast<int32_t>((ordinary_sgpr_limit - dispatch_state_count) & ~1u);
     for (int32_t base = last_base; base >= 20; base -= 2) {
@@ -4519,7 +4524,7 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
                                           group.owners.summaries, static_cast<uint16_t>(base),
                                           dispatch_state_count, arch);
           });
-      if ((consan_uses_gfx9_cdna_encoding(arch)) && !admits_owner)
+      if (target_placement == ConSanMoiDispatchIdentityPlacement::PreloadedScalar && !admits_owner)
         continue;
       if (options.moi_owner_sgpr.base() &&
           range_overlaps(static_cast<uint16_t>(base), dispatch_state_count,
@@ -4543,7 +4548,8 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
     }
   }
 
-  if (consan_arch_is_rdna(arch)) {
+  if (target_placement == ConSanMoiDispatchIdentityPlacement::PersistentVectorPreferred ||
+      target_placement == ConSanMoiDispatchIdentityPlacement::ScalarThenLiteral) {
     // A dynamic-stack kernel can allocate the full ordinary scalar file while
     // leaving a lower pair completely untouched. Dispatch identity crosses
     // arbitrary guest code, so site-local liveness is not sufficient: require
@@ -4605,7 +4611,7 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
     }
   }
 
-  if (consan_uses_gfx12_rdna_execution(arch) ||
+  if (target_placement == ConSanMoiDispatchIdentityPlacement::ScalarThenLiteral ||
       dispatch_identity.fallback_kind == ConSanMoiFallbackKind::SampledLiteralDispatchId) {
     // Automatic banked Record/Replay can capture the preload into persistent
     // descriptor-grown VGPRs during the later owner-state placement pass.
@@ -4618,9 +4624,8 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
         "dispatch-ID SGPR pair fits");
     return update;
   }
-  if ((consan_uses_gfx9_cdna_encoding(arch)) &&
-      moi_mode_operations(request.moi_engine).transient_scalar_placement.spill_layout ==
-          ConSanMoiScalarSpillLayout::Inline &&
+  if (target_placement == ConSanMoiDispatchIdentityPlacement::PreloadedScalar &&
+      dispatch_identity.permits_private_entry_capture &&
       std::ranges::any_of(site_plans, [](const ConSanCandidateResourcePlan &plan) {
         return plan.source != ConSanRegisterAllocationSource::Unsupported &&
                plan.site_kind == ConSanResourceSiteKind::Access;
@@ -4981,9 +4986,13 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
       std::ranges::any_of(program_inventory.kernels(), [](const ConSanKernelInfo &kernel) {
         return kernel.uses_cluster_workgroup_id;
       });
-  const bool is_rdna_dispatch_vgpr_arch = consan_uses_gfx11_or_gfx12_encoding(arch);
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  const bool target_uses_persistent_dispatch_vgprs =
+      target && target->moi_dispatch_identity_placement !=
+                    ConSanMoiDispatchIdentityPlacement::PreloadedScalar;
   const bool needs_persistent_dispatch_vgprs =
-      (is_rdna_dispatch_vgpr_arch && persistent_demand.needs_persistent_dispatch_capture) ||
+      (target_uses_persistent_dispatch_vgprs &&
+       persistent_demand.needs_persistent_dispatch_capture) ||
       persistent_demand.private_dispatch_incompatible_with_dynamic_stack;
   const bool needs_workgroup_key = persistent_demand.needs_workgroup_key;
   const bool has_explicit_owner_epoch = options.moi_owner_epoch_vgprs.complete();
@@ -5037,7 +5046,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
         "scope");
     return update;
   }
-  if (is_rdna_dispatch_vgpr_arch && !uses_resident_wave_private_state) {
+  if (target_uses_persistent_dispatch_vgprs && !uses_resident_wave_private_state) {
     // Persistent owner/epoch and exact-workgroup state shares the ordinary
     // VGPR file with site-local Record/Replay and Sampled probes. Keep it above
     // the largest operational scratch window. Guest operands may overlap a

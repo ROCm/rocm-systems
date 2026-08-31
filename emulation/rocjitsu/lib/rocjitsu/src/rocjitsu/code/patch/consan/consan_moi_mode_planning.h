@@ -132,7 +132,7 @@ struct MoiAccessSpillFallbackContext {
 /// Normalized facts used by a mode to declare its dispatch-identity demand.
 /// Target-family inspection and site traversal remain common solver work.
 struct MoiDispatchIdentityFacts {
-  bool target_uses_gfx12_cdna_execution = false;
+  bool access_reports_need_explicit_identity = true;
   bool has_access_or_atomic_consumer = false;
 };
 
@@ -141,6 +141,7 @@ struct MoiDispatchIdentityFacts {
 /// semantically required and which lossless fallback it permits.
 struct MoiDispatchIdentityPlan {
   bool needs_dispatch_id = false;
+  bool permits_private_entry_capture = false;
   std::optional<ConSanMoiFallbackKind> fallback_kind;
   bool fallback_replans_dispatch_only = false;
   std::string_view fallback_diagnostic;

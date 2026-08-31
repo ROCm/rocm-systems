@@ -36,6 +36,9 @@ inline constexpr ConSanTargetProfile kConSanGfx1250TargetProfile = [] {
       .lds_byte_offset_token = true,
       .scaled_vglobal = true,
   };
+  profile.moi_dispatch_identity_placement =
+      ConSanMoiDispatchIdentityPlacement::ScalarThenPersistentVector;
+  profile.moi_access_reports_need_explicit_dispatch_identity = false;
   profile.max_group_segment_bytes = static_cast<uint32_t>(ROCJITSU_GFX1250_LDS_SIZE_KB) * 1024u;
   profile.has_cluster_facilities = true;
   profile.has_selectable_vgpr_bank = true;

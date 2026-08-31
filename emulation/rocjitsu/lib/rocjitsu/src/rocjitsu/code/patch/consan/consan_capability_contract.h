@@ -270,6 +270,18 @@ struct ConSanAtomicAddressMaterializationCapability {
   bool operator==(const ConSanAtomicAddressMaterializationCapability &) const = default;
 };
 
+/// Target-owned strategy for placing the dispatch identity consumed by MOI
+/// reports. The common solver owns register search; this contract selects the
+/// target-neutral search and lossless overflow representation without
+/// recovering a target family from encoding or product lineage.
+enum class ConSanMoiDispatchIdentityPlacement : uint8_t {
+  Unsupported,
+  PreloadedScalar,
+  PersistentVectorPreferred,
+  ScalarThenLiteral,
+  ScalarThenPersistentVector,
+};
+
 /// Describes the strength of the stable contract for one
 /// target/engine/capability-form combination.
 ///
@@ -323,6 +335,9 @@ struct ConSanTargetProfile {
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
   ConSanAtomicAddressMaterializationCapability atomic_address_materialization;
+  ConSanMoiDispatchIdentityPlacement moi_dispatch_identity_placement =
+      ConSanMoiDispatchIdentityPlacement::Unsupported;
+  bool moi_access_reports_need_explicit_dispatch_identity = true;
   bool supports_wave32 = false;
   bool supports_wave64 = true;
   uint8_t exec_register_width_bits = 64;
@@ -543,6 +558,15 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
          (profile.encoding_family != ConSanEncodingFamily::Gfx12 ||
           profile.architecture_family != ConSanArchitectureFamily::Rdna)) ||
         (profile.requires_sc_runtime_flat_group_gate && !profile.has_selectable_vgpr_bank) ||
+        profile.moi_dispatch_identity_placement ==
+            ConSanMoiDispatchIdentityPlacement::Unsupported ||
+        static_cast<uint8_t>(profile.moi_dispatch_identity_placement) >
+            static_cast<uint8_t>(ConSanMoiDispatchIdentityPlacement::ScalarThenPersistentVector) ||
+        ((profile.moi_dispatch_identity_placement ==
+          ConSanMoiDispatchIdentityPlacement::PreloadedScalar) !=
+         (profile.dispatch_identity == ConSanDispatchIdentitySource::PreloadedSgprPair)) ||
+        (!profile.moi_access_reports_need_explicit_dispatch_identity &&
+         profile.dispatch_identity != ConSanDispatchIdentitySource::CodeObjectLiteral) ||
         static_cast<uint8_t>(profile.sc_dense_route_identity) >
             static_cast<uint8_t>(ConSanScDenseRouteIdentity::ReturnPc) ||
         (profile.sc_dense_route_identity == ConSanScDenseRouteIdentity::ReturnPc &&

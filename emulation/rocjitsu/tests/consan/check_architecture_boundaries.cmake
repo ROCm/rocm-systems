@@ -191,6 +191,26 @@ if(NOT _target_extension_test MATCHES
     message(FATAL_ERROR "ConSan extension-axis exercises are missing")
 endif()
 
+# Dispatch placement composes one mode-owned demand with one target-owned
+# capability. The shared register search must not rediscover either axis from
+# product/encoding predicates or a second mode-registry lookup.
+set(_moi_placement_file "${_consan_dir}/consan_moi_placement.inc")
+file(READ "${_moi_placement_file}" _moi_placement)
+string(FIND "${_moi_placement}" "configure_automatic_moi_dispatch_id_sgprs" _dispatch_begin)
+string(FIND "${_moi_placement}" "plan_moi_dispatch_id_fallback" _dispatch_end)
+if(_dispatch_begin LESS 0 OR _dispatch_end LESS_EQUAL _dispatch_begin)
+    message(FATAL_ERROR "ConSan dispatch-placement boundary could not be located")
+endif()
+math(EXPR _dispatch_length "${_dispatch_end} - ${_dispatch_begin}")
+string(SUBSTRING "${_moi_placement}" ${_dispatch_begin} ${_dispatch_length} _dispatch_placement)
+if(_dispatch_placement MATCHES
+   "consan_(uses_gfx|arch_is_(cdna|rdna))|moi_mode_operations")
+    message(
+        FATAL_ERROR
+        "ConSan dispatch placement must compose normalized target and mode capabilities"
+    )
+endif()
+
 # Dispatch-key and call-return registers belong to one shared scalar-router
 # allocation. Do not restore mode-prefixed copies or independently optional
 # mechanism-owned fields in the broad operating point.

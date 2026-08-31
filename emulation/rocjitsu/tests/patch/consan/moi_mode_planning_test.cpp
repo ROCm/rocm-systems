@@ -119,6 +119,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsDispatchIdentityPolicy) {
   request.moi_engine = ConSanMoiEngine::RecordReplay;
   auto plan = plan_moi_dispatch_identity(request, {});
   EXPECT_TRUE(plan.needs_dispatch_id);
+  EXPECT_FALSE(plan.permits_private_entry_capture);
   EXPECT_EQ(plan.fallback_kind, ConSanMoiFallbackKind::RecordReplayZeroGeneration);
   EXPECT_FALSE(plan.fallback_replans_dispatch_only);
 
@@ -126,17 +127,19 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsDispatchIdentityPolicy) {
   request.moi_runtime_sample_stride = 8u;
   plan = plan_moi_dispatch_identity(request, {});
   EXPECT_TRUE(plan.needs_dispatch_id);
+  EXPECT_FALSE(plan.permits_private_entry_capture);
   EXPECT_EQ(plan.fallback_kind, ConSanMoiFallbackKind::SampledLiteralDispatchId);
   EXPECT_TRUE(plan.fallback_replans_dispatch_only);
-  EXPECT_FALSE(plan_moi_dispatch_identity(request, {.target_uses_gfx12_cdna_execution = true})
+  EXPECT_FALSE(plan_moi_dispatch_identity(request, {.access_reports_need_explicit_identity = false})
                    .needs_dispatch_id);
 
   request.moi_engine = ConSanMoiEngine::InlineShadow;
   plan = plan_moi_dispatch_identity(request, {.has_access_or_atomic_consumer = true});
   EXPECT_TRUE(plan.needs_dispatch_id);
+  EXPECT_TRUE(plan.permits_private_entry_capture);
   EXPECT_FALSE(plan.fallback_kind);
   request.moi_track_atomics = false;
-  EXPECT_FALSE(plan_moi_dispatch_identity(request, {.target_uses_gfx12_cdna_execution = true,
+  EXPECT_FALSE(plan_moi_dispatch_identity(request, {.access_reports_need_explicit_identity = false,
                                                     .has_access_or_atomic_consumer = true})
                    .needs_dispatch_id);
 }

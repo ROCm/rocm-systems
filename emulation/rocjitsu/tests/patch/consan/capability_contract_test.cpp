@@ -37,6 +37,8 @@ struct ExpectedTargetProfile {
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
   ConSanAtomicAddressMaterializationCapability atomic_address_materialization;
+  ConSanMoiDispatchIdentityPlacement moi_dispatch_identity_placement;
+  bool moi_access_reports_need_explicit_dispatch_identity;
   bool supports_wave32;
   bool supports_wave64;
   uint8_t exec_register_width_bits;
@@ -92,6 +94,8 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .maximum_lanes = 32,
             },
         .atomic_address_materialization = {.flat_and_global = true},
+        .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::PreloadedScalar,
+        .moi_access_reports_need_explicit_dispatch_identity = true,
         .supports_wave32 = false,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -145,6 +149,8 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .maximum_lanes = 32,
             },
         .atomic_address_materialization = {.flat_and_global = true},
+        .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::PreloadedScalar,
+        .moi_access_reports_need_explicit_dispatch_identity = true,
         .supports_wave32 = false,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -198,6 +204,9 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .maximum_lanes = 32,
             },
         .atomic_address_materialization = {.flat_and_global = true},
+        .moi_dispatch_identity_placement =
+            ConSanMoiDispatchIdentityPlacement::PersistentVectorPreferred,
+        .moi_access_reports_need_explicit_dispatch_identity = true,
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -255,6 +264,8 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .flat_and_global = true,
                 .buffer_resource = true,
             },
+        .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::ScalarThenLiteral,
+        .moi_access_reports_need_explicit_dispatch_identity = true,
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -314,6 +325,9 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .lds_byte_offset_token = true,
                 .scaled_vglobal = true,
             },
+        .moi_dispatch_identity_placement =
+            ConSanMoiDispatchIdentityPlacement::ScalarThenPersistentVector,
+        .moi_access_reports_need_explicit_dispatch_identity = false,
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -366,6 +380,9 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.resident_wave_identity, expected.resident_wave_identity);
   EXPECT_EQ(actual.workgroup_shadow_clear, expected.workgroup_shadow_clear);
   EXPECT_EQ(actual.atomic_address_materialization, expected.atomic_address_materialization);
+  EXPECT_EQ(actual.moi_dispatch_identity_placement, expected.moi_dispatch_identity_placement);
+  EXPECT_EQ(actual.moi_access_reports_need_explicit_dispatch_identity,
+            expected.moi_access_reports_need_explicit_dispatch_identity);
   EXPECT_EQ(actual.supports_wave32, expected.supports_wave32);
   EXPECT_EQ(actual.supports_wave64, expected.supports_wave64);
   EXPECT_EQ(actual.exec_register_width_bits, expected.exec_register_width_bits);
@@ -459,6 +476,20 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
                  [](auto &profiles) { profiles[0].address_free_private_limit_bytes = 0u; });
   expect_invalid("missing private granularity",
                  [](auto &profiles) { profiles[0].private_allocation_granularity_bytes = 0u; });
+  expect_invalid("unknown dispatch placement strategy", [](auto &profiles) {
+    profiles[2].moi_dispatch_identity_placement =
+        static_cast<ConSanMoiDispatchIdentityPlacement>(255u);
+  });
+  expect_invalid("unsupported dispatch placement strategy", [](auto &profiles) {
+    profiles[2].moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::Unsupported;
+  });
+  expect_invalid("preloaded scalar strategy on a literal target", [](auto &profiles) {
+    profiles[2].moi_dispatch_identity_placement =
+        ConSanMoiDispatchIdentityPlacement::PreloadedScalar;
+  });
+  expect_invalid("implicit access identity without literal support", [](auto &profiles) {
+    profiles[0].moi_access_reports_need_explicit_dispatch_identity = false;
+  });
   expect_invalid("missing group segment limit",
                  [](auto &profiles) { profiles[0].max_group_segment_bytes = 0u; });
   expect_invalid("missing ordinary atomic address materialization", [](auto &profiles) {
