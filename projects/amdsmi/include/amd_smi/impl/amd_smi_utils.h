@@ -10,6 +10,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <iosfwd>
 #include <limits>
 #include <optional>
 #include <string>
