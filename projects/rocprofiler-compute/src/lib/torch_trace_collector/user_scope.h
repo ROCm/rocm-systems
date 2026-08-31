@@ -9,8 +9,7 @@ namespace torch_trace_collector::detail
 {
 
 // Pushes a marker frame, publishes the thread stack to ThreadLocalDebugInfo,
-// and emits a ROCTX range. A non-empty args blob is appended as "|args=<encoded>"
-// before the "|<backend>" suffix.
+// and emits a ROCTX range.
 void push_user_scope(const std::string& marker,
                      const std::string& context,
                      const std::string& backend,

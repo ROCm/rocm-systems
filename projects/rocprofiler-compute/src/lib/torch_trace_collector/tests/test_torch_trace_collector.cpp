@@ -24,10 +24,13 @@ extern "C"
 #include <rocprofiler-sdk-roctx/roctx.h>
 }
 
+#include <nlohmann/json.hpp>
+
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -46,6 +49,17 @@ Stats& stats()
 SnapshotStore& snapshots()
 {
     return process_state().snapshots;
+}
+
+nlohmann::json load_marker_args_codec()
+{
+    std::ifstream in{MARKER_ARGS_CODEC_PATH};
+    if (!in)
+    {
+        ADD_FAILURE() << "cannot open " << MARKER_ARGS_CODEC_PATH;
+        return nlohmann::json::object();
+    }
+    return nlohmann::json::parse(in);
 }
 
 void reset_state()
@@ -112,6 +126,51 @@ std::vector<std::int64_t> sequence_numbers_on_shard(std::size_t   shard,
         }
     }
     return sequence_numbers;
+}
+
+constexpr const char kArgsSegmentPrefix[] = "|args=";
+
+std::string encoded_args_for_operator(const std::vector<std::string>& recorded,
+                                      const std::string&              operator_name)
+{
+    const std::string top_level_prefix = operator_name + ":";
+    const std::string nested_prefix    = "/" + operator_name + ":";
+    std::string       encoded_args;
+    for (const auto& marker : recorded)
+    {
+        const bool match = marker.compare(0, top_level_prefix.size(), top_level_prefix) == 0 ||
+                           marker.find(nested_prefix) != std::string::npos;
+        if (!match)
+        {
+            continue;
+        }
+        const auto args_pos = marker.find(kArgsSegmentPrefix);
+        if (args_pos == std::string::npos)
+        {
+            continue;
+        }
+        const auto        args_begin = args_pos + (sizeof(kArgsSegmentPrefix) - 1);
+        const auto        args_end   = marker.find('|', args_begin);
+        const std::string encoded    = (args_end == std::string::npos)
+                                           ? marker.substr(args_begin)
+                                           : marker.substr(args_begin, args_end - args_begin);
+        if (!encoded_args.empty() && encoded_args != encoded)
+        {
+            ADD_FAILURE() << operator_name << " args differ: " << encoded_args << " vs " << encoded;
+        }
+        encoded_args = encoded;
+    }
+    if (encoded_args.empty())
+    {
+        std::string markers;
+        for (const auto& marker : recorded)
+        {
+            markers += marker;
+            markers += '\n';
+        }
+        ADD_FAILURE() << "no args segment for " << operator_name << ":\n" << markers;
+    }
+    return encoded_args;
 }
 
 std::size_t count_in_marker_path(const std::string& wire, const std::string& needle)
@@ -248,14 +307,22 @@ TEST(RoctxRangeIntercept, RecordsPushA)
     EXPECT_EQ(recorded.front(), "probe");
 }
 
-TEST(ArgsEncoding, EscapesPipePercentAndNewlines)
+TEST(ArgsEncoding, MatchesMarkerArgsCodec)
 {
-    EXPECT_EQ(encode_args("a|b"), "a%7Cb");
-    EXPECT_EQ(encode_args("100%"), "100%25");
-    EXPECT_EQ(encode_args("a;b"), "a%3Bb");
-    EXPECT_EQ(encode_args("x\ny\rz"), "x%0Ay%0Dz");
-    EXPECT_EQ(encode_args(""), "");
-    EXPECT_EQ(encode_args("(self=float32[2x2]);x"), "(self=float32[2x2])%3Bx");
+    const nlohmann::json codec = load_marker_args_codec();
+    ASSERT_FALSE(codec.empty());
+    ASSERT_EQ(kMaxArgsLen, codec.at("max_args_len").get<std::size_t>());
+    ASSERT_EQ(kMaxArgItems, codec.at("max_arg_items").get<std::size_t>());
+
+    ASSERT_TRUE(codec.contains("cases"));
+    ASSERT_FALSE(codec.at("cases").empty());
+    for (const auto& test_case : codec.at("cases"))
+    {
+        const auto name      = test_case.at("name").get<std::string>();
+        const auto plaintext = test_case.at("plaintext").get<std::string>();
+        const auto encoded   = test_case.at("encoded").get<std::string>();
+        EXPECT_EQ(encode_args(plaintext), encoded) << name;
+    }
 }
 
 TEST(ArgsEncoding, AppendArgsSegmentPlacesEncodedBlobBeforeBackend)
@@ -319,9 +386,6 @@ TEST(ArgsRendering, ScalarValueModeRendersValueOtherwiseTypeTag)
 
 TEST(ArgsRendering, CapArgsBlobTruncatesPastLimit)
 {
-    const std::string under(kMaxArgsLen, 'a');
-    EXPECT_EQ(cap_args_blob(under), under);
-
     const std::string at_limit(kMaxArgsLen, 'a');
     EXPECT_EQ(cap_args_blob(at_limit), at_limit);
 
@@ -330,6 +394,42 @@ TEST(ArgsRendering, CapArgsBlobTruncatesPastLimit)
     EXPECT_EQ(capped.size(), kMaxArgsLen + 3);
     EXPECT_EQ(capped.compare(kMaxArgsLen, 3, "..."), 0);
     EXPECT_EQ(capped.substr(0, kMaxArgsLen), std::string(kMaxArgsLen, 'a'));
+}
+
+TEST_F(TorchTraceCollectorTest, RecordedArgsForMmReluCat)
+{
+    install(/*capture_args=*/true, /*capture_values=*/false);
+    const auto opts = at::TensorOptions().dtype(at::kFloat);
+    const auto a    = at::zeros({2, 3}, opts);
+    const auto b    = at::zeros({3, 4}, opts);
+    const auto t    = at::zeros({2, 3}, opts);
+
+    roctx_range_intercept::start_recording();
+    (void)at::mm(a, b);
+    (void)at::relu(t);
+    (void)at::cat({t, t}, 0);
+    const auto recorded = roctx_range_intercept::stop_recording();
+    ASSERT_FALSE(recorded.empty());
+
+    EXPECT_EQ(encoded_args_for_operator(recorded, "aten::mm"),
+              encode_args("(self=float32[2x3], mat2=float32[3x4])"));
+    EXPECT_EQ(encoded_args_for_operator(recorded, "aten::relu"), encode_args("(self=float32[2x3])"));
+    EXPECT_EQ(encoded_args_for_operator(recorded, "aten::cat"),
+              encode_args("(tensors=[float32[2x3], float32[2x3]], dim=Int)"));
+}
+
+TEST_F(TorchTraceCollectorTest, RecordedCatArgsIncludeDimValue)
+{
+    install(/*capture_args=*/true, /*capture_values=*/true);
+    const auto t = at::zeros({2, 3}, at::TensorOptions().dtype(at::kFloat));
+
+    roctx_range_intercept::start_recording();
+    (void)at::cat({t, t}, 1);
+    const auto recorded = roctx_range_intercept::stop_recording();
+    ASSERT_FALSE(recorded.empty());
+
+    EXPECT_EQ(encoded_args_for_operator(recorded, "aten::cat"),
+              encode_args("(tensors=[float32[2x3], float32[2x3]], dim=1)"));
 }
 
 TEST_F(TorchTraceCollectorTest, PushUserScopeEmitsArgsSegmentBeforeBackend)

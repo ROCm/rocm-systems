@@ -7,8 +7,10 @@ and ``core._push_scope`` / ``_pop_scope``."""
 
 import functools
 import importlib
+import json
 import sys
 import types
+from pathlib import Path
 
 import common  # noqa: F401
 import pytest
@@ -604,29 +606,30 @@ def test_torch_pop_scope_routes_each_frame_to_its_originating_tier(torch_backend
 # Operator args capture
 # ---------------------------------------------------------------------------
 
-
-@pytest.mark.parametrize(
-    "raw",
-    [
-        "",
-        "(self=float32[4096x4096], other=float64)",
-        "a|b%c\nd\re",
-        "(float32[2x3], dim=1)",
-        "100% | done",
-        "a;b;c",
-        "%3B literal and ; raw",
-    ],
+_MARKER_ARGS_CODEC_PATH = (
+    Path(__file__).resolve().parents[3] / "marker_args_codec.json"
 )
-def test_encode_args_round_trips(raw):
+_MARKER_ARGS_CODEC = json.loads(_MARKER_ARGS_CODEC_PATH.read_text(encoding="utf-8"))
+
+
+def test_marker_args_codec_limits():
     from utils.inject_roctx import marker_format
 
-    encoded = marker_format.encode_args(raw)
-    # The encoded form must not contain the reserved delimiters or newlines.
-    assert "|" not in encoded
-    assert ";" not in encoded
-    assert "\n" not in encoded
-    assert "\r" not in encoded
-    assert marker_format.decode_args(encoded) == raw
+    assert marker_format.MAX_ARGS_LEN == _MARKER_ARGS_CODEC["max_args_len"]
+    assert marker_format.MAX_ARG_ITEMS == _MARKER_ARGS_CODEC["max_arg_items"]
+
+
+@pytest.mark.parametrize(
+    "case",
+    _MARKER_ARGS_CODEC["cases"],
+    ids=[case["name"] for case in _MARKER_ARGS_CODEC["cases"]],
+)
+def test_marker_args_codec_encode_decode(case):
+    from utils.inject_roctx import marker_format
+
+    encoded = marker_format.encode_args(case["plaintext"])
+    assert encoded == case["encoded"]
+    assert marker_format.decode_args(encoded) == case["plaintext"]
 
 
 def test_core_push_scope_appends_args_segment_before_backend(core_with_python_tier):
@@ -647,7 +650,6 @@ def test_core_push_scope_encodes_pipe_in_args(core_with_python_tier):
     core, pushed, _ = core_with_python_tier
 
     core._push_scope("op", "#1@x:1", backend="torch", args="a|b")
-    # The '|' inside args is encoded so the trailing backend stays parseable.
     assert pushed == ["op:#1@x:1|args=a%7Cb|torch"]
 
 
@@ -684,7 +686,6 @@ def test_args_capture_config_gate():
     core.set_args_capture(False, False)
     assert core.args_capture_enabled() is False
 
-    # Values require args capture to also be enabled.
     core.set_args_capture(False, True)
     assert core.args_values_enabled() is False
 
@@ -713,17 +714,14 @@ def test_triton_build_args_tensor_and_scalar():
     ]
     self_obj = types.SimpleNamespace(params=params)
 
-    # Default (shapes) mode: tensors render as dtype[shape], scalars as types.
     blob = triton_backend._build_triton_args(
         self_obj, (fake_tensor, 1024), {"grid": (8,), "BLOCK_SIZE": 256}
     )
     assert "x_ptr=float32[2x3]" in blob
     assert "n_elements=int" in blob
-    # grid is a runtime geometry kwarg and must be skipped.
     assert "grid" not in blob
     assert "BLOCK_SIZE=int" in blob
 
-    # values mode: scalar values are additionally captured.
     core.set_args_capture(True, True)
     blob_values = triton_backend._build_triton_args(
         self_obj, (fake_tensor, 1024), {"grid": (8,), "BLOCK_SIZE": 256}
@@ -733,8 +731,6 @@ def test_triton_build_args_tensor_and_scalar():
 
 
 def test_triton_build_args_drops_compiled_kernel_preamble():
-    """CompiledKernel launch args keep only kernel params, not the launcher
-    preamble (grid, stream, function, metadata, hooks)."""
     from utils.inject_roctx._backends import triton as triton_backend
 
     class _LazyDict:
@@ -755,12 +751,9 @@ def test_triton_build_args_drops_compiled_kernel_preamble():
 
     x = types.SimpleNamespace(shape=(8,), dtype="torch.float32")
     out = types.SimpleNamespace(shape=(8,), dtype="torch.float32")
-    # Launcher preamble: grid(3), stream, function, packed metadata,
-    # launch_metadata, and two hooks, followed by the kernel params.
     preamble = (8, 1, 1, 0, 12345, (4, 1, 0), _LazyDict(), _HookChain(), _HookChain())
     blob = triton_backend._build_triton_args(self_obj, preamble + (x, out, 8, 256), {})
 
-    # Scalars render as type names in the default (shapes) mode.
     assert blob == (
         "(x_ptr=float32[8], out_ptr=float32[8], n_elements=int, BLOCK_SIZE=int)"
     )
@@ -769,7 +762,6 @@ def test_triton_build_args_drops_compiled_kernel_preamble():
 
 
 def test_triton_build_args_drops_internal_types_without_names():
-    """Launcher-internal objects are dropped even when no names are resolved."""
     from utils.inject_roctx import core
     from utils.inject_roctx._backends import triton as triton_backend
 
@@ -787,21 +779,18 @@ def test_triton_build_args_drops_internal_types_without_names():
 
 
 def test_triton_build_args_caps_combined_positional_and_keyword():
-    """Positional and keyword args share one MAX_ARG_ITEMS budget."""
     from utils.inject_roctx import marker_format
     from utils.inject_roctx._backends import triton as triton_backend
 
     cap = marker_format.MAX_ARG_ITEMS
     self_obj = types.SimpleNamespace(params=None)
 
-    # Positional args alone fill the budget.
     blob = triton_backend._build_triton_args(
         self_obj, tuple(range(cap)), {f"k{i}": i for i in range(cap)}
     )
     assert len(blob[1:-1].split(", ")) == cap
     assert "k0=" not in blob
 
-    # Keyword args fill the remaining budget.
     blob = triton_backend._build_triton_args(
         self_obj, (1, 2), {f"k{i}": i for i in range(cap)}
     )
@@ -825,7 +814,6 @@ def test_torch_build_dispatch_args_formats(monkeypatch):
     from utils.inject_roctx import core
     from utils.inject_roctx._backends import torch as torch_backend
 
-    # Stand in for torch.Tensor so the formatter takes the tensor branch.
     class FakeTensor:
         def __init__(self, shape, dtype):
             self.shape = shape
@@ -834,16 +822,13 @@ def test_torch_build_dispatch_args_formats(monkeypatch):
     fake_torch = types.SimpleNamespace(Tensor=FakeTensor)
     monkeypatch.setattr(torch_backend._STATE, "torch", fake_torch)
 
-    # Stand in for an OpOverload carrying an ATen schema.
     func = types.SimpleNamespace(
         _schema=types.SimpleNamespace(arguments=[types.SimpleNamespace(name="self")])
     )
 
     t = FakeTensor((4, 8), "torch.float16")
     blob = torch_backend._build_dispatch_args(func, (t,), {"dim": 1})
-    # Positional arg is labelled with its schema name.
     assert "self=float16[4x8]" in blob
-    # dim value is hidden unless value capture is enabled.
     assert "dim=int" in blob
 
     core.set_args_capture(True, True)
@@ -852,7 +837,6 @@ def test_torch_build_dispatch_args_formats(monkeypatch):
 
 
 def test_torch_build_dispatch_args_without_schema(monkeypatch):
-    """Positional args render unlabelled when no schema is available."""
     from utils.inject_roctx._backends import torch as torch_backend
 
     class FakeTensor:
@@ -866,3 +850,33 @@ def test_torch_build_dispatch_args_without_schema(monkeypatch):
     t = FakeTensor((2, 3), "torch.float32")
     blob = torch_backend._build_dispatch_args(object(), (t,), {})
     assert blob == "(float32[2x3])"
+
+
+def test_torch_build_dispatch_args_for_mm_relu_cat(monkeypatch):
+    torch = pytest.importorskip("torch")
+    from utils.inject_roctx import core
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    monkeypatch.setattr(torch_backend._STATE, "torch", torch)
+    core.set_args_capture(True, False)
+
+    a = torch.zeros(2, 3, dtype=torch.float32)
+    b = torch.zeros(3, 4, dtype=torch.float32)
+    t = torch.zeros(2, 3, dtype=torch.float32)
+
+    assert torch_backend._build_dispatch_args(
+        torch.ops.aten.mm.default, (a, b), {}
+    ) == "(self=float32[2x3], mat2=float32[3x4])"
+    assert torch_backend._build_dispatch_args(
+        torch.ops.aten.relu.default, (t,), {}
+    ) == "(self=float32[2x3])"
+    assert torch_backend._build_dispatch_args(
+        torch.ops.aten.cat.default, ([t, t],), {"dim": 0}
+    ) == "(tensors=[float32[2x3], float32[2x3]], dim=int)"
+
+    core.set_args_capture(True, True)
+    assert torch_backend._build_dispatch_args(
+        torch.ops.aten.cat.default, ([t, t],), {"dim": 1}
+    ) == "(tensors=[float32[2x3], float32[2x3]], dim=1)"
+
+

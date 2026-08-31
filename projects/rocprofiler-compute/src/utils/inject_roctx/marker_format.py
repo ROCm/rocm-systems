@@ -1,13 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Wire-format codec for the marker args blob.
+"""Percent-encoding for the ``|args=<ENC>`` marker segment.
 
-The blob occupies the ``|args=<ENC>`` segment of a marker. ``%``, ``|``, ``;``,
-and newlines are percent-encoded so the segment is parsed as a single field.
+Encodes ``%``, ``|``, ``;``, and newlines.
 """
 
-# Bounds applied when building an args blob.
+# Args blob limits.
 MAX_ARGS_LEN = 512
 MAX_ARG_ITEMS = 32
 
@@ -41,8 +40,7 @@ def decode_args(encoded: str) -> str:
 
 
 def cap_args(blob: str) -> str:
-    """Truncate an args blob to ``MAX_ARGS_LEN`` characters, appending ``...``
-    when truncated."""
+    """Truncate an args blob to ``MAX_ARGS_LEN`` characters and append ``...``."""
     if len(blob) > MAX_ARGS_LEN:
         return blob[:MAX_ARGS_LEN] + "..."
     return blob

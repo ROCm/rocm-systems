@@ -18,13 +18,13 @@
 namespace torch_trace_collector::detail
 {
 
-// Characters kept from an args blob before encoding.
+// Maximum length of an args blob.
 inline constexpr std::size_t kMaxArgsLen = 512;
 
 // Maximum number of operator inputs rendered into an args blob.
 inline constexpr std::size_t kMaxArgItems = 32;
 
-// Operator-argument capture configuration, set by install().
+// Operator-argument capture configuration.
 struct ArgsCaptureConfig
 {
     std::atomic<bool> capture_args{true};
@@ -33,8 +33,7 @@ struct ArgsCaptureConfig
 
 inline ArgsCaptureConfig g_args_capture;
 
-// Truncate an args blob longer than kMaxArgsLen characters and append an
-// ellipsis.
+// Truncate an args blob to kMaxArgsLen and append "...".
 inline std::string cap_args_blob(std::string blob)
 {
     if (blob.size() <= kMaxArgsLen)
@@ -46,14 +45,13 @@ inline std::string cap_args_blob(std::string blob)
     return blob;
 }
 
-// Whether operator args are captured (default on).
+// Whether operator args are captured.
 inline bool args_capture_enabled()
 {
     return g_args_capture.capture_args.load();
 }
 
-// Whether scalar values are recorded in addition to shapes and dtypes. Values
-// are only recorded when args capture is also enabled.
+// Whether scalar values are recorded. Requires args capture.
 inline bool args_values_enabled()
 {
     return g_args_capture.capture_args.load() && g_args_capture.capture_values.load();
@@ -90,9 +88,8 @@ inline std::string encode_args(const std::string& args)
     return out;
 }
 
-// Map a tensor scalar type to the dtype spelling used by the Python tiers
-// (e.g. Float -> float32). Types outside the list below use the lowercased
-// ATen name, which is how torch spells the fp8, unsigned, and quantized dtypes.
+// Tensor dtype name used by the Python tiers (Float -> float32).
+// Unlisted types use the lowercased ATen name.
 inline std::string scalar_type_name(c10::ScalarType type)
 {
     switch (type)
@@ -198,10 +195,8 @@ inline std::string render_leaf_ivalue(const c10::IValue& iv, bool values)
     }
 }
 
-// Build the unencoded args blob for a RecordFunction leaf as
-// "(name=dtype[shape], ...)". Argument names come from the operator schema
-// when available. Returns "" when capture is disabled, args are unavailable, or
-// the operator has no inputs.
+// Unencoded args blob: "(name=dtype[shape], ...)". Empty when capture is off
+// or the operator has no inputs.
 inline std::string build_leaf_args(const at::RecordFunction& record_fn)
 {
     if (!args_capture_enabled())
