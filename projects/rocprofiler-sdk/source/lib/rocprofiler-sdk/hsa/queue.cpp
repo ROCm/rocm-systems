@@ -129,17 +129,20 @@ template <typename TryDrainFn>
 void
 replay_wait_or_fatal(TryDrainFn&& try_drain_once, std::string_view what)
 {
-    static constexpr int drain_slices = 5;
-    static constexpr int max_slices   = 12;
+    // One try_drain_once() call blocks for at most one slice, so the two together bound the wait
+    // at seconds_per_slice * max_slices.
+    static constexpr int seconds_per_slice = 5;
+    static constexpr int max_slices        = 12;
 
     for(int i = 0; i < max_slices; ++i)
     {
         if(try_drain_once()) return;
-        ROCP_WARNING << fmt::format(
-            "kernel replay: still waiting for {} (~{}s elapsed)", what, (i + 1) * drain_slices);
+        ROCP_WARNING << fmt::format("kernel replay: still waiting for {} (~{}s elapsed)",
+                                    what,
+                                    (i + 1) * seconds_per_slice);
     }
     ROCP_FATAL << fmt::format(
-        "kernel replay: {} did not drain after ~{}s", what, max_slices * drain_slices);
+        "kernel replay: {} did not drain after ~{}s", what, max_slices * seconds_per_slice);
 }
 
 // Drain a queue's in-flight async completion handler(s) during replay. Unlike Queue::sync()'s
