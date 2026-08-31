@@ -109,10 +109,12 @@ jobs:
 
       - name: Copy repository into WSL
         shell: wsl-bash {0}
-        env:
-          WORKSPACE_WIN: ${{ github.workspace }}
         run: |
           set -euo pipefail
+          # GitHub Actions `env:` does not cross the Windows/WSL boundary (that needs
+          # WSLENV), so trusted values are interpolated into the script text instead.
+          WORKSPACE_WIN='${{ github.workspace }}'
+
           # Building on /mnt/c is an order of magnitude slower than the WSL filesystem.
           SRC="$(wslpath -a -u "${WORKSPACE_WIN}")"
           rm -rf "${HOME}/rocm-systems"
@@ -122,11 +124,12 @@ jobs:
 
       - name: Verify WSL environment
         shell: wsl-bash {0}
-        env:
-          ROCM_PATH: ${{ env.ROCM_PATH }}
-          WSL_DISTRIBUTION: ${{ env.WSL_DISTRIBUTION }}
         run: |
           set -euo pipefail
+          # GitHub Actions `env:` does not cross the Windows/WSL boundary (that needs
+          # WSLENV), so trusted values are interpolated into the script text instead.
+          ROCM_PATH='${{ env.ROCM_PATH }}'
+          WSL_DISTRIBUTION='${{ env.WSL_DISTRIBUTION }}'
 
           fail=0
 
@@ -177,12 +180,18 @@ jobs:
 
       - name: Prepare build environment
         shell: wsl-bash {0}
-        env:
-          ROCM_PATH: ${{ env.ROCM_PATH }}
-          GPU_TARGET_FALLBACK: ${{ env.GPU_TARGET_FALLBACK }}
-          WIN_SDK_VERSION: ${{ steps.detect-sdk.outputs.SDK_VERSION }}
         run: |
           set -euo pipefail
+          # GitHub Actions `env:` does not cross the Windows/WSL boundary (that needs
+          # WSLENV), so trusted values are interpolated into the script text instead.
+          ROCM_PATH='${{ env.ROCM_PATH }}'
+          GPU_TARGET_FALLBACK='${{ env.GPU_TARGET_FALLBACK }}'
+          WIN_SDK_VERSION='${{ steps.detect-sdk.outputs.SDK_VERSION }}'
+
+          if [ -z "${WIN_SDK_VERSION}" ]; then
+            echo "ERROR: the detect-sdk step produced no SDK_VERSION output."
+            exit 1
+          fi
 
           WIN_SDK="/mnt/c/Program Files (x86)/Windows Kits/10/Include/${WIN_SDK_VERSION}"
           if [ ! -d "${WIN_SDK}/shared" ]; then
@@ -296,15 +305,18 @@ jobs:
       - name: Test - integration tests
         shell: wsl-bash {0}
         timeout-minutes: 60
-        env:
-          GPU_ENABLE_PAL: ${{ env.GPU_ENABLE_PAL }}
-          WSLKMT_VENDOR_PACKET: ${{ env.WSLKMT_VENDOR_PACKET }}
-          EXCLUDE_TESTS_REGEX: ${{ env.wsl_EXCLUDE_TESTS_REGEX }}
-          EXCLUDE_LABEL_REGEX: ${{ env.wsl_EXCLUDE_LABEL_REGEX }}
         run: |
           set -euo pipefail
           # shellcheck disable=SC1091
           source "${HOME}/rocprof-wsl-env.sh"
+
+          # GitHub Actions `env:` does not cross the Windows/WSL boundary (that needs
+          # WSLENV), so trusted values are interpolated into the script text instead.
+          # These two must reach the ctest child processes, so they are exported.
+          export GPU_ENABLE_PAL='${{ env.GPU_ENABLE_PAL }}'
+          export WSLKMT_VENDOR_PACKET='${{ env.WSLKMT_VENDOR_PACKET }}'
+          EXCLUDE_TESTS_REGEX='${{ env.wsl_EXCLUDE_TESTS_REGEX }}'
+          EXCLUDE_LABEL_REGEX='${{ env.wsl_EXCLUDE_LABEL_REGEX }}'
 
           # An empty -E/-LE regex matches every test name, so only pass the flags when the
           # corresponding workflow variable is actually set.
@@ -325,10 +337,12 @@ jobs:
       - name: Collect logs
         if: ${{ always() }}
         shell: wsl-bash {0}
-        env:
-          WORKSPACE_WIN: ${{ github.workspace }}
         run: |
           set -euo pipefail
+          # GitHub Actions `env:` does not cross the Windows/WSL boundary (that needs
+          # WSLENV), so trusted values are interpolated into the script text instead.
+          WORKSPACE_WIN='${{ github.workspace }}'
+
           DEST="$(wslpath -a -u "${WORKSPACE_WIN}")/wsl-logs"
           rm -rf "${DEST}"
           mkdir -p "${DEST}"
