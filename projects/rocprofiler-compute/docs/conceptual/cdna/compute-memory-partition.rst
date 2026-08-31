@@ -4,9 +4,9 @@
 
 .. _compute-memory-partition:
 
-*******************************************
+**********************************************
 Compute and memory partition modes in analysis
-*******************************************
+**********************************************
 
 AMD Instinct™ MI300 and MI350 series GPUs support **compute partition modes**
 (SPX, DPX, QPX, CPX) and **memory partition modes** (NPS1, NPS2, NPS4, and
