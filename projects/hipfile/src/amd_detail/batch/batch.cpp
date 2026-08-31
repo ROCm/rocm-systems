@@ -360,23 +360,49 @@ BatchContext::submitOperations(BatchOperations pending_ops)
         // Destruction takes context_mutex before canceling the task group. Keep
         // all enqueue operations in this critical section so destroy cannot
         // finish before an accepted operation is handed to the task group.
-        auto self = shared_from_this();
-        for (const auto &op : pending_ops) {
-            task_group->run([self, op]() {
-                op->run();
-                {
-                    std::lock_guard<std::mutex> _lock{self->context_mutex};
+        auto   self     = shared_from_this();
+        size_t op_index = 0;
+        try {
+            for (; op_index < pending_ops.size(); op_index++) {
+                const auto &op = pending_ops[op_index];
+                task_group->run([self, op]() {
+                    op->run();
+                    {
+                        std::lock_guard<std::mutex> _lock{self->context_mutex};
 
-                    // A cancel may have moved this operation to completed_ops
-                    // already. Cancellation only stops queued work that has not
-                    // started, so this work may still run after the operation was
-                    // canceled. See completeCanceledOperations().
-                    if (auto node = self->submitted_ops.extract(op); !node.empty()) {
-                        self->completed_ops.push_back(std::move(node.value()));
+                        // A cancel may have moved this operation to completed_ops
+                        // already. Cancellation only stops queued work that has not
+                        // started, so this work may still run after the operation was
+                        // canceled. See completeCanceledOperations().
+                        if (auto node = self->submitted_ops.extract(op); !node.empty()) {
+                            self->completed_ops.push_back(std::move(node.value()));
+                        }
                     }
+                    self->status_cv.notify_all();
+                });
+            }
+        }
+        catch (...) {
+            // Cancel work already accepted by the task group. Its queued work
+            // will move it to completed_ops after observing the canceled state.
+            for (size_t i = 0; i < op_index; i++) {
+                pending_ops[i]->tryCancel();
+            }
+
+            // No queued work exists to complete the failed operation or any
+            // operation after it, so complete those operations here.
+            for (; op_index < pending_ops.size(); op_index++) {
+                const auto &op = pending_ops[op_index];
+                if (!op->tryCancel()) {
+                    continue;
                 }
-                self->status_cv.notify_all();
-            });
+
+                if (auto node = submitted_ops.extract(op); !node.empty()) {
+                    completed_ops.push_back(std::move(node.value()));
+                }
+            }
+            status_cv.notify_all();
+            throw;
         }
     }
 }

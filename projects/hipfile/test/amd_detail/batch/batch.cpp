@@ -512,6 +512,44 @@ TEST_F(HipFileBatchContext, SubmitOverCapacityOverMultipleSubmissions)
     ASSERT_THROW(_context->submitOperations(BatchOperations{op}), BatchFull);
 }
 
+TEST_F(HipFileBatchContext, TaskGroupSubmissionFailureCancelsEntireSubmission)
+{
+    int  queued_cookie{};
+    int  unsubmitted_cookie{};
+    auto queued_op      = std::make_shared<StrictMock<MBatchOperation>>();
+    auto unsubmitted_op = std::make_shared<StrictMock<MBatchOperation>>();
+    EXPECT_CALL(*queued_op, markPending()).Times(1);
+    EXPECT_CALL(*unsubmitted_op, markPending()).Times(1);
+    EXPECT_CALL(*queued_op, tryCancel()).WillOnce(Return(true));
+    EXPECT_CALL(*unsubmitted_op, tryCancel()).WillOnce(Return(true));
+    EXPECT_CALL(*mock_task_group, run(_))
+        .WillOnce([this](std::function<void()> work) { enqueued_tasks.push_back(std::move(work)); })
+        .WillOnce(Throw(std::runtime_error{"Failed to submit task"}));
+
+    ASSERT_THROW(_context->submitOperations(BatchOperations{queued_op, unsubmitted_op}), std::runtime_error);
+    ASSERT_EQ(enqueued_tasks.size(), 1);
+
+    hipFileIOEvents_t unsubmitted_event{&unsubmitted_cookie, hipFileCanceled, 0};
+    EXPECT_CALL(*unsubmitted_op, event()).WillOnce(Return(unsubmitted_event));
+    unsigned          nr = 1;
+    hipFileIOEvents_t event{};
+    ASSERT_NO_THROW(_context->getStatus(0, &nr, &event, std::nullopt));
+    ASSERT_EQ(nr, 1);
+    ASSERT_EQ(event.cookie, &unsubmitted_cookie);
+    ASSERT_EQ(event.status, hipFileCanceled);
+
+    EXPECT_CALL(*queued_op, run()).Times(1);
+    enqueued_tasks.front()();
+
+    hipFileIOEvents_t queued_event{&queued_cookie, hipFileCanceled, 0};
+    EXPECT_CALL(*queued_op, event()).WillOnce(Return(queued_event));
+    nr = 1;
+    ASSERT_NO_THROW(_context->getStatus(0, &nr, &event, std::nullopt));
+    ASSERT_EQ(nr, 1);
+    ASSERT_EQ(event.cookie, &queued_cookie);
+    ASSERT_EQ(event.status, hipFileCanceled);
+}
+
 TEST_F(HipFileBatchContext, SubmitWithContextRetainedBeforeDestroyIsRejected)
 {
     hipFileBatchHandle_t handle           = _context.get();
