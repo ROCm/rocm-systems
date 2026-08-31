@@ -5,6 +5,7 @@
 #include "backends/amd_smi/sdma_feature.hpp"
 
 #include "common/env_vars.hpp"
+#include "common/string_utility.hpp"
 #include "core/amd_smi.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
@@ -13,7 +14,6 @@
 
 #include "logger/debug.hpp"
 
-#include <cctype>
 #include <string_view>
 
 namespace rocprofsys
@@ -27,10 +27,7 @@ get_setting_name(std::string_view input)
 {
     constexpr auto prefix = std::string_view{ "rocprofsys_" };
 
-    std::string result;
-    result.reserve(input.size());
-    for(auto c : input)
-        result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    auto result = utility::string::to_lower(input);
 
     if(result.compare(0, prefix.size(), prefix) == 0) return result.substr(prefix.size());
 

@@ -144,15 +144,6 @@ TEST_F(logger_test, parse_boolean_env_false_values)
     EXPECT_FALSE(rocprofsys::parse_boolean_env(nullptr));
 }
 
-TEST_F(logger_test, to_lower_conversion)
-{
-    EXPECT_EQ(rocprofsys::to_lower("HELLO"), "hello");
-    EXPECT_EQ(rocprofsys::to_lower("Hello World"), "hello world");
-    EXPECT_EQ(rocprofsys::to_lower("already_lower"), "already_lower");
-    EXPECT_EQ(rocprofsys::to_lower("MiXeD123"), "mixed123");
-    EXPECT_EQ(rocprofsys::to_lower(""), "");
-}
-
 TEST_F(logger_test, logger_settings_parse_level)
 {
     rocprofsys::logger_settings_t settings;

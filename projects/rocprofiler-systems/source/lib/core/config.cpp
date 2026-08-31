@@ -11,6 +11,7 @@
 #include "common/environment.hpp"
 #include "common/path.hpp"
 #include "common/static_object.hpp"
+#include "common/string_utility.hpp"
 #include "constraint.hpp"
 #include "gpu.hpp"
 #include "logger/logger.hpp"
@@ -111,8 +112,7 @@ std::string
 get_setting_name(std::string _v)
 {
     constexpr auto _prefix = std::string_view{ "rocprofsys_" };
-    for(auto& itr : _v)
-        itr = tolower(itr);
+    _v                     = utility::string::to_lower(_v);
     if(_v.starts_with(_prefix)) return _v.substr(_prefix.length());
     return _v;
 }
@@ -173,14 +173,6 @@ trim_config_value(std::string_view value)
     return str;
 }
 
-[[nodiscard]] std::string
-lower_config_value(std::string value)
-{
-    for(auto& itr : value)
-        itr = static_cast<char>(std::tolower(static_cast<unsigned char>(itr)));
-    return value;
-}
-
 [[nodiscard]] bool
 has_config_value_reference(std::string_view raw_value)
 {
@@ -209,7 +201,7 @@ is_recognized_boolean_text_value(std::string_view value)
 [[nodiscard]] bool
 is_valid_boolean_config_value(std::string_view raw_value)
 {
-    auto value = lower_config_value(trim_config_value(raw_value));
+    auto value = utility::string::to_lower(trim_config_value(raw_value));
     if(value.empty()) return false;
 
     if(is_integer_config_value(value)) return true;
@@ -3379,8 +3371,7 @@ rank_passes_filter(std::optional<std::uint64_t> current_rank,
                    std::optional<std::uint64_t> world_size, std::string enabled_ranks_str)
 {
     rocprofsys::utility::trim_str(enabled_ranks_str);
-    for(auto& ch : enabled_ranks_str)
-        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    enabled_ranks_str = rocprofsys::utility::string::to_lower(enabled_ranks_str);
 
     if(enabled_ranks_str.empty() || enabled_ranks_str == "all") return true;
     if(enabled_ranks_str == "none") return false;
