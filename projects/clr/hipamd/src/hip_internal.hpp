@@ -655,6 +655,7 @@ namespace hip {
     void RemoveMemoryPool(MemoryPool* pool);
     bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr,
                     bool skip_event = false);
+    bool IsFreedPoolMemory(amd::Memory* memory);
     void ReleaseFreedMemory();
     void RemoveStreamFromPools(Stream* stream);
     void AddSafeStream(Stream* event_stream, Stream* wait_stream);
