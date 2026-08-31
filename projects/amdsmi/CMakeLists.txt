@@ -85,7 +85,7 @@ set(PKG_VERSION_NUM_COMMIT 0)
 project(
     ${AMD_SMI_LIBS_TARGET}
     DESCRIPTION "AMD System Management libraries"
-    HOMEPAGE_URL "https://github.com/ROCm/rocm-systems/tree/develop/amdsmi"
+    HOMEPAGE_URL "https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi"
 )
 
 set(CMAKE_CXX_STANDARD 17)

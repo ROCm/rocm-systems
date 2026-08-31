@@ -110,7 +110,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   size_t ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
   int i = 0;
   int targetStreams = 0;
-
+  uint32_t graphSyncValue = GRAPH_SYNC_VALUE;
   // Symmetric memory runtime must be initialized before any window registration.
   NCCLCHECKGOTO(ncclDevrInitOnce(comm), ret, fail);
 
@@ -142,6 +142,10 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   comm->ceColl.baseUCSymReadyPtr = (uint8_t*)comm->ceColl.ceSyncWin->userPtr + comm->ceColl.baseUCSymReadyOffset;
   comm->ceColl.baseUCSymComplPtr = (uint8_t*)comm->ceColl.ceSyncWin->userPtr + comm->ceColl.baseUCSymComplOffset;
   comm->ceColl.ceSeqNum = 0;
+  // Allocate the UC barrier flag-value buffer: slot [0] tracks the running seq,
+  // slot [1] holds the constant GRAPH_SYNC_VALUE for graph capture.
+  NCCLCHECKGOTO(ncclCudaCalloc(&comm->ceColl.ceSeqNumDev, 2, comm->memManager), ret, fail);
+  NCCLCHECKGOTO(ncclCudaMemcpy(comm->ceColl.ceSeqNumDev + 1, &graphSyncValue, 1), ret, fail);
   comm->ceColl.useCompletePtr = false;
   comm->ceColl.intraBatchSyncFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
   comm->ceColl.intraBatchSyncMsgThreshold = CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD;
@@ -207,16 +211,20 @@ fail:
   comm->ceColl.signalBuffer = nullptr;
   comm->ceColl.signalWin = nullptr;
   if (comm->ceColl.d_barrierSync != nullptr) {
-    hipFree(comm->ceColl.d_barrierSync);
+    CUDACHECKIGNORE(hipFree(comm->ceColl.d_barrierSync));
     comm->ceColl.d_barrierSync = nullptr;
   }
   if (comm->ceColl.scatterStream != nullptr) {
-    cudaStreamDestroy(comm->ceColl.scatterStream);
+    CUDACHECKIGNORE(cudaStreamDestroy(comm->ceColl.scatterStream));
     comm->ceColl.scatterStream = nullptr;
   }
   if (comm->ceColl.synceEvent != nullptr) {
-    cudaEventDestroy(comm->ceColl.synceEvent);
+    CUDACHECKIGNORE(cudaEventDestroy(comm->ceColl.synceEvent));
     comm->ceColl.synceEvent = nullptr;
+  }
+  if (comm->ceColl.ceSeqNumDev != nullptr) {
+    ncclCudaFree(comm->ceColl.ceSeqNumDev, comm->memManager);
+    comm->ceColl.ceSeqNumDev = nullptr;
   }
   goto exit;
 }
@@ -257,6 +265,12 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
     }
     comm->ceColl.signalBuffer = NULL;
     comm->ceColl.signalWin = NULL;
+  }
+
+  // Free the UC barrier flag-value device buffer
+  if (comm->ceColl.ceSeqNumDev != NULL) {
+    NCCLCHECKGOTO(ncclCudaFree(comm->ceColl.ceSeqNumDev, comm->memManager), ret, fail);
+    comm->ceColl.ceSeqNumDev = NULL;
   }
 
   // Clean up copy streams and events
@@ -351,34 +365,102 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
                             size_t* opIdx, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
+  int myLsaRank = comm->devrState.lsaSelf;
+  int lsaSize = comm->devrState.lsaSize;
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
 
   bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
   uint32_t currentSeq = ++comm->ceColl.ceSeqNum;
 
-  // Source pointer is either the constant graph sync value or the sequence number
-  void* srcPtr = capturing ? (void*)&GRAPH_SYNC_VALUE : (void*)&currentSeq;
   // Wait value is either the constant graph sync value or the sequence number
   uint32_t waitValue = capturing ? GRAPH_SYNC_VALUE : currentSeq;
 
   // Use multi-cast address as destination pointer
   void* mcDstPtr;
-  void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
+  void* dstPtr = isComplete ? (void*)&completePtrs[myLsaRank] : (void*)&readyPtrs[myLsaRank];
   size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
   NCCLCHECKGOTO(ncclDevrGetLsaTeamPtrMC(comm, comm->ceColl.ceSyncWin, offset, ncclTeamLsa(comm), &mcDstPtr), ret, fail);
 
+  // Store the updated sequence number in the device buffer.
+  if (!capturing) {
+    CUCHECKGOTO(cuStreamWriteValue32(stream, (CUdeviceptr)comm->ceColl.ceSeqNumDev, currentSeq,
+                                    CU_STREAM_WRITE_VALUE_DEFAULT),
+              ret, fail);
+  }
+
   // Write our own ready/complete flag to the multi-cast address
-  CUDACHECKGOTO(cudaMemcpyAsync(mcDstPtr, srcPtr, sizeof(uint32_t), cudaMemcpyHostToDevice, stream), ret, fail);
+  CUDACHECKGOTO(cudaMemcpyAsync(mcDstPtr, comm->ceColl.ceSeqNumDev + capturing, sizeof(uint32_t),
+                              cudaMemcpyDeviceToDevice, stream),
+              ret, fail);
 
   // Add local wait operations for every other rank
-  for (int r = 0; r < comm->nRanks; ++r) {
-    if (r == comm->rank) continue;
+  for (int r = 0; r < lsaSize; ++r) {
+    if (r == myLsaRank) continue;
     batchParams[*opIdx] = {};
     batchParams[*opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
     batchParams[*opIdx].waitValue.address = (CUdeviceptr)(isComplete ? (void*)&completePtrs[r] : (void*)&readyPtrs[r]);
     batchParams[*opIdx].waitValue.value = waitValue;
     batchParams[*opIdx].waitValue.flags = CU_STREAM_WAIT_VALUE_EQ;
+    (*opIdx)++;
+  }
+
+  exit:
+  return ret;
+  fail:
+  goto exit;
+}
+// Capture: issue peer writes as a separate stream batch so the captured graph
+// orders write → wait → reset (reset is a second batch in ncclMemOpSync). Fusing
+// write+wait+reset in one HIP batch can hang on replay.
+static ncclResult_t ncclPrepUCSyncCapture(struct ncclComm* comm, bool isComplete, uint32_t* readyPtrs,
+                                         uint32_t* completePtrs, uint32_t waitValue, cudaStream_t stream) {
+  ncclResult_t ret = ncclSuccess;
+  hipStreamBatchMemOpParams* writeParams = nullptr;
+  size_t writeIdx = 0;
+  void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
+  size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
+
+  NCCLCHECKGOTO(ncclCalloc(&writeParams, comm->nRanks), ret, fail);
+  for (int r = 0; r < comm->nRanks; ++r) {
+    if (r == comm->rank) continue;
+    void* peerDstPtr;
+    NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, r, &peerDstPtr), ret, fail);
+    writeParams[writeIdx] = {};
+    writeParams[writeIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+    writeParams[writeIdx].writeValue.address = (CUdeviceptr)peerDstPtr;
+    writeParams[writeIdx].writeValue.value = waitValue;
+    writeParams[writeIdx].writeValue.flags = 0;
+    writeIdx++;
+  }
+  if (writeIdx) {
+    CUCHECKGOTO(hipStreamBatchMemOp(stream, writeIdx, writeParams, 0), ret, fail);
+  }
+
+exit:
+  free(writeParams);
+  return ret;
+fail:
+  goto exit;
+}
+
+// Non-capture: fuse peer writes into batchParams with waits (one submit, lower latency).
+static ncclResult_t ncclPrepUCSyncNonCapture(struct ncclComm* comm, bool isComplete, uint32_t* readyPtrs,
+                                            uint32_t* completePtrs, uint32_t waitValue,
+                                            hipStreamBatchMemOpParams* batchParams, size_t* opIdx) {
+  ncclResult_t ret = ncclSuccess;
+  void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
+  size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
+
+  for (int r = 0; r < comm->nRanks; ++r) {
+    if (r == comm->rank) continue;
+    void* peerDstPtr;
+    NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, r, &peerDstPtr), ret, fail);
+    batchParams[*opIdx] = {};
+    batchParams[*opIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+    batchParams[*opIdx].writeValue.address = (CUdeviceptr)peerDstPtr;
+    batchParams[*opIdx].writeValue.value = waitValue;
+    batchParams[*opIdx].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
     (*opIdx)++;
   }
 
@@ -389,42 +471,35 @@ fail:
 }
 
 ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete, hipStreamBatchMemOpParams* batchParams,
-                            size_t* opIdx) {
+                            size_t* opIdx, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
-#ifdef ENABLE_FAULT_INJECTION
-  NCCLCHECK(ceFaultCheck(comm, CE_FAULT_SYNC_PREP, "ncclPrepUCSync"));
-#endif
+  #ifdef ENABLE_FAULT_INJECTION
+    NCCLCHECK(ceFaultCheck(comm, CE_FAULT_SYNC_PREP, "ncclPrepUCSync"));
+  #endif
 
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
 
   bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
   uint32_t currentSeq = ++comm->ceColl.ceSeqNum;
-
-  // Write our own ready/complete flag to remote ranks
   uint32_t waitValue = capturing ? GRAPH_SYNC_VALUE : currentSeq;
-  for (int r = 0; r < comm->nRanks; ++r) {
-    if (r == comm->rank) continue;
-    void* peerDstPtr;
-    void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
-    size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
-    NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, r, &peerDstPtr), ret, fail);
-    batchParams[*opIdx] = {};
-    batchParams[*opIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
-    batchParams[*opIdx].writeValue.address = (CUdeviceptr)peerDstPtr;
-    batchParams[*opIdx].writeValue.value = waitValue;
-    batchParams[*opIdx].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
-    (*opIdx)++;
+
+  if (capturing) {
+    NCCLCHECKGOTO(ncclPrepUCSyncCapture(comm, isComplete, readyPtrs, completePtrs, waitValue, stream), ret, fail);
+  } else {
+    NCCLCHECKGOTO(ncclPrepUCSyncNonCapture(comm, isComplete, readyPtrs, completePtrs, waitValue, batchParams, opIdx),
+                  ret, fail);
   }
 
-  // Add local wait operations for every other rank
+  // Waits always go in batchParams (submitted by ncclMemOpSync; reset follows if capturing).
   for (int r = 0; r < comm->nRanks; ++r) {
     if (r == comm->rank) continue;
     batchParams[*opIdx] = {};
     batchParams[*opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
-    batchParams[*opIdx].waitValue.address = (CUdeviceptr)(isComplete ? (void*)&completePtrs[r] : (void*)&readyPtrs[r]);
-    batchParams[*opIdx].waitValue.value = capturing ? GRAPH_SYNC_VALUE : currentSeq;
+    batchParams[*opIdx].waitValue.address =
+      (CUdeviceptr)(isComplete ? (void*)&completePtrs[r] : (void*)&readyPtrs[r]);
+    batchParams[*opIdx].waitValue.value = waitValue;
     batchParams[*opIdx].waitValue.flags = CU_STREAM_WAIT_VALUE_EQ;
     (*opIdx)++;
   }
@@ -455,27 +530,35 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct nc
   if (comm->nvlsSupport) {
     NCCLCHECKGOTO(ncclPrepMCSync(comm, comm->ceColl.useCompletePtr, batchParams, &opIdx, stream), ret, fail);
   } else {
-    NCCLCHECKGOTO(ncclPrepUCSync(comm, comm->ceColl.useCompletePtr, batchParams, &opIdx), ret, fail);
+    NCCLCHECKGOTO(ncclPrepUCSync(comm, comm->ceColl.useCompletePtr, batchParams, &opIdx, stream), ret, fail);
   }
 
-  // For CUDA graph capture, add reset operation
+  // Execute the wait batch first and let it fully drain. The reset-to-0 ops
+  // MUST run strictly after every wait is satisfied: if they share one batch
+  // with the waits, ROCm's hipStreamBatchMemOp does not guarantee the resets
+  // wait for the wait ops, so a reset can clobber a peer's flag mid-barrier
+  // and hang graph replay. Issuing them as a separate, stream-ordered batch
+  // forces reset-after-wait.
+  CUCHECKGOTO(hipStreamBatchMemOp(stream, opIdx, batchParams, 0), ret, fail);
+
+  // For graph capture, reset our flag array to 0 in a separate batch so the
+  // fixed-value barrier can be replayed.
   if (ncclCudaGraphValid(comm->planner.capturingGraph)) {
-    for (int i = 0; i < lsaSize; i++) {
-      batchParams[opIdx] = {};
-      batchParams[opIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
-      batchParams[opIdx].writeValue.address =
+    size_t resetIdx = 0;
+    for (int i = 0; i < comm->nRanks; i++) {
+      batchParams[resetIdx] = {};
+      batchParams[resetIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+      batchParams[resetIdx].writeValue.address =
         (CUdeviceptr)(comm->ceColl.useCompletePtr ? (void*)&completePtrs[i] : (void*)&readyPtrs[i]);
-      batchParams[opIdx].writeValue.value = 0;
+      batchParams[resetIdx].writeValue.value = 0;
       // CU_STREAM_WRITE_VALUE_DEFAULT is a CUDA-specific constant with no HIP equivalent.
       // This field must be initialized to satisfy the CUDA-compatible struct definition,
       // but the HIP runtime does not use this flag and treats it as 0.
-      batchParams[opIdx].writeValue.flags = 0;
-      opIdx++;
+      batchParams[resetIdx].writeValue.flags = 0;
+      resetIdx++;
     }
+    CUCHECKGOTO(hipStreamBatchMemOp(stream, resetIdx, batchParams, 0), ret, fail);
   }
-
-  // Execute all memory operations in a single batch
-  CUCHECKGOTO(hipStreamBatchMemOp(stream, opIdx, batchParams, 0), ret, fail);
 
   // Toggle the flag for next call
   comm->ceColl.useCompletePtr = !comm->ceColl.useCompletePtr;
@@ -560,6 +643,13 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
       if (params->intraBatchSync && ((i + 1) % comm->ceColl.intraBatchSyncFreq == 0) && ((i + 1) < params->numOps)) {
         NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
       }
+    }
+    // Force an even sync count so useCompletePtr returns to its pre-launch
+    // state; an odd count leaves the toggle flipped and desyncs the next
+    // ready/complete barrier on graph replay. (ported from NCCL)
+    if (params->intraBatchSync &&
+        ((params->numOps + comm->ceColl.intraBatchSyncFreq - 1) / comm->ceColl.intraBatchSyncFreq) % 2 == 0) {
+      NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
     }
   }
   //--------------No graph capture--------------
