@@ -68,8 +68,8 @@ Writing those tests found four bugs in the helpers, which is the argument for ha
 
 `tests/rocprofv3/kernel-replay/test_kernel_replay_cli.py` imports `rocprofv3.py` as a module and
 exercises its argument handling without a GPU or a built SDK. It covers the two decisions unique to
-replay: which services cannot be collected in the same run, and how an input file's counter groups
-collapse into the single application run that replay produces.
+replay: which services cannot be collected in the same run, and how counter groups and input-file
+jobs turn into application runs.
 
 ## What is not covered
 
