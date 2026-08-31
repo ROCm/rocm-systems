@@ -20,8 +20,6 @@
 #include <pthread.h>
 #include <stdexcept>
 
-#include <signal.h>
-
 #pragma weak pthread_join
 #pragma weak pthread_mutex_lock
 #pragma weak pthread_spin_lock
