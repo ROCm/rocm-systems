@@ -53,6 +53,14 @@ extern std::string g_pciDeviceClass;
 extern int g_pciDeviceClassCalls;
 extern std::string g_lastPciDeviceClassBusId;
 
+// fillInfo asks the physical device for its compute partition mode before falling back to the class
+// probe above. The default is "SPX", i.e. an unpartitioned GPU. Set "CPX"/"DPX" for a partitioned
+// device, or "" for a platform that reports no mode at all. The recorded busId is how a test sees
+// that the probe targeted function 0 rather than the caller's own alias BDF.
+extern std::string g_pciComputePartition;
+extern int g_pciComputePartitionCalls;
+extern std::string g_lastPciComputePartitionBusId;
+
 extern bool g_bootstrapNetInitFail;
 
 extern ncclResult_t g_ncclNetInitResult;
