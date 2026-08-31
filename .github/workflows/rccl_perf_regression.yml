@@ -80,7 +80,7 @@ jobs:
       config_json: ${{ steps.resolve.outputs.config_json }}
     steps:
       - name: Checkout PR (full history)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # github.sha/github.ref point at the PR's synthetic merge commit on
           # pull_request events, not the PR head -- use the head SHA directly
@@ -178,7 +178,7 @@ jobs:
 
       - name: Post / update PR comment
         if: always() && github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88  # v2
         with:
           header: rccl-perf-gate
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -186,7 +186,7 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rccl-ab-report
           path: |
