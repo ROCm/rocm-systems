@@ -1702,5 +1702,91 @@ TEST_F(P2pMPITest, IpcGraphRegisterBufferTest)
     }
 }
 
+// ROCM-26926: Verify P2P send/recv correctness when the P2P batch auto-enable
+// path is gated on multi-node.  With RCCL_P2P_BATCH_ENABLE unset (default -1),
+// rcclEffectiveP2pBatchEnable returns 0 for single-node communicators
+// (comm->nNodes <= 1), so the channel-base mapping matches pre-7.14 behaviour.
+TEST_F(P2pMPITest, P2pBatchAutoDisableOnSingleNode)
+{
+    if(getenv("RCCL_P2P_BATCH_ENABLE"))
+    {
+        GTEST_SKIP() << "RCCL_P2P_BATCH_ENABLE is explicitly set — "
+                        "cannot test auto-detect path";
+    }
+
+    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+                                          kNoProcessLimit,
+                                          kRequirePowerOfTwo,
+                                          1,
+                                          kRequireSingleNode))
+        << "Test requirements not met - all ranks must meet requirements";
+
+    setupP2PBuffers();
+    ASSERT_MPI_SUCCESS(createTestCommunicator());
+
+    if(config.world_rank == 0)
+    {
+        TEST_INFO("ROCM-26926: Testing P2P send/recv with default auto-detect "
+                  "on single node (%d processes)",
+                  config.world_size);
+    }
+
+    const size_t count = p2p_config.buffer_size / sizeof(float);
+    const int    peer  = (config.world_rank == 0) ? 1 : 0;
+
+    auto nccl_result = ncclGroupStart();
+    ASSERT_EQ(ncclSuccess, nccl_result);
+
+    nccl_result = ncclSend(p2p_config.send_buffer,
+                           count,
+                           ncclFloat,
+                           peer,
+                           getActiveCommunicator(),
+                           getActiveStream());
+    ASSERT_EQ(ncclSuccess, nccl_result)
+        << "Rank " << config.world_rank << ": ncclSend failed";
+
+    nccl_result = ncclRecv(p2p_config.recv_buffer,
+                           count,
+                           ncclFloat,
+                           peer,
+                           getActiveCommunicator(),
+                           getActiveStream());
+    ASSERT_EQ(ncclSuccess, nccl_result)
+        << "Rank " << config.world_rank << ": ncclRecv failed";
+
+    nccl_result = ncclGroupEnd();
+    ASSERT_EQ(ncclSuccess, nccl_result);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()))
+        << "Rank " << config.world_rank << ": Stream sync failed";
+
+    size_t error_idx;
+    float  expected_val, actual_val;
+    bool   data_correct = verifyBufferData<float>(
+        p2p_config.recv_buffer,
+        count,
+        [peer_rank = peer](size_t i) {
+            return static_cast<float>(peer_rank * kDefaultPatternMultiplier + i);
+        },
+        kMaxValidationElements,
+        1e-5,
+        &error_idx,
+        &expected_val,
+        &actual_val);
+
+    EXPECT_TRUE(data_correct) << "Rank " << config.world_rank
+                              << ": Data validation failed at index " << error_idx
+                              << ": expected " << expected_val
+                              << ", got " << actual_val;
+
+    if(config.world_rank == 0)
+    {
+        TEST_INFO("ROCM-26926: P2P batch auto-disable test completed successfully");
+    }
+}
+
 #endif // MPI_TESTS_ENABLED
 

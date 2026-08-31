@@ -6,7 +6,6 @@
 #include "concepts.hpp"
 
 #include <timemory/mpl/concepts.hpp>
-#include <timemory/utility/delimit.hpp>
 
 #include <algorithm>
 #include <array>
@@ -27,8 +26,8 @@ namespace utility
 inline auto
 get_thread_index()
 {
-    static std::atomic<std::int64_t> _c{ 0 };
-    static thread_local std::int64_t _v = _c++;
+    static std::atomic<std::int64_t>       _c{ 0 };
+    static thread_local const std::int64_t _v = _c++;
     return _v;
 }
 

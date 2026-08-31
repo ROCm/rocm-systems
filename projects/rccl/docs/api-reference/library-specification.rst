@@ -29,6 +29,26 @@ Communicator functions
 
 .. doxygenfunction:: ncclCommUserRank
 
+Fault tolerance and communicator management
+-------------------------------------------
+
+These functions let applications detect failures and recover by resizing or
+rebuilding communicators. See :ref:`fault-tolerance` for usage guidance.
+
+.. doxygenfunction:: ncclCommGetAsyncError
+
+.. doxygenfunction:: ncclCommFinalize
+
+.. doxygenfunction:: ncclCommSplit
+
+.. doxygenfunction:: ncclCommShrink
+
+.. doxygenfunction:: ncclCommGrow
+
+.. doxygenfunction:: ncclCommGetUniqueId
+
+.. doxygenfunction:: ncclCommRevoke
+
 .. _communicator-suspend-resume:
 
 Communicator suspend and resume

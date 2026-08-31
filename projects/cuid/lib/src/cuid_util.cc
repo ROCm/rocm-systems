@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "cuid_util.h"
 #include "smbios_util.h"
@@ -388,20 +369,14 @@ CuidUtilities::make_fallback_fingerprint(const std::string &id,
   std::string system_id;
   amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
 
-  if (geteuid() == 0) {
-    // If running as root, get platform serial number
-    status = SmbiosUtil::get_system_serial(system_id);
-  }
-  if (geteuid() != 0 || system_id.empty() || status != AMDCUID_STATUS_SUCCESS) {
-    std::ifstream machine_id_file("/etc/machine-id");
-    if (machine_id_file.is_open())
-      std::getline(machine_id_file, system_id);
+  std::ifstream machine_id_file("/etc/machine-id");
+  if (machine_id_file.is_open())
+    std::getline(machine_id_file, system_id);
 
-    if (system_id.empty()) {
-      std::ifstream hostname_file("/etc/hostname");
-      if (hostname_file.is_open())
-        std::getline(hostname_file, system_id);
-    }
+  if (system_id.empty()) {
+    std::ifstream hostname_file("/etc/hostname");
+    if (hostname_file.is_open())
+      std::getline(hostname_file, system_id);
   }
 
   std::string id_hex;

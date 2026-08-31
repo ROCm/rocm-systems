@@ -87,7 +87,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_USE_OMPT": "domains.parallel.runtimes.openmp",
     "ROCPROFSYS_USE_KOKKOSP": "domains.parallel.runtimes.kokkos",
     "ROCPROFSYS_USE_RCCLP": "domains.parallel.runtimes.rccl",
-    "ROCPROFSYS_USE_SHMEM": "domains.parallel.runtimes.shmem",
+    "ROCPROFSYS_USE_OPENSHMEM": "domains.parallel.runtimes.shmem",
     "ROCPROFSYS_USE_UCX": "domains.parallel.runtimes.ucx",
     # --- Output ---
     "ROCPROFSYS_OUTPUT_PATH": "output.path",
@@ -258,9 +258,11 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
 
     @pytest.mark.timeout(120)
     def test_simulate_lib(self, rocprof_config):
-        user_lib = rocprof_config.rocprofsys_lib_dir / "librocprof-sys-user.so"
-        if not user_lib.exists():
-            pytest.fail("librocprof-sys-user.so not found")
+        causal_api_lib = (
+            rocprof_config.rocprofsys_lib_dir / "librocprof-sys-causal-api.so"
+        )
+        if not causal_api_lib.exists():
+            pytest.fail("librocprof-sys-causal-api.so not found")
 
         pass_regex = [
             r"\[rocprof-sys\]\[exe\] Runtime instrumentation is not possible![\s\S]*"
@@ -270,7 +272,14 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         result = self.run_test(
             "baseline",
             target=self.target,
-            run_args=["--print-available", "functions", "-v", "2", "--", str(user_lib)],
+            run_args=[
+                "--print-available",
+                "functions",
+                "-v",
+                "2",
+                "--",
+                str(causal_api_lib),
+            ],
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
@@ -285,9 +294,9 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         binary rewrite tests with "unable to reinstrument previously instrumented
         binary" errors.
         """
-        lib_basename = "librocprof-sys-user.so"
-        user_lib = rocprof_config.rocprofsys_lib_dir / lib_basename
-        if not user_lib.exists():
+        lib_basename = "librocprof-sys-causal-api.so"
+        causal_api_lib = rocprof_config.rocprofsys_lib_dir / lib_basename
+        if not causal_api_lib.exists():
             pytest.skip(f"{lib_basename} not built")
 
         tmp_dir = test_output_dir / "tmp"
@@ -338,6 +347,52 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=pass_regex)
         self.assert_file_exists(result.output_dir / "instrumentation" / "user.log")
+
+    @pytest.mark.timeout(60)
+    def test_exe_only(self):
+        """Test --exe-only excludes shared libraries from instrumentation."""
+        ls_name, ls_args = get_ls_command()
+
+        pass_regex = [r"\[filter\] skipping shared lib '.*' \(--exe-only\)"]
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "--simulate",
+                "--exe-only",
+                "--",
+                ls_name,
+                *ls_args,
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
+
+    @pytest.mark.timeout(60)
+    def test_max_library_functions(self):
+        """Test --max-library-functions skips shared libs exceeding the threshold."""
+        ls_name, ls_args = get_ls_command()
+
+        pass_regex = [
+            r"\[filter\] skipping shared lib '.*' "
+            r"\(\d+ functions > --max-library-functions=10\)"
+        ]
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "--simulate",
+                "--max-library-functions",
+                "10",
+                "--",
+                ls_name,
+                *ls_args,
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
 
 
 # ============================================================================

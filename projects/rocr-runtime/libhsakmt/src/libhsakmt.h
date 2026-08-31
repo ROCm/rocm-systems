@@ -33,6 +33,8 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <limits.h>
+#include <errno.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
 
@@ -252,6 +254,7 @@ void hsakmt_destroy_counter_props(HsaKFDContext *ctx);
 uint32_t *hsakmt_convert_queue_ids(HSAuint32 NumQueues, HSA_QUEUEID *Queues);
 
 extern int hsakmt_ioctl(int fd, unsigned long request, void *arg);
+extern int hsakmt_open(const char *path, int flags);
 
 /* Void pointer arithmetic (or remove -Wpointer-arith to allow void pointers arithmetic) */
 #define VOID_PTR_ADD32(ptr,n) (void*)((uint32_t*)(ptr) + n)/*ptr + offset*/
@@ -272,6 +275,7 @@ extern int hsakmt_ioctl(int fd, unsigned long request, void *arg);
 void hsakmt_clear_events_page(HsaKFDContext *ctx);
 void hsakmt_fmm_clear_all_mem(HsaKFDContext *ctx);
 void hsakmt_fmm_clear_all_aperture(HsaKFDContext *ctx);
+void hsakmt_fmm_destroy_always_mapped_tracker(HsaKFDContext *ctx);
 void hsakmt_clear_process_doorbells(HsaKFDContext *ctx);
 uint32_t hsakmt_get_num_sysfs_nodes(HsaKFDContext *ctx);
 
@@ -280,4 +284,15 @@ bool hsakmt_is_forked_child(void);
 /* Calculate VGPR and SGPR register file size per CU */
 uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv);
 uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int hsakmt_safe_env_to_int(const char* envvar, int default_val);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif

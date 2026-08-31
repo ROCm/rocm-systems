@@ -48,6 +48,7 @@ namespace Pal
  *   along with the Platform object.
  * + @ref IPrivateScreen - These objects are created as during IPlatform::EnumerateDevices() based on
  *   which screens are attached to each device.  They are automatically destroyed along with the Platform object.
+ * + @ref IRefCounted - Refcounted objects do not fit the IDestroyable / GetObjectSize() / CreateObject() pattern.
  ***********************************************************************************************************************
  */
 class IDestroyable

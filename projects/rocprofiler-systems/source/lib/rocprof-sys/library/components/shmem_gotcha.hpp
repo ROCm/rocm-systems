@@ -468,7 +468,7 @@ shmem_gotcha<SHMEMPolicy>::configure()
         auto permit_list =
             rocprofsys::common::get_env<std::string>(env_vars::SHMEM_PERMIT_LIST, "");
         std::set<std::string> tokens;
-        for(const auto& itr : rocprofsys::common::delimit(permit_list))
+        for(const auto& itr : rocprofsys::delimit(permit_list))
             tokens.insert(itr);
         if(tokens.empty()) return shmem_categories::get_default_permit();
         if(tokens.count("all"))

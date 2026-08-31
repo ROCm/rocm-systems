@@ -76,12 +76,12 @@ typedef struct queue_element {
 } __attribute__((__aligned__(64))) queue_element_t;
 
 class QueueElementProxy {
-  using ProxyT = DeviceProxy<PosixAligned64Allocator, queue_element_t>;
+  using ProxyT = DeviceProxy<queue_element_t>;
 
  public:
-  QueueElementProxy([[maybe_unused]] const PosixAligned64Allocator& alloc = PosixAligned64Allocator(),
+  QueueElementProxy(const PosixAligned64Allocator& alloc = PosixAligned64Allocator(),
                     size_t num_elems = 1)
-    : proxy_{num_elems} {
+    : alloc_{alloc}, proxy_{num_elems, alloc_} {
     new (proxy_.get()) queue_element_t();
   }
 
@@ -98,12 +98,13 @@ class QueueElementProxy {
   __host__ __device__ queue_element_t* get() { return proxy_.get(); }
 
  private:
+  PosixAligned64Allocator alloc_{};
   ProxyT proxy_{};
 };
 
 class QueueProxy {
-  using ProxyT = DeviceProxy<HIPHostAllocator, queue_element_t *>;
-  using ProxyPerBlockT = DeviceProxy<HIPHostAllocator, queue_element_t>;
+  using ProxyT = DeviceProxy<queue_element_t *>;
+  using ProxyPerBlockT = DeviceProxy<queue_element_t>;
 
  public:
   /**
@@ -115,9 +116,10 @@ class QueueProxy {
   QueueProxy() = default;
 
   QueueProxy(size_t max_queues, size_t queue_size,
-             [[maybe_unused]] const HIPHostAllocator& alloc = HIPHostAllocator())
-    : queue_proxy_{max_queues},
-      per_block_queue_proxy_{queue_size * max_queues},
+             const HIPHostAllocator& alloc = HIPHostAllocator())
+    : alloc_{alloc},
+      queue_proxy_{max_queues, alloc_},
+      per_block_queue_proxy_{queue_size * max_queues, alloc_},
       max_queues_{max_queues}, queue_size_{queue_size},
       total_queue_elements_{queue_size * max_queues} {
 
@@ -142,6 +144,7 @@ class QueueProxy {
   __host__ __device__ queue_element_t **get() { return queue_proxy_.get(); }
 
  private:
+  HIPHostAllocator alloc_{};
   ProxyT queue_proxy_{};
 
   ProxyPerBlockT per_block_queue_proxy_{};

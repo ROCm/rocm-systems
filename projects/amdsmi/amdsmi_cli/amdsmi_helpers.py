@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import grp
 import json
@@ -394,6 +377,23 @@ class AMDSMIHelpers:
             outputformat = "csv"
         return outputformat
 
+    @staticmethod
+    def _query_or_na(query, device_handle):
+        """Run a device query, returning "N/A" if the library reports an error."""
+        try:
+            return query(device_handle)
+        except amdsmi_exception.AmdSmiLibraryException:
+            return "N/A"
+
+    def get_gpu_cuid_or_uuid(self, device_handle):
+        """Return the device CUID when available, falling back to the UUID."""
+        identifier = self._query_or_na(amdsmi_interface.amdsmi_get_gpu_device_cuid, device_handle)
+        if identifier == "N/A":
+            identifier = self._query_or_na(
+                amdsmi_interface.amdsmi_get_gpu_device_uuid, device_handle
+            )
+        return identifier
+
     def get_gpu_choices(self):
         """Return dictionary of possible GPU choices and string of the output:
             Dictionary will be in format: gpus[ID] : (BDF, UUID, Device Handle)
@@ -431,11 +431,13 @@ class AMDSMIHelpers:
             max_padding = int(math.log10(len(device_handles))) + 1
 
             for gpu_id, device_handle in enumerate(device_handles):
-                bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(device_handle)
-                uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(device_handle)
+                bdf = self._query_or_na(amdsmi_interface.amdsmi_get_gpu_device_bdf, device_handle)
+                uuid = self._query_or_na(amdsmi_interface.amdsmi_get_gpu_device_uuid, device_handle)
+                cuid = self._query_or_na(amdsmi_interface.amdsmi_get_gpu_device_cuid, device_handle)
                 gpu_choices[str(gpu_id)] = {
                     "bdf": bdf,
                     "UUID": uuid,
+                    "CUID": cuid,
                     "Device Handle": device_handle,
                 }
 
@@ -443,7 +445,9 @@ class AMDSMIHelpers:
                     id_padding = max_padding
                 else:
                     id_padding = max_padding - int(math.log10(gpu_id))
-                gpu_choices_str += f"ID: {gpu_id}{' ' * id_padding}| BDF: {bdf} | UUID: {uuid}\n"
+                gpu_choices_str += (
+                    f"ID: {gpu_id}{' ' * id_padding}| BDF: {bdf} | UUID: {uuid} | CUID: {cuid}\n"
+                )
 
             # Add the all option to the gpu_choices
             gpu_choices["all"] = "all"
@@ -617,10 +621,15 @@ class AMDSMIHelpers:
                 bdf = gpu_info["bdf"]
                 is_bdf = True
                 uuid = gpu_info["UUID"]
+                cuid = gpu_info["CUID"]
                 device_handle = gpu_info["Device Handle"]
 
                 # Check if passed gpu is a gpu ID or UUID
-                if gpu_selection == gpu_id or gpu_selection.lower() == uuid:
+                if (
+                    gpu_selection == gpu_id
+                    or gpu_selection.lower() == uuid
+                    or gpu_selection.lower() == cuid
+                ):
                     selected_device_handles.append(device_handle)
                     valid_gpu_choice = True
                     break

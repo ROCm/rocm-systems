@@ -31,10 +31,14 @@
 #include "lib/output/output_config.hpp"
 #include "lib/output/sql/common.hpp"
 #include "lib/output/stream_info.hpp"
+#include "lib/rocprofiler-sdk-rocpd/details/operators.hpp"
 #include "lib/rocprofiler-sdk-tool/config.hpp"
 
+#include <rocprofiler-sdk-rocpd/types.h>
 #include <rocprofiler-sdk/cxx/perfetto.hpp>
 
+#include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace rocpd
@@ -48,9 +52,14 @@ struct PerfettoSession
     PerfettoSession(const tool::output_config&, sqlite3* connection);
     ~PerfettoSession();
 
+    // NOTE: not thread-safe; assumes write_perfetto() is invoked single-threaded per session.
+    ::perfetto::StaticString get_static_event_name(const std::string& value) const;
+
     std::unique_ptr<::perfetto::TracingSession> tracing_session = {};
     const tool::output_config&                  config;
     sqlite3*                                    connection = nullptr;
+
+    mutable std::unordered_set<std::string> static_event_names = {};
 };
 
 void
@@ -59,11 +68,13 @@ write_perfetto(
     const types::process&  process,
     const std::unordered_map<uint64_t, std::pair<rocpd::types::agent, tool::agent_index>>&
                                                      agent_data,
+    rocpd_version_triplet_t                          schema_version,
     const tool::generator<types::thread>&            thread_gen,
     const tool::generator<types::region>&            region_gen,
     const tool::generator<types::sample>&            sample_gen,
     const tool::generator<types::kernel_dispatch>&   kernel_dispatch_gen,
     const tool::generator<types::memory_copies>&     memory_copy_gen,
+    const tool::generator<types::graph_launch>&      graph_launch_gen,
     const tool::generator<types::scratch_memory>&    scratch_memory_gen,
     const tool::generator<types::memory_allocation>& memory_allocation_gen,
     const tool::generator<types::counter>&           counter_collection_gen);

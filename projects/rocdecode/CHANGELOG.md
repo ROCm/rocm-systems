@@ -2,11 +2,18 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
-## rocDecode 1.8.1 for ROCm 7.14
+## (Unreleased) rocDecode 1.10.0
 
 ### Added
 
 * Invalid video size handling for AVC/HEVC.
+* Added support for explicitly loading librocm_sysdeps_va via dlopen, ensuring complete isolation from the system libva library.
+
+### Resolved issues
+
+* Fixed decode errors of some AVC interlaced container streams by adding support for the picture data packet from the demuxer which contains multiple pictures.
+* Corrected fake CTest passes.
+* Resolved vendored libva link issue in samples without extra env vars.
 
 ## rocDecode 1.8.0 for ROCm 7.13
 

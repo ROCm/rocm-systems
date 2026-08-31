@@ -207,9 +207,14 @@ bool DmaBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& dstMe
                                 const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
                                 const amd::Coord3D& size, bool entire,
                                 amd::CopyMetadata copyMetadata) const {
-  if (setup_.disableCopyBuffer_ ||
+  // When FFM/DTIF fast-copy is enabled, plain device allocations are marked
+  // HostMemoryDirectAccess so HtoD/DtoH can short-circuit to a host memcpy. DtoD
+  // must not take that path: the host memcpy CPU-stalls on prior queue work
+  // (releaseGpuMemoryFence) and breaks CUDA-style host-async DtoD semantics.
+  if (!HSA_ENABLE_DTIF_FAST_COPY &&
+      (setup_.disableCopyBuffer_ ||
       (srcMemory.isHostMemDirectAccess() && !srcMemory.isCpuUncached() &&
-       (dev().agent_profile() != HSA_PROFILE_FULL) && dstMemory.isHostMemDirectAccess())) {
+       (dev().agent_profile() != HSA_PROFILE_FULL) && dstMemory.isHostMemDirectAccess()))) {
     // Stall GPU before CPU access
     gpu().releaseGpuMemoryFence();
     return HostBlitManager::copyBuffer(srcMemory, dstMemory, srcOrigin, dstOrigin, size, false,
@@ -226,9 +231,12 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
                                     const amd::BufferRect& srcRect, const amd::BufferRect& dstRect,
                                     const amd::Coord3D& size, bool entire,
                                     amd::CopyMetadata copyMetadata) const {
-  if (setup_.disableCopyBufferRect_ ||
+  // See note in copyBuffer: skip the host short-circuit when FFM/DTIF fast-copy
+  // is enabled so DtoD stays on the GPU blit path.
+  if (!HSA_ENABLE_DTIF_FAST_COPY &&
+      (setup_.disableCopyBufferRect_ ||
       (srcMemory.isHostMemDirectAccess() && !srcMemory.isCpuUncached() &&
-       dstMemory.isHostMemDirectAccess())) {
+       dstMemory.isHostMemDirectAccess()))) {
     // Stall GPU before CPU access
     gpu().releaseGpuMemoryFence();
     return HostBlitManager::copyBufferRect(srcMemory, dstMemory, srcRect, dstRect, size, entire,
@@ -482,8 +490,9 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
   uint32_t copyMask = 0;
   bool kUseRegularCopyApi = false;
   constexpr size_t kRetainCountThreshold = 8;
-  bool forceSDMA =
+  const bool requireSDMA =
       (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA);
+  bool forceSDMA = requireSDMA;
   HwQueueEngine engine = HwQueueEngine::Unknown;
 
   hsa_agent_t copyAgent, peerAgent;
@@ -550,9 +559,12 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
                 &gpu(), copyMask, engine);
       } else {
         ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
-                "Failed to allocate SDMA engine for VirtualGPU %p, falling back to regular copy",
-                &gpu());
-        kUseRegularCopyApi = true;
+                "Failed to allocate SDMA engine for VirtualGPU %p", &gpu());
+        if (requireSDMA) {
+          status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+        } else {
+          kUseRegularCopyApi = true;
+        }
       }
     }
 
@@ -569,7 +581,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
       status =
           Hsa::memory_async_copy_on_engine(dst, peerAgent, src, copyAgent, size, wait_events.size(),
                                            wait_events.data(), active, copyEngine, forceSDMA);
-    } else {
+    } else if (!requireSDMA) {
       kUseRegularCopyApi = true;
     }
   }
@@ -591,49 +603,16 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
     gpu().setFenceDirty(false);
   } else {
     gpu().Barriers().ResetCurrentSignal();
-    LogPrintfError("HSA copy failed with code %d, falling to Blit copy", status);
+    if (requireSDMA) {
+      LogPrintfError("Required SDMA copy failed with code %d", status);
+    } else {
+      LogPrintfError("HSA copy failed with code %d, falling to Blit copy", status);
+    }
   }
 
   return (status == HSA_STATUS_SUCCESS);
 }
 
-
-// ================================================================================================
-// Resolves the real HSA agents for a src/dst memory pair using pointer_info
-inline void DmaBlitManager::resolveAgents(const Memory& srcMem, const Memory& dstMem,
-                                          address srcAddr, address dstAddr,
-                                          hsa_agent_t& srcAgent, hsa_agent_t& dstAgent) const {
-  // Use agents stored in memory objects during creation
-  srcAgent = srcMem.getOwningAgent();
-  dstAgent = dstMem.getOwningAgent();
-
-  // Handle invalid agent (shouldn't happen if create() properly initialized)
-  if (srcAgent.handle == 0) {
-    srcAgent = srcMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
-    if (static_cast<const amd::Memory*>(srcMem.owner())->ipcShared() ||
-        static_cast<const amd::Memory*>(srcMem.owner())->vmmImported()) {
-      hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
-      if (HSA_STATUS_SUCCESS ==
-          Hsa::pointer_info(const_cast<address>(srcAddr), &info, nullptr, nullptr, nullptr)) {
-        srcAgent = info.agentOwner;
-      }
-    } else {
-        srcAgent = srcMem.isHostMemDirectAccess() ? srcMem.dev().getCpuAgent() : srcMem.dev().getBackendDevice();
-    }
-  }
-  if (dstAgent.handle == 0) {
-    dstAgent = dstMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
-    if (static_cast<const amd::Memory*>(dstMem.owner())->ipcShared() ||
-        static_cast<const amd::Memory*>(dstMem.owner())->vmmImported()) {
-      hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
-      if (HSA_STATUS_SUCCESS == Hsa::pointer_info(dstAddr, &info, nullptr, nullptr, nullptr)) {
-        dstAgent = info.agentOwner;
-      }
-    } else {
-        dstAgent = dstMem.isHostMemDirectAccess() ? dstMem.dev().getCpuAgent() : dstMem.dev().getBackendDevice();
-    }
-  }
-}
 
 // ================================================================================================
 bool DmaBlitManager::hsaCopy(const Memory& srcMemory, const Memory& dstMemory,
@@ -647,9 +626,10 @@ bool DmaBlitManager::hsaCopy(const Memory& srcMemory, const Memory& dstMemory,
   src += srcOrigin[0];
   dst += dstOrigin[0];
 
-  hsa_agent_t srcAgent;
-  hsa_agent_t dstAgent;
-  resolveAgents(srcMemory, dstMemory, src, dst, srcAgent, dstAgent);
+  // Owning agents are computed when the memory is created, including IPC/VMM-imported
+  // memory, so no per-copy pointer_info query is needed.
+  hsa_agent_t srcAgent = srcMemory.getOwningAgent();
+  hsa_agent_t dstAgent = dstMemory.getOwningAgent();
 
   // Blocking D2H copies need a wait anyways so better wait here
   // than having to wait on the device for dependent signals for SDMA which is slow
@@ -687,9 +667,9 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
     address src = reinterpret_cast<address>(srcMem.getDeviceMemory()) + op.srcOffset;
     address dst = reinterpret_cast<address>(dstMem.getDeviceMemory()) + op.dstOffset;
 
-    hsa_agent_t srcAgent;
-    hsa_agent_t dstAgent;
-    resolveAgents(srcMem, dstMem, src, dst, srcAgent, dstAgent);
+    // Owning agents are cached at memory creation time.
+    hsa_agent_t srcAgent = srcMem.getOwningAgent();
+    hsa_agent_t dstAgent = dstMem.getOwningAgent();
 
     // Normalize agents to ensure the calling device's SDMA engines are used,
     // matching the rocrCopyBuffer agent selection logic.
@@ -775,10 +755,9 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
   // Submit each non-empty engine group as a separate batch with its own signal.
   // Within each group, ops are grouped by type (SWAP and each INDIRECT mode
   // each become one multi-entry op; see the bucket declarations below).
-  // LINEAR ops are further grouped by src_agent:
-  //  - Same (src, size) with multiple dsts (SdmaD2D) → BROADCAST
-  //  - Multiple remaining ops from same src_agent    → MULTI
-  //  - Single remaining op                           → LINEAR
+  // LINEAR ops share one src_agent per engine group.
+  // SdmaD2D only: same (src, size) with multiple dsts → BROADCAST.
+  // Remaining LINEAR ops → one MULTI or LINEAR.
   hsa_status_t status = HSA_STATUS_SUCCESS;
   std::vector<ProfilingSignal*> groupSignals;
 
@@ -788,7 +767,6 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
     HwQueueEngine engine = static_cast<HwQueueEngine>(e);
 
-    // Two-level grouping: first by src_agent, then by (src, size) for broadcast.
     struct BcastKey {
       const void* src;
       size_t size;
@@ -802,11 +780,7 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       std::vector<void*> dsts;
       std::vector<hsa_agent_t> dst_agents;
     };
-    struct AgentGroup {
-      hsa_agent_t src_agent;
-      std::map<BcastKey, BcastEntry> sub_groups;
-    };
-    std::map<uint64_t, AgentGroup> agent_groups;
+    std::map<BcastKey, BcastEntry> broadcast_groups;
 
     struct MultiArrays {
       std::vector<void*> srcs;
@@ -817,6 +791,8 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
     MultiArrays swapPending;
     hsa_agent_t swapSrcAgent = {};
+    MultiArrays linear_pending;
+    hsa_agent_t linear_src_agent = {};
 
     // Indirect ops are bucketed by their indirect mode (SRC / DST / SRCDST)
     // into multi-entry HSA ops, one bucket per mode.  All entries in one
@@ -859,24 +835,30 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
         bucket.pending.sizes.push_back(op.size);
         continue;
       }
-      auto& ag = agent_groups[op.src_agent.handle];
-      ag.src_agent = op.src_agent;
-      BcastKey bkey{op.src, op.size};
-      auto& be = ag.sub_groups[bkey];
-      if (be.dsts.empty()) {
-        be.tmpl = op;
+      if (linear_pending.srcs.empty() && broadcast_groups.empty()) {
+        linear_src_agent = op.src_agent;
       }
-      be.dsts.push_back(op.dst);
-      be.dst_agents.push_back(op.dst_agent);
+      if (engine == HwQueueEngine::SdmaD2D) {
+        auto& broadcast_entry = broadcast_groups[BcastKey{op.src, op.size}];
+        if (broadcast_entry.dsts.empty()) {
+          broadcast_entry.tmpl = op;
+        }
+        broadcast_entry.dsts.push_back(op.dst);
+        broadcast_entry.dst_agents.push_back(op.dst_agent);
+      } else {
+        linear_pending.srcs.push_back(const_cast<void*>(op.src));
+        linear_pending.dsts.push_back(op.dst);
+        linear_pending.dst_agents.push_back(op.dst_agent);
+        linear_pending.sizes.push_back(op.size);
+      }
     }
 
     gpu().Barriers().SetActiveEngine(engine);
 
     std::vector<MultiArrays> multiStore;
     // Upper-bound entries that land in multiStore: one swap bucket + one
-    // multi bucket per src_agent group + one per populated indirect-mode
-    // bucket.
-    multiStore.reserve(1 + agent_groups.size() + indirectPending.size());
+    // multi bucket + one per populated indirect-mode bucket.
+    multiStore.reserve(1 + 1 + indirectPending.size());
 
     std::vector<hsa_amd_memory_copy_op_t> finalOps;
 
@@ -897,57 +879,53 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       finalOps.push_back(swap);
     }
 
-    // --- Emit LINEAR / BROADCAST batches (one group per src_agent) ---
-    for (auto& [agent_handle, ag] : agent_groups) {
-      MultiArrays pending;
-
-      for (auto& [bkey, be] : ag.sub_groups) {
-        if (be.dsts.size() > 1 && engine == HwQueueEngine::SdmaD2D) {
-          hsa_amd_memory_copy_op_t bcast = {};
-          bcast.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-          bcast.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST;
-          bcast.src = be.tmpl.src;
-          bcast.src_agent = ag.src_agent;
-          bcast.dst_list = be.dsts.data();
-          bcast.dst_agent_list = be.dst_agents.data();
-          bcast.num_entries = static_cast<uint16_t>(be.dsts.size());
-          bcast.size = be.tmpl.size;
-          finalOps.push_back(bcast);
-        } else {
-          for (size_t i = 0; i < be.dsts.size(); ++i) {
-            pending.srcs.push_back(const_cast<void*>(be.tmpl.src));
-            pending.dsts.push_back(be.dsts[i]);
-            pending.dst_agents.push_back(be.dst_agents[i]);
-            pending.sizes.push_back(be.tmpl.size);
-          }
+    // --- Emit LINEAR / BROADCAST batches ---
+    for (auto& [bcast_key, broadcast_entry] : broadcast_groups) {
+      if (broadcast_entry.dsts.size() > 1) {
+        hsa_amd_memory_copy_op_t bcast = {};
+        bcast.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+        bcast.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST;
+        bcast.src = broadcast_entry.tmpl.src;
+        bcast.src_agent = linear_src_agent;
+        bcast.dst_list = broadcast_entry.dsts.data();
+        bcast.dst_agent_list = broadcast_entry.dst_agents.data();
+        bcast.num_entries = static_cast<uint16_t>(broadcast_entry.dsts.size());
+        bcast.size = broadcast_entry.tmpl.size;
+        finalOps.push_back(bcast);
+      } else {
+        for (size_t i = 0; i < broadcast_entry.dsts.size(); ++i) {
+          linear_pending.srcs.push_back(const_cast<void*>(broadcast_entry.tmpl.src));
+          linear_pending.dsts.push_back(broadcast_entry.dsts[i]);
+          linear_pending.dst_agents.push_back(broadcast_entry.dst_agents[i]);
+          linear_pending.sizes.push_back(broadcast_entry.tmpl.size);
         }
       }
+    }
 
-      if (pending.srcs.size() > 1) {
-        multiStore.push_back(std::move(pending));
-        auto& stored = multiStore.back();
+    if (linear_pending.srcs.size() > 1) {
+      multiStore.push_back(std::move(linear_pending));
+      auto& stored = multiStore.back();
 
-        hsa_amd_memory_copy_op_t multi = {};
-        multi.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-        multi.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
-        multi.src_list = stored.srcs.data();
-        multi.src_agent = ag.src_agent;
-        multi.dst_list = stored.dsts.data();
-        multi.dst_agent_list = stored.dst_agents.data();
-        multi.size_list = stored.sizes.data();
-        multi.num_entries = static_cast<uint16_t>(stored.srcs.size());
-        finalOps.push_back(multi);
-      } else if (pending.srcs.size() == 1) {
-        hsa_amd_memory_copy_op_t linear = {};
-        linear.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-        linear.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
-        linear.src = pending.srcs[0];
-        linear.src_agent = ag.src_agent;
-        linear.dst = pending.dsts[0];
-        linear.dst_agent = pending.dst_agents[0];
-        linear.size = pending.sizes[0];
-        finalOps.push_back(linear);
-      }
+      hsa_amd_memory_copy_op_t multi = {};
+      multi.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+      multi.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+      multi.src_list = stored.srcs.data();
+      multi.src_agent = linear_src_agent;
+      multi.dst_list = stored.dsts.data();
+      multi.dst_agent_list = stored.dst_agents.data();
+      multi.size_list = stored.sizes.data();
+      multi.num_entries = static_cast<uint16_t>(stored.srcs.size());
+      finalOps.push_back(multi);
+    } else if (linear_pending.srcs.size() == 1) {
+      hsa_amd_memory_copy_op_t linear = {};
+      linear.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+      linear.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+      linear.src = linear_pending.srcs[0];
+      linear.src_agent = linear_src_agent;
+      linear.dst = linear_pending.dsts[0];
+      linear.dst_agent = linear_pending.dst_agents[0];
+      linear.size = linear_pending.sizes[0];
+      finalOps.push_back(linear);
     }
 
     // --- Emit INDIRECT batches ---
@@ -1039,7 +1017,9 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
         wait_events.size(), wait_events.data());
 
     if (status != HSA_STATUS_SUCCESS) {
-      gpu().Barriers().ResetCurrentSignal();
+      for (size_t s = 0; s < finalOps.size(); ++s) {
+        gpu().Barriers().ResetCurrentSignal();
+      }
       LogPrintfError("HSA batch copy failed with code %d for engine %d", status, engine);
       return false;
     }
@@ -2853,87 +2833,107 @@ bool KernelBlitManager::ShaderCopyBufferBatchRaw(
 
   constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
   constexpr uint32_t kLocalWorkSize = 512;
-  const uint32_t max_workgroups_per_copy = std::max<uint32_t>(
-      dev().settings().limit_blit_wg_ / copy_operations.size(), 1);
-  const size_t descriptor_bytes =
-      copy_operations.size() * sizeof(CopyBufferBatchDescriptor);
-  void *descriptor_buffer = gpu().allocKernArg(descriptor_bytes, kCBAlignment);
-  CopyBufferBatchDescriptor *descriptors =
-      static_cast<CopyBufferBatchDescriptor *>(descriptor_buffer);
-  size_t descriptor_index = 0;
-  uint64_t max_aligned_element_count = 0;
-  bool needs_system_scope = false;
+  amd::Kernel* const kernel = kernels_[BlitCopyBufferBatch];
+  const Kernel& gpu_kernel = static_cast<const Kernel&>(*kernel->getDeviceKernel(dev()));
+  const size_t kernarg_reservation = (kCBAlignment - 1) +
+                                     (gpu_kernel.KernargSegmentAlignment() - 1) +
+                                     gpu_kernel.KernargSegmentByteSize();
+  const size_t kernarg_pool_chunk_size = gpu().KernArgPoolChunkSize();
+  if (kernarg_reservation > kernarg_pool_chunk_size ||
+      kernarg_pool_chunk_size - kernarg_reservation < sizeof(CopyBufferBatchDescriptor)) {
+    LogError("Kernarg pool chunk is too small for a batch copy dispatch");
+    return false;
+  }
+  const size_t max_operations_per_dispatch =
+      (kernarg_pool_chunk_size - kernarg_reservation) / sizeof(CopyBufferBatchDescriptor);
+  const size_t descriptor_buffer_bytes =
+      max_operations_per_dispatch * sizeof(CopyBufferBatchDescriptor);
   bool attach_signal = false;
 
-  for (const auto &copy_operation : copy_operations) {
-    const uint64_t source_address = reinterpret_cast<uint64_t>(copy_operation.src);
-    const uint64_t destination_address = reinterpret_cast<uint64_t>(copy_operation.dst);
-    needs_system_scope |= copy_operation.needs_system_scope || !copy_operation.metadata.isAsync_;
-    attach_signal |= copy_operation.attach_signal || !copy_operation.metadata.isAsync_;
-    const bool addresses_aligned = ((source_address % kMaxAlignment) == 0) &&
-                                   ((destination_address % kMaxAlignment) == 0);
-    const uint32_t aligned_element_size =
-        (addresses_aligned) ? kMaxAlignment : sizeof(uint32_t);
-    const uint64_t aligned_element_count =
-        copy_operation.size / aligned_element_size;
-    const uint32_t trailing_byte_count =
-        copy_operation.size % aligned_element_size;
-    max_aligned_element_count =
-        std::max(max_aligned_element_count, aligned_element_count);
+  for (size_t operation_offset = 0; operation_offset < copy_operations.size();
+       operation_offset += max_operations_per_dispatch) {
+    const size_t operation_count =
+        std::min(max_operations_per_dispatch, copy_operations.size() - operation_offset);
+    void* descriptor_buffer = gpu().allocKernArg(descriptor_buffer_bytes, kCBAlignment);
+    CopyBufferBatchDescriptor* descriptors =
+        static_cast<CopyBufferBatchDescriptor*>(descriptor_buffer);
+    uint64_t max_aligned_element_count = 0;
+    bool needs_system_scope = false;
 
-    descriptors[descriptor_index++] = {
-        source_address, destination_address, aligned_element_count,
-        aligned_element_size, trailing_byte_count};
+    for (size_t descriptor_index = 0; descriptor_index < operation_count; ++descriptor_index) {
+      const BatchRawCopyOp& copy_operation = copy_operations[operation_offset + descriptor_index];
+      const uint64_t source_address = reinterpret_cast<uint64_t>(copy_operation.src);
+      const uint64_t destination_address = reinterpret_cast<uint64_t>(copy_operation.dst);
+      needs_system_scope |= copy_operation.needs_system_scope || !copy_operation.metadata.isAsync_;
+      attach_signal |= copy_operation.attach_signal || !copy_operation.metadata.isAsync_;
+      const bool addresses_aligned =
+          ((source_address % kMaxAlignment) == 0) && ((destination_address % kMaxAlignment) == 0);
+      const uint32_t aligned_element_size = (addresses_aligned) ? kMaxAlignment : sizeof(uint32_t);
+      const uint64_t aligned_element_count = copy_operation.size / aligned_element_size;
+      const uint32_t trailing_byte_count = copy_operation.size % aligned_element_size;
+      max_aligned_element_count = std::max(max_aligned_element_count, aligned_element_count);
+
+      descriptors[descriptor_index] = {source_address, destination_address, aligned_element_count,
+                                       aligned_element_size, trailing_byte_count};
+    }
+
+    const uint32_t max_workgroups_per_copy = std::max<uint32_t>(
+        dev().settings().limit_blit_wg_ / static_cast<uint32_t>(operation_count), 1);
+    uint32_t workgroup_count = static_cast<uint32_t>(std::min<uint64_t>(
+        max_workgroups_per_copy,
+        amd::alignUp(max_aligned_element_count, static_cast<uint64_t>(kLocalWorkSize)) /
+            kLocalWorkSize));
+    workgroup_count = std::max<uint32_t>(workgroup_count, 1);
+    const uint32_t copy_stride = workgroup_count * kLocalWorkSize;
+
+    constexpr bool kDirectVa = true;
+    setArgument(kernel, 0, sizeof(cl_mem), descriptor_buffer, 0, nullptr, kDirectVa);
+    setArgument(kernel, 1, sizeof(kLocalWorkSize), &kLocalWorkSize);
+    setArgument(kernel, 2, sizeof(copy_stride), &copy_stride);
+
+    size_t global_work_size[2] = {copy_stride, operation_count};
+    size_t local_work_size[2] = {kLocalWorkSize, 1};
+    amd::NDRangeContainer nd_range(2, nullptr, global_work_size, local_work_size);
+
+    address parameters = captureArguments(kernel);
+    if (needs_system_scope) {
+      gpu().addSystemScope();
+    }
+    const bool is_last_dispatch = (operation_offset + operation_count) == copy_operations.size();
+    const bool submit_result =
+        gpu().submitKernelInternal(nd_range, *kernel, parameters, nullptr, 0, nullptr, nullptr,
+                                   is_last_dispatch && attach_signal);
+    releaseArguments(parameters);
+    if (!submit_result) {
+      return false;
+    }
   }
 
-  uint32_t workgroup_count = static_cast<uint32_t>(
-      std::min<uint64_t>(max_workgroups_per_copy,
-                         amd::alignUp(max_aligned_element_count,
-                                      static_cast<uint64_t>(kLocalWorkSize)) /
-                             kLocalWorkSize));
-  workgroup_count = std::max<uint32_t>(workgroup_count, 1);
-  const uint32_t copy_stride = workgroup_count * kLocalWorkSize;
-
-  amd::Kernel *const kernel = kernels_[BlitCopyBufferBatch];
-  constexpr bool kDirectVa = true;
-  setArgument(kernel, 0, sizeof(cl_mem), descriptor_buffer, 0, nullptr,
-              kDirectVa);
-
-  setArgument(kernel, 1, sizeof(kLocalWorkSize), &kLocalWorkSize);
-  setArgument(kernel, 2, sizeof(copy_stride), &copy_stride);
-
-  size_t global_work_size[2] = {copy_stride, copy_operations.size()};
-  size_t local_work_size[2] = {kLocalWorkSize, 1};
-  amd::NDRangeContainer nd_range(2, nullptr, global_work_size, local_work_size);
-
-  address parameters = captureArguments(kernel);
-  if (needs_system_scope) {
-    gpu().addSystemScope();
-  }
-  bool submit_result =
-      gpu().submitKernelInternal(nd_range, *kernel, parameters, nullptr, 0,
-                                 nullptr, nullptr, attach_signal);
-  releaseArguments(parameters);
-
-  return submit_result;
+  return true;
 }
 
 // ================================================================================================
 bool KernelBlitManager::WriteBufferBatch(
     const std::vector<amd::BatchWriteMemoryOp>& write_ops) const {
-  for (const amd::BatchWriteMemoryOp& op : write_ops) {
-    if (op.metadata.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderStream) {
-      gpu().releaseGpuMemoryFence();
-      break;
-    }
-  }
-
   std::vector<amd::BatchCopyOp> pinned_copy_ops;
+  std::vector<BufferState> pinned_buffers;
   std::vector<BatchRawCopyOp> staging_copy_ops;
   size_t staging_batch_size = 0;
+  auto release_pinned_buffers = [this, &pinned_buffers]() {
+    for (BufferState& buffer : pinned_buffers) {
+      releaseBuffer(buffer);
+    }
+    pinned_buffers.clear();
+  };
 
   for (const amd::BatchWriteMemoryOp& op : write_ops) {
     Memory* dst_memory = dev().getRocMemory(op.dst_memory);
+    if (dst_memory == nullptr) {
+      LogError("KernelBlitManager::WriteBufferBatch: Invalid destination memory!");
+      gpu().releaseGpuMemoryFence();
+      gpu().command()->ReleasePinnedMemory();
+      return false;
+    }
 
     const_address src_addr = reinterpret_cast<const_address>(op.src_host);
     size_t copy_offset = 0;
@@ -2951,6 +2951,7 @@ bool KernelBlitManager::WriteBufferBatch(
         staging_copy_ops.clear();
         staging_batch_size = 0;
         if (!result) {
+          release_pinned_buffers();
           gpu().releaseGpuMemoryFence();
           gpu().command()->ReleasePinnedMemory();
           return false;
@@ -2963,6 +2964,7 @@ bool KernelBlitManager::WriteBufferBatch(
       const size_t copy_size = buffer_state.copySize_;
       if (buffer_state.buffer_ == 0 || copy_size == 0) {
         LogWarning("KernelBlitManager::WriteBufferBatch: Buffer creation failed!");
+        release_pinned_buffers();
         gpu().releaseGpuMemoryFence();
         gpu().command()->ReleasePinnedMemory();
         return false;
@@ -2973,7 +2975,7 @@ bool KernelBlitManager::WriteBufferBatch(
         const size_t pinned_offset = buffer_state.buffer_ - pinned_memory->getDeviceMemory();
         pinned_copy_ops.emplace_back(buffer_state.pinnedMem_, op.dst_memory, pinned_offset,
                                      op.dst_offset + copy_offset, copy_size, op.metadata);
-        releaseBuffer(buffer_state);
+        pinned_buffers.push_back(buffer_state);
       } else {
         memcpy(buffer_state.buffer_, src_addr + copy_offset, copy_size);
         staging_copy_ops.push_back({buffer_state.buffer_,
@@ -2992,21 +2994,34 @@ bool KernelBlitManager::WriteBufferBatch(
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
     if (!hsaCopyBatch(pinned_copy_ops)) {
-      gpu().releaseGpuMemoryFence();
-      gpu().command()->ReleasePinnedMemory();
-      return false;
+      LogWarning(
+          "KernelBlitManager::WriteBufferBatch: SDMA batch copy failed, falling back to shader "
+          "copy");
+      // System scope so the dispatch observes the application's writes
+      // to the pinned source.
+      constexpr bool kNeedsSystemScope = true;
+      constexpr bool kAttachSignal = false;
+      for (const amd::BatchCopyOp& op : pinned_copy_ops) {
+        Memory* src_memory = dev().getRocMemory(op.srcMemory);
+        Memory* dst_memory = dev().getRocMemory(op.dstMemory);
+        staging_copy_ops.push_back({src_memory->getDeviceMemory() + op.srcOffset,
+                                    dst_memory->getDeviceMemory() + op.dstOffset, op.size,
+                                    op.metadata, kNeedsSystemScope, kAttachSignal});
+      }
     }
     pinned_copy_ops.clear();
   }
 
   if (!staging_copy_ops.empty()) {
     if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+      release_pinned_buffers();
       gpu().releaseGpuMemoryFence();
       gpu().command()->ReleasePinnedMemory();
       return false;
     }
   }
 
+  release_pinned_buffers();
   return true;
 }
 
@@ -3019,14 +3034,22 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
   };
 
   std::vector<amd::BatchCopyOp> pinned_copy_ops;
+  std::vector<BufferState> pinned_buffers;
   std::vector<BatchRawCopyOp> staging_copy_ops;
   std::vector<StagingReadBack> staging_read_backs;
   size_t staging_batch_size = 0;
+  auto release_pinned_buffers = [this, &pinned_buffers]() {
+    for (BufferState& buffer : pinned_buffers) {
+      releaseBuffer(buffer);
+    }
+    pinned_buffers.clear();
+  };
 
   for (const amd::BatchReadMemoryOp& op : read_ops) {
     Memory* src_memory = dev().getRocMemory(op.src_memory);
     if (src_memory == nullptr) {
       LogError("KernelBlitManager::ReadBufferBatch: Invalid source memory!");
+      release_pinned_buffers();
       gpu().releaseGpuMemoryFence();
       gpu().command()->ReleasePinnedMemory();
       return false;
@@ -3041,6 +3064,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
       const size_t max_staging_size = std::min(remaining_size, StagingXferSize);
       if ((staging_batch_size + max_staging_size) > StagingXferSize) {
         if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+          release_pinned_buffers();
           gpu().releaseGpuMemoryFence();
           gpu().command()->ReleasePinnedMemory();
           return false;
@@ -3060,6 +3084,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
       const size_t copy_size = buffer_state.copySize_;
       if (buffer_state.buffer_ == 0 || copy_size == 0) {
         LogWarning("KernelBlitManager::ReadBufferBatch: Buffer creation failed!");
+        release_pinned_buffers();
         gpu().releaseGpuMemoryFence();
         gpu().command()->ReleasePinnedMemory();
         return false;
@@ -3071,7 +3096,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
         pinned_copy_ops.emplace_back(op.src_memory, buffer_state.pinnedMem_,
                                      op.src_offset + copy_offset, pinned_offset, copy_size,
                                      op.metadata);
-        releaseBuffer(buffer_state);
+        pinned_buffers.push_back(buffer_state);
       } else {
         staging_copy_ops.push_back({src_memory->getDeviceMemory() + op.src_offset + copy_offset,
                                     buffer_state.buffer_, copy_size, op.metadata, true, true});
@@ -3089,25 +3114,43 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
     if (!hsaCopyBatch(pinned_copy_ops)) {
-      gpu().releaseGpuMemoryFence();
-      gpu().command()->ReleasePinnedMemory();
-      return false;
+      LogWarning(
+          "KernelBlitManager::ReadBufferBatch: SDMA batch copy failed, falling back to shader "
+          "copy");
+      // The shader writes to pinned application memory that the host
+      // reads once this command completes, so it needs a system scope release.
+      constexpr bool kNeedsSystemScope = true;
+      constexpr bool kAttachSignal = true;
+      for (const amd::BatchCopyOp& op : pinned_copy_ops) {
+        Memory* src_memory = dev().getRocMemory(op.srcMemory);
+        Memory* dst_memory = dev().getRocMemory(op.dstMemory);
+        staging_copy_ops.push_back({src_memory->getDeviceMemory() + op.srcOffset,
+                                    dst_memory->getDeviceMemory() + op.dstOffset, op.size,
+                                    op.metadata, kNeedsSystemScope, kAttachSignal});
+      }
     }
     pinned_copy_ops.clear();
   }
 
   if (!staging_copy_ops.empty()) {
     if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+      release_pinned_buffers();
       gpu().releaseGpuMemoryFence();
       gpu().command()->ReleasePinnedMemory();
       return false;
     }
-    gpu().Barriers().WaitCurrent();
-    for (const StagingReadBack& read_back : staging_read_backs) {
-      memcpy(read_back.dst, read_back.staging, read_back.size);
+    // Only staged ops need the host read-back; a pinned op writes straight into
+    // the caller's buffer, so keep the copy asynchronous when the batch is all
+    // pinned fallback ops.
+    if (!staging_read_backs.empty()) {
+      gpu().Barriers().WaitCurrent();
+      for (const StagingReadBack& read_back : staging_read_backs) {
+        memcpy(read_back.dst, read_back.staging, read_back.size);
+      }
     }
   }
 
+  release_pinned_buffers();
   return true;
 }
 
@@ -3245,11 +3288,14 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
 
   const Memory& srcRocMemory = gpuMem(srcMemory);
   const Memory& dstRocMemory = gpuMem(dstMemory);
+  const bool requireSDMA =
+      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA;
   bool useLimitedP2pBlitWg = false;
   const bool useShaderCopyBuffer =
       useShaderCopyBufferPath(srcRocMemory, dstRocMemory, sizeIn[0], copyMetadata,
                               &useLimitedP2pBlitWg);
-  const bool useShaderCopyPath = setup_.disableHwlCopyBuffer_ || useShaderCopyBuffer;
+  const bool useShaderCopyPath =
+      !requireSDMA && (setup_.disableHwlCopyBuffer_ || useShaderCopyBuffer);
   if (useLimitedP2pBlitWg) {
     constexpr uint32_t kLimitWgForKernelP2p = 16;
     blitWg = kLimitWgForKernelP2p;
@@ -3270,7 +3316,9 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
   }
 
   if (!result) {
-    if (DEBUG_CLR_DISABLE_FALLBACK) {
+    if (requireSDMA) {
+      LogError("SDMA copy failed and shader fallback is not permitted");
+    } else if (DEBUG_CLR_DISABLE_FALLBACK) {
       guarantee(false, "DMA copy failed and fallback path is disabled");
     } else {
       // Check CL_MEM_SVM_ATOMICS flag to see if we used system_coarse_segment_
@@ -3570,12 +3618,19 @@ bool KernelBlitManager::batchMemOps(const void* paramArray, size_t paramSize,
   size_t dim = 1;
 
   size_t globalWorkOffset[1] = {0};
-  size_t globalWorkSize[1] = {count};
+  // Launch a single work-item; the kernel loops over all ops sequentially.
+  // CUDA spec: ops execute in array order — globalWorkSize=1 enforces this.
+  size_t globalWorkSize[1] = {1};
   size_t localWorkSize[1] = {1};
 
-  // Get constant buffer and copy the array of parameters
+  // During graph packet capture, allocate from the graph's stable kernarg pool so the
+  // address baked into the captured AQL packet remains valid on re-launch.
   constexpr bool kDirectVa = true;
-  auto constBuf = gpu().allocKernArg((count * paramSize), kCBAlignment);
+  bool isGraphPktCapturing =
+      gpu().command() != nullptr && gpu().command()->getPktCapturingState();
+  auto constBuf = isGraphPktCapturing
+      ? gpu().command()->getGraphKernArg(count * paramSize, kCBAlignment, dev().index())
+      : gpu().allocKernArg(count * paramSize, kCBAlignment);
   memcpy(constBuf, paramArray, (count * paramSize));
 
   setArgument(kernels_[blitType], 0, sizeof(cl_mem), constBuf, 0, nullptr, kDirectVa);

@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/common/container/pool.hpp"
 #include "lib/common/container/pool_object.hpp"
+#include "lib/common/container/static_vector.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
@@ -43,6 +44,10 @@
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -55,6 +60,7 @@
 #include <hsa/hsa_api_trace.h>
 #include <pthread.h>
 
+#include <array>
 #include <atomic>
 #include <cstring>
 #include <thread>
@@ -68,6 +74,8 @@ namespace queue_interposition
 {
 namespace
 {
+auto s_active_queue_interposition_consumers = std::atomic<uint32_t>{0};
+
 // NOTE:
 //  - "installed" is for checking whether HSA functions have been passed
 //  - "active" is for controlling whether wrappers are intercepting or passing through
@@ -78,13 +86,19 @@ auto s_intercept_active    = std::atomic<bool>{false};  // actively intercepting
 auto s_intercept_dynamic   = std::atomic<bool>{false};  // dynamically add queue states
 
 bool
+has_active_queue_interposition_consumers()
+{
+    return s_active_queue_interposition_consumers.load(std::memory_order_relaxed) > 0;
+}
+
+bool
 should_bypass_inline_intercept()
 {
     return (!s_intercept_installed.load(std::memory_order_acquire) ||
             !s_intercept_active.load(std::memory_order_acquire) ||
             registration::get_fini_status() != 0 ||
             // TODO: debug and enable queue interposition for attachment
-            registration::supports_attachment());
+            registration::supports_attachment() || !has_active_queue_interposition_consumers());
 }
 
 auto*&
@@ -222,7 +236,8 @@ publish_submitted_packets(QueueState* state, uint64_t submit_pos)
         << ") regressed below last_published_submit_pos (" << tls.last_published_submit_pos << ")";
 
     __atomic_store_n(state->real_wdid, submit_pos, __ATOMIC_RELEASE);
-    (*tls.ring_doorbell)(state->doorbell_signal, static_cast<hsa_signal_value_t>(submit_pos - 1));
+    const auto doorbell_idx = static_cast<hsa_signal_value_t>(submit_pos - 1);
+    (*tls.ring_doorbell)(state->doorbell_signal, doorbell_idx);
     tls.last_published_submit_pos = submit_pos;
 }
 
@@ -450,6 +465,178 @@ async_signal_handler(hsa_signal_t                            completion_signal,
     }
 }
 
+// The no-signal finalizer. Runs on a task-group worker, or on the thread
+// flushing the retry owner -- never on the reader thread or under a hub lock.
+//
+// There is deliberately no HSA fallback: a signal-less dispatch never had an SDK
+// signal and the app may already have destroyed its own, so a convert/sanity
+// failure emits no record but still retires the correlation id.
+void
+complete_signal_less_dispatch(kfd::signal_less_hub_t::proven&& proven)
+{
+    auto&       _payload    = proven.payload;
+    const auto* _rocp_agent = agent::get_agent(_payload.agent_id);
+    auto        _hsa_agent  = agent::get_hsa_agent(_rocp_agent);
+
+    auto _convert = [&_hsa_agent](uint64_t ticks, uint64_t* out) {
+        if(!_hsa_agent) return false;
+        const auto* _ext = get_amd_ext_table();
+        if(!_ext || !_ext->hsa_amd_profiling_convert_tick_to_system_domain_fn) return false;
+        return _ext->hsa_amd_profiling_convert_tick_to_system_domain_fn(*_hsa_agent, ticks, out) ==
+               HSA_STATUS_SUCCESS;
+    };
+
+    auto _emit = [&_payload](uint64_t start_ns, uint64_t end_ns) {
+        kernel_dispatch::emit_kernel_dispatch_record(_payload.tracing_data,
+                                                     _payload.callback_record,
+                                                     _payload.correlation_id,
+                                                     _payload.tid,
+                                                     start_ns,
+                                                     end_ns);
+    };
+
+    // Retires exactly once whatever the outcome, and even if a client callback
+    // throws (run_complete_signal_less_dispatch arms this from a scope destructor).
+    auto _retire = [&_payload]() {
+        auto* _corr_id = _payload.correlation_id;
+        if(!_corr_id) return;
+        ROCP_FATAL_IF(_corr_id->get_ref_count() == 0)
+            << "reference counter for correlation id " << _corr_id->internal
+            << " has no reference count";
+        _corr_id->sub_kern_count();
+        _corr_id->sub_ref_count();
+    };
+
+    const uint64_t _now = common::timestamp_ns();
+
+    auto       _detail  = kfd::finalize_detail{};
+    const auto _outcome = kfd::run_complete_signal_less_dispatch(proven.start_ticks,
+                                                                 proven.end_ticks,
+                                                                 _payload.enqueue_ts,
+                                                                 _now,
+                                                                 _convert,
+                                                                 _emit,
+                                                                 _retire,
+                                                                 &_detail);
+
+    if(_outcome == kfd::finalize_outcome::result_ready)
+    {
+        kfd::note_signal_less(kfd::signal_less_counter::finalizer_emitted);
+        return;
+    }
+
+    kfd::note_signal_less(kfd::signal_less_counter::finalizer_no_timing);
+
+    // Rate-limited: the first few are the diagnostic, a steady stream must not
+    // flood the log.
+    static auto _warned = std::atomic<int>{0};
+    if(_warned.fetch_add(1, std::memory_order_relaxed) < 10)
+    {
+        ROCP_INFO << fmt::format(
+            "KFD dispatch-log: no timing for dispatch (reason={}, gpu={} slot={} idx={})",
+            kfd::finalize_reason_name(_detail.reason),
+            proven.key.gpu_id,
+            proven.key.doorbell_off,
+            proven.key.dispatch_idx_low32);
+    }
+}
+
+bool
+submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
+{
+    auto* _tg = get_async_signal_handler();
+    if(!_tg || registration::get_fini_status() != 0) return false;
+
+    // task_group_t::async takes a std::function, which must be copy-constructible;
+    // the payload is move-only, so it travels in a shared_ptr.
+    auto _held = std::make_shared<kfd::signal_less_hub_t::proven>(std::move(proven));
+    _tg->async([_held]() { complete_signal_less_dispatch(std::move(*_held)); });
+    return true;
+}
+
+bool
+is_dispatch_packet(const rocprofiler_packet& pkt)
+{
+    auto _type = bit_extract(pkt.kernel_dispatch.header,
+                             HSA_PACKET_HEADER_TYPE,
+                             HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+    if(_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) return true;
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+    if(_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+        return pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH;
+#endif
+    return false;
+}
+
+// Per-BATCH signal-less eligibility, decided ONCE before any packet is touched.
+// It must be final up front: a batch that has skipped its completion signals
+// cannot be moved back onto the signal path, so even "will the hub accept these
+// keys" is answered here. If ANY packet fails, the WHOLE batch keeps the signal
+// path.
+//
+// keys_out is indexed BY PACKET INDEX, so registration uses the exact keys the
+// hub validated here rather than re-deriving them from a second doorbell lookup
+// that could observe a different generation.
+bool
+signal_less_batch_eligible(Queue*                                            queue,
+                           const rocprofiler_packet*                         packets,
+                           uint64_t                                          num_packets,
+                           uint64_t                                          base_pkt_index,
+                           std::vector<std::optional<kfd::correlation_key>>* keys_out,
+                           kfd::window_ptr*                                  window_out)
+{
+    keys_out->clear();
+    if(window_out) *window_out = {};
+
+    // Cheapest gate first: with the feature off this is one relaxed load.
+    if(kfd::signal_less_child_stale()) return false;
+    if(!kfd::signal_less_feature_enabled()) return false;
+
+    const auto _gpu_id = queue->get_agent().get_rocp_agent()->gpu_id;
+    if(!kfd::ensure_reader_session(static_cast<uint32_t>(_gpu_id))) return false;
+    const auto _gpu = static_cast<uint32_t>(_gpu_id);
+
+    // Resolve the window open for this queue: rlock only, no clock, no bind.
+    // No window (SDMA, poisoned/overlapped slot, disabled) -> signal path.
+    auto _w = kfd::doorbell_map().resolve(_gpu, queue->get_id());
+    if(!_w) return false;
+    const uint32_t _slot = (*_w)->slot;
+
+    keys_out->assign(num_packets, std::nullopt);
+    auto _flat = std::vector<kfd::correlation_key>{};
+    for(uint64_t i = 0; i < num_packets; ++i)
+    {
+        if(!is_dispatch_packet(packets[i])) continue;
+        auto _key = kfd::correlation_key{
+            _slot, static_cast<uint32_t>((base_pkt_index + i) & 0xFFFFFFFFULL), _gpu};
+        (*keys_out)[i] = _key;
+        _flat.emplace_back(_key);
+    }
+    if(_flat.empty())
+    {
+        keys_out->clear();
+        return false;
+    }
+
+    // The admission latch replaces the deleted is_closing() hub call: a
+    // plain bool read while this thread already holds gate_lock, via the
+    // doorbell_tls handoff process_doorbell_impl set before calling the interceptor.
+    auto*      _st       = get_doorbell_tls().state;
+    const bool _eligible = kfd::owner_registry().slot_uniquely_owned(_gpu, _slot) &&
+                           kfd::signal_less_hub().can_register_batch(_flat) &&
+                           !(_st != nullptr && _st->admission_closed);
+
+    if(_eligible)
+    {
+        if(window_out) *window_out = *_w;
+    }
+    else
+    {
+        keys_out->clear();
+    }
+    return _eligible;
+}
+
 // Local kernel-dispatch tracing path: swaps in pooled completion signals,
 // runs KERNEL_DISPATCH_ENQUEUE tracer hooks, and prepares a completion-signal
 // waiter for the async signal handler pool. Strict 1:1 packet forwarding; does
@@ -459,7 +646,8 @@ write_interceptor(Queue*                                queue,
                   const void*                           packets,
                   uint64_t                              pkt_count,
                   hsa_amd_queue_intercept_packet_writer writer,
-                  async_signal_task_vector_t*           deferred_async_tasks)
+                  async_signal_task_vector_t*           deferred_async_tasks,
+                  uint64_t                              base_pkt_index)
 {
     using callback_record_t = packet_data_t::callback_record_t;
     using packet_vector_t   = common::container::small_vector<rocprofiler_packet, 512>;
@@ -557,6 +745,7 @@ write_interceptor(Queue*                                queue,
     auto process_packet_batch = [&queue, &corr_id, tracing_data_v, deferred_async_tasks](
                                     const rocprofiler_packet* _packets,
                                     uint64_t                  _num_packets,
+                                    uint64_t                  _base_pkt_index,
                                     const packet_writer_fn_t& _writer) {
         static constexpr auto null_signal = hsa_signal_t{.handle = 0};
 
@@ -573,6 +762,18 @@ write_interceptor(Queue*                                queue,
                                                   .enqueue_ts     = common::timestamp_ns(),
                                                   .correlation_id = corr_id,
                                                   .packet_data    = packet_data_array_t{}};
+
+        // Decided once for the whole batch, before any packet is modified. All
+        // packets in a batch share one queue, hence one owner_window.
+        auto            _signal_less_keys   = std::vector<std::optional<kfd::correlation_key>>{};
+        kfd::window_ptr _signal_less_window = {};
+        const bool      _signal_less_batch  = signal_less_batch_eligible(queue,
+                                                                   _packets,
+                                                                   _num_packets,
+                                                                   _base_pkt_index,
+                                                                   &_signal_less_keys,
+                                                                   &_signal_less_window);
+        auto            _signal_less_regs   = std::vector<kfd::signal_less_hub_t::registration>{};
 
         // Searching across all the packets given during this write
         for(size_t i = 0; i < _num_packets; ++i)
@@ -668,6 +869,7 @@ write_interceptor(Queue*                                queue,
             _packet_data.kernel_packet = _packets[i];
             // create a reference for short hand access
             auto& kernel_packet = _packet_data.kernel_packet;
+
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
             auto& completion_signal =
                 is_ext_kernel_dispatch
@@ -691,14 +893,17 @@ write_interceptor(Queue*                                queue,
                 return nullptr;
             };
 
-            // No barrier packet: borrow a pooled signal if needed, then bump value by 1.
-            if(!existing_completion_signal)
-                _packet_data.pooled_signal = create_signal(&completion_signal);
+            if(!_signal_less_batch)
+            {
+                // No barrier packet: borrow a pooled signal if needed, then bump value by 1.
+                if(!existing_completion_signal)
+                    _packet_data.pooled_signal = create_signal(&completion_signal);
 
-            get_core_table()->hsa_signal_add_scacq_screl_fn(completion_signal, 1);
+                get_core_table()->hsa_signal_add_scacq_screl_fn(completion_signal, 1);
 
-            // set the completion signal to the kernel packet
-            _packet_data.completion_signal = completion_signal;
+                // set the completion signal to the kernel packet
+                _packet_data.completion_signal = completion_signal;
+            }
 
             // computes the "size" based on the offset of reserved_padding field
             constexpr auto kernel_dispatch_info_rt_size =
@@ -744,6 +949,26 @@ write_interceptor(Queue*                                queue,
                 thr_id,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
 
+            if(_signal_less_batch && _signal_less_keys[i].has_value())
+            {
+                auto _reg           = kfd::signal_less_hub_t::registration{};
+                _reg.key            = *_signal_less_keys[i];
+                _reg.correlation_id = internal_corr_id;
+                _reg.window         = _signal_less_window;
+
+                auto& _pl           = _reg.payload;
+                _pl.callback_record = _packet_data.callback_record;
+                _pl.tracing_data    = _packet_data.tracing_data;
+                // The reference this payload inherits was taken by the
+                // add_ref_count()/add_kern_count() above; the finalizer releases it.
+                _pl.correlation_id = corr_id;
+                _pl.tid            = thr_id;
+                _pl.agent_id       = queue->get_agent().get_rocp_agent()->id;
+                _pl.enqueue_ts     = _info_session.enqueue_ts;
+
+                _signal_less_regs.emplace_back(std::move(_reg));
+            }
+
             // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
             // along with an ID of the client we got the packet from (this will be returned via
             // completed_cb_t)
@@ -771,7 +996,36 @@ write_interceptor(Queue*                                queue,
         auto current_signal_value   = hsa_signal_value_t{0};
         auto _shared_info_session   = std::shared_ptr<queue_info_session_t>{};
 
-        if(!_info_session.packet_data.empty())
+        // Register the whole batch BEFORE the writer publishes any packet, so a
+        // firmware record can never arrive for a dispatch the hub has not seen.
+        const auto _signal_less_count = _signal_less_regs.size();
+        if(_signal_less_batch &&
+           !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs)))
+        {
+            // Reachable only if another queue's collision quarantined this slot between
+            // eligibility and here. The packets already skipped their signals, so nothing
+            // else will retire these ids.
+            kfd::note_signal_less(kfd::signal_less_counter::register_refused, _signal_less_count);
+            // Safe to iterate after the std::move above: register_batch() validates the
+            // whole batch under its lock and returns false BEFORE moving any element, so
+            // on this refusal path _signal_less_regs is intact.
+            for(auto& _reg : _signal_less_regs)
+            {
+                auto* _corr_id = _reg.payload.correlation_id;
+                if(_corr_id == nullptr) continue;
+                _corr_id->sub_kern_count();
+                _corr_id->sub_ref_count();
+            }
+            ROCP_WARNING << "KFD dispatch-log: signal-less batch registration refused; these "
+                            "dispatches will not be timed";
+        }
+        else if(_signal_less_batch)
+        {
+            kfd::note_signal_less(kfd::signal_less_counter::entry_registered, _signal_less_count);
+        }
+
+        // A signal-less batch has no completion signal to wait on.
+        if(!_info_session.packet_data.empty() && !_signal_less_batch)
         {
             last_completion_signal = _info_session.packet_data.back().completion_signal;
 
@@ -811,11 +1065,54 @@ write_interceptor(Queue*                                queue,
     ROCP_TRACE_IF(pkt_count > 1) << fmt::format(
         "[{}] Batching packets. Number of packets = {}", __FUNCTION__, pkt_count);
 
-    process_packet_batch(packets_arr, pkt_count, [&writer](packet_vector_t&& _packets) {
-        writer(_packets.data(), _packets.size());
-    });
+    process_packet_batch(
+        packets_arr, pkt_count, base_pkt_index, [&writer](packet_vector_t&& _packets) {
+            writer(_packets.data(), _packets.size());
+        });
 }
 }  // namespace
+
+uint64_t
+close_admission_and_snapshot(const hsa_queue_t* queue)
+{
+    auto state = lookup_queue_state(queue, /*create_if_missing=*/false);
+    if(!state) return 0;
+    auto lk                 = std::lock_guard<std::mutex>{state->gate_lock};
+    state->admission_closed = true;  // SW-2: no later batch can register
+    return state->next_submit_pos;   // snapshot, ordered by this same lock
+}
+
+bool
+wait_queue_hw_drained(const hsa_queue_t* queue, uint64_t submit_pos, uint64_t deadline_ns)
+{
+    auto state = lookup_queue_state(queue, /*create_if_missing=*/false);
+    if(!state || !state->real_rdid) return true;
+
+    while(!hw_queue_drained(__atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE), submit_pos))
+    {
+        if(kfd::steady_now_ns() >= deadline_ns) return false;
+        std::this_thread::sleep_for(std::chrono::microseconds{200});
+    }
+    return true;
+}
+
+void
+fence_all_queue_gates()
+{
+    // Copy the states out from under the registry lock FIRST: taking a queue's
+    // gate_lock while holding it would invert the established order.
+    auto _states = std::vector<queue_state_ptr_t>{};
+    get_queue_registry().rlock([&_states](const auto& map) {
+        _states.reserve(map.size());
+        for(const auto& itr : map)
+            if(itr.second) _states.emplace_back(itr.second);
+    });
+
+    for(const auto& _state : _states)
+    {
+        auto lk = std::lock_guard<std::mutex>{_state->gate_lock};
+    }
+}
 
 void
 process_doorbell_impl(const queue_state_ptr_t& state,
@@ -842,27 +1139,47 @@ process_doorbell_impl(const queue_state_ptr_t& state,
         return;
     }
 
-    static thread_local auto snapshot_storage = std::vector<char>{};
-    const uint64_t           max_bytes        = (wptr_end - scan_pos) * state_ptr->pkt_size;
-    if(snapshot_storage.size() < max_bytes) snapshot_storage.resize(max_bytes);
-    char* const source_snapshot = snapshot_storage.data();
+    constexpr size_t kSnapshotMaxPkts = 16;
+    const uint64_t   max_pkts         = wptr_end - scan_pos;
+    const auto       pkt_size         = state_ptr->pkt_size;
+
+    using snapshot_pkt_t = std::array<char, 64>;
+    common::container::static_vector<snapshot_pkt_t, kSnapshotMaxPkts> snapshot;
+    std::vector<char>                                                  overflow_snapshot;
+    char*                                                              source_snapshot = nullptr;
+
+    if(max_pkts > kSnapshotMaxPkts)
+    {
+        overflow_snapshot.resize(max_pkts * pkt_size);
+        source_snapshot = overflow_snapshot.data();
+    }
 
     uint64_t drained = 0;
     for(uint64_t pos = scan_pos; pos < wptr_end; ++pos)
     {
         const auto  ring_slot = pos & state_ptr->ring_mask;
-        char* const slot_base =
-            static_cast<char*>(state_ptr->ring_buf) + (ring_slot * state_ptr->pkt_size);
-        auto* const hdr_ptr = reinterpret_cast<volatile uint16_t*>(slot_base);
+        char* const slot_base = static_cast<char*>(state_ptr->ring_buf) + (ring_slot * pkt_size);
+        auto* const hdr_ptr   = reinterpret_cast<volatile uint16_t*>(slot_base);
 
         if((__atomic_load_n(hdr_ptr, __ATOMIC_ACQUIRE) & 0xFFu) ==
            static_cast<unsigned>(HSA_PACKET_TYPE_INVALID))
             break;
 
-        ::memcpy(source_snapshot + (drained * state_ptr->pkt_size), slot_base, state_ptr->pkt_size);
+        char* dst = nullptr;
+        if(source_snapshot)
+        {
+            dst = source_snapshot + (drained * pkt_size);
+        }
+        else
+        {
+            dst = snapshot.emplace_back().data();
+        }
+        ::memcpy(dst, slot_base, pkt_size);
         __atomic_store_n(hdr_ptr, static_cast<uint16_t>(HSA_PACKET_TYPE_INVALID), __ATOMIC_RELEASE);
         ++drained;
     }
+
+    if(!source_snapshot) source_snapshot = reinterpret_cast<char*>(snapshot.data());
 
     if(drained == 0)
     {
@@ -902,7 +1219,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                           source_snapshot,
                           pkt_count,
                           ring_buffer_writer,
-                          &deferred_async_tasks);
+                          &deferred_async_tasks,
+                          start_submit_pos);
     }
     else
     {
@@ -1115,6 +1433,56 @@ supports_queue_interposition()
     return s_intercept_installed.load(std::memory_order_acquire);
 }
 
+namespace
+{
+void
+resync_queue_shadow_state(QueueState* state)
+{
+    if(!state || !state->real_wdid) return;
+
+    const uint64_t wdid = __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE);
+    state->virtual_wptr.store(wdid, std::memory_order_release);
+    state->next_scan_pos   = wdid;
+    state->next_submit_pos = wdid;
+}
+
+void
+resync_all_queue_shadow_states()
+{
+    get_queue_registry().rlock([](const auto& registry) {
+        for(const auto& entry : registry)
+            resync_queue_shadow_state(entry.second.get());
+    });
+}
+}  // namespace
+
+void
+notify_queue_interposition_consumer_context_started(const context::context* ctx)
+{
+    if(!context_needs_queue_interposition_tracing(ctx)) return;
+
+    const auto prev = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
+    if(prev == 0 && s_intercept_installed.load(std::memory_order_acquire))
+        resync_all_queue_shadow_states();
+
+    s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_release);
+}
+
+void
+notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
+{
+    if(!context_needs_queue_interposition_tracing(ctx)) return;
+    auto cur = s_active_queue_interposition_consumers.load(std::memory_order_relaxed);
+    while(cur > 0)
+    {
+        if(s_active_queue_interposition_consumers.compare_exchange_weak(
+               cur, cur - 1, std::memory_order_release, std::memory_order_relaxed))
+        {
+            return;
+        }
+    }
+}
+
 void
 interposition_sync()
 {
@@ -1172,6 +1540,12 @@ interposition_init(CoreApiTable* core_table, bool enabled)
 
     // mark that intercept has been activated
     s_intercept_active.store(enabled, std::memory_order_release);
+
+    // Inline intercept is the only path that produces a KFD correlation key, so
+    // probe dispatch-log here (not in generic queue_init()). Master opt-in gate:
+    // the KFD dispatch-log feature does nothing unless signal-less is enabled.
+    // Best-effort.
+    if(kfd::signal_less_feature_enabled()) kfd::init_kfd_profiler();
 }
 
 void
@@ -1193,4 +1567,34 @@ interposition_fini()
 }
 }  // namespace queue_interposition
 }  // namespace hsa
+
+// Bridge for the KFD layer (declared in kfd/signal_less.hpp). Defined here so
+// kfd never needs the HSA interposition headers, and called directly -- both
+// sides are in the same object library.
+namespace kfd
+{
+bool
+submit_complete_signal_less_dispatch(signal_less_hub_t::proven& p)
+{
+    return hsa::queue_interposition::submit_to_task_group(p);
+}
+
+void
+finalize_complete_signal_less_dispatch(signal_less_hub_t::proven&& p)
+{
+    hsa::queue_interposition::complete_signal_less_dispatch(std::move(p));
+}
+
+void
+drain_signal_less_interceptor()
+{
+    hsa::queue_interposition::fence_all_queue_gates();
+}
+
+void
+join_signal_less_tasks()
+{
+    hsa::queue_interposition::interposition_sync();
+}
+}  // namespace kfd
 }  // namespace rocprofiler

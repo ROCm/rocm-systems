@@ -148,6 +148,8 @@ platforms:
       - rocrtstFunc.Memory_Atomic_Dec_Test
       - rocrtstFunc.Memory_Atomic_Xchg_Test
       - rocrtstFunc.DISABLED_DebugBasicTests
+      - rocrtstFunc.TrapHandler_Abort
+      - rocrtstFunc.TrapHandler_Generic
       - rocrtstFunc.Memory_Alignment_Test
       - rocrtstFunc.Deallocation_Notifier_Test
       - rocrtstFunc.AgentPropertiesTests
@@ -185,4 +187,13 @@ platforms:
   # FFM Simulator - only Core and Extended groups allowed
   FFM_SIMULATOR:
     allowed_groups: [Core, Extended]
-    blocked_tests: []
+    blocked_tests:
+      - rocrtstFunc.Memory_Max_Mem
+      - rocrtstFunc.Memory_Available  # Uses max & available mem; not accurate
+      - rocrtstPerf.Memory_Async_Copy # Requires hwloc support
+      # These negative tests require device exceptions to call
+      # error callback. It doesn't currently do this.
+      - rocrtstNeg.*
+      - rocrtstFunc.TrapHandler_Abort
+      - rocrtstFunc.TrapHandler_Generic
+

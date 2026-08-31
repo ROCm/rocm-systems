@@ -21,11 +21,15 @@
 // SOFTWARE.
 
 #include "gfx10wave.h"
+
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <map>
+#include <new>
 #include <utility>
 #include <vector>
+
 #include "gfx11/gfx11wave.h"
 #include "gfx12/gfx12wave.h"
 #include "mi400/mi400wave.h"
@@ -129,7 +133,11 @@ enum EINST
     einst_final
 };
 
-static std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
+// clang-format off
+using instruction_table_t = std::unordered_map<int, mapped_inst_t>;
+alignas(instruction_table_t) static std::byte table_map_to_common_type_storage[sizeof(instruction_table_t)];
+static instruction_table_t& table_map_to_common_type =
+    *::new (static_cast<void*>(table_map_to_common_type_storage)) instruction_table_t{
     {(int) EINST::salu,              {WaveInstCategory::SALU, 1} },
     {(int) EINST::smem_rd,           {WaveInstCategory::SMEM, 1} },
     {(int) EINST::smem_wr,           {WaveInstCategory::SMEM, 1} },
@@ -209,6 +217,7 @@ static std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
     {(int) EINST::subv_loop_begin,   {WaveInstCategory::SALU, 1} },
     {(int) EINST::subv_loop_end,     {WaveInstCategory::SALU, 1} }
 };
+// clang-format on
 
 mapped_inst_t map_to_common_type(int einst, int dprate, int derate)
 {

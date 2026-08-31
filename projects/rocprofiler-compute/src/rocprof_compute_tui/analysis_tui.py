@@ -64,7 +64,6 @@ class tui_analysis(OmniAnalyze_Base):
             self.path,
             self.args.kernel_verbose,
             self.args.verbose,
-            self._profiling_config,
         )
 
         kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(

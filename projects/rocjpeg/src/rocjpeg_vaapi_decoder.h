@@ -36,12 +36,16 @@ THE SOFTWARE.
 #include <sys/stat.h>
 #include <unordered_map>
 #include <memory>
+#include <mutex>
 #include <functional>
 #include <libdrm/amdgpu.h>
 #include <libdrm/amdgpu_drm.h>
 #include <va/va.h>
 #include <va/va_drm.h>
 #include <va/va_drmcommon.h>
+#ifdef ROCJPEG_USE_DLOPEN_VA
+#include "rocjpeg_vaapi_loader.h"
+#endif
 #include "rocjpeg_commons.h"
 #include "rocjpeg_parser.h"
 #include "../api/rocjpeg/rocjpeg.h"
@@ -192,6 +196,7 @@ class RocJpegVaapiMemoryPool {
         VADisplay va_display_; // The VADisplay associated with the memory pool.
         uint32_t max_pool_size_; // The maximum pool size of the memory pool (mem_pool_) per entry.
         std::unordered_map<uint32_t, std::vector<RocJpegVaapiMemPoolEntry>> mem_pool_; // The memory pool.
+        std::mutex pool_mutex_; // Protects mem_pool_ for concurrent async/sync access.
         /**
          * @brief Retrieves the total size of the memory pool.
          *
@@ -279,10 +284,11 @@ public:
      * @brief Initializes the decoder with the specified device, GCN architecture, and device ID.
      * @param device_name The name of the device.
      * @param device_id The ID of the device.
-     * @param gpu_uuid The UUID of the GPU.
+     * @param gpu_uuid The GPU UUID (fallback match).
+     * @param gpu_pci_bdf The GPU PCI BDF (primary match).
      * @return The status of the initialization.
      */
-    RocJpegStatus InitializeDecoder(std::string device_name, int device_id, std::string& gpu_uuid);
+    RocJpegStatus InitializeDecoder(const std::string& device_name, int device_id, const std::string& gpu_uuid, const std::string& gpu_pci_bdf);
 
     /**
      * @brief Submits a JPEG stream for decoding.
@@ -333,6 +339,12 @@ public:
      */
     RocJpegStatus SetSurfaceAsIdle(VASurfaceID surface_id);
 private:
+#ifdef ROCJPEG_USE_DLOPEN_VA
+    // Shared reference to the process-wide VA loader. The dlopen handle stays
+    // open as long as at least one decoder instance exists; dlclose runs when
+    // the last shared_ptr is destroyed.
+    std::shared_ptr<RocJpegVaapiLoader> va_loader_;
+#endif
     int device_id_; // The ID of the device
     int drm_fd_; // The file descriptor for the DRM device
     uint32_t min_picture_width_; // The minimum width of the picture
@@ -371,6 +383,10 @@ private:
      * partitions based on the unique identifiers of GPUs.
      */
     std::unordered_map<std::string, ComputePartition> gpu_uuids_to_compute_partition_map_;
+
+    // GPU PCI BDF -> render node index / compute partition (primary match key).
+    std::unordered_map<std::string, int> gpu_pci_bdf_to_render_nodes_map_;
+    std::unordered_map<std::string, ComputePartition> gpu_pci_bdf_to_compute_partition_map_;
     /**
      * @brief Initializes the VAAPI with the specified DRM node.
      * @param drm_node The DRM node to use for VAAPI initialization.
@@ -418,9 +434,15 @@ private:
                                     ComputePartition current_compute_partitions,
                                     int &offset);
     /**
-     * @brief Retrieves GPU UUIDs and maps them to render node IDs.
+     * @brief Retrieves GPU UUIDs and PCI bus IDs and maps them to render node IDs and compute partitions.
     */
     void GetGpuUuids();
+
+    // Returns the lowercased PCI BDF (function suffix stripped) for a render node, or "" if not a PCI device.
+    std::string GetRenderNodeBusId(const std::string& render_node_name);
+
+    // Returns the lowest-numbered /dev/dri/renderD* node, or "" if none.
+    std::string GetFirstAvailableDrmNode();
 
     /**
      * @brief Retrieves the number of JPEG cores available.

@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT OMP_TARGET_COMPILER)
     find_program(
@@ -40,7 +40,8 @@ set(DEFAULT_GPU_TARGETS
     "gfx1101"
     "gfx1102"
     "gfx1151"
-    "gfx1152")
+    "gfx1152"
+    "gfx1250")
 
 set(OPENMP_GPU_TARGETS
     "${DEFAULT_GPU_TARGETS}"

@@ -2212,4 +2212,282 @@ TEST_P(KFDSVMRangeTest, MapAllHighAddr) {
     TEST_END
 }
 
+/*
+ * Test integer overflow protection in SVM attribute functions
+ * ROCM-26862: Verify overflow checks prevent stack buffer overflow
+ */
+TEST_P(KFDSVMRangeTest, IntegerOverflowProtection) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    if (!SVMAPISupported())
+        return;
+
+    int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+
+    if (!SVMAPISupported_GPU(defaultGPUNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << defaultGPUNode << std::endl;
+        return;
+    }
+
+    unsigned int BufferSize = PAGE_SIZE;
+    HsaSVMRange testBuffer(BufferSize, defaultGPUNode);
+    void *pBuf = testBuffer.As<void *>();
+
+    LOG() << "Testing integer overflow protection in SVM functions" << std::endl;
+
+    /* Test 1: Verify extremely large nattr triggers size limit check in hsaKmtSVMSetAttr
+     * The ioctl size field is limited to 14 bits (16383 bytes), which is reached before
+     * SIZE_MAX overflow. With sizeof(HSA_SVM_ATTRIBUTE)=8 and args header=24 bytes,
+     * the limit is ~2044 attributes. Test with a value that exceeds this.
+     */
+    {
+        // This value exceeds the ioctl size limit (14 bits = 16383 bytes max)
+        HSAuint32 nattr_too_large = 10000;
+        HSA_SVM_ATTRIBUTE *attrs = new HSA_SVM_ATTRIBUTE[2];  // Only allocate small array for test
+
+        attrs[0].type = HSA_SVM_ATTR_PREFETCH_LOC;
+        attrs[0].value = defaultGPUNode;
+        attrs[1].type = HSA_SVM_ATTR_PREFERRED_LOC;
+        attrs[1].value = defaultGPUNode;
+
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMSetAttr, m_hsakmt_current_ctx,
+                                           pBuf, BufferSize, nattr_too_large, attrs);
+
+        // Should fail with INVALID_PARAMETER due to size limit check
+        EXPECT_NE(status, HSAKMT_STATUS_SUCCESS)
+            << "hsaKmtSVMSetAttr should reject nattr that exceeds ioctl size limit";
+        EXPECT_EQ(status, HSAKMT_STATUS_INVALID_PARAMETER)
+            << "Expected INVALID_PARAMETER for size limit, got " << status;
+
+        delete[] attrs;
+        LOG() << "Test 1 (SetAttr size limit): PASSED - excessive nattr correctly rejected" << std::endl;
+    }
+
+    /* Test 2: Verify extremely large nattr triggers size limit check in hsaKmtSVMGetAttr */
+    {
+        HSAuint32 nattr_too_large = 10000;
+        HSA_SVM_ATTRIBUTE *attrs = new HSA_SVM_ATTRIBUTE[2];
+
+        attrs[0].type = HSA_SVM_ATTR_PREFETCH_LOC;
+        attrs[0].value = 0;
+        attrs[1].type = HSA_SVM_ATTR_PREFERRED_LOC;
+        attrs[1].value = 0;
+
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx,
+                                           pBuf, BufferSize, nattr_too_large, attrs);
+
+        // Should fail with INVALID_PARAMETER due to size limit check
+        EXPECT_NE(status, HSAKMT_STATUS_SUCCESS)
+            << "hsaKmtSVMGetAttr should reject nattr that exceeds ioctl size limit";
+        EXPECT_EQ(status, HSAKMT_STATUS_INVALID_PARAMETER)
+            << "Expected INVALID_PARAMETER for size limit, got " << status;
+
+        delete[] attrs;
+        LOG() << "Test 2 (GetAttr size limit): PASSED - excessive nattr correctly rejected" << std::endl;
+    }
+
+    /* Test 3: Verify edge case - maximum safe nattr works correctly */
+    {
+        // Use a reasonably large but safe nattr value
+        HSAuint32 nattr_safe = 10;
+        HSA_SVM_ATTRIBUTE *attrs = new HSA_SVM_ATTRIBUTE[nattr_safe];
+
+        for (HSAuint32 i = 0; i < nattr_safe; i++) {
+            attrs[i].type = HSA_SVM_ATTR_PREFETCH_LOC;
+            attrs[i].value = defaultGPUNode;
+        }
+
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMSetAttr, m_hsakmt_current_ctx,
+                                           pBuf, BufferSize, nattr_safe, attrs);
+
+        // Should succeed - this is a valid call
+        EXPECT_SUCCESS(status) << "hsaKmtSVMSetAttr should work with safe nattr";
+
+        delete[] attrs;
+        LOG() << "Test 3 (Safe nattr): PASSED - normal operation verified" << std::endl;
+    }
+
+    /* Test 4: Verify single attribute still works (regression test) */
+    {
+        HSA_SVM_ATTRIBUTE attr;
+        attr.type = HSA_SVM_ATTR_PREFETCH_LOC;
+        attr.value = defaultGPUNode;
+
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtSVMSetAttr, m_hsakmt_current_ctx,
+                                   pBuf, BufferSize, 1, &attr))
+            << "Single attribute SetAttr should still work";
+
+        attr.value = 0;
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx,
+                                   pBuf, BufferSize, 1, &attr))
+            << "Single attribute GetAttr should still work";
+
+        LOG() << "Test 4 (Single attr): PASSED - backward compatibility verified" << std::endl;
+    }
+
+    LOG() << "All integer overflow protection tests PASSED" << std::endl;
+    TEST_END
+}
+
+/*
+ * A caller that registers with HsaMemFlags.ui32.AlwaysMapped is pinning the
+ * range (hsa_amd_memory_lock), and needs the GPU mapping to stay valid until
+ * the matching deregistration.  Under the SVM API that requires
+ * KFD_IOCTL_SVM_FLAG_GPU_ALWAYS_MAPPED; without it svm_range_evict() takes its
+ * xnack_enabled branch and unmaps the range from the GPU on any MMU
+ * invalidation, even while a transfer is still reading it.
+ *
+ * The SVM registration path creates no vm_object, so libhsakmt refcounts the
+ * flagged ranges itself in order to clear the flag again on deregistration.
+ * Overlapping pins share one record, because releasing one of them must not
+ * clear the flag on pages that another live pin still covers -- section 4
+ * below is the regression test for that.
+ */
+TEST_P(KFDSVMRangeTest, RegisterMemoryAlwaysMapped) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    if (!SVMAPISupported())
+        return;
+
+    int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+
+    if (!SVMAPISupported_GPU(defaultGPUNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << defaultGPUNode << std::endl;
+        return;
+    }
+
+    /* GPU_ALWAYS_MAPPED arrived in KFD interface minor version 11 */
+    if (Get_Version()->KernelInterfaceMinorVersion < 11) {
+        LOG() << "Skipping test: GPU_ALWAYS_MAPPED needs KFD interface 1.11" << std::endl;
+        return;
+    }
+
+    if (Get_NodeInfo()->GetNodeProperties(defaultGPUNode)->Integrated) {
+        LOG() << "Skipping test on APU: system memory registration is a no-op" << std::endl;
+        return;
+    }
+
+    const HSAuint64 nPages = 8;
+    const HSAuint64 BufferSize = nPages * PAGE_SIZE;
+
+    /* Plain anonymous host memory: the registration has to be what creates
+     * the SVM range, so HsaSVMRange is deliberately not used here.
+     */
+    void *pBuf = mmap(NULL, BufferSize, PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    void *pCtrl = mmap(NULL, BufferSize, PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    ASSERT_NE(MAP_FAILED, pBuf) << "failed to mmap test buffer";
+    ASSERT_NE(MAP_FAILED, pCtrl) << "failed to mmap control buffer";
+
+    /* GetAttr reports SET_FLAGS as the AND over every range in the interval
+     * and CLR_FLAGS as the complement of the OR, so "set on all pages" and
+     * "set on no page" are both directly observable, and a range that is only
+     * partly flagged answers false to both.
+     */
+    auto MappedOnAllPages = [&](void *addr, HSAuint64 size) -> bool {
+        HSA_SVM_ATTRIBUTE attr;
+
+        attr.type = HSA_SVM_ATTR_SET_FLAGS;
+        attr.value = 0;
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx,
+                                   addr, size, 1, &attr));
+        return !!(attr.value & HSA_SVM_FLAG_GPU_ALWAYS_MAPPED);
+    };
+    auto MappedOnNoPage = [&](void *addr, HSAuint64 size) -> bool {
+        HSA_SVM_ATTRIBUTE attr;
+
+        attr.type = HSA_SVM_ATTR_CLR_FLAGS;
+        attr.value = 0;
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx,
+                                   addr, size, 1, &attr));
+        return !!(attr.value & HSA_SVM_FLAG_GPU_ALWAYS_MAPPED);
+    };
+
+    HsaMemFlags pinFlags;
+    HsaMemFlags plainFlags;
+
+    pinFlags.Value = 0;
+    pinFlags.ui32.HostAccess = 1;
+    pinFlags.ui32.AlwaysMapped = 1;
+
+    plainFlags.Value = 0;
+    plainFlags.ui32.HostAccess = 1;
+
+    /* 1. A registration that is not a pin must be left alone */
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pCtrl, BufferSize, plainFlags));
+    EXPECT_TRUE(MappedOnNoPage(pCtrl, BufferSize))
+        << "GPU_ALWAYS_MAPPED set on a registration that is not a pin";
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pCtrl));
+
+    /* 2. A pin sets the flag on the whole range, unpinning clears it */
+    EXPECT_TRUE(MappedOnNoPage(pBuf, BufferSize))
+        << "GPU_ALWAYS_MAPPED already set before registration";
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pBuf, BufferSize, pinFlags));
+    EXPECT_TRUE(MappedOnAllPages(pBuf, BufferSize))
+        << "GPU_ALWAYS_MAPPED not set by a pinning registration";
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pBuf));
+    EXPECT_TRUE(MappedOnNoPage(pBuf, BufferSize))
+        << "GPU_ALWAYS_MAPPED still set after deregistration";
+
+    /* 3. The same range pinned twice takes two deregistrations to release */
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pBuf, BufferSize, pinFlags));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pBuf, BufferSize, pinFlags));
+    EXPECT_TRUE(MappedOnAllPages(pBuf, BufferSize));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pBuf));
+    EXPECT_TRUE(MappedOnAllPages(pBuf, BufferSize))
+        << "GPU_ALWAYS_MAPPED dropped while a second pin of the same range is live";
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pBuf));
+    EXPECT_TRUE(MappedOnNoPage(pBuf, BufferSize))
+        << "GPU_ALWAYS_MAPPED still set after the last deregistration";
+
+    /* 4. Overlapping pins at different start addresses.  Releasing the inner
+     * one must not unpin the pages the outer one still covers.
+     */
+    void *pInner = reinterpret_cast<char *>(pBuf) + 4 * PAGE_SIZE;
+    const HSAuint64 InnerSize = 4 * PAGE_SIZE;
+
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pBuf, BufferSize, pinFlags));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pInner, InnerSize, pinFlags));
+    EXPECT_TRUE(MappedOnAllPages(pBuf, BufferSize));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pInner));
+    EXPECT_TRUE(MappedOnAllPages(pInner, InnerSize))
+        << "inner deregistration cleared GPU_ALWAYS_MAPPED under a live outer pin";
+    EXPECT_TRUE(MappedOnAllPages(pBuf, BufferSize))
+        << "inner deregistration partly unpinned the outer range";
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pBuf));
+    EXPECT_TRUE(MappedOnNoPage(pBuf, BufferSize))
+        << "GPU_ALWAYS_MAPPED still set after the last deregistration";
+
+    /* 5. A plain registration inside a pinned range is not a pin.  Its
+     * deregistration goes through the same path but must not release the pin,
+     * which it cannot be distinguished from by anything except its address.
+     */
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pBuf, BufferSize, pinFlags));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx,
+                               pInner, InnerSize, plainFlags));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pInner));
+    EXPECT_TRUE(MappedOnAllPages(pBuf, BufferSize))
+        << "a plain deregistration released the pin covering it";
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pBuf));
+    EXPECT_TRUE(MappedOnNoPage(pBuf, BufferSize))
+        << "GPU_ALWAYS_MAPPED still set after the pin was released";
+
+    munmap(pBuf, BufferSize);
+    munmap(pCtrl, BufferSize);
+
+    TEST_END
+}
+
 INSTANTIATE_TEST_CASE_P(, KFDSVMRangeTest,::testing::Values(0, 1));

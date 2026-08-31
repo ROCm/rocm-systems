@@ -135,20 +135,18 @@ void ReportActivity(const amd::Command& command) {
   }
 
   if (command.type() == CL_COMMAND_TASK) {
-    auto timestamps = static_cast<const amd::AccumulateCommand&>(command).getTimestamps();
-    const auto& kernel_names =
-        static_cast<const amd::AccumulateCommand&>(command).getKernelNames();
-    // timestamps has one entry per HSA_PACKET_TYPE_KERNEL_DISPATCH packet only.
-    // kernel_names has one entry per AQL packet slot (nullptr for barriers and SDMA/copy nodes
-    // that don't generate timestamps). Walk kernel_names; for each non-null entry consume
-    // the next timestamp.
-    uint32_t ti = 0;
-    for (uint32_t ki = 0; ki < kernel_names.size() && ti < timestamps.size(); ki++) {
-      if (kernel_names[ki] == nullptr) continue;
-      auto it = timestamps[ti++];
-      record.begin_ns = it.first;
-      record.end_ns = it.second;
-      record.kernel_name = kernel_names[ki]->c_str();
+    const auto& kernel_dispatches =
+        static_cast<const amd::AccumulateCommand&>(command).getKernelDispatches();
+    for (const auto& dispatch : kernel_dispatches) {
+      // Missing or invalid signal timing leaves this dispatch's slot empty
+      // instead of shifting every later kernel onto the wrong timestamp.
+      if (dispatch.end_ns == 0) {
+        continue;
+      }
+      record.begin_ns = dispatch.start_ns;
+      record.end_ns = dispatch.end_ns;
+      record.kernel_name = dispatch.kernel_name;
+      record.queue_id = static_cast<uint64_t>(dispatch.queue_index);
       function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
     }
   } else {

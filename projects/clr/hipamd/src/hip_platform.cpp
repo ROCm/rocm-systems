@@ -78,10 +78,23 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   const size_t alu_occupancy = simdPerCU * std::min(MaxWavesPerSimd, GprWaves);
   const int alu_limited_threads = static_cast<int>(alu_occupancy * wavefrontSize);
 
-  const size_t total_used_lds = wrkGrpInfo->usedLDSSize_ + dynamicSMemSize;
+  // The LDS limit must be expressed in the same unit as the ALU limit computed
+  // above. In WGP mode a workgroup allocates out of the LDS pool of the whole
+  // WGP (2 CUs), so the per-CU pool has to be doubled to match. Kernels
+  // compiled with -mcumode report isWGPMode_ == false and keep the per-CU pool.
+  const uint64_t lds_pool_size = static_cast<uint64_t>(device.info().localMemSizePerCU_) *
+      (wrkGrpInfo->isWGPMode_ ? 2 : 1);
+
+  // HW allocates LDS in fixed size alignment, so a workgroup is accounted for
+  // the aligned size rather than for the exact number of bytes requested.
+  const size_t lds_granularity = device.isa().ldsAlignment();
+  const size_t requested_lds = wrkGrpInfo->usedLDSSize_ + dynamicSMemSize;
+  const size_t total_used_lds = lds_granularity != 0
+      ? ((requested_lds + lds_granularity - 1) / lds_granularity) * lds_granularity
+      : requested_lds;
+
   const int lds_occupancy_wgs = total_used_lds != 0
-      ? static_cast<int>(device.info().localMemSize_ / total_used_lds)
-      : INT_MAX;
+      ? static_cast<int>(lds_pool_size / total_used_lds) : INT_MAX;
   // Calculate how many blocks of inputBlockSize we can fit per CU
   // Need to align with hardware wavefront size. If they want 65 threads, but
   // waves are 64, then we need 128 threads per block.
@@ -90,6 +103,13 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   *maxBlocksPerCU = alu_limited_threads / aligned_input_size;
   // Unless those blocks are further constrained by LDS size.
   *maxBlocksPerCU = std::min(*maxBlocksPerCU, lds_occupancy_wgs);
+
+  // The count above is per scheduling unit of the kernel: a WGP for a WGP mode
+  // kernel, a single CU for a kernel compiled with -mcumode.
+  if (wrkGrpInfo->isWGPMode_ != device.settings().enableWgpMode_) {
+    *maxBlocksPerCU = wrkGrpInfo->isWGPMode_
+        ? (*maxBlocksPerCU / 2) : (*maxBlocksPerCU * 2);
+  }
 
   // Return optimal block size: min of ALU limit and requested size
   *bestBlockSize = std::min(alu_limited_threads, aligned_input_size);
@@ -303,9 +323,15 @@ void __hipUnregisterFatBinary(void** modules) {
   if (!HIP_SKIP_ABORT_ON_GPU_ERROR || !amd::Device::IsGPUInError()) {
     std::call_once(unregister_device_sync, []() {
       for (const auto& hipDevice : g_devices) {
-        // By synchronizing devices ensure that all HSA signal handlers
-        // complete before RemoveFatBinary
         hipDevice->SyncAllStreams(true);
+        // SyncAllStreams only guarantees the GPU finished and the host observed
+        // the completion signals — the HSA async-handler thread can still be
+        // inside a completion callback.  That callback reports kernel names that
+        // point into the Kernel objects RemoveFatBinary is about to destroy, so
+        // the handlers have to be drained too, not just the streams.
+        for (auto* device : hipDevice->devices()) {
+          device->WaitForHsaAsyncHandlersIdle();
+        }
       }
     });
   }
@@ -698,23 +724,21 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   const int deviceId = hip::Stream::DeviceId(stream);
 
   const auto [hip_error, func] = [&]() -> std::pair<hipError_t, hipFunction_t> {
-    hipFunction_t f;
+    hipFunction_t f = nullptr;
     const hipError_t err = PlatformState::Instance().StatCO().GetFunc(&f, hostFunction, deviceId);
-    
-    // Propagate specific invalid code object errors
-    if (err == hipErrorInvalidKernelFile ||
-        err == hipErrorInvalidDeviceFunction ||
-        err == hipErrorInvalidImage) {
-      return {err, nullptr};
-    }
-    
+
     // If successful lookup with valid function, use it
     if (err == hipSuccess && f) {
       return {hipSuccess, f};
     }
-    
-    // Fallback: assume it's a hip function type
-    return {hipSuccess, reinterpret_cast<hipFunction_t>(const_cast<void*>(hostFunction))};
+
+    // Only take fallback for hipErrorInvalidSymbol (not in registered table)
+    if (err == hipErrorInvalidSymbol) {
+      return {hipSuccess, reinterpret_cast<hipFunction_t>(const_cast<void*>(hostFunction))};
+    }
+
+    // Propagate all other errors
+    return {err, nullptr};
   }();
 
   if (hip_error != hipSuccess) {

@@ -4,7 +4,10 @@
 #include "common/preset_registry.hpp"
 
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "embedded_presets.hpp"
+
+#include <spdlog/fmt/fmt.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -26,23 +29,21 @@ find_preset_directory()
     if(preset_dir_env && std::strlen(preset_dir_env) > 0)
     {
         auto dir = std::string{ preset_dir_env };
-        if(common::path::exists(dir)) return dir;
+        if(path::is_directory(dir)) return dir;
     }
 
     auto root = common::path::get_rocprofsys_root();
     if(!root.empty())
     {
-        auto candidate =
-            common::join('/', root, "share", "rocprofiler-systems", "presets");
-        if(common::path::exists(candidate)) return candidate;
+        auto candidate = fmt::format("{}/share/rocprofiler-systems/presets", root);
+        if(path::is_directory(candidate)) return candidate;
     }
 
     const auto* rocm_path = std::getenv("ROCM_PATH");
     if(rocm_path && std::strlen(rocm_path) > 0)
     {
-        auto candidate = common::join('/', std::string{ rocm_path }, "share",
-                                      "rocprofiler-systems", "presets");
-        if(common::path::exists(candidate)) return candidate;
+        auto candidate = fmt::format("{}/share/rocprofiler-systems/presets", rocm_path);
+        if(path::is_directory(candidate)) return candidate;
     }
 
     return {};
@@ -183,7 +184,7 @@ preset_registry::resolve_filepath(const std::string& name_or_path)
     // Bare preset name — resolve within the preset directory
     if(m_directory.empty()) return {};
 
-    auto filepath  = common::join('/', m_directory, name_or_path + ".json");
+    auto filepath  = fmt::format("{}/{}.json", m_directory, name_or_path);
     auto resolved  = common::path::realpath(filepath);
     auto canon_dir = common::path::realpath(m_directory);
     if(resolved.empty() || canon_dir.empty() ||
@@ -253,7 +254,7 @@ preset_registry::ensure_all_loaded()
         // Skip if preset is already cached (e.g. from embedded presets)
         if(m_presets.count(preset_name) > 0) continue;
 
-        const auto filepath = common::join('/', m_directory, std::string{ filename });
+        const auto filepath = fmt::format("{}/{}", m_directory, filename);
         if(auto info = load_file(filepath)) m_presets[preset_name] = std::move(*info);
 
         errno = 0;
@@ -289,6 +290,29 @@ preset_registry::is_section_enabled(std::string_view preset_name,
     const auto& json = it->second;
     if(!json.contains(section)) return default_value;
     return json[std::string{ section }].value("enabled", default_value);
+}
+
+bool
+preset_registry::is_rocpd_output_enabled(std::string_view preset_name,
+                                         bool             default_value) const
+{
+    auto iter = m_json_cache.find(std::string{ preset_name });
+    if(iter == m_json_cache.end())
+    {
+        return default_value;
+    }
+
+    const auto& json = iter->second;
+    if(!json.contains("output"))
+    {
+        return default_value;
+    }
+    const auto& output = json["output"];
+    if(!output.contains("rocpd_output"))
+    {
+        return default_value;
+    }
+    return output["rocpd_output"].value("enabled", default_value);
 }
 
 void
@@ -380,7 +404,7 @@ preset_registry::describe(std::string_view preset_name)
     if(preset_json.contains("tracing"))
     {
         const auto& tracing = preset_json["tracing"];
-        bool        enabled = tracing.value("enabled", false);
+        const bool  enabled = tracing.value("enabled", false);
         std::string entry   = std::string("Tracing:         ") + (enabled ? "ON" : "OFF");
         if(enabled && tracing.contains("buffer_size_kb"))
         {
@@ -398,7 +422,7 @@ preset_registry::describe(std::string_view preset_name)
     if(preset_json.contains("profiling"))
     {
         const auto& profiling = preset_json["profiling"];
-        bool        enabled   = profiling.value("enabled", false);
+        const bool  enabled   = profiling.value("enabled", false);
         std::string entry = std::string("Profiling:       ") + (enabled ? "ON" : "OFF");
         if(enabled && profiling.contains("flat_profile") &&
            profiling["flat_profile"].value("enabled", false))
@@ -410,7 +434,7 @@ preset_registry::describe(std::string_view preset_name)
     if(preset_json.contains("sampling"))
     {
         const auto& sampling = preset_json["sampling"];
-        bool        enabled  = sampling.value("enabled", false);
+        const bool  enabled  = sampling.value("enabled", false);
         std::string entry = std::string("CPU Sampling:    ") + (enabled ? "ON" : "OFF");
         if(enabled && sampling.contains("frequency_hz"))
         {
@@ -483,8 +507,7 @@ preset_registry::describe(std::string_view preset_name)
     }
 
     // Output: rocPD
-    if(preset_json.contains("output") && preset_json["output"].contains("rocpd_output") &&
-       preset_json["output"]["rocpd_output"].value("enabled", false))
+    if(is_rocpd_output_enabled(preset_name))
     {
         lines.emplace_back("rocPD Output:    ON");
     }
@@ -496,7 +519,7 @@ preset_registry::describe(std::string_view preset_name)
     oss << description << "\n";
     for(size_t i = 0; i < lines.size(); ++i)
     {
-        bool is_last = (i + 1 == lines.size());
+        const bool is_last = (i + 1 == lines.size());
         oss << "  " << (is_last ? "\u2514\u2500 " : "\u251c\u2500 ") << lines[i];
         if(!is_last) oss << "\n";
     }
