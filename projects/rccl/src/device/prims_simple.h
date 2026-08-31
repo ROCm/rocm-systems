@@ -27,7 +27,8 @@ class Primitives<T, RedOp, Fan, Direct,
   static constexpr int RoleInput = 0x01, RoleOutput = 0x02, RoleWaitRecv = 0x04, RoleWaitSend = 0x08,
                        RolePostSend = 0x10, RolePostRecv = 0x20, Aborted = 0x40, NetRegMode = 0x80,
                        ConnFifoEnabled = 0x100, DirectWrite = 0x200, DirectRead = 0x400, PatMode = 0x800,
-                       NvlsMinPolling = 0x1000, NetDeviceUnpack = 0x2000, AnyNetDeviceUnpack = 0x4000;
+                       NvlsMinPolling = 0x1000, NetDeviceUnpack = 0x2000, AnyNetDeviceUnpack = 0x4000,
+                       RoleWaitPatNvls = 0x8000, RolePostPatNvls = 0x10000;
   const int tid, tidInBlock;
   const int nthreads;
   int nworkers;
@@ -38,6 +39,7 @@ class Primitives<T, RedOp, Fan, Direct,
   const int group;
   const int threadsPerBlock;
   uint64_t step;
+  struct ncclPatPeer* patNvlsPeer = NULL;
   struct ncclConnInfo* conn = NULL;
   struct ncclConnFifo* connFifo = NULL;
   T* connEltsFifo;
@@ -155,7 +157,7 @@ class Primitives<T, RedOp, Fan, Direct,
           }
         }
       } else if ((flags & ConnFifoEnabled) && connFifo[step % NCCL_STEPS].mode == NCCL_MODE_OFFSET) {
-        ptrs[index] = connEltsFifo + loadInt(&connFifo[step % NCCL_STEPS].offset) / sizeof(T);
+        ptrs[index] = connEltsFifo + loadSsize(&connFifo[step % NCCL_STEPS].offset) / sizeof(T);
       } else if (isSendNotRecv && DirectSend) {
         // directBuff is only assigned by setDataPtrs when (Direct && ipcReg);
         // when Direct=1 but no buffer was registered, it stays NULL and using
@@ -383,7 +385,7 @@ public:
           }
           void** ptrs = isSendNotRecv ? ncclShmem.groups[group].dsts : ncclShmem.groups[group].srcs;
           if ((flags & ConnFifoEnabled) && connFifo[step % NCCL_STEPS].mode == NCCL_MODE_OFFSET) {
-            int offset = loadInt(&connFifo[step % NCCL_STEPS].offset);
+            ssize_t offset = loadSsize(&connFifo[step % NCCL_STEPS].offset);
             ptrs[index] = connEltsFifo + offset / sizeof(T);
           } else if (Direct && fn.work->regUsed) {
             if (isSendNotRecv) {
@@ -619,6 +621,44 @@ private:
     }
   }
 
+  template <int primsMode>
+  __device__ __forceinline__ void initPatNvlsState(struct ncclPatPeer* dims) {
+    constexpr bool IsAg = primsMode == primsModePatAg;
+    constexpr int nvlsConnIdx = 0;
+
+    const bool isWaitThread = IsAg && tid == 5;
+    const bool isOwnerThread = tid == nthreads - 1;
+
+    if (isWaitThread || isOwnerThread) {
+      if (isWaitThread) {
+        flags |= RoleWaitPatNvls;
+      }
+      if (!IsAg && isOwnerThread) {
+        flags |= RoleWaitPatNvls;
+      }
+      if (isOwnerThread) {
+        flags |= RolePostPatNvls;
+      }
+
+      const int intraPeer = ncclShmem.channel.nvls.down;
+      ncclDevChannelPeer* channelPeer = ncclShmem.channel.peers[intraPeer];
+      struct ncclConnInfo* c = IsAg ? &channelPeer->send[nvlsConnIdx] : &channelPeer->recv[nvlsConnIdx];
+      flags |= (c->flags & NCCL_NVLS_MIN_POLL) ? NvlsMinPolling : 0;
+
+      if (isOwnerThread) {
+        struct ncclPatPeer* nvlsPeer = patNvlsPeer = dims + NCCL_PAT_NDIMS;
+        nvlsPeer->conn = c;
+        nvlsPeer->step = c->step;
+        nvlsPeer->buff = c->buffs[NCCL_PROTO_SIMPLE];
+        nvlsPeer->tailPtr = c->tail;
+        nvlsPeer->headPtr = c->head;
+        nvlsPeer->stepCache = 0;
+        nvlsPeer->accSize = 0;
+        nvlsPeer->connStepSize = c->stepSize / sizeof(T);
+      }
+    }
+  }
+
 public:
   __forceinline__ __device__ Primitives(int tid, int nthreads, int const* recvPeers, int const* sendPeers,
                                         void const* inputBuf, void* outputBuf, uint64_t redOpArg, uint8_t group = 0,
@@ -730,20 +770,38 @@ public:
     setDataPtrs(inputBuf, outputBuf, redOpArg, (struct ncclDevWorkCollReg*)collWork, sendIpcReg || recvIpcReg, peer,
                 collWork != nullptr ? collWork->acc : nullptr);
     // coverity[uninit_member] => coverity thinks fan.n is not initialized
-  } else if (mode == primsModePatRs || mode == primsModePatAg) { // Connect to all ranks +/- 2^n
+  } else if (mode == primsModePatRs || mode == primsModePatAg) {
+    // Connect to all ranks that are at nodes +/- 2^n
+    struct ncclPatPeer* recvDims = (struct ncclPatPeer*)recvPeers;
+    struct ncclPatPeer* sendDims = (struct ncclPatPeer*)sendPeers;
     flags |= PatMode;
+
     const int roles[5] = {RoleWaitRecv, RolePostRecv, RoleWaitSend, RolePostSend, RoleInput | RoleOutput};
     if (tid < 5) flags |= roles[tid];
 
     int nranks = ncclShmem.comm.nRanks;
-    if (tid < 32 && ((1UL << tid) < nranks)) {
-      int rank = ncclShmem.comm.rank;
-      uint32_t delta = 1 << tid;
-      // When sharing, RS and AG both recv from rank-delta and send to rank+delta; otherwise AG mirrors RS.
+    int nNodes = ncclShmem.comm.nNodes;
+    int localRanks = nranks / nNodes;
+
+    if (tid < NCCL_PAT_NDIMS && ((1UL << tid) < nNodes)) {
+      int node = ncclShmem.comm.node;
+      uint32_t mask = 1 << tid;
+      int denseLocalRank = localRanks > 1 ? channel->nvls.headRank : 0;
+      int prevDensePeer = ((node + nNodes - mask) % nNodes) * localRanks + denseLocalRank;
+      int nextDensePeer = ((node + mask) % nNodes) * localRanks + denseLocalRank;
+      int prevPeer = prevDensePeer;
+      int nextPeer = nextDensePeer;
+      if (localRanks > 1) {
+        int* denseToUserRank = ncclShmem.comm.denseToUserRank;
+        prevPeer = denseToUserRank[prevDensePeer];
+        nextPeer = denseToUserRank[nextDensePeer];
+      }
       const bool shared = ncclShmem.comm.patSharedQps != 0;
+      int recvPeer = (shared || mode == primsModePatRs) ? prevPeer : nextPeer;
+      int sendPeer = (!shared && mode == primsModePatAg) ? prevPeer : nextPeer;
+
       // Load recv peer
-      int recvPeer = (shared || mode == primsModePatRs) ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
-      struct ncclPatPeer* peer = ((struct ncclPatPeer*)recvPeers) + tid;
+      struct ncclPatPeer* peer = recvDims + tid;
       struct ncclConnInfo* conn = peer->conn = channel->peers[recvPeer]->recv + connIndexRecv;
       peer->step = conn->step;
       peer->buff = conn->buffs[NCCL_PROTO_SIMPLE];
@@ -752,8 +810,7 @@ public:
       peer->accSize = 0;
       peer->connStepSize = conn->stepSize / sizeof(T);
       // Load send peer
-      int sendPeer = (!shared && mode == primsModePatAg) ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
-      peer = ((struct ncclPatPeer*)sendPeers) + tid;
+      peer = sendDims + tid;
       conn = peer->conn = channel->peers[sendPeer]->send + connIndexSend;
       peer->step = conn->step;
       peer->connFifo = conn->connFifo;
@@ -768,6 +825,21 @@ public:
       ncclShmem.groups[group].userOutput = (void*)outputBuf;
       ncclShmem.groups[group].redOpArgs = redOpArg; // scaler for local input
     }
+
+    if (localRanks > 1) {
+      if (mode == primsModePatAg) this->fan = Fan(0, 1);
+      if (group == 0) {
+        if (mode == primsModePatAg) {
+          // Initialize state for the local NVLS broadcast. tid 5 waits,
+          // and the last tid loads its state and posts.
+          initPatNvlsState<primsModePatAg>(sendDims);
+        } else if (mode == primsModePatRs) {
+          // Initialize state for the local NVLS reduction. The last tid
+          // loads its state, waits, and posts its step.
+          initPatNvlsState<primsModePatRs>(recvDims);
+        }
+      }
+    }
     patBarrier();
   }
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
@@ -780,7 +852,10 @@ public:
 }
 
 __forceinline__ __device__ ~Primitives() {
-  if (flags & PatMode) return;
+  if (flags & PatMode) {
+    if (patNvlsPeer != NULL) patNvlsPeer->conn->step = patNvlsPeer->step;
+    return;
+  }
   // Save steps for the next operation
   if (flags & (RolePostSend | RolePostRecv)) conn->step = step;
   if ((flags & NetRegMode) && (flags & RoleWaitSend)) {
@@ -1042,15 +1117,103 @@ __device__ __forceinline__ void directGather(intptr_t outIx, ssize_t totalElem, 
   ScatterGatherOp<1, 0, 1, 0>(-1, outIx, totalElem, peerElem, peerOffset, skip, shift, /*postOp=*/false);
 }
 
+__device__ __forceinline__ size_t nvlsDenseToUserOffset(size_t denseOffset, size_t count) {
+  if (count == 0) return 0;
+  int denseRank = (int)(denseOffset / count);
+  size_t rankOffset = denseOffset - (size_t)denseRank * count;
+  int* denseToUserRank = ncclShmem.comm.denseToUserRank;
+  int userRank = denseToUserRank[denseRank];
+  return (size_t)userRank * count + rankOffset;
+}
+
+// PAT scatter/gather cannot reuse ScatterGatherOp: parallel PAT groups share
+// an NVLS step, but use per-group offsets and completion metadata.
+// Scatter one PAT step from user input into the local NVLS send FIFOs.
+__device__ __forceinline__ void patScatter(struct ncclPatStep* ps, struct ncclPatShmem* shmem, int psIdx,
+                                           int parallelFactor, int localRanks, size_t count) {
+  int localIdx = psIdx % parallelFactor;
+  bool skipped = ps->flags & PatSkipped;
+  int nelem = skipped ? 0 : (ps->nelem < 0 ? 0 : ps->nelem);
+  T* userInput = (T*)ncclShmem.groups[group].userInput;
+
+  if (flags & RoleWaitSend) {
+    if (localIdx == 0) {
+      int spins = 0;
+      while (connStepCache + NCCL_STEPS < step + StepPerSlice) {
+        connStepCache = loadStepValue(connStepPtr);
+        if (checkAbort(flags, Aborted, spins)) break;
+      }
+    }
+    shmem->patScatterDsts[index] = (void*)(connEltsFifo + (step % NCCL_STEPS) * connStepSize + ps->nvlsOffset);
+  }
+  barrier();
+
+  // Primitives reserves the final warp for send/fence overlap. Those threads
+  // still participate in the full-group barriers below, but not in the copy.
+  if (!skipped && tid < nworkers) {
+    for (int i = 0; i < fan.nsend(); i++) {
+      ssize_t remaining = (ssize_t)localRanks * (ssize_t)count - (ssize_t)i * (ssize_t)count;
+      ssize_t realSize = min((ssize_t)nelem, remaining);
+      int workSize = (ncclShmem.aborted || realSize < 0) ? 0 : (int)realSize;
+      if (workSize > 0) {
+        size_t inpIx = nvlsDenseToUserOffset(ps->inpIx + (size_t)i * count, count);
+        void* src = (void*)(userInput + inpIx);
+        void* dst = shmem->patScatterDsts[i];
+        reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/1>(tid, nworkers,
+                                                                               ncclShmem.groups[group].redOpArgs,
+                                                                               /*postOp=*/false, 1, &src, 1, &dst,
+                                                                               workSize);
+      }
+    }
+  }
+
+  // 'skipped' and 'nelem' are group-uniform, so a plain barrier is enough here
+  // to publish the vote (upstream relies on a value-returning barrierAny()).
+  if (localIdx == 0 && tid == 0) shmem->patGroupFenceNeeded = false;
+  barrier();
+  if (tid == 0 && !skipped && nelem > 0) shmem->patGroupFenceNeeded = true;
+  if (localIdx == parallelFactor - 1 && (flags & (RoleWaitSend | RolePostSend))) {
+    step += StepPerSlice;
+  }
+  barrier();
+  if (localIdx == parallelFactor - 1 && (flags & RolePostSend)) {
+    if (shmem->patGroupFenceNeeded || (flags & ConnFifoEnabled)) fence_acq_rel_sys();
+    st_relaxed_sys_global(connStepPtr, step);
+  }
+}
+
+// Use the local NVLS reduction as this PAT-RS step's local input.
+template <bool needsNvlsReduce = false>
 __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPatShmem* shmem) {
+  struct ncclPatPeer* nvlsReducePeer = shmem->recvDims + NCCL_PAT_NDIMS;
+  bool nvlsWaiter = needsNvlsReduce && (flags & RoleWaitPatNvls);
+  bool nvlsPoster = needsNvlsReduce && (flags & RolePostPatNvls);
+  uint64_t nvlsStep = needsNvlsReduce ? nvlsReducePeer->step : 0;
+  if (nvlsWaiter) {
+    int spins = 0;
+    while (nvlsReducePeer->stepCache < nvlsStep + StepPerSlice) {
+      nvlsReducePeer->stepCache = loadStepValue(nvlsReducePeer->tailPtr);
+      if (checkAbort(flags, Aborted, spins)) break;
+    }
+  }
   if (ps->flags & PatSkipped) {
     patBarrier();
+    if (nvlsPoster) {
+      nvlsReducePeer->step += StepPerSlice;
+    }
     patBarrier();
+    if (nvlsPoster) {
+      st_relaxed_sys_global(nvlsReducePeer->headPtr, nvlsReducePeer->step);
+    }
     return;
   } // Skipped
   int nelem = ps->nelem < 0 ? 0 : ps->nelem;
   T* userInput = (T*)ncclShmem.groups[group].userInput;
   T* userOutput = (T*)ncclShmem.groups[group].userOutput;
+  T* localInput = needsNvlsReduce ?
+                    ((T*)nvlsReducePeer->buff) + (nvlsStep % NCCL_STEPS) * nvlsReducePeer->connStepSize +
+                      ps->nvlsOffset :
+                    userInput + ps->inpIx;
 
   bool recv = ps->recvDim >= 0 && (flags & (RolePostRecv | RoleWaitRecv));
   bool send = ps->sendDim >= 0 && (flags & (RolePostSend | RoleWaitSend));
@@ -1067,7 +1230,8 @@ __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPat
   }
 
   if (recv && (flags & RoleWaitRecv)) {
-    ncclShmem.groups[group].srcs[0] = ((T*)peer->buff) + (step % NCCL_STEPS) * peer->connStepSize + ps->recvOffset;
+    ncclShmem.groups[group].srcs[needsNvlsReduce ? 1 : 0] =
+      ((T*)peer->buff) + (step % NCCL_STEPS) * peer->connStepSize + ps->recvOffset;
     int spins = 0;
     while (peer->stepCache < step + StepPerSlice) {
       peer->stepCache = loadStepValue(peer->tailPtr);
@@ -1084,10 +1248,10 @@ __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPat
       ((T*)peer->buff) + ((step + ps->stepOffset) % NCCL_STEPS) * peer->connStepSize + ps->sendOffset;
     if (peer->accSize < ps->sendOffset + nelem + (step + ps->stepOffset) * peer->connStepSize) {
       // New data, add our own data to it.
-      ncclShmem.groups[group].srcs[1] = userInput + ps->inpIx;
+      ncclShmem.groups[group].srcs[needsNvlsReduce ? 0 : 1] = localInput;
     } else {
       // There is already data in there, accumulate instead of writing to it.
-      ncclShmem.groups[group].srcs[1] = ncclShmem.groups[group].dsts[0];
+      ncclShmem.groups[group].srcs[needsNvlsReduce ? 0 : 1] = ncclShmem.groups[group].dsts[0];
     }
   }
   long long int localAccSize = shmem->localAccSize;
@@ -1095,27 +1259,32 @@ __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPat
     ncclShmem.groups[group].dsts[0] = userOutput + ps->outIx;
     if (localAccSize < ps->outIx + nelem) {
       // New data, add our own data to it.
-      ncclShmem.groups[group].srcs[1] = userInput + ps->inpIx;
+      ncclShmem.groups[group].srcs[needsNvlsReduce ? 0 : 1] = localInput;
       localAccSize = ps->outIx + nelem;
     } else {
       // There is already data in there, accumulate instead of writing to it.
-      ncclShmem.groups[group].srcs[1] = ncclShmem.groups[group].dsts[0];
+      ncclShmem.groups[group].srcs[needsNvlsReduce ? 0 : 1] = ncclShmem.groups[group].dsts[0];
     }
   }
   patBarrier();
-  int nSrcs = 2;
-  void** srcs = ncclShmem.groups[group].srcs;
-  if (ps->recvDim < 0) {
-    srcs++;
-    nSrcs--;
-  } // No peer to receive from, remove one source
+  int nSrcs = (ps->recvDim < 0) ? 1 : 2;
+  // No peer to receive from, remove one source
+  void** srcs =
+    needsNvlsReduce ? ncclShmem.groups[group].srcs : ncclShmem.groups[group].srcs + (ps->recvDim < 0 ? 1 : 0);
 
   int workSize = ncclShmem.aborted ? 0 : nelem;
 
-  reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 2, 0, 1, 1, /*PreOpSrcs*/ 0>(tid, nthreads,
-                                                                          ncclShmem.groups[group].redOpArgs,
-                                                                          /*postOp=*/false, nSrcs, srcs, 1,
-                                                                          ncclShmem.groups[group].dsts, workSize);
+  if (needsNvlsReduce && srcs[0] == localInput) {
+    reduceCopy<Unroll, useAcc, RedOp, T, 1, 1, 2, 0, 1, 1, /*PreOpSrcs*/ 0>(tid, nthreads,
+                                                                            ncclShmem.groups[group].redOpArgs,
+                                                                            /*postOp=*/false, nSrcs, srcs, 1,
+                                                                            ncclShmem.groups[group].dsts, workSize);
+  } else {
+    reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 2, 0, 1, 1, /*PreOpSrcs*/ 0>(tid, nthreads,
+                                                                            ncclShmem.groups[group].redOpArgs,
+                                                                            /*postOp=*/false, nSrcs, srcs, 1,
+                                                                            ncclShmem.groups[group].dsts, workSize);
+  }
 
   // Store conn step here inside the two barriers to make sure next reload will see the update.
   if (postSend && (flags & RolePostSend)) {
@@ -1134,6 +1303,9 @@ __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPat
   if (ps->sendDim < 0 && (flags & RoleOutput)) atomicMax(&shmem->localAccSize, localAccSize);
   if (ps->sendDim >= 0 && (flags & RoleWaitSend))
     atomicMax(&peer->accSize, ps->sendOffset + nelem + (step + ps->stepOffset) * peer->connStepSize);
+  if (nvlsPoster) {
+    nvlsReducePeer->step += StepPerSlice;
+  }
 
   patBarrier();
 
@@ -1144,12 +1316,51 @@ __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPat
   if (postRecv && (flags & RolePostRecv)) {
     st_relaxed_sys_global(peer->headPtr, step);
   }
+  if (nvlsPoster) {
+    st_relaxed_sys_global(nvlsReducePeer->headPtr, nvlsReducePeer->step);
+  }
 }
 
+__device__ __forceinline__ void patNvlsBcast(struct ncclPatStep* ps, struct ncclPatShmem* shmem, int workSize,
+                                             bool skipped) {
+  struct ncclPatPeer* nvlsBcastPeer = shmem->sendDims + NCCL_PAT_NDIMS;
+
+  if (flags & RoleWaitPatNvls) {
+    int spins = 0;
+    while (nvlsBcastPeer->stepCache + NCCL_STEPS < nvlsBcastPeer->step + StepPerSlice) {
+      nvlsBcastPeer->stepCache = loadStepValue(nvlsBcastPeer->headPtr);
+      if (checkAbort(flags, Aborted, spins)) break;
+    }
+  }
+  if (tid == 1) {
+    ncclShmem.groups[group].dsts[1] =
+      ((T*)nvlsBcastPeer->buff) + (nvlsBcastPeer->step % NCCL_STEPS) * nvlsBcastPeer->connStepSize + ps->nvlsOffset;
+  }
+  patBarrier();
+  if (workSize > 0) {
+    reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 1, 1, 1, /*PreOpSrcs*/ 0>(tid, nthreads,
+                                                                            ncclShmem.groups[group].redOpArgs,
+                                                                            /*postOp=*/false, 1,
+                                                                            ncclShmem.groups[group].srcs, 1,
+                                                                            ncclShmem.groups[group].dsts + 1, workSize);
+  }
+  patBarrier();
+
+  if (flags & RolePostPatNvls) {
+    nvlsBcastPeer->step += StepPerSlice;
+    if (workSize > 0 || skipped) fence_acq_rel_sys();
+    st_relaxed_sys_global(nvlsBcastPeer->tailPtr, nvlsBcastPeer->step);
+  }
+}
+
+// Forward PAT-AG output through the local NVLS broadcast when requested.
+template <bool needsBcast = false>
 __device__ __forceinline__ void patCopy(struct ncclPatStep* ps, struct ncclPatShmem* shmem) {
-  if (ps->flags & PatSkipped) {
+  bool skipped = ps->flags & PatSkipped;
+  if (skipped) {
     patBarrier();
     patBarrier();
+    if (needsBcast) patNvlsBcast(ps, shmem, 0, /*skipped=*/true);
     return;
   } // Skipped
   int nelem = ps->nelem < 0 ? 0 : ps->nelem;
@@ -1178,11 +1389,13 @@ __device__ __forceinline__ void patCopy(struct ncclPatStep* ps, struct ncclPatSh
       peer->stepCache = loadStepValue(peer->tailPtr);
       if (checkAbort(flags, Aborted, spins)) break;
     }
-    if (peer->accSize < ps->recvOffset + nelem + (step + ps->stepOffset) * peer->connStepSize) {
-      // New data, copy to our output buffer.
-      ncclShmem.groups[group].dsts[1] = userOutput + ps->outIx;
-    } else {
-      ncclShmem.groups[group].dsts[1] = ncclShmem.groups[group].srcs[0]; // Already done
+    if (!needsBcast) {
+      if (peer->accSize < ps->recvOffset + nelem + (step + ps->stepOffset) * peer->connStepSize) {
+        // New data, copy to our output buffer.
+        ncclShmem.groups[group].dsts[1] = userOutput + ps->outIx;
+      } else {
+        ncclShmem.groups[group].dsts[1] = ncclShmem.groups[group].srcs[0]; // Already done
+      }
     }
   }
   if (send && (flags & RoleWaitSend)) {
@@ -1198,27 +1411,36 @@ __device__ __forceinline__ void patCopy(struct ncclPatStep* ps, struct ncclPatSh
     ncclShmem.groups[group].srcs[0] = userInput + ps->inpIx;
     if (localAccSize < ps->inpIx + nelem) {
       // New data, copy to our output buffer.
-      ncclShmem.groups[group].dsts[1] = userOutput + ps->outIx;
+      if (!needsBcast) ncclShmem.groups[group].dsts[1] = userOutput + ps->outIx;
       localAccSize = ps->inpIx + nelem;
-    } else {
+    } else if (!needsBcast) {
       // Already done
       ncclShmem.groups[group].dsts[1] = ncclShmem.groups[group].srcs[0];
     }
   }
   patBarrier();
-  int nDsts = 2;
-  void** dsts = ncclShmem.groups[group].dsts;
-  if (ps->sendDim < 0) {
-    dsts++;
-    nDsts--;
-  } // No peer to send to, remove one dest
-  if (ncclShmem.groups[group].srcs[0] == ncclShmem.groups[group].dsts[1]) nDsts--; // In-place or already done.
 
   int workSize = ncclShmem.aborted ? 0 : nelem;
 
-  reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 2, /*PreOpSrcs*/ 0>(
-    tid, nthreads, ncclShmem.groups[group].redOpArgs, /*postOp=*/false, 1, ncclShmem.groups[group].srcs, nDsts, dsts,
-    workSize);
+  if (needsBcast) {
+    if (ps->sendDim >= 0) {
+      reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs*/ 0>(
+        tid, nthreads, ncclShmem.groups[group].redOpArgs,
+        /*postOp=*/false, 1, ncclShmem.groups[group].srcs, 1, ncclShmem.groups[group].dsts, workSize);
+    }
+  } else {
+    int nDsts = 2;
+    void** dsts = ncclShmem.groups[group].dsts;
+    if (ps->sendDim < 0) {
+      dsts++;
+      nDsts--;
+    } // No peer to send to, remove one dest
+    if (ncclShmem.groups[group].srcs[0] == ncclShmem.groups[group].dsts[1]) nDsts--; // In-place or already done.
+
+    reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 2, /*PreOpSrcs*/ 0>(
+      tid, nthreads, ncclShmem.groups[group].redOpArgs, /*postOp=*/false, 1, ncclShmem.groups[group].srcs, nDsts, dsts,
+      workSize);
+  }
 
   // Store conn step here inside the two barriers to make sure next reload will see the update.
   if (postSend && (flags & RolePostSend)) {
@@ -1244,9 +1466,63 @@ __device__ __forceinline__ void patCopy(struct ncclPatStep* ps, struct ncclPatSh
     if (nelem > 0 || peer->connFifo) fence_acq_rel_sys();
     st_relaxed_sys_global(peer->tailPtr, step);
   }
+  if (needsBcast) {
+    patNvlsBcast(ps, shmem, workSize, /*skipped=*/false);
+  }
   if (postRecv && (flags & RolePostRecv)) {
     st_relaxed_sys_global(peer->headPtr, step);
   }
 }
+
+// Gather one PAT step from the local NVLS recv FIFOs into user-rank order.
+__device__ __forceinline__ void patGather(struct ncclPatStep* ps, struct ncclPatShmem* shmem, int psIdx,
+                                          int parallelFactor, size_t count) {
+  int localIdx = psIdx % parallelFactor;
+  if ((flags & RoleWaitRecv) && localIdx == 0) {
+    int spins = 0;
+    while (connStepCache < step + StepPerSlice) {
+      connStepCache = loadStepValue(connStepPtr);
+      if (checkAbort(flags, Aborted, spins)) break;
+    }
+  }
+  if (ps->flags & PatSkipped) {
+    barrier();
+    if (localIdx == parallelFactor - 1 && (flags & (RoleWaitRecv | RolePostRecv))) {
+      step += StepPerSlice;
+    }
+    barrier();
+    if (localIdx == parallelFactor - 1 && (flags & RolePostRecv)) {
+      st_relaxed_sys_global(connStepPtr, step);
+    }
+    return;
+  }
+
+  int nelem = ps->nelem < 0 ? 0 : ps->nelem;
+  T* userOutput = (T*)ncclShmem.groups[group].userOutput;
+
+  if (flags & RoleWaitRecv) {
+    shmem->patGatherSrcs[index] = (void*)(connEltsFifo + (step % NCCL_STEPS) * connStepSize + ps->nvlsOffset);
+  }
+  barrier();
+
+  int workSize = ncclShmem.aborted ? 0 : nelem;
+  for (int i = 0; i < fan.nrecv(); i++) {
+    void* src = shmem->patGatherSrcs[i];
+    size_t outIx = nvlsDenseToUserOffset(ps->outIx + (size_t)i * count, count);
+    void* dst = (void*)(userOutput + outIx);
+    reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/0>(tid, nthreads,
+                                                                            ncclShmem.groups[group].redOpArgs,
+                                                                            /*postOp=*/false, 1, &src, 1, &dst,
+                                                                            workSize);
+  }
+
+  if (localIdx == parallelFactor - 1 && (flags & (RoleWaitRecv | RolePostRecv))) {
+    step += StepPerSlice;
+  }
+  barrier();
+
+  if (localIdx == parallelFactor - 1 && (flags & RolePostRecv)) {
+    st_relaxed_sys_global(connStepPtr, step);
+  }
 }
-;
+};

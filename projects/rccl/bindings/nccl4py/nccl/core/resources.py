@@ -17,17 +17,84 @@ from abc import ABC, abstractmethod
 
 from nccl.bindings import nccl as _nccl_bindings
 
+from nccl.core._binding_helpers import LowppView
 from nccl.core.constants import WindowFlag
+from nccl.core.team import NCCLTeam
 from nccl.core.typing import NcclDataType, NcclInvalid
 
 _PointerBox = _nccl_bindings.PointerBox
 
 __all__ = [
+    "MultimemHandle",
+    "LsaBarrierHandle",
+    "GinBarrierHandle",
+    "LLA2AHandle",
     "RegisteredBufferHandle",
     "RegisteredWindowHandle",
     "CustomRedOp",
     "DevCommResource",
 ]
+
+
+class MultimemHandle(LowppView, lowpp_cls=_nccl_bindings.MultimemHandle):
+    """Multimem handle, returned by
+    :py:meth:`~nccl.core.DevCommResource.multimem_handle` for a team requested
+    with ``multimem=True``. Pass it to device-side multimem operations.
+    """
+
+    @property
+    def mc_base_pointer(self) -> int:
+        """Multicast base pointer written by NCCL; ``0`` means none was provided."""
+        return self._lowpp.mc_base_ptr
+
+
+class LsaBarrierHandle(LowppView, lowpp_cls=_nccl_bindings.LsaBarrierHandle):
+    """LSA barrier handle, returned by
+    :py:attr:`~nccl.core.DevCommResource.resource_handles` for each
+    :py:class:`~nccl.core.LsaBarrierRequirement`. Pass it to device-side
+    barrier sessions.
+    """
+
+    @property
+    def buf_handle(self) -> int:
+        """Buffer resource offset assigned by NCCL during device comm creation."""
+        return self._lowpp.buf_handle
+
+    @property
+    def n_barriers(self) -> int:
+        """Number of barriers this handle provides."""
+        return self._lowpp.n_barriers
+
+
+class GinBarrierHandle(LowppView, lowpp_cls=_nccl_bindings.GinBarrierHandle):
+    """GIN barrier handle, returned by
+    :py:attr:`~nccl.core.DevCommResource.resource_handles` for each
+    :py:class:`~nccl.core.GinBarrierRequirement`. Pass it to device-side
+    barrier sessions.
+    """
+
+    @property
+    def signal0(self) -> int:
+        """Starting GIN signal index assigned by NCCL during device comm creation."""
+        return self._lowpp.signal0
+
+
+class LLA2AHandle(LowppView, lowpp_cls=_nccl_bindings.LLA2AHandle):
+    """Low-latency all-to-all handle, returned by
+    :py:attr:`~nccl.core.DevCommResource.resource_handles` for each
+    :py:class:`~nccl.core.LLA2ARequirement`. Pass it to device-side all-to-all
+    sessions.
+    """
+
+    @property
+    def buf_handle(self) -> int:
+        """Buffer resource offset assigned by NCCL during device comm creation."""
+        return self._lowpp.buf_handle
+
+    @property
+    def n_slots(self) -> int:
+        """Number of slots this handle provides."""
+        return self._lowpp.n_slots
 
 
 class CommResource(ABC):
@@ -209,17 +276,12 @@ class RegisteredWindowHandle(CommResource):
 
     @property
     def is_valid(self) -> bool:
-        """Whether the resource has been initialized and is still valid (not closed)."""
-        return not self._closed and self._handle.ptr
+        """Whether the window is still registered (not closed, handle non-null)."""
+        return not self._closed and bool(self._handle.ptr)
 
     @property
     def handle(self) -> int:
-        """Window handle for NCCL operations.
-
-        Raises:
-            RuntimeError: If the window has been deregistered or the handle
-                is invalid.
-        """
+        """Window handle for NCCL operations, or ``0`` once deregistered."""
         return int(self._handle.ptr)
 
     @property
@@ -255,6 +317,28 @@ class RegisteredWindowHandle(CommResource):
         """
         self._check_valid()
         ptr = _nccl_bindings.get_lsa_multimem_device_pointer(self.handle, offset)
+        return ptr if ptr != 0 else None
+
+    def get_multimem_device_pointer(self, multimem: MultimemHandle, offset: int = 0) -> int | None:
+        """Returns the multicast device pointer for this window and ``multimem``.
+
+        Unlike :meth:`get_lsa_multimem_device_pointer` (which uses the LSA
+        team's multimem), this resolves the pointer for an explicit multimem
+        handle produced during device communicator creation.
+
+        Args:
+            multimem: A :py:class:`~nccl.core.MultimemHandle` returned by
+                :py:meth:`DevCommResource.multimem_handle`.
+            offset: Byte offset within the window buffer. Defaults to 0.
+
+        Returns:
+            Device pointer as int, or ``None`` if multimem is not supported.
+
+        Raises:
+            RuntimeError: If the window has been closed.
+        """
+        self._check_valid()
+        ptr = _nccl_bindings.get_multimem_device_pointer(self.handle, offset, multimem._lowpp.ptr)
         return ptr if ptr != 0 else None
 
     def get_lsa_device_pointer(self, lsa_rank: int, offset: int = 0) -> int:
@@ -384,25 +468,54 @@ class DevCommResource(CommResource):
     aborted.
     """
 
-    def __init__(self, comm_ptr: int, requirements_ptr: int):
+    def __init__(
+        self,
+        comm_ptr: int,
+        reqs_lowpp: _nccl_bindings.DevCommRequirements,
+        team_multimem_lowpp: dict[NCCLTeam, _nccl_bindings.MultimemHandle] | None = None,
+        resource_handle_lowpps: tuple[
+            _nccl_bindings.LsaBarrierHandle
+            | _nccl_bindings.GinBarrierHandle
+            | _nccl_bindings.LLA2AHandle,
+            ...,
+        ]
+        | None = None,
+    ):
         """Creates a device communicator from an existing host communicator.
 
         Args:
             comm_ptr: NCCL communicator raw pointer.
-            requirements_ptr: Pointer to a ncclDevCommRequirements_t
-                structure.
+            reqs_lowpp: Per-create low-level requirements root. Consumed during
+                construction and released once ncclDevCommCreate has copied it;
+                the caller keeps its linked-list nodes alive until this
+                constructor returns.
+            team_multimem_lowpp: Per-team multimem output storage. The resource
+                retains these objects because NCCL writes through their
+                pointers and returned handle facades reference them.
+            resource_handle_lowpps: Per-resource output handle lowpps in
+                requirement order. The resource retains the handle storage
+                because NCCL writes offsets into it during creation and device
+                kernels read it afterwards.
 
         Raises:
             NcclInvalid: If comm_ptr is 0 (invalid communicator).
         """
-        self._requirements_ptr = requirements_ptr
+        self._reqs_lowpp = reqs_lowpp
+        self._team_multimem_lowpp = team_multimem_lowpp or {}
+        self._resource_handle_lowpps = resource_handle_lowpps or []
         self._dev_comm: _nccl_bindings.DevComm | None = None
         super().__init__(comm_ptr)
-        self._allocate()
+        # reqs_lowpp is only needed for the create call; drop it afterwards so we
+        # don't retain a struct whose linked-list pointers dangle once the
+        # caller's requirement nodes are freed.
+        try:
+            self._allocate()
+        finally:
+            del self._reqs_lowpp
 
     def _allocate(self) -> None:
         """Creates the device communicator via ncclDevCommCreate."""
-        self._dev_comm = _nccl_bindings.dev_comm_create(self._comm_ptr, self._requirements_ptr)
+        self._dev_comm = _nccl_bindings.dev_comm_create(self._comm_ptr, self._reqs_lowpp.ptr)
 
     def _deallocate(self) -> None:
         """Destroys the device communicator via ncclDevCommDestroy."""
@@ -430,6 +543,62 @@ class DevCommResource(CommResource):
             RuntimeError: If the device communicator has been destroyed.
         """
         return self.dev_comm.ptr
+
+    def multimem_handle(self, team: NCCLTeam) -> MultimemHandle:
+        """Returns the multimem handle requested for ``team``.
+
+        The returned facade wraps this dev comm's per-create output storage;
+        each lookup creates a new facade over the same storage. It remains
+        backed by the resource until the device communicator is closed.
+
+        Args:
+            team: The team the handle was requested for, as an entry of the
+                ``teams`` requirement used to create this device communicator.
+
+        Returns:
+            The :py:class:`~nccl.core.MultimemHandle` NCCL filled in for ``team``.
+
+        Raises:
+            RuntimeError: If the device communicator has been closed.
+            KeyError: If ``team`` was not requested with ``multimem=True`` in
+                the requirements used to create this device communicator.
+        """
+        self._check_valid()
+        try:
+            lowpp = self._team_multimem_lowpp[team]
+        except KeyError:
+            raise KeyError(
+                f"no multimem handle for {team!r}; it was not requested with "
+                "multimem=True in this device communicator's requirements"
+            ) from None
+        return MultimemHandle._from_lowpp(lowpp)
+
+    @property
+    def resource_handles(
+        self,
+    ) -> tuple[LsaBarrierHandle | GinBarrierHandle | LLA2AHandle, ...]:
+        """Finalized resource handles, in the order of
+        :py:attr:`~nccl.core.NCCLDevCommRequirements.resources`.
+
+        ``resource_handles[i]`` corresponds to ``requirements.resources[i]`` and
+        is an :py:class:`~nccl.core.LsaBarrierHandle`,
+        :py:class:`~nccl.core.GinBarrierHandle`, or
+        :py:class:`~nccl.core.LLA2AHandle` depending on the requirement. Each
+        remains backed by this resource until the device communicator is closed.
+        """
+        self._check_valid()
+        handles = []
+        for lowpp in self._resource_handle_lowpps:
+            if isinstance(lowpp, _nccl_bindings.LsaBarrierHandle):
+                handles.append(LsaBarrierHandle._from_lowpp(lowpp))
+            elif isinstance(lowpp, _nccl_bindings.GinBarrierHandle):
+                handles.append(GinBarrierHandle._from_lowpp(lowpp))
+            elif isinstance(lowpp, _nccl_bindings.LLA2AHandle):
+                handles.append(LLA2AHandle._from_lowpp(lowpp))
+            else:
+                raise NcclInvalid(f"unexpected resource handle lowpp: {type(lowpp).__name__}")
+
+        return tuple(handles)
 
     def __repr__(self) -> str:
         if not self.is_valid:

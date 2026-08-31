@@ -189,6 +189,7 @@ ncclResult_t ncclGinIbP2PBarrier(struct ncclGinIbCollComm* cComm) {
 ncclResult_t ncclGinIbConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm, void** collComm) {
   struct ncclIbListenComm* lComm = (struct ncclIbListenComm*)listenComm;
   struct ncclGinIbCollComm* cCommArray = nullptr;
+  ncclResult_t ret = ncclSuccess;
   int next;
 
   *collComm = NULL;
@@ -202,10 +203,13 @@ ncclResult_t ncclGinIbConnect(void* ctx, void* handles[], int nranks, int rank, 
   next = (cComm->rank + 1) % nranks;
   do {
     if (cComm->sendComm == NULL) {
-      NCCLCHECK(ncclIbConnectImpl(ctx, lComm->dev, handles[next], &cComm->sendComm, NULL, /*nQpsPerDev*/ 1,
-                                  ncclParamGinIbTc() != -1 ? ncclParamGinIbTc() : ncclParamIbTc()));
+      NCCLCHECKGOTO(ncclIbConnectImpl(ctx, lComm->dev, handles[next], &cComm->sendComm, NULL, /*nQpsPerDev*/ 1,
+                                      ncclParamGinIbTc() != -1 ? ncclParamGinIbTc() : ncclParamIbTc()),
+                    ret, fail);
     }
-    if (cComm->recvComm == NULL) NCCLCHECK(ncclIbAcceptImpl(lComm, &cComm->recvComm, NULL, /*nQpsPerDev*/ 1));
+    if (cComm->recvComm == NULL) {
+      NCCLCHECKGOTO(ncclIbAcceptImpl(lComm, &cComm->recvComm, NULL, /*nQpsPerDev*/ 1), ret, fail);
+    }
   } while (cComm->sendComm == NULL || cComm->recvComm == NULL);
 
   cComm->getProperties = (ncclResult_t (*)(int dev, void* props))ncclIbGetProperties;
@@ -219,6 +223,12 @@ ncclResult_t ncclGinIbConnect(void* ctx, void* handles[], int nranks, int rank, 
 
   *collComm = cCommArray;
   return ncclSuccess;
+
+fail:
+  if (cComm->recvComm) ncclNetIb.closeRecv(cComm->recvComm);
+  if (cComm->sendComm) ncclNetIb.closeSend(cComm->sendComm);
+  free(cCommArray);
+  return ret;
 }
 
 ncclResult_t ncclGinIbCloseColl(void* collComm) {
@@ -299,9 +309,7 @@ ncclResult_t ncclGinIbGdakiCreateContext(void* collComm, ncclGinConfig_t* config
   if (ncclParamGinIbTc() != -1) config->trafficClass = ncclParamGinIbTc();
   else if (ncclParamIbTc() != -1) config->trafficClass = ncclParamIbTc();
 
-  // GDAKI currently doesn't support the rankStride optimization.
-  NCCLCHECK(ncclGinGdakiCreateContext(cComm, config->nSignals, config->nCounters, config->nContexts, config->queueDepth,
-                                      config->trafficClass, config->backendVersion, ginCtx, devHandle));
+  NCCLCHECK(ncclGinGdakiCreateContext(cComm, config, ginCtx, devHandle));
 
   return ncclSuccess;
 }
@@ -386,10 +394,12 @@ ncclResult_t ncclRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* config
   // Make sure all QP we create use the provided traffic class.
   ncclIbSetTrafficClass(cComm->ctx, config->trafficClass);
 
-  if (config->rankStride <= 0 || (cComm->nranks % config->rankStride) != 0) {
-    WARN(
-      "Rma Proxy create context: invalid rank stride %d, must be >= 0 and nranks (%d) must be a multiple of the stride",
-      config->rankStride, cComm->nranks);
+  // rankStride 0 means a fully connected group (every rank). A zero stride
+  // would also infinite-loop the connect walk below.
+  int rankStride = config->rankStride <= 0 ? 1 : config->rankStride;
+  if ((cComm->nranks % rankStride) != 0) {
+    WARN("Rma Proxy create context: invalid rank stride %d, nranks (%d) must be a multiple of the stride", rankStride,
+         cComm->nranks);
     return ncclInternalError;
   }
 
@@ -414,7 +424,7 @@ ncclResult_t ncclRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* config
     NCCLCHECKGOTO(ncclIbMalloc((void**)&gc->fullRecvComm, sizeof(void*) * nranks), ret, end);
     gc->rank = cComm->rank;
 
-    for (int i = 0; i < nranks; i += config->rankStride) {
+    for (int i = 0; i < nranks; i += rankStride) {
       int connectPeer = (cComm->rank + i) % nranks;
       int acceptPeer = (cComm->rank - i + nranks) % nranks;
       do {
@@ -536,7 +546,8 @@ static ncclResult_t ncclRmaIbProxyGetRecvComm(struct ncclRmaIbProxyCtx* rmaProxy
 }
 
 ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
-                                uint64_t dstOff, void* dstMhandle, uint32_t rank, void** request) {
+                                uint64_t dstOff, void* dstMhandle, uint32_t rank, uint32_t optFlags, void** request) {
+  (void)optFlags;
   struct ncclRmaIbProxyCtx* rmaProxyCtx = &((struct ncclRmaIbProxyCtx*)rmaCtx)[context];
 
   struct ncclRmaIbProxyMrHandle* srcMrHandle = (struct ncclRmaIbProxyMrHandle*)srcMhandle;
@@ -588,7 +599,9 @@ ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void
 }
 
 ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset, void* remoteMhandle, size_t size,
-                                uint64_t localOffset, void* localMhandle, uint32_t rank, void** request) {
+                                uint64_t localOffset, void* localMhandle, uint32_t rank, uint32_t optFlags,
+                                void** request) {
+  (void)optFlags;
   struct ncclRmaIbProxyCtx* rmaProxyCtx = &((struct ncclRmaIbProxyCtx*)rmaCtx)[context];
 
   struct ncclRmaIbProxyMrHandle* remoteMrHandle = (struct ncclRmaIbProxyMrHandle*)remoteMhandle;
@@ -642,8 +655,9 @@ ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset
 ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
                                       uint64_t dstOff, void* dstMhandle, uint32_t rank, uint64_t signalOff,
                                       void* signalMhandle, uint64_t signalValue, uint32_t signalOp, bool isStrongSignal,
-                                      void** request) {
+                                      uint32_t optFlags, void** request) {
   (void)isStrongSignal;
+  (void)optFlags;
   if (signalOp != NCCL_NET_SIGNAL_OP_INC && signalOp != NCCL_NET_SIGNAL_OP_ADD) {
     WARN("ncclRmaIbProxyIPutSignal: Unsupported signalOp %u", signalOp);
     return ncclInvalidArgument;
@@ -787,6 +801,11 @@ ncclResult_t ncclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint
   struct ncclRmaIbProxyMrHandle* rmaMrHandle = (struct ncclRmaIbProxyMrHandle*)mhandle;
   struct ncclIbRecvComm* comm;
   NCCLCHECK(ncclRmaIbProxyGetRecvComm(rmaProxyCtx, rank, &comm));
+  if (comm->flushEnabled == 0) {
+    *request = NULL;
+    return ncclSuccess;
+  }
+  NCCLCHECK(ncclIbCreateFlushQp(comm));
   struct ncclIbQp* qp = &comm->devs[0].gpuFlush.qp;
 
   struct ncclIbRequest* req;

@@ -39,7 +39,7 @@ std::string ginEnvDisabledReason() {
   return "";
 }
 
-// GIN type requested for this run (2=proxy, 4=rocshmem-gda); 0 if unset.
+// GIN type requested for this run (2=proxy, 6=rocshmem-gda, 7=anvil-sdma); 0 if unset.
 int requestedGinType() {
   const char* t = std::getenv("NCCL_GIN_TYPE");
   return t ? std::atoi(t) : 0;
@@ -48,10 +48,11 @@ int requestedGinType() {
 std::string ginTypeReason() {
   const char* ginType = std::getenv("NCCL_GIN_TYPE");
   if (!ginType)
-    return "GIN type not set (required NCCL_GIN_TYPE=2 [proxy] or 4 [rocshmem-gda])";
+    return "GIN type not set (required NCCL_GIN_TYPE=2 [proxy], 6 [rocshmem-gda], or 7 [anvil-sdma])";
   int t = requestedGinType();
-  if (t != 2 && t != 4)
-    return std::string("Invalid GIN type: ") + ginType + " (required NCCL_GIN_TYPE=2 [proxy] or 4 [rocshmem-gda])";
+  if (t != NCCL_GIN_TYPE_PROXY && t != NCCL_GIN_TYPE_ROCSHMEM_GDA && t != NCCL_GIN_TYPE_ANVIL_SDMA)
+    return std::string("Invalid GIN type: ") + ginType +
+           " (required NCCL_GIN_TYPE=2 [proxy], 6 [rocshmem-gda], or 7 [anvil-sdma])";
   return "";
 }
 
@@ -116,13 +117,13 @@ std::string ginProxyTestSkipReason() {
   return "";
 }
 
-// rocSHMEM-GDA (type 4)/SDMA (type 5) implements only INDEXED signals; VA signals are
+// rocSHMEM-GDA (type 6)/Anvil SDMA (type 7) implements only INDEXED signals; VA signals are
 // unsupported (Put/PutValue address the signal via indexedSignal.signalId).
 std::string vaSignalTestSkipReason() {
-  if (requestedGinType() == 4)
-    return "VA signals not supported by rocSHMEM-GDA (NCCL_GIN_TYPE=4)";
-  if (requestedGinType() == 5)
-    return "VA signals not supported by SDMA (NCCL_GIN_TYPE=5)";
+  if (requestedGinType() == NCCL_GIN_TYPE_ROCSHMEM_GDA)
+    return "VA signals not supported by rocSHMEM-GDA (NCCL_GIN_TYPE=6)";
+  if (requestedGinType() == NCCL_GIN_TYPE_ANVIL_SDMA)
+    return "VA signals not supported by SDMA (NCCL_GIN_TYPE=7)";
   return "";
 }
 
@@ -3936,7 +3937,7 @@ TEST_F(GinMPIDeviceTests, Properties_NLsaTeams) {
   ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
   ASSERT_EQ(ncclSuccess, ncclCommQueryProperties(comm, &props));
 
-  // Backend type must match the requested NCCL_GIN_TYPE (2=proxy, 4=rocshmem-gda).
+  // Backend type must match the requested NCCL_GIN_TYPE (2=proxy, 6=rocshmem-gda, 7=anvil-sdma).
   EXPECT_EQ(requestedGinType(), (int)props.ginType);
 
   // nLsaTeams = nRanks / lsaSize: >= 1 and must evenly divide nRanks.
@@ -4981,7 +4982,7 @@ TEST_F(GinMPIDeviceTests, RailConnection_Create) {
   reqs.ginSignalCount      = 1;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
-  EXPECT_TRUE(devComm.ginConnectionsRailed) << "devComm should report railed GIN";
+  EXPECT_GT(devComm.ginConnectionStride, 1) << "devComm should report railed GIN (stride>1)";
   (void)ncclDevCommDestroy(comm, &devComm);
 }
 
@@ -5002,7 +5003,7 @@ std::string intraNodeSymReason() {
 // symmetric-memory RS kernel (RailA2A_LsaLD) eligible, so this drives the
 // production kernel path -- not a hand-written reference kernel.
 TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric) {
-  if (requestedGinType() == 4)
+  if (requestedGinType() == NCCL_GIN_TYPE_ROCSHMEM_GDA)
     GTEST_SKIP() << "Skipping symmetric ReduceScatter (RailA2A_LsaLD) for rocSHMEM-GDA";
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
@@ -5091,7 +5092,7 @@ TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric) {
 // Same as ReduceScatter_Symmetric but exercises ncclAvg, which drives the
 // FuncSumPostDiv post-divide path on the symmetric RS kernel (RailA2A_LsaLD).
 TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric_Avg) {
-  if (requestedGinType() == 4)
+  if (requestedGinType() == NCCL_GIN_TYPE_ROCSHMEM_GDA)
     GTEST_SKIP() << "Skipping symmetric ReduceScatter (RailA2A_LsaLD) for rocSHMEM-GDA";
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;

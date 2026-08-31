@@ -176,8 +176,11 @@ static ncclResult_t ncclProfiler_init(void** ctx, uint64_t commId, int* eActivat
                                       int nNodes, int nRanks, int rank, ncclDebugLogger_t logfn) {
   NCCLCHECK(ncclProfiler_v5->init(ctx, commId, eActivationMask, commName, nNodes, nRanks, rank, logfn));
 
+  // Clear v6/v7 event bits from the activation mask since v5 doesn't support them
+  // (ncclProfileProxyDiag is an RCCL v6-only extension and is cleared here as well)
   if (eActivationMask) {
-    *eActivationMask &= ~(ncclProfileCeColl | ncclProfileCeSync | ncclProfileCeBatch | ncclProfileProxyDiag);
+    *eActivationMask &=
+        ~(ncclProfileCeColl | ncclProfileCeSync | ncclProfileCeBatch | ncclProfileProxyDiag | ncclProfileKernelPhase);
   }
 
   ncclProfiler.startEvent = ncclProfiler_startEvent;

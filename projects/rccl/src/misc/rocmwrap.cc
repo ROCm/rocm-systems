@@ -99,9 +99,13 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
     int legacyIpcCap = 0;
     if (CUPFN(cuMemGetAddressRange(&base, &baseSize, ptr)) != hipSuccess) goto cleanup;
     if (CUPFN(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, ptr)) != hipSuccess) goto cleanup;
+#if HIP_VERSION >= 71260540
     if (CUPFN(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, base)) !=
         hipSuccess)
       goto cleanup;
+#else
+    (void)legacyIpcCap;
+#endif
   }
 
   ok = 1;

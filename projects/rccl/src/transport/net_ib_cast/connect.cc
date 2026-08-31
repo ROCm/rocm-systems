@@ -1854,9 +1854,37 @@ ib_recv:
         // RCCL: allocate the GDR flush buffer directly via HIP (never cuMem/VMM)
         // so hsa_amd_portable_export_dmabuf can export it. cuMem/VMM allocations
         // fail to export through the HSA portable exporter on some ROCm/NIC stacks.
-        CUDACHECKGOTO(hipExtMallocWithFlags((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), gpuFlushFlags),
-                      ret, fail);
-        CUDACHECKGOTO(hipMemset(rCommDev->gpuFlush.gpuFlushGpuMem, 0, sizeof(int)), ret, fail);
+        // Use a non-blocking proxy stream so initialization does not make the
+        // legacy stream depend on a ThreadLocal graph-capturing stream.
+        hipError_t hipFlushSt =
+          hipExtMallocWithFlags((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), gpuFlushFlags);
+        if (hipFlushSt != hipSuccess) {
+          ret = rcclCudaErrorHandler(hipFlushSt);
+          goto fail;
+        }
+        cudaStreamCaptureMode capMode = cudaStreamCaptureModeRelaxed;
+        bool capModeExchanged = false;
+        cudaStream_t zeroStream = nullptr;
+        hipFlushSt = cudaThreadExchangeStreamCaptureMode(&capMode);
+        if (hipFlushSt == hipSuccess) {
+          capModeExchanged = true;
+          hipFlushSt = cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking);
+        }
+        if (hipFlushSt == hipSuccess)
+          hipFlushSt = cudaMemsetAsync(rCommDev->gpuFlush.gpuFlushGpuMem, 0, sizeof(int), zeroStream);
+        if (hipFlushSt == hipSuccess) hipFlushSt = cudaStreamSynchronize(zeroStream);
+        if (zeroStream != nullptr) {
+          cudaError_t destroySt = cudaStreamDestroy(zeroStream);
+          if (hipFlushSt == hipSuccess) hipFlushSt = destroySt;
+        }
+        if (capModeExchanged) {
+          cudaError_t restoreSt = cudaThreadExchangeStreamCaptureMode(&capMode);
+          if (hipFlushSt == hipSuccess) hipFlushSt = restoreSt;
+        }
+        if (hipFlushSt != hipSuccess) {
+          ret = rcclCudaErrorHandler(hipFlushSt);
+          goto fail;
+        }
 
         if (useDmaBuf) {
           uint64_t exportOffset = 0;

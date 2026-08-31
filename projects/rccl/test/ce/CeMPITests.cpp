@@ -77,7 +77,9 @@ protected:
     // Returns true when all CE prerequisites are met (driver + env vars).
     // Delegates to isCeDispatchConfigured() in CeTestHelpers.hpp — the single
     // source of truth shared with CeInternalMPITests.cpp.
-    bool isCeExpected() const { return isCeDispatchConfigured(); }
+    // Hierarchical CE (multi-node) only implements AllGather and AlltoAll; Scatter,
+    // Gather, and AllReduce fall back to SM kernels when nNodes > 1.
+    virtual bool isCeExpected() const { return isCeDispatchConfigured(); }
 
     // CE log markers: "Init CE" = CE initialised; "CE: rank" = CE path taken for a collective.
     enum class CeLogStatus { Taken, InitOnlyNoOp, NotInitialized };
@@ -157,7 +159,11 @@ protected:
         }
     }
 
-    bool isCeAllReduceExpected() const { return isCeAllReduceDispatchConfigured(); }
+    bool isCeAllReduceExpected() const
+    {
+        // CE AllReduce is single-node only (ceAllReduceFits / nNodes>1 gate).
+        return isCeAllReduceDispatchConfigured() && !isMultiNodeTest();
+    }
 
     void assertCEAllReducePathTaken(const char* context)
     {
@@ -177,8 +183,9 @@ protected:
             EXPECT_FALSE(ceLogShowsAllReducePath(log))
                 << context
                 << ": CE AllReduce log marker found but CE AR was not expected";
-            TEST_INFO("%s: assertion passed — non-CE-AR path (CE AR prerequisites not met)",
-                      context);
+            if(!ceLogShowsAllReducePath(log))
+                TEST_INFO("%s: assertion passed — non-CE-AR path (CE AR prerequisites not met)",
+                          context);
         }
     }
 
@@ -366,6 +373,8 @@ TEST_F(CeMPI_AlltoAll, ThreeRanks) { runAlltoAll(3,          kSmallCount,  "CeMP
 class CeMPI_Scatter : public CeMPITest
 {
 protected:
+    // Hierarchical CE does not implement Scatter; multi-node runs take the SM path.
+    bool isCeExpected() const override { return isCeDispatchConfigured() && !isMultiNodeTest(); }
     // Root sends block r to rank r; non-root send bufs are registered but ignored.
     void runScatter(int minRanks, size_t count, int root, const char* testId)
     {
@@ -415,6 +424,8 @@ TEST_F(CeMPI_Scatter, EightRanksRoot0) { runScatter(kMinRanks8, kSmallCount, 0, 
 class CeMPI_Gather : public CeMPITest
 {
 protected:
+    // Hierarchical CE does not implement Gather; multi-node runs take the SM path.
+    bool isCeExpected() const override { return isCeDispatchConfigured() && !isMultiNodeTest(); }
     // All ranks send; root gathers into block-pattern recvbuf; non-root recv bufs registered.
     void runGather(int minRanks, size_t count, int root, const char* testId)
     {

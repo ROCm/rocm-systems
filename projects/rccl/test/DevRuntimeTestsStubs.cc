@@ -21,9 +21,15 @@
 #include "utils.h"
 #include "cudawrap.h"
 #include "dev_runtime_internal.h"
+#include "enqueue.h"
+#include "enqueue/mgmt_task_enq.h"
 #include "gin/gin_host.h"
+#include "rma/rma.h"
 #include "rma/rma_proxy.h"
+#include "rma/rma_ce.h"
 #include "nccl_device/core_tmp.h"
+#include "nccl_device/core.h"
+#include "nccl_device/cft_barrier.h"
 #include "nccl_device/lsa_barrier.h"
 #include "nccl_device/gin_barrier.h"
 
@@ -52,6 +58,7 @@ thread_local int             ncclGroupBlocking = 0;
 struct ncclDevCommCompat ncclDevCommCompat_v22902 = {};
 struct ncclDevCommCompat ncclDevCommCompat_v22907 = {};
 struct ncclDevCommCompat ncclDevCommCompat_v23000 = {};
+struct ncclDevCommCompat ncclDevCommCompat_v23100 = {};
 
 // ---------------------------------------------------------------------------
 // Debug / error.
@@ -88,23 +95,30 @@ ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
 ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
 
 // ---------------------------------------------------------------------------
-// Param loader.
+// Param loader / enqueue rearch gate.
 // ---------------------------------------------------------------------------
 int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
   if (cache) *cache = deftVal;
   if (noCache) *noCache = 0;
   return deftVal;
 }
+int64_t ncclParamEnqueueRearchEnable() { return 0; }
 
 // ---------------------------------------------------------------------------
-// Proxy.
+// Proxy / mgmt task enqueue.
 // ---------------------------------------------------------------------------
 ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm*, int, void*, int*) { return ncclSuccess; }
+ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
+                                 struct ncclComm*) {
+  return ncclSuccess;
+}
 
 // ---------------------------------------------------------------------------
-// Symmetric kernels.
+// Symmetric kernels / RMA.
 // ---------------------------------------------------------------------------
 ncclResult_t ncclSymkInitOnce(struct ncclComm*) { return ncclSuccess; }
+bool ncclRmaProxyEnabled(struct ncclComm*) { return false; }
+ncclResult_t ncclRmaCeInit(struct ncclComm*) { return ncclSuccess; }
 
 // ---------------------------------------------------------------------------
 // Space allocator.
@@ -169,7 +183,8 @@ ncclResult_t ncclGetRailedGinType(struct ncclComm*, ncclGinType_t* ginType) {
   return ncclSuccess;
 }
 ncclResult_t ncclGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
-ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*) {
+ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
+                                 uint32_t) {
   return ncclSuccess;
 }
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
@@ -197,6 +212,24 @@ ncclResult_t ncclDevrAllocAndPopulateSegmentWindows(struct ncclDevrState*, struc
   if (out) *out = nullptr;
   return ncclSuccess;
 }
+ncclResult_t ncclDevrVerifySegmentLayouts(struct ncclDevrMemory*, struct ncclComm*) { return ncclSuccess; }
+ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory*) { return ncclSuccess; }
+
+// ---------------------------------------------------------------------------
+// CFT / LE helpers pulled in via #include of hipified dev_runtime.cc.
+// ---------------------------------------------------------------------------
+int computeCftSize(struct ncclComm*) { return 1; }
+int computeCftMcSize(struct ncclComm*) { return 1; }
+ncclResult_t symBindTeamLe(struct ncclComm*, struct ncclDevrMemory*, ncclCftLeId) { return ncclSuccess; }
+ncclResult_t symUnbindTeamLe(struct ncclComm*, struct ncclDevrMemory*, ncclCftLeId) { return ncclSuccess; }
+ncclResult_t symTeamObtainUcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier) {
+  if (needBarrier) *needBarrier = false;
+  return ncclSuccess;
+}
+ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier) {
+  if (needBarrier) *needBarrier = false;
+  return ncclSuccess;
+}
 
 // ---------------------------------------------------------------------------
 // Team accessors (host variants).
@@ -204,6 +237,8 @@ ncclResult_t ncclDevrAllocAndPopulateSegmentWindows(struct ncclDevrState*, struc
 extern "C" ncclTeam_t ncclTeamWorld(ncclComm_t) { return ncclTeam_t{}; }
 extern "C" ncclTeam_t ncclTeamLsa(ncclComm_t) { return ncclTeam_t{}; }
 extern "C" ncclTeam_t ncclTeamRail(ncclComm_t) { return ncclTeam_t{}; }
+extern "C" ncclTeam_t ncclTeamCft(ncclComm_t, ncclCftTeamMode_t) { return ncclTeam_t{}; }
+extern "C" ncclTeam_t ncclTeamCftMultimem(ncclComm_t) { return ncclTeam_t{}; }
 
 // ---------------------------------------------------------------------------
 // Barrier requirement builders (host variants).
@@ -213,6 +248,10 @@ extern "C" ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t, int, ncclLsa
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*,
+                                                        ncclDevResourceRequirements_t*) {
+  return ncclSuccess;
+}
+extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCftBarrierHandle_t*,
                                                         ncclDevResourceRequirements_t*) {
   return ncclSuccess;
 }

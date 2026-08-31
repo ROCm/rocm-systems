@@ -144,12 +144,12 @@ private:
         return handle->net;
     }
     static ncclResult_t TrampIput(void* rmaCtx, int, uint64_t, void*, size_t,
-                                  uint64_t, void*, uint32_t rank, void** request) {
+                                  uint64_t, void*, uint32_t rank, uint32_t, void** request) {
         return Net(rmaCtx, Handle::Ctx)->issue(rank, request);
     }
     static ncclResult_t TrampIputSignal(void* rmaCtx, int, uint64_t, void*, size_t,
                                         uint64_t, void*, uint32_t rank, uint64_t,
-                                        void*, uint64_t, uint32_t, bool, void** request) {
+                                        void*, uint64_t, uint32_t, bool, uint32_t, void** request) {
         return Net(rmaCtx, Handle::Ctx)->issue(rank, request);
     }
     static ncclResult_t TrampTest(void* collComm, void* request, int* done) {

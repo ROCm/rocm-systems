@@ -213,12 +213,14 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm*       /*comm*/,
                               int*                   p2p,
                               int*                   read,
                               int*                   intermediateRank,
-                              int*                   cudaP2p)
+                              int*                   cudaP2p,
+                              int*                   isCrossClique)
 {
     if (p2p)              *p2p              = 0;
     if (read)             *read             = 0;
     if (intermediateRank) *intermediateRank = -1;
     if (cudaP2p)          *cudaP2p          = 0;
+    if (isCrossClique)    *isCrossClique    = 0;
     return ncclSuccess;
 }
 
@@ -345,6 +347,25 @@ ncclResult_t ncclMemTrackImportFromPeer(struct ncclMemManager* /*manager*/,
 ncclResult_t ncclMemUntrack(struct ncclMemManager* /*manager*/,
                             void*                  /*ptr*/,
                             size_t                 /*size*/)
+{
+    return ncclSuccess;
+}
+
+ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* /*manager*/,
+                                   void*                  /*ptr*/,
+                                   struct ncclMemUntrackInfo* info)
+{
+    if (info) {
+        info->memType = ncclMemPersist;
+        info->dynMemState = ncclDynMemStateActive;
+        info->dynMemSize = 0;
+    }
+    return ncclSuccess;
+}
+
+ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* /*manager*/,
+                                   void*                  /*ptr*/,
+                                   size_t                 /*size*/)
 {
     return ncclSuccess;
 }

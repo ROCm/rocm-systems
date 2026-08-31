@@ -40,8 +40,14 @@ typedef struct ncclLsaBarrierHandle ncclLsaBarrierHandle_t;
 struct ncclGinBarrierHandle;
 typedef struct ncclGinBarrierHandle ncclGinBarrierHandle_t;
 
+struct ncclCftBarrierHandle;
+typedef struct ncclCftBarrierHandle ncclCftBarrierHandle_t;
+
 struct ncclLLA2AHandle;
 typedef struct ncclLLA2AHandle ncclLLA2AHandle_t;
+
+typedef uint32_t ncclCftLeId;
+typedef ncclCftLeId ncclCftLeId_t;
 
 struct ncclTeam {
   int nRanks, rank, stride;
@@ -74,7 +80,31 @@ typedef enum {
   NCCL_GIN_CONNECTION_NONE,
   NCCL_GIN_CONNECTION_FULL,
   NCCL_GIN_CONNECTION_RAIL,
+  NCCL_GIN_CONNECTION_CUSTOM_STRIDE,
 } ncclGinConnectionType_t;
+
+typedef enum {
+  NCCL_GIN_TYPE_NONE = 0, // Sentinel: accept any available backend (used in ncclDevCommRequirements)
+  NCCL_GIN_TYPE_PROXY = 2, // intentionally not 1. Must match NCCL_NET_DEVICE_GIN_PROXY for backward compatibility
+  NCCL_GIN_TYPE_GDAKI = 3, // intentionally not 2. Must match NCCL_NET_DEVICE_GIN_GDAKI for backward compatibility
+  NCCL_GIN_TYPE_GPI = 4, // Must match NCCL_NET_DEVICE_GIN_GPI
+  NCCL_GIN_TYPE_EFA_GDA = 5, // Must match NCCL_NET_DEVICE_GIN_EFA_GDA for backward compatibility
+  NCCL_GIN_TYPE_ROCSHMEM_GDA = 6, // RCCL: must match NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA
+  NCCL_GIN_TYPE_ANVIL_SDMA = 7, // RCCL: must match NCCL_NET_DEVICE_GIN_ANVIL_SDMA
+  NCCL_GIN_MAX_TYPES = 8,
+} ncclGinType_t;
+
+typedef enum {
+  NCCL_CFT_TEAM_FLAT,
+  NCCL_CFT_TEAM_HIER_MULTIMEM,
+  NCCL_CFT_TEAM_HIER_LSA,
+} ncclCftTeamMode_t;
+
+typedef enum {
+  NCCL_CFT_NONE = 0x0,
+  NCCL_CFT = 0x1,
+  NCCL_CFT_MULTIMEM = 0x2,
+} ncclCftCap_t;
 
 struct ncclDevCommRequirements {
   /* attributes that users should never touch. */
@@ -113,6 +143,18 @@ struct ncclDevCommRequirements {
   // Set to false if GIN VA signals will not be needed by the kernels using this devComm (defaults to true).
   // When false, the use of GIN VA signals results in undefined behavior.
   bool ginVaSignalsRequired;
+
+  // Stride of ranks to connect for GIN if ginConnectionType is NCCL_GIN_CONNECTION_CUSTOM_STRIDE.
+  int ginCustomStride;
+
+  ncclGinType_t ginType;
+  // If true, initialize the devComm assuming the version of the device code is the same
+  // as the runtime version of the NCCL library (i.e., the device code is JIT-compiled).
+  // When true, the DevComm must be allocated according to devCommRuntimeVersionSize.
+  bool useRuntimeVersion;
+
+  int cftCaps; // Bitmask of ncclCftCap_t values
+  int cftBarrierCount;
 };
 
 // clang-format off: maintain hand-formatted code
@@ -139,6 +181,11 @@ struct ncclDevCommRequirements {
     0,                                           /* worldGinBarrierCount */    \
     true,                                        /* ginStrongSignalsRequired */ \
     true,                                        /* ginVaSignalsRequired */     \
+    1,                                           /* ginCustomStride      */     \
+    NCCL_GIN_TYPE_NONE,                          /* ginType */                  \
+    false,                                       /* useRuntimeVersion */        \
+    NCCL_CFT_NONE,                               /* cftCaps */                 \
+    0,                                           /* cftBarrierCount */         \
 }
 // clang-format on
 
@@ -166,14 +213,7 @@ struct ncclTeamRequirements {
     NCCL_VERSION_CODE,                             /* version */ \
   }
 
-typedef enum {
-  NCCL_GIN_TYPE_NONE = 0,
-  NCCL_GIN_TYPE_PROXY = 2, // intentially not 1. Must match NCCL_NET_DEVICE_GIN_PROXY for backward compatibility
-  NCCL_GIN_TYPE_GDAKI = 3, // intentially not 2. Must match NCCL_NET_DEVICE_GIN_GDAKI for backward compatibility
-  NCCL_GIN_TYPE_GPI = 4, // Must match NCCL_NET_DEVICE_GIN_GPI
-  NCCL_GIN_TYPE_ROCSHMEM_GDA = 5, // Must match NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA
-  NCCL_GIN_TYPE_ANVIL_SDMA = 6, // Must match NCCL_NET_DEVICE_GIN_ANVIL_SDMA
-} ncclGinType_t;
+#define NCCL_GIN_MAX_ACTIVE_BACKENDS 4
 
 struct ncclCommProperties {
   /* internal use only */
@@ -192,6 +232,11 @@ struct ncclCommProperties {
   int nLsaTeams;
   bool hostRmaSupport;
   ncclGinType_t railedGinType;
+  uint64_t commHash;
+  int ginMinStride;
+  ncclGinConnectionType_t ginConnectionType;
+  bool ginSupport[64]; // ginSupport[i] is true if gin type i is supported
+  size_t devCommRuntimeVersionSize;
 };
 
 // Pin ncclCommProperties_t's ABI-sensitive layout at compile time.
@@ -210,14 +255,30 @@ static_assert(offsetof(ncclCommProperties_t, ginType) == 36,
 static_assert(offsetof(ncclCommProperties_t, railedGinType) == 48,
               "ncclCommProperties_t.railedGinType offset changed; update nccl4py's "
               "cynccl.pxd and bindings/nccl4py/tests/test_comm_properties_abi.py to match");
-static_assert(sizeof(ncclCommProperties_t) == 56, "ncclCommProperties_t size changed; update nccl4py's cynccl.pxd and "
-                                                  "bindings/nccl4py/tests/test_comm_properties_abi.py to match");
+static_assert(offsetof(ncclCommProperties_t, commHash) == 56,
+              "ncclCommProperties_t.commHash offset changed; update nccl4py's cynccl.pxd "
+              "and bindings/nccl4py/tests/test_comm_properties_abi.py to match");
+static_assert(offsetof(ncclCommProperties_t, ginMinStride) == 64,
+              "ncclCommProperties_t.ginMinStride offset changed; update nccl4py's cynccl.pxd "
+              "and bindings/nccl4py/tests/test_comm_properties_abi.py to match");
+static_assert(offsetof(ncclCommProperties_t, ginConnectionType) == 68,
+              "ncclCommProperties_t.ginConnectionType offset changed; update nccl4py's cynccl.pxd "
+              "and bindings/nccl4py/tests/test_comm_properties_abi.py to match");
+static_assert(offsetof(ncclCommProperties_t, ginSupport) == 72,
+              "ncclCommProperties_t.ginSupport offset changed; update nccl4py's cynccl.pxd "
+              "and bindings/nccl4py/tests/test_comm_properties_abi.py to match");
+static_assert(offsetof(ncclCommProperties_t, devCommRuntimeVersionSize) == 136,
+              "ncclCommProperties_t.devCommRuntimeVersionSize offset changed; update nccl4py's "
+              "cynccl.pxd and bindings/nccl4py/tests/test_comm_properties_abi.py to match");
+static_assert(sizeof(ncclCommProperties_t) == 144, "ncclCommProperties_t size changed; update nccl4py's cynccl.pxd and "
+                                                   "bindings/nccl4py/tests/test_comm_properties_abi.py to match");
 
 NCCL_EXTERN_C __host__ ncclResult_t ncclCommQueryProperties(ncclComm_t comm, ncclCommProperties_t* props);
 NCCL_EXTERN_C __host__ ncclResult_t ncclDevCommCreate(ncclComm_t comm, ncclDevCommRequirements_t const* reqs,
                                                       ncclDevComm_t* outDevComm);
 NCCL_EXTERN_C __host__ ncclResult_t ncclDevCommDestroy(ncclComm_t comm, ncclDevComm_t const* devComm);
 
+// VA pointer based query functions for host code
 NCCL_EXTERN_C __host__ ncclResult_t ncclGetLsaMultimemDevicePointer(ncclWindow_t window, size_t offset, void** outPtr);
 NCCL_EXTERN_C __host__ ncclResult_t ncclGetMultimemDevicePointer(ncclWindow_t window, size_t offset,
                                                                  ncclMultimemHandle_t multimem, void** outPtr);
@@ -226,34 +287,56 @@ NCCL_EXTERN_C __host__ ncclResult_t ncclGetLsaDevicePointer(ncclWindow_t window,
 NCCL_EXTERN_C __host__ ncclResult_t ncclGetPeerDevicePointer(ncclWindow_t window, size_t offset, int peer,
                                                              void** outPtr);
 
+// CFT handle based query functions for host code
+NCCL_EXTERN_C __host__ ncclResult_t ncclGetMultimemDeviceLeInfo(ncclWindow_t window, size_t offset, ncclCftLeId* leId,
+                                                                size_t* leOffset);
+NCCL_EXTERN_C __host__ ncclResult_t ncclGetCftDeviceLeInfo(ncclWindow_t window, size_t offset, int peerCft,
+                                                           ncclTeam_t cftTeam, ncclCftLeId* leId, size_t* leOffset);
+NCCL_EXTERN_C __host__ ncclResult_t ncclGetPeerDeviceLeInfo(ncclWindow_t window, size_t offset, int peerWorld,
+                                                            ncclCftLeId* leId, size_t* leOffset);
+
 ////////////////////////////////////////////////////////////////////////////////
 // Team API:
-#if __cplusplus
-NCCL_IR_EXTERN_C NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamWorld(ncclDevComm const&);
+#ifdef __CUDACC__
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclTeam ncclTeamWorld(ncclDevComm const&);
 #endif
 #ifndef __clang_llvm_bitcode_lib__
 NCCL_EXTERN_C __host__ ncclTeam_t ncclTeamWorld(ncclComm_t comm);
 #endif
 
-#if __cplusplus
-NCCL_IR_EXTERN_C NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamLsa(ncclDevComm const&);
+#ifdef __CUDACC__
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclTeam ncclTeamLsa(ncclDevComm const&);
 #endif
 #ifndef __clang_llvm_bitcode_lib__
 NCCL_EXTERN_C __host__ ncclTeam_t ncclTeamLsa(ncclComm_t comm);
 #endif
 
+#ifdef __CUDACC__
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclTeam ncclTeamCft(ncclDevComm const&,
+                                                         ncclCftTeamMode_t mode = NCCL_CFT_TEAM_FLAT);
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclTeam ncclTeamCftMultimem(ncclDevComm const&);
+#endif
+#ifndef __clang_llvm_bitcode_lib__
+#if __cplusplus
+NCCL_EXTERN_C __host__ ncclTeam_t ncclTeamCft(ncclComm_t comm, ncclCftTeamMode_t mode = NCCL_CFT_TEAM_FLAT);
+#else
+NCCL_EXTERN_C __host__ ncclTeam_t ncclTeamCft(ncclComm_t comm, ncclCftTeamMode_t mode);
+#endif
+NCCL_EXTERN_C __host__ ncclTeam_t ncclTeamCftMultimem(ncclComm_t comm);
+#endif
+
 NCCL_EXTERN_C NCCL_HOST_DEVICE_INLINE bool ncclTeamRankIsMember(ncclTeam_t a, ncclTeam_t b, int bPeer);
 NCCL_EXTERN_C NCCL_HOST_DEVICE_INLINE int ncclTeamRankToTeam(ncclTeam_t a, ncclTeam_t b, int bPeer);
 
-#if __cplusplus
-NCCL_IR_EXTERN_C NCCL_HOST_DEVICE_INLINE int ncclTeamRankToWorld(ncclDevComm const&, ncclTeam, int rank);
+#ifdef __CUDACC__
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE int ncclTeamRankToWorld(ncclDevComm const&, ncclTeam, int rank);
 #endif
 #ifndef __clang_llvm_bitcode_lib__
 NCCL_EXTERN_C __host__ int ncclTeamRankToWorld(ncclComm_t comm, ncclTeam_t team, int rank);
 #endif
 
-#if __cplusplus
-NCCL_IR_EXTERN_C NCCL_HOST_DEVICE_INLINE int ncclTeamRankToLsa(ncclDevComm const&, ncclTeam, int rank);
+#ifdef __CUDACC__
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE int ncclTeamRankToLsa(ncclDevComm const&, ncclTeam, int rank);
 #endif
 #ifndef __clang_llvm_bitcode_lib__
 NCCL_EXTERN_C __host__ int ncclTeamRankToLsa(ncclComm_t comm, ncclTeam_t team, int rank);
@@ -269,8 +352,8 @@ NCCL_EXTERN_C NCCL_HOST_DEVICE_INLINE ncclTeam_t ncclTeamOuterFactor(ncclTeam_t 
 NCCL_EXTERN_C NCCL_HOST_DEVICE_INLINE int ncclTeamRankInDifference(ncclTeam_t parent, ncclTeam_t subset, int index);
 
 // Equivalent to ncclTeamOuterFactor of lsa team.
-#if __cplusplus
-NCCL_IR_EXTERN_C NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamRail(ncclDevComm const&);
+#ifdef __CUDACC__
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE ncclTeam ncclTeamRail(ncclDevComm const&);
 #endif
 #ifndef __clang_llvm_bitcode_lib__
 NCCL_EXTERN_C __host__ ncclTeam_t ncclTeamRail(ncclComm_t comm);
@@ -286,7 +369,8 @@ NCCL_DEVICE_INLINE ncclSymPtr<char> ncclGetResourceBuffer(ncclDevComm const&, nc
 ////////////////////////////////////////////////////////////////////////////////
 // Window API:
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
+// VA pointer based query functions
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetLocalPointer(ncclWindow_t w, size_t offset);
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetLsaPointer(ncclWindow_t w, size_t offset, int peer);
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetPeerPointer(ncclWindow_t w, size_t offset, int peer);
@@ -294,6 +378,14 @@ NCCL_DEVICE_INLINE void* ncclGetPeerPointer(ncclWindow_t w, size_t offset, ncclT
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetMultimemPointer(ncclWindow_t w, size_t offset,
                                                                  ncclMultimemHandle mmHandle);
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetLsaMultimemPointer(ncclWindow_t w, size_t offset, ncclDevComm const&);
+
+// CFT handle based query functions
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGetCftLeInfo(ncclWindow_t w, size_t offset, int peerCft, ncclTeam cftTeam,
+                                                          ncclDevComm const& comm, ncclCftLeId* leId, size_t* leOffset);
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGetPeerLeInfo(
+  ncclWindow_t w, size_t offset, int peerWorld, ncclDevComm const& comm, ncclCftLeId* leId, size_t* leOffset);
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGetMultimemLeInfo(ncclWindow_t w, size_t offset, ncclDevComm const&,
+                                                               ncclCftLeId* leId, size_t* leOffset);
 #endif
 
 #if __CUDACC__
@@ -307,6 +399,14 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetResourceBufferMultimemPointer(
   ncclDevComm const&, ncclDevResourceHandle, ncclMultimemHandle);
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaMultimemPointer(ncclDevComm const&,
                                                                                   ncclDevResourceHandle);
+
+// Convenience for combining ncclGet***LeInfo() with resource handle.
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGetResourceBufferCftLeInfo(
+  ncclDevComm const&, ncclDevResourceHandle, int peerCft, ncclCftLeId* leId, size_t* leOffset);
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGetResourceBufferPeerLeInfo(
+  ncclDevComm const&, ncclDevResourceHandle, int peerWorld, ncclCftLeId* leId, size_t* leOffset);
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGetResourceBufferMultimemLeInfo(ncclDevComm const&, ncclDevResourceHandle,
+                                                                             ncclCftLeId* leId, size_t* leOffset);
 #endif
 
 #endif // _NCCL_DEVICE_CORE_H_

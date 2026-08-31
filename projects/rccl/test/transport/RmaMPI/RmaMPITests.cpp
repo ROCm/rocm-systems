@@ -56,7 +56,7 @@ TEST_P(RmaMPITest, IPutBasic)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  rma_->iput(rmaCtx_, /*context=*/0,
+                  IPut( /*context=*/0,
                              /*srcOff=*/0, sendMh, kSize,
                              /*dstOff=*/0, recvMh,
                              /*peerRank=*/1, &req));
@@ -94,7 +94,7 @@ TEST_P(RmaMPITest, IGetBasic)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  rma_->iget(rmaCtx_, /*context=*/0,
+                  IGet( /*context=*/0,
                              /*remoteOff=*/0, mh, kSize,
                              /*localOff=*/0,  mh,
                              /*peerRank=*/1, &req));
@@ -315,7 +315,7 @@ TEST_P(RmaMPITest, IFlushAfterIGet)
     {
         void* getReq = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  rma_->iget(rmaCtx_, 0, 0, mh, kSize, 0, mh, 1, &getReq));
+                  IGet( 0, 0, mh, kSize, 0, mh, 1, &getReq));
         ASSERT_TRUE(PollUntilDone(getReq));
 
         // iflush is the actual unit under test here: post a flush request
@@ -367,7 +367,7 @@ TEST_P(RmaMPITest, MultipleInflightIPuts)
         {
             const int ctx = i % nCtx;
             ASSERT_EQ(ncclSuccess,
-                      rma_->iput(rmaCtx_, /*context=*/ctx,
+                      IPut( /*context=*/ctx,
                                  /*srcOff=*/i * kBlock, sendMh, kBlock,
                                  /*dstOff=*/i * kBlock, recvMh,
                                  /*peerRank=*/1, &reqs[i]));
@@ -423,7 +423,7 @@ TEST_P(RmaMPITest, MultipleInflightIGets)
         {
             const int ctx = i % nCtx;
             ASSERT_EQ(ncclSuccess,
-                      rma_->iget(rmaCtx_, /*context=*/ctx,
+                      IGet( /*context=*/ctx,
                                  /*remoteOff=*/i * kBlock, mh, kBlock,
                                  /*localOff=*/ i * kBlock, mh,
                                  /*peerRank=*/1, &reqs[i]));
@@ -494,10 +494,10 @@ TEST_P(RmaMPITest, MixedIPutIGetIPutSignal)
         void *putReq = nullptr, *getReq = nullptr, *psReq = nullptr;
 
         ASSERT_EQ(ncclSuccess,
-                  rma_->iput(rmaCtx_, /*context=*/0 % nCtx,
+                  IPut( /*context=*/0 % nCtx,
                              0, putSendMh, kSize, 0, putRecvMh, 1, &putReq));
         ASSERT_EQ(ncclSuccess,
-                  rma_->iget(rmaCtx_, /*context=*/1 % nCtx,
+                  IGet( /*context=*/1 % nCtx,
                              0, getMh, kSize, 0, getMh, 1, &getReq));
         ASSERT_EQ(ncclSuccess,
                   IPutSignal( /*context=*/2 % nCtx,

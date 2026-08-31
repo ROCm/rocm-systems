@@ -565,7 +565,7 @@ TEST(ProxyTests, ProxyOpsPoolMutexCondRoundTrip)
     pool->nextOps    = kNoOps;
     pool->nextOpsEnd = kNoOps;
 
-    ncclOsSetMutexCondShared(pool->mutex, pool->cond);
+    ncclOsSetMutexCondShared(pool->mutex, pool->cond, &pool->syncObjectsInitialized);
 
     int  observedOps  = kNoOps;
     bool waitSucceeded = false;
@@ -674,7 +674,7 @@ TEST(ProxyTests, ProxyOpsPoolMutexCondProcessShared)
             pool.nextOpsEnd     = kNoOps;
             region->childObserved = kNoOps - 1;
 
-            ncclOsSetMutexCondShared(pool.mutex, pool.cond);
+            ncclOsSetMutexCondShared(pool.mutex, pool.cond, &pool.syncObjectsInitialized);
 
             pid_t pid = fork();
             ASSERT_NE(pid, -1);

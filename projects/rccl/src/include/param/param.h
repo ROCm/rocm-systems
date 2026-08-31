@@ -14,7 +14,8 @@
 // param/utils.h vs include/utils.h, param/param.h vs include/param.h). Source
 // keeps the plain names; includes must use the staged _tmp names.
 #include "param/common_tmp.h"
-#include "param/utils_tmp.h"
+// param/utils.h is listed before include/utils.h, so it keeps the plain name.
+#include "param/utils.h"
 #include "param/parsers.h"
 #include "param/param_registry.h"
 
