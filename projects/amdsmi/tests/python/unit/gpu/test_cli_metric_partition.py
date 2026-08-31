@@ -117,6 +117,11 @@ def _install_fake_amdsmi():
     return interface
 
 
+# Every sys.modules key this suite replaces, snapshotted and restored around each
+# class so the stubs never reach a sibling suite in the same interpreter.
+_CLI_MODULES = ("amdsmi", "amdsmi.amdsmi_interface", "amdsmi.amdsmi_exception")
+
+
 def _load_metric_module():
     spec = importlib.util.spec_from_file_location("metric_under_test", METRIC_PATH)
     module = importlib.util.module_from_spec(spec)
@@ -268,8 +273,21 @@ class TestCliMetricPartitionClock(unittest.TestCase):
     def setUpClass(cls):
         if not os.path.isfile(METRIC_PATH):
             raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
+        # Clear the CLI modules so the fake amdsmi wins the import race, keeping a
+        # snapshot to restore afterwards.
+        cls._saved_modules = {name: sys.modules.get(name) for name in _CLI_MODULES}
+        for name in _CLI_MODULES:
+            sys.modules.pop(name, None)
         cls.interface = _install_fake_amdsmi()
         cls.metric_module = _load_metric_module()
+
+    @classmethod
+    def tearDownClass(cls):
+        for name, mod in getattr(cls, "_saved_modules", {}).items():
+            if mod is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = mod
 
     def _run_clock_partition(self, partition_metrics):
         """Drive ``metric_gpu`` for ``--clock --partition`` and return ``clocks``."""
@@ -458,6 +476,11 @@ class TestCliMetricPartitionVirtualOS(unittest.TestCase):
     def setUpClass(cls):
         if not os.path.isfile(METRIC_PATH):
             raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
+        # Clear the CLI modules so the fake amdsmi wins the import race, keeping a
+        # snapshot to restore afterwards.
+        cls._saved_modules = {name: sys.modules.get(name) for name in _CLI_MODULES}
+        for name in _CLI_MODULES:
+            sys.modules.pop(name, None)
         cls.interface = _install_fake_amdsmi()
         cls.metric_module = _load_metric_module()
         # fclk is unavailable so the non-partition clock exception handler fires.
@@ -472,6 +495,14 @@ class TestCliMetricPartitionVirtualOS(unittest.TestCase):
         cls.interface.AmdSmiTemperatureMetric = types.SimpleNamespace(
             CURRENT="CURRENT", CRITICAL="CRITICAL"
         )
+
+    @classmethod
+    def tearDownClass(cls):
+        for name, mod in getattr(cls, "_saved_modules", {}).items():
+            if mod is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = mod
 
     def _run_metric(self, args):
         partition_calls = []
