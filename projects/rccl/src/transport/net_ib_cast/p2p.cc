@@ -1181,15 +1181,10 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
         req->recv.cmplsRecords->completions[qpIndex] = 1;
         IbCastPostRecvWorkRequest(qp->qp, &recvComm->ibRecvWorkRequest);
       } else {
-#if 1
         // In the prepost path wr_id is UINT64_MAX (sentinel); only decrement rxPosts
         // in the non-prepost path where wr_id is a valid slot index.
-        // TODO: QP sharing - mask commId bits (msb 16 bits) and confirm if there are any assumption on if all 64 bits of wr_id is used anywhere
         uint64_t rawWrId = IbCastStripCommId(wc->wr_id);
         commBase->rxPosts[rawWrId]--;
-#else
-        commBase->rxPosts[wc->wr_id]--;
-#endif
       }
 
       if (commBase->recvMatchingScheme == BY_INDEX) {

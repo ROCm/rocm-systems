@@ -77,7 +77,6 @@ static inline int IbCastQpSharingDepthMultiplier(void) {
 
 #define IBCAST_MAX_SHARED_QPS 1024
 #define IBCAST_MAX_COMMS      4096
-#define IBCAST_CTS_QP_SLOT_INVALID 0xFF
 #define IBCAST_FLUSH_QP_IDX  -1   // sentinel qpIdx for flush QPs in the shared pool
 
 // Pool key -- uniquely identifies a shared QP
@@ -103,7 +102,12 @@ struct IbCastSharedQp {
     int      refcount;                     // number of comms using this QP
     int      cqRefcount;                   // comms using this group's CQs (tracked on qpIdx==0 only)
     bool     used;                         // slot in use
-    int8_t   ctsQpSlot;                    // CTS signaling slot from primary
+    // Note: ctsQpSlot is NOT tracked in the shared pool.  CTS offload is
+    // mutually exclusive with QP sharing (disabled at init when sharing is on).
+    // In the sharing-enabled, non-offload path, CTS signaling uses
+    // (slot == ctsQp->devIndex) to decide when to set IBV_SEND_SIGNALED,
+    // which relies only on the per-QP devIndex already stored here — no
+    // additional per-pool ctsQpSlot is needed.
 };
 
 // Global comm table for completion routing (commId -> comm pointer)
