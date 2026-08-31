@@ -2,12 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Binary hardening mitigations for the CLR host runtime.
-#
-# Included at directory scope from the top-level CMakeLists.txt so that rocclr,
-# hipamd and opencl inherit them. Device code is produced by explicit clang
-# invocations in add_custom_command(), so these host flags do not reach offload
-# compilation.
+# Included at directory scope so rocclr, hipamd and opencl inherit the policy.
 
 include_guard()
 
@@ -18,17 +13,12 @@ if(NOT CLR_ENABLE_HARDENING)
   return()
 endif()
 
-# Everything below is GCC/Clang driver and ELF linker syntax. UNIX is the proxy
-# for that: on Windows CLR builds with MSVC or clang-cl, which reject it.
+# GCC/Clang driver and ELF linker syntax, which MSVC and clang-cl reject.
 if(NOT UNIX)
   return()
 endif()
 
-# Sanitizers replace the allocator and stack layout these mitigations rely on,
-# and report false positives when combined with FORTIFY_SOURCE.
-# ENABLE_ADDRESS_SANITIZER is the opencl subtree's own switch for the same
-# thing. Any truthy value disables, so that a sanitizer added later does not
-# silently inherit a conflicting configuration.
+# FORTIFY_SOURCE reports false positives under sanitizers.
 if(ADDRESS_SANITIZER OR THEROCK_SANITIZER OR ENABLE_ADDRESS_SANITIZER)
   message(STATUS "CLR hardening: disabled for sanitizer build")
   return()
@@ -37,9 +27,7 @@ endif()
 include(CheckCXXCompilerFlag)
 include(CheckCXXSourceCompiles)
 
-# Compile flags are probed because an unsupported one is a hard error on every
-# translation unit: clang and gcc reject -fstack-clash-protection outright on
-# targets that do not implement it.
+# gcc and clang reject -fstack-clash-protection outright where unsupported.
 foreach(_clr_hardening_flag -fstack-protector-strong -fstack-clash-protection)
   string(MAKE_C_IDENTIFIER "CLR_HAVE${_clr_hardening_flag}" _clr_hardening_var)
   check_cxx_compiler_flag("${_clr_hardening_flag}" ${_clr_hardening_var})
@@ -50,15 +38,11 @@ endforeach()
 
 unset(_clr_hardening_var)
 
-# Every ELF linker used for ROCm (GNU ld, lld, mold) accepts these. Deliberately
-# not probed: an unsupported -z keyword is warned about and ignored rather than
-# rejected, so a link probe would succeed either way.
+# Not probed: linkers warn and ignore an unknown -z keyword, so a probe passes either way.
 add_link_options("-Wl,-z,relro,-z,now" "-Wl,-z,noexecstack")
 
-# Distributions such as Ubuntu 24.04 already default to level 3, so pinning the
-# level 2 named in the report would remove fortification rather than add it.
-# Probe the real construct under -Werror so that a compiler or C library
-# implementing only level 2 falls back instead of warning on every file.
+# Ubuntu 24.04 and others default to level 3; pinning the report's 2 would remove
+# fortification. Probed under -Werror so level-2-only toolchains fall back.
 set(CMAKE_REQUIRED_FLAGS "-Werror -O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3")
 check_cxx_source_compiles("#include <string.h>\nint main(void) { return 0; }"
   CLR_HAVE_fortify_source_3)
@@ -69,9 +53,8 @@ else()
   set(_clr_fortify_level 2)
 endif()
 
-# FORTIFY_SOURCE needs an optimizing build; at -O0 the C library warns, and
-# hipamd compiles with -Werror. Undefining first keeps toolchains that already
-# predefine it from warning about the redefinition.
+# Needs an optimizing build, and hipamd compiles with -Werror. Undefine first so
+# toolchains that predefine it do not warn.
 add_compile_options(
   "$<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>"
   "$<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=${_clr_fortify_level}>")
