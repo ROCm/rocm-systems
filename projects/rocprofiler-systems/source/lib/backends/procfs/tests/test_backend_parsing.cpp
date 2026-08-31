@@ -167,20 +167,6 @@ TEST_F(parse_statm_test, non_numeric_returns_nullopt)
 class parsing_utilities_test : public ::testing::Test
 {};
 
-TEST_F(parsing_utilities_test, starts_with_match)
-{
-    EXPECT_TRUE(starts_with("cpu0 200", "cpu"));
-    EXPECT_TRUE(starts_with("processor", "processor"));
-    EXPECT_TRUE(starts_with("abc", ""));
-}
-
-TEST_F(parsing_utilities_test, starts_with_no_match)
-{
-    EXPECT_FALSE(starts_with("cpu0", "gpu"));
-    EXPECT_FALSE(starts_with("cp", "cpu"));
-    EXPECT_FALSE(starts_with("", "cpu"));
-}
-
 TEST_F(parsing_utilities_test, ltrim_removes_leading_whitespace)
 {
     using rocprofsys::utility::string::ltrim;

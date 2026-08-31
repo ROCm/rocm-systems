@@ -2226,7 +2226,7 @@ print_settings(bool _include_env)
 
     // generic filter for filtering relevant options
     auto _is_rocprofsys_option = [](const auto& _v, const auto&) {
-        return (_v.find("ROCPROFSYS_") == 0);
+        return _v.starts_with("ROCPROFSYS_");
     };
 
     if(_include_env)

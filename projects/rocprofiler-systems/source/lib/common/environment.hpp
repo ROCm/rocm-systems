@@ -360,14 +360,14 @@ remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
 
     env_list.erase(std::remove_if(env_list.begin(), env_list.end(),
                                   [&key](const std::string& entry) {
-                                      return std::string_view{ entry }.find(key) == 0;
+                                      return std::string_view{ entry }.starts_with(key);
                                   }),
                    env_list.end());
 
     // Restore from original_envs if previously existed
     for(const auto& orig : original_envs)
     {
-        if(std::string_view{ orig }.find(key) == 0) env_list.emplace_back(orig);
+        if(std::string_view{ orig }.starts_with(key)) env_list.emplace_back(orig);
     }
 }
 
@@ -468,8 +468,7 @@ is_python_interpreter(std::string_view executable)
     constexpr std::string_view python3_prefix = "python3.";
 
     const bool has_valid_prefix =
-        basename.size() > python3_prefix.size() &&
-        basename.substr(0, python3_prefix.size()) == python3_prefix;
+        basename.size() > python3_prefix.size() && basename.starts_with(python3_prefix);
     if(!has_valid_prefix) return false;
 
     const auto version_digits = basename.substr(python3_prefix.size());
@@ -618,7 +617,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     const auto _key         = fmt::format("{}=", _env_var);
 
     const auto matches_key = [&_key](const std::string& entry) {
-        return std::string_view{ entry }.find(_key) == 0;
+        return std::string_view{ entry }.starts_with(_key);
     };
 
     auto first = std::find_if(_environ.begin(), _environ.end(), matches_key);
@@ -680,7 +679,7 @@ add_torch_library_path(std::vector<std::string>& envp, std::string_view executab
     constexpr std::string_view ld_prefix = "LD_LIBRARY_PATH=";
 
     auto is_ld_path = [&](const std::string& entry) {
-        return std::string_view{ entry }.substr(0, ld_prefix.length()) == ld_prefix;
+        return std::string_view{ entry }.starts_with(ld_prefix);
     };
 
     for(const auto& entry : envp)

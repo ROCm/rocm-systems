@@ -29,7 +29,7 @@ get_setting_name(std::string_view input)
 
     auto result = utility::string::to_lower(input);
 
-    if(result.compare(0, prefix.size(), prefix) == 0) return result.substr(prefix.size());
+    if(result.starts_with(prefix)) return result.substr(prefix.size());
 
     return result;
 }

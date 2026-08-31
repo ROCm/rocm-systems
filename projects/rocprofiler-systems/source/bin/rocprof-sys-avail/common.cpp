@@ -300,8 +300,7 @@ process_categories(parser_t& p, const str_set_t& _category_options)
         for(auto prefix : _prefixes)
         {
             if(opt_lower.size() > prefix.size() &&
-               opt_lower.compare(0, prefix.size(),
-                                 rocprofsys::utility::string::to_lower(prefix)) == 0)
+               opt_lower.starts_with(rocprofsys::utility::string::to_lower(prefix)))
             {
                 // Map the shorthand (without prefix) to the full canonical form
                 auto shorthand           = opt_lower.substr(prefix.size());
@@ -411,9 +410,8 @@ rocm_domain_from_setting_name(std::string_view _env_var_name)
     // Check if the environment variable name matches the expected shape
     // ROCPROFSYS_ROCM_<DOMAIN>_OPERATIONS.
     if(_env_var_name.size() <= _rocm_op_prefix.size() + _rocm_op_suffix.size() ||
-       _env_var_name.compare(0, _rocm_op_prefix.size(), _rocm_op_prefix) != 0 ||
-       _env_var_name.compare(_env_var_name.size() - _rocm_op_suffix.size(),
-                             _rocm_op_suffix.size(), _rocm_op_suffix) != 0)
+       !_env_var_name.starts_with(_rocm_op_prefix) ||
+       !_env_var_name.ends_with(_rocm_op_suffix))
         return std::nullopt;
 
     // Extract the domain name from the environment variable name, then convert it to
