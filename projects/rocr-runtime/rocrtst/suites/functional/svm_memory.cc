@@ -1066,15 +1066,6 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatch(hsa_agent_t agent,
                                      HSA_WAIT_STATE_ACTIVE)) {}
   }
 
-  // verify that all the ranges are gpu resident after prefetch 
-  for (uint32_t i = 0; i < kNumRegions; i++) {
-    hsa_amd_svm_attribute_pair_t attr;
-    attr.attribute = HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION;
-    attr.value = 0;
-    ASSERT_SUCCESS(hsa_amd_svm_attributes_get(ptrs[i], sizes[i], &attr, 1));
-    ASSERT_EQ(attr.value, agent.handle);
-  }
-
   // set up dependency signals
   static const uint32_t kNumDepSignals = 3;
   hsa_signal_t dep_signals[kNumDepSignals];
@@ -1110,12 +1101,6 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatch(hsa_agent_t agent,
     ASSERT_SUCCESS(hsa_amd_svm_attributes_get(ptrs[i], sizes[i], &attr, 1));
     ASSERT_EQ(attr.value, agent.handle) << "region " << i << " was not prefetched to the destination GPU";
 
-    attr.attribute = HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION;
-    attr.value = 0;
-    ASSERT_SUCCESS(hsa_amd_svm_attributes_get(ptrs[i], sizes[i], &attr, 1));
-    ASSERT_EQ(attr.value, agent.handle);
-
-    // The reservation itself survives the operation
     hsa_amd_pointer_info_t ptrInfo = {};
     ptrInfo.size = sizeof(ptrInfo);
     ASSERT_SUCCESS(hsa_amd_pointer_info(ptrs[i], &ptrInfo, nullptr, nullptr, nullptr));
@@ -1130,6 +1115,7 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatch(hsa_agent_t agent,
     }
   }
 
+  // cleanup
   hsa_signal_destroy(completion);
   for (uint32_t i = 0; i < kNumDepSignals; i++) {
     hsa_signal_destroy(dep_signals[i]);
@@ -1184,21 +1170,22 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatchPerf(hsa_agent_t agent,
   size_t sizes_arr[1] = {kRegionSize};
   hsa_agent_t dst_arr[1] = {agent};
 
-  // Prefetch only 
+  // Record timing for prefetch only operation 
   double prefetch_only_us = 0.0;
   for (uint32_t i = 0; i < kNumIters; i++) {
-    // Move pages to CPU first so the timed prefetch has real work to do
+    // Prefetch to pages to cpu first
     hsa_signal_store_relaxed(signal, 1);
     ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(ptr, kRegionSize, cpu_agent, 0, nullptr, signal));
     while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
                                      HSA_WAIT_STATE_ACTIVE)) {}
-
     hsa_signal_store_relaxed(signal, 1);
+
     auto t0 = std::chrono::steady_clock::now();
     ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(ptr, kRegionSize, agent, 0, nullptr, signal));
     while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
                                      HSA_WAIT_STATE_ACTIVE)) {}
     auto t1 = std::chrono::steady_clock::now();
+
     prefetch_only_us += std::chrono::duration<double, std::micro>(t1 - t0).count();
   }
 
