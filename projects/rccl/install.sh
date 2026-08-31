@@ -169,7 +169,7 @@ while true; do
     -c | --enable-code-coverage)     enable_code_coverage=true;                                                                        shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
-            --enable-tdm-simple)        enable_tdm_simple=true;                                                                           shift ;;
+         --enable-tdm-simple)        enable_tdm_simple=true;                                                                           shift ;;
     -f | --fast)                     build_local_gpu_only=true;                                                                        shift ;;
          --force-reduce-pipeline)    force_reduce_pipeline=true;                                                                       shift ;;
     -h | --help)                     display_help;                                                                                     exit 0 ;;

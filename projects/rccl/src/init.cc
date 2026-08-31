@@ -203,10 +203,9 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 //   1 = force cheap fence off (__threadfence_system), 2 = force cheap fence on (override auto, e.g. re-enable on gfx950)
 RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 
-#ifdef ENABLE_TDM_SIMPLE
+#if ENABLE_TDM_SIMPLE
 // Off by default; the mover path is still under evaluation.
 RCCL_PARAM(TdmSimpleEnable, "TDM_SIMPLE_ENABLE", 0);
-RCCL_PARAM(TdmSimpleMinBytes, "TDM_SIMPLE_MIN_BYTES", 4096);
 #endif
 
 /**
@@ -900,9 +899,8 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   tmpCommAndChans.comm.isAllNvlink = comm->isAllNvlink;
   tmpCommAndChans.comm.p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
   tmpCommAndChans.comm.cheapPostSendFenceOff = comm->cheapPostSendFenceOff;
-#ifdef ENABLE_TDM_SIMPLE
+#if ENABLE_TDM_SIMPLE
   tmpCommAndChans.comm.tdmSimpleEnable = comm->tdmSimpleEnable;
-  tmpCommAndChans.comm.tdmSimpleMinBytes = comm->tdmSimpleMinBytes;
 #endif
   tmpCommAndChans.comm.patSharedQps = comm->patSharedQps ? 1 : 0;
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
@@ -1265,7 +1263,7 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
     comm->buffSizes[p] = envs[p] != -2 ? envs[p] : defaults[p];
   }
 
-#ifdef ENABLE_TDM_SIMPLE
+#if ENABLE_TDM_SIMPLE
   // FIFO slot k sits at k*(buffSizes/NCCL_STEPS), so the step must be a RCCL_TDM_ALIGN
   // multiple for every slot to hit TDM's direct path. No-op at the 4MiB default.
   {
@@ -1870,13 +1868,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
                                                                  false);
 #endif
   INFO(NCCL_INIT, "Cheap post-send fence is %s", comm->cheapPostSendFenceOff ? "OFF" : "ON");
-#ifdef ENABLE_TDM_SIMPLE
+#if ENABLE_TDM_SIMPLE
   // gfx1250 only; the mover entry points are deleted elsewhere.
   comm->tdmSimpleEnable =
     rcclParamTdmSimpleEnable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
-  comm->tdmSimpleMinBytes = (int)rcclParamTdmSimpleMinBytes();
-  if (comm->tdmSimpleEnable)
-    INFO(NCCL_INIT, "TDM SIMPLE path enabled, min slice %d bytes", comm->tdmSimpleMinBytes);
+  if (comm->tdmSimpleEnable) INFO(NCCL_INIT, "TDM SIMPLE path enabled");
 #endif
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||

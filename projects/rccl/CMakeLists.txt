@@ -111,7 +111,7 @@ option(FAULT_INJECTION                         "Enable fault injection"         
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 if(ENABLE_TDM_SIMPLE)
-  add_compile_definitions(ENABLE_TDM_SIMPLE)
+  add_compile_definitions(ENABLE_TDM_SIMPLE=1)
 endif()
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):

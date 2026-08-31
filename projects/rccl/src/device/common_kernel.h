@@ -749,47 +749,46 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
 // System scope is required for peer visibility; non-temporal keeps remote data out of local caches.
 static constexpr CachePolicy kRcclTdmPolicy = createCachePolicy(TemporalHint::NT, MemScope::SYS);
 
+#if TDM_SUPPORTED && ENABLE_TDM_SIMPLE
+// Does this slice qualify for the TDM mover? Pure gating, no side effects.
+template <int useAcc, typename RedFn, typename T, int MultimemSrcs, int MultimemDsts, int PreOpSrcs, int Pipeline,
+          typename IntBytes>
+__device__ __forceinline__ bool canUseTdm(int thread, int nThreads, bool postOp, int nSrcs, void** srcPtrs,
+                                          int nDsts, void** dstPtrs, IntBytes nElts) {
+  // No multimem, accumulation or pipelining, and PreOp only when it is the identity.
+  if (MultimemSrcs || MultimemDsts || useAcc || Pipeline) return false;
+  if (PreOpSrcs && !Apply_PreOp<RedFn, 1>::IsIdentity) return false;
+  if (!ncclShmem.comm.tdmSimpleEnable) return false;
+
+  // One source, one or two destinations, no postOp.
+  if (nSrcs != 1 || (nDsts != 1 && nDsts != 2) || postOp) return false;
+
+  // Every global address must reach the mover's direct path.
+  if (srcPtrs[0] == nullptr || ((uintptr_t)srcPtrs[0] & (RCCL_TDM_ALIGN - 1))) return false;
+  for (int dst = 0; dst < nDsts; dst++) {
+    if (dstPtrs[dst] == nullptr || ((uintptr_t)dstPtrs[dst] & (RCCL_TDM_ALIGN - 1))) return false;
+  }
+
+  // The team entry point takes block warp indices, and the tensor op needs a converged wave.
+  int base = threadIdx.x - thread;
+  return ((base | nThreads) & (WARP_SIZE - 1)) == 0;
+}
+#endif
+
 template <int useAcc, typename RedFn, typename T, int MultimemSrcs, int MultimemDsts, int PreOpSrcs, int Pipeline,
           typename IntBytes>
 __device__ __forceinline__ bool tryTdmCopy(int thread, int nThreads, bool postOp, int nSrcs, void** srcPtrs,
                                            int nDsts, void** dstPtrs, IntBytes nElts) {
-#if TDM_SUPPORTED && defined(ENABLE_TDM_SIMPLE)
-  if (!ncclShmem.comm.tdmSimpleEnable) return false;
-  // TDM copy is only supported for simple cases without multimem, accumulation, or pipelining
-  if (MultimemSrcs || MultimemDsts || useAcc || Pipeline) {
+#if TDM_SUPPORTED && ENABLE_TDM_SIMPLE
+  if (!canUseTdm<useAcc, RedFn, T, MultimemSrcs, MultimemDsts, PreOpSrcs, Pipeline>(
+        thread, nThreads, postOp, nSrcs, srcPtrs, nDsts, dstPtrs, nElts))
     return false;
-  }
-  if (PreOpSrcs && !Apply_PreOp<RedFn, 1>::IsIdentity) {
-    return false;
-  }
-  // Check if the number of sources and destinations is supported for TDM copy
-  if (nSrcs != 1 || (nDsts != 1 && nDsts != 2) || postOp) {
-    return false;
-  }
-  // Check if the number of bytes is above the minimum threshold for TDM copy
+
+  // WARP_SIZE is a compile-time power of two, so these exact divisions compile to shifts.
+  uint32_t w0 = (threadIdx.x - thread) / WARP_SIZE, w1 = w0 + nThreads / WARP_SIZE;
   size_t bytes = (size_t)nElts * sizeof(T);
-  if (bytes < (size_t)ncclShmem.comm.tdmSimpleMinBytes) {
-    return false;
-  }
-
-  const void* src = srcPtrs[0];
-  if (src == nullptr || ((uintptr_t)src & (RCCL_TDM_ALIGN - 1))) return false;
   for (int dst = 0; dst < nDsts; dst++) {
-    if (dstPtrs[dst] == nullptr || ((uintptr_t)dstPtrs[dst] & (RCCL_TDM_ALIGN - 1))) {
-      return false;
-    }
-  }
-
-  int base = threadIdx.x - thread;
-  // Base and thread count is a multiple of the warp size
-  if ((base | nThreads) & (WARP_SIZE - 1)) {
-    return false;
-  }
-  // WARP_SIZE is a compile-time power of two,
-  // so these exact divisions compile to shifts.
-  uint32_t w0 = base / WARP_SIZE, w1 = w0 + nThreads / WARP_SIZE;
-  for (int dst = 0; dst < nDsts; dst++) {
-    tdm::tdmCopyByTeam<kRcclTdmPolicy>(dstPtrs[dst], src, bytes, ncclTdmStageForWarp(w0),
+    tdm::tdmCopyByTeam<kRcclTdmPolicy>(dstPtrs[dst], srcPtrs[0], bytes, ncclTdmStageForWarp(w0),
                                        (size_t)(w1 - w0) * RCCL_TDM_STAGE_BYTES_PER_WARP, w0, w1);
   }
   return true;
