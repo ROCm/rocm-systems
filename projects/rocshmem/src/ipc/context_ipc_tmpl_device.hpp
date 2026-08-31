@@ -510,7 +510,7 @@ __device__ void IPCContext::internal_ring_allreduce_wave(
                       chunk_size * sizeof(T), send_pe);
       __builtin_amdgcn_wave_barrier();
       fence(send_pe);
-      
+
       wait_val = seg + 10;
       if (is_thread_zero_in_wave()) {
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
@@ -698,7 +698,7 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
   int chunk_size = max(1, pWrk_elems / PE_size);
   int n_chunks   = (nreduce + chunk_size - 1) / chunk_size;
   int finish = PE_start + stride * PE_size;
-  
+
   for (int c = 0; c < n_chunks; c++) {
     int offset = c * chunk_size;
     int count  = min(chunk_size, nreduce - offset);
@@ -742,7 +742,7 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
         threadfence_system();
       }
     }
-    
+
     sync_wave(team);
     __builtin_amdgcn_wave_barrier();
 
@@ -779,8 +779,8 @@ __device__ void IPCContext::internal_get_broadcast_wave(
 template <typename T>
 __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
                               T *dest, const T *source, int nelems, int PE_root) {
-  if (dest == nullptr || 
-    source == nullptr || 
+  if (dest == nullptr ||
+    source == nullptr ||
     team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
@@ -813,7 +813,7 @@ __device__ void IPCContext::internal_broadcast_wave(T *dst, const T *src, int ne
   // Synchronize on completion of broadcast
   internal_sync_wave(my_pe, pe_start, stride, pe_size, p_sync);
 }
-  
+
 template <typename T>
 __device__ void IPCContext::broadcast_wg(rocshmem_team_t team, T *dst,
                                       const T *src, int nelems, int pe_root) {
@@ -943,7 +943,7 @@ __device__ int IPCContext::fcollect_wave(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
   if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
-  
+
   fcollectmem_linear_wave(team, dst, src, nelems * sizeof(T));
 
   return ROCSHMEM_SUCCESS;
