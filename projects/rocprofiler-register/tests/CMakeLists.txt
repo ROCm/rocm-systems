@@ -122,6 +122,8 @@ add_library(rocprofiler-register::tests-weak ALIAS rocprofiler-register-tests-we
 add_library(rocprofiler-register::tests-tool ALIAS rocprofiler-register-tests-tool)
 add_library(rocprofiler-register::tests-rocp ALIAS rocprofiler-register-tests-rocp)
 
+add_subdirectory(runtime-soname)
+
 #
 # test scenarios
 #
