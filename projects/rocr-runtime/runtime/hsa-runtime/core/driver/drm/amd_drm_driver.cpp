@@ -68,8 +68,6 @@ hsa_status_t DrmDriver::CreateQueue(const CreateQueueInParams *queueIn, CreateQu
     compute_mqd.eop_va = drmQueueIn->extra_va;
     compute_mqd.ctx_save_area_addr = drmQueueIn->cwsr_va;
     compute_mqd.ctx_save_area_size = drmQueueIn->cwsr_size;
-    fprintf(stderr, "DEBUG DRM: Creating compute queue with eop_va=0x%llx, cwsr_va=0x%llx, cwsr_size=%u\n",
-            (unsigned long long)compute_mqd.eop_va, (unsigned long long)compute_mqd.ctx_save_area_addr, compute_mqd.ctx_save_area_size);
     mqd_in = &compute_mqd;
     // This is an HSA AQL queue — tell the kernel/MES to configure it in AQL mode.
     // Previously set SECURE (1<<2) which made MES treat it as a non-AQL (PM4) TMZ
@@ -190,6 +188,13 @@ hsa_status_t DrmDriver::ModifyQueue(const ModifyQueueInParams *queueIn) {
 
 void DrmDriver::ReleaseResources(core::Agent &agent) {
   FreeDoorbellMemory(agent);
+
+  auto it = trap_tma_by_agent_.find(&agent);
+  if (it != trap_tma_by_agent_.end()) {
+    if (it->second != nullptr)
+      static_cast<GpuAgent&>(agent).system_deallocator()(it->second);
+    trap_tma_by_agent_.erase(it);
+  }
 }
 
 hsa_status_t DrmDriver::AllocateDoorbellMemory(core::Agent &agent) {
@@ -388,6 +393,74 @@ hsa_status_t DrmDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
   // Stub: GWS (Global Wave Sync) allocation not yet supported in DRM mode
   // May require new kernel ioctl support
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+}
+
+hsa_status_t DrmDriver::SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
+                                       const void* buffer_base, uint64_t buffer_base_size) const {
+  // On the DRM/UKI path the kernel installs the first-level CWSR trap handler
+  // itself at KMS open; userspace only installs the level-2 handler via the CWSR
+  // ioctl. Route to libdrm instead of the KFD path inherited from KfdDriver.
+  //
+  // The kernel validates that both the trap-handler code (TBA) and the trap
+  // memory buffer (TMA) are GPU virtual addresses mapped in this device's render
+  // VM. The TBA (trap_code_buf_) already satisfies this: it is allocated
+  // executable and is therefore GPU-resident with a render-VM bo_va mapping.
+  // The TMA is the problem on the exception-debugging path, where the generic
+  // code passes a NULL TMA (the KFD path lets the kernel manage that buffer
+  // internally, but the DRM path requires userspace to supply one). Substitute a
+  // zeroed, render-VM-mapped TMA. Plain kernarg memory does not get a render-VM
+  // bo_va mapping, so allocate from the executable system pool (same property
+  // that makes the TBA valid).
+  core::Agent* agent = core::Runtime::runtime_singleton_->agent_by_nodeid(node_id);
+  if (agent == nullptr || agent->device_type() != core::Agent::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  GpuAgent* gpuAgent = static_cast<GpuAgent*>(agent);
+  amdgpu_device_handle dev = gpuAgent->libDrmDev();
+
+  uint64_t tma_va = reinterpret_cast<uint64_t>(buffer_base);
+  uint64_t tma_size = buffer_base_size;
+  if (buffer_base == nullptr || buffer_base_size == 0) {
+    constexpr size_t kDrmTrapTmaSize = 0x1000;
+    void*& tma = trap_tma_by_agent_[agent];
+    if (tma == nullptr) {
+      tma = gpuAgent->system_allocator()(kDrmTrapTmaSize, 0x1000,
+                      core::MemoryRegion::AllocateExecutable |
+                      core::MemoryRegion::AllocateExecutableBlitKernelObject);
+      if (tma == nullptr) {
+        trap_tma_by_agent_.erase(agent);
+        debug_print(
+              "DrmDriver::SetTrapHandler: render-VM TMA allocation failed\n");
+        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      }
+      memset(tma, 0, kDrmTrapTmaSize);
+    }
+    tma_va = reinterpret_cast<uint64_t>(tma);
+    tma_size = kDrmTrapTmaSize;
+  }
+
+  int result = amdgpu_cwsr_set_l2_trap_handler(
+                                            dev,
+                                            reinterpret_cast<uint64_t>(base),
+                                            base_size,
+                                            tma_va, tma_size);
+  if (result == 0)
+    return HSA_STATUS_SUCCESS;
+
+  const int err = errno;
+  // The level-2 trap handler is optional: the kernel installs the first-level
+  // CWSR handler itself. When CWSR is unavailable on this device (e.g. user
+  // queues disabled, so amdgpu never allocates the per-file trap object), the
+  // kernel returns EOPNOTSUPP. Treat that as non-fatal so the runtime keeps
+  // running without the L2 handler rather than aborting.
+  if (err == EOPNOTSUPP) {
+    debug_print("DrmDriver::SetTrapHandler: CWSR L2 trap handler unavailable "
+                "(EOPNOTSUPP); continuing without it\n");
+    return HSA_STATUS_SUCCESS;
+  }
+  debug_print("amdgpu_cwsr_set_l2_trap_handler failed: %d (errno %d)\n", result, err);
+  return HSA_STATUS_ERROR;
 }
 
 // Legacy DestroyQueue: used for KFD-created queues when DRM queue creation falls back to KFD.
