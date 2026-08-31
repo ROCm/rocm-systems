@@ -135,15 +135,23 @@ bool AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* re
 // Host-resolve the AllGather LSA<->SDMA crossover (bytes/rank). Parsed once per
 // process; see gin_sdma_allgather::resolveSdmaThresholdFromEnv().
 static inline size_t AllGatherResolveSdmaThreshold() {
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+  return gin_sdma_allgather::kAllGatherSdmaThresholdDefault;
+#else
   static const size_t cached = gin_sdma_allgather::resolveSdmaThresholdFromEnv();
   return cached;
+#endif
 }
 
 // Parse NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS once per process (deprecated alias
 // NCCL_GIN_ANVIL_AG_CTAS still honored in the policy helper).
 static inline size_t AllGatherResolveCtasEnv() {
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+  return gin_sdma_allgather::kAllGatherCtasUnset;
+#else
   static const size_t cached = gin_sdma_allgather::parseAllGatherCtasEnv();
   return cached;
+#endif
 }
 
 static inline int AllGatherResolveLaunchCtas(size_t chunkBytes, size_t sdmaThreshold, int poolCtas) {
