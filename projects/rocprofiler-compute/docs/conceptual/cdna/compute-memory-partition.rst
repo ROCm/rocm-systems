@@ -32,8 +32,8 @@ Supported platforms
 Partition-aware metric normalization applies only to GPUs that support compute
 and memory partitioning:
 
-* **CDNA3:** MI300A, MI300X, MI308X, MI325X, and related gfx940–gfx942 parts
-* **CDNA4:** MI350X, MI355X, MI358, and related gfx950 / gfx1250 parts
+* **CDNA3:** MI300A, MI300X, MI325X
+* **CDNA4:** MI350X, MI355X
 
 Pre-MI300 Instinct GPUs (MI100, MI200 series) do not use these modes. ROCm
 Compute Profiler treats them as a single compute partition with one XCD
