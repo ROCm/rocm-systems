@@ -197,7 +197,7 @@ hsa_status_t KfdDriver::Open() {
   });
 }
 
-hsa_status_t KfdDriver::Close() { return lifecycle_.ShutDown(); }
+hsa_status_t KfdDriver::Close() { return lifecycle_.Close(); }
 
 hsa_status_t KfdDriver::AcquireTopologySnapshot() const {
   return lifecycle_.AcquireSnapshot([this]() {

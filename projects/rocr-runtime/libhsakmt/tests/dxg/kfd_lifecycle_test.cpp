@@ -118,6 +118,25 @@ TEST_CASE(shutdown_is_idempotent) {
   CHECK_EQ(recorder.calls, first_shutdown);
 }
 
+TEST_CASE(close_gives_back_only_the_open_reference) {
+  Recorder recorder;
+  KfdLifecycle lifecycle(recorder.Ops());
+  AcquireAll(lifecycle);
+
+  /* Twice, because a second close must find nothing left to give back rather
+   * than hand the thunk a reference it no longer holds.
+   */
+  CHECK_EQ(lifecycle.Close(), HSA_STATUS_SUCCESS);
+  CHECK_EQ(lifecycle.Close(), HSA_STATUS_SUCCESS);
+  CHECK_EQ(recorder.calls, (std::vector<std::string>{"close"}));
+
+  /* The runtime enable and the snapshot were never Close()'s to release, so
+   * the broad teardown still gives those back afterwards.
+   */
+  CHECK_EQ(lifecycle.ShutDown(), HSA_STATUS_SUCCESS);
+  CHECK_EQ(recorder.calls, (std::vector<std::string>{"close", "disable", "release"}));
+}
+
 TEST_CASE(open_and_snapshot_acquisition_are_each_idempotent) {
   Recorder recorder;
   KfdLifecycle lifecycle(recorder.Ops());

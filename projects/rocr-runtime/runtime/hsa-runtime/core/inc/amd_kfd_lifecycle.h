@@ -124,13 +124,29 @@ class KfdLifecycle {
   /// to answer it from what the first acquire reported.
   hsa_status_t AcquireSnapshot(const std::function<hsa_status_t()>& acquire);
 
+  /// @brief Give back the open reference, and nothing else.
+  ///
+  /// @details The inverse of Open(), not a teardown: core::Driver documents
+  /// Close() as closing a connection to an open driver, and a caller asking
+  /// for that must not also lose the runtime enable and the topology snapshot.
+  /// ShutDown() is the method that gives back everything.
+  ///
+  /// Idempotent, and safe to call on a driver that never opened: owning no
+  /// open reference is success, because there is nothing to give back. Like
+  /// every stage of ShutDown(), the ownership is dropped before the call
+  /// rather than after, so a failed close is not retried into a double close.
+  ///
+  /// @return What the thunk's close reported, or HSA_STATUS_SUCCESS if this
+  /// owned no open reference.
+  hsa_status_t Close();
+
   /// @brief Give back every reference this driver owns, and only those.
   ///
   /// @details Runs every owned step even if an earlier one fails - stopping at
   /// the first error would strand the references the remaining steps give
   /// back, which is the leak this class exists to prevent. Each step's
   /// ownership is dropped as it runs, so a failed release is not retried into
-  /// a double release later.
+  /// a double release later. The last of those steps is Close().
   ///
   /// @return The first error any step reported, or HSA_STATUS_SUCCESS. Owning
   /// nothing is success: there is nothing to fail.

@@ -70,6 +70,13 @@ hsa_status_t KfdLifecycle::AcquireSnapshot(const std::function<hsa_status_t()>& 
   return status;
 }
 
+hsa_status_t KfdLifecycle::Close() {
+  if (!owns_open_) return HSA_STATUS_SUCCESS;
+
+  owns_open_ = false;
+  return ops_.close();
+}
+
 hsa_status_t KfdLifecycle::ShutDown() {
   hsa_status_t status = HSA_STATUS_SUCCESS;
   auto record = [&status](hsa_status_t err) {
@@ -89,10 +96,9 @@ hsa_status_t KfdLifecycle::ShutDown() {
     record(ops_.release_snapshot());
   }
 
-  if (owns_open_) {
-    owns_open_ = false;
-    record(ops_.close());
-  }
+  // The close stage is Close(), which carries the same ownership discipline
+  // and reports success when there is no open reference to give back.
+  record(Close());
 
   return status;
 }
