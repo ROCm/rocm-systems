@@ -323,6 +323,8 @@ def pytest_configure(config: pytest.Config) -> None:
         "unit_tests",
         "hip_stream",
         "presets",
+        "domain_flags",
+        "sample_trace_profile_cli",
         "tool_runner",
         "cli_help",
         "hpc",
@@ -334,6 +336,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "validation_usm",
         "selective_regions",
         "minimal",
+        "backend_flags",
         "rank_filter",
         "pytest_impl",
     ]
