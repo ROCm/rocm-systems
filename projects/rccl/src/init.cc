@@ -1266,7 +1266,7 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
 #if ENABLE_TDM_SIMPLE
   // FIFO slot k sits at k*(buffSizes/NCCL_STEPS), so the step must be a RCCL_TDM_ALIGN
   // multiple for every slot to hit TDM's direct path. No-op at the 4MiB default.
-  {
+  if (comm->tdmSimpleEnable) {
     int64_t simple = comm->buffSizes[NCCL_PROTO_SIMPLE];
     int64_t aligned = ROUNDUP(simple, (int64_t)(NCCL_STEPS * RCCL_TDM_ALIGN));
     if (simple > 0 && aligned != simple && aligned <= INT_MAX) {
