@@ -7,6 +7,38 @@ set(ROCJITSU_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 include(rj_add_object_library)
 include(rj_configure_target)
 
+# One compiled source of truth for version information. The object is embedded
+# directly in librocjitsu.so so its C API remains exported despite the shared
+# library's archive-hiding link option; native consumers that call the API use
+# the same object through the private static archive.
+add_library(rocjitsu_version_objects OBJECT src/rocjitsu/base/rj_version.cpp)
+set_target_properties(
+    rocjitsu_version_objects
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
+target_include_directories(
+    rocjitsu_version_objects
+    PRIVATE ${ROCJITSU_INCLUDE_DIR} ${RJ_VERSION_INCLUDE_DIR}
+)
+rj_configure_target(rocjitsu_version_objects WARNINGS HIDDEN)
+
+add_library(rocjitsu_version STATIC $<TARGET_OBJECTS:rocjitsu_version_objects>)
+target_include_directories(
+    rocjitsu_version
+    PUBLIC
+        $<BUILD_INTERFACE:${ROCJITSU_INCLUDE_DIR}>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
+# Vendored DRM/amdgpu UAPI headers. kfd_ioctl.h includes <libdrm/drm.h>, so
+# attach this target privately at the HSA include chokepoints.
+add_library(rocjitsu_drm_headers INTERFACE)
+target_include_directories(
+    rocjitsu_drm_headers
+    SYSTEM
+    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external_headers/drm_headers
+)
+
 add_subdirectory(src/rocjitsu/analysis)
 add_subdirectory(src/rocjitsu/code)
 add_subdirectory(src/rocjitsu/isa)
@@ -99,3 +131,4 @@ add_subdirectory(src/rocjitsu/vm)
 add_subdirectory(src/rocjitsu/kmd)
 add_subdirectory(src/rocjitsu/config)
 add_subdirectory(src/rocjitsu/hooks)
+add_subdirectory(src/rocjitsu/vmm)

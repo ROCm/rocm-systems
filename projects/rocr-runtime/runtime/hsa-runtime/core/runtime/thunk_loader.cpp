@@ -212,6 +212,9 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       HSAKMT_PFN(hsaKmtAvailableMemory) = (HSAKMT_DEF(hsaKmtAvailableMemory)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtAvailableMemory");
       if (HSAKMT_PFN(hsaKmtAvailableMemory) == nullptr) goto LOAD_ERROR;
 
+      HSAKMT_PFN(hsaKmtGetDefaultHostGpu) = (HSAKMT_DEF(hsaKmtGetDefaultHostGpu)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetDefaultHostGpu");
+      if (HSAKMT_PFN(hsaKmtGetDefaultHostGpu) == nullptr) goto LOAD_ERROR;
+
       HSAKMT_PFN(hsaKmtRegisterMemory) = (HSAKMT_DEF(hsaKmtRegisterMemory)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtRegisterMemory");
       if (HSAKMT_PFN(hsaKmtRegisterMemory) == nullptr) goto LOAD_ERROR;
 
@@ -530,6 +533,7 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtAllocMemoryAlign) = (HSAKMT_DEF(hsaKmtAllocMemoryAlign)*)(&hsaKmtAllocMemoryAlign);
       HSAKMT_PFN(hsaKmtFreeMemory) = (HSAKMT_DEF(hsaKmtFreeMemory)*)(&hsaKmtFreeMemory);
       HSAKMT_PFN(hsaKmtAvailableMemory) = (HSAKMT_DEF(hsaKmtAvailableMemory)*)(&hsaKmtAvailableMemory);
+      HSAKMT_PFN(hsaKmtGetDefaultHostGpu) = (HSAKMT_DEF(hsaKmtGetDefaultHostGpu)*)(&hsaKmtGetDefaultHostGpu);
       HSAKMT_PFN(hsaKmtRegisterMemory) = (HSAKMT_DEF(hsaKmtRegisterMemory)*)(&hsaKmtRegisterMemory);
       HSAKMT_PFN(hsaKmtRegisterMemoryToNodes) = (HSAKMT_DEF(hsaKmtRegisterMemoryToNodes)*)(&hsaKmtRegisterMemoryToNodes);
       HSAKMT_PFN(hsaKmtRegisterMemoryWithFlags) = (HSAKMT_DEF(hsaKmtRegisterMemoryWithFlags)*)(&hsaKmtRegisterMemoryWithFlags);

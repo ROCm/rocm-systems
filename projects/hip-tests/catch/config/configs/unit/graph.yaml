@@ -1408,10 +1408,16 @@ graph:
     <<: *level_2
     tags: [exec]
     # ROCM-22772: Temporarily disabled until multi-device graph is added
-    disabled: [amd_windows. amd_linux]
+    disabled: [amd_windows, amd_linux]
   Unit_hipGraphCrossDeviceLaunch_ExplicitNodes:
     <<: *level_2
     tags: [exec]
+    disabled: [amd_windows]
+  Unit_hipGraphStreamPool_InstantiateFootprint:
+    <<: *level_2
+    tags: [exec]
+    # (amd_windows) PAL backend does not charge device memory for eager internal
+    # stream allocation at instantiate, so the footprint is unmeasurable there.
     disabled: [amd_windows]
   Unit_hipGraphKernelNodeCopyAttributes_Functional:
     <<: *level_2
