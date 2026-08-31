@@ -41,7 +41,6 @@
 
 #include <hsa/hsa_api_trace.h>
 
-#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <limits>
@@ -149,9 +148,11 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
     // The public mask is wider than the set of shader engines implemented by an agent. Filter it
     // before constructing AQLProfile resources and buffering packets so, for example, 0xFFFFFFFF
     // becomes 0xF on a four-SE agent instead of creating packets for non-existent engines.
-    constexpr uint32_t max_shader_engines = std::numeric_limits<uint32_t>::digits;
-    num_shader_engines = std::min(agent->get_rocp_agent()->num_shader_banks, max_shader_engines);
-    const auto valid_shader_engine_mask = (uint64_t{1} << num_shader_engines) - 1;
+    num_shader_engines = agent->get_rocp_agent()->num_shader_banks;
+    const auto valid_shader_engine_mask =
+        (num_shader_engines >= std::numeric_limits<uint64_t>::digits)
+            ? std::numeric_limits<uint64_t>::max()
+            : (uint64_t{1} << num_shader_engines) - 1;
     params.shader_engine_mask &= valid_shader_engine_mask;
 
     if(params.shader_engine_mask == 0)

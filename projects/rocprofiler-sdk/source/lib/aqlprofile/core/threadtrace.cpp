@@ -296,7 +296,7 @@ _internal_aqlprofile_att_create_packets(aqlprofile_handle_t*                  ha
     uint64_t           MAX_BUFFER_SIZE = uint64_t(1) << 34;
     if(pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID) MAX_BUFFER_SIZE = uint64_t(1) << 29;
 
-    if(trace_config.capacity_per_se > MAX_BUFFER_SIZE) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if(trace_config.capacity_per_se >= MAX_BUFFER_SIZE) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     if(trace_config.capacity_per_se < MIN_BUFFER_SIZE) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
     void* sqtt_buffer           = memorymgr->GetOutputBuf();
@@ -538,6 +538,8 @@ aqlprofile_att_get_buffer_packets(uint64_t*                      header,
     pm4_builder::CmdBuffer commands;
     for(int se_id = 0; (manager->config.se_mask >> se_id) != 0; se_id++)
     {
+        if(((manager->config.se_mask >> se_id) & 1) == 0) continue;
+
         auto& status = manager->GetTraceControlBuf<pm4_builder::TraceControl>()[se_id];
         sqttbuilder->GetStatusPacket(&commands, status, se_id);
     }
