@@ -13,7 +13,6 @@
 #include <timemory/settings.hpp>
 #include <timemory/settings/types.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
-#include <timemory/utility/filepath.hpp>
 
 static inline void
 dump_info(std::ostream& _os, const fmodset_t& _data)
