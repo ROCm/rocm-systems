@@ -230,6 +230,18 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
   assert(isa != nullptr && "ISA registry inconsistency.");
 
+  // A0 silicon requires the "strict" ISA variant. Re-point A0 devices to the
+  // strict variant by name so the reported ISA and code-object selection target
+  // the A0-safe ISA. B0 keeps the base target.
+  // gfx1250 is version 12.5.0; ASIC revision 0 is the A0 stepping.
+  if (isa->GetMajorVersion() == 12 && isa->GetMinorVersion() == 5 &&
+      isa->GetStepping() == 0 && properties_.Capability.ui32.ASICRevision == 0) {
+    const core::Isa* strict_isa =
+        core::IsaRegistry::GetIsa("amdgcn-amd-amdhsa--gfx1250-strict");
+    assert(strict_isa != nullptr && "A0 strict ISA variant is not registered.");
+    if (strict_isa != nullptr) isa = strict_isa;
+  }
+
   supported_isas_.push_back(isa);
   if (!supported_isas_[0]->GetIsaGeneric().empty()) {
     supported_isas_.push_back(core::IsaRegistry::GetIsa(supported_isas_[0]->GetIsaGeneric()));
