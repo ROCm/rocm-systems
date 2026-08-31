@@ -452,7 +452,6 @@ __device__ int GDAContext::reduce_wave(rocshmem_team_t team, T *dest,
 
       int n_seg = nreduce / seg_size;
       int n_seg_up = (nreduce - 1) / seg_size + 1;
-      chunk_size = seg_size / PE_size;
 
       if (n_seg > 0) {
         internal_ring_allreduce_wave<T, Op>(dest, source, nreduce, team_obj,
@@ -576,10 +575,10 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
       internal_putmem_wg(reinterpret_cast<void *>(&pWrk[off_send]),
         reinterpret_cast<void *>(&dst[off_send + off_seg]),
         chunk_size * sizeof(T), send_pe, send_pe, wf_info);
+      
+      fence();
 
       if (is_thread_zero_in_block()) {
-        fence();
-
         wait_val = seg + 100;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
           send_pe, wf_info);
@@ -588,6 +587,7 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
 #endif /* __gfx90a__ */
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
+      fence();
       __syncthreads();
       gda_compute_reduce<T, Op>(&pWrk[off_recv], &dst[off_seg + off_recv],
                                 chunk_size, wg_id, wg_size);
@@ -599,10 +599,9 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
       internal_putmem_nbi_wg(reinterpret_cast<void *>(&dst[off_send + off_seg]),
         reinterpret_cast<void *>(&dst[off_send + off_seg]),
         chunk_size * sizeof(T), send_pe, send_pe, wf_info);
-
+      fence();
       if (is_thread_zero_in_block()) {
-        fence();
-        wait_val = seg + 100;
+        wait_val = seg + 10;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
           send_pe, wf_info);
 #if defined(__gfx90a__)
@@ -610,6 +609,7 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
 #endif /* __gfx90a__ */
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
+      fence();
       __syncthreads();
     }
   }
@@ -652,7 +652,7 @@ __device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
       internal_putmem_wave(reinterpret_cast<void *>(&pWrk[off_send]),
         reinterpret_cast<void *>(&dst[off_send + off_seg]),
         chunk_size * sizeof(T), send_pe, send_pe, wf_info);
-
+      fence();
       if (is_thread_zero_in_wave()) {
         qps[send_pe].quiet(wf_info);
         wait_val = seg + 100;
@@ -663,6 +663,7 @@ __device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
 #endif /* __gfx90a__ */
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
+      fence();
       for (int j = wf_tid; j < chunk_size; j += WF_SIZE) {
         OpWrap<Op>::Calc(&pWrk[off_recv], &dst[off_seg + off_recv], j);
       }
@@ -674,7 +675,7 @@ __device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
       internal_putmem_nbi_wave(reinterpret_cast<void *>(&dst[off_send + off_seg]),
         reinterpret_cast<void *>(&dst[off_send + off_seg]),
         chunk_size * sizeof(T), send_pe, send_pe, wf_info);
-
+      fence();
       if (is_thread_zero_in_wave()) {
         qps[send_pe].quiet(wf_info);
         wait_val = seg + 10;
@@ -724,8 +725,6 @@ __device__ int GDAContext::reduce_wg(rocshmem_team_t team, T *dest,
       int n_seg = nreduce / seg_size;
       // integer division rounding up
       int n_seg_up = (nreduce - 1) / seg_size + 1;
-      // recalculate chunk_size
-      chunk_size = seg_size / PE_size;
 
       if (n_seg > 0) {
         internal_ring_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, n_seg,
