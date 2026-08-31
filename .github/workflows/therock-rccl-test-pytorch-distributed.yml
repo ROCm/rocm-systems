@@ -17,6 +17,12 @@ on:
       notify_email:
         type: string
         default: ''
+      notify_webhook:
+        type: string
+        default: ''
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK:
+        required: false
   workflow_dispatch:
     inputs:
       amdgpu_families:
@@ -33,6 +39,10 @@ on:
         default: 'smoke'
       notify_email:
         description: 'Email address to send test summary report'
+        type: string
+        default: ''
+      notify_webhook:
+        description: 'Teams webhook URL for test summary notifications'
         type: string
         default: ''
 
@@ -69,12 +79,12 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: 22004a6bc8a28393f8b772b7f6e2a3040f11cd8d # 2026-07-20
+          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          sparse-checkout: .github/scripts
+          sparse-checkout: projects/rccl/ci/scripts
           path: rocm-systems
 
       - name: Run setup test environment workflow
@@ -103,22 +113,38 @@ jobs:
             psutil
 
       - name: Run PyTorch c10d NCCL tests
-        timeout-minutes: 60
+        timeout-minutes: ${{ inputs.test_scope == 'all' && 120 || 60 }}
         env:
           NCCL_DEBUG: INFO
           TORCH_NCCL_BLOCKING_WAIT: 1
           TORCH_NCCL_ASYNC_ERROR_HANDLING: 1
+          NOTIFY_EMAIL: ${{ inputs.notify_email }}
+          # Falls back to repo secret when no webhook input is provided.
+          # Empty on forked PRs (secrets unavailable) — only the notification
+          # is skipped; tests always run regardless.
+          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook || secrets.RCCL_CI_TEAMS_WEBHOOK }}
         run: |
-          NOTIFY_ARGS=""
-          if [ -n "${{ inputs.notify_email }}" ]; then
-            NOTIFY_ARGS="--notify-email ${{ inputs.notify_email }}"
+          # The dynamic linker caches LD_LIBRARY_PATH at process startup.
+          # PyTorch's import chain (rocm_sdk.preload_libraries -> ctypes.CDLL)
+          # needs _rocm_sdk_core/lib on the path before Python starts.
+          export PYTHONPATH="rocm-systems/projects/rccl/ci/scripts:${PYTHONPATH:-}"
+          for d in $(python -c "from rccl_ci_utils import find_pip_sdk_lib_dirs; print('\n'.join(str(d) for d in find_pip_sdk_lib_dirs()))"); do
+            export LD_LIBRARY_PATH="${d}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          done
+          # TheRock's libamdhip64.so depends on librocm_sysdeps_elf.so
+          if [ -d "${{ env.OUTPUT_ARTIFACTS_DIR }}/lib/rocm_sysdeps/lib" ]; then
+            export LD_LIBRARY_PATH="${{ env.OUTPUT_ARTIFACTS_DIR }}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           fi
-          python rocm-systems/.github/scripts/test_pytorch_c10d.py \
+
+          NOTIFY_ARGS=()
+          [ -n "$NOTIFY_EMAIL" ] && NOTIFY_ARGS+=(--notify-email "$NOTIFY_EMAIL")
+          [ -n "$NOTIFY_WEBHOOK" ] && NOTIFY_ARGS+=(--notify-webhook "$NOTIFY_WEBHOOK")
+          python rocm-systems/projects/rccl/ci/scripts/test_pytorch_c10d.py \
             --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
             --pytorch-src ${{ env.PYTORCH_SRC }} \
             --results-log ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.log \
             --test-scope ${{ inputs.test_scope || 'smoke' }} \
-            $NOTIFY_ARGS
+            "${NOTIFY_ARGS[@]}"
 
       - name: Upload test results
         if: always()

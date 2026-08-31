@@ -557,7 +557,7 @@ void Backend::destroy_symm_alias(void *alias, size_t length) {
 }
 
 void Backend::alloc_ipc_symm_table() {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   /*
    * Device-visible symmetric-registration table shared by all contexts via
    * IpcImpl (so registrations are observed without re-propagation).
@@ -589,7 +589,7 @@ void Backend::alloc_ipc_symm_table() {
 }
 
 void Backend::free_ipc_symm_table() {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   if (ipcImpl.symm_table == nullptr) {
     return;
   }
@@ -609,7 +609,7 @@ int Backend::register_ipc_symm_region([[maybe_unused]] void *symm_addr,
                                       [[maybe_unused]] size_t length,
                                       [[maybe_unused]] const std::vector<int>& peer_global,
                                       [[maybe_unused]] int self_index) {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   IpcSymmTable *table = ipcImpl.symm_table;
   if (table == nullptr) {
     return ROCSHMEM_ERROR;
@@ -733,7 +733,7 @@ int Backend::register_ipc_symm_region([[maybe_unused]] void *symm_addr,
 }
 
 int Backend::unregister_ipc_symm_region([[maybe_unused]] void *symm_addr) {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   IpcSymmTable *table = ipcImpl.symm_table;
   if (table == nullptr) {
     return ROCSHMEM_ERROR;

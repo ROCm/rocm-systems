@@ -8,6 +8,11 @@ subtrees:
   - entries:
     - file: what-is-rocprof-compute.rst
 
+  - caption: Quick reference
+    entries:
+    - file: quick-reference/rocprofiler-compute-at-a-glance.rst
+      title: ROCm Compute Profiler at a glance
+
   - caption: Install
     entries:
     - file: install/core-install.rst
@@ -30,6 +35,7 @@ subtrees:
       - file: how-to/analyze/cli.rst
       - file: how-to/analyze/standalone-gui.rst
       - file: how-to/analyze/tui.rst
+      - file: how-to/analyze/optiq.rst
 
   - caption: Conceptual
     entries:

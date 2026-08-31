@@ -359,8 +359,8 @@ static void *allocate_exec_aligned_memory_cpu(uint32_t size)
 	 *
 	 * MAP_ANONYMOUS initializes the memory to zero.
 	 */
-	ptr = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC,
-				MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	ptr = mmap(NULL, size, PROT_READ | PROT_WRITE,
+			MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 
 	if (ptr == MAP_FAILED)
 		return NULL;
@@ -456,10 +456,9 @@ void *hsakmt_allocate_exec_aligned_memory_gpu(HsaKFDContext *ctx,
 
 	if (NodeId != 0) {
 		uint32_t nodes_array[1] = {NodeId};
-		HsaMemMapFlags map_flags = {0};
 		HSAKMT_STATUS result;
 
-		result = hsaKmtMapMemoryToGPUNodesCtx(ctx, mem, size, &gpu_va, map_flags, 1, nodes_array);
+		result = hsaKmtMapMemoryToGPUNodesCtx(ctx, mem, size, &gpu_va, flags, 1, nodes_array);
 		if (result != HSAKMT_STATUS_SUCCESS) {
 			hsaKmtFreeMemoryCtx(ctx, mem, size);
 			return NULL;
@@ -1002,6 +1001,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfoCtx(HsaKFDContext *ctx,
 	QueueInfo->QueueDetailError = 0;
 	QueueInfo->QueueTypeExtended = 0;
 	QueueInfo->SaveAreaHeader = q->ctx_save_restore;
+	QueueInfo->SaveAreaAllocSize = q->ctx_save_restore_size;
 
 	return HSAKMT_STATUS_SUCCESS;
 }

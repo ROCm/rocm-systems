@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(rocprofiler-rocprofv3-tests LANGUAGES C CXX)
 
@@ -40,6 +40,7 @@ add_subdirectory(collection-period)
 add_subdirectory(ompt)
 add_subdirectory(rocdecode-trace)
 add_subdirectory(rocjpeg-trace)
+add_subdirectory(hipfile-trace)
 add_subdirectory(rocshmem-trace)
 add_subdirectory(advanced-thread-trace)
 add_subdirectory(hip-stream-display)

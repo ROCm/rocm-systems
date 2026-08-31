@@ -68,7 +68,9 @@ table KfdDeviceInfo {
   // Compute organization (from kfd_topology.c kfd_fill_gpu_properties)
   simd_count: uint32;             // Total SIMD units (CUs * SIMDs/CU).
   max_waves_per_simd: uint32 = 10;
-  num_shader_engines: uint32;    // KFD array_count: total shader arrays, not libdrm SE count.
+  num_shader_engines: uint32;    // Shader engines per XCC, matching the SoC's se[] count.
+                                 // KFD array_count is derived (times arrays/SE, and times
+                                 // num_xcc for the sysfs node property).
   num_shader_arrays_per_engine: uint32 = 1;
   num_cu_per_sh: uint32;
   simd_per_cu: uint32 = 4;       // 4 for CDNA, 2 for RDNA.
@@ -106,6 +108,34 @@ table KfdDeviceInfo {
   capability: uint32 = 0;
   capability2: uint32 = 0;
   debug_prop: uint64 = 0;
+
+  // Appended to preserve existing field IDs. Required to be nonzero when
+  // num_sdma_engines is nonzero.
+  num_sdma_queues_per_engine: uint32;
+}
+
+/// How the GPU presents itself on a PCI bus, for front ends that attach it to a
+/// VMM rather than interposing the KFD ioctls.
+///
+/// Identity fields not repeated here come from KfdDeviceInfo: the vendor, device
+/// and revision a driver reads are the same values KFD reports. What is here is
+/// the bus shape, which nothing else in the simulation describes.
+///
+/// The class code is what a guest driver's PCI table matches on: amdgpu binds
+/// any AMD device presenting 0x120000 (processing accelerator) or a display
+/// class, and then asks the device what it is through IP discovery.
+table PciDeviceInfo {
+  class_code: uint32 = 0x120000;   // 24-bit PCI class, subclass and programming interface.
+  subsystem_vendor_id: uint32 = 0; // 0 = same as the vendor ID.
+  subsystem_id: uint32 = 0;        // 0 = same as the device ID.
+
+  // Aperture sizes. The register aperture must be large enough to reach every
+  // register the driver reads before IP discovery, the furthest of which sits
+  // at byte 0x5a800; a smaller one pushes those reads onto the indirect window.
+  // Every aperture size must be a power of two, as PCI requires of a BAR.
+  vram_aperture_bytes: uint64 = 0; // 0 = an implementation-chosen window, <= 256 MiB.
+  doorbell_aperture_bytes: uint64 = 2097152;
+  register_aperture_bytes: uint64 = 524288;
 }
 
 /// Top-level AMDGPU configuration.
@@ -116,6 +146,10 @@ table AmdgpuConfig {
   memory: GpuMemoryConfig;
   device: KfdDeviceInfo;         // KFD device identity for sysfs topology.
   num_gpus: uint32 = 1;          // Number of simulated GPU instances.
+  // Appended, not inserted: FlatBuffers assigns field IDs by declaration order,
+  // so placing this before num_gpus would renumber it and change how existing
+  // buffers read.
+  pci: PciDeviceInfo;            // Bus shape for PCI-attached front ends.
 }
 
 enum DbtExecutionBackend: byte {
@@ -124,9 +158,9 @@ enum DbtExecutionBackend: byte {
 }
 
 /// Silicon revision for a DBT translation side. gfx1250 A0 and B0 share an ELF
-/// machine ID but require different translation workarounds, so the revision is
-/// carried out of band. `unspecified` is the default for architectures whose
-/// machine ID already identifies the silicon.
+/// machine ID, so the revision is carried out of band and selects the
+/// corresponding translation profile. `unspecified` is the default for
+/// architectures whose machine ID identifies the silicon.
 enum DbtSiliconRevision: byte {
   unspecified,
   gfx1250_a0,
@@ -234,7 +268,7 @@ table TopologyDef {
 /// Top-level simulation configuration.
 table SimulationConfig {
   max_ticks: uint64;             // Maximum simulation ticks before halting.
-  num_threads: uint32;           // Number of simulation threads (partitions).
+  num_threads: uint32;           // Number of simulation engine partitions (one per XCD when partitioned).
   exec_mode: string;             // Execution mode: "functional" (default) or "clocked".
   vm: VirtualMachineConfig;      // Virtual machine hardware model. Omit for dbt_guest-only configs.
   topology: TopologyDef;         // Declarative topology. Omit for dbt_guest-only configs.

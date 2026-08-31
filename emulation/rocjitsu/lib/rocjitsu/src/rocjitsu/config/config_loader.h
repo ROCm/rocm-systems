@@ -10,6 +10,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/config/kfd_device_config.h"
+#include "rocjitsu/config/pci_device_config.h"
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
@@ -48,12 +49,23 @@ struct TopologyBuildResult {
 ///
 /// Contains the engine configuration and the built component tree. Provides
 /// convenience accessors for the SoC and GPU memory. After loading, wire
-/// the topology into a SimulationEngine:
+/// the topology into a SimulationEngine. Multi-threaded rocjitsu topologies
+/// use the XCD-aware policy from rocjitsu/vm/amdgpu/partitioning.h:
 /// @code
+///   #include "rocjitsu/vm/amdgpu/partitioning.h"
+///
 ///   auto loaded = load_config("config.json", kEmbeddedSchema);
-///   SimulationEngine engine(loaded.engine_config);
+///   auto *soc = loaded.soc();
+///   loaded.engine_config.num_threads =
+///       rocjitsu::amdgpu::clamp_xcd_partition_count(
+///           soc, loaded.engine_config.num_threads);
+///   simdojo::SimulationEngine engine(loaded.engine_config);
 ///   engine.topology().set_root(loaded.take_root());
 ///   loaded.wire_links(engine.topology());
+///   if (loaded.engine_config.num_threads > 1 &&
+///       !rocjitsu::amdgpu::partition_topology_by_xcds(
+///           engine.topology(), soc, loaded.engine_config.num_threads))
+///     throw std::invalid_argument("multi-threaded topology requires an XCD");
 ///   engine.create();
 /// @endcode
 struct LoadedConfig {
@@ -63,6 +75,7 @@ struct LoadedConfig {
       extra_gpu_builds; ///< Additional GPU SoC trees (for num_gpus > 1).
   simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL;
   KfdDeviceConfig device;               ///< KFD device identity from vm.gpu.device.
+  PciDeviceConfig pci;                  ///< PCI bus shape from vm.gpu.pci.
   DbtGuestConfig dbt_guest;             ///< Optional DBT guest-GPU discovery config.
   uint32_t num_gpus = 1;                ///< Number of simulated GPU instances.
   std::vector<KfdDeviceConfig> devices; ///< Per-GPU configs (populated when num_gpus > 1).
@@ -80,11 +93,31 @@ struct LoadedConfig {
   void wire_links(simdojo::Topology &topo) { topo.wire_links(build_result.link_specs, exec_mode); }
 };
 
+/// @brief The identity and bus shape of the GPU a config describes.
+struct DeviceIdentityConfig {
+  KfdDeviceConfig device; ///< GPU identity, as KFD also reports it.
+  PciDeviceConfig pci;    ///< Bus shape for PCI-attached front ends.
+};
+
+/// @brief Read only a config's device identity and bus shape.
+/// @param json_path Path to the JSON config file.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @returns The identity and bus shape.
+/// @throws std::runtime_error when the file cannot be read or parsed.
+/// @details Building the topology allocates the whole simulated machine, which
+/// for a large part is gigabytes of register files. A front end that only needs
+/// to know which GPU to present should not pay for a machine it never runs.
+DeviceIdentityConfig load_device_identity(const std::string &json_path,
+                                          const std::string &schema_text);
+
 /// @brief Parse an architecture name string to an rj_code_arch_t enum value.
 rj_code_arch_t parse_arch(const std::string &arch_str);
 
 /// @brief Convert an rj_code_arch_t enum to its string name.
 const char *arch_to_string(rj_code_arch_t arch);
+
+/// @brief Parse an execution mode name, defaulting to FUNCTIONAL.
+simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
 
 /// @brief Load simulation config from a JSON file.
 /// @param json_path Path to the JSON config file.

@@ -59,12 +59,8 @@ __host__ ROContext::ROContext(Backend *b,
   }
   ro_net_win_id = block_id % backend->ro_window_proxy_->get_num_MPI_windows();
 
-  ipcImpl_.ipc_bases = b->ipcImpl.ipc_bases;
-  ipcImpl_.shm_size = b->ipcImpl.shm_size;
-  ipcImpl_.shm_rank = b->ipcImpl.shm_rank;
-  ipcImpl_.pes_with_ipc_avail = b->ipcImpl.pes_with_ipc_avail;
-  ipcImpl_.ipc_first_pe = b->ipcImpl.ipc_first_pe;
-  ipcImpl_.ipc_stride = b->ipcImpl.ipc_stride;
+  ipcImpl_.initFrom(b->ipcImpl);
+  ipcImpl_.assignSdmaChannel(block_id);
 
 }
 
@@ -576,7 +572,7 @@ __device__ uint64_t broadcast(bool lowest_active, uint64_t value) {
 __device__ int ROContext::broadcastmem_wave([[maybe_unused]] rocshmem_team_t team,
                                         [[maybe_unused]] void *dest, 
                                         [[maybe_unused]] const void* source, 
-                                        [[maybe_unused]] int nelement, 
+                                        [[maybe_unused]] int nelems,
                                         [[maybe_unused]] int PE_root) {
   LOGD_WARN("Broadcastmem Wave API not implemented for reverse offload backend");
   return ROCSHMEM_ERROR;

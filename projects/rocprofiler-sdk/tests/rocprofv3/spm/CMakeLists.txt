@@ -1,7 +1,7 @@
 #
 # rocprofv3 tool test
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-tests-spm
@@ -30,3 +30,4 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 add_subdirectory(json)
+add_subdirectory(rocpd)

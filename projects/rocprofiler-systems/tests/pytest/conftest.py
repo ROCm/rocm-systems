@@ -289,6 +289,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "decode",
         "videodecode",
         "jpegdecode",
+        "hipfile",
         "rocprof_binary",
         "rocprof_config",
         "xgmi",
@@ -301,6 +302,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "sampling_duration",
         "no_tmp_files",
         "rccl",
+        "rocshmem",
         "roctx",
         "time_window",
         "transpose",
@@ -308,7 +310,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "ainic",
         "network",
         "fork",
-        "user_api",
         "thread_limit",
         "pthreads",
         "rewrite_caller",
@@ -322,6 +323,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "unit_tests",
         "hip_stream",
         "presets",
+        "tool_runner",
         "cli_help",
         "hpc",
         "hip",
@@ -610,8 +612,24 @@ def pytest_collection_modifyitems(config, items) -> None:
                 )
 
 
-def pytest_collection_finish(session):
+# Modules that fail to collect are recorded here so CTest generate mode can fail
+_collection_errors: list[pytest.CollectReport] = []
+
+
+def pytest_collectreport(report) -> None:
+    """Record collection failures for CTest generate mode's abort check."""
+    if report.failed:
+        _collection_errors.append(report)
+
+
+def pytest_collection_finish(session) -> None:
     if session.config.getoption("--ctest-mode", default="off") == "generate":
+        if _collection_errors:
+            failures = "\n".join(f"  - {r.nodeid}" for r in _collection_errors)
+            pytest.exit(
+                f"CTestTestfile.cmake generation failed due to:\n{failures}",
+                returncode=1,
+            )
         raw_path = session.config.getoption("--ctest-output-path", default=None)
         output_path = Path(raw_path) if raw_path else None
         _ctest_generate_tests(session.items, output_path)
@@ -738,7 +756,10 @@ def pytest_sessionfinish(session, exitstatus):
 def overflow_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     if rocprof_config.capabilities.perf_events_usable:
         return None
-    return "Requires either perf_event_paranoid <= 2 or CAP_SYS_ADMIN to be available"
+    return (
+        "Requires either perf_event_paranoid <= 2, or CAP_PERFMON or "
+        "CAP_SYS_ADMIN to be available"
+    )
 
 
 def gpu_unavailable_reason() -> Optional[str]:
@@ -758,11 +779,33 @@ def annotate_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[st
 
 
 def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    if rocprof_config.capabilities.ptrace_scope == 0:
+    """Gate ``attach`` tests on whether ptrace attach is permitted.
+
+    Follows the yama policy documented in the Linux kernel's
+    ``Documentation/admin-guide/LSM/Yama.rst``:
+
+    * no sysctl -- yama is not active, so nothing restricts ptrace
+    * scope 0 -- classic ptrace permissions, attach is allowed
+    * scope 1/2 -- restricted, but CAP_SYS_PTRACE bypasses the restriction
+    * scope 3 -- attach is disabled outright and cannot be re-enabled
+      without a reboot
+    """
+    caps = rocprof_config.capabilities
+    scope = caps.ptrace_scope
+
+    if scope is None or scope == 0:
+        return None
+    if scope >= 3:
+        return (
+            f"yama ptrace_scope is {scope}: ptrace attach is disabled outright "
+            "and cannot be re-enabled without a reboot"
+        )
+    if caps.cap_sys_ptrace:
         return None
     return (
-        "Requires ptrace_scope to be 0. Run 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope' "
-        "to enable attaching to process"
+        f"Requires CAP_SYS_PTRACE or ptrace_scope 0 (currently {scope}). Run "
+        "'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope', or grant "
+        "CAP_SYS_PTRACE, to enable attaching to a running process"
     )
 
 
@@ -770,7 +813,10 @@ def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     caps = rocprof_config.capabilities
     if caps.papi_nic_events is not None and caps.perf_events_usable:
         return None
-    return "Requires PAPI network events and perf_event_paranoid <= 2 (or CAP_SYS_ADMIN) to be available"
+    return (
+        "Requires PAPI network events and perf_event_paranoid <= 2 "
+        "(or CAP_PERFMON or CAP_SYS_ADMIN) to be available"
+    )
 
 
 def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
@@ -1485,6 +1531,28 @@ def _generate_rocprofsys_config_header() -> list[str]:
             signal.signal(signal.SIGALRM, _previous_handler)
 
 
+def _trace_processor_shell_status(tests_dir: Path) -> str:
+    """Report which trace_processor_shell Perfetto validation will use.
+
+    Mirrors resolve_trace_processor_shell() in validate-perfetto-proto.py, minus its
+    ``-t`` argument, so a CI log shows whether the build staged a binary before any
+    Perfetto test runs and had to report it the hard way.
+    """
+
+    def usable(path: Path) -> bool:
+        return path.is_file() and os.access(path, os.X_OK)
+
+    override = os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL")
+    if override and usable(Path(override)):
+        return f"{override} ($ROCPROFSYS_TRACE_PROC_SHELL)"
+
+    staged = tests_dir / "trace_processor_shell"
+    if usable(staged):
+        return f"{staged} (staged by the build)"
+
+    return "none staged, perfetto will download one on demand"
+
+
 def _build_rocprofsys_config_header() -> list[str]:
     """Collect system configuration and format it as printable header lines."""
     try:
@@ -1531,6 +1599,10 @@ def _build_rocprofsys_config_header() -> list[str]:
     else:
         oshrun_version_str = "Not found"
 
+    ptrace_scope_str = (
+        "N/A (yama not active)" if cap.ptrace_scope is None else cap.ptrace_scope
+    )
+
     oshrun_strips_str = (
         "Yes (decoy '--' inserted)"
         if cap.oshrun_strips_double_dash
@@ -1556,6 +1628,9 @@ def _build_rocprofsys_config_header() -> list[str]:
         else "Not found"
     )
 
+    # capabilities.max_threads reports 0 when rocprof-sys-avail could not be queried
+    max_threads_str = cap.max_threads if cap.max_threads else "Not found"
+
     W = 22  # label width for alignment
 
     def _row(label: str, value) -> str:
@@ -1563,6 +1638,19 @@ def _build_rocprofsys_config_header() -> list[str]:
 
     def _subrow(label: str, value) -> str:
         return f"    {label:<{W}}{value}"
+
+    # Build mode only: the staged binary is a build-tree test aid and is not installed,
+    # so in install mode this would always report the download fallback
+    trace_processor_rows = (
+        []
+        if rocprof_config.is_installed
+        else [
+            _row(
+                "Trace processor:",
+                _trace_processor_shell_status(rocprof_config.rocprofsys_tests_dir),
+            )
+        ]
+    )
 
     header = [
         "",
@@ -1578,6 +1666,7 @@ def _build_rocprofsys_config_header() -> list[str]:
         _row("Output dir:", rocprof_config.test_output_dir),
         _row("Validate ROCPD:", check_use_rocpd()),
         _row("Validate Perfetto:", check_use_perfetto()),
+        *trace_processor_rows,
         "-" * 70,
         "Core Executables:",
         _row("Instrument:", rocprof_config.rocprofsys_instrument),
@@ -1599,12 +1688,15 @@ def _build_rocprofsys_config_header() -> list[str]:
         "-" * 70,
         "System Capabilities:",
         _row("Detected num procs:", cap.num_procs),
+        _row("Max threads:", max_threads_str),
         _row("UCX available:", cap.ucx_availability),
         _row("Perf event paranoid:", cap.perf_event_paranoid),
         _row("CAP_SYS_ADMIN:", cap.cap_sys_admin),
         _row("CAP_PERFMON:", cap.cap_perfmon),
+        _row("CAP_SYS_PTRACE:", cap.cap_sys_ptrace),
         _row("Perf events usable:", cap.perf_events_usable),
-        _row("Ptrace scope:", cap.ptrace_scope),
+        _row("Ptrace scope:", ptrace_scope_str),
+        _row("Attach usable:", attach_unavailable_reason(rocprof_config) is None),
         _row("Is inside docker:", rocprof_config.capabilities.is_inside_docker),
         _row("PAPI available:", cap.papi_availability),
         _row("AI NIC devices:", cap.ai_nic_devices),
@@ -2526,7 +2618,10 @@ def assert_perfetto(subtests, tests_dir, request, test_output_dir):
                         pytest.fail(
                             f"Fail regex found: {pattern}\n{output}", pytrace=False
                         )
-            _print_subtest_output(request, subtest_name, output)
+            # On success echo only the command: validation.message may contain the
+            # full "-p"/--print perfetto dump, which floods ctest/CI logs. Failures
+            # above still surface the complete output.
+            _print_subtest_output(request, subtest_name, f"Command: {validation.command}")
 
     return _assert_perfetto
 

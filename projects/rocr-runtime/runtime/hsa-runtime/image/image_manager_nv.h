@@ -43,6 +43,8 @@
 #ifndef EXT_IMAGE_IMAGE_MANAGER_NV_H_ 
 #define EXT_IMAGE_IMAGE_MANAGER_NV_H_ 
 
+#include <optional>
+
 #include "addrlib/inc/addrinterface.h"
 #include "image_manager_kv.h"
 
@@ -97,13 +99,25 @@ class ImageManagerNv : public ImageManagerKv {
   virtual void printSwizzleMode(uint32_t sw_mode) const;
 
  protected:
+  /// @brief Compute addrlib surface info. If forced_sw_mode is empty, addrlib picks its preferred
+  /// swizzle (native allocation); otherwise the given swizzle mode is forced so the computed tiling
+  /// matches an imported surface whose layout is dictated externally (Vulkan image interop). Returns
+  /// the swizzle mode used, or (uint32_t)-1 on failure.
   uint32_t GetAddrlibSurfaceInfoNv(hsa_agent_t component,
                                   const hsa_ext_image_descriptor_t& desc,
                                   uint32_t num_mipmap_levels,
                                   Image::TileMode tileMode,
                                   size_t image_data_row_pitch,
                                   size_t image_data_slice_pitch,
-                                  ADDR2_COMPUTE_SURFACE_INFO_OUTPUT& out) const;
+                                  ADDR2_COMPUTE_SURFACE_INFO_OUTPUT& out,
+                                  std::optional<uint32_t> forced_sw_mode = std::nullopt) const;
+
+  /// @brief Build a mipmapped-array image SRD. If meta is null the native path runs (addrlib's
+  /// preferred swizzle, mipmap.tile_mode). Otherwise the surface metadata's swizzle is forced and its
+  /// tile_swizzle (pipe-bank-XOR) is injected into the base address, reconstructing the SRD of an
+  /// imported surface whose layout is dictated externally (Vulkan image interop on Windows, where
+  /// the AMD Vulkan driver exposes no extension to query the SRD).
+  hsa_status_t BuildMipmapSrd(MipmappedArray& mipmap, const HsaWddmSurfaceMetadata* meta) const;
 
   bool IsLocalMemory(const void* address) const;
 

@@ -436,7 +436,9 @@ hsa_status_t InterceptQueue::GetInfo(hsa_queue_info_attribute_t attribute, void*
     case HSA_AMD_QUEUE_INFO_AGENT:
     case HSA_AMD_QUEUE_INFO_DOORBELL_ID: 
     case HSA_QUEUE_INFO_USE_COUNT:
-    case HSA_QUEUE_INFO_HW_ID: {
+    case HSA_QUEUE_INFO_HW_ID:
+    case HSA_AMD_QUEUE_INFO_ENGINE_TYPE:
+    case HSA_AMD_QUEUE_INFO_SDMA_ENGINE_ID: {
       if (!AMD::AqlQueue::IsType(wrapped.get())) return HSA_STATUS_ERROR_INVALID_QUEUE;
 
       AMD::AqlQueue* aqlQueue = static_cast<AMD::AqlQueue*>(wrapped.get());

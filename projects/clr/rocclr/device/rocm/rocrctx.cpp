@@ -31,6 +31,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_agent_get_info)
   GET_ROCR_SYMBOL(hsa_queue_create)
   GET_ROCR_SYMBOL(hsa_queue_destroy)
+  GET_ROCR_SYMBOL(hsa_amd_queue_get_info)
   GET_ROCR_SYMBOL(hsa_queue_load_read_index_scacquire)
   GET_ROCR_SYMBOL(hsa_queue_load_read_index_relaxed)
   GET_ROCR_SYMBOL(hsa_queue_load_write_index_scacquire)

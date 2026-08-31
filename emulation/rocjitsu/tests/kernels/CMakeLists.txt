@@ -43,6 +43,7 @@ rj_add_device_kernel(matmul_mfma_16x16 gfx950)
 rj_add_device_kernel(matmul_tiled gfx950)
 rj_add_device_kernel(vector_add gfx950)
 rj_add_device_kernel(dynamic_copy_loop gfx950)
+rj_add_device_kernel(scratch_spill_probe gfx950)
 rj_add_device_kernel(virtual_lds_smoke gfx950)
 rj_add_device_kernel(cvt_pk_bf16_f32 gfx950)
 rj_add_device_kernel(multikernel_indirect_branch gfx950)
@@ -140,6 +141,7 @@ if(RJ_INSTALL_TESTS)
         ${KERNEL_OUTPUT_DIR}/vector_add_gfx90a.o
         ${KERNEL_OUTPUT_DIR}/vector_add_probe_gfx90a.o
         ${KERNEL_OUTPUT_DIR}/dynamic_copy_loop.o
+        ${KERNEL_OUTPUT_DIR}/scratch_spill_probe.o
         ${KERNEL_OUTPUT_DIR}/virtual_lds_smoke.o
         ${KERNEL_OUTPUT_DIR}/cvt_pk_bf16_f32.o
         ${KERNEL_OUTPUT_DIR}/hipkittens_bf16fp32_256_256_64_32_with16x32.hsaco
@@ -177,18 +179,49 @@ find_program(
     DOC "Path to clang-offload-bundler for device-only probe objects"
 )
 set(HAS_PROBE_FIXTURES FALSE)
+set(HAS_GFX1250_DBT_FIXTURE FALSE)
+set(RJ_GFX1250_DBT_FIXTURE_TARGET)
 if(CLANG_OFFLOAD_BUNDLER)
     rj_add_probe_object(rj_nop_probe gfx90a OUTPUT_NAME rj_nop_probe_gfx90a)
+    rj_add_probe_object(
+        callable_sgpr_probe
+        gfx950
+        OUTPUT_NAME callable_sgpr_probe_gfx950
+    )
     set(HAS_PROBE_FIXTURES TRUE)
+
+    # The narrow gfx1250 DBT library accepts a raw AMDGPU code object rather
+    # than the host ELF / .hip_fatbin produced by rj_add_device_kernel().
+    if(HAS_GFX1250_DEVICE_KERNELS)
+        rj_add_probe_object(
+            relocation_function_table_dispatch
+            gfx1250
+            OUTPUT_NAME relocation_function_table_dispatch_gfx1250
+        )
+        set(HAS_GFX1250_DBT_FIXTURE TRUE)
+        set(RJ_GFX1250_DBT_FIXTURE_TARGET
+            probe_relocation_function_table_dispatch_gfx1250
+        )
+    endif()
+
     # Install the probe object alongside the other kernel fixtures so installed
     # runs of probe_fixture_test / hsa_dbi_nop_probe_test can find it via
     # ROCJITSU_KERNEL_DIR. Gated here (not in the list above) because it exists
     # only when the offload bundler is available.
     if(RJ_INSTALL_TESTS)
         install(
-            FILES ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx90a.hsaco
+            FILES
+                ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx90a.hsaco
+                ${KERNEL_OUTPUT_DIR}/callable_sgpr_probe_gfx950.hsaco
             DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/kernels
         )
+        if(HAS_GFX1250_DBT_FIXTURE)
+            install(
+                FILES
+                    ${KERNEL_OUTPUT_DIR}/relocation_function_table_dispatch_gfx1250.hsaco
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/kernels
+            )
+        endif()
     endif()
 else()
     message(
@@ -209,12 +242,14 @@ add_custom_target(
         kernel_vector_add_gfx90a
         kernel_vector_add_probe_gfx90a
         kernel_dynamic_copy_loop
+        kernel_scratch_spill_probe
         kernel_virtual_lds_smoke
         kernel_cvt_pk_bf16_f32
         kernel_multikernel_indirect_branch
         kernel_multikernel_indirect_branch_part0
         kernel_multikernel_indirect_branch_part1
         ${RJ_GFX1250_DEVICE_KERNEL_TARGET}
+        ${RJ_GFX1250_DBT_FIXTURE_TARGET}
         kernel_triton_cdna4_matmul_dynamic_32x32x64
         kernel_triton_cdna4_matmul_buffer_async_1024
         kernel_triton_cdna4_flash_attention_no_async_1024
@@ -234,5 +269,6 @@ endif()
 # Export variables to the parent scope so the test executable can use them.
 set(HAS_DEVICE_KERNELS TRUE PARENT_SCOPE)
 set(HAS_GFX1250_DEVICE_KERNELS ${HAS_GFX1250_DEVICE_KERNELS} PARENT_SCOPE)
+set(HAS_GFX1250_DBT_FIXTURE ${HAS_GFX1250_DBT_FIXTURE} PARENT_SCOPE)
 set(HAS_PROBE_FIXTURES ${HAS_PROBE_FIXTURES} PARENT_SCOPE)
 set(KERNEL_OUTPUT_DIR ${KERNEL_OUTPUT_DIR} PARENT_SCOPE)

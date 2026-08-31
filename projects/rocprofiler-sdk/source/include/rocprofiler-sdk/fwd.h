@@ -185,6 +185,7 @@ typedef enum rocprofiler_callback_tracing_kind_t  // NOLINT(performance-enum-siz
                                                          ///< ::rocprofiler_marker_core_range_api_id_t
     ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,     ///< @see ::rocprofiler_hip_graph_operation_t
     ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,  ///< rocSHMEM API tracing
+    ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,   ///< hipFILE API Tracing
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -239,6 +240,8 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,              ///< One record per hipGraphLaunch invocation
     ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API,           ///< rocSHMEM tracing
     ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT,
+    ROCPROFILER_BUFFER_TRACING_HIPFILE_API,  ///< hipFILE tracing
+    ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT,
     ROCPROFILER_BUFFER_TRACING_LAST,
 
     /// @var ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT
@@ -252,6 +255,9 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     /// contains the function argument(s) and return value
     /// @var ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT
     /// @brief Similar to ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API except the buffer record
+    /// contains the function argument(s) and return value
+    /// @var ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT
+    /// @brief Similar to ROCPROFILER_BUFFER_TRACING_HIPFILE_API except the buffer record
     /// contains the function argument(s) and return value
 } rocprofiler_buffer_tracing_kind_t;
 
@@ -438,7 +444,8 @@ typedef enum rocprofiler_runtime_library_t
     ROCPROFILER_ROCJPEG_LIBRARY   = (1 << 6),
     ROCPROFILER_OMPT_LIBRARY      = (1 << 7),
     ROCPROFILER_ROCSHMEM_LIBRARY  = (1 << 8),
-    ROCPROFILER_LIBRARY_LAST      = ROCPROFILER_ROCSHMEM_LIBRARY,
+    ROCPROFILER_HIPFILE_LIBRARY   = (1 << 9),
+    ROCPROFILER_LIBRARY_LAST      = ROCPROFILER_HIPFILE_LIBRARY,
 } rocprofiler_runtime_library_t;
 
 /**
@@ -457,7 +464,8 @@ typedef enum rocprofiler_intercept_table_t
     ROCPROFILER_ROCDECODE_TABLE      = (1 << 7),
     ROCPROFILER_ROCJPEG_TABLE        = (1 << 8),
     ROCPROFILER_ROCSHMEM_TABLE       = (1 << 9),
-    ROCPROFILER_TABLE_LAST           = ROCPROFILER_ROCSHMEM_TABLE,
+    ROCPROFILER_HIPFILE_TABLE        = (1 << 10),
+    ROCPROFILER_TABLE_LAST           = ROCPROFILER_HIPFILE_TABLE,
 } rocprofiler_intercept_table_t;
 
 /**
@@ -474,6 +482,7 @@ typedef enum rocprofiler_runtime_initialization_operation_t  // NOLINT(performan
     ROCPROFILER_RUNTIME_INITIALIZATION_ROCJPEG,    ///< Application loaded rocJPEG runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_OMPT,       ///< Application loaded OMPT runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_ROCSHMEM,   ///< Application loaded rocSHMEM runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_HIPFILE,    ///< Application loaded hipFILE runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_LAST,
 } rocprofiler_runtime_initialization_operation_t;
 

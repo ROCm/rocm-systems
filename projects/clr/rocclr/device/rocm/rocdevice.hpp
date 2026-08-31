@@ -60,24 +60,21 @@ class PrintfDbg;
 
 class ProfilingSignal : public amd::ReferenceCountedObject {
  public:
-  //! Sentinel for queue_index_ when the owning stream is unknown.
-  static constexpr uint32_t kInvalidQueueIndex = std::numeric_limits<uint32_t>::max();
+  //! Sentinel for dispatch_slot_ when this signal doesn't time a reported graph dispatch.
+  static constexpr uint32_t kNoDispatchSlot = std::numeric_limits<uint32_t>::max();
 
   hsa_signal_t signal_;   //!< HSA signal to track profiling information
   Timestamp* ts_;         //!< Timestamp object associated with the signal
   HwQueueEngine engine_;  //!< Engine used with this signal
-  //! vGPU (queue) index of the stream this signal was dispatched on. Graphs span
-  //! multiple streams under one command, so profiling reads this per-signal to
-  //! attribute each kernel to the queue it actually ran on.
-  uint32_t queue_index_ = kInvalidQueueIndex;
+  //! AccumulateCommand dispatch record this signal supplies timing for.
+  uint32_t dispatch_slot_ = kNoDispatchSlot;
   std::recursive_mutex lock_;  //!< Signal lock for update
 
   typedef union {
     struct {
-      uint32_t done_ : 1;              //!< True if signal is done
-      uint32_t isPacketDispatch_ : 1;  //!< True if the packet, used with the signal, is dispatch
-      uint32_t interrupt_ : 1;         //!< True if the signal will trigger an interrupt
-      uint32_t reserved_ : 29;
+      uint32_t done_ : 1;       //!< True if signal is done
+      uint32_t interrupt_ : 1;  //!< True if the signal will trigger an interrupt
+      uint32_t reserved_ : 30;
     };
     uint32_t data_;
   } Flags;
@@ -96,7 +93,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
     signal_.handle = 0;
     flags_.data_ = 0;
     flags_.done_ = true;
-    queue_index_ = kInvalidQueueIndex;
+    dispatch_slot_ = kNoDispatchSlot;
   }
 
   virtual ~ProfilingSignal();
@@ -111,7 +108,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
     cached_timing_.start_ = 0;
     cached_timing_.end_ = 0;
     cached_timing_.valid_ = false;
-    queue_index_ = kInvalidQueueIndex;
+    dispatch_slot_ = kNoDispatchSlot;
   }
 
   //! Check if timing is already cached
@@ -384,6 +381,11 @@ class Device : public NullDevice {
   //! Get the CPU agent with the least NUMA distance to this GPU
   const hsa_agent_t& getCpuAgent() const { return cpu_agent_info_->agent; }
 
+  //! Maps an HSA agent to a stable global index shared across all devices. GPU agents
+  //! occupy [0, numGpuAgents); CPU agents occupy [numGpuAgents, numGpuAgents + numCpuAgents).
+  //! Returns -1 if the agent is not one of the enumerated agents.
+  static int agentGlobalIndex(hsa_agent_t agent);
+
   //! Get the CPU agent that is in a 'index' NUMA node
   const hsa_agent_t getCpuAgent(int index) const {
     if ((index < 0) || (index >= cpu_agents_.size())) {
@@ -471,10 +473,6 @@ class Device : public NullDevice {
   void deviceVmemRelease(uint64_t mem_handle) const;
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
 
-  //! Whether host-resident NUMA VMM allocation is supported for the given node.
-  //! Queries the CPU agent's HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED; returns
-  //! false against a ROCr that predates the query (graceful degrade).
-  bool hostVmemSupported(int numaNode) const;
   //! Allocate a host-resident VMM handle on a CPU NUMA pool. numaNode < 0 resolves
   //! to the calling thread's current node (HostNumaCurrent). Returns 0 on failure.
   uint64_t hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const;
@@ -600,6 +598,8 @@ class Device : public NullDevice {
     //! Cached hardware doorbell (UC MMIO), only set when DEBUG_CLR_DIRECT_DOORBELL is enabled.
     volatile uint64_t* doorbellPtr = nullptr;
     bool deviceMemRingBuf = false;
+    //! Largest barrier-bit slot shared by every VirtualGPU using this physical queue.
+    std::shared_ptr<std::atomic<uint64_t>> largestAqlBarrierBitSlot;
   };
 
   //! Acquire HSA queue. This method can create a new HSA queue or
@@ -726,6 +726,7 @@ class Device : public NullDevice {
 
   bool populateOCLDeviceConstants();
   static bool isHsaInitialized_;
+  static bool hostVmemSupported_;
   static std::vector<hsa_agent_t> gpu_agents_;
   static std::vector<AgentInfo> cpu_agents_;
   uint32_t preferred_numa_node_;
@@ -830,7 +831,7 @@ class Device : public NullDevice {
   struct SdmaEngineAllocator {
     amd::Monitor lock_;  //!< Protects the allocation state
     std::unordered_map<VirtualGPU*, uint32_t> vgpu_to_engine_;  //!< VirtualGPU -> engine mask
-    std::atomic<uint32_t> next_rr_engine_{0};  //!< Simple RR counter for future use
+    std::atomic<uint32_t> next_rr_engine_{0};  //!< RR counter for sdma engine selection
     const Device& device_;  //!< Reference to parent device for accessing masks
 
     SdmaEngineAllocator(const Device& device) : device_(device) {}

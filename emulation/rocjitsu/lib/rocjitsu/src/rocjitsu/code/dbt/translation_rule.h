@@ -22,8 +22,15 @@
 
 #pragma once
 
+#include "util/bit.h"
+
+#include <algorithm>
+#include <array>
 #include <compare>
 #include <cstdint>
+#include <functional>
+#include <limits>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -83,6 +90,9 @@ struct KernelResourceRequirements {
   /// @brief Initial per-lane private segment size from descriptor translation.
   uint32_t private_segment_fixed_size = 0;
 
+  /// @brief Whether private memory above the fixed segment is a dynamic call stack.
+  bool uses_dynamic_stack = false;
+
   /// @brief Minimum per-lane private segment size required after spill-backed lowerings.
   uint32_t required_private_segment_fixed_size = 0;
 
@@ -110,10 +120,11 @@ struct KernelResourceRequirements {
   /// @param accum_base Initial target AccVGPR base.
   /// @param sgprs Initial target SGPR count.
   /// @param private_bytes Initial per-lane private segment size.
+  /// @param dynamic_stack Whether the kernel uses a runtime-managed dynamic stack.
   KernelResourceRequirements(uint32_t vgprs, uint32_t agprs, uint32_t accum_base, uint32_t sgprs,
-                             uint32_t private_bytes = 0)
+                             uint32_t private_bytes = 0, bool dynamic_stack = false)
       : num_vgprs(vgprs), num_agprs(agprs), accum_offset(accum_base), num_sgprs(sgprs),
-        private_segment_fixed_size(private_bytes),
+        private_segment_fixed_size(private_bytes), uses_dynamic_stack(dynamic_stack),
         required_private_segment_fixed_size(private_bytes),
         semantic_spill_persistent_end(private_bytes) {}
 
@@ -150,14 +161,20 @@ struct KernelResourceRequirements {
   /// @details Persistent semantic spill slots hold values across multiple
   /// replacement sequences. They are allocated before the reusable temp window
   /// so later per-instruction spills cannot overwrite them.
-  [[nodiscard]] uint32_t reserve_persistent_semantic_spill_dwords(uint32_t dwords) {
-    constexpr uint32_t kSpillAlignment = 16;
-    const uint32_t base =
-        (semantic_spill_persistent_end + kSpillAlignment - 1u) & ~(kSpillAlignment - 1u);
-    const uint32_t required = base + dwords * 4u;
-    semantic_spill_persistent_end = required;
-    require_private_segment_bytes(required);
-    return base;
+  ///
+  /// @returns The per-lane byte offset of the reserved slots, or std::nullopt if
+  /// aligning/extending the private segment would exceed the 32-bit private-size
+  /// field. The private segment is initialized from the guest descriptor's
+  /// private size, which can be near UINT32_MAX, so unchecked 32-bit arithmetic
+  /// here could wrap to a low offset and corrupt guest scratch. Callers must
+  /// treat nullopt as a kernel translation failure.
+  [[nodiscard]] std::optional<uint32_t> reserve_persistent_semantic_spill_dwords(uint32_t dwords) {
+    const auto reservation = semantic_spill_reservation(dwords);
+    if (!reservation)
+      return std::nullopt;
+    semantic_spill_persistent_end = reservation->second;
+    require_private_segment_bytes(reservation->second);
+    return reservation->first;
   }
 
   /// @brief Reserve @p dwords reusable 32-bit per-lane spill slots.
@@ -169,12 +186,33 @@ struct KernelResourceRequirements {
   /// persistent virtual registers, so every lowering site in the kernel can
   /// reuse the same slot range. Descriptor recomputation later raises
   /// private_segment_fixed_size to cover the largest reservation.
-  [[nodiscard]] uint32_t reserve_semantic_spill_dwords(uint32_t dwords) {
-    constexpr uint32_t kSpillAlignment = 16;
-    const uint32_t base =
-        (semantic_spill_persistent_end + kSpillAlignment - 1u) & ~(kSpillAlignment - 1u);
-    require_private_segment_bytes(base + dwords * 4u);
-    return base;
+  ///
+  /// @returns The per-lane byte offset of the reserved slots, or std::nullopt on
+  /// 32-bit overflow (see reserve_persistent_semantic_spill_dwords). Unlike the
+  /// persistent variant this does not advance semantic_spill_persistent_end.
+  [[nodiscard]] std::optional<uint32_t> reserve_semantic_spill_dwords(uint32_t dwords) {
+    const auto reservation = semantic_spill_reservation(dwords);
+    if (!reservation)
+      return std::nullopt;
+    require_private_segment_bytes(reservation->second);
+    return reservation->first;
+  }
+
+private:
+  /// @brief Compute the aligned base and one-past-end for a spill reservation.
+  ///
+  /// @returns {base_byte_offset, end_byte_offset} using checked 64-bit math, or
+  /// std::nullopt if either would exceed the 32-bit private-size field.
+  [[nodiscard]] std::optional<std::pair<uint32_t, uint32_t>>
+  semantic_spill_reservation(uint32_t dwords) const {
+    constexpr uint64_t kSpillAlignment = 16;
+    constexpr uint64_t kMax = std::numeric_limits<uint32_t>::max();
+    const uint64_t base =
+        util::align_up(static_cast<uint64_t>(semantic_spill_persistent_end), kSpillAlignment);
+    const uint64_t end = base + static_cast<uint64_t>(dwords) * 4u;
+    if (base > kMax || end > kMax)
+      return std::nullopt;
+    return std::pair<uint32_t, uint32_t>{static_cast<uint32_t>(base), static_cast<uint32_t>(end)};
   }
 };
 
@@ -228,8 +266,8 @@ struct TranslationContext : KernelResourceRequirements, VirtualLdsTranslationSta
   TranslationContext(uint32_t vgprs, uint32_t sgprs) : KernelResourceRequirements(vgprs, sgprs) {}
 
   TranslationContext(uint32_t vgprs, uint32_t agprs, uint32_t accum_base, uint32_t sgprs,
-                     uint32_t private_bytes = 0)
-      : KernelResourceRequirements(vgprs, agprs, accum_base, sgprs, private_bytes) {}
+                     uint32_t private_bytes = 0, bool dynamic_stack = false)
+      : KernelResourceRequirements(vgprs, agprs, accum_base, sgprs, private_bytes, dynamic_stack) {}
 };
 
 /// @brief Status returned by a semantic EXPAND rule lookup or expansion.
@@ -370,6 +408,98 @@ using ExpandFn = ExpandResult (*)(const Instruction &inst, uint32_t arch, uint64
                                   const LivenessAnalysis &liveness, TranslationContext &context,
                                   const LaneLayout *guest_layout, const LaneLayout *host_layout);
 
+/// @brief Read-only test for whether an implemented expansion is still actionable.
+///
+/// @details The predicate observes only the decoded instruction stream. It must
+/// share any operand or neighboring-instruction trigger checks used by the
+/// corresponding ExpandFn, but must not allocate resources or emit words.
+using ResidualExpandFn = bool (*)(const Instruction &inst);
+
+/// @brief Whether and how a rewrite participates in final-stream discharge.
+enum class RewriteDischargeDisposition : uint8_t {
+  Unregistered,          ///< No audit contract was declared; audited profiles reject this state.
+  Checked,               ///< Run the registered read-only predicate on the final stream.
+  NoSuccessfulExpansion, ///< The rule may decline or fail, but must never emit output.
+};
+
+/// @brief Decoded context required by one residual rewrite predicate.
+enum class RewriteDischargeContext : uint8_t {
+  Instruction, ///< The predicate observes only the candidate instruction.
+  BasicBlock,  ///< The predicate observes neighboring instructions in the decoded basic block.
+};
+
+/// @brief Explicit final-stream audit contract for one rewrite.
+///
+/// @details Audited profiles require every rewrite to use checked() or
+/// no_success(). A checked predicate declares the least decoded context it
+/// needs: instruction-local checks support a constant-memory stream scan, while
+/// basic-block checks require the verifier to retain the decoded CFG.
+/// The default Unregistered state keeps older, unaudited profiles source
+/// compatible without allowing an audited profile to silently omit a rule.
+class RewriteDischarge {
+public:
+  RewriteDischargeDisposition disposition = RewriteDischargeDisposition::Unregistered;
+  ResidualExpandFn check = nullptr;
+  const char *rationale = nullptr;
+  RewriteDischargeContext context = RewriteDischargeContext::Instruction;
+
+  [[nodiscard]] static constexpr RewriteDischarge
+  checked(ResidualExpandFn predicate, RewriteDischargeContext required_context) {
+    return {RewriteDischargeDisposition::Checked, predicate, nullptr, required_context};
+  }
+
+  [[nodiscard]] static constexpr RewriteDischarge no_success(const char *reason) {
+    return {RewriteDischargeDisposition::NoSuccessfulExpansion, nullptr, reason,
+            RewriteDischargeContext::Instruction};
+  }
+
+  [[nodiscard]] constexpr bool valid() const {
+    if (disposition == RewriteDischargeDisposition::Checked) {
+      const bool valid_context = context == RewriteDischargeContext::Instruction ||
+                                 context == RewriteDischargeContext::BasicBlock;
+      return check != nullptr && rationale == nullptr && valid_context;
+    }
+    if (disposition == RewriteDischargeDisposition::NoSuccessfulExpansion)
+      return check == nullptr && rationale != nullptr && rationale[0] != '\0' &&
+             context == RewriteDischargeContext::Instruction;
+    return false;
+  }
+
+  /// @brief Whether @p status is compatible with the declared audit contract.
+  [[nodiscard]] constexpr bool allows(ExpandStatus status) const {
+    return disposition != RewriteDischargeDisposition::NoSuccessfulExpansion ||
+           status != ExpandStatus::Success;
+  }
+};
+
+/// @brief Applicability test for a non-opcode-keyed instruction rewrite.
+using InstructionRewriteAppliesFn = bool (*)(const Instruction &inst);
+
+/// @brief Lowering callback for a non-opcode-keyed instruction rewrite.
+using InstructionRewriteFn = ExpandResult (*)(const Instruction &inst, uint64_t offset,
+                                              std::span<const uint8_t> source_text,
+                                              const LivenessAnalysis &liveness,
+                                              TranslationContext &context);
+
+/// @brief One rewrite selected by operands or other instruction-local state.
+///
+/// @details These rules are kept separate from the sorted opcode table so that
+/// table lookup remains cheap. The same declaration drives applicability,
+/// liveness selection, lowering, and final-stream discharge.
+class RegisteredInstructionRewrite {
+public:
+  const char *name = nullptr;
+  InstructionRewriteAppliesFn applies = nullptr;
+  InstructionRewriteFn lower = nullptr;
+  bool requires_liveness = true;
+  RewriteDischarge discharge;
+
+  [[nodiscard]] constexpr bool valid() const {
+    return name != nullptr && name[0] != '\0' && applies != nullptr && lower != nullptr &&
+           discharge.valid();
+  }
+};
+
 /// @brief A single translation rule for one (source, target) instruction.
 ///
 /// @details Keyed by (src_encoding_id, src_opcode) for lookup via binary search.
@@ -389,6 +519,19 @@ struct TranslationRule {
   ExpandFn expand_fn;             ///< Expansion generator (for Expand).
   const LaneLayout *guest_layout; ///< Source matrix layout (for matrix Expand).
   const LaneLayout *host_layout;  ///< Target matrix layout (for matrix Expand).
+  bool requires_liveness = true;  ///< Conservative default; tables opt out after auditing.
+  /// Explicit final-stream audit disposition for this expansion.
+  RewriteDischarge discharge;
+
+  constexpr TranslationRule(uint16_t source_encoding_id, uint16_t source_opcode,
+                            RuleAction rule_action, uint16_t target_opcode, uint8_t field_map_count,
+                            const FieldMap *maps, ExpandFn expansion,
+                            const LaneLayout *source_layout, const LaneLayout *target_layout,
+                            bool needs_liveness = true, RewriteDischarge audit = {})
+      : src_encoding_id(source_encoding_id), src_opcode(source_opcode), action(rule_action),
+        dst_opcode(target_opcode), num_field_maps(field_map_count), field_maps(maps),
+        expand_fn(expansion), guest_layout(source_layout), host_layout(target_layout),
+        requires_liveness(needs_liveness), discharge(audit) {}
 
   constexpr auto operator<=>(const TranslationRule &rhs) const {
     if (auto cmp = src_encoding_id <=> rhs.src_encoding_id; cmp != 0)
@@ -397,6 +540,92 @@ struct TranslationRule {
   }
   constexpr bool operator==(const TranslationRule &rhs) const {
     return src_encoding_id == rhs.src_encoding_id && src_opcode == rhs.src_opcode;
+  }
+};
+
+/// @brief Whether a semantic rule table is strictly ordered for binary search.
+///
+/// @details SemanticTranslator::find_expand_rule() binary-searches these tables,
+/// so an entry in the wrong place misses its own rule rather than failing.
+/// Encoding ids are derived rather than written down -- a SOPK id, for instance,
+/// is the SOPK base plus the opcode -- which makes a misplaced entry easy to
+/// introduce and silent to observe. Every table static_asserts this.
+///
+/// Strict rather than merely nondecreasing: the search takes the first match, so
+/// a duplicated (encoding id, opcode) leaves the second rule permanently
+/// unreachable -- the same silent miss, arrived at from the other direction.
+/// Catching that case depends on the comparison below ordering rules by their
+/// key alone, which is what makes two entries that share a key but differ in
+/// action or handler compare greater-equal here. Defaulting those operators
+/// would keep the out-of-order half working and silently drop the duplicate
+/// half.
+[[nodiscard]] constexpr bool translation_rules_sorted(std::span<const TranslationRule> rules) {
+  return std::ranges::adjacent_find(rules, std::ranges::greater_equal{}) == rules.end();
+}
+
+namespace translation_rule_detail {
+
+/// @brief Two rules sharing a key but differing in everything else.
+///
+/// @details The duplicate half of translation_rules_sorted() works only while
+/// the comparison ignores these trailing fields. Defaulting the operators would
+/// order this pair by them instead, so the pair would compare ascending, every
+/// table in the tree would still satisfy its own assertion, and the duplicate
+/// check would be silently gone. Pinning it here fails at the definition rather
+/// than at some future table that happens to duplicate a key.
+inline constexpr std::array<TranslationRule, 2> kSameKeyDifferentTail = {{
+    {1, 2, RuleAction::Identity, 0, 0, nullptr, nullptr, nullptr, nullptr, true},
+    {1, 2, RuleAction::Expand, 3, 0, nullptr, nullptr, nullptr, nullptr, false},
+}};
+static_assert(!translation_rules_sorted(kSameKeyDifferentTail),
+              "TranslationRule must order by (encoding id, opcode) alone, or "
+              "translation_rules_sorted() stops rejecting duplicate keys");
+
+} // namespace translation_rule_detail
+
+/// @brief Complete handwritten rewrite declaration for one translation profile.
+///
+/// @details Opcode-keyed expansions and non-table instruction rewrites retain
+/// their existing dispatch mechanisms, but are selected here as one profile.
+/// Verification is available only when the registry is nonempty, the opcode
+/// rules have strictly ordered unique keys, and every declared rule carries a
+/// valid checked or no-success disposition.
+class RewriteRegistry {
+public:
+  std::span<const TranslationRule> opcode_rules;
+  std::span<const RegisteredInstructionRewrite> instruction_rules;
+
+  /// @brief Whether a non-opcode rule requires contextual final-stream analysis.
+  ///
+  /// @details These predicates cannot be evaluated safely by the streaming
+  /// verifier because their neighboring instructions do not exist until the CFG
+  /// is built. Conservatively request that CFG independent of the lowering
+  /// selector, which is allowed to differ from the residual predicate.
+  [[nodiscard]] constexpr bool instruction_rewrites_require_basic_block() const {
+    for (const RegisteredInstructionRewrite &rule : instruction_rules) {
+      if (rule.discharge.disposition == RewriteDischargeDisposition::Checked &&
+          rule.discharge.context == RewriteDischargeContext::BasicBlock) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  [[nodiscard]] constexpr bool has_complete_discharge() const {
+    if (opcode_rules.empty() && instruction_rules.empty())
+      return false;
+    for (size_t rule_index = 0; rule_index < opcode_rules.size(); ++rule_index) {
+      const TranslationRule &rule = opcode_rules[rule_index];
+      if (rule.action != RuleAction::Expand || rule.expand_fn == nullptr || !rule.discharge.valid())
+        return false;
+      if (rule_index != 0 && !(opcode_rules[rule_index - 1] < rule))
+        return false;
+    }
+    for (const RegisteredInstructionRewrite &rule : instruction_rules) {
+      if (!rule.valid())
+        return false;
+    }
+    return true;
   }
 };
 

@@ -30,7 +30,7 @@ overview:
   * :doc:`cdna/references`
 
 * **Ryzen APU (RDNA)** - :doc:`RDNA3 <rdna/rdna-performance-model>`: Architecture, top-level RDNA3 block diagram, gfx115x panels, and chapters for:
-  
+
   * :doc:`rdna/system-speed-of-light`
 
   * :doc:`rdna/shader-engine` (overview)

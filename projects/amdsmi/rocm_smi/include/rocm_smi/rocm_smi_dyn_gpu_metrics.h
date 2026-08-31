@@ -1,24 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #ifndef ROCM_SMI_ROCM_SMI_DYN_GPU_METRICS_H_
 #define ROCM_SMI_ROCM_SMI_DYN_GPU_METRICS_H_
 
@@ -894,7 +876,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "GFX Activity Accumulator", "Accumulator for GFX activity percentage",
              details::AMDGpuMetricAttributeId_t::GFX_ACTIVITY_ACC,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::PERCENT),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
@@ -903,7 +885,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "Memory Activity Accumulator", "Accumulator for memory activity percentage",
              details::AMDGpuMetricAttributeId_t::MEM_ACTIVITY_ACC,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::PERCENT),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
@@ -957,7 +939,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "PCIe NAK Sent Count Accumulator", "Accumulator for PCIe NAK sent count",
              details::AMDGpuMetricAttributeId_t::PCIE_NAK_SENT_COUNT_ACC,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::COUNT_ACCUMULATOR),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
@@ -966,7 +948,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "PCIe NAK Received Count Accumulator", "Accumulator for PCIe NAK received count",
              details::AMDGpuMetricAttributeId_t::PCIE_NAK_RCVD_COUNT_ACC,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::COUNT_ACCUMULATOR),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
@@ -1061,7 +1043,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "PCIe LC Perf Other End Recovery", "PCIe link control performance other end recovery",
              details::AMDGpuMetricAttributeId_t::PCIE_LC_PERF_OTHER_END_RECOVERY,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::COUNT_ACCUMULATOR),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
