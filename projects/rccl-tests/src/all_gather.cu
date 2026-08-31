@@ -327,8 +327,8 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
   if (count == 0 || devtimeLoop < 1) return testSuccess;
 
   const size_t chunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
-  int loop = devtimeLoop;
-  int skip = devtimeSkip < 0 ? 0 : devtimeSkip;
+  int loop = 0;
+  int skip = 0;
   gin_devtime::resolveLoopSkip(chunkBytes, loop, skip);
 
   auto kernel = SPECIALIZE_KERNEL(GinHybridAllGatherTimedKernel, type, op);

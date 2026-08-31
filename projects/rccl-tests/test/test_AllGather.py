@@ -99,7 +99,7 @@ def test_AllGatherSingleProcess(nthreads, ngpus_single, byte_range, op, step_fac
 #                            bound would allow unsegmented; each 128 MiB segment
 #                            stays well under it, so a stale/truncated tail here
 #                            would surface as a data-check failure.
-#   3. 2 GiB total        -- multi-segment completion guard; a subprocess timeout
+#   3. 4 GiB total        -- multi-segment completion guard; a subprocess timeout
 #                            turns a reintroduced SDMA hang into a test failure
 #                            instead of stalling the runner forever.
 #

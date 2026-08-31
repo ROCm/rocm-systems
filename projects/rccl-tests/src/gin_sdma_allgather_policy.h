@@ -21,6 +21,10 @@
 #include <cstddef>
 #include <cstdint>
 
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+#include <cstdlib>
+#endif
+
 #if defined(GIN_SDMA_HOST_ONLY)
 #ifndef GIN_SDMA_AG_HD
 #define GIN_SDMA_AG_HD /* host-only: no HIP attributes */
@@ -153,11 +157,10 @@ GIN_SDMA_AG_HD inline void bandwidthGBps(size_t perRankCount, size_t typeSize, d
 
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
 // Host-side env resolution (unit-testable without pulling in all_gather.cu).
-#include <cstdlib>
 
 inline bool parseEnvU64(const char* name, unsigned long long* val) {
   const char* e = getenv(name);
-  if (!e || !e[0]) return false;
+  if (!e || !e[0] || *e == '-') return false;
   char* end = nullptr;
   unsigned long long v = strtoull(e, &end, 10);
   if (end == e) return false;
@@ -168,7 +171,7 @@ inline bool parseEnvU64(const char* name, unsigned long long* val) {
 inline size_t parseAllGatherCtasEnv() {
   const char* e = getenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS");
   if (!e || !e[0]) e = getenv("NCCL_GIN_ANVIL_AG_CTAS");  // deprecated alias
-  if (!e || !e[0]) return kAllGatherCtasUnset;
+  if (!e || !e[0] || *e == '-') return kAllGatherCtasUnset;
   char* end = nullptr;
   unsigned long long v = strtoull(e, &end, 10);
   if (end == e) return kAllGatherCtasUnset;
