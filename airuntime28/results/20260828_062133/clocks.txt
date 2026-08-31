@@ -1,0 +1,36 @@
+
+=== gfx clock samples (189 taken, 0.35s apart) ===
+    100 CLK: 1098 MHz
+     25 CLK: 1097 MHz
+     11 CLK: 1076 MHz
+      8 CLK: 1077 MHz
+      5 CLK: 1079 MHz
+      4 CLK: 1078 MHz
+      3 CLK: 1095 MHz
+      2 CLK: 1090 MHz
+      2 CLK: 1086 MHz
+      2 CLK: 1084 MHz
+      2 CLK: 1083 MHz
+      2 CLK: 1082 MHz
+      2 CLK: 1080 MHz
+      2 CLK: 1075 MHz
+      2 CLK: 1073 MHz
+      2 CLK: 1070 MHz
+      2 CLK: 1069 MHz
+      2 CLK: 1068 MHz
+      1 CLK: 1096 MHz
+      1 CLK: 1092 MHz
+      1 CLK: 1089 MHz
+      1 CLK: 1085 MHz
+      1 CLK: 1081 MHz
+      1 CLK: 1074 MHz
+      1 CLK: 1072 MHz
+      1 CLK: 1071 MHz
+      1 CLK: 1066 MHz
+      1 CLK: 1065 MHz
+      1 CLK: 1062 MHz
+
+distinct values: 29
+min: 1062 MHz
+max: 1098 MHz
+CLOCK_WATCH_DONE

@@ -1,0 +1,57 @@
+AIRUNTIME-28 summary, result set 20260828_062133
+
+--- isolated 1 GiB copy: effect of each change against its own control ---
+  nt-store-128            -0.47%  vs=plain-128 sig=0
+  nt-both-128             +0.58%  vs=nt-store-128 sig=0
+  asm-plain-128           -1.26%  vs=plain-128 sig=1
+  ntrt-store-128          -0.29%  vs=asm-plain-128 sig=0
+  nt-store-64             +0.23%  vs=plain-64 sig=0
+  pr2616-actual-32        -0.18%  vs=plain-32 sig=0
+  plain-64               +77.26%  vs=plain-128 sig=1
+  plain-32              +220.10%  vs=plain-128 sig=1
+
+--- size curve: nt-store-128 against plain-128 ---
+  64KiB         +0.83%  
+  256KiB        -0.43%  
+  1MiB          -1.31%  
+  4MiB          -0.37%  
+  16MiB         -0.04%  
+  32MiB         +0.00%  
+  64MiB         -0.42%  
+  96MiB         -4.43%  significant
+  128MiB        -3.07%  significant
+  192MiB        -3.20%  significant
+  256MiB        -1.53%  
+  512MiB        -1.37%  
+  1024MiB       -0.38%  
+
+--- concurrency: victim time, by victim working set ---
+       2 MiB    +0.14%  
+       8 MiB    -2.56%  significant
+      16 MiB    -2.70%  significant
+      32 MiB    -4.73%  significant
+      48 MiB    -2.88%  significant
+      64 MiB    -2.73%  significant
+      96 MiB    -2.40%  significant
+     128 MiB    -2.67%  significant
+
+--- adversarial: did any case make the hint lose ---
+  worse_cases              0.000000 
+  most_adverse_pct         1.191813 multistream @ 24 MiB
+  coarsest_resolution_pp   6.110819 multistream @ 24 MiB
+
+--- cache facts ---
+  measured capacity 128.000000 MiB
+  cached plateau    11498 GB/s
+  HBM floor         4357 GB/s
+  max cold/warm     1.011844 x  (1.0 = nothing survives a dispatch)
+  alloc kinds retaining across a dispatch: 0.000000
+
+--- flush sizing ---
+  smallest adequate flush     128 MiB
+  cold latency spread         0.06% across a 16x range of flush sizes
+
+e2e_memcpy is not run here: it needs a patched CLR build. See e2e_run.sh.
+
+Regenerate this file from rows.tsv without re-measuring:
+  ./run_all.sh summarise results/20260828_062133

@@ -1,0 +1,87 @@
+AIRUNTIME-28 result set 20260828_062133
+mode: full
+
+=================== HOST ===================
+heliosr-1b114-a07-4
+6.14.0-37-generic
+2026-08-28T06:21:33Z (UTC)
+=================== ROCM ===================
+10.1.0
+AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 998a696feca902c689c53383e48d29494f9edba7)
+Target: x86_64-unknown-linux-gnu
+HIP version: 7.16.26314-0000000
+AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 998a696feca902c689c53383e48d29494f9edba7)
+Target: x86_64-unknown-linux-gnu
+=================== GPU AGENTS ===================
+Agent 3: gfx1250
+   CUs=256    Max Waves Per CU:        64(0x40)                           
+--- gfx targets present ---
+gfx12
+gfx1250
+=================== CACHE HIERARCHY (GPU agent) ===================
+  Cache Info:              
+    L1:                      49152(0xc000) KB                   
+  Chip ID:                 0(0x0)                             
+  ASIC Revision:           0(0x0)                             
+  Cacheline Size:          64(0x40)                           
+  Max Clock Freq. (MHz):   3150                               
+  BDFID:                   0                                  
+  Internal Node ID:        1                                  
+  Compute Unit:            127                                
+  SIMDs per CU:            0                                  
+  Shader Engines:          0                                  
+  Shader Arrs. per Eng.:   0                                  
+  WatchPts on Addr. Ranges:1                                  
+--
+  Cache Info:              
+    L1:                      32(0x20) KB                        
+    L2:                      4096(0x1000) KB                    
+  Chip ID:                 30145(0x75c1)                      
+  ASIC Revision:           0(0x0)                             
+  Cacheline Size:          64(0x40)                           
+  Max Clock Freq. (MHz):   1100                               
+  BDFID:                   256                                
+  Internal Node ID:        2                                  
+  Compute Unit:            256                                
+  SIMDs per CU:            4                                  
+  Shader Engines:          16                                 
+  Shader Arrs. per Eng.:   2                                  
+=================== MEMORY / CLOCKS ===================
+--- current clocks / power ---
+=================== TOPOLOGY ===================
+KFD nodes: 3
+HIP visible devices: 1
+=================== OTHER USERS ON GPU ===================
+
+=================== SOURCE REVISION ===================
+(not a git checkout on this host)
+
+=================== CLR UNDER TEST ===================
+patched CLR present at ~/airuntime28-clr-install
+lrwxrwxrwx 1 victzhan victzhan       16 Aug 25 18:51 /home/victzhan/airuntime28-clr-install/lib/libamdhip64.so -> libamdhip64.so.7
+lrwxrwxrwx 1 victzhan victzhan       36 Aug 25 18:51 /home/victzhan/airuntime28-clr-install/lib/libamdhip64.so.7 -> libamdhip64.so.7.16.26342-563095dbca
+-rw-r--r-- 1 victzhan victzhan 30299512 Aug 25 18:51 /home/victzhan/airuntime28-clr-install/lib/libamdhip64.so.7.16.26342-563095dbca
+
+=================== CACHE SIZE: REPORTED vs MEASURED ===================
+The driver's l2CacheSize and the measured GL2 capacity disagree by 24x.
+Every footprint in this suite is sized against the measured figure.
+  device        : AMD Radeon Graphics (gfx1250), 256 CUs
+  clock         : 1100 MHz
+  GL2 capacity  : 96 MiB measured / 4 MiB reported by driver
+  flush         : 1024 MiB (10.7x measured GL2)
+  copy size     : 16 MiB, cold (flushed)
+
+=================== CONFIGURED CONSTANTS ===================
+constexpr u64 kKiB = 1024ULL;
+constexpr u64 kMiB = 1024ULL * 1024ULL;
+constexpr u64 kGiB = 1024ULL * 1024ULL * 1024ULL;
+constexpr u64 kGL2Bytes = 96 * kMiB;
+constexpr u64 kDriverReportedL2Bytes = 4 * kMiB;  // kept only to report the discrepancy
+constexpr u64 kNearCacheBytes = 16 * kMiB;
+constexpr u64 kFlushBytes = 1 * kGiB;
+constexpr u64 kLocalWorkSize = 512;
+constexpr unsigned kMaxAlignment = 16;
+constexpr int kBootstrapResamples = 3000;
+constexpr unsigned kBootstrapSeed = 20260828u;  // fixed so intervals are reproducible
+constexpr int kDefaultIters = 40;
+constexpr int kDefaultWarmup = 8;

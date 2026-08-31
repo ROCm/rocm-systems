@@ -1,0 +1,26 @@
+=== small copies ===
+  device        : AMD Radeon Graphics (gfx1250), 256 CUs
+  clock         : 1100 MHz
+  GL2 capacity  : 96 MiB measured / 4 MiB reported by driver
+  flush         : 1024 MiB (10.7x measured GL2)
+  dispatch      : 512 threads/WG x 256 WGs, grid-stride (production)
+  bootstrap     : 3000 resamples, seed 20260828
+  iters/warmup  : 120 / 8
+
+  a dispatch that copies nothing takes 0.0079 ms on this stream
+
+        size   plain_ms vs_empty       runtime-nt (hint only)     template-nt (as shipped)  res_lim
+  ----------------------------------------------------------------------------------------------------
+       16KiB     0.0089     1.1x    +0.87% [-1.82,+2.27] (ns)    -0.43% [-3.25,+2.79] (ns)   5.92pp
+       64KiB     0.0090     1.1x    -0.92% [-2.60,+0.44] (ns)    -0.46% [-2.16,+1.32] (ns)   5.44pp
+      256KiB     0.0093     1.2x    -0.45% [-2.75,+3.18] (ns)    +0.00% [-1.30,+1.64] (ns)   3.80pp
+        1MiB     0.0096     1.2x    -0.42% [-2.47,+1.32] (ns)    -1.28% [-4.21,+1.65] (ns)   3.93pp
+        2MiB     0.0095     1.2x    -0.90% [-3.30,+0.85] (ns)    -0.84% [-2.36,+0.89] (ns)   4.88pp
+        4MiB     0.0113     1.4x    -1.02% [-3.66,+1.03] (ns)    -0.34% [-1.39,+1.13] (ns)   4.69pp
+        8MiB     0.0139     1.8x    -1.54% [-3.24,-0.31] (ns)    -1.25% [-3.14,-0.28] (ns)   4.30pp
+       16MiB     0.1032    13.0x    +0.00% [-0.08,+0.04] (ns)    +0.04% [+0.00,+0.08] (ns)   0.19pp
+       32MiB     0.0563     7.1x    -0.28% [-0.43,+0.07] (ns)    +0.07% [-0.21,+0.36] (ns)   0.78pp
+       64MiB     0.0562     7.1x    +0.00% [-0.28,+0.43] (ns)    +0.00% [-0.28,+0.36] (ns)   0.85pp
+
+  'vs_empty' is how many empty dispatches the copy costs. Below about 3x, the
+  measurement is dominated by launch overhead and no store policy can move it.

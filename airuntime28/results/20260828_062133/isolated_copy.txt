@@ -1,0 +1,50 @@
+=== isolated copy ===
+  device        : AMD Radeon Graphics (gfx1250), 256 CUs
+  clock         : 1100 MHz
+  GL2 capacity  : 96 MiB measured / 4 MiB reported by driver
+  flush         : 1024 MiB (10.7x measured GL2)
+  dispatch      : 512 threads/WG x 256 WGs, grid-stride (production)
+  bootstrap     : 3000 resamples, seed 20260828
+  copy size     : 1024 MiB, cold (flushed)
+  iters/warmup  : 25 / 8, 18 slots (every arm twice)
+
+  byte-exactness: all 9 variants verified (unaligned tail included)
+
+  buffers       : src 0x7e64f6e00000  dst 0x7e64b6c00000  |delta| 1026 MiB
+  arm                    median_ms   vs baseline [95% CI]
+  ------------------------------------------------------------------
+  plain-128                 0.5253   -  (baseline)               
+  nt-both-128               0.5263    +0.37% [-0.28,+0.63] (ns)  
+  nt-store-128              0.5230    -0.47% [-0.83,-0.11] (ns)  
+  nt-store-64               0.9313   +77.55% [+76.80,+78.30]     
+  plain-64                  0.9303   +77.26% [+76.75,+77.69]     
+  ntrt-store-128            0.5175    -1.56% [-2.17,-1.20]       
+  pr2616-actual-32          1.6750   +219.86% [+217.57,+225.37]  
+  plain-32                  1.6804   +220.10% [+218.77,+220.62]  
+  asm-plain-128             0.5189    -1.26% [-1.71,-0.95]       
+  resolution limit (same arm twice): +/-0.74 pp
+
+  arm                        GB/s vs plain-128
+  plain-128                4087.7     +0.00%
+  nt-both-128              4080.6     +0.18%
+  nt-store-128             4106.2     -0.45%
+  nt-store-64              2305.9    +77.28%
+  plain-64                 2308.4    +77.08%
+  ntrt-store-128           4149.4     -1.49%
+  pr2616-actual-32         1282.1   +218.84%
+  plain-32                 1278.0   +219.86%
+  asm-plain-128            4138.9     -1.24%
+
+  Controlled comparisons: each against the arm differing in one respect only
+  question                                         effect [95% CI]             
+  ------------------------------------------------------------------------------
+  NT store hint, 128-bit (the shipped change)       -0.47% [-0.83,-0.11] (ns)  
+  also hinting the load, 128-bit                    +0.58% [+0.16,+0.71] (ns)  
+  hand-written store, default hint (codegen only)   -1.26% [-1.71,-0.95]       
+  NT_RT hint, net of that codegen effect            -0.29% [-0.59,+0.05] (ns)  
+  NT store hint at 64-bit width                     +0.23% [-0.04,+0.65] (ns)  
+  NT store hint at 32-bit width                     -0.18% [-0.34,+1.30] (ns)  
+  64-bit instead of 128-bit (width only)           +77.26% [+76.75,+77.69]     
+  32-bit instead of 128-bit (width only)           +220.10% [+218.77,+220.62]  
+  negative is faster; '(ns)' means below the 0.74 pp resolution limit
+

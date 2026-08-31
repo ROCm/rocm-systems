@@ -1,0 +1,36 @@
+=== cross-dispatch retention by allocation kind ===
+  device        : AMD Radeon Graphics (gfx1250), 256 CUs
+  clock         : 1100 MHz
+  GL2 capacity  : 96 MiB measured / 4 MiB reported by driver
+  flush         : 1024 MiB (10.7x measured GL2)
+  dispatch      : 512 threads/WG x 256 WGs, grid-stride (production)
+  bootstrap     : 3000 resamples, seed 20260828
+  probe         : dependent-load chase, 1 lane, randomised cycle
+  cold / warm   : after a flush / after the identical walk in the previous dispatch
+  4laps         : four laps inside ONE dispatch, per hop - the control showing
+                  that caching works at all for this allocation kind
+  iters/warmup  : 25 / 8
+
+== footprint 1 MiB ==
+  allocation                     cold_ns    warm_ns   4laps_ns  warm/cold  verdict
+  ----------------------------------------------------------------------------------------
+  hipMalloc                        416.4      419.4      334.0      1.007  no retention
+  hipMalloc finegrained            415.7      416.2      327.8      1.001  no retention
+  hipHostMalloc                   1069.6     1077.5     1070.6      1.007  no retention
+  hipHostMalloc NonCoherent       1084.9     1079.5     1058.5      0.995  no retention
+  malloc + hipHostRegister        1072.2     1077.1     1063.9      1.005  no retention
+  hipMallocManaged                 908.9      893.4      889.8      0.983  no retention
+
+== footprint 32 MiB ==
+  allocation                     cold_ns    warm_ns   4laps_ns  warm/cold  verdict
+  ----------------------------------------------------------------------------------------
+  hipMalloc                        737.9      742.2      673.8      1.006  no retention
+  hipMalloc finegrained            744.0      740.5      677.2      0.995  no retention
+  hipHostMalloc                    962.6      951.6      940.4      0.989  no retention
+  hipHostMalloc NonCoherent        959.2      957.6      941.2      0.998  no retention
+  malloc + hipHostRegister         963.8      968.1      961.0      1.004  no retention
+  hipMallocManaged                 907.7      902.3      898.2      0.994  no retention
+
+  allocation kinds retaining across a dispatch: 0
+  No allocation kind retains, so the invalidation is not selective by memory
+  type. The MTYPE explanation is ruled out; the mechanism remains open.

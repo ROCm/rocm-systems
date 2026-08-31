@@ -1,0 +1,162 @@
+# Generated from users/victzhan/AIRUNTIME-28-nt-blit by remote/clr_patch.sh.
+# Do not hand-edit: regenerate instead, or the branch and this file will drift.
+# base:   8a43c008e9090f47038ccac33adff130beb853f1
+# commit: 81e65d6bbb4a7b6a12667936b044a22e07841af5
+#
+diff --git a/projects/clr/rocclr/device/blitcl.cpp b/projects/clr/rocclr/device/blitcl.cpp
+index 4db67804845..fd717925a25 100644
+--- a/projects/clr/rocclr/device/blitcl.cpp
++++ b/projects/clr/rocclr/device/blitcl.cpp
+@@ -128,6 +128,51 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
+       }
+     }
+ 
++    // Non-temporal variant of __amd_rocclr_copyBuffer, selected by
++    // DEBUG_CLR_BLIT_NONTEMPORAL. Identical to the kernel above except that the
++    // store carries a non-temporal hint (th:TH_STORE_NT on gfx12), telling the
++    // cache not to retain the destination lines. A bulk copy never re-reads
++    // what it just wrote, so keeping those lines costs capacity that concurrent
++    // work could use.
++    //
++    // Two deliberate choices here:
++    //   * The access width stays ulong2 (128-bit). __builtin_nontemporal_store
++    //     accepts OpenCL vector types, so the hint costs no width. Dropping to
++    //     ulong to get the hint would halve bytes-in-flight per work item and
++    //     measured ~44% slower on gfx1250 for large copies.
++    //   * Only the store is non-temporal. The source may legitimately be reused
++    //     by a following copy (one buffer broadcast to many), so it keeps
++    //     ordinary caching.
++    __kernel void __amd_rocclr_copyBufferNT(__global uchar* src, __global uchar* dst, ulong size,
++                                            uint remainder, uint aligned_size, ulong end_ptr,
++                                            uint next_chunk, uint workgroup_size) {
++      uint l = __builtin_amdgcn_workitem_id_x();
++      uint g = __builtin_amdgcn_workgroup_id_x();
++      ulong id = (g * workgroup_size + l);
++      ulong id_remainder = id;
++
++      if (aligned_size == sizeof(ulong2)) {
++        __global ulong2* srcD = (__global ulong2*)(src);
++        __global ulong2* dstD = (__global ulong2*)(dst);
++        while ((ulong)(&dstD[id]) < end_ptr) {
++          __builtin_nontemporal_store(srcD[id], &dstD[id]);
++          id += next_chunk;
++        }
++      } else {
++        __global uint* srcD = (__global uint*)(src);
++        __global uint* dstD = (__global uint*)(dst);
++        while ((ulong)(&dstD[id]) < end_ptr) {
++          __builtin_nontemporal_store(srcD[id], &dstD[id]);
++          id += next_chunk;
++        }
++      }
++      if ((remainder != 0) && (id_remainder == 0)) {
++        for (ulong i = size - remainder; i < size; ++i) {
++          dst[i] = src[i];
++        }
++      }
++    }
++
+     typedef struct CopyBufferBatchDescriptor {
+       ulong source_address;
+       ulong destination_address;
+diff --git a/projects/clr/rocclr/device/pal/palblit.cpp b/projects/clr/rocclr/device/pal/palblit.cpp
+index 39eb0a157fb..67990912dbf 100644
+--- a/projects/clr/rocclr/device/pal/palblit.cpp
++++ b/projects/clr/rocclr/device/pal/palblit.cpp
+@@ -10,6 +10,7 @@
+ #include "device/pal/palmemory.hpp"
+ #include "device/pal/palvirtual.hpp"
+ #include "utils/debug.hpp"
++#include "utils/flags.hpp"
+ #include <algorithm>
+ 
+ namespace amd::pal {
+@@ -2308,7 +2309,7 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
+   bool result = false;
+ 
+   if (!gpuMem(srcMemory).isHostMemDirectAccess() && !gpuMem(dstMemory).isHostMemDirectAccess()) {
+-    constexpr uint32_t kBlitType = BlitCopyBuffer;
++    const uint32_t kBlitType = DEBUG_CLR_BLIT_NONTEMPORAL ? BlitCopyBufferNT : BlitCopyBuffer;
+     constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
+     amd::Coord3D size(sizeIn[0]);
+ 
+diff --git a/projects/clr/rocclr/device/pal/palblit.hpp b/projects/clr/rocclr/device/pal/palblit.hpp
+index 4feb9d8af3a..9ed84e350b0 100644
+--- a/projects/clr/rocclr/device/pal/palblit.hpp
++++ b/projects/clr/rocclr/device/pal/palblit.hpp
+@@ -261,6 +261,7 @@ class KernelBlitManager : public DmaBlitManager {
+     BlitCopyBufferRect,
+     BlitCopyBufferRectAligned,
+     BlitCopyBuffer,
++    BlitCopyBufferNT,
+     BlitCopyBufferAligned,
+     FillBufferUnAligned,
+     FillImage,
+@@ -539,7 +540,8 @@ static const char* BlitName[KernelBlitManager::BlitTotal] = {
+     "__amd_rocclr_copyImage",           "__amd_rocclr_copyImage1DA",
+     "__amd_rocclr_copyImageToBuffer",   "__amd_rocclr_copyBufferToImage",
+     "__amd_rocclr_copyBufferRect",      "__amd_rocclr_copyBufferRectAligned",
+-    "__amd_rocclr_copyBuffer",          "__amd_rocclr_copyBufferAligned",
++    "__amd_rocclr_copyBuffer",          "__amd_rocclr_copyBufferNT",
++    "__amd_rocclr_copyBufferAligned",
+     "__amd_rocclr_fillBufferUnAligned", "__amd_rocclr_fillImage",
+     "__amd_rocclr_scheduler",           "__amd_rocclr_gwsInit",
+     "__amd_rocclr_streamOpsWrite",      "__amd_rocclr_streamOpsWait",
+diff --git a/projects/clr/rocclr/device/rocm/rocblit.cpp b/projects/clr/rocclr/device/rocm/rocblit.cpp
+index 5a3d575552b..bbbaf40b125 100644
+--- a/projects/clr/rocclr/device/rocm/rocblit.cpp
++++ b/projects/clr/rocclr/device/rocm/rocblit.cpp
+@@ -11,6 +11,7 @@
+ #include "device/rocm/rockernel.hpp"
+ #include "device/rocm/rocsched.hpp"
+ #include "utils/debug.hpp"
++#include "utils/flags.hpp"
+ #include <algorithm>
+ #include <map>
+ 
+@@ -2699,7 +2700,9 @@ bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Co
+                                          const amd::Coord3D& srcOrigin, const amd::Coord3D& sizeIn,
+                                          bool entire, const uint32_t blitWg,
+                                          amd::CopyMetadata copyMetadata, bool attachSignal) const {
+-  constexpr uint32_t kBlitType = BlitCopyBuffer;
++  // Both kernels take the same arguments and the same kMaxAlignment, so the
++  // non-temporal variant reaches its ulong2 path exactly like the default one.
++  const uint32_t kBlitType = DEBUG_CLR_BLIT_NONTEMPORAL ? BlitCopyBufferNT : BlitCopyBuffer;
+   constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
+   amd::Coord3D size(sizeIn[0]);
+ 
+diff --git a/projects/clr/rocclr/device/rocm/rocblit.hpp b/projects/clr/rocclr/device/rocm/rocblit.hpp
+index 257e58dfdca..cbf4a4adb15 100644
+--- a/projects/clr/rocclr/device/rocm/rocblit.hpp
++++ b/projects/clr/rocclr/device/rocm/rocblit.hpp
+@@ -291,6 +291,7 @@ class KernelBlitManager : public DmaBlitManager {
+     FillBufferUnAligned = 0,
+     FillBufferAligned2D,
+     BlitCopyBuffer,
++    BlitCopyBufferNT,
+     BlitCopyBufferAligned,
+     BlitCopyBufferRect,
+     BlitCopyBufferRectAligned,
+@@ -646,7 +647,8 @@ class KernelBlitManager : public DmaBlitManager {
+ 
+ static const char* BlitName[KernelBlitManager::BlitTotal] = {
+     "__amd_rocclr_fillBufferUnAligned",  "__amd_rocclr_fillBufferAligned2D",
+-    "__amd_rocclr_copyBuffer",         "__amd_rocclr_copyBufferAligned",
++    "__amd_rocclr_copyBuffer",         "__amd_rocclr_copyBufferNT",
++    "__amd_rocclr_copyBufferAligned",
+     "__amd_rocclr_copyBufferRect",     "__amd_rocclr_copyBufferRectAligned",
+     "__amd_rocclr_streamOpsWrite",     "__amd_rocclr_streamOpsWait",
+     "__amd_rocclr_scheduler",          "__amd_rocclr_gwsInit",
+diff --git a/projects/clr/rocclr/utils/flags.hpp b/projects/clr/rocclr/utils/flags.hpp
+index 5caf9d7a1da..bf56b76e2cb 100644
+--- a/projects/clr/rocclr/utils/flags.hpp
++++ b/projects/clr/rocclr/utils/flags.hpp
+@@ -219,6 +219,8 @@ release(uint, DEBUG_CLR_LIMIT_BLIT_WG, 16,                                    \
+         "Limit the number of workgroups in blit operations")                  \
+ release(bool, DEBUG_CLR_BLIT_KERNARG_OPT, false,                              \
+         "Enable blit kernel arguments optimization")                          \
++release(bool, DEBUG_CLR_BLIT_NONTEMPORAL, false,                              \
++        "Use non-temporal stores in the shader copy blit kernel")             \
+ release(bool, ROC_SKIP_KERNEL_ARG_COPY, false,                                \
+         "If true, then runtime can skip kernel arg copy")                     \
+ release(bool, GPU_STREAMOPS_CP_WAIT, false,                                   \

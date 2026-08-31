@@ -1,0 +1,30 @@
+=== flush sensitivity ===
+  device        : AMD Radeon Graphics (gfx1250), 256 CUs
+  clock         : 1100 MHz
+  GL2 capacity  : 96 MiB measured / 4 MiB reported by driver
+  flush         : 1024 MiB (10.7x measured GL2)
+  dispatch      : 512 threads/WG x 256 WGs, grid-stride (production)
+  bootstrap     : 3000 resamples, seed 20260828
+  probe/copy    : 32 MiB chase footprint, 128 MiB copy
+  iters/warmup  : 25 / 8
+
+  warm reference (no flush, cache populated by previous dispatch): 742.4 ns/hop
+
+       flush     xGL2    cold_ns/hop    vs warm   plain-128_ms        nt-store-128 [95% CI]
+  --------------------------------------------------------------------------------------------
+       128 M     1.3x          745.5      1.00x         0.0795         -3.93% [-4.39,-2.41]
+       256 M     2.7x          745.6      1.00x         0.0792    -3.83% [-4.75,-1.74] (ns)
+       512 M     5.3x          745.7      1.00x         0.0790    -3.30% [-4.63,-1.73] (ns)
+      1024 M    10.7x          745.6      1.00x         0.0794    -3.02% [-4.80,-2.20] (ns)
+      2048 M    21.3x          745.9      1.00x         0.0790         -3.34% [-4.57,-1.75]
+
+       flush    cold_vs_max    copy_vs_max
+      2048 M          0.00%          0.00%
+      1024 M         -0.04%          0.51%
+       512 M         -0.02%          0.10%
+       256 M         -0.04%          0.31%
+       128 M         -0.06%          0.66%
+
+  smallest flush where both are within 2% of the 2 GiB result: 128 MiB
+  config.h currently uses 1024 MiB. Adequate.
+  cold latency spread across a 16x range of flush sizes: 0.06%

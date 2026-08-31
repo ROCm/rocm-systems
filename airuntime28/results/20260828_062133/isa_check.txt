@@ -1,0 +1,94 @@
+=== emitting device assembly ===
+clang++: warning: argument unused during compilation: '--hip-link' [-Wunused-command-line-argument]
+2514 isa/isolated_copy.s
+=== expectations declared by variants.h ===
+  plain-128            elem=16B mode=0  global_store_b128 -
+  nt-both-128          elem=16B mode=1  global_store_b128 th:TH_STORE_NT
+  nt-store-128         elem=16B mode=2  global_store_b128 th:TH_STORE_NT
+  nt-store-64          elem= 8B mode=2  global_store_b64 th:TH_STORE_NT
+  plain-64             elem= 8B mode=0  global_store_b64 -
+  ntrt-store-128       elem=16B mode=3  global_store_b128 th:TH_STORE_NT_RT
+  pr2616-actual-32     elem= 8B mode=2  global_store_b32 th:TH_STORE_NT
+  plain-32             elem= 4B mode=0  global_store_b32 -
+  asm-plain-128        elem=16B mode=4  global_store_b128 th:TH_STORE_RT
+
+=== emitted memory ops per instantiation ===
+  ElemT= 4B mode=0  used by: plain-32
+      global_load_b32                              x2
+      global_load_u8                               x1
+      global_store_b32                             x2
+      global_store_b8                              x1
+  ElemT= 8B mode=0  used by: plain-64
+      global_load_b32                              x1
+      global_load_b64                              x1
+      global_load_u8                               x1
+      global_store_b32                             x1
+      global_store_b64                             x1
+      global_store_b8                              x1
+  ElemT= 8B mode=2  used by: nt-store-64, pr2616-actual-32
+      global_load_b32                              x1
+      global_load_b64                              x1
+      global_load_u8                               x1
+      global_store_b32 th:TH_STORE_NT              x1
+      global_store_b64 th:TH_STORE_NT              x1
+      global_store_b8                              x1
+  ElemT=16B mode=0  used by: plain-128
+      global_load_b128                             x1
+      global_load_b32                              x1
+      global_load_u8                               x1
+      global_store_b128                            x1
+      global_store_b32                             x1
+      global_store_b8                              x1
+  ElemT=16B mode=1  used by: nt-both-128
+      global_load_b128 th:TH_LOAD_NT               x1
+      global_load_b32 th:TH_LOAD_NT                x1
+      global_load_u8                               x1
+      global_store_b128 th:TH_STORE_NT             x1
+      global_store_b32 th:TH_STORE_NT              x1
+      global_store_b8                              x1
+  ElemT=16B mode=2  used by: nt-store-128
+      global_load_b128                             x1
+      global_load_b32                              x1
+      global_load_u8                               x1
+      global_store_b128 th:TH_STORE_NT             x1
+      global_store_b32 th:TH_STORE_NT              x1
+      global_store_b8                              x1
+  ElemT=16B mode=3  used by: ntrt-store-128
+      global_load_b128                             x1
+      global_load_b32                              x1
+      global_load_u8                               x1
+      global_store_b128 th:TH_STORE_NT_RT          x1
+      global_store_b32 th:TH_STORE_NT_RT           x1
+      global_store_b8                              x1
+  ElemT=16B mode=4  used by: asm-plain-128
+      global_load_b128                             x1
+      global_load_b32                              x1
+      global_load_u8                               x1
+      global_store_b128 th:TH_STORE_RT             x1
+      global_store_b32 th:TH_STORE_RT              x1
+      global_store_b8                              x1
+
+=== expectation check ===
+  [OK ] plain-128            expects global_store_b128
+  [OK ] nt-both-128          expects global_store_b128 th:TH_STORE_NT
+  [OK ] nt-store-128         expects global_store_b128 th:TH_STORE_NT
+  [OK ] nt-store-64          expects global_store_b64 th:TH_STORE_NT
+  [OK ] plain-64             expects global_store_b64
+  [OK ] ntrt-store-128       expects global_store_b128 th:TH_STORE_NT_RT
+  [OK ] pr2616-actual-32     expects global_store_b32 th:TH_STORE_NT
+  [OK ] plain-32             expects global_store_b32
+  [OK ] asm-plain-128        expects global_store_b128 th:TH_STORE_RT
+
+ISA_EXPECTATIONS: ALL MATCH
+
+=== only nt-both-128 may carry an NT load hint ===
+  global_load_b128 ... th:TH_LOAD_NT occurrences: 1
+
+=== support kernels must be plain (no temporal hints) ===
+  bench::chaseKernel -> global_load_b128 (no hint)
+  bench::chaseKernel -> global_load_b64 (no hint)
+  bench::chaseKernel -> global_store_b64 (no hint)
+  bench::sweepReadKernel -> global_load_b128 (no hint)
+  bench::sweepReadKernel -> global_store_b64 (no hint)
+
+ISA_OK

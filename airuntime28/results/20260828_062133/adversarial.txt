@@ -1,0 +1,58 @@
+=== adversarial search for cases where the hint loses ===
+  device        : AMD Radeon Graphics (gfx1250), 256 CUs
+  clock         : 1100 MHz
+  GL2 capacity  : 96 MiB measured / 4 MiB reported by driver
+  flush         : 1024 MiB (10.7x measured GL2)
+  dispatch      : 512 threads/WG x 256 WGs, grid-stride (production)
+  bootstrap     : 3000 resamples, seed 20260828
+  iters/warmup  : 120 / 8, 4 slots per case (both arms twice)
+
+--- footprint 24 MiB per buffer (a copy touches 48 MiB = 0.50x GL2) ---
+  case           mechanism that could hurt                     plain_ms nt vs plain [95% CI]         res_limit  verdict
+  ----------------------------------------------------------------------------------------------------------------------------------
+  reference      one copy timed, nothing else                     0.056  +0.07% [-0.14,+0.50] (ns)      0.71pp  no difference
+  consume-only   reader of the destination (copy untimed)         0.017  -1.21% [-3.94,+0.63] (ns)      2.39pp  no difference
+  chain-second   2nd copy, src just written by the 1st            0.056  -0.14% [-0.36,+0.14] (ns)      0.57pp  no difference
+  chain-coldsrc  same, src NOT just written (control)             0.056  +0.14% [-0.07,+0.29] (ns)      0.64pp  no difference
+  fanout         one source copied to 3 destinations              0.036  -1.44% [-2.58,-0.23] (ns)      2.43pp  no difference
+  overwrite      same destination rewritten 6x                    0.283  -0.13% [-0.25,+0.04] (ns)      0.53pp  no difference
+  staging-reuse  one staging buffer, 4 chunks, reader timed       0.011  -1.61% [-3.64,+0.64] (ns)      3.57pp  no difference
+  multistream    4 concurrent copies on 4 streams                 0.030  +1.19% [-1.70,+5.34] (ns)      6.11pp  no difference
+  unaligned      32-bit fallback path, 4B NT stores               0.056  -0.28% [-0.50,-0.07] (ns)      0.71pp  no difference
+
+--- footprint 48 MiB per buffer (a copy touches 96 MiB = 1.00x GL2) ---
+  case           mechanism that could hurt                     plain_ms nt vs plain [95% CI]         res_limit  verdict
+  ----------------------------------------------------------------------------------------------------------------------------------
+  reference      one copy timed, nothing else                     0.056  +0.07% [-0.28,+0.35] (ns)      0.43pp  no difference
+  consume-only   reader of the destination (copy untimed)         0.056  +0.07% [-0.07,+0.28] (ns)      0.43pp  no difference
+  chain-second   2nd copy, src just written by the 1st            0.056  -0.14% [-0.22,+0.07] (ns)      0.36pp  no difference
+  chain-coldsrc  same, src NOT just written (control)             0.056  -0.14% [-0.29,+0.07] (ns)      0.64pp  no difference
+  fanout         one source copied to 3 destinations              0.052  +0.31% [-0.81,+1.08] (ns)      2.69pp  no difference
+  overwrite      same destination rewritten 6x                    0.317  +0.00% [-0.04,+0.05] (ns)      0.16pp  no difference
+  staging-reuse  one staging buffer, 4 chunks, reader timed       0.013  +0.00% [-1.48,+2.28] (ns)      3.08pp  no difference
+  multistream    4 concurrent copies on 4 streams                 0.060  +0.13% [-0.07,+0.20] (ns)      0.40pp  no difference
+  unaligned      32-bit fallback path, 4B NT stores               0.096  -2.34% [-2.64,-1.98]           0.88pp  NT is better
+
+--- footprint 128 MiB per buffer (a copy touches 256 MiB = 2.67x GL2) ---
+  case           mechanism that could hurt                     plain_ms nt vs plain [95% CI]         res_limit  verdict
+  ----------------------------------------------------------------------------------------------------------------------------------
+  reference      one copy timed, nothing else                     0.080  -3.53% [-3.97,-3.21]           1.25pp  NT is better
+  consume-only   reader of the destination (copy untimed)         0.056  -0.07% [-0.21,+0.07] (ns)      0.36pp  no difference
+  chain-second   2nd copy, src just written by the 1st            0.080  -3.60% [-4.23,-3.07]           1.24pp  NT is better
+  chain-coldsrc  same, src NOT just written (control)             0.080  -3.45% [-4.11,-2.86]           1.15pp  NT is better
+  fanout         one source copied to 3 destinations              0.159  -0.03% [-0.13,+0.05] (ns)      0.23pp  no difference
+  overwrite      same destination rewritten 6x                    0.455  -3.73% [-4.05,-3.42]           0.54pp  NT is better
+  staging-reuse  one staging buffer, 4 chunks, reader timed       0.103  +0.04% [-0.08,+0.15] (ns)      0.31pp  no difference
+  multistream    4 concurrent copies on 4 streams                 0.067  -4.78% [-5.94,-3.50]           1.94pp  NT is better
+  unaligned      32-bit fallback path, 4B NT stores               0.230  -2.05% [-2.19,-1.80]           0.52pp  NT is better
+
+  A verdict needs both: an interval excluding zero AND a magnitude above the
+  resolution limit, which is this rig measuring the same arm twice in the
+  same run. Positive means the non-temporal variant took longer.
+
+  cases where the hint is significantly worse : 0
+  most adverse effect seen anywhere           : +1.19%  (multistream @ 24 MiB)
+  coarsest resolution in the suite            : 6.11 pp (multistream @ 24 MiB)
+
+  So: no regression was found, and a regression smaller than 6.11 pp could not
+  have been found in the least sensitive case. That is the claim's limit.

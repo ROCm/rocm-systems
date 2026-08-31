@@ -1,0 +1,27 @@
+=== concurrency: copy vs cache-sensitive victim ===
+  device        : AMD Radeon Graphics (gfx1250), 256 CUs
+  clock         : 1100 MHz
+  GL2 capacity  : 96 MiB measured / 4 MiB reported by driver
+  flush         : 1024 MiB (10.7x measured GL2)
+  dispatch      : 512 threads/WG x 256 WGs, grid-stride (production)
+  bootstrap     : 3000 resamples, seed 20260828
+  copy          : 128 MiB, repeated to cover the victim's whole run
+  victim        : 128 WGs x 256 threads sweeping its working set, ~5 ms alone
+  metric        : the VICTIM's time. Negative means the hint helped it.
+  iters/warmup  : 25 / 8
+
+   victim_ws   passes   copies    alone_ms                 nt-store-128      asm-plain-128 (control)  res_lim
+  ----------------------------------------------------------------------------------------------------------------
+         2 M    10777       76       4.726    +0.14% [-0.36,+0.51] (ns)    +0.08% [-0.37,+0.23] (ns)   0.75pp
+         8 M     3197       82       5.013         -2.56% [-2.74,-2.37]    -0.31% [-0.61,-0.15] (ns)   0.54pp
+        16 M      421       76       4.603         -2.70% [-3.34,-2.55]    -0.21% [-0.66,+0.02] (ns)   0.40pp
+        32 M      226       79       4.868         -4.73% [-5.02,-4.51]    -0.26% [-0.85,-0.13] (ns)   0.94pp
+        48 M      153       82       4.995         -2.88% [-2.99,-2.57]    -0.62% [-0.97,-0.33] (ns)   0.70pp
+        64 M      114       81       4.974         -2.73% [-2.98,-2.50]         -0.48% [-0.78,-0.29]   0.38pp
+        96 M       61       68       4.226         -2.40% [-2.85,-2.09]    -0.37% [-0.65,+0.19] (ns)   0.82pp
+       128 M       44       69       4.339         -2.67% [-2.96,-2.25]    -0.54% [-0.90,+0.11] (ns)   0.84pp
+
+  best gain: -4.73% at a 32 MiB working set; 7 of 8 sizes significant
+  The control arm is the same copy with a hand-written store carrying the
+  default hint. It should sit near zero: if it moves with the nt arm, what is
+  being measured is codegen rather than the temporal hint.

@@ -1,0 +1,331 @@
+cache_capacity	256 KiB	read_gbps	1742.421255	GB/s	
+cache_capacity	1 MiB	read_gbps	6747.624069	GB/s	
+cache_capacity	4 MiB	read_gbps	23809.275598	GB/s	
+cache_capacity	8 MiB	read_gbps	28859.568056	GB/s	
+cache_capacity	12 MiB	read_gbps	31018.945401	GB/s	
+cache_capacity	16 MiB	read_gbps	12122.693636	GB/s	
+cache_capacity	24 MiB	read_gbps	11366.692648	GB/s	
+cache_capacity	32 MiB	read_gbps	11329.109439	GB/s	
+cache_capacity	48 MiB	read_gbps	11611.223484	GB/s	
+cache_capacity	64 MiB	read_gbps	11533.240608	GB/s	
+cache_capacity	80 MiB	read_gbps	11498.084373	GB/s	
+cache_capacity	96 MiB	read_gbps	11437.741818	GB/s	
+cache_capacity	128 MiB	read_gbps	8047.214811	GB/s	
+cache_capacity	192 MiB	read_gbps	4936.751110	GB/s	
+cache_capacity	256 MiB	read_gbps	4492.951333	GB/s	
+cache_capacity	512 MiB	read_gbps	4378.812768	GB/s	
+cache_capacity	1024 MiB	read_gbps	4357.103988	GB/s	
+cache_capacity	capacity	footprint_mib	128.000000	MiB	
+cache_capacity	plateau	read_gbps	11498.084373	GB/s	
+cache_capacity	hbm_floor	read_gbps	4357.103988	GB/s	
+residency	32 KiB	cold_ns_per_hop	334.017590	ns	
+residency	32 KiB	warm_ns_per_hop	333.626958	ns	
+residency	32 KiB	same_dispatch_ns_per_hop	155.741698	ns	
+residency	128 KiB	cold_ns_per_hop	375.602540	ns	
+residency	128 KiB	warm_ns_per_hop	377.480465	ns	
+residency	128 KiB	same_dispatch_ns_per_hop	275.452388	ns	
+residency	512 KiB	cold_ns_per_hop	410.665147	ns	
+residency	512 KiB	warm_ns_per_hop	405.858038	ns	
+residency	512 KiB	same_dispatch_ns_per_hop	317.391561	ns	
+residency	1 MiB	cold_ns_per_hop	413.833855	ns	
+residency	1 MiB	warm_ns_per_hop	413.816713	ns	
+residency	1 MiB	same_dispatch_ns_per_hop	326.174253	ns	
+residency	2 MiB	cold_ns_per_hop	487.166929	ns	
+residency	2 MiB	warm_ns_per_hop	485.710812	ns	
+residency	2 MiB	same_dispatch_ns_per_hop	347.345209	ns	
+residency	4 MiB	cold_ns_per_hop	593.849039	ns	
+residency	4 MiB	warm_ns_per_hop	595.355320	ns	
+residency	4 MiB	same_dispatch_ns_per_hop	402.729797	ns	
+residency	8 MiB	cold_ns_per_hop	676.366854	ns	
+residency	8 MiB	warm_ns_per_hop	672.841549	ns	
+residency	8 MiB	same_dispatch_ns_per_hop	490.097904	ns	
+residency	16 MiB	cold_ns_per_hop	715.890217	ns	
+residency	16 MiB	warm_ns_per_hop	719.501543	ns	
+residency	16 MiB	same_dispatch_ns_per_hop	596.887112	ns	
+residency	32 MiB	cold_ns_per_hop	742.251682	ns	
+residency	32 MiB	warm_ns_per_hop	738.902664	ns	
+residency	32 MiB	same_dispatch_ns_per_hop	676.462507	ns	
+residency	64 MiB	cold_ns_per_hop	757.454491	ns	
+residency	64 MiB	warm_ns_per_hop	753.508615	ns	
+residency	64 MiB	same_dispatch_ns_per_hop	718.663788	ns	
+residency	96 MiB	cold_ns_per_hop	758.415937	ns	
+residency	96 MiB	warm_ns_per_hop	762.860584	ns	
+residency	96 MiB	same_dispatch_ns_per_hop	734.662819	ns	
+residency	256 MiB	cold_ns_per_hop	763.351345	ns	
+residency	256 MiB	warm_ns_per_hop	764.853621	ns	
+residency	256 MiB	same_dispatch_ns_per_hop	759.485531	ns	
+residency	-	max_cold_warm_ratio	1.011844	x	
+flush_sensitivity	chase	cold_ns_per_hop	745.492601	ns	flush_mib=128
+flush_sensitivity	plain-128	copy_ms	0.079480	ms	flush_mib=128
+flush_sensitivity	nt-store-128	delta_pct	-3.929819	pct	flush_mib=128
+flush_sensitivity	chase	cold_ns_per_hop	745.584679	ns	flush_mib=256
+flush_sensitivity	plain-128	copy_ms	0.079199	ms	flush_mib=256
+flush_sensitivity	nt-store-128	delta_pct	-3.834969	pct	flush_mib=256
+flush_sensitivity	chase	cold_ns_per_hop	745.732927	ns	flush_mib=512
+flush_sensitivity	plain-128	copy_ms	0.079039	ms	flush_mib=512
+flush_sensitivity	nt-store-128	delta_pct	-3.297914	pct	flush_mib=512
+flush_sensitivity	chase	cold_ns_per_hop	745.598745	ns	flush_mib=1024
+flush_sensitivity	plain-128	copy_ms	0.079359	ms	flush_mib=1024
+flush_sensitivity	nt-store-128	delta_pct	-3.017230	pct	flush_mib=1024
+flush_sensitivity	chase	cold_ns_per_hop	745.915270	ns	flush_mib=2048
+flush_sensitivity	plain-128	copy_ms	0.078958	ms	flush_mib=2048
+flush_sensitivity	nt-store-128	delta_pct	-3.340116	pct	flush_mib=2048
+flush_sensitivity	-	smallest_adequate_mib	128.000000	MiB	
+flush_sensitivity	-	cold_latency_spread_pct	0.056697	pct	
+buffers	src_dst_delta	bytes	1075838976.000000	B	
+isolated_copy_controlled	nt-store-128	delta_pct	-0.466844	pct	vs=plain-128 sig=0
+isolated_copy_controlled	nt-both-128	delta_pct	0.575827	pct	vs=nt-store-128 sig=0
+isolated_copy_controlled	asm-plain-128	delta_pct	-1.255296	pct	vs=plain-128 sig=1
+isolated_copy_controlled	ntrt-store-128	delta_pct	-0.286203	pct	vs=asm-plain-128 sig=0
+isolated_copy_controlled	nt-store-64	delta_pct	0.232222	pct	vs=plain-64 sig=0
+isolated_copy_controlled	pr2616-actual-32	delta_pct	-0.176898	pct	vs=plain-32 sig=0
+isolated_copy_controlled	plain-64	delta_pct	77.262855	pct	vs=plain-128 sig=1
+isolated_copy_controlled	plain-32	delta_pct	220.096053	pct	vs=plain-128 sig=1
+isolated_copy	plain-128	median_ms	0.525348	ms	ci=0.000..0.000 sig=0
+isolated_copy	plain-128	delta_pct	0.000000	pct	ci=0.000..0.000 sig=0
+isolated_copy	nt-both-128	median_ms	0.526270	ms	ci=-0.280..0.628 sig=0
+isolated_copy	nt-both-128	delta_pct	0.373860	pct	ci=-0.280..0.628 sig=0
+isolated_copy	nt-store-128	median_ms	0.522985	ms	ci=-0.826..-0.115 sig=0
+isolated_copy	nt-store-128	delta_pct	-0.466844	pct	ci=-0.826..-0.115 sig=0
+isolated_copy	nt-store-64	median_ms	0.931317	ms	ci=76.803..78.300 sig=1
+isolated_copy	nt-store-64	delta_pct	77.546913	pct	ci=76.803..78.300 sig=1
+isolated_copy	plain-64	median_ms	0.930276	ms	ci=76.747..77.690 sig=1
+isolated_copy	plain-64	delta_pct	77.262855	pct	ci=76.747..77.690 sig=1
+isolated_copy	ntrt-store-128	median_ms	0.517537	ms	ci=-2.173..-1.204 sig=1
+isolated_copy	ntrt-store-128	delta_pct	-1.558287	pct	ci=-2.173..-1.204 sig=1
+isolated_copy	pr2616-actual-32	median_ms	1.675034	ms	ci=217.570..225.373 sig=1
+isolated_copy	pr2616-actual-32	delta_pct	219.857556	pct	ci=217.570..225.373 sig=1
+isolated_copy	plain-32	median_ms	1.680402	ms	ci=218.769..220.622 sig=1
+isolated_copy	plain-32	delta_pct	220.096053	pct	ci=218.769..220.622 sig=1
+isolated_copy	asm-plain-128	median_ms	0.518859	ms	ci=-1.708..-0.955 sig=1
+isolated_copy	asm-plain-128	delta_pct	-1.255296	pct	ci=-1.708..-0.955 sig=1
+isolated_copy	-	resolution_limit_pp	0.741026	pp	
+size_curve	nt-store-128	delta_pct	0.828669	pct	size=64KiB sig=0
+size_curve	nt-both-128	delta_pct	1.379234	pct	size=64KiB sig=0
+size_curve	ntrt-store-128	delta_pct	-0.009458	pct	size=64KiB sig=0
+size_curve	plain-128	copy_ms	0.009615	ms	size=64KiB
+size_curve	plain-128	bandwidth_rw	13.632033	GB/s	size=64KiB
+size_curve	nt-store-128	delta_pct	-0.430378	pct	size=256KiB sig=0
+size_curve	nt-both-128	delta_pct	0.868240	pct	size=256KiB sig=0
+size_curve	ntrt-store-128	delta_pct	-0.462271	pct	size=256KiB sig=0
+size_curve	plain-128	copy_ms	0.009134	ms	size=256KiB
+size_curve	plain-128	bandwidth_rw	57.399605	GB/s	size=256KiB
+size_curve	nt-store-128	delta_pct	-1.313916	pct	size=1MiB sig=0
+size_curve	nt-both-128	delta_pct	-0.010350	pct	size=1MiB sig=0
+size_curve	ntrt-store-128	delta_pct	-0.894631	pct	size=1MiB sig=0
+size_curve	plain-128	copy_ms	0.009294	ms	size=1MiB
+size_curve	plain-128	bandwidth_rw	225.645805	GB/s	size=1MiB
+size_curve	nt-store-128	delta_pct	-0.373974	pct	size=4MiB sig=0
+size_curve	nt-both-128	delta_pct	-0.357872	pct	size=4MiB sig=0
+size_curve	ntrt-store-128	delta_pct	1.139899	pct	size=4MiB sig=0
+size_curve	plain-128	copy_ms	0.011417	ms	size=4MiB
+size_curve	plain-128	bandwidth_rw	734.747156	GB/s	size=4MiB
+size_curve	nt-store-128	delta_pct	-0.037826	pct	size=16MiB sig=0
+size_curve	nt-both-128	delta_pct	0.000000	pct	size=16MiB sig=0
+size_curve	ntrt-store-128	delta_pct	-0.039762	pct	size=16MiB sig=0
+size_curve	plain-128	copy_ms	0.103155	ms	size=16MiB
+size_curve	plain-128	bandwidth_rw	325.281677	GB/s	size=16MiB
+size_curve	nt-store-128	delta_pct	0.000000	pct	size=32MiB sig=0
+size_curve	nt-both-128	delta_pct	-0.213502	pct	size=32MiB sig=0
+size_curve	ntrt-store-128	delta_pct	-0.072227	pct	size=32MiB sig=0
+size_curve	plain-128	copy_ms	0.056605	ms	size=32MiB
+size_curve	plain-128	bandwidth_rw	1185.564242	GB/s	size=32MiB
+size_curve	nt-store-128	delta_pct	-0.423953	pct	size=64MiB sig=0
+size_curve	nt-both-128	delta_pct	-0.141032	pct	size=64MiB sig=0
+size_curve	ntrt-store-128	delta_pct	-0.212858	pct	size=64MiB sig=0
+size_curve	plain-128	copy_ms	0.056725	ms	size=64MiB
+size_curve	plain-128	bandwidth_rw	2366.112475	GB/s	size=64MiB
+size_curve	nt-store-128	delta_pct	-4.432643	pct	size=96MiB sig=1
+size_curve	nt-both-128	delta_pct	-2.392519	pct	size=96MiB sig=0
+size_curve	ntrt-store-128	delta_pct	-4.914289	pct	size=96MiB sig=1
+size_curve	plain-128	copy_ms	0.062855	ms	size=96MiB
+size_curve	plain-128	bandwidth_rw	3203.032360	GB/s	size=96MiB
+size_curve	nt-store-128	delta_pct	-3.066731	pct	size=128MiB sig=1
+size_curve	nt-both-128	delta_pct	-0.613850	pct	size=128MiB sig=0
+size_curve	ntrt-store-128	delta_pct	-4.439746	pct	size=128MiB sig=1
+size_curve	plain-128	copy_ms	0.078638	ms	size=128MiB
+size_curve	plain-128	bandwidth_rw	3413.558944	GB/s	size=128MiB
+size_curve	nt-store-128	delta_pct	-3.197421	pct	size=192MiB sig=1
+size_curve	nt-both-128	delta_pct	-1.305196	pct	size=192MiB sig=0
+size_curve	ntrt-store-128	delta_pct	-4.725716	pct	size=192MiB sig=1
+size_curve	plain-128	copy_ms	0.111687	ms	size=192MiB
+size_curve	plain-128	bandwidth_rw	3605.193034	GB/s	size=192MiB
+size_curve	nt-store-128	delta_pct	-1.532886	pct	size=256MiB sig=0
+size_curve	nt-both-128	delta_pct	-0.167112	pct	size=256MiB sig=0
+size_curve	ntrt-store-128	delta_pct	-2.591182	pct	size=256MiB sig=1
+size_curve	plain-128	copy_ms	0.142453	ms	size=256MiB
+size_curve	plain-128	bandwidth_rw	3768.758202	GB/s	size=256MiB
+size_curve	nt-store-128	delta_pct	-1.365153	pct	size=512MiB sig=0
+size_curve	nt-both-128	delta_pct	-0.103197	pct	size=512MiB sig=0
+size_curve	ntrt-store-128	delta_pct	-2.163105	pct	size=512MiB sig=0
+size_curve	plain-128	copy_ms	0.270566	ms	size=512MiB
+size_curve	plain-128	bandwidth_rw	3968.502610	GB/s	size=512MiB
+size_curve	nt-store-128	delta_pct	-0.382850	pct	size=1024MiB sig=0
+size_curve	nt-both-128	delta_pct	0.075685	pct	size=1024MiB sig=0
+size_curve	ntrt-store-128	delta_pct	-1.444772	pct	size=1024MiB sig=1
+size_curve	plain-128	copy_ms	0.525789	ms	size=1024MiB
+size_curve	plain-128	bandwidth_rw	4084.306740	GB/s	size=1024MiB
+size_curve	nt-store-128	best_gain_pct	-4.432643	pct	
+size_curve	nt-store-128	best_gain_at_mib	96.000000	MiB	
+small_copy	runtime-nt	delta_pct	0.868240	pct	size_kib=16 vs_empty=1.1
+small_copy	template-nt	delta_pct	-0.431812	pct	size_kib=16 vs_empty=1.1
+small_copy	runtime-plain	copy_ms	0.008854	ms	size_kib=16 vs_empty=1.1
+small_copy	runtime-nt	delta_pct	-0.917329	pct	size_kib=64 vs_empty=1.1
+small_copy	template-nt	delta_pct	-0.457103	pct	size_kib=64 vs_empty=1.1
+small_copy	runtime-plain	copy_ms	0.009014	ms	size_kib=64 vs_empty=1.1
+small_copy	runtime-nt	delta_pct	-0.450842	pct	size_kib=256 vs_empty=1.2
+small_copy	template-nt	delta_pct	0.000000	pct	size_kib=256 vs_empty=1.2
+small_copy	runtime-plain	copy_ms	0.009253	ms	size_kib=256 vs_empty=1.2
+small_copy	runtime-nt	delta_pct	-0.423095	pct	size_kib=1024 vs_empty=1.2
+small_copy	template-nt	delta_pct	-1.280136	pct	size_kib=1024 vs_empty=1.2
+small_copy	runtime-plain	copy_ms	0.009575	ms	size_kib=1024 vs_empty=1.2
+small_copy	runtime-nt	delta_pct	-0.899580	pct	size_kib=2048 vs_empty=1.2
+small_copy	template-nt	delta_pct	-0.839109	pct	size_kib=2048 vs_empty=1.2
+small_copy	runtime-plain	copy_ms	0.009454	ms	size_kib=2048 vs_empty=1.2
+small_copy	runtime-nt	delta_pct	-1.023864	pct	size_kib=4096 vs_empty=1.4
+small_copy	template-nt	delta_pct	-0.344326	pct	size_kib=4096 vs_empty=1.4
+small_copy	runtime-plain	copy_ms	0.011297	ms	size_kib=4096 vs_empty=1.4
+small_copy	runtime-nt	delta_pct	-1.543785	pct	size_kib=8192 vs_empty=1.8
+small_copy	template-nt	delta_pct	-1.248059	pct	size_kib=8192 vs_empty=1.8
+small_copy	runtime-plain	copy_ms	0.013941	ms	size_kib=8192 vs_empty=1.8
+small_copy	runtime-nt	delta_pct	0.000000	pct	size_kib=16384 vs_empty=13.0
+small_copy	template-nt	delta_pct	0.038443	pct	size_kib=16384 vs_empty=13.0
+small_copy	runtime-plain	copy_ms	0.103155	ms	size_kib=16384 vs_empty=13.0
+small_copy	runtime-nt	delta_pct	-0.282093	pct	size_kib=32768 vs_empty=7.1
+small_copy	template-nt	delta_pct	0.070189	pct	size_kib=32768 vs_empty=7.1
+small_copy	runtime-plain	copy_ms	0.056324	ms	size_kib=32768 vs_empty=7.1
+small_copy	runtime-nt	delta_pct	0.000000	pct	size_kib=65536 vs_empty=7.1
+small_copy	template-nt	delta_pct	0.000000	pct	size_kib=65536 vs_empty=7.1
+small_copy	runtime-plain	copy_ms	0.056245	ms	size_kib=65536 vs_empty=7.1
+adversarial	reference	delta_pct	0.071275	pct	footprint_mib=24 sig=0 res_pp=0.71
+adversarial	reference	baseline_ms	0.056245	ms	footprint_mib=24 sig=0 res_pp=0.71
+adversarial	consume-only	delta_pct	-1.208895	pct	footprint_mib=24 sig=0 res_pp=2.39
+adversarial	consume-only	baseline_ms	0.016665	ms	footprint_mib=24 sig=0 res_pp=2.39
+adversarial	chain-second	delta_pct	-0.141974	pct	footprint_mib=24 sig=0 res_pp=0.57
+adversarial	chain-second	baseline_ms	0.056125	ms	footprint_mib=24 sig=0 res_pp=0.57
+adversarial	chain-coldsrc	delta_pct	0.142128	pct	footprint_mib=24 sig=0 res_pp=0.64
+adversarial	chain-coldsrc	baseline_ms	0.056044	ms	footprint_mib=24 sig=0 res_pp=0.64
+adversarial	fanout	delta_pct	-1.435914	pct	footprint_mib=24 sig=0 res_pp=2.43
+adversarial	fanout	baseline_ms	0.036295	ms	footprint_mib=24 sig=0 res_pp=2.43
+adversarial	overwrite	delta_pct	-0.126465	pct	footprint_mib=24 sig=0 res_pp=0.53
+adversarial	overwrite	baseline_ms	0.283225	ms	footprint_mib=24 sig=0 res_pp=0.53
+adversarial	staging-reuse	delta_pct	-1.610440	pct	footprint_mib=24 sig=0 res_pp=3.57
+adversarial	staging-reuse	baseline_ms	0.011297	ms	footprint_mib=24 sig=0 res_pp=3.57
+adversarial	multistream	delta_pct	1.191813	pct	footprint_mib=24 sig=0 res_pp=6.11
+adversarial	multistream	baseline_ms	0.029645	ms	footprint_mib=24 sig=0 res_pp=6.11
+adversarial	unaligned	delta_pct	-0.284725	pct	footprint_mib=24 sig=0 res_pp=0.71
+adversarial	unaligned	baseline_ms	0.056285	ms	footprint_mib=24 sig=0 res_pp=0.71
+adversarial	reference	delta_pct	0.071683	pct	footprint_mib=48 sig=0 res_pp=0.43
+adversarial	reference	baseline_ms	0.056285	ms	footprint_mib=48 sig=0 res_pp=0.43
+adversarial	consume-only	delta_pct	0.069192	pct	footprint_mib=48 sig=0 res_pp=0.43
+adversarial	consume-only	baseline_ms	0.056125	ms	footprint_mib=48 sig=0 res_pp=0.43
+adversarial	chain-second	delta_pct	-0.142848	pct	footprint_mib=48 sig=0 res_pp=0.36
+adversarial	chain-second	baseline_ms	0.056164	ms	footprint_mib=48 sig=0 res_pp=0.36
+adversarial	chain-coldsrc	delta_pct	-0.140557	pct	footprint_mib=48 sig=0 res_pp=0.64
+adversarial	chain-coldsrc	baseline_ms	0.056285	ms	footprint_mib=48 sig=0 res_pp=0.64
+adversarial	fanout	delta_pct	0.313503	pct	footprint_mib=48 sig=0 res_pp=2.69
+adversarial	fanout	baseline_ms	0.051958	ms	footprint_mib=48 sig=0 res_pp=2.69
+adversarial	overwrite	delta_pct	0.000000	pct	footprint_mib=48 sig=0 res_pp=0.16
+adversarial	overwrite	baseline_ms	0.317196	ms	footprint_mib=48 sig=0 res_pp=0.16
+adversarial	staging-reuse	delta_pct	0.000000	pct	footprint_mib=48 sig=0 res_pp=3.08
+adversarial	staging-reuse	baseline_ms	0.012739	ms	footprint_mib=48 sig=0 res_pp=3.08
+adversarial	multistream	delta_pct	0.132077	pct	footprint_mib=48 sig=0 res_pp=0.40
+adversarial	multistream	baseline_ms	0.060010	ms	footprint_mib=48 sig=0 res_pp=0.40
+adversarial	unaligned	delta_pct	-2.340714	pct	footprint_mib=48 sig=1 res_pp=0.88
+adversarial	unaligned	baseline_ms	0.096024	ms	footprint_mib=48 sig=1 res_pp=0.88
+adversarial	reference	delta_pct	-3.534573	pct	footprint_mib=128 sig=1 res_pp=1.25
+adversarial	reference	baseline_ms	0.079800	ms	footprint_mib=128 sig=1 res_pp=1.25
+adversarial	consume-only	delta_pct	-0.070090	pct	footprint_mib=128 sig=0 res_pp=0.36
+adversarial	consume-only	baseline_ms	0.055884	ms	footprint_mib=128 sig=0 res_pp=0.36
+adversarial	chain-second	delta_pct	-3.600089	pct	footprint_mib=128 sig=1 res_pp=1.24
+adversarial	chain-second	baseline_ms	0.079960	ms	footprint_mib=128 sig=1 res_pp=1.24
+adversarial	chain-coldsrc	delta_pct	-3.446443	pct	footprint_mib=128 sig=1 res_pp=1.15
+adversarial	chain-coldsrc	baseline_ms	0.079520	ms	footprint_mib=128 sig=1 res_pp=1.15
+adversarial	fanout	delta_pct	-0.025189	pct	footprint_mib=128 sig=0 res_pp=0.23
+adversarial	fanout	baseline_ms	0.159038	ms	footprint_mib=128 sig=0 res_pp=0.23
+adversarial	overwrite	delta_pct	-3.726253	pct	footprint_mib=128 sig=1 res_pp=0.54
+adversarial	overwrite	baseline_ms	0.455484	ms	footprint_mib=128 sig=1 res_pp=0.54
+adversarial	staging-reuse	delta_pct	0.038734	pct	footprint_mib=128 sig=0 res_pp=0.31
+adversarial	staging-reuse	baseline_ms	0.102875	ms	footprint_mib=128 sig=0 res_pp=0.31
+adversarial	multistream	delta_pct	-4.775768	pct	footprint_mib=128 sig=1 res_pp=1.94
+adversarial	multistream	baseline_ms	0.066980	ms	footprint_mib=128 sig=1 res_pp=1.94
+adversarial	unaligned	delta_pct	-2.054205	pct	footprint_mib=128 sig=1 res_pp=0.52
+adversarial	unaligned	baseline_ms	0.229665	ms	footprint_mib=128 sig=1 res_pp=0.52
+adversarial	-	worse_cases	0.000000	count	
+adversarial	-	most_adverse_pct	1.191813	pct	multistream @ 24 MiB
+adversarial	-	coarsest_resolution_pp	6.110819	pp	multistream @ 24 MiB
+concurrency	nt-store-128	victim_delta_pct	0.140977	pct	ws_mib=2 passes=10777 copies=76 sig=0
+concurrency	asm-plain-128	victim_delta_pct	0.078330	pct	ws_mib=2 passes=10777 copies=76 sig=0
+concurrency	plain-128	victim_alone_ms	4.726136	ms	ws_mib=2 passes=10777 copies=76 sig=0
+concurrency	nt-store-128	victim_delta_pct	-2.558471	pct	ws_mib=8 passes=3197 copies=82 sig=1
+concurrency	asm-plain-128	victim_delta_pct	-0.314784	pct	ws_mib=8 passes=3197 copies=82 sig=1
+concurrency	plain-128	victim_alone_ms	5.012601	ms	ws_mib=8 passes=3197 copies=82 sig=1
+concurrency	nt-store-128	victim_delta_pct	-2.702272	pct	ws_mib=16 passes=421 copies=76 sig=1
+concurrency	asm-plain-128	victim_delta_pct	-0.205996	pct	ws_mib=16 passes=421 copies=76 sig=1
+concurrency	plain-128	victim_alone_ms	4.603387	ms	ws_mib=16 passes=421 copies=76 sig=1
+concurrency	nt-store-128	victim_delta_pct	-4.727645	pct	ws_mib=32 passes=226 copies=79 sig=1
+concurrency	asm-plain-128	victim_delta_pct	-0.261684	pct	ws_mib=32 passes=226 copies=79 sig=1
+concurrency	plain-128	victim_alone_ms	4.868265	ms	ws_mib=32 passes=226 copies=79 sig=1
+concurrency	nt-store-128	victim_delta_pct	-2.883179	pct	ws_mib=48 passes=153 copies=82 sig=1
+concurrency	asm-plain-128	victim_delta_pct	-0.615356	pct	ws_mib=48 passes=153 copies=82 sig=1
+concurrency	plain-128	victim_alone_ms	4.995295	ms	ws_mib=48 passes=153 copies=82 sig=1
+concurrency	nt-store-128	victim_delta_pct	-2.732033	pct	ws_mib=64 passes=114 copies=81 sig=1
+concurrency	asm-plain-128	victim_delta_pct	-0.482612	pct	ws_mib=64 passes=114 copies=81 sig=1
+concurrency	plain-128	victim_alone_ms	4.973703	ms	ws_mib=64 passes=114 copies=81 sig=1
+concurrency	nt-store-128	victim_delta_pct	-2.401303	pct	ws_mib=96 passes=61 copies=68 sig=1
+concurrency	asm-plain-128	victim_delta_pct	-0.367183	pct	ws_mib=96 passes=61 copies=68 sig=1
+concurrency	plain-128	victim_alone_ms	4.226422	ms	ws_mib=96 passes=61 copies=68 sig=1
+concurrency	nt-store-128	victim_delta_pct	-2.665365	pct	ws_mib=128 passes=44 copies=69 sig=1
+concurrency	asm-plain-128	victim_delta_pct	-0.538736	pct	ws_mib=128 passes=44 copies=69 sig=1
+concurrency	plain-128	victim_alone_ms	4.339391	ms	ws_mib=128 passes=44 copies=69 sig=1
+concurrency	nt-store-128	best_gain_pct	-4.727645	pct	
+concurrency	nt-store-128	best_gain_at_ws_mib	32.000000	MiB	
+residency_by_alloc	hipMalloc	cold_ns_per_hop	416.430790	ns	footprint_mib=1
+residency_by_alloc	hipMalloc	warm_ns_per_hop	419.350050	ns	footprint_mib=1
+residency_by_alloc	hipMalloc	four_laps_ns_per_hop	333.951408	ns	footprint_mib=1
+residency_by_alloc	hipMalloc	warm_over_cold	1.007010	x	footprint_mib=1
+residency_by_alloc	hipMalloc finegrained	cold_ns_per_hop	415.711664	ns	footprint_mib=1
+residency_by_alloc	hipMalloc finegrained	warm_ns_per_hop	416.239811	ns	footprint_mib=1
+residency_by_alloc	hipMalloc finegrained	four_laps_ns_per_hop	327.752525	ns	footprint_mib=1
+residency_by_alloc	hipMalloc finegrained	warm_over_cold	1.001270	x	footprint_mib=1
+residency_by_alloc	hipHostMalloc	cold_ns_per_hop	1069.634804	ns	footprint_mib=1
+residency_by_alloc	hipHostMalloc	warm_ns_per_hop	1077.505527	ns	footprint_mib=1
+residency_by_alloc	hipHostMalloc	four_laps_ns_per_hop	1070.600585	ns	footprint_mib=1
+residency_by_alloc	hipHostMalloc	warm_over_cold	1.007358	x	footprint_mib=1
+residency_by_alloc	hipHostMalloc NonCoherent	cold_ns_per_hop	1084.943302	ns	footprint_mib=1
+residency_by_alloc	hipHostMalloc NonCoherent	warm_ns_per_hop	1079.490758	ns	footprint_mib=1
+residency_by_alloc	hipHostMalloc NonCoherent	four_laps_ns_per_hop	1058.534719	ns	footprint_mib=1
+residency_by_alloc	hipHostMalloc NonCoherent	warm_over_cold	0.994974	x	footprint_mib=1
+residency_by_alloc	malloc + hipHostRegister	cold_ns_per_hop	1072.241226	ns	footprint_mib=1
+residency_by_alloc	malloc + hipHostRegister	warm_ns_per_hop	1077.089808	ns	footprint_mib=1
+residency_by_alloc	malloc + hipHostRegister	four_laps_ns_per_hop	1063.915086	ns	footprint_mib=1
+residency_by_alloc	malloc + hipHostRegister	warm_over_cold	1.004522	x	footprint_mib=1
+residency_by_alloc	hipMallocManaged	cold_ns_per_hop	908.853952	ns	footprint_mib=1
+residency_by_alloc	hipMallocManaged	warm_ns_per_hop	893.386430	ns	footprint_mib=1
+residency_by_alloc	hipMallocManaged	four_laps_ns_per_hop	889.760384	ns	footprint_mib=1
+residency_by_alloc	hipMallocManaged	warm_over_cold	0.982981	x	footprint_mib=1
+residency_by_alloc	hipMalloc	cold_ns_per_hop	737.887192	ns	footprint_mib=32
+residency_by_alloc	hipMalloc	warm_ns_per_hop	742.205667	ns	footprint_mib=32
+residency_by_alloc	hipMalloc	four_laps_ns_per_hop	673.815536	ns	footprint_mib=32
+residency_by_alloc	hipMalloc	warm_over_cold	1.005852	x	footprint_mib=32
+residency_by_alloc	hipMalloc finegrained	cold_ns_per_hop	743.978310	ns	footprint_mib=32
+residency_by_alloc	hipMalloc finegrained	warm_ns_per_hop	740.461063	ns	footprint_mib=32
+residency_by_alloc	hipMalloc finegrained	four_laps_ns_per_hop	677.242708	ns	footprint_mib=32
+residency_by_alloc	hipMalloc finegrained	warm_over_cold	0.995272	x	footprint_mib=32
+residency_by_alloc	hipHostMalloc	cold_ns_per_hop	962.552261	ns	footprint_mib=32
+residency_by_alloc	hipHostMalloc	warm_ns_per_hop	951.645851	ns	footprint_mib=32
+residency_by_alloc	hipHostMalloc	four_laps_ns_per_hop	940.441132	ns	footprint_mib=32
+residency_by_alloc	hipHostMalloc	warm_over_cold	0.988669	x	footprint_mib=32
+residency_by_alloc	hipHostMalloc NonCoherent	cold_ns_per_hop	959.191227	ns	footprint_mib=32
+residency_by_alloc	hipHostMalloc NonCoherent	warm_ns_per_hop	957.594872	ns	footprint_mib=32
+residency_by_alloc	hipHostMalloc NonCoherent	four_laps_ns_per_hop	941.168690	ns	footprint_mib=32
+residency_by_alloc	hipHostMalloc NonCoherent	warm_over_cold	0.998336	x	footprint_mib=32
+residency_by_alloc	malloc + hipHostRegister	cold_ns_per_hop	963.798237	ns	footprint_mib=32
+residency_by_alloc	malloc + hipHostRegister	warm_ns_per_hop	968.070602	ns	footprint_mib=32
+residency_by_alloc	malloc + hipHostRegister	four_laps_ns_per_hop	961.003399	ns	footprint_mib=32
+residency_by_alloc	malloc + hipHostRegister	warm_over_cold	1.004433	x	footprint_mib=32
+residency_by_alloc	hipMallocManaged	cold_ns_per_hop	907.674026	ns	footprint_mib=32
+residency_by_alloc	hipMallocManaged	warm_ns_per_hop	902.303886	ns	footprint_mib=32
+residency_by_alloc	hipMallocManaged	four_laps_ns_per_hop	898.212719	ns	footprint_mib=32
+residency_by_alloc	hipMallocManaged	warm_over_cold	0.994084	x	footprint_mib=32
+residency_by_alloc	-	retaining_kinds	0.000000	count	

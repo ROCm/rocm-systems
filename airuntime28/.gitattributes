@@ -1,0 +1,23 @@
+# Everything here is consumed by bash and hipcc on a Linux target, so LF is not a
+# preference. The editor on the Windows side writes UTF-16LE without a BOM and
+# PowerShell rewrites LF to CRLF when piping to a native process; both produce
+# files the target rejects. sync.ps1 normalises on the way out, and this pins the
+# repository side so a checkout cannot reintroduce it.
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.hip  text eol=lf
+*.h    text eol=lf
+*.hpp  text eol=lf
+*.cpp  text eol=lf
+*.py   text eol=lf
+*.md   text eol=lf
+*.tsv  text eol=lf
+*.txt  text eol=lf
+
+# PowerShell parses LF fine, and sync.ps1 normalises these along with everything
+# else, so there is no reason to make them the exception.
+*.ps1  text eol=lf
+
+# Patches must round-trip byte for byte or they stop applying.
+*.patch -text
