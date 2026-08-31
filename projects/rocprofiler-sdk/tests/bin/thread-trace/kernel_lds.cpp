@@ -43,7 +43,16 @@ get_shader_engine_id()
     const auto value = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_sendmsg_rtn)
                            ? __builtin_amdgcn_s_sendmsg_rtn(RTN_GET_SE_HW_ID)
                            : 0u;
-    return (value >> SE_HW_ID_SE_ID_OFFSET) & ((1u << SE_HW_ID_SE_ID_SIZE) - 1);
+    const auto se_id = (value >> SE_HW_ID_SE_ID_OFFSET) & ((1u << SE_HW_ID_SE_ID_SIZE) - 1);
+#    if defined(__gfx1250__)
+    constexpr uint32_t XCC_ID_OFFSET = 16;
+    constexpr uint32_t XCC_ID_SIZE   = 4;
+    constexpr uint32_t SE_PER_XCC    = 2;
+    const auto         xcc_id        = (value >> XCC_ID_OFFSET) & ((1u << XCC_ID_SIZE) - 1);
+    return xcc_id * SE_PER_XCC + se_id;
+#    else
+    return se_id;
+#    endif
 #else
     const auto se_id  = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_getreg)
                             ? __builtin_amdgcn_s_getreg(
