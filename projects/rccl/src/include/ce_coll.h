@@ -65,6 +65,11 @@ struct ncclCeColl {
   size_t baseUCSymReadyOffset;
   size_t baseUCSymComplOffset;
   uint32_t ceSeqNum;
+  // Device buffer sourcing the UC barrier flag value. Slot [0]: running seq
+  // (stored per non-capture barrier); slot [1]: constant GRAPH_SYNC_VALUE used
+  // during graph capture. Peer writes memcpy from here so they can be issued
+  // as a separate stream op ahead of the wait/reset batch (see ncclPrepUCSync).
+  uint32_t* ceSeqNumDev;
   bool useCompletePtr;
   uint32_t intraBatchSyncFreq;
   uint64_t intraBatchSyncMsgThreshold;
@@ -85,7 +90,7 @@ struct ncclCeColl {
   struct ncclDevrWindow* signalWin;
   // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.
   uint32_t* d_barrierSync;
-  cudaStream_t scatterStream; 
+  cudaStream_t scatterStream;
   cudaEvent_t synceEvent;  // join scatterStream back onto the caller's stream
   // Latched while this comm has live graph-captured plans. CE 2-shot AllReduce
   // can deadlock on eager calls that share a graph-mode comm, so we disable CE

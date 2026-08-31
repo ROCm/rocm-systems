@@ -45,6 +45,10 @@
  *   - SuspendResumeBasic / MemStats / CollectiveIntegrity / Lifecycle / Group
  *     / ArgValidation / MemStatsValidation - public API tests for
  *     ncclCommSuspend / ncclCommResume / ncclCommMemStats. Need np >= 2.
+ *   - SuspendResumeSingleProcMultiGpu - one rank owning several GPUs through
+ *     ncclCommInitAll. Needs exactly 1 rank and >= 2 GPUs, and drives at most
+ *     kMaxGpusForSingleProcess of them. Every rank reaches the same skip
+ *     decision, so launching it with more ranks is safe.
  *
  * Run (a single mpirun -np 2 invocation runs the entire file):
  *   mpirun -np 2 ./rccl-UnitTestsMPI --gtest_filter='MemManager*:SuspendResume*'
@@ -53,6 +57,7 @@
  *   mpirun -np 1 ./rccl-UnitTestsMPI --gtest_filter='MemManagerAnyRanks.*'
  *   mpirun -np 2 ./rccl-UnitTestsMPI --gtest_filter='MemManagerTwoRank.*'
  *   mpirun -np 2 ./rccl-UnitTestsMPI --gtest_filter='SuspendResume*'
+ *   mpirun -np 1 ./rccl-UnitTestsMPI --gtest_filter='SuspendResumeSingleProcMultiGpu.*'
  */
 
 #include "DeviceBufferHelpers.hpp"
@@ -63,6 +68,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
@@ -1943,14 +1949,246 @@ TEST_F(SuspendResumeGroup, CollectiveAfterSuspendInSameGroup)
 }
 
 // ----------------------------------------------------------------------------
-// 6. Argument validation / corner cases
+// 6. Single-process multi-GPU
+//
+// One process drives every visible GPU. Communicators are created through
+// ncclCommInitAll.
+//
+// The suite needs the binary launched as a single rank; validateTestPrerequisites
+// skips it otherwise.
+// ----------------------------------------------------------------------------
+
+namespace
+{
+constexpr int kMinGpusForSingleProcess = 2;
+// Grouping is already covered by a handful of communicators, and ncclCommInitAll
+// costs minutes once every GPU of the node joins in.
+constexpr int kMaxGpusForSingleProcess = 4;
+}
+
+class SuspendResumeSingleProcMultiGpu : public SuspendResumePublicAPITestBase
+{
+protected:
+    // Number of GPUs this process will drive, or 0 when the environment cannot
+    // host the suite (launched with more than one rank, or fewer than two
+    // devices). Capped, see kMaxGpusForSingleProcess.
+    int usableDeviceCount()
+    {
+        if (!validateTestPrerequisites(1, /*max_processes=*/1)) return 0;
+        int count = 0;
+        if (hipGetDeviceCount(&count) != hipSuccess) return 0;
+        if (count < kMinGpusForSingleProcess) return 0;
+        return std::min(count, kMaxGpusForSingleProcess);
+    }
+
+    ncclResult_t suspendAll(const std::vector<ncclComm_t>& comms)
+    {
+        ncclResult_t ret = ncclGroupStart();
+        if (ret != ncclSuccess) return ret;
+        for (ncclComm_t comm : comms)
+        {
+            ret = ncclCommSuspend(comm, NCCL_SUSPEND_MEM);
+            if (ret != ncclSuccess) break;
+        }
+        ncclResult_t endRet = ncclGroupEnd();
+        return ret != ncclSuccess ? ret : endRet;
+    }
+
+    ncclResult_t resumeAll(const std::vector<ncclComm_t>& comms)
+    {
+        ncclResult_t ret = ncclGroupStart();
+        if (ret != ncclSuccess) return ret;
+        for (ncclComm_t comm : comms)
+        {
+            ret = ncclCommResume(comm);
+            if (ret != ncclSuccess) break;
+        }
+        ncclResult_t endRet = ncclGroupEnd();
+        return ret != ncclSuccess ? ret : endRet;
+    }
+};
+
+TEST_F(SuspendResumeSingleProcMultiGpu, GroupSuspendResumeAllComms)
+{
+    const int deviceCount = usableDeviceCount();
+    if (deviceCount == 0) GTEST_SKIP() << "Needs exactly 1 rank and >= 2 GPUs";
+
+    std::vector<ncclComm_t> comms(deviceCount, nullptr);
+    ASSERT_EQ(ncclSuccess, ncclCommInitAll(comms.data(), deviceCount, nullptr));
+    std::vector<NcclCommAutoGuard> commGuards;
+    commGuards.reserve(deviceCount);
+    for (ncclComm_t comm : comms) commGuards.emplace_back(comm);
+
+    for (int dev = 0; dev < deviceCount; ++dev)
+        EXPECT_EQ(0u, readStat(comms[dev], ncclStatGpuMemSuspended))
+            << "comm on device " << dev << " starts active";
+
+    ASSERT_EQ(ncclSuccess, suspendAll(comms));
+    for (int dev = 0; dev < deviceCount; ++dev)
+        EXPECT_EQ(1u, readStat(comms[dev], ncclStatGpuMemSuspended))
+            << "comm on device " << dev << " must be suspended once the group closes";
+
+    ASSERT_EQ(ncclSuccess, resumeAll(comms));
+    for (int dev = 0; dev < deviceCount; ++dev)
+        EXPECT_EQ(0u, readStat(comms[dev], ncclStatGpuMemSuspended))
+            << "comm on device " << dev << " must be active again";
+}
+
+TEST_F(SuspendResumeSingleProcMultiGpu, CallerDeviceRestored)
+{
+    const int deviceCount = usableDeviceCount();
+    if (deviceCount == 0) GTEST_SKIP() << "Needs exactly 1 rank and >= 2 GPUs";
+
+    std::vector<ncclComm_t> comms(deviceCount, nullptr);
+    ASSERT_EQ(ncclSuccess, ncclCommInitAll(comms.data(), deviceCount, nullptr));
+    std::vector<NcclCommAutoGuard> commGuards;
+    commGuards.reserve(deviceCount);
+    for (ncclComm_t comm : comms) commGuards.emplace_back(comm);
+
+    // The communicators switch to devices 0..deviceCount-1 in turn, so a caller
+    // sitting on device 0 sees a missing restore as a current device left at
+    // deviceCount - 1. Picking the last device instead would hide the bug.
+    const int callerDevice = 0;
+    ASSERT_EQ(hipSuccess, hipSetDevice(callerDevice));
+
+    ASSERT_EQ(ncclSuccess, suspendAll(comms));
+    int deviceAfterSuspend = -1;
+    ASSERT_EQ(hipSuccess, hipGetDevice(&deviceAfterSuspend));
+    EXPECT_EQ(callerDevice, deviceAfterSuspend)
+        << "ncclCommSuspend must leave the caller's current device untouched";
+
+    ASSERT_EQ(ncclSuccess, resumeAll(comms));
+    int deviceAfterResume = -1;
+    ASSERT_EQ(hipSuccess, hipGetDevice(&deviceAfterResume));
+    EXPECT_EQ(callerDevice, deviceAfterResume)
+        << "ncclCommResume must leave the caller's current device untouched";
+}
+
+// Suspend releases the peer imports that p2pMap created for the other devices of
+// this process, and Resume rebuilds them at the same addresses. Read from the
+// manager's entries: a collective here would deadlock, because the symmetric
+// init it triggers is itself collective over each comm in turn.
+TEST_F(SuspendResumeSingleProcMultiGpu, IntraProcessPeerImportsSurviveCycle)
+{
+    const int deviceCount = usableDeviceCount();
+    if (deviceCount == 0) GTEST_SKIP() << "Needs exactly 1 rank and >= 2 GPUs";
+
+    std::vector<ncclComm_t> comms(deviceCount, nullptr);
+    ASSERT_EQ(ncclSuccess, ncclCommInitAll(comms.data(), deviceCount, nullptr));
+    std::vector<NcclCommAutoGuard> commGuards;
+    commGuards.reserve(deviceCount);
+    for (ncclComm_t comm : comms) commGuards.emplace_back(comm);
+
+    // ncclCuMemEnable only reports the effective setting once RCCL has initialized.
+    if (!ncclCuMemEnable())
+        GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 - p2pMap does not track intra-process imports";
+
+    struct PeerImport
+    {
+        void* ptr        = nullptr;
+        void* ownerPtr   = nullptr;
+        bool  active     = false;
+        bool  ownsHandle = false;
+    };
+    auto importsOf = [](ncclComm_t comm) {
+        std::vector<PeerImport> imports;
+        std::lock_guard<std::mutex> lk(comm->memManager->lock);
+        for (auto* e = comm->memManager->entries; e != nullptr; e = e->next)
+        {
+            if (!e->isImportedFromPeer) continue;
+            imports.push_back({e->ptr, e->desc.imported.ownerPtr,
+                               e->state == ncclDynMemStateActive, e->handle != 0});
+        }
+        std::sort(imports.begin(), imports.end(),
+                  [](const PeerImport& l, const PeerImport& r) { return l.ptr < r.ptr; });
+        return imports;
+    };
+    auto addressesOf = [](const std::vector<PeerImport>& imports) {
+        std::vector<std::pair<void*, void*>> addresses;
+        for (const PeerImport& import : imports) addresses.emplace_back(import.ptr, import.ownerPtr);
+        return addresses;
+    };
+    auto countActive = [](const std::vector<PeerImport>& imports) {
+        return static_cast<int>(std::count_if(imports.begin(), imports.end(),
+                                              [](const PeerImport& import) { return import.active; }));
+    };
+    auto countOwningHandle = [](const std::vector<PeerImport>& imports) {
+        return static_cast<int>(std::count_if(imports.begin(), imports.end(),
+                                              [](const PeerImport& import) { return import.ownsHandle; }));
+    };
+
+    std::vector<std::vector<PeerImport>> before(deviceCount);
+    int                                  handlelessBefore = 0;
+    for (int dev = 0; dev < deviceCount; ++dev)
+    {
+        ASSERT_NE(nullptr, comms[dev]->memManager);
+        before[dev]     = importsOf(comms[dev]);
+        const int total = static_cast<int>(before[dev].size());
+        EXPECT_EQ(total, countActive(before[dev]))
+            << "every peer import of the comm on device " << dev << " starts active";
+        handlelessBefore += total - countOwningHandle(before[dev]);
+    }
+    // p2pMap releases the handle right after mapping the peer memory, so the
+    // imports it tracks own none. They exist only when the P2P transport was
+    // selected: without peer access the comms fall back to SHM or NET, which
+    // register no imports and leave the intra-process branch unreachable.
+    if (handlelessBefore == 0)
+        GTEST_SKIP() << "no handle-less peer imports, these devices are not connected over P2P";
+
+    ASSERT_EQ(ncclSuccess, suspendAll(comms));
+    for (int dev = 0; dev < deviceCount; ++dev)
+    {
+        const std::vector<PeerImport> suspended = importsOf(comms[dev]);
+        EXPECT_EQ(before[dev].size(), suspended.size())
+            << "Suspend must keep the entries of the comm on device " << dev << ", only release them";
+        EXPECT_EQ(0, countActive(suspended))
+            << "Suspend must release every peer import of the comm on device " << dev;
+    }
+
+    ASSERT_EQ(ncclSuccess, resumeAll(comms));
+    for (int dev = 0; dev < deviceCount; ++dev)
+    {
+        const std::vector<PeerImport> resumed = importsOf(comms[dev]);
+        const int                     total   = static_cast<int>(resumed.size());
+        EXPECT_EQ(addressesOf(before[dev]), addressesOf(resumed))
+            << "Resume must rebuild the peer imports of the comm on device " << dev
+            << " at their original addresses";
+        EXPECT_EQ(total, countActive(resumed))
+            << "Resume must leave every peer import of the comm on device " << dev << " active";
+        // Resume re-imports through cuMemImportFromShareableHandle, so unlike
+        // p2pMap it hands the entry a handle it owns and the next Suspend has to
+        // release. An entry left handle-less here would leak the peer's memory.
+        EXPECT_EQ(total, countOwningHandle(resumed))
+            << "a re-imported entry must own the handle it was imported with";
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 7. Argument validation / corner cases
 //
 // Each of these returns from inside ncclCommSuspend/Resume/MemStats BEFORE the
 // bootstrapBarrier is reached, so individual ranks failing the call do not
 // leave their peers blocked on a barrier.
 // ----------------------------------------------------------------------------
 
-class SuspendResumeArgValidation : public SuspendResumePublicAPITestBase {};
+class SuspendResumeArgValidation : public SuspendResumePublicAPITestBase
+{
+protected:
+    // Same bootstrap as createTestCommunicator, but with a caller-supplied config;
+    // the fixture helper always uses the default one.
+    ncclResult_t createCommWithConfig(ncclConfig_t* config, ncclComm_t* comm)
+    {
+        // The status travels ahead of the id: a failure known only to rank 0 would leave
+        // the other ranks blocked in ncclCommInitRankConfig for a rank that never joins.
+        int idResult = ncclSuccess;
+        if (MPIEnvironment::world_rank == 0) idResult = ncclGetUniqueId(&nccl_id_);
+        MPI_Bcast(&idResult, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        if (idResult != ncclSuccess) return static_cast<ncclResult_t>(idResult);
+        MPI_Bcast(&nccl_id_, sizeof(ncclUniqueId), MPI_BYTE, 0, MPI_COMM_WORLD);
+        return ncclCommInitRankConfig(comm, MPIEnvironment::world_size, nccl_id_,
+                                      MPIEnvironment::world_rank, config);
+    }
+};
 
 TEST_F(SuspendResumeArgValidation, ZeroFlags)
 {
@@ -2058,6 +2296,140 @@ TEST_F(SuspendResumeArgValidation, CollectiveWhileSuspended)
     ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
     EXPECT_TRUE(runAllReduceAndVerify(comm, stream))
         << "a rejected collective must leave the comm usable";
+}
+
+// A non-blocking communicator takes the ncclCommGetAsyncError branch on the way
+// out of Suspend and Resume, so both may report ncclInProgress and have to be
+// polled to completion like any other non-blocking call.
+TEST_F(SuspendResumeArgValidation, NonBlockingCommCycle)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+
+    ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+    config.blocking     = 0;
+
+    ncclComm_t   comm = nullptr;
+    ncclResult_t ret  = createCommWithConfig(&config, &comm);
+    ASSERT_MPI_TRUE(ret == ncclSuccess || ret == ncclInProgress);
+    ASSERT_MPI_TRUE(comm != nullptr);
+    auto commGuard = makeCommAutoGuard(comm);
+
+    // Give up rather than hang the whole mpirun; healthy calls take milliseconds.
+    auto waitForCompletion = [&](ncclResult_t callResult) {
+        const auto   deadline    = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+        ncclResult_t asyncResult = callResult;
+        while (asyncResult == ncclInProgress)
+        {
+            if (ncclCommGetAsyncError(comm, &asyncResult) != ncclSuccess) return ncclSystemError;
+            if (std::chrono::steady_clock::now() > deadline) return ncclInProgress;
+        }
+        return asyncResult;
+    };
+
+    ASSERT_MPI_EQ(ncclSuccess, waitForCompletion(ret));
+
+    ASSERT_MPI_EQ(ncclSuccess, waitForCompletion(ncclCommSuspend(comm, NCCL_SUSPEND_MEM)));
+    EXPECT_EQ(1u, readStat(comm, ncclStatGpuMemSuspended));
+
+    // A rejection is raised before the comm joins the group, so it never reaches
+    // the async state: the return code is the only place a caller can see it.
+    ASSERT_MPI_EQ(ncclInvalidUsage, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    ncclResult_t asyncError = ncclSystemError;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommGetAsyncError(comm, &asyncError));
+    ASSERT_MPI_EQ(ncclSuccess, asyncError);
+
+    ASSERT_MPI_EQ(ncclSuccess, waitForCompletion(ncclCommResume(comm)));
+    EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended));
+}
+
+// splitShare is read from the parent's own config when the child is created, so
+// the flag has to be set at ncclCommInitRankConfig time rather than passed to
+// ncclCommSplit. The child then shares the parent's memory manager and neither
+// side owns the allocations alone, so both must refuse to suspend.
+TEST_F(SuspendResumeArgValidation, SplitShareCommRejected)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+
+    ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+    config.splitShare   = 1;
+
+    ncclComm_t parent = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, createCommWithConfig(&config, &parent));
+    ASSERT_MPI_TRUE(parent != nullptr);
+    auto parentGuard = makeCommAutoGuard(parent);
+
+    ncclComm_t child = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSplit(parent, /*color=*/0, MPIEnvironment::world_rank,
+                                             &child, /*config=*/nullptr));
+    ASSERT_MPI_TRUE(child != nullptr);
+    auto childGuard = makeCommAutoGuard(child);
+
+    ASSERT_MPI_EQ(ncclInvalidUsage, ncclCommSuspend(child, NCCL_SUSPEND_MEM));
+    ASSERT_MPI_EQ(ncclInvalidUsage, ncclCommSuspend(parent, NCCL_SUSPEND_MEM));
+}
+
+// A rejected Suspend or Resume must still hand the caller back the device it was
+// called on. Both rejections used here are raised after the internal switch to
+// comm->cudaDev; the argument checks reject before it and never touch the device.
+TEST_F(SuspendResumeArgValidation, RejectedCallRestoresCallerDevice)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+
+    int localDevices = 0;
+    ASSERT_EQ(hipSuccess, hipGetDeviceCount(&localDevices));
+    // Suspend and Resume below are collective, so the skip has to be unanimous.
+    int deviceCount = 0;
+    ASSERT_MPI_SUCCESS(MPI_Allreduce(&localDevices, &deviceCount, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if (deviceCount < 2) GTEST_SKIP() << "Needs >= 2 visible GPUs to tell a missing restore apart";
+
+    const int callerDevice  = (comm->cudaDev + 1) % deviceCount;
+    auto      currentDevice = [] {
+        int device = -1;
+        EXPECT_EQ(hipSuccess, hipGetDevice(&device));
+        return device;
+    };
+
+    ASSERT_EQ(hipSuccess, hipSetDevice(callerDevice));
+    EXPECT_EQ(ncclInvalidUsage, ncclCommResume(comm)) << "comm is active, Resume must be rejected";
+    EXPECT_EQ(callerDevice, currentDevice())
+        << "a rejected ncclCommResume must not leave the caller on the comm's device";
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+
+    ASSERT_EQ(hipSuccess, hipSetDevice(callerDevice));
+    EXPECT_EQ(ncclInvalidUsage, ncclCommSuspend(comm, NCCL_SUSPEND_MEM))
+        << "comm is already suspended, the second Suspend must be rejected";
+    EXPECT_EQ(callerDevice, currentDevice())
+        << "a rejected ncclCommSuspend must not leave the caller on the comm's device";
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+    ASSERT_EQ(hipSuccess, hipSetDevice(comm->cudaDev));
+}
+
+// NCCL_DISABLE_MEM_MANAGER is read through NCCL_PARAM, which caches on first use,
+// so this only reproduces in a process started with the variable already set.
+TEST_F(SuspendResumeArgValidation, MemManagerDisabledRejected)
+{
+    const char* memManagerDisabled = std::getenv("NCCL_DISABLE_MEM_MANAGER");
+    const int   disabledHere = (memManagerDisabled != nullptr && std::string(memManagerDisabled) == "1") ? 1 : 0;
+
+    // A launcher may forward the variable to only some ranks, and the collective
+    // below would then wait for the ranks that skipped.
+    int disabledEverywhere = 0;
+    ASSERT_MPI_SUCCESS(
+        MPI_Allreduce(&disabledHere, &disabledEverywhere, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if (!disabledEverywhere)
+        GTEST_SKIP() << "Needs NCCL_DISABLE_MEM_MANAGER=1 set on every rank before process start";
+
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    ASSERT_MPI_EQ(ncclInvalidUsage, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    ASSERT_MPI_EQ(ncclInvalidUsage, ncclCommResume(comm));
 }
 
 // ----- ncclCommMemStats validation --------------------------------------
