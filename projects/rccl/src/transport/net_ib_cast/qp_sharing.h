@@ -167,6 +167,8 @@ void IbCastCleanupGroupCqs(struct IbCastSharedQp* slot0Entry);
 
 // Validate that all shared QP pool entries and commIds are cleaned up.
 // Logs leaked entries and asserts on non-zero counts. Call at finalize time.
+// Gated by NCCL_IB_QP_SHARING_VALIDATE_POOL=1.
+extern int64_t rcclParamIbCastQpSharingValidatePool();
 void IbCastValidateSharedQpPool(void);
 
 // Encode commId into wr_id[63:48]. When commId==0 (sharing disabled or

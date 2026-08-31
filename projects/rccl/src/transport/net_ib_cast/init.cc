@@ -361,8 +361,9 @@ ncclResult_t IbCastFinalizeDevices(void) {
   // the flush is one-shot. atexit(rcclTelemetryFlush) covers the process.
   --netRefCount;
   if (netRefCount == 0) {
-    // debug validation
-    IbCastValidateSharedQpPool();
+    if (rcclParamIbCastQpSharingValidatePool()) {
+      IbCastValidateSharedQpPool();
+    }
   }
   return ncclSuccess;
 }
