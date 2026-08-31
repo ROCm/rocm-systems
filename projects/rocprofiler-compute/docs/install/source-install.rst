@@ -74,12 +74,6 @@ follows.
     * - ``TEST_FROM_INSTALL``
       - Should be ON to enable testing from the installation location without dependency on the source directory.
 
-    * - ``BUILD_TORCH_TRACE_COLLECTOR``
-      - Build ``torch_trace_collector`` for :ref:`Torch trace <torch-operator-mapping>`.
-        Requires PyTorch 2.13 or 2.14 at ``$ROCM_PATH/../torch``.
-        ``AUTO`` (default) builds when that Torch is found, ``ON`` requires it,
-        and ``OFF`` skips the build.
-
     * - ``ENABLE_SANITIZER``
       - Builds with sanitizer instrumentation for development.
         One of ``OFF`` (default), ``ASAN``, ``HOST_ASAN``, ``TSAN``, or ``UBSAN``. See

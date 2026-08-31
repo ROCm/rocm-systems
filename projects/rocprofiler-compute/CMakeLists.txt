@@ -1282,11 +1282,11 @@ install(
     TARGETS rocprofiler-compute-tool
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
 )
-# BUILD_TORCH_TRACE_COLLECTOR=AUTO skips the extension when Torch is absent.
+# The collector is skipped when PyTorch is absent or an unsupported version.
 # The loader searches lib/rocprofiler-compute/ for the versioned artifact.
-if(TARGET ${TORCH_TRACE_COLLECTOR_TARGET})
+if(TARGET torch-trace-collector-module)
     install(
-        TARGETS ${TORCH_TRACE_COLLECTOR_TARGET}
+        TARGETS torch-trace-collector-module
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
     )
 endif()

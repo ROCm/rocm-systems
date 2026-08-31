@@ -903,6 +903,20 @@ Requirements
 * PyTorch 2.13 or 2.14 in the profiling environment.
 * PyTorch application must be run as a Python script or a Python command.
 
+.. important::
+
+   PyTorch must be installed together with ROCm from the TheRock package index.
+   Torch trace is built against the PyTorch that ships alongside ROCm, so a
+   PyTorch installed separately, for example from the default PyPI index, is not
+   supported.
+
+   Install ``rocm[profiler]`` and ``torch`` from the same index, each with the
+   ``device-*`` extra for your GPU. See `Installing multi-arch PyTorch Python
+   packages
+   <https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-multi-arch-pytorch-python-packages>`_
+   for the index URL, the supported ``device-*`` extras, and the PyTorch version
+   compatibility matrix.
+
 Usage
 -----
 
@@ -955,10 +969,11 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 Torch trace collector
 ---------------------
 
-``--torch-trace`` loads ``torch_trace_collector-<torch-version>.so`` for the
-workload PyTorch version (2.13 or 2.14). If no matching module is available,
-profiling stops with an error that lists the supported versions and the
-workload version.
+``--torch-trace`` loads ``torch_trace_collector-<major>.<minor>.<abi>.so`` for
+the workload PyTorch version. If this installation has no collector at all,
+profiling stops and says so. If a collector exists but none matches the workload
+PyTorch version, profiling stops with an error listing the supported versions and
+the workload version.
 
 Output
 ------

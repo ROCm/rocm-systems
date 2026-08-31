@@ -72,7 +72,6 @@ Common CMake options:
 - `-D INSTALL_TESTS=ON` - Install test files and test suite
 - `-D ENABLE_COVERAGE=ON` - Enable code coverage reporting
 - `-D TEST_FROM_INSTALL=ON` - Enable testing from installation directory instead of build directory
-- `-D BUILD_TORCH_TRACE_COLLECTOR=AUTO|ON|OFF` - Build `torch_trace_collector` for PyTorch 2.13 or 2.14. `AUTO` (default) builds when Torch is found, `ON` requires Torch, `OFF` skips
 - `-D ENABLE_SANITIZER=ASAN|HOST_ASAN|TSAN` - Build with sanitizer instrumentation for development (default OFF)
 
 Note that per the above command, build assets will be stored under `build` directory and installed assets will be stored under `install` directory.
