@@ -249,7 +249,7 @@ the Stage 10 checkpoint.
 | `moi_exec_save_sgprs_persistent` | Placement and prologue | Proof attached to selected scalar allocation | Scalar allocation proof, not a free flag; delete in Stage 2 |
 | `moi_dynamic_stack_spill` | MOI orchestration, placement, common emission, prologue | Per-patch/per-owner spill-frame mechanics | `MoiSpillFramePlan`; delete code-object-wide flag in Stages 2/3 |
 | `moi_inline_access_present` | Inventory orchestration, placement, barrier, sync | Semantic fact that ordinary Inline accesses were admitted | Derive from observation plan/evidence intents; delete in Stages 2/5 |
-| `automatic_moi_owner_sgpr` | Placement; common emission, prologue, sync | Provenance of selected owner scalar | `ConSanMoiTransientSgprAssignment` source; delete flag in Stage 2 |
+| `moi_owner_sgpr` | Placement; common emission, prologue, sync | Optional code-object-wide owner scalar and the authority that selected it | `ConSanMoiSgprAllocation`; the loose `automatic_moi_owner_sgpr` provenance flag was deleted during the fifth refactoring |
 | `moi_router_jump` | Placement; common/atomic/Sampled emission | Shared scalar-router indirect PC and saved-SCC allocation | `ConSanMoiIndirectJumpSgprs`; loose independently optional fields deleted during the fifth refactoring |
 | `moi_router_call` | Placement and Inline/Record/Sampled routing | Shared scalar-router key/call-return allocation | `ConSanMoiRouterCallSgprs`; loose independently optional fields deleted during the fifth refactoring |
 | `moi_inline_visible_evidence_sgpr` | Placement and prologue | Inline evidence-state ABI member | Inline evidence allocation; delete loose optional in Stage 2 |

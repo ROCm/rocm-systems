@@ -5085,7 +5085,7 @@ TEST(ConSanMoi, InlineShadowPrivateHwIdOwnerBiasesBeforeProbeValuRead) {
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.test_force_private_epoch = true;
   options.moi_owner_source = ConSanMoiOwnerSource::HwId;
-  options.moi_owner_sgpr = 20u;
+  options.moi_owner_sgpr.set(20u);
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -5102,18 +5102,18 @@ TEST(ConSanMoi, InlineShadowPrivateHwIdOwnerBiasesBeforeProbeValuRead) {
   ASSERT_TRUE(patched.is_valid());
   const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
   const auto get_hw_id =
-      hwreg ? build_s_getreg_b32(*options.moi_owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4)
+      hwreg ? build_s_getreg_b32(*options.moi_owner_sgpr.base(), *hwreg, ROCJITSU_CODE_ARCH_RDNA4)
             : std::nullopt;
   ASSERT_TRUE(get_hw_id);
   const std::array<uint32_t, 6> expected_owner = {
       *get_hw_id,
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
-      build_s_add_u32(*options.moi_owner_sgpr, *options.moi_owner_sgpr,
+      build_s_add_u32(*options.moi_owner_sgpr.base(), *options.moi_owner_sgpr.base(),
                       scalar_positive_inline_u32(1), ROCJITSU_CODE_ARCH_RDNA4),
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
       *instrumentation::build_salu_to_valu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4),
       build_v_mov_b32_e32(static_cast<uint16_t>(*access->scratch_vgpr + 4u),
-                          *options.moi_owner_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
+                          *options.moi_owner_sgpr.base(), ROCJITSU_CODE_ARCH_RDNA4),
   };
   const std::vector<uint32_t> access_words =
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);

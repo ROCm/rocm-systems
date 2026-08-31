@@ -328,6 +328,26 @@ struct ConSanMoiBranchOnlyScalarSpill {
   auto operator<=>(const ConSanMoiBranchOnlyScalarSpill &) const = default;
 };
 
+/// One optional SGPR allocation together with the authority that selected it.
+/// Provenance cannot remain set after the register is cleared.
+class ConSanMoiSgprAllocation {
+public:
+  [[nodiscard]] std::optional<uint16_t> base() const { return base_; }
+  [[nodiscard]] bool automatic() const { return base_ && automatic_; }
+
+  void set(std::optional<uint16_t> base, bool automatic = false) {
+    base_ = base;
+    automatic_ = base && automatic;
+  }
+  void reset() { set(std::nullopt); }
+
+  auto operator<=>(const ConSanMoiSgprAllocation &) const = default;
+
+private:
+  std::optional<uint16_t> base_;
+  bool automatic_ = false;
+};
+
 /// Persistent hardware dispatch identity selected for an MOI operating point.
 ///
 /// The scalar and vector register forms are alternatives. Scalar provenance is
@@ -337,62 +357,30 @@ struct ConSanMoiBranchOnlyScalarSpill {
 /// pair when only some owner components cannot retain that pair.
 class ConSanMoiDispatchIdentityAllocation {
 public:
-  enum class RegisterKind : uint8_t {
-    None,
-    ExplicitSgpr,
-    AutomaticSgpr,
-    Vgpr,
-  };
-
-  [[nodiscard]] std::optional<uint16_t> sgpr() const {
-    return register_kind_ == RegisterKind::ExplicitSgpr ||
-                   register_kind_ == RegisterKind::AutomaticSgpr
-               ? std::optional{register_base_}
-               : std::nullopt;
-  }
-  [[nodiscard]] std::optional<uint16_t> vgpr() const {
-    return register_kind_ == RegisterKind::Vgpr ? std::optional{register_base_} : std::nullopt;
-  }
-  [[nodiscard]] bool automatic_sgpr() const {
-    return register_kind_ == RegisterKind::AutomaticSgpr;
-  }
+  [[nodiscard]] std::optional<uint16_t> sgpr() const { return sgpr_.base(); }
+  [[nodiscard]] std::optional<uint16_t> vgpr() const { return vgpr_; }
+  [[nodiscard]] bool automatic_sgpr() const { return sgpr_.automatic(); }
   [[nodiscard]] bool private_fallback() const { return private_fallback_; }
 
-  void set_sgpr(uint16_t base, bool automatic = false) {
-    register_kind_ = automatic ? RegisterKind::AutomaticSgpr : RegisterKind::ExplicitSgpr;
-    register_base_ = base;
-  }
   void set_sgpr(std::optional<uint16_t> base, bool automatic = false) {
+    sgpr_.set(base, automatic);
     if (base)
-      set_sgpr(*base, automatic);
-    else
-      reset_sgpr();
-  }
-  void set_vgpr(uint16_t base) {
-    register_kind_ = RegisterKind::Vgpr;
-    register_base_ = base;
+      vgpr_.reset();
   }
   void set_vgpr(std::optional<uint16_t> base) {
+    vgpr_ = base;
     if (base)
-      set_vgpr(*base);
-    else
-      reset_vgpr();
+      sgpr_.reset();
   }
-  void reset_sgpr() {
-    if (sgpr())
-      register_kind_ = RegisterKind::None;
-  }
-  void reset_vgpr() {
-    if (vgpr())
-      register_kind_ = RegisterKind::None;
-  }
+  void reset_sgpr() { sgpr_.reset(); }
+  void reset_vgpr() { vgpr_.reset(); }
   void set_private_fallback(bool enabled) { private_fallback_ = enabled; }
 
   auto operator<=>(const ConSanMoiDispatchIdentityAllocation &) const = default;
 
 private:
-  RegisterKind register_kind_ = RegisterKind::None;
-  uint16_t register_base_ = 0;
+  ConSanMoiSgprAllocation sgpr_;
+  std::optional<uint16_t> vgpr_;
   bool private_fallback_ = false;
 };
 
@@ -892,7 +880,7 @@ struct ConSanMoiOperatingPoint {
   /// Code-object-wide scalar owner register accepted by placement. It carries
   /// the probe-local normalized resident-wave identity when the selected
   /// engine represents that identity in transient scalar state.
-  std::optional<uint16_t> moi_owner_sgpr;
+  ConSanMoiSgprAllocation moi_owner_sgpr;
   /// Persistent per-lane owner VGPR accepted by placement. Some operating
   /// points instead use per-owner assignments, scalar state, or private state,
   /// in which case this code-object-wide value is empty.
@@ -929,8 +917,6 @@ struct ConSanMoiOperatingPoint {
   /// least one ordinary access probe. Atomic-only objects need fewer
   /// transient EXEC pairs than access probes with causal-token lookup.
   bool moi_inline_access_present = false;
-  /// Internal marker set after ConSan assigns the hw_id owner temporary SGPR.
-  bool automatic_moi_owner_sgpr = false;
   /// Explicit scalar-router ABI selected when a spill-backed transient window
   /// cannot use the mode's fixed register layout. The indirect jump, dispatch
   /// key, and call-return pair are one shared routing mechanism used by Inline,
@@ -1005,7 +991,7 @@ struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {
   /// directly to preserve an explicitly seeded downstream state.
   MoiOptions(const ConSanOptions &options) : ConSanOptions(options) {
     moi_exec_save_sgpr = options.requested_moi_exec_save_sgpr;
-    moi_owner_sgpr = options.requested_moi_owner_sgpr;
+    moi_owner_sgpr.set(options.requested_moi_owner_sgpr);
     moi_owner_vgpr = options.requested_moi_owner_vgpr;
     moi_epoch_vgpr = options.requested_moi_epoch_vgpr;
   }

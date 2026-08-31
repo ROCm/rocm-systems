@@ -3319,10 +3319,11 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       words.insert(words.end(), load_owner->begin(), load_owner->end());
       words.push_back(*wait_owner);
       words.push_back(*shift_owner);
-    } else if (request.moi_owner_source == ConSanMoiOwnerSource::HwId && point.moi_owner_sgpr) {
-      if (point.automatic_moi_owner_sgpr) {
+    } else if (request.moi_owner_source == ConSanMoiOwnerSource::HwId &&
+               point.moi_owner_sgpr.base()) {
+      if (point.moi_owner_sgpr.automatic()) {
         const auto save_owner = instrumentation::build_v_writelane_b32(
-            private_temporary, *point.moi_owner_sgpr, 0u, arch);
+            private_temporary, *point.moi_owner_sgpr.base(), 0u, arch);
         if (!save_owner) {
           errors.emplace_back("ConSan MOI inline atomic patch could not save borrowed owner state");
           return std::nullopt;
@@ -3331,7 +3332,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       }
       const ConSanTargetProfile *target = consan_target_profile(arch);
       const consan_detail::MoiResidentWaveOwnerRequest request{
-          .destination_sgpr = *point.moi_owner_sgpr,
+          .destination_sgpr = *point.moi_owner_sgpr.base(),
           .one_based = true,
       };
       if (target == nullptr ||
@@ -3339,10 +3340,10 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
         errors.emplace_back("ConSan MOI inline atomic patch could not derive resident-wave owner");
         return std::nullopt;
       }
-      words.push_back(build_v_mov_b32_e32(materialized_owner, *point.moi_owner_sgpr, arch));
-      if (point.automatic_moi_owner_sgpr) {
+      words.push_back(build_v_mov_b32_e32(materialized_owner, *point.moi_owner_sgpr.base(), arch));
+      if (point.moi_owner_sgpr.automatic()) {
         const auto restore_owner = instrumentation::build_v_readlane_b32(
-            *point.moi_owner_sgpr, private_temporary, 0u, arch);
+            *point.moi_owner_sgpr.base(), private_temporary, 0u, arch);
         const auto wait_owner = instrumentation::build_valu_to_salu_dependency_wait(arch);
         if (!restore_owner || !wait_owner) {
           errors.emplace_back(

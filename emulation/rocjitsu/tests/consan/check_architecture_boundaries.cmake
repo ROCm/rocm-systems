@@ -211,6 +211,14 @@ _consan_assert_no_match(
     "dispatch identity must remain one typed operating-point allocation"
 )
 
+# Scalar allocations carry their selection provenance. The owner scalar must
+# not return to a loose optional plus a separately mutable automatic marker.
+_consan_assert_no_match(
+    "${_consan_dir}/consan_options.h.inc"
+    "(bool[ \t]+automatic_moi_owner_sgpr|std::optional<uint16_t>[ \t]+moi_owner_sgpr)[ \t]*;"
+    "owner scalar and its provenance must remain one typed allocation"
+)
+
 # Semantic policy owns meaning, never an ISA recipe or product identity.
 set(
     _semantic_policy_sources

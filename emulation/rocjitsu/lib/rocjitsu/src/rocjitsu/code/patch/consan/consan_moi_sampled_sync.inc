@@ -2239,7 +2239,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
           return reg && range_overlaps(base, width, *reg, reg_width);
         };
         bool overlaps = persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
-                        overlaps_optional(group_options.moi_owner_sgpr) ||
+                        overlaps_optional(group_options.moi_owner_sgpr.base()) ||
                         overlaps_optional(group_options.moi_persistent_sgprs.owner) ||
                         overlaps_optional(group_options.moi_persistent_sgprs.epoch) ||
                         overlaps_optional(group_options.moi_persistent_sgprs.workgroup_key) ||
@@ -2600,7 +2600,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
           return reg && range_overlaps(base, width, *reg, reg_width);
         };
         bool overlaps = persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
-                        overlaps_optional(route_options.moi_owner_sgpr) ||
+                        overlaps_optional(route_options.moi_owner_sgpr.base()) ||
                         overlaps_optional(route_options.moi_persistent_sgprs.owner) ||
                         overlaps_optional(route_options.moi_persistent_sgprs.epoch) ||
                         overlaps_optional(route_options.moi_persistent_sgprs.workgroup_key) ||

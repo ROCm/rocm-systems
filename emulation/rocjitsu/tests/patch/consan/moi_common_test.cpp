@@ -3701,7 +3701,7 @@ TEST(ConSanMoi, OwnerEpochPrologueCanUseHwIdOwnerSource) {
   MoiOptions options = moi_options();
   options.moi_init_owner_epoch = true;
   options.moi_owner_source = ConSanMoiOwnerSource::HwId;
-  options.moi_owner_sgpr = 20;
+  options.moi_owner_sgpr.set(20);
   options.moi_owner_vgpr = 11;
   options.moi_epoch_vgpr = 12;
 
@@ -3772,7 +3772,7 @@ TEST(ConSanMoi, Gfx1100OwnerEpochPrologueUsesHwId1ResidentWaveIdentity) {
   MoiOptions options = moi_options();
   options.moi_init_owner_epoch = true;
   options.moi_owner_source = ConSanMoiOwnerSource::HwId;
-  options.moi_owner_sgpr = 20;
+  options.moi_owner_sgpr.set(20);
   options.moi_owner_vgpr = 11;
   options.moi_epoch_vgpr = 12;
 
@@ -3825,7 +3825,7 @@ TEST(ConSanMoi, InlineShadowHwIdOwnerPrologueRemapsReservedZero) {
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_init_owner_epoch = true;
   options.moi_owner_source = ConSanMoiOwnerSource::HwId;
-  options.moi_owner_sgpr = 20;
+  options.moi_owner_sgpr.set(20);
   options.moi_owner_vgpr = 11;
   options.moi_epoch_vgpr = 12;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -3838,14 +3838,14 @@ TEST(ConSanMoi, InlineShadowHwIdOwnerPrologueRemapsReservedZero) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  ASSERT_TRUE(options.moi_owner_sgpr);
+  ASSERT_TRUE(options.moi_owner_sgpr.base());
   ASSERT_TRUE(test_moi_owner_vgpr(result));
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
   ASSERT_TRUE(hwreg);
-  const uint16_t owner_sgpr = *options.moi_owner_sgpr;
+  const uint16_t owner_sgpr = *options.moi_owner_sgpr.base();
   const auto get_hw_id = build_s_getreg_b32(owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(get_hw_id);
   const std::array<uint32_t, 7> expected_prefix = {

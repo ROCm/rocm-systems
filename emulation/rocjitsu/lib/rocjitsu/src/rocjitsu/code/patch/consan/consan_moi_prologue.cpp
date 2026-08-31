@@ -2305,9 +2305,9 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanMoiOperatingPoi
   const auto overlaps = [&](std::optional<uint16_t> reg, uint16_t width = 1u) {
     return reg && range_overlaps(sgpr_base, sgpr_count, *reg, width);
   };
-  const bool backs_up_only_automatic_owner = point.automatic_moi_owner_sgpr &&
-                                             point.moi_owner_sgpr &&
-                                             sgpr_base == *point.moi_owner_sgpr && sgpr_count == 1u;
+  const bool backs_up_only_automatic_owner =
+      point.moi_owner_sgpr.automatic() && point.moi_owner_sgpr.base() &&
+      sgpr_base == *point.moi_owner_sgpr.base() && sgpr_count == 1u;
   bool conflict = (point.moi_exec_save_sgprs_persistent && !backs_up_only_automatic_owner) ||
                   overlaps(point.moi_persistent_sgprs.owner) ||
                   overlaps(point.moi_persistent_sgprs.epoch) ||
@@ -2388,7 +2388,7 @@ void try_apply_owner_epoch_prologue_patch(
     result.errors.emplace_back("ConSan MOI owner and epoch VGPRs must be distinct");
     return;
   }
-  if (options.moi_owner_source == ConSanMoiOwnerSource::HwId && !options.moi_owner_sgpr) {
+  if (options.moi_owner_source == ConSanMoiOwnerSource::HwId && !options.moi_owner_sgpr.base()) {
     result.errors.emplace_back("ConSan MOI hw_id owner source requires RJ_CONSAN_MOI_OWNER_SGPR");
     return;
   }
@@ -2412,7 +2412,7 @@ void try_apply_owner_epoch_prologue_patch(
   }
   const uint32_t owner_required_sgpr_count =
       options.moi_owner_source == ConSanMoiOwnerSource::HwId
-          ? static_cast<uint32_t>(*options.moi_owner_sgpr) + 1u
+          ? static_cast<uint32_t>(*options.moi_owner_sgpr.base()) + 1u
           : 0u;
   /// Per-kernel transaction fixed before any descriptor or text mutation.
   ///
@@ -2639,9 +2639,9 @@ void try_apply_owner_epoch_prologue_patch(
                                                 needs_dynamic_stack_scalar_backup ||
                                                 needs_record_replay_runtime_scalar_backup;
     const bool needs_automatic_owner_scalar_backup =
-        kernel_options.automatic_moi_owner_sgpr &&
+        kernel_options.moi_owner_sgpr.automatic() &&
         kernel_options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
-        kernel_options.moi_owner_sgpr.has_value();
+        kernel_options.moi_owner_sgpr.base().has_value();
     if (needs_full_entry_scalar_backup || needs_automatic_owner_scalar_backup) {
       const bool entry_backup_arch_supported = consan_is_capability_arch(arch);
       const bool has_scalar_spill_contract = kernel_options.has_moi_scalar_spill();
@@ -2653,8 +2653,9 @@ void try_apply_owner_epoch_prologue_patch(
           return;
         }
       }
-      const uint16_t sgpr_base = needs_full_entry_scalar_backup ? *kernel_options.moi_exec_save_sgpr
-                                                                : *kernel_options.moi_owner_sgpr;
+      const uint16_t sgpr_base = needs_full_entry_scalar_backup
+                                     ? *kernel_options.moi_exec_save_sgpr
+                                     : *kernel_options.moi_owner_sgpr.base();
       const uint16_t borrowed_sgpr_count =
           needs_full_entry_scalar_backup
               ? moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
@@ -2756,7 +2757,7 @@ void try_apply_owner_epoch_prologue_patch(
         .workgroup_key_vgpr = kernel_options.moi_workgroup_key_vgpr,
         .owner_shift_bits = owner_shift_bits,
         .owner_source = kernel_options.moi_owner_source,
-        .owner_sgpr = kernel_options.moi_owner_sgpr,
+        .owner_sgpr = kernel_options.moi_owner_sgpr.base(),
         .one_based_owner_ids = kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
         .persistent_sgprs = kernel_options.moi_persistent_sgprs,
         .record_replay_workgroup_vgprs = kernel_options.moi_record_replay_workgroup_vgprs,

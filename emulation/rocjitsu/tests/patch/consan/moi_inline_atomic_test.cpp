@@ -783,7 +783,7 @@ TEST(ConSanMoi, Cdna4InlineRelocatesOrdinaryAtomicAcquireSequence) {
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.moi_owner_source = ConSanMoiOwnerSource::HwId;
-  options.moi_owner_sgpr = 60;
+  options.moi_owner_sgpr.set(60);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 64;
   options.moi_dispatch_identity.set_vgpr(50);
@@ -852,7 +852,7 @@ TEST(ConSanMoi, Cdna4InlinePublishesOrdinaryReleaseStoreBeforeGuestCommit) {
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.moi_owner_source = ConSanMoiOwnerSource::HwId;
-  options.moi_owner_sgpr = 60;
+  options.moi_owner_sgpr.set(60);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 64;
   options.moi_dispatch_identity.set_vgpr(50);

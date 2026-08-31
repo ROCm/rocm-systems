@@ -126,7 +126,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   ConSanMoiOperatingPoint state{
       .moi_initialize_owner_epoch = true,
       .moi_exec_save_sgpr = 2u,
-      .moi_owner_sgpr = 3u,
+      .moi_owner_sgpr = {},
       .moi_owner_vgpr = 4u,
       .moi_epoch_vgpr = 5u,
       .automatic_moi_persistent_vgprs = true,
@@ -137,7 +137,6 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .moi_exec_save_sgprs_persistent = true,
       .moi_dynamic_stack_spill = true,
       .moi_inline_access_present = true,
-      .automatic_moi_owner_sgpr = true,
       .moi_router_jump = ConSanMoiIndirectJumpSgprs{2u, 7u},
       .moi_router_call = ConSanMoiRouterCallSgprs{12u, 14u},
       .moi_inline_visible_evidence_sgpr = 8u,
@@ -153,6 +152,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .owner_persistent_vgprs = {},
       .owner_transient_sgprs = {},
   };
+  state.moi_owner_sgpr.set(3u, true);
   state.moi_dispatch_identity.set_sgpr(16u, true);
   state.moi_dispatch_identity.set_private_fallback(true);
 
@@ -181,7 +181,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   expect_field_participates([](auto &value) { value.moi_exec_save_sgprs_persistent = false; });
   expect_field_participates([](auto &value) { value.moi_dynamic_stack_spill = false; });
   expect_field_participates([](auto &value) { value.moi_inline_access_present = false; });
-  expect_field_participates([](auto &value) { value.automatic_moi_owner_sgpr = false; });
+  expect_field_participates([](auto &value) { value.moi_owner_sgpr.set(3u, false); });
   expect_field_participates([](auto &value) { value.moi_dispatch_identity.set_sgpr(16u, false); });
   expect_field_participates(
       [](auto &value) { value.moi_dispatch_identity.set_private_fallback(false); });
@@ -207,7 +207,7 @@ TEST(ConSan, MoiOptionsSeedsSelectedRegistersWithoutMutatingCallerInput) {
 
   MoiOptions attempt(input);
   EXPECT_EQ(attempt.moi_exec_save_sgpr, 2u);
-  EXPECT_EQ(attempt.moi_owner_sgpr, 3u);
+  EXPECT_EQ(attempt.moi_owner_sgpr.base(), 3u);
   EXPECT_EQ(attempt.moi_owner_vgpr, 4u);
   EXPECT_EQ(attempt.moi_epoch_vgpr, 5u);
 
@@ -222,7 +222,7 @@ TEST(ConSan, MoiOptionsSeedsSelectedRegistersWithoutMutatingCallerInput) {
   EXPECT_EQ(input.requested_moi_epoch_vgpr, 5u);
   const MoiOptions fresh_attempt(input);
   EXPECT_EQ(fresh_attempt.moi_exec_save_sgpr, 2u);
-  EXPECT_EQ(fresh_attempt.moi_owner_sgpr, 3u);
+  EXPECT_EQ(fresh_attempt.moi_owner_sgpr.base(), 3u);
   EXPECT_EQ(fresh_attempt.moi_owner_vgpr, 4u);
   EXPECT_EQ(fresh_attempt.moi_epoch_vgpr, 5u);
 }

@@ -2360,14 +2360,14 @@ private:
     break;
   }
   case ConSanMoiOwnerSource::HwId: {
-    if (!point.moi_owner_sgpr) {
+    if (!point.moi_owner_sgpr.base()) {
       errors.emplace_back("ConSan MOI private owner hw_id source requires "
                           "RJ_CONSAN_MOI_OWNER_SGPR");
       return false;
     }
-    if (point.automatic_moi_owner_sgpr) {
-      const auto save = instrumentation::build_v_writelane_b32(owner_backup_vgpr,
-                                                               *point.moi_owner_sgpr, 0u, arch);
+    if (point.moi_owner_sgpr.automatic()) {
+      const auto save = instrumentation::build_v_writelane_b32(
+          owner_backup_vgpr, *point.moi_owner_sgpr.base(), 0u, arch);
       if (!save) {
         errors.emplace_back(
             "ConSan MOI inline-shadow probe could not save its borrowed owner scalar");
@@ -2377,7 +2377,7 @@ private:
     }
     const ConSanTargetProfile *target = consan_target_profile(arch);
     const consan_detail::MoiResidentWaveOwnerRequest owner_request{
-        .destination_sgpr = *point.moi_owner_sgpr,
+        .destination_sgpr = *point.moi_owner_sgpr.base(),
         .one_based = true,
     };
     if (target == nullptr ||
@@ -2386,10 +2386,10 @@ private:
           "ConSan MOI inline-shadow probe could not encode its resident-wave owner");
       return false;
     }
-    words.push_back(build_v_mov_b32_e32(tmp_vgpr, *point.moi_owner_sgpr, arch));
-    if (point.automatic_moi_owner_sgpr) {
-      const auto restore =
-          instrumentation::build_v_readlane_b32(*point.moi_owner_sgpr, owner_backup_vgpr, 0u, arch);
+    words.push_back(build_v_mov_b32_e32(tmp_vgpr, *point.moi_owner_sgpr.base(), arch));
+    if (point.moi_owner_sgpr.automatic()) {
+      const auto restore = instrumentation::build_v_readlane_b32(*point.moi_owner_sgpr.base(),
+                                                                 owner_backup_vgpr, 0u, arch);
       const auto wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
       if (!restore || !wait) {
         errors.emplace_back(
