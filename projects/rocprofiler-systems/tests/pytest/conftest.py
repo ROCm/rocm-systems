@@ -324,7 +324,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "hip_stream",
         "presets",
         "domain_flags",
-        "sample_trace_profile_cli",
         "tool_runner",
         "cli_help",
         "hpc",
