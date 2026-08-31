@@ -165,18 +165,10 @@ const auto strict_config_value_validations = std::array<config_value_validation,
       "a positive finite floating-point value" },
 } };
 
-[[nodiscard]] std::string
-trim_config_value(std::string_view value)
-{
-    auto str = std::string{ value };
-    utility::trim_str(str);
-    return str;
-}
-
 [[nodiscard]] bool
 has_config_value_reference(std::string_view raw_value)
 {
-    auto value = trim_config_value(raw_value);
+    auto value = utility::string::trim(raw_value);
     return !value.empty() && value.front() == '$';
 }
 
@@ -201,7 +193,7 @@ is_recognized_boolean_text_value(std::string_view value)
 [[nodiscard]] bool
 is_valid_boolean_config_value(std::string_view raw_value)
 {
-    auto value = utility::string::to_lower(trim_config_value(raw_value));
+    auto value = utility::string::to_lower(utility::string::trim(raw_value));
     if(value.empty()) return false;
 
     if(is_integer_config_value(value)) return true;
@@ -212,7 +204,7 @@ is_valid_boolean_config_value(std::string_view raw_value)
 [[nodiscard]] bool
 parse_floating_point_config_value(std::string_view raw_value, double& parsed_value)
 {
-    auto value = trim_config_value(raw_value);
+    auto value = utility::string::trim(raw_value);
     if(value.empty()) return false;
 
     char* end    = nullptr;
@@ -282,7 +274,7 @@ validate_config_setting_value(std::string_view name, std::string_view raw_value,
         }
         case config_value_rule::choice:
         {
-            auto value = trim_config_value(raw_value);
+            auto value = utility::string::trim(raw_value);
             if(choices)
             {
                 valid =
@@ -328,7 +320,7 @@ validate_config_file_values(const std::string& config_file, const std::string& t
     {
         ++line_number;
 
-        auto trimmed_line = trim_config_value(line);
+        auto trimmed_line = utility::string::trim(line);
         if(trimmed_line.empty() || trimmed_line.front() == '#') continue;
 
         auto key       = std::string{};
@@ -336,25 +328,25 @@ validate_config_file_values(const std::string& config_file, const std::string& t
 
         if(auto equal_pos = trimmed_line.find('='); equal_pos != std::string::npos)
         {
-            key =
-                trim_config_value(std::string_view{ trimmed_line }.substr(0, equal_pos));
-            raw_value =
-                trim_config_value(std::string_view{ trimmed_line }.substr(equal_pos + 1));
+            key = utility::string::trim(
+                std::string_view{ trimmed_line }.substr(0, equal_pos));
+            raw_value = utility::string::trim(
+                std::string_view{ trimmed_line }.substr(equal_pos + 1));
         }
         else
         {
             auto split_pos = trimmed_line.find_first_of(" \t");
             if(split_pos == std::string::npos) continue;
 
-            key =
-                trim_config_value(std::string_view{ trimmed_line }.substr(0, split_pos));
-            raw_value =
-                trim_config_value(std::string_view{ trimmed_line }.substr(split_pos + 1));
+            key = utility::string::trim(
+                std::string_view{ trimmed_line }.substr(0, split_pos));
+            raw_value = utility::string::trim(
+                std::string_view{ trimmed_line }.substr(split_pos + 1));
         }
 
         if(auto comment_pos = raw_value.find('#'); comment_pos != std::string::npos)
-            raw_value =
-                trim_config_value(std::string_view{ raw_value }.substr(0, comment_pos));
+            raw_value = utility::string::trim(
+                std::string_view{ raw_value }.substr(0, comment_pos));
 
         if(!raw_value.empty() && has_config_value_reference(raw_value)) continue;
 
@@ -3370,8 +3362,8 @@ bool
 rank_passes_filter(std::optional<std::uint64_t> current_rank,
                    std::optional<std::uint64_t> world_size, std::string enabled_ranks_str)
 {
-    rocprofsys::utility::trim_str(enabled_ranks_str);
-    enabled_ranks_str = rocprofsys::utility::string::to_lower(enabled_ranks_str);
+    enabled_ranks_str = rocprofsys::utility::string::to_lower(
+        rocprofsys::utility::string::trim(enabled_ranks_str));
 
     if(enabled_ranks_str.empty() || enabled_ranks_str == "all") return true;
     if(enabled_ranks_str == "none") return false;
