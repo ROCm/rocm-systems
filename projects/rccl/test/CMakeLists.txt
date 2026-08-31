@@ -289,6 +289,12 @@ if(BUILD_TESTS)
   target_link_options(rccl-UnitTests PRIVATE
     "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12")
 
+  # AICOMRCCL-2183: RcclMockFuncs.hpp's empty ncclDebugLog, needed to link the Release-only
+  # sources above, overrides librccl.so's own in Debug and silences all library logging. Hidden
+  # keeps it linkable here but out of .dynsym, as rccl-UnitTestsFixturesDebug does below.
+  target_compile_options(rccl-UnitTests PRIVATE
+    -fvisibility=hidden -fvisibility-inlines-hidden)
+
   # A real shared library, unlike the net plugin above: ProfilerPluginCloseTests checks
   # that RCCL unloads an external profiler plugin, so it needs a separately loadable
   # object. It lands beside rccl-UnitTests in the build tree and is installed beside it
