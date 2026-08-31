@@ -8151,3 +8151,120 @@ TEST(Cdna4FlatMixedApertureTest, ScratchSwizzleDoesNotStrideGlobalLanes) {
   if (!wf->is_halted())
     wf->halt();
 }
+
+TEST(Cdna5VopdCndmaskTest, Wave32LaneMaskIsReadAtWaveWidth) {
+  // A wave32 VOPD cndmask whose mask operand is VCC_HI. Reading that mask as a
+  // 64-bit scalar aborts the model: VCC_HI (selector 107) cannot begin a
+  // register pair, so resolve_src_scalar64 throws. _topk_topp_kernel on gfx1250
+  // hit this in all eight of its shapes. The mask must be read at wf_size().
+  amdgpu::GpuMemory gpu_mem("cdna5_vopd_cndmask_mem");
+  amdgpu::L2Cache l2("cdna5_vopd_cndmask_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna5_vopd_cndmask", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+
+  // The two halves of VCC differ, so a read of the wrong half is visible in the
+  // result rather than being masked by a lucky value.
+  constexpr uint64_t kVccHi = 0x5u; // lanes 0 and 2
+  constexpr uint64_t kVccLo = 0xAu; // lanes 1 and 3
+  wf->set_vcc_raw((kVccHi << 32) | kVccLo);
+  wf->set_exec(0xFu);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < 4; ++lane) {
+    cu->write_vgpr(vb + 1, lane, 0x11110000u + lane); // src0
+    cu->write_vgpr(vb + 2, lane, 0x22220000u + lane); // src1
+    cu->write_vgpr(vb + 0, lane, 0xDEADBEEFu);        // dst
+    cu->write_vgpr(vb + 4, lane, 0xC0FFEE00u + lane);
+    cu->write_vgpr(vb + 3, lane, 0xDEADBEEFu);
+  }
+
+  // LLVM gfx1250: v_dual_cndmask_b32 v0, v1, v2, vcc_hi :: v_dual_mov_b32 v3, v4
+  const uint32_t words[] = {0xCF248101u, 0x6B020104u, 0x03000000u};
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_TRUE(std::string_view(inst->mnemonic()).starts_with("v_dual_cndmask_b32"));
+
+  // Before the fix this call terminates the process:
+  //   std::logic_error: Unsupported encoding value for scalar64 read: 107
+  cu->execute_instruction(inst.get(), *wf);
+
+  // VCC_HI selects src1 on lanes 0 and 2, src0 on lanes 1 and 3. Had the model
+  // read VCC_LO, or the whole 64-bit VCC, the pattern would be inverted.
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x22220000u);
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 1), 0x11110001u);
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 2), 0x22220002u);
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 3), 0x11110003u);
+
+  // The paired slot still runs.
+  EXPECT_EQ(cu->read_vgpr(vb + 3, 0), 0xC0FFEE00u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Cdna5VopdCndmaskTest, Wave32LaneMaskIgnoresTheNeighbouringScalar) {
+  // An odd-numbered SGPR mask is legal in wave32 and names one register. A
+  // 64-bit read of it also pulls in the next SGPR, which the instruction never
+  // named. That read is invisible in the result for lanes 0..31, but it is a
+  // register dependency the machine does not have. Pin the operand to one SGPR.
+  amdgpu::GpuMemory gpu_mem("cdna5_vopd_cndmask_sgpr_mem");
+  amdgpu::L2Cache l2("cdna5_vopd_cndmask_sgpr_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna5_vopd_cndmask_sgpr", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  const uint32_t sb = wf->sgpr_alloc().base;
+  cu->write_sgpr(sb + 1, 0x5u);        // the named mask: lanes 0 and 2
+  cu->write_sgpr(sb + 2, 0xFFFFFFFFu); // the neighbour, which must not matter
+  wf->set_exec(0xFu);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < 4; ++lane) {
+    cu->write_vgpr(vb + 1, lane, 0x11110000u + lane);
+    cu->write_vgpr(vb + 2, lane, 0x22220000u + lane);
+    cu->write_vgpr(vb + 0, lane, 0xDEADBEEFu);
+    cu->write_vgpr(vb + 4, lane, 0xC0FFEE00u + lane);
+  }
+
+  // LLVM gfx1250: v_dual_cndmask_b32 v0, v1, v2, s1 :: v_dual_mov_b32 v3, v4
+  const uint32_t words[] = {0xCF248101u, 0x01020104u, 0x03000000u};
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x22220000u);
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 1), 0x11110001u);
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 2), 0x22220002u);
+  EXPECT_EQ(cu->read_vgpr(vb + 0, 3), 0x11110003u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}

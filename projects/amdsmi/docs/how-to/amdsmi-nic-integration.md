@@ -1351,7 +1351,7 @@ library sources.
 
 External contributions described in this guide target the **bare-metal** AMD
 SMI library; see
-[CONTRIBUTING.md](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/CONTRIBUTING.md)
+[CONTRIBUTING.md](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/.github/CONTRIBUTING.md)
 for guidelines. The host AMD SMI library has its own contribution process,
 documented in its repository and user guide linked above.
 

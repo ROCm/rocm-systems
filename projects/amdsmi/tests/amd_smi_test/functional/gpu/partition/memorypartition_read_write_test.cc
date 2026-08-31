@@ -452,7 +452,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     std::cout << "\t**amdsmi_set_gpu_memory_partition_mode"
               << "(processor_handles_[" << dv_ind
-              << "], nullptr): " << smi_amdgpu_get_status_string(err, false) << "\n";
+              << "], null_memory_partition): " << smi_amdgpu_get_status_string(err, false) << "\n";
     // Note: new_memory_partition is not set
     ASSERT_TRUE(err == AMDSMI_STATUS_INVAL);
     if (err == AMDSMI_STATUS_INVAL) {

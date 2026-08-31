@@ -31,7 +31,7 @@ hipFileMemcpyKernel(AsyncOpFallback *op)
         }
         return;
     }
-    const size_t size = io_type == IoType::Read ? static_cast<size_t>(bytes_transferred_internal) : *size_p;
+    const size_t bytes_completed = static_cast<size_t>(bytes_transferred_internal);
 
     const hoff_t *buffer_offset_p = std::get_if<const hoff_t>(&op->buffer_offset);
     if (!buffer_offset_p) {
@@ -57,9 +57,19 @@ hipFileMemcpyKernel(AsyncOpFallback *op)
         }
         return;
     }
-    size_t *const gpu_buffer_region = reinterpret_cast<size_t *>(reinterpret_cast<uintptr_t>(op->gpu_buffer) +
-                                                                 static_cast<uintptr_t>(buffer_offset));
-    const size_t  num_chunks        = size / sizeof(size_t);
+    // Read consumes the chunk cpu_copy already staged in the bounce buffer; Write sizes the chunk
+    // here and publishes it so cpu_copy knows how much to flush.
+    const size_t remaining = *size_p - bytes_completed;
+    const size_t size      = io_type == IoType::Read
+                                 ? op->chunk_bytes_copied
+                                 : (op->bounce_buffer_size < remaining ? op->bounce_buffer_size : remaining);
+    if (io_type == IoType::Write && start_idx == 0) {
+        op->chunk_bytes_copied = size;
+    }
+
+    size_t *const gpu_buffer_region = reinterpret_cast<size_t *>(
+        reinterpret_cast<uintptr_t>(op->gpu_buffer) + static_cast<uintptr_t>(buffer_offset) + bytes_completed);
+    const size_t num_chunks = size / sizeof(size_t);
 
     switch (io_type) {
         case IoType::Read:

@@ -2,7 +2,7 @@
 name: amdsmi-review-spec
 description: "Spec-conformance review subagent. Checks the diff against its originating spec/issue/PRD — missing requirements, scope creep, implemented-but-wrong. Use when: spec conformance, requirement coverage, scope creep vs spec."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages, execute/runInTerminal, atlassian/*
-model: "Claude Opus 4.6"
+model: "Claude Opus 5"
 user-invocable: false
 ---
 

@@ -60,6 +60,23 @@ _PROFILE_ALIASES = {
 }
 
 
+def _group_isa_additions_args(entries: list[str] | None) -> dict[str, list[str]]:
+    """Group repeated ``NAME:XML`` additions arguments by logical ISA name."""
+    grouped: dict[str, list[str]] = {}
+    for entry in entries or []:
+        if ':' not in entry:
+            raise ValueError(
+                f'--isa-additions entry must be name:xml_path, got: {entry}'
+            )
+        name, xml_path = entry.split(':', 1)
+        if not name or not xml_path:
+            raise ValueError(
+                f'--isa-additions entry must have non-empty name and path, got: {entry}'
+            )
+        grouped.setdefault(name, []).append(xml_path)
+    return grouped
+
+
 def _collect_shared_execute_body_variants(specs, plan):
     """Collect candidate shared execute bodies from each ISA.
 
@@ -193,11 +210,35 @@ def _codegen_config(
 
 def _run(args) -> None:
     """Parse the input XMLs and generate the requested outputs."""
-    specs = []
+    try:
+        addition_xmls = _group_isa_additions_args(getattr(args, 'isa_additions', None))
+    except ValueError as error:
+        print(f'error: {error}', file=sys.stderr)
+        sys.exit(1)
+
+    parsed_inputs = []
+    logical_names = set()
     for entry in args.isafiles:
         name, xml_path, profile_key = _parse_isa_arg(entry)
         profile = _PROFILES[profile_key]()
-        spec = Parser(xml_path, profile).parse()
+        logical_name = (
+            name or profile.generated_arch_name or profile_key.replace('.', '_')
+        )
+        parsed_inputs.append((name, logical_name, xml_path, profile))
+        logical_names.add(logical_name)
+
+    unknown_addition_names = set(addition_xmls) - logical_names
+    if unknown_addition_names:
+        names = ', '.join(sorted(unknown_addition_names))
+        print(
+            f'error: --isa-additions names not present in ISA inputs: {names}',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    specs = []
+    for name, logical_name, xml_path, profile in parsed_inputs:
+        spec = Parser(xml_path, profile, addition_xmls.get(logical_name, ())).parse()
         _apply_codegen_identity(spec, name)
         sem = derive_all_semantics(spec)
         specs.append((spec.arch_name, spec, sem))
@@ -311,6 +352,14 @@ def main() -> None:
         metavar='[NAME:]XML',
         help='Machine-readable AMD GPU ISA XML specifications. Each path may '
         'have a generated identity prefix (e.g., cdna1:/path/to/cdna1.xml).',
+    )
+    arg_parser.add_argument(
+        '--isa-additions',
+        action='append',
+        default=[],
+        metavar='NAME:XML',
+        help='apply an ISA additions XML file to the named ISA. May be repeated; '
+        'files are applied in command-line order.',
     )
     arg_parser.add_argument(
         '--gen-isas',
