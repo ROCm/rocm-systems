@@ -182,22 +182,8 @@ def generate_alltoallv_wg_api():
  * @return void
  */
 \n"""
-    _types = [
-    ("float", "float"),
-    ("double", "double"),
-    ("char", "char"),
-    ("signed char", "schar"),
-    ("short", "short"),
-    ("int", "int"),
-    ("long", "long"),
-    ("long long", "longlong"),
-    ("unsigned char", "uchar"),
-    ("unsigned short", "ushort"),
-    ("unsigned int", "uint"),
-    ("unsigned long", "ulong"),
-    ("unsigned long long", "ulonglong"),
-]
-    for type_, tname_ in _types:
+
+    for type_, tname_ in types:
         expanded_code += alltoallv_wg_api(type_, tname_)
 
     return expanded_code
@@ -429,7 +415,9 @@ def generate_reduction_wave_api():
 
     float_types = [
         ("float", "float"),
-        ("double", "double")
+        ("double", "double"),
+        ("__half", "half"),
+        ("__hip_bfloat16", "bfloat16")
     ]
 
     for type_, tname_ in int_types:
@@ -541,7 +529,9 @@ def generate_reducescatter_wave_api():
 
     float_types = [
         ("float", "float"),
-        ("double", "double")
+        ("double", "double"),
+        ("__half", "half"),
+        ("__hip_bfloat16", "bfloat16")
     ]
 
     for type_, tname_ in int_types:
@@ -644,7 +634,9 @@ def generate_reduction_api():
 
     float_types = [
         ("float", "float"),
-        ("double", "double")
+        ("double", "double"),
+        ("__half", "half"),
+        ("__hip_bfloat16", "bfloat16")
     ]
 
     for type_, tname_ in int_types:
@@ -684,7 +676,9 @@ def generate_reduce_on_stream_api():
 
     float_types = [
         ("float", "float"),
-        ("double", "double")
+        ("double", "double"),
+        ("__half", "half"),
+        ("__hip_bfloat16", "bfloat16")
     ]
 
     for type_, tname_ in int_types:
