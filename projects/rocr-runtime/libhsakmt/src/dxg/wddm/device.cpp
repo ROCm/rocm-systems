@@ -900,15 +900,30 @@ uint64_t WDDMDevice::AllocateCwsrSize(uint64_t* out_ctx_size, uint64_t* out_debu
   // compute_unit_count in device_info_ is the total CU count across all XCCs.
   const uint32_t cu_num          = device_info_.compute_unit_count / num_xcc;
   // wave_per_cu from device_info_ is per-CU (40 for Navi10/12/14, 32 for Navi2x+).
-  const uint32_t wave_per_cu     = device_info_.wave_per_cu ? device_info_.wave_per_cu : 32;
-  const uint32_t wave_num        = cu_num * wave_per_cu;
-
   // KMD CalCwsrSaveAreaSize() split: gfx10+ (FAMILY_NV) vs pre-gfx10
   const bool is_gfx10_plus = (major >= 10);
 
+  const uint32_t wave_per_cu     = device_info_.wave_per_cu ? device_info_.wave_per_cu : 32;
+  uint32_t wave_num              = cu_num * wave_per_cu;
+  // Pre-Navi (gfx9): Linux queues.c caps wave_num at NumShaderBanks/NumArrays*512.
+  // Matches get_num_waves() in queues.c for gfxv < GFX_VERSION_NAVI10.
+  // num_shader_engine is total across all XCCs (wkmi.cpp scales it by num_xcc for gfx9.4),
+  // so divide by num_xcc to get per-XCC SE count, matching cu_num which is also per-XCC.
+  if (!is_gfx10_plus) {
+    const uint32_t num_se  = device_info_.num_shader_engine / num_xcc;
+    const uint32_t num_sa  = device_info_.shader_array_per_shader_engine;
+    if (num_se > 0 && num_sa > 0)
+      wave_num = std::min(wave_num, (num_se / num_sa) * 512u);
+  }
+
   // Control stack: gfx10+ = 12 bytes/wave, older = 8 bytes/wave
   const uint32_t bytes_per_wave  = is_gfx10_plus ? 12 : 8;
-  const uint32_t ctl_stack_size  = wave_num * bytes_per_wave + 8;
+  uint32_t ctl_stack_size        = wave_num * bytes_per_wave + 8;
+  // gfx10.x (Navi) HW control stack RAM is physically limited to 0x7000 bytes.
+  // Matches Linux queues.c: if ((gfxv & 0x3f0000) == 0xA0000) ctl_stack_size = MIN(..., 0x7000)
+  // major == 10 covers the full gfx10.x family (Navi10/12/14, Navi21/22/23/24).
+  if (major == 10)
+    ctl_stack_size = std::min(ctl_stack_size, 0x7000u);
 
   // Sizes from KMD kdx/src/RunListMgr.cpp CalCwsrSaveAreaSize():
   //   gfx10+: sgpr=0x5000, hwreg=0x1400, vgpr=0x40000
@@ -1062,6 +1077,11 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
     free(priv_data);
+    if (queue->cwsr_mem_ != nullptr) {
+      delete GpuMemory::Convert(queue->cwsr_mem_);
+      queue->cwsr_mem_ = nullptr;
+      queue->cwsr_mem_handle_ = 0;
+    }
     return false;
   }
   if (doorbell_loc != nullptr) {
