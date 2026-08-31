@@ -3910,6 +3910,12 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool ceArSymRegistered =
         info->coll == ncclFuncAllReduce && rcclParamForceCeAllReduce() && ceAvailable && !hasSysmemSegment;
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
+      // Sym-window CE AllGather (-R 2) above the symk/CE crossover, without requiring
+      // CTAPolicy=ZERO to flip the whole comm to CE mode. Same predicate the
+      // rcclSelectAllGather Branch #3 reports, so selection and dispatch agree.
+      bool ceAgSymRegistered =
+        info->coll == ncclFuncAllGather && ceAvailable && !hasSysmemSegment &&
+        rcclAllGatherCeRegisteredWindow(comm, recvBytes, winRegType, ceCapturing);
       if (info->coll == ncclFuncAllReduce && info->decisionValid) {
         // AllReduce's backend was already chosen once by rcclSelectAllReduce();
         // honor it here instead of recomputing CE eligibility. rcclSelectAllReduce
@@ -3929,8 +3935,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       } else if (info->coll == ncclFuncAllGather && info->decisionValid) {
         // AllGather's backend was chosen once by rcclSelectAllGather(); honor it
         // here so decision and dispatch agree (mirrors the AllReduce block above).
-        // rcclSelectAllGather Branch #3 gates CE on (CTAPolicy & ZERO), matching
-        // the ceCollTaskAppend condition, so RCCL_CE_REGISTERED <=> that path fires.
+        // rcclSelectAllGather Branch #3 gates CE on (CTAPolicy & ZERO) or the
+        // (symMaxR2, ceRegMax] window, matching the ceAgSymRegistered condition
+        // below, so RCCL_CE_REGISTERED <=> that path fires.
         // RCCL_CE_SCRATCH maps to the FORCE_CE + DDA-scratch path.
         if (info->decision.algo == RCCL_CE_REGISTERED) {
           INFO(NCCL_INIT, "Taking CE collective path for AllGather via registered windows");
@@ -3945,7 +3952,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           NCCLCHECK(collTaskAppend(comm, info, opDev));
         }
       } else if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable) && !hasSysmemSegment) ||
-                 ceArSymRegistered) {
+                 ceArSymRegistered || ceAgSymRegistered) {
         INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                    opDev));

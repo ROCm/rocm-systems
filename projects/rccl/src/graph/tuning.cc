@@ -1858,12 +1858,12 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [8] AlltoAll        -- not used
   },
   // ceRegMax: registered CE upper bound per collective.
-  // AG: 0 = no upper bound for CE-registered (R=2).
+  // AG: 8 GiB cap for registered CE; the lower edge is symMaxR2[AG] (0 = no upper bound).
   // AR: 8 GiB cap for registered CE (copies through user symmetric windows).
   .ceRegMax = {
     0,                             // [0] Broadcast      -- not used
     0,                             // [1] Reduce          -- not used
-    0,                             // [2] AllGather       -- no upper bound (R=2 CE-registered)
+    8ULL*1024*1024*1024,           // [2] AllGather       -- 8 GiB registered CE cap (R=2)
     0,                             // [3] ReduceScatter   -- not used
     8ULL*1024*1024*1024,           // [4] AllReduce       -- 8 GiB registered CE cap
     0,                             // [5] SendRecv        -- not used
@@ -1873,8 +1873,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   },
   // symMaxR2: suppress symk in favour of CE-registered when recv is registered and
   // msg > threshold.
-  // AR set to 256 KiB -- CE outperforms symk above this on gfx1250 (tune from perf data).
-  // All other collectives: 0 (no suppression).
+  // AR set to 256 KiB and AG to 4 MiB -- CE outperforms symk above these on gfx1250
+  // (tune from perf data). All other collectives: 0 (no suppression).
   .symMaxR2 = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
