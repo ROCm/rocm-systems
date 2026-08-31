@@ -720,7 +720,9 @@ typedef struct hipFileIOParams {
 typedef struct hipFileIOEvents {
     void *cookie; //!< Optionally used to track IO operations (e.g. pointer to corresponding hipFileIOParams)
     hipFileStatus_t status; //!< Status of the batch IO operation
-    size_t          ret;    //!< Number of bytes transferred or POSIX error code if negative
+    size_t          ret;    //!< Number of bytes transferred or error code. Cast to ssize_t to inspect.
+                            //!< If non-negative, number of bytes transferred
+                            //!< If negative, POSIX or hipFileOpError_t error
 } hipFileIOEvents_t;
 
 /*!
