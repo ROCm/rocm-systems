@@ -6,6 +6,7 @@
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
+#include "common/string_utility.hpp"
 #include "component_categories.hpp"
 #include "defines.hpp"
 #include "enumerated_list.hpp"
@@ -318,9 +319,8 @@ main(int argc, char** argv)
                 return;
             }
 
-            auto _domain = p.get<std::string>("list-operations");
-            std::transform(_domain.begin(), _domain.end(), _domain.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
+            auto _domain = rocprofsys::utility::string::to_lower(
+                p.get<std::string>("list-operations"));
 
             auto _settings     = tim::settings::shared_instance();
             auto _setting_name = rocm_setting_name_for_domain(_domain);
