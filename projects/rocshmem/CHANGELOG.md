@@ -5,8 +5,8 @@
 
 ### Added
 * Added new APIs:
-  * rocshmem_tile_{min, max, sum}_reduce{_wave}{_wg} variants for the IPC backend
-  * rocshmem_ctx_tile_{min, max, sum}_reduce{_wave}{_wg} variants for the IPC backend
+    * `rocshmem_tile_{min, max, sum}_reduce{_wave}{_wg}` variants for the IPC backend
+    * `rocshmem_ctx_tile_{min, max, sum}_reduce{_wave}{_wg}` variants for the IPC backend
 * Added `--num_wf` argument to functional test harness for runtime wavefront size detection on architectures with wave size 32 (gfx1100, gfx1201, gfx1250) (#9312)
 * Added LTO inline-remarks comparison toolset and interactive resource-usage dashboards under `scripts/analysis/` (#10872)
 * Optimized device API wrappers to remove double-indirection in cross-TU calls, enabling more reliable LTO inlining (#9729)
@@ -28,7 +28,7 @@
 
 ### Resolved Issues
 * Fixed `reduce_wg` and `reduce_wave` operations producing incorrect results for some scenarios
-* fix compilation of rocSHMEM when using clang++ instead of hipcc
+* Fixed compilation of rocSHMEM when using clang++ instead of hipcc
 * Fixed team-relative PE rank computation in GDA alltoallv
 * Fixed `USE_SDMA=ON` builds failing for GDA+IPC with messages >128B
 * Fixed libverbs/libmlx5 discovery using `.so.1` versioned symlinks in GDA backend
