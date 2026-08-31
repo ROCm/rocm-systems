@@ -50,6 +50,7 @@
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "amd_smi/impl/amd_smi_test_internal.h"
+#include "amd_smi/impl/amd_smi_ualoe.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_uuid.h"
 #include "amd_smi/impl/xf86drm.h"
@@ -1457,6 +1458,18 @@ amdsmi_status_t amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processo
   }
   LOG_DEBUG(oam_ss);
 
+  // Retrieve Physical Accelerator ID (UALoE)
+  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
+#ifdef ENABLE_WSL_BACKEND
+  // get_mutex() indexes into the Linux RSMI device list, which WSL devices
+  // are never registered in; skip rather than lock a null mutex.
+  if (!gpu_device->backend())
+#endif
+  {
+    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
+    get_physical_acc_id_from_ualoe(gpu_device, &(info->physical_acc_id));
+  }
+
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -2431,6 +2444,7 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   info->target_graphics_version = std::numeric_limits<uint64_t>::max();
   info->subsystem_id = std::numeric_limits<uint32_t>::max();
   info->flags = 0;
+  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
 
   std::ostringstream ss;
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
@@ -2503,6 +2517,8 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   if (status == AMDSMI_STATUS_SUCCESS && tmp_oam_id != std::numeric_limits<uint16_t>::max()) {
     info->oam_id = static_cast<uint32_t>(tmp_oam_id);
   }
+
+  get_physical_acc_id_from_ualoe(gpu_device, &(info->physical_acc_id));
 
   auto tmp_num_of_compute_units = uint32_t(0);
   status = rsmi_wrapper(amd::smi::rsmi_dev_number_of_computes_get, processor_handle, 0,
