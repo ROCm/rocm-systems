@@ -18,7 +18,7 @@ from typing import Any, Callable, Optional
 
 from utils.inject_roctx import core
 from utils.inject_roctx._backends.torch_cpp_loader import (
-    UnsupportedTorchVersionError,
+    CollectorUnavailableError,
 )
 from utils.inject_roctx._backends.torch_cpp_loader import (
     load as load_torch_trace_collector,
@@ -264,7 +264,7 @@ def _initialize_c_tier() -> bool:
 
     try:
         module = _STATE.load_torch_trace_collector()
-    except UnsupportedTorchVersionError as exc:
+    except CollectorUnavailableError as exc:
         console_error("ml api trace", str(exc))
     except Exception as exc:
         console_warning(

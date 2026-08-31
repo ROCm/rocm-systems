@@ -152,10 +152,10 @@ ROCTX range, the leaf, then those extras.
 
 ## Build and load
 
-- `BUILD_TORCH_TRACE_COLLECTOR` in `src/lib/torch_trace_collector/CMakeLists.txt` is `AUTO` (skip if Torch / ROCTX / Python headers are missing), `ON` (require), or `OFF`. CMake looks for the PyTorch install in the `torch` directory beside `$ROCM_PATH` (sibling of the ROCm prefix).
-- PyTorch version must match `^2\.(13|14)([.]|$)` after stripping a `+...` suffix. The MODULE links `Python3::Module` (no `torch_python`). `PREFIX` is empty.
-- CMake names the artifact `torch_trace_collector-<Torch_VERSION>.so` (local `+...` stripped). Library output is `${CMAKE_BINARY_DIR}/lib`. Install destination is `${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute` (`lib` or `lib64`).
-- `torch_cpp_loader.py` keys on the workload `torch.__version__` with a local `+...` suffix removed. That string must equal the filename version; 2.13.1 does not load `torch_trace_collector-2.13.0.so`. The filename does not encode the CPython ABI; the MODULE is built against the configure-time `Python3::Module`.
+- `src/lib/torch_trace_collector/CMakeLists.txt` skips the build when PyTorch is missing or unsupported. CMake looks for the PyTorch install in the `torch` directory beside `$ROCM_PATH` (sibling of the ROCm prefix).
+- The version comes from `TORCH_VERSION_MAJOR` and `TORCH_VERSION_MINOR` in the PyTorch headers, not `find_package(Torch)`, and must be 2.13 or 2.14. The MODULE takes the Python include dirs and links no Python library. `PREFIX` is empty.
+- CMake names the artifact `torch_trace_collector-<major>.<minor>.<Python3_SOABI>.so`. Library output is `${CMAKE_BINARY_DIR}/lib`. Install destination is `${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute` (`lib` or `lib64`).
+- `torch_cpp_loader.py` keys on the workload PyTorch major and minor version, from `Version(torch.__version__).release[:2]`. The ABI tag in the filename records the interpreter the artifact was built for; the loader reports it but does not require a match.
 
 Search is rooted at the executing Python package (checkout: `src/`; install: `<prefix>/libexec/rocprofiler-compute/`). Order, via `find_prebuilt_artifacts` in `native_tool_finder.py`:
 

@@ -23,16 +23,31 @@ _PACKAGE_ROOT = _THIS_DIR.parents[2]
 _ARTIFACT_PREFIX = "torch_trace_collector-"
 _ARTIFACT_SUFFIX = ".so"
 _ARTIFACT_NAME_GLOB = f"{_ARTIFACT_PREFIX}*{_ARTIFACT_SUFFIX}"
+# torch_trace_collector-<major>.<minor>.<cpython abi tag>.so
 _ARTIFACT_NAME_PATTERN = re.compile(
     r"^"
     + re.escape(_ARTIFACT_PREFIX)
-    + r"(\d+[^/]*)"
+    + r"(\d+\.\d+)\.(.+)"
     + re.escape(_ARTIFACT_SUFFIX)
     + r"$"
 )
 
 
-class UnsupportedTorchVersionError(RuntimeError):
+class CollectorUnavailableError(RuntimeError):
+    """No ``torch_trace_collector`` is usable for this workload."""
+
+
+class CollectorNotBuiltError(CollectorUnavailableError):
+    """This installation has no ``torch_trace_collector`` at all."""
+
+    def __init__(self, workload_torch_version: str) -> None:
+        super().__init__(
+            "torch_trace_collector was not built for this installation, so "
+            f"PyTorch {workload_torch_version} cannot be traced."
+        )
+
+
+class UnsupportedTorchVersionError(CollectorUnavailableError):
     """No ``torch_trace_collector`` matches the workload PyTorch version."""
 
     def __init__(
@@ -48,11 +63,13 @@ class UnsupportedTorchVersionError(RuntimeError):
 
 
 def torch_version() -> str:
-    """Return ``torch.__version__`` without a local ``+...`` suffix."""
+    """Return the workload PyTorch version as ``<major>.<minor>``."""
     try:
         import torch
+        from torch.torch_version import Version
 
-        return torch.__version__.split("+", 1)[0]
+        release = Version(torch.__version__).release
+        return f"{release[0]}.{release[1]}"
     except Exception as exc:
         console_error(
             "ml api trace",
@@ -77,6 +94,8 @@ def load() -> types.ModuleType:
     """Resolve the ``torch_trace_collector`` module."""
     workload_torch_version = torch_version()
     collectors_by_version = list_collector_artifacts()
+    if not collectors_by_version:
+        raise CollectorNotBuiltError(workload_torch_version)
     so_path = collectors_by_version.get(workload_torch_version)
     if so_path is None:
         raise UnsupportedTorchVersionError(
