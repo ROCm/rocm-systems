@@ -707,6 +707,10 @@ function(rj_add_consan_device_conformance_cases)
             # The workload is sub-second in isolation, but a simulator process
             # can exceed the default during teardown under the full -j16 gate.
             set(_baseline_workload_timeout 120)
+        elseif(_workload_name STREQUAL "RcclPartialBarrier")
+            # This workload is sub-second in isolation but can exceed the
+            # default while the full -j16 gate runs the large LDS pipelines.
+            set(_baseline_workload_timeout 120)
         endif()
         foreach(_outcome IN ITEMS Correct Incorrect)
             string(TOLOWER "${_outcome}" _outcome_label)
@@ -748,8 +752,8 @@ function(rj_add_consan_device_conformance_cases)
                 _mode_value STREQUAL "inline-shadow"
                 AND _workload_name STREQUAL "Gfx950LargeLdsPipeline"
             )
-                # This takes about 53 seconds by itself on a 32-thread host,
-                # but can exceed 120 seconds in the full -j32 simulator gate.
+                # This takes about 53 seconds by itself, but can exceed 120
+                # seconds under contention in the full simulator gate.
                 set(_workload_timeout 240)
             elseif(
                 _mode_value STREQUAL "inline-shadow"
@@ -785,8 +789,15 @@ function(rj_add_consan_device_conformance_cases)
             )
                 # These take 10--12 seconds serially but can exceed the
                 # default on any simulator target under the front-loaded
-                # contention of the -j32 gate.
+                # contention of the full gate.
                 set(_workload_timeout 180)
+            elseif(
+                _mode_value STREQUAL "sampled"
+                AND _workload_name STREQUAL "AtomicCasPublication"
+            )
+                # This workload is sub-second in isolation but can exceed the
+                # default while the full -j16 gate runs the large LDS pipelines.
+                set(_workload_timeout 120)
             endif()
             list(LENGTH _workload_fields _workload_field_count)
             if(_workload_field_count GREATER 3)
