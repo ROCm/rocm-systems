@@ -9564,6 +9564,11 @@ amdsmi_status_t amdsmi_get_nic_port_info(amdsmi_processor_handle processor_handl
  *
  *  @platform{host} @platform{gpu_bm_linux}
  *
+ *  @details A NIC whose RDMA driver is absent (for example, ionic_rdma blacklisted)
+ *  is still enumerated: this call returns ::AMDSMI_STATUS_SUCCESS with a zeroed
+ *  struct. Check @p info->num_rdma_dev rather than the return value to tell
+ *  whether any RDMA device was reported.
+ *
  *  @param[in] processor_handle NIC for which to query
  *
  *  @param[out] info reference to the nic rdma devices info struct.

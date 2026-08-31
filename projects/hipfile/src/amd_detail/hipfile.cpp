@@ -208,11 +208,9 @@ selectBackend(const vector<shared_ptr<Backend>> &backends, const shared_ptr<IFil
 }
 
 ssize_t
-hipFileIo(IoType type, hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t file_offset,
-          hoff_t buffer_offset, const vector<shared_ptr<Backend>> &backends)
+hipFileIo(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
+          hoff_t file_offset, hoff_t buffer_offset, const vector<shared_ptr<Backend>> &backends)
 try {
-    auto [file, buffer] = Context<DriverState>::get()->getFileAndBuffer(fh, buffer_base);
-
     if (file_offset < 0 || buffer_offset < 0) {
         throw std::system_error(EINVAL, std::generic_category());
     }
@@ -221,11 +219,32 @@ try {
 
     return backend->io(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset);
 }
-catch (const DriverNotInitialized &) {
-    return -hipFileDriverNotInitialized;
-}
 catch (hipFileError_t e) {
     return -e.err;
+}
+catch (const Hip::RuntimeError &) {
+    throw;
+}
+catch (const std::system_error &e) {
+    errno = e.code().value();
+    return -1;
+}
+catch (const std::invalid_argument &) {
+    return -hipFileInvalidValue;
+}
+catch (...) {
+    return -hipFileInternalError;
+}
+
+ssize_t
+hipFileIo(IoType type, hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t file_offset,
+          hoff_t buffer_offset, const vector<shared_ptr<Backend>> &backends)
+try {
+    auto [file, buffer] = Context<DriverState>::get()->getFileAndBuffer(fh, buffer_base);
+    return hipFileIo(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset, backends);
+}
+catch (const DriverNotInitialized &) {
+    return -hipFileDriverNotInitialized;
 }
 catch (const InvalidMemoryType &) {
     return -hipFileHipMemoryTypeInvalid;
@@ -238,10 +257,6 @@ catch (const FileNotRegistered &) {
 }
 catch (const Hip::RuntimeError &e) {
     return -e.error;
-}
-catch (const std::system_error &e) {
-    errno = e.code().value();
-    return -1;
 }
 catch (...) {
     return -hipFileInternalError;
@@ -410,14 +425,38 @@ try {
     hipFileInit();
     (void)flags; // Unused at this time.
 
-    if (iocbp == nullptr && nr > 0) {
+    if (nr == 0 || iocbp == nullptr) {
         return {hipFileInvalidValue, hipSuccess};
     }
 
     std::shared_ptr<IBatchContext> batch_context = Context<DriverState>::get()->getBatchContext(batch_idp);
-    batch_context->submit_operations(iocbp, nr);
+    BatchOperations                pending_ops{};
+    pending_ops.reserve(nr);
+
+    for (unsigned i = 0; i < nr; i++) {
+        // Make a copy so another thread cannot modify an accepted operation.
+        auto param_copy = std::make_unique<const hipFileIOParams_t>(iocbp[i]);
+        auto [file, buffer] =
+            Context<DriverState>::get()->getFileAndBuffer(param_copy->fh, param_copy->u.batch.devPtr_base);
+        pending_ops.push_back(
+            std::make_shared<BatchOperation>(std::move(param_copy), std::move(buffer), std::move(file)));
+    }
+
+    batch_context->submitOperations(std::move(pending_ops));
 
     return {hipFileSuccess, hipSuccess};
+}
+catch (const BatchFull &) {
+    return {hipFileBatchFull, hipSuccess};
+}
+catch (const DriverNotInitialized &) {
+    return {hipFileDriverNotInitialized, hipSuccess};
+}
+catch (const InvalidMemoryType &) {
+    return {hipFileHipMemoryTypeInvalid, hipSuccess};
+}
+catch (const FileNotRegistered &) {
+    return {hipFileHandleNotRegistered, hipSuccess};
 }
 catch (const std::invalid_argument &) {
     return {hipFileInvalidValue, hipSuccess};
@@ -431,13 +470,24 @@ hipFileBatchIOGetStatus(hipFileBatchHandle_t batch_idp, unsigned min_nr, unsigne
                         hipFileIOEvents_t *iocbp, struct timespec *timeout)
 try {
     hipFileInit();
-    (void)batch_idp;
-    (void)min_nr;
-    (void)nr;
-    (void)iocbp;
-    (void)timeout;
 
-    throw std::runtime_error("Not Implemented");
+    if (iocbp == nullptr) {
+        return {hipFileInvalidValue, hipSuccess};
+    }
+    if (nr == nullptr || *nr == 0) {
+        return {hipFileInvalidValue, hipSuccess};
+    }
+    if (min_nr > *nr) {
+        return {hipFileInvalidValue, hipSuccess};
+    }
+
+    std::shared_ptr<IBatchContext> batch_context = Context<DriverState>::get()->getBatchContext(batch_idp);
+    batch_context->getStatus(min_nr, nr, iocbp, makeBatchDeadline(timeout));
+
+    return {hipFileSuccess, hipSuccess};
+}
+catch (const std::invalid_argument &) {
+    return {hipFileInvalidValue, hipSuccess};
 }
 catch (...) {
     return handle_exception();
@@ -447,9 +497,14 @@ hipFileError_t
 hipFileBatchIOCancel(hipFileBatchHandle_t batch_idp)
 try {
     hipFileInit();
-    (void)batch_idp;
 
-    throw std::runtime_error("Not Implemented");
+    std::shared_ptr<IBatchContext> batch_context = Context<DriverState>::get()->getBatchContext(batch_idp);
+    batch_context->cancelOperations();
+
+    return {hipFileSuccess, hipSuccess};
+}
+catch (const std::invalid_argument &) {
+    return {hipFileInvalidValue, hipSuccess};
 }
 catch (...) {
     return handle_exception();
@@ -459,9 +514,8 @@ void
 hipFileBatchIODestroy(hipFileBatchHandle_t batch_idp)
 try {
     hipFileInit();
-    (void)batch_idp;
 
-    throw std::runtime_error("Not Implemented");
+    Context<DriverState>::get()->destroyBatchContext(batch_idp);
 }
 catch (...) {
     return;
