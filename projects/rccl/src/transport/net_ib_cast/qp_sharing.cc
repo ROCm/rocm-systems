@@ -91,7 +91,6 @@ struct IbCastSharedQp* IbCastRegisterSharedQp(const IbCastSharedQpKey* key,
     entry->refcount = initialRefcount;
     entry->cqRefcount = 0;
     entry->used = true;
-    entry->ctsQpSlot = IBCAST_CTS_QP_SLOT_INVALID;
     return entry;
 }
 
