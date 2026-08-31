@@ -21,7 +21,7 @@ from rich.text import Text
 from utils.mem_chart_common import (
     COLORS,
     build_arch_notes,
-    build_bw_edge_column,
+    build_bw_edges,
     build_ip_block,
     build_kernel_panel,
     build_legend,
@@ -356,20 +356,10 @@ def _build_cache_columns(
     )
     gl1_panel = build_ip_block("GL1 Cache", _CACHE_PANEL_W, _TOTAL_H, gl1_content)
 
-    gl1_gl2_edges_text = build_bw_edge_column(
+    gl1_gl2_edges_text = build_bw_edges(
         [
-            (
-                "Read BW",
-                format_value(metrics["gl1_gl2_read_bw"], "Bytes/s", 1),
-                "left",
-                COLORS["read"],
-            ),
-            (
-                "Write BW",
-                format_value(metrics["gl1_gl2_write_bw"], "Bytes/s", 1),
-                "right",
-                COLORS["write"],
-            ),
+            ("Read BW", metrics["gl1_gl2_read_bw"], "left", COLORS["read"]),
+            ("Write BW", metrics["gl1_gl2_write_bw"], "right", COLORS["write"]),
         ],
         std_arrows,
     )
@@ -390,24 +380,10 @@ def _build_memory_columns(
     std_arrows: dict[str, str],
 ) -> tuple[Text, Panel, Text, Panel]:
     """GL2-GCEA edges, GCEA panel, DRAM edges, DRAM panel."""
-
-    color_read = COLORS["read"]
-    color_write = COLORS["write"]
-
-    gl2_gcea_edges_text = build_bw_edge_column(
+    gl2_gcea_edges_text = build_bw_edges(
         [
-            (
-                "Read BW",
-                format_value(metrics["gl2_fabric_read_bw"], "Bytes/s", 1),
-                "left",
-                color_read,
-            ),
-            (
-                "Write BW",
-                format_value(metrics["gl2_fabric_write_bw"], "Bytes/s", 1),
-                "right",
-                color_write,
-            ),
+            ("Read BW", metrics["gl2_fabric_read_bw"], "left", COLORS["read"]),
+            ("Write BW", metrics["gl2_fabric_write_bw"], "right", COLORS["write"]),
         ],
         std_arrows,
     )
@@ -419,20 +395,10 @@ def _build_memory_columns(
     )
     gcea_panel = build_ip_block("GCEA", _CACHE_PANEL_W, _TOTAL_H, gcea_content)
 
-    dram_edges_text = build_bw_edge_column(
+    dram_edges_text = build_bw_edges(
         [
-            (
-                "Read BW",
-                format_value(metrics["dram_read_bw"], "Bytes/s", 1),
-                "left",
-                color_read,
-            ),
-            (
-                "Write BW",
-                format_value(metrics["dram_write_bw"], "Bytes/s", 1),
-                "right",
-                color_write,
-            ),
+            ("Read BW", metrics["dram_read_bw"], "left", COLORS["read"]),
+            ("Write BW", metrics["dram_write_bw"], "right", COLORS["write"]),
         ],
         std_arrows,
     )

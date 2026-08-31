@@ -14,7 +14,7 @@ from rich.text import Text
 from utils.mem_chart_common import (
     COLORS,
     build_arch_notes,
-    build_bw_edge_column,
+    build_bw_edges,
     build_cache_panel,
     build_ip_block,
     build_kernel_panel,
@@ -548,17 +548,12 @@ def create_mem_chart_diagram(
         width=_IP_BLOCK_W,
         height=_TOTAL_H,
     )
-    l2_fab_edges = build_bw_edge_column(
+    l2_fab_edges = build_bw_edges(
         [
-            (
-                "Read BW",
-                format_value(metrics["l2_fabric_read_bw"], "Bytes/s", 1),
-                "left",
-                COLORS["read"],
-            ),
+            ("Read BW", metrics["l2_fabric_read_bw"], "left", COLORS["read"]),
             (
                 "Write/Atomic BW",
-                format_value(metrics["l2_fabric_wr_at_bw"], "Bytes/s", 1),
+                metrics["l2_fabric_wr_at_bw"],
                 "right",
                 COLORS["write"],
             ),
