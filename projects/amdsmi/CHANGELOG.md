@@ -25,6 +25,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `vram_bit_width` never being reported as `N/A`**.  
   - The unavailable-value check compared a `uint32_t` field against `UINT64_MAX`, which can never match, so an unknown bit width was logged as `4294967295`.
+- **Fixed `amd-smi ras --afid --folder --json` emitting nothing when no CPER files are readable**.  
+  - When every `.cper` file in the folder was skipped (e.g. rejected as a symlink), the JSON path printed empty output, so consumers feeding stdout to `json.loads` failed with `Expecting value: line 1 column 1 (char 0)`. It now emits `[]` for that case, matching the `--cper --json` contract.
 
 - **Fixed `amd-smi static --vram` reporting `GDDR7` for LPDDR5 unified memory on APUs (e.g. gfx117x)**.  
   - `AMDSMI_VRAM_TYPE__MAX` aliases the highest real memory type (`LPDDR5`), so a genuine LPDDR5 reading was matched by the `__MAX` special case and mislabeled `GDDR7`. It is now correctly reported as `LPDDR5`.
@@ -149,6 +151,9 @@ GPU: 0
   - The caller already knows this value, so it is now passed through to `gpuvsmi_get_pid_info()`, eliminating one full topology discovery per process per refresh. Falls back to the original discovery path when the id is unavailable.
 
 ### Resolved Issues
+
+- **Fixed `amd-smi metric --clock` reporting FCLK `max_clk` as 0 MHz**.
+  - `amdsmi_get_clock_info()` derived the FCLK (data-fabric) range from `pp_od_clk_voltage`, which on some GPUs (e.g. MI45x) lists only `OD_SCLK`/`OD_MCLK` and no FCLK section. The parsed maximum stayed at 0 and the code never fell back to `pp_dpm_fclk`, so `amd-smi metric --clock` showed `FCLK_0 MAX_CLK: 0 MHz`. The range now falls back to `pp_dpm_fclk` (and the analogous `pp_dpm_sclk`/`pp_dpm_mclk`) whenever the overdrive file omits that domain.
 
 - **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.  
   - The common no-entries case printed empty output, so consumers feeding stdout to `json.loads` failed with `Expecting value: line 1 column 1 (char 0)`. The command now always emits exactly one valid JSON document: `[]` when there are no entries, or a single aggregated array across all GPUs when there are. `--follow` mode stays silent until entries appear. The human-readable primary-partition warning is also suppressed in JSON mode so it no longer corrupts the output.

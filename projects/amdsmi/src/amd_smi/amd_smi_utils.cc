@@ -32,6 +32,7 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "amd_smi/impl/amd_smi_clk_testing.h"
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_system.h"
@@ -278,6 +279,62 @@ amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, uint
   return AMDSMI_STATUS_SUCCESS;
 }
 
+bool smi_amdgpu_parse_od_clk_range(std::istream& od_stream, amdsmi_clk_type_t domain,
+                                   unsigned int* max_freq, unsigned int* min_freq) {
+  // Section header (and its GFXCLK/MCLK/FCLK alias) whose levels feed this
+  // domain's user-defined range.
+  const char* od_header = nullptr;
+  const char* alias_header = nullptr;
+  switch (domain) {
+    case AMDSMI_CLK_TYPE_GFX:
+      od_header = "OD_SCLK:";
+      alias_header = "GFXCLK:";
+      break;
+    case AMDSMI_CLK_TYPE_MEM:
+      od_header = "OD_MCLK:";
+      alias_header = "MCLK:";
+      break;
+    case AMDSMI_CLK_TYPE_DF:
+      od_header = "OD_FCLK:";
+      alias_header = "FCLK:";
+      break;
+    default:
+      return false;
+  }
+
+  unsigned int max = 0;
+  unsigned int min = UINT_MAX;
+  bool in_domain = false;
+  bool found = false;
+  char str[10];
+  unsigned int dpm_level, freq;
+  for (std::string line; getline(od_stream, line);) {
+    // Section headers end with ':'. This domain's header (or its alias) starts
+    // capture; any other header ends it, so an adjacent section such as
+    // OD_VDDC_CURVE is not folded into the range.
+    if (!line.empty() && line.back() == ':') {
+      in_domain = line.compare(od_header) == 0 || line.compare(alias_header) == 0;
+      continue;
+    }
+    if (!in_domain) {
+      continue;
+    }
+    if (sscanf(line.c_str(), "%u: %u%9s", &dpm_level, &freq, str) <= 2) {
+      continue;  // skip lines that don't conform to the format
+    }
+    found = true;
+    if (freq > max) max = freq;
+    if (freq < min) min = freq;
+  }
+
+  if (!found || max == 0) {
+    return false;
+  }
+  *max_freq = max;
+  *min_freq = min;
+  return true;
+}
+
 amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_clk_type_t domain,
                                       int* max_freq, int* min_freq, int* num_dpm,
                                       int* sleep_state_freq) {
@@ -286,19 +343,17 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
 
   std::string smclk_min_max_fullpath = "";
 
-  bool sclk = false;
-  bool mclk = false;
-  bool fclk = false;
+  bool use_od_range = false;
   switch (domain) {
     case AMDSMI_CLK_TYPE_GFX:
       smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
       fullpath += "/pp_dpm_sclk";
-      sclk = true;
+      use_od_range = true;
       break;
     case AMDSMI_CLK_TYPE_MEM:
       smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
       fullpath += "/pp_dpm_mclk";
-      mclk = true;
+      use_od_range = true;
       break;
     case AMDSMI_CLK_TYPE_VCLK0:
       fullpath += "/pp_dpm_vclk";
@@ -318,7 +373,7 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
     case AMDSMI_CLK_TYPE_DF:
       smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
       fullpath += "/pp_dpm_fclk";
-      fclk = true;
+      use_od_range = true;
       break;
     default:
       return AMDSMI_STATUS_INVAL;
@@ -337,65 +392,13 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
   dpm = 0;
   sleep_freq = UINT_MAX;
   current_freq = 0;
-  // if getting sclk, mclk or fclk info, read pp_od_clk_voltage for min and max info
-  if (sclk || mclk || fclk) {
+  // GFX/MEM/DF expose a user-defined range in pp_od_clk_voltage; when it omits
+  // this domain's section (e.g. no OD_FCLK on MI45x) fall back to the pp_dpm_*
+  // levels below.
+  if (use_od_range) {
     std::ifstream smclk_ranges(smclk_min_max_fullpath.c_str());
-    unsigned int smax = 0;
-    unsigned int mmax = 0;
-    unsigned int fmax = 0;
-    unsigned int smin = UINT_MAX;
-    unsigned int mmin = UINT_MAX;
-    unsigned int fmin = UINT_MAX;
-
-    // if pp_od_clk_voltage is not found, then go back to using the original pp_dpm files
-    if (!smclk_ranges.is_open()) {
-      sclk = false;
-      mclk = false;
-      fclk = false;
-    } else {
-      // using enum to switch between recording for sclk, mclk, or fclk
-      enum ClkType { PARSING_SCLK = 0, PARSING_MCLK = 1, PARSING_FCLK = 2 };
-      ClkType current_clk_type = PARSING_SCLK;
-      unsigned int dpm_level, freq;
-      for (std::string line; getline(smclk_ranges, line);) {
-        if (line.compare("GFXCLK:") == 0 || line.compare("OD_SCLK:") == 0) {
-          current_clk_type = PARSING_SCLK;
-          continue;
-        } else if (line.compare("MCLK:") == 0 || line.compare("OD_MCLK:") == 0) {
-          current_clk_type = PARSING_MCLK;
-          continue;
-        } else if (line.compare("FCLK:") == 0 || line.compare("OD_FCLK:") == 0) {
-          current_clk_type = PARSING_FCLK;
-          continue;
-        }
-        if (sscanf(line.c_str(), "%u: %d%9s", &dpm_level, &freq, str) <= 2) {
-          // skip lines that don't conform to the format
-          continue;
-        }
-        if (current_clk_type == PARSING_SCLK) {
-          if (freq > smax) smax = freq;
-          if (freq < smin) smin = freq;
-        } else if (current_clk_type == PARSING_MCLK) {
-          if (freq > mmax) mmax = freq;
-          if (freq < mmin) mmin = freq;
-        } else if (current_clk_type == PARSING_FCLK) {
-          if (freq > fmax) fmax = freq;
-          if (freq < fmin) fmin = freq;
-        }
-      }
-
-      if (sclk) {
-        max = smax;
-        min = smin;
-      } else if (mclk) {
-        max = mmax;
-        min = mmin;
-      } else if (fclk) {
-        max = fmax;
-        min = fmin;
-      }
-
-      smclk_ranges.close();
+    if (!smi_amdgpu_parse_od_clk_range(smclk_ranges, domain, &max, &min)) {
+      use_od_range = false;
     }
   }
   // obtain rest of info from regular pp_dpm_* files.
@@ -404,7 +407,7 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
 
     char firstChar = line[0];
     if (firstChar == 'S') {
-      if (sscanf(line.c_str(), "%c: %d%9s", &single_char, &sleep_freq, str) <= 2) {
+      if (sscanf(line.c_str(), "%c: %u%9s", &single_char, &sleep_freq, str) <= 2) {
         ranges.close();
         return AMDSMI_STATUS_NO_DATA;
       }
@@ -418,7 +421,7 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
        * incorrect min value.
        */
 
-      if (sscanf(line.c_str(), "%u: %d%c", &dpm_level, &freq, str) <= 2) {
+      if (sscanf(line.c_str(), "%u: %u%c", &dpm_level, &freq, str) <= 2) {
         ranges.close();
         return AMDSMI_STATUS_IO;
       }
@@ -428,9 +431,8 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
         current_freq = freq;
       }
 
-      // not * was detected so check for the min max if not sclk, mclk, or fclk, which are user
-      // defined
-      if (!sclk && !mclk && !fclk) {
+      // Domains without an OD range derive min/max from the dpm levels here.
+      if (!use_od_range) {
         max = freq > max ? freq : max;
         min = freq < min ? freq : min;
       }
