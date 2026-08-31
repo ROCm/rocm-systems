@@ -359,7 +359,7 @@ class OmniSoC_Base:
         arch = self.__arch
         if not arch:
             return ()
-        policy_arch = canonical_config_arch(arch) or arch
+        policy_arch = canonical_config_arch(arch)
         return _load_same_bucket_priority_policy_map().get(policy_arch, ())
 
     def _metric_aware_coalesce_pass(

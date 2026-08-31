@@ -50,15 +50,9 @@ from utils.logger import console_error  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 from utils.utils_common import canonical_config_arch  # noqa: E402
 from utils.utils_counter_defs import (  # noqa: E402
-    get_build_in_vars,
-    parse_counters_text,
+    extract_metric_formula_hw_counters,
 )
 from vendored import yaml  # noqa: E402
-
-
-def analysis_config_arch(gpu_arch: str) -> str:
-    """Analysis YAML subdirectory for *gpu_arch* (e.g. gfx1151 -> gfx115x)."""
-    return canonical_config_arch(gpu_arch) or gpu_arch
 
 
 def _counter_display_ip_prefix(counter: str) -> str:
@@ -81,34 +75,12 @@ def _counters_grouped_by_ip_sorted(counters: list[str]) -> dict[str, list[str]]:
     return by_ip
 
 
-def parse_counters(config_text: str, gpu_series: str) -> set[str]:
-    """Extract all hardware counters from config text.
-
-    Args:
-        config_text: Metric formula text
-        gpu_series: GPU series for resolving built-in vars
-    """
-    hw_counters, variables = parse_counters_text(config_text)
-    build_in_vars = get_build_in_vars(gpu_series)
-
-    while variables:
-        subvariables: set[str] = set()
-        for var in variables:
-            if var in build_in_vars:
-                hw_new, var_new = parse_counters_text(build_in_vars[var])
-                hw_counters.update(hw_new)
-                subvariables.update(var_new)
-        variables = subvariables - variables
-
-    return hw_counters
-
-
 def iter_yaml_metrics(
     config_dir: Path,
     gpu_arch: str,
 ) -> Iterator[tuple[str, Any, int, str, str]]:
     """Iterate over all metrics in analysis YAML files."""
-    config_root = config_dir / analysis_config_arch(gpu_arch)
+    config_root = config_dir / canonical_config_arch(gpu_arch)
     if not config_root.is_dir():
         return
 
@@ -339,12 +311,12 @@ def generate_bucket_metrics(
     total_metrics = 0
 
     gpu_series = mi_gpu_specs.get_gpu_series(arch)
-    config_arch = analysis_config_arch(arch)
+    config_arch = canonical_config_arch(arch)
     for file_id, panel_id, metric_idx, metric_name, metric_yaml in iter_yaml_metrics(
         config_dir, arch
     ):
         total_metrics += 1
-        hardware_counters = parse_counters(metric_yaml, gpu_series)
+        hardware_counters = extract_metric_formula_hw_counters(metric_yaml, gpu_series)
         buckets: set[str] = set()
         for formula_counter in hardware_counters:
             bucket_label = counter_to_bucket.get(formula_counter)
@@ -610,7 +582,7 @@ Examples:
     if not perfmon_config:
         console_error(f"Error: No perfmon config found for architecture: {arch}")
 
-    config_arch_name = analysis_config_arch(arch)
+    config_arch_name = canonical_config_arch(arch)
     config_arch_path = config_dir / config_arch_name
     if not config_arch_path.is_dir():
         console_error(
