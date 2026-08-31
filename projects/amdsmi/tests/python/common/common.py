@@ -1587,7 +1587,7 @@ class Common:
         Raises:
             AmdSmiLibraryException: If initialization fails for reasons other than driver not loaded
             AmdSmiParameterException: If invalid parameters are passed to amdsmi_init
-            unittest.SkipTest: If no compatible AMD drivers are detected on the system
+            RuntimeError: If no compatible AMD drivers are detected on the system
         """
         # Build init_flag additively from detected drivers (mirrors CLI amdsmi_init.py pattern).
         # Using INIT_AMD_APUS when both GPU and CPU drivers are present is wrong on discrete-GPU
@@ -1598,9 +1598,11 @@ class Common:
         if self._check_amd_hsmp_driver():
             init_flag |= amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS
         if init_flag == 0:
+            # Errors rather than skips: a driverless box cannot exercise anything,
+            # and skipping reports OK for a suite that never ran.
             msg = "Drivers not loaded (amdgpu, amd_hsmp or hsmp_acpi drivers not found in modules)"
             self.print(msg)
-            raise unittest.SkipTest(msg)
+            raise RuntimeError(msg)
 
         msg = "AMDSMI init failed for detected drivers"
         ret = self._init_with_flag(init_flag, msg)
