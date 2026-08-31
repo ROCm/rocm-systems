@@ -131,17 +131,19 @@ parts. Theoretical HBM bandwidth is then:
 .. note::
 
    HBM is interleaved across the whole chip and does **not** shrink with compute
-   partition the way L2 channels do. ROCm Compute Profiler therefore uses the
-   **whole-chip SPX XCD count** when adjusting HBM channel counts for NPS modes,
-   while L2 channel totals follow the **active compute partition**.
+   partition the way L2 channels do. For NPS memory modes, **Memory Channels**
+   (``num_memory_channels``), which drive HBM and L2-Fabric percent-of-peak
+   metrics, are derived from the **whole-chip SPX XCD count** and the NPS
+   divisor. **Total L2 Channels** (``total_l2_chan``), which drive L2 bandwidth,
+   busy, and stall peaks, follow the **active compute partition**.
 
 Valid compute and memory mode pairings depend on the GPU model. Refer to the
 `ROCm blog compatibility matrix <https://rocm.blogs.amd.com/software-tools-optimization/compute-memory-modes/README.html>`_
 and `MI300X partitioning overview <https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/gpu-partitioning/mi300x/overview.html>`_
 for supported combinations.
 
-Worked example: CPX on MI300X
-=============================
+Example: CPX on MI300X
+======================
 
 **Question:** *Is CPX supported, and do I multiply metrics by eight to get
 full-GPU numbers?*
