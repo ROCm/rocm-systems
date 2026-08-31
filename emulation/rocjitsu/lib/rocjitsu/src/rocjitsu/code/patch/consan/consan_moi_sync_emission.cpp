@@ -1902,7 +1902,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // Scalar persistent state is already wave-uniform and needs no widening.
     // Saturation stays fail-closed in the token readers.
     const bool widen_consumer_segment =
-        point.moi_inline_access_present && !point.moi_persistent_sgprs.epoch;
+        point.moi_inline_access_present && !point.moi_persistent_sgprs.epoch();
     const auto widen_exec =
         widen_consumer_segment
             ? instrumentation::build_s_mov_b64(kRdna4ExecLo, kScalarInlineNegativeOneOperand, arch)
@@ -1928,9 +1928,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     advance_words.insert(advance_words.end(), saturate_epoch->begin(), saturate_epoch->end());
     if (restore_matching_exec)
       advance_words.push_back(*restore_matching_exec);
-    if (point.moi_persistent_sgprs.epoch) {
+    if (point.moi_persistent_sgprs.epoch()) {
       const auto persist_epoch = instrumentation::build_v_readfirstlane_b32(
-          *point.moi_persistent_sgprs.epoch, *point.moi_epoch_vgpr, arch);
+          *point.moi_persistent_sgprs.epoch(), *point.moi_epoch_vgpr, arch);
       const auto persist_wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
       if (!persist_epoch || !persist_wait) {
         errors.emplace_back("ConSan MOI inline acquire could not persist its consumer segment");
@@ -3182,8 +3182,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     errors.emplace_back("ConSan MOI inline atomic patch has an invalid scratch VGPR window");
     return std::nullopt;
   }
-  const bool scalar_persistent =
-      point.moi_persistent_sgprs.owner && point.moi_persistent_sgprs.epoch;
+  const bool scalar_persistent = point.moi_persistent_sgprs.complete();
   if ((!point.moi_owner_vgpr || !point.moi_epoch_vgpr) && !scalar_persistent &&
       private_layout == nullptr) {
     errors.emplace_back("ConSan MOI inline atomic patch requires RJ_CONSAN_MOI_OWNER_VGPR and "
@@ -3264,9 +3263,9 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
         static_cast<uint16_t>(scratch_vgpr + required_scratch_count - 4u);
     const uint16_t materialized_epoch = static_cast<uint16_t>(materialized_owner + 1u);
     words.push_back(
-        build_v_mov_b32_e32(materialized_owner, *point.moi_persistent_sgprs.owner, arch));
+        build_v_mov_b32_e32(materialized_owner, *point.moi_persistent_sgprs.owner(), arch));
     words.push_back(
-        build_v_mov_b32_e32(materialized_epoch, *point.moi_persistent_sgprs.epoch, arch));
+        build_v_mov_b32_e32(materialized_epoch, *point.moi_persistent_sgprs.epoch(), arch));
     point.moi_owner_vgpr = materialized_owner;
     point.moi_epoch_vgpr = materialized_epoch;
   }

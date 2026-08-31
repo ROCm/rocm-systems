@@ -1257,8 +1257,7 @@ TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
   for (uint32_t present_mask = 0u; present_mask < 3u; ++present_mask) {
     SCOPED_TRACE(present_mask);
     MoiOptions options;
-    options.moi_persistent_sgprs.owner = 40u;
-    options.moi_persistent_sgprs.epoch = 41u;
+    options.moi_persistent_sgprs.set_owner_epoch(40u, 41u);
     if (present_mask & 1u)
       options.moi_owner_vgpr = 6u;
     if (present_mask & 2u)
@@ -1273,8 +1272,7 @@ TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
   }
 
   MoiOptions valid;
-  valid.moi_persistent_sgprs.owner = 40u;
-  valid.moi_persistent_sgprs.epoch = 41u;
+  valid.moi_persistent_sgprs.set_owner_epoch(40u, 41u);
   valid.moi_owner_vgpr = 6u;
   valid.moi_epoch_vgpr = 7u;
   std::vector<std::string> errors;
@@ -2057,9 +2055,9 @@ TEST(ConSanMoi, Cdna4DirectScalarStateReusesUnreferencedSharedOwnerAllocation) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(test_moi_persistent_sgpr_state(result).owner);
+  ASSERT_TRUE(test_moi_persistent_sgpr_state(result).owner());
   ASSERT_FALSE(result.resource_plans.empty());
-  EXPECT_LT(*test_moi_persistent_sgpr_state(result).owner, 80u);
+  EXPECT_LT(*test_moi_persistent_sgpr_state(result).owner(), 80u);
   EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
     return !plan.has_indirect_sgpr_access && plan.sgpr_reference_coverage_complete &&
            plan.scalar_tail_floor < 80u;
@@ -2118,17 +2116,17 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
       continue;
     }
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-    ASSERT_TRUE(test_moi_persistent_sgpr_state(result).owner)
+    ASSERT_TRUE(test_moi_persistent_sgpr_state(result).owner())
         << testing::PrintToString(result.warnings);
-    ASSERT_TRUE(test_moi_persistent_sgpr_state(result).epoch);
-    EXPECT_GE(*test_moi_persistent_sgpr_state(result).owner, 80u);
-    EXPECT_EQ(*test_moi_persistent_sgpr_state(result).epoch,
-              *test_moi_persistent_sgpr_state(result).owner + 1u);
+    ASSERT_TRUE(test_moi_persistent_sgpr_state(result).epoch());
+    EXPECT_GE(*test_moi_persistent_sgpr_state(result).owner(), 80u);
+    EXPECT_EQ(*test_moi_persistent_sgpr_state(result).epoch(),
+              *test_moi_persistent_sgpr_state(result).owner() + 1u);
     if (engine == ConSanMoiEngine::RecordReplay) {
       EXPECT_FALSE(test_moi_persistent_sgpr_state(result).workgroup_key);
       ASSERT_TRUE(test_moi_persistent_sgpr_state(result).record_replay_workgroup.complete());
       EXPECT_EQ(*test_moi_persistent_sgpr_state(result).record_replay_workgroup.x(),
-                *test_moi_persistent_sgpr_state(result).epoch + 1u);
+                *test_moi_persistent_sgpr_state(result).epoch() + 1u);
       EXPECT_EQ(*test_moi_persistent_sgpr_state(result).record_replay_workgroup.y(),
                 *test_moi_persistent_sgpr_state(result).record_replay_workgroup.x() + 1u);
       EXPECT_EQ(*test_moi_persistent_sgpr_state(result).record_replay_workgroup.z(),
@@ -3942,8 +3940,8 @@ TEST(ConSanMoi, AutomaticScalarPersistentStatePreservesGuestVgprAllocation) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_FALSE(test_moi_owner_vgpr(result));
   EXPECT_FALSE(test_moi_epoch_vgpr(result));
-  ASSERT_TRUE(test_moi_persistent_sgpr_state(result).owner);
-  ASSERT_TRUE(test_moi_persistent_sgpr_state(result).epoch);
+  ASSERT_TRUE(test_moi_persistent_sgpr_state(result).owner());
+  ASSERT_TRUE(test_moi_persistent_sgpr_state(result).epoch());
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
             1);

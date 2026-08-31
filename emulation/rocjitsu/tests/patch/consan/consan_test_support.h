@@ -313,8 +313,7 @@ testing::AssertionResult consan_patch_succeeded(const ConSanTransformArtifacts &
 test_moi_persistent_sgpr_state(const ConSanTransformArtifacts &result) {
   const auto consumer = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     const ConSanMoiPersistentSgprState &state = patch.persistent_sgpr_state;
-    return state.owner || state.epoch || state.workgroup_key ||
-           !state.record_replay_workgroup.empty();
+    return state.complete() || state.workgroup_key || !state.record_replay_workgroup.empty();
   });
   return consumer == result.patches.end() ? ConSanMoiPersistentSgprState{}
                                           : consumer->persistent_sgpr_state;

@@ -266,9 +266,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     if (!consan_detail::validate_scalar_state_temporaries(point, "sampled atomic prelude", errors))
       return false;
     words.push_back(
-        build_v_mov_b32_e32(*point.moi_owner_vgpr, *point.moi_persistent_sgprs.owner, arch));
+        build_v_mov_b32_e32(*point.moi_owner_vgpr, *point.moi_persistent_sgprs.owner(), arch));
     words.push_back(
-        build_v_mov_b32_e32(*point.moi_epoch_vgpr, *point.moi_persistent_sgprs.epoch, arch));
+        build_v_mov_b32_e32(*point.moi_epoch_vgpr, *point.moi_persistent_sgprs.epoch(), arch));
   }
   if (!guest_first && !guest_preserves_address) {
     // Compiler-emitted ordinary acquire loads may reuse the low address VGPR

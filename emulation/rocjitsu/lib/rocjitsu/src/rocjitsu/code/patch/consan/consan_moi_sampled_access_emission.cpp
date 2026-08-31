@@ -1245,9 +1245,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     if (!consan_detail::validate_scalar_state_temporaries(point, "sampled probe", errors))
       return std::nullopt;
     words.push_back(
-        build_v_mov_b32_e32(*point.moi_owner_vgpr, *point.moi_persistent_sgprs.owner, arch));
+        build_v_mov_b32_e32(*point.moi_owner_vgpr, *point.moi_persistent_sgprs.owner(), arch));
     words.push_back(
-        build_v_mov_b32_e32(*point.moi_epoch_vgpr, *point.moi_persistent_sgprs.epoch, arch));
+        build_v_mov_b32_e32(*point.moi_epoch_vgpr, *point.moi_persistent_sgprs.epoch(), arch));
   }
   const bool materialize_flat_address = candidate_requires_flat_address_materialization(candidate);
   if (!preserved_lds_byte_offset_vgpr &&

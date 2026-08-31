@@ -3661,7 +3661,7 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
         scratch, version_cas_value, version_cas_value, /*return_old_value=*/true, /*scope=*/2,
         arch);
     uint16_t owner_vgpr = 0;
-    if (patch.persistent_epoch_private_offset || patch.persistent_sgpr_state.owner) {
+    if (patch.persistent_epoch_private_offset || patch.persistent_sgpr_state.owner()) {
       const auto resource_plan = std::ranges::find_if(result.resource_plans, [&](const auto &plan) {
         return plan.site_kind == ConSanResourceSiteKind::Atomic &&
                plan.text_offset == patch.anchor_offset && plan.scratch_vgpr == patch.scratch_vgpr;

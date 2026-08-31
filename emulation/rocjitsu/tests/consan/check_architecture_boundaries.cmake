@@ -232,6 +232,11 @@ _consan_assert_no_match(
     "std::optional<(uint16_t|uint32_t)>[ \t]+(x|y|z|cluster_workgroup_id)[ \t]*;"
     "persistent workgroup coordinates must not regain independent optional storage"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_options.h.inc"
+    "(std::optional<uint16_t>[ \t]+(owner|epoch)|uint16_t[ \t]+(owner_vgpr|epoch_vgpr))[ \t]*;"
+    "persistent owner and epoch registers must remain one shared semantic pair"
+)
 
 # Semantic policy owns meaning, never an ISA recipe or product identity.
 set(

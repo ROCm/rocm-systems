@@ -21,8 +21,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return;
   }
   if ((!options.moi_owner_vgpr || !options.moi_epoch_vgpr) &&
-      (!options.moi_persistent_sgprs.owner || !options.moi_persistent_sgprs.epoch) &&
-      !options.automatic_moi_private_epoch) {
+      !options.moi_persistent_sgprs.complete() && !options.automatic_moi_private_epoch) {
     result.warnings.emplace_back("ConSan MOI inline atomic patch requires "
                                  "RJ_CONSAN_MOI_OWNER_VGPR and RJ_CONSAN_MOI_EPOCH_VGPR");
     return;

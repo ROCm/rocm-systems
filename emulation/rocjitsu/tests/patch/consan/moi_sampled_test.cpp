@@ -2254,8 +2254,8 @@ TEST(ConSanMoi, Cdna4SampledAtomicMaterializesAddressWithDynamicScalarState) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(test_moi_persistent_sgpr_state(result).owner);
-  EXPECT_TRUE(test_moi_persistent_sgpr_state(result).epoch);
+  EXPECT_TRUE(test_moi_persistent_sgpr_state(result).owner());
+  EXPECT_TRUE(test_moi_persistent_sgpr_state(result).epoch());
   const auto atomic_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
   ASSERT_NE(atomic_patch, result.patches.end()) << testing::PrintToString(result.warnings);
@@ -2280,12 +2280,12 @@ TEST(ConSanMoi, Cdna4SampledAtomicMaterializesAddressWithDynamicScalarState) {
   EXPECT_NE(std::ranges::find(
                 cave, build_v_mov_b32_e32(static_cast<uint16_t>(*atomic_patch->scratch_vgpr +
                                                                 kAtomicOwnerScratchOffset),
-                                          *test_moi_persistent_sgpr_state(result).owner, kArch)),
+                                          *test_moi_persistent_sgpr_state(result).owner(), kArch)),
             cave.end());
   EXPECT_NE(std::ranges::find(
                 cave, build_v_mov_b32_e32(static_cast<uint16_t>(*atomic_patch->scratch_vgpr +
                                                                 kAtomicEpochScratchOffset),
-                                          *test_moi_persistent_sgpr_state(result).epoch, kArch)),
+                                          *test_moi_persistent_sgpr_state(result).epoch(), kArch)),
             cave.end());
   EXPECT_NE(
       std::ranges::find(cave, build_v_mov_b32_e32(saved_address, vector_source_vgpr(0u), kArch)),
@@ -3501,8 +3501,8 @@ TEST(ConSanMoi, Cdna4SampledMovesEmptyAccumulatorBoundaryForDynamicStackState) {
   const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
   ASSERT_EQ(persistent_assignments.size(), 1u);
   const ConSanMoiPersistentVgprAssignment &assignment = persistent_assignments.front();
-  EXPECT_EQ(assignment.owner_vgpr, 127u);
-  EXPECT_EQ(assignment.epoch_vgpr, 128u);
+  EXPECT_EQ(assignment.owner_epoch_vgprs.owner, 127u);
+  EXPECT_EQ(assignment.owner_epoch_vgprs.epoch, 128u);
   EXPECT_FALSE(assignment.dispatch_id_vgpr);
   EXPECT_EQ(std::ranges::count_if(result.patches,
                                   [](const ConSanPatchInfo &patch) {
@@ -3558,8 +3558,8 @@ TEST(ConSanMoi, Cdna4SampledMixesPrivateAndEmptyAccumulatorBoundaryState) {
   ASSERT_EQ(persistent_assignments.size(), 1u);
   const ConSanMoiPersistentVgprAssignment &assignment = persistent_assignments.front();
   EXPECT_EQ(assignment.descriptor_file_offset, dynamic->descriptor_file_offset);
-  EXPECT_EQ(assignment.owner_vgpr, 251u);
-  EXPECT_EQ(assignment.epoch_vgpr, 252u);
+  EXPECT_EQ(assignment.owner_epoch_vgprs.owner, 251u);
+  EXPECT_EQ(assignment.owner_epoch_vgprs.epoch, 252u);
   EXPECT_FALSE(assignment.dispatch_id_vgpr);
   const auto dynamic_plan =
       std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
@@ -3641,8 +3641,8 @@ TEST(ConSanMoi, Cdna4SampledRecoversInitiallyResourceFailedOwnerComponent) {
   ASSERT_EQ(persistent_assignments.size(), 1u);
   const ConSanMoiPersistentVgprAssignment &persistent = persistent_assignments.front();
   EXPECT_EQ(persistent.descriptor_file_offset, dynamic->descriptor_file_offset);
-  EXPECT_EQ(persistent.owner_vgpr, 251u);
-  EXPECT_EQ(persistent.epoch_vgpr, 252u);
+  EXPECT_EQ(persistent.owner_epoch_vgprs.owner, 251u);
+  EXPECT_EQ(persistent.owner_epoch_vgprs.epoch, 252u);
 
   // No scalar window is legal for the union of the two owners. The resource
   // planner must therefore keep the initially failed dynamic component in the
@@ -4253,9 +4253,9 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-    EXPECT_TRUE(test_moi_persistent_sgpr_state(result).owner);
-    EXPECT_TRUE(test_moi_persistent_sgpr_state(result).epoch);
-    EXPECT_GE(*test_moi_persistent_sgpr_state(result).owner, 40u);
+    EXPECT_TRUE(test_moi_persistent_sgpr_state(result).owner());
+    EXPECT_TRUE(test_moi_persistent_sgpr_state(result).epoch());
+    EXPECT_GE(*test_moi_persistent_sgpr_state(result).owner(), 40u);
     ASSERT_FALSE(result.resource_plans.empty());
     EXPECT_TRUE(
         std::ranges::all_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
@@ -4293,12 +4293,12 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
         text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
     EXPECT_NE(std::ranges::find(access_cave,
                                 build_v_mov_b32_e32(access_owner_vgpr,
-                                                    *test_moi_persistent_sgpr_state(result).owner,
+                                                    *test_moi_persistent_sgpr_state(result).owner(),
                                                     target.arch)),
               access_cave.end());
     EXPECT_NE(std::ranges::find(access_cave,
                                 build_v_mov_b32_e32(access_epoch_vgpr,
-                                                    *test_moi_persistent_sgpr_state(result).epoch,
+                                                    *test_moi_persistent_sgpr_state(result).epoch(),
                                                     target.arch)),
               access_cave.end());
     ASSERT_TRUE(test_moi_exec_save_sgpr(result));
@@ -4321,11 +4321,11 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
         text_words_at_offset(patched, sync->trampoline_offset, sync->trampoline_size);
     EXPECT_NE(std::ranges::find(sync_cave,
                                 build_v_mov_b32_e32(epoch_vgpr,
-                                                    *test_moi_persistent_sgpr_state(result).epoch,
+                                                    *test_moi_persistent_sgpr_state(result).epoch(),
                                                     target.arch)),
               sync_cave.end());
     const auto persist_epoch = instrumentation::build_v_readfirstlane_b32(
-        *test_moi_persistent_sgpr_state(result).epoch, epoch_vgpr, target.arch);
+        *test_moi_persistent_sgpr_state(result).epoch(), epoch_vgpr, target.arch);
     ASSERT_TRUE(persist_epoch);
     EXPECT_NE(std::ranges::find(sync_cave, *persist_epoch), sync_cave.end());
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -4521,10 +4521,10 @@ TEST(ConSanMoi, CdnaSampledUsesPerOwnerPersistentTuplesAcrossAccvgprBoundaries) 
                           &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
     ASSERT_NE(probe_assignment, persistent_assignments.end());
     ASSERT_NE(helper_assignment, persistent_assignments.end());
-    EXPECT_EQ(probe_assignment->owner_vgpr, 12u);
-    EXPECT_EQ(probe_assignment->epoch_vgpr, 13u);
-    EXPECT_EQ(helper_assignment->owner_vgpr, 24u);
-    EXPECT_EQ(helper_assignment->epoch_vgpr, 25u);
+    EXPECT_EQ(probe_assignment->owner_epoch_vgprs.owner, 12u);
+    EXPECT_EQ(probe_assignment->owner_epoch_vgprs.epoch, 13u);
+    EXPECT_EQ(helper_assignment->owner_epoch_vgprs.owner, 24u);
+    EXPECT_EQ(helper_assignment->owner_epoch_vgprs.epoch, 25u);
     EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                  &ConSanPatchInfo::kind),
               2u);

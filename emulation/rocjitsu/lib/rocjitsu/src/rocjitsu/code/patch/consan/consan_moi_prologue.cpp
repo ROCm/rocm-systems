@@ -1036,8 +1036,8 @@ build_owner_epoch_prologue_words(uint64_t prologue_text_offset, uint64_t origina
   const ConSanMoiOwnerSource owner_source = plan.owner_source;
   const std::optional<uint16_t> owner_sgpr = plan.owner_sgpr;
   const bool one_based_owner_ids = plan.one_based_owner_ids;
-  const std::optional<uint16_t> persistent_owner_sgpr = plan.persistent_sgprs.owner;
-  const std::optional<uint16_t> persistent_epoch_sgpr = plan.persistent_sgprs.epoch;
+  const std::optional<uint16_t> persistent_owner_sgpr = plan.persistent_sgprs.owner();
+  const std::optional<uint16_t> persistent_epoch_sgpr = plan.persistent_sgprs.epoch();
   const std::optional<uint16_t> persistent_workgroup_key_sgpr = plan.persistent_sgprs.workgroup_key;
   const ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_sgprs =
       plan.persistent_sgprs.record_replay_workgroup;
@@ -2294,8 +2294,8 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanMoiOperatingPoi
       point.moi_owner_sgpr.automatic() && point.moi_owner_sgpr.base() &&
       sgpr_base == *point.moi_owner_sgpr.base() && sgpr_count == 1u;
   bool conflict = (point.moi_exec_save_sgprs_persistent && !backs_up_only_automatic_owner) ||
-                  overlaps(point.moi_persistent_sgprs.owner) ||
-                  overlaps(point.moi_persistent_sgprs.epoch) ||
+                  overlaps(point.moi_persistent_sgprs.owner()) ||
+                  overlaps(point.moi_persistent_sgprs.epoch()) ||
                   overlaps(point.moi_persistent_sgprs.workgroup_key) ||
                   overlaps(point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount) ||
                   overlaps(point.moi_inline_visible_evidence_sgpr);
@@ -2356,7 +2356,7 @@ void try_apply_owner_epoch_prologue_patch(
   }
   if ((!options.moi_owner_vgpr || !options.moi_epoch_vgpr) &&
       result.moi_operating_point.owner_persistent_vgprs.empty() &&
-      (!options.moi_persistent_sgprs.owner || !options.moi_persistent_sgprs.epoch)) {
+      !options.moi_persistent_sgprs.complete()) {
     result.errors.emplace_back(
         "ConSan MOI owner/epoch prologue requires RJ_CONSAN_MOI_OWNER_VGPR and "
         "RJ_CONSAN_MOI_EPOCH_VGPR");
@@ -2765,15 +2765,15 @@ void try_apply_owner_epoch_prologue_patch(
           required_sgpr_count, static_cast<uint32_t>(*kernel_options.moi_dispatch_identity.sgpr()) +
                                    kMoiDispatchStateSgprCount);
     }
-    if (kernel_options.moi_persistent_sgprs.owner) {
+    if (kernel_options.moi_persistent_sgprs.owner()) {
       required_sgpr_count = std::max<uint32_t>(
           required_sgpr_count,
-          static_cast<uint32_t>(*kernel_options.moi_persistent_sgprs.owner) + 1u);
+          static_cast<uint32_t>(*kernel_options.moi_persistent_sgprs.owner()) + 1u);
     }
-    if (kernel_options.moi_persistent_sgprs.epoch) {
+    if (kernel_options.moi_persistent_sgprs.epoch()) {
       required_sgpr_count = std::max<uint32_t>(
           required_sgpr_count,
-          static_cast<uint32_t>(*kernel_options.moi_persistent_sgprs.epoch) + 1u);
+          static_cast<uint32_t>(*kernel_options.moi_persistent_sgprs.epoch()) + 1u);
     }
     if (kernel_options.moi_persistent_sgprs.workgroup_key) {
       required_sgpr_count = std::max<uint32_t>(

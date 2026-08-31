@@ -252,7 +252,7 @@ private:
     words.push_back(*restore_exec);
     return true;
   };
-  if (point.moi_persistent_sgprs.epoch) {
+  if (point.moi_persistent_sgprs.epoch()) {
     const auto special_state = moi_special_state_sgprs(request, point);
     if (!point.moi_exec_save_sgpr || !special_state) {
       errors.emplace_back("ConSan MOI scalar inline barrier requires scalar special-state storage");
@@ -261,7 +261,7 @@ private:
     const auto save_scc = instrumentation::build_s_cselect_b32(special_state->scc_save_sgpr,
                                                                scalar_positive_inline_u32(1),
                                                                scalar_positive_inline_u32(0), arch);
-    const auto at_maximum = instrumentation::build_s_cmp_eq_u32(*point.moi_persistent_sgprs.epoch,
+    const auto at_maximum = instrumentation::build_s_cmp_eq_u32(*point.moi_persistent_sgprs.epoch(),
                                                                 /*literal=*/255u, arch);
     // The compare consumes the following literal word. If the epoch is already
     // saturated, skip the two-word CDNA4-compatible increment sequence. This
@@ -301,8 +301,8 @@ private:
     words.push_back(consan_moi_exact_shadow::max_epoch);
     words.push_back(*skip_increment);
     if (!append_moi_entry_salu_write(words,
-                                     build_s_add_u32(*point.moi_persistent_sgprs.epoch,
-                                                     *point.moi_persistent_sgprs.epoch,
+                                     build_s_add_u32(*point.moi_persistent_sgprs.epoch(),
+                                                     *point.moi_persistent_sgprs.epoch(),
                                                      scalar_positive_inline_u32(1), arch),
                                      arch)) {
       errors.emplace_back("ConSan MOI scalar inline barrier could not encode saturating add");
@@ -765,7 +765,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     return;
   }
   if (!options.moi_epoch_vgpr && result.moi_operating_point.owner_persistent_vgprs.empty() &&
-      !options.moi_persistent_sgprs.epoch && !options.automatic_moi_private_epoch) {
+      !options.moi_persistent_sgprs.epoch() && !options.automatic_moi_private_epoch) {
     result.warnings.emplace_back(
         "ConSan MOI inline-shadow barrier epoch patch has no persistent epoch state");
     return;
@@ -934,7 +934,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           continue;
         }
         std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
-        if (!candidate_options.moi_owner_vgpr && !candidate_options.moi_persistent_sgprs.owner) {
+        if (!candidate_options.moi_owner_vgpr && !candidate_options.moi_persistent_sgprs.owner()) {
           const auto owner_shift =
               common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
           if (!owner_shift)
@@ -1044,7 +1044,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             moi_persistent_vgpr_assignment(result.moi_operating_point, descriptor_offset);
         if (assignment)
           persistent_epoch_vgpr_requirements[descriptor_offset] =
-              static_cast<uint16_t>(assignment->epoch_vgpr + 1u);
+              static_cast<uint16_t>(assignment->owner_epoch_vgprs.epoch + 1u);
       }
     }
   } else if (!options.automatic_moi_private_epoch) {
@@ -1264,7 +1264,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       return;
     }
     std::optional<uint64_t> oversized_local_body_island;
-    if (!planned.private_epoch_offset && !candidate_options.moi_persistent_sgprs.epoch &&
+    if (!planned.private_epoch_offset && !candidate_options.moi_persistent_sgprs.epoch() &&
         !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
                                               planned.owner_descriptor_file_offsets)) {
       result.errors.emplace_back("ConSan MOI inline barrier lost its persistent VGPR assignment");
@@ -1277,7 +1277,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     // consuming temporary SGPR state on both the entry and return paths. The
     // private-epoch form is larger and continues to use the general appended
     // placement below.
-    if (!planned.private_epoch_offset && !candidate_options.moi_persistent_sgprs.epoch) {
+    if (!planned.private_epoch_offset && !candidate_options.moi_persistent_sgprs.epoch()) {
       if (const auto local_body_offset =
               local_indirect_allocator.claim_reachable(site.text_offset)) {
         const uint64_t return_text_offset = site.text_offset + site.size;
@@ -1307,7 +1307,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           info.trampoline_size = static_cast<uint32_t>(local_words->size() * sizeof(uint32_t));
           info.relocated_guest_instruction_offset =
               *local_body_offset +
-              (candidate_options.moi_persistent_sgprs.epoch ? sizeof(uint32_t) : 0u);
+              (candidate_options.moi_persistent_sgprs.epoch() ? sizeof(uint32_t) : 0u);
           info.owner_descriptor_file_offsets = planned.owner_descriptor_file_offsets;
           if (!append_moi_barrier_lowering_commit(result, candidate, info, "barrier epoch patch",
                                                   lowering_commits))
@@ -1467,7 +1467,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
     } else {
       info.relocated_guest_instruction_offset =
-          cave_text_offset + (candidate_options.moi_persistent_sgprs.epoch ? sizeof(uint32_t) : 0u);
+          cave_text_offset +
+          (candidate_options.moi_persistent_sgprs.epoch() ? sizeof(uint32_t) : 0u);
     }
     note_planned_resource_info(info, planned);
     if (!append_moi_barrier_lowering_commit(result, candidate, info, "barrier epoch patch",
@@ -1643,7 +1644,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
               "ConSan MOI reused barrier relay lost a site scalar assignment");
           return ReusedDenseRelayResult::Failed;
         }
-        if (!planned.private_epoch_offset && !candidate_options.moi_persistent_sgprs.epoch &&
+        if (!planned.private_epoch_offset && !candidate_options.moi_persistent_sgprs.epoch() &&
             !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
                                                   planned.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
@@ -1721,7 +1722,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           }
         } else {
           info.relocated_guest_instruction_offset =
-              body_offset + (candidate_options.moi_persistent_sgprs.epoch ? sizeof(uint32_t) : 0u);
+              body_offset +
+              (candidate_options.moi_persistent_sgprs.epoch() ? sizeof(uint32_t) : 0u);
         }
         note_planned_resource_info(info, planned);
         staged_barriers.push_back({.planned_index = index,
@@ -1902,7 +1904,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
               "ConSan MOI dense barrier relay lost its transient scalar assignment");
           return;
         }
-        if (!planned.private_epoch_offset && !candidate_options.moi_persistent_sgprs.epoch &&
+        if (!planned.private_epoch_offset && !candidate_options.moi_persistent_sgprs.epoch() &&
             !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
                                                   planned.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
@@ -1923,7 +1925,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
              .offset = body_offset,
              .relocated_guest_instruction_offset =
                  body_offset +
-                 (candidate_options.moi_persistent_sgprs.epoch ? sizeof(uint32_t) : 0u),
+                 (candidate_options.moi_persistent_sgprs.epoch() ? sizeof(uint32_t) : 0u),
              .words = std::move(*body_words)});
       }
 

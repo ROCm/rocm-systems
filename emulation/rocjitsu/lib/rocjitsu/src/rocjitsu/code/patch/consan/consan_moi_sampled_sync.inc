@@ -127,9 +127,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     return std::nullopt;
   if (scalar_persistent) {
     words.push_back(
-        build_v_mov_b32_e32(*point.moi_owner_vgpr, *point.moi_persistent_sgprs.owner, arch));
+        build_v_mov_b32_e32(*point.moi_owner_vgpr, *point.moi_persistent_sgprs.owner(), arch));
     words.push_back(
-        build_v_mov_b32_e32(*point.moi_epoch_vgpr, *point.moi_persistent_sgprs.epoch, arch));
+        build_v_mov_b32_e32(*point.moi_epoch_vgpr, *point.moi_persistent_sgprs.epoch(), arch));
   }
   if (!append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
@@ -540,7 +540,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   words.push_back(*restore_after_advance);
   if (scalar_persistent) {
     const auto persist_epoch = instrumentation::build_v_readfirstlane_b32(
-        *point.moi_persistent_sgprs.epoch, *point.moi_epoch_vgpr, arch);
+        *point.moi_persistent_sgprs.epoch(), *point.moi_epoch_vgpr, arch);
     const auto delay = instrumentation::build_salu_dependency_delay(arch);
     if (!persist_epoch || !delay) {
       errors.emplace_back("ConSan MOI sampled barrier failed at scalar epoch persistence");
@@ -2240,8 +2240,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         };
         bool overlaps = persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
                         overlaps_optional(group_options.moi_owner_sgpr.base()) ||
-                        overlaps_optional(group_options.moi_persistent_sgprs.owner) ||
-                        overlaps_optional(group_options.moi_persistent_sgprs.epoch) ||
+                        overlaps_optional(group_options.moi_persistent_sgprs.owner()) ||
+                        overlaps_optional(group_options.moi_persistent_sgprs.epoch()) ||
                         overlaps_optional(group_options.moi_persistent_sgprs.workgroup_key) ||
                         overlaps_optional(group_options.moi_dispatch_identity.sgpr(),
                                           kMoiDispatchStateSgprCount);
@@ -2598,8 +2598,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         };
         bool overlaps = persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
                         overlaps_optional(route_options.moi_owner_sgpr.base()) ||
-                        overlaps_optional(route_options.moi_persistent_sgprs.owner) ||
-                        overlaps_optional(route_options.moi_persistent_sgprs.epoch) ||
+                        overlaps_optional(route_options.moi_persistent_sgprs.owner()) ||
+                        overlaps_optional(route_options.moi_persistent_sgprs.epoch()) ||
                         overlaps_optional(route_options.moi_persistent_sgprs.workgroup_key) ||
                         overlaps_optional(route_options.moi_dispatch_identity.sgpr(),
                                           kMoiDispatchStateSgprCount);

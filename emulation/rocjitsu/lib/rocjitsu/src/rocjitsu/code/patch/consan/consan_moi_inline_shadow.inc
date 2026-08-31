@@ -22,7 +22,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   if (!validate_inline_shadow_exec_save_sgpr(options, options, options, arch, result.warnings))
     return;
   if (!options.moi_owner_vgpr && result.moi_operating_point.owner_persistent_vgprs.empty() &&
-      !options.moi_persistent_sgprs.owner && !options.automatic_moi_private_epoch) {
+      !options.moi_persistent_sgprs.owner() && !options.automatic_moi_private_epoch) {
     result.warnings.emplace_back("ConSan MOI inline-shadow probe requires persistent owner state");
     return;
   }

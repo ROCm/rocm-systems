@@ -153,7 +153,7 @@ plan_moi_record_event(std::span<const uint8_t> bytes, const ProgramInventory &in
   }
 
   std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
-  if (!event_point.moi_owner_vgpr && !event_point.moi_persistent_sgprs.owner) {
+  if (!event_point.moi_owner_vgpr && !event_point.moi_persistent_sgprs.owner()) {
     if (moi_record_uses_private_owner(request, event_point)) {
       ResolvedMoiScratchPlan owner_resources = resources;
       if (active_private_segment_size)

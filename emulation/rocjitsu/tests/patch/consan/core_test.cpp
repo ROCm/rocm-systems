@@ -92,8 +92,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversOwnerAssignments) {
   owner_state.dispatch_id_sgpr = 10u;
   ConSanMoiPersistentVgprAssignment persistent_state;
   persistent_state.descriptor_file_offset = 64u;
-  persistent_state.owner_vgpr = 16u;
-  persistent_state.epoch_vgpr = 17u;
+  persistent_state.owner_epoch_vgprs = ConSanMoiOwnerEpochRegisters{16u, 17u};
   ConSanMoiOperatingPoint allocation;
   allocation.automatic_moi_private_epoch = true;
   allocation.moi_exec_save_sgpr = 2u;
@@ -142,11 +141,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .moi_inline_visible_evidence_sgpr = 8u,
       .moi_branch_only_spill = ConSanMoiBranchOnlyScalarSpill{10u},
       .moi_dispatch_identity = {},
-      .moi_persistent_sgprs = {.owner = 20u,
-                               .epoch = 21u,
-                               .workgroup_key = 22u,
-                               .record_replay_workgroup =
-                                   ConSanMoiPersistentWorkgroupRegisters{23u, 24u, 25u}},
+      .moi_persistent_sgprs = {},
       .moi_record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{26u, 27u, 28u},
       .moi_record_replay_workgroup_private_offsets =
           ConSanMoiPersistentWorkgroupPrivateOffsets{32u, 36u, 40u},
@@ -157,6 +152,10 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   state.moi_owner_sgpr.set(3u, true);
   state.moi_dispatch_identity.set_sgpr(16u, true);
   state.moi_dispatch_identity.set_private_fallback(true);
+  state.moi_persistent_sgprs.set_owner_epoch(20u, 21u);
+  state.moi_persistent_sgprs.workgroup_key = 22u;
+  state.moi_persistent_sgprs.record_replay_workgroup =
+      ConSanMoiPersistentWorkgroupRegisters{23u, 24u, 25u};
 
   EXPECT_EQ(ConSanMoiOperatingPoint{}, ConSanMoiOperatingPoint{});
   EXPECT_EQ(state, ConSanMoiOperatingPoint(state));
@@ -410,15 +409,18 @@ TEST(ConSan, MoiPersistentPlacementUpdateKeepsEntryScratchWithItsOperatingPoint)
 TEST(ConSan, MoiPersistentScalarStateRequiresTheOwnerEpochPair) {
   ConSanMoiPersistentSgprState state;
   EXPECT_FALSE(state.complete());
+  EXPECT_FALSE(state.owner());
+  EXPECT_FALSE(state.epoch());
 
-  state.owner = 12u;
-  EXPECT_FALSE(state.complete());
-
-  state.epoch = 13u;
+  state.set_owner_epoch(12u, 13u);
   EXPECT_TRUE(state.complete());
+  EXPECT_EQ(state.owner(), 12u);
+  EXPECT_EQ(state.epoch(), 13u);
 
-  state.owner.reset();
+  state.reset_owner_epoch();
   EXPECT_FALSE(state.complete());
+  EXPECT_FALSE(state.owner());
+  EXPECT_FALSE(state.epoch());
 }
 
 TEST(ConSan, MoiPersistentWorkgroupTupleIsAllOrNothing) {

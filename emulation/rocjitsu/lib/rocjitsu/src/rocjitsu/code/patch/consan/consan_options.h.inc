@@ -262,6 +262,16 @@ using ConSanMoiPersistentWorkgroupRegisters = ConSanMoiPersistentWorkgroupTuple<
 /// tuple when no lifetime-safe persistent register window exists.
 using ConSanMoiPersistentWorkgroupPrivateOffsets = ConSanMoiPersistentWorkgroupTuple<uint32_t>;
 
+/// Register pair carrying one owner identity and its synchronization epoch.
+/// Scalar and vector persistent representations use the same semantic pair;
+/// their containing allocation determines the register file and lifetime.
+struct ConSanMoiOwnerEpochRegisters {
+  uint16_t owner = 0;
+  uint16_t epoch = 0;
+
+  auto operator<=>(const ConSanMoiOwnerEpochRegisters &) const = default;
+};
+
 /// Exact ordinary-SGPR ABI that retains MOI state across arbitrary guest
 /// instructions.
 ///
@@ -270,11 +280,19 @@ using ConSanMoiPersistentWorkgroupPrivateOffsets = ConSanMoiPersistentWorkgroupT
 /// kernel consumes that choice. Emitted prologue metadata records the same
 /// value so the final mechanism remains self-describing after mutable lowering
 /// state is gone; it is not an independently reconstructed representation.
-struct ConSanMoiPersistentSgprState {
-  /// Resident-wave or workitem owner identity retained for every probe.
-  std::optional<uint16_t> owner;
-  /// Current synchronization epoch paired with the persistent owner.
-  std::optional<uint16_t> epoch;
+class ConSanMoiPersistentSgprState {
+public:
+  [[nodiscard]] std::optional<uint16_t> owner() const {
+    return owner_epoch_ ? std::optional{owner_epoch_->owner} : std::nullopt;
+  }
+  [[nodiscard]] std::optional<uint16_t> epoch() const {
+    return owner_epoch_ ? std::optional{owner_epoch_->epoch} : std::nullopt;
+  }
+  void set_owner_epoch(uint16_t owner, uint16_t epoch) {
+    owner_epoch_ = ConSanMoiOwnerEpochRegisters{owner, epoch};
+  }
+  void reset_owner_epoch() { owner_epoch_.reset(); }
+
   /// Compact workgroup identity used by InlineShadow when that engine does
   /// not require the exact coordinate tuple.
   std::optional<uint16_t> workgroup_key;
@@ -284,9 +302,12 @@ struct ConSanMoiPersistentSgprState {
 
   /// Return whether the mandatory owner/epoch pair is present. Optional
   /// workgroup state refines that pair but cannot make a partial pair usable.
-  [[nodiscard]] bool complete() const { return owner && epoch; }
+  [[nodiscard]] bool complete() const { return owner_epoch_.has_value(); }
 
   auto operator<=>(const ConSanMoiPersistentSgprState &) const = default;
+
+private:
+  std::optional<ConSanMoiOwnerEpochRegisters> owner_epoch_;
 };
 
 /// Persistent vector state selected for one connected set of owning kernels.
@@ -294,8 +315,7 @@ struct ConSanMoiPersistentSgprState {
 /// must use one tuple, while unrelated kernels may use different safe tails.
 struct ConSanMoiPersistentVgprAssignment {
   uint64_t descriptor_file_offset = 0;
-  uint16_t owner_vgpr = 0;
-  uint16_t epoch_vgpr = 0;
+  ConSanMoiOwnerEpochRegisters owner_epoch_vgprs;
   std::optional<uint16_t> workgroup_key_vgpr;
   ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_vgprs;
   /// Entry-captured hardware dispatch identity. The pair is used when no
