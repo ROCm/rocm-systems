@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+#include "args_capture.h"
 #include "leaf_context.h"
 #include "marker_stack.h"
 #include "process_state.h"
@@ -212,6 +213,7 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_f
         }
 
         std::string wire_string = build_marker_string(stack);
+        append_args_segment(wire_string, build_leaf_args(record_fn));
         wire_string += '|';
         wire_string += kRecordFnBackend;
         roctxRangePushA(wire_string.c_str());
@@ -297,7 +299,10 @@ std::string build_marker_string(const std::vector<StackEntry>& stack)
     return out;
 }
 
-void push_user_scope(const std::string& marker, const std::string& context, const std::string& backend)
+void push_user_scope(const std::string& marker,
+                     const std::string& context,
+                     const std::string& backend,
+                     const std::string& args)
 {
     ProcessState& state        = process_state();
     ThreadState&  thread       = thread_state();
@@ -315,6 +320,7 @@ void push_user_scope(const std::string& marker, const std::string& context, cons
         pushed_guard = true;
 
         std::string wire_string = build_marker_string(thread.stack);
+        append_args_segment(wire_string, args);
         if (!backend.empty())
         {
             wire_string += '|';
@@ -362,17 +368,24 @@ void pop_user_scope()
     }
 }
 
-std::int64_t install()
+std::int64_t install(bool capture_args, bool capture_values)
 {
+    g_args_capture.capture_args.store(capture_args);
+    g_args_capture.capture_values.store(capture_values);
     return process_state().install.wlock(
-        [](InstallState& state)
+        [capture_args](InstallState& state)
         {
-            if (state.handle == at::INVALID_CALLBACK_HANDLE)
+            if (state.handle != at::INVALID_CALLBACK_HANDLE)
             {
-                state.handle = at::addGlobalCallback(
-                    at::RecordFunctionCallback(start_cb, end_cb)
-                        .scopes({at::RecordScope::FUNCTION, at::RecordScope::BACKWARD_FUNCTION}));
+                return static_cast<std::int64_t>(state.handle);
             }
+            auto callback = at::RecordFunctionCallback(start_cb, end_cb)
+                                .scopes({at::RecordScope::FUNCTION, at::RecordScope::BACKWARD_FUNCTION});
+            if (capture_args)
+            {
+                callback.needsInputs(true);
+            }
+            state.handle = at::addGlobalCallback(callback);
             return static_cast<std::int64_t>(state.handle);
         });
 }

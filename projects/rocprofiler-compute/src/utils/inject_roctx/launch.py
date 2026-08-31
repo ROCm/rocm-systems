@@ -5,7 +5,8 @@
 ROCTX injection.
 
 Invoked by absolute path as ``python <path>/launch.py --frameworks <name>
-[<name> ...] -- <target.py> [args...]``.
+[<name> ...] [--capture-args <0|1>] [--capture-arg-values <0|1>] --
+<target.py> [args...]``. The capture options configure operator-argument capture.
 """
 
 import runpy
@@ -40,39 +41,82 @@ def _report_torch_trace_callback_errors() -> None:
         f"Some ROCTX markers may be missing or misattributed. Stats: {dict(stats)}",
     )
 
+_LAUNCHER_OPTIONS = ("--frameworks", "--capture-args", "--capture-arg-values")
 
-# Consume a leading "--frameworks <name> [<name> ...]" option and an optional
-# "--" separator. Framework names are all tokens until "--".
-args = sys.argv[1:]
-frameworks: List[str] = []
-if args and args[0] == "--frameworks":
-    args = args[1:]
-    while args and args[0] != "--":
-        frameworks.append(args[0])
-        args = args[1:]
-if args and args[0] == "--":
-    args = args[1:]
 
-if not args:
-    print(
-        "usage: python <path>/launch.py [--frameworks <name> ...] -- "
-        "<target.py> [args...]",
-        file=sys.stderr,
+def _flag(value: str) -> bool:
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def parse_launcher_options(
+    argv: list[str],
+) -> tuple[list[str], bool, bool, list[str]]:
+    """Parse leading launcher options and the ``--`` separator.
+
+    Returns ``(frameworks, capture_args, capture_arg_values, remaining)`` where
+    ``remaining`` is the workload command following ``--``.
+    """
+    args = list(argv)
+    frameworks: list[str] = []
+    capture_args = True
+    capture_arg_values = False
+    while args:
+        if args[0] == "--":
+            args = args[1:]
+            break
+        if args[0] == "--frameworks":
+            args = args[1:]
+            while args and args[0] not in (
+                "--",
+                "--capture-args",
+                "--capture-arg-values",
+            ):
+                frameworks.append(args[0])
+                args = args[1:]
+            continue
+        if args[0] == "--capture-args" and len(args) > 1:
+            capture_args = _flag(args[1])
+            args = args[2:]
+            continue
+        if args[0] == "--capture-arg-values" and len(args) > 1:
+            capture_arg_values = _flag(args[1])
+            args = args[2:]
+            continue
+        break
+    return frameworks, capture_args, capture_arg_values, args
+
+
+def main(argv: list[str]) -> None:
+    frameworks, capture_args, capture_arg_values, args = parse_launcher_options(argv)
+
+    if not args:
+        print(
+            "usage: python <path>/launch.py [--frameworks <name> ...] "
+            "[--capture-args <0|1>] [--capture-arg-values <0|1>] -- "
+            "<target.py> [args...]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    target_script = args[0]
+    script_args = args[1:]
+
+    install_global_wraps(
+        frameworks,
+        capture_args=capture_args,
+        capture_arg_values=capture_arg_values,
     )
-    sys.exit(2)
 
-target_script = args[0]
-script_args = args[1:]
-
-install_global_wraps(frameworks)
-
-sys.argv = [target_script] + script_args
-# Execute the workload as the top-level program (__name__ == "__main__").
-try:
-    runpy.run_path(target_script, run_name="__main__")
-finally:
-    # Never let reporting replace the workload's exception.
+    sys.argv = [target_script] + script_args
     try:
-        _report_torch_trace_callback_errors()
-    except Exception:
-        pass
+        runpy.run_path(target_script, run_name="__main__")
+    finally:
+        # Never let reporting replace the workload's exception.
+        try:
+            _report_torch_trace_callback_errors()
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

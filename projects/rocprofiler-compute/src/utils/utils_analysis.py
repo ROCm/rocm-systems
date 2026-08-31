@@ -542,14 +542,22 @@ def process_ml_api_trace_output(
         raise ValueError(
             f"Consolidated ML API trace is missing required columns {missing_columns}"
         )
-    # Backend is added by utils_profile._augment_marker_csv. When absent,
-    # default to "torch".
+    # Backend and Args are added by utils_profile._augment_marker_csv. When
+    # absent, Backend defaults to "torch" and Args to empty.
     has_backend = "Backend" in consolidated_df.columns
-    projection = [*required_columns, "Backend"] if has_backend else required_columns
+    has_args = "Args" in consolidated_df.columns
+    projection = list(required_columns)
+    if has_backend:
+        projection.append("Backend")
+    if has_args:
+        projection.append("Args")
     consolidated_df = consolidated_df[projection]
     if not has_backend:
         consolidated_df = consolidated_df.assign(Backend="torch")
-    if consolidated_df.drop(columns=["Backend"]).isnull().values.any():
+    if not has_args:
+        consolidated_df = consolidated_df.assign(Args="")
+    consolidated_df["Args"] = consolidated_df["Args"].fillna("")
+    if consolidated_df.drop(columns=["Backend", "Args"]).isnull().values.any():
         console_warning("Consolidated ML API trace contains missing values")
         raise ValueError("Consolidated ML API trace contains missing values")
     consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
@@ -566,6 +574,7 @@ def process_ml_api_trace_output(
             "Operator_Name",
             "Context_Id",
             "Backend",
+            "Args",
             "Kernel_Name",
             "Counter_Name",
             "Counter_Value",

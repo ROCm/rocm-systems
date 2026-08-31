@@ -10,7 +10,7 @@
 namespace torch_trace_collector::detail
 {
 
-std::int64_t install();
+std::int64_t install(bool capture_args = true, bool capture_values = false);
 void         uninstall();
 bool         is_installed();
 

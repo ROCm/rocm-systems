@@ -736,6 +736,35 @@ hierarchy (``/``-separated) and kernel stats. A consolidated CSV
 (``ml_api_trace/consolidated.csv``) is written with all operator/kernel data;
 see :ref:`torch-operator-profiling` for details.
 
+Operator argument capture
+-------------------------
+
+Leaf operators (ATen ops and Triton kernel launches) additionally record an
+``Args`` column in ``ml_api_trace/consolidated.csv`` describing the operator's
+inputs as ``(name=dtype[shape], ...)``, where each input is labelled with its
+parameter name (for example ``(self=float32[4096x4096], other=float32[4096x4096])``
+or ``(in_ptr0=float32[8], xnumel=int)``). Capture is on by default.
+
+The capture level is controlled by the ``--ml-trace-with-params`` profile flag,
+which only takes effect alongside a tracing flag (``--torch-trace``,
+``--triton-trace``, or ``--ml-api-trace``); used on its own it is ignored with a
+warning:
+
+* ``--ml-trace-with-params off`` — do not capture operator args.
+* ``--ml-trace-with-params shapes`` — capture input shapes and dtypes
+  (default).
+* ``--ml-trace-with-params values`` — also record the values of scalar
+  arguments (numbers, booleans, and truncated strings). Tensor contents are
+  not recorded.
+
+At most 32 arguments are recorded per operator. The rendered list is truncated
+to 512 characters, followed by ``...``.
+
+For example, the same Triton kernel launch under each capture level::
+
+    shapes:  (in_ptr0=float32[4096x4096], in_ptr1=float32[4096x4096], out_ptr0=float32[4096x4096], xnumel=int, XBLOCK=int)
+    values:  (in_ptr0=float32[4096x4096], in_ptr1=float32[4096x4096], out_ptr0=float32[4096x4096], xnumel=16777216, XBLOCK=2048)
+
 The flat **Operator summary** table below the call tree has one row per
 operator that ran at least one GPU kernel. Time cells auto-switch between
 milliseconds and microseconds per cell; missing values render as ``N/A``.

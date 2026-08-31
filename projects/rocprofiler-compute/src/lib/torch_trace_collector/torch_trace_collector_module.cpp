@@ -43,7 +43,11 @@ PYBIND11_MODULE(torch_trace_collector, m)
 
     m.doc() = "Emits ROCTX ranges around PyTorch operators through a RecordFunction callback.";
 
-    m.def("install", &install, "Install the global RecordFunction callback. Idempotent.");
+    m.def("install",
+          &install,
+          pybind11::arg("capture_args")   = true,
+          pybind11::arg("capture_values") = false,
+          "Install the global RecordFunction callback. Idempotent.");
     m.def("uninstall", &uninstall, "Remove the registered callback.");
     m.def("is_installed", &is_installed, "Return True if the callback is installed.");
     m.def(
@@ -52,6 +56,7 @@ PYBIND11_MODULE(torch_trace_collector, m)
         pybind11::arg("marker"),
         pybind11::arg("context"),
         pybind11::arg("backend") = std::string(""),
+        pybind11::arg("args")    = std::string(""),
         "Push a marker frame, emit a ROCTX range, and publish the stack to ThreadLocalDebugInfo.");
     m.def("pop_user_scope", &pop_user_scope, "Pop the most recent push_user_scope frame on this thread.");
     m.def("dump_stats", &dump_stats, "Return collector counters.");
