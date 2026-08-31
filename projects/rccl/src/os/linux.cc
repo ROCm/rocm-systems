@@ -667,6 +667,7 @@ ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass
 }
 
 ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* busId, char* partition, size_t maxLen) {
+  if (partition == NULL || maxLen == 0) return ncclInvalidArgument;
   char* path = NULL;
   NOWARN(ncclOsGetPciPath(busId, &path), NCCL_GRAPH);
   if (path == NULL) {
