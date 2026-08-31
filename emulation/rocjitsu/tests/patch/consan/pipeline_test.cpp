@@ -1138,7 +1138,7 @@ TEST(ConSanPipeline, AutomaticMoiBindingPublishesImmutableTokenAndLibraryOwnedRe
   EXPECT_EQ(resumed.outcome, direct.outcome);
   EXPECT_EQ(resumed.observation_plan(), direct.observation_plan());
   EXPECT_EQ(resumed.coverage_ledger, direct.coverage_ledger);
-  EXPECT_EQ(resumed.runtime_static_mapping, direct.runtime_static_mapping);
+  EXPECT_EQ(resumed.runtime_static_mapping(), direct.runtime_static_mapping());
   EXPECT_EQ(resumed.replacement, direct.replacement);
 }
 

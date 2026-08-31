@@ -286,8 +286,6 @@ public:
   /// Sole ownership of target-neutral semantic policy and authoritative
   /// lowering outcomes.
   ConSanCoverageLedger coverage_ledger;
-  /// Validated runtime-facing projection of committed lowerings.
-  ConSanRuntimeStaticMapping runtime_static_mapping;
   /// Validation-only mutation result and stable applied identity.
   ConSanMutationOutcome mutation;
   /// Independently validated replacement image, or empty when not installable.
@@ -305,6 +303,11 @@ public:
   /// Return the immutable semantic plan owned by the coverage ledger.
   [[nodiscard]] const ConSanObservationPlan &observation_plan() const {
     return coverage_ledger.observation_plan();
+  }
+
+  /// Derive the runtime-facing projection from authoritative lowering commits.
+  [[nodiscard]] ConSanRuntimeStaticMapping runtime_static_mapping() const {
+    return coverage_ledger.runtime_static_mapping();
   }
 
   /// Verify fixed-stage status, artifact relationships, result identity, and

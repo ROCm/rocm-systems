@@ -4149,7 +4149,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     if (registered_auto_moi_report_generation)
       register_auto_moi_report_metadata(
           code_object_reader.handle, *registered_auto_moi_report_generation,
-          transform_result.code_object.fingerprint, transform_result.runtime_static_mapping);
+          transform_result.code_object.fingerprint, transform_result.runtime_static_mapping());
     install_action = transform_result.install_action(config->fail_closed);
     replacement_instrumentation_selected =
         install_action == rocjitsu::ConSanInstallAction::LoadReplacement;

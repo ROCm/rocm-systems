@@ -2459,3 +2459,47 @@ starting baseline, and the remaining broad operating-point and transform-
 artifact surfaces, full architecture and mode locality, smallness of surviving
 cross-axis composition, both extension exercises, and an independent Section
 14 audit remain open.
+
+### 16.22 Convergence checkpoint 21: derive the runtime mapping projection
+
+The next adjacent ownership trace followed `ConSanRuntimeStaticMapping` from
+accepted lowering commits to HSA registration. `TransformResult` retained a
+stored copy even though its only assignment derived it from the coverage
+ledger, its only production consumer passed it to the runtime hook, rollback
+cleared it beside the ledger, and `well_formed()` compared it back to a fresh
+ledger projection. The field was therefore a cache without independent
+semantics and another representation capable of diverging from its authority.
+
+`TransformResult` now exposes a const semantic accessor that derives the
+runtime mapping directly from the ledger's authoritative commits. Publication,
+rollback, deferred-binding failure, result validation, the hook consumer, and
+the pipeline equivalence regression no longer transport, clear, or compare a
+stored copy. The architecture-boundary gate now rejects a runtime-mapping field
+on both the private and public result buses while retaining the ledger's named
+projection operation.
+
+| Signal | Checkpoint 21 | Cumulative change | Slice change from checkpoint 20 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,714 | +739 | **-2** |
+| Nonblank production lines | 99,438 | +355 | **-3** |
+| Production implementation lines | 91,739 | **+289** | **-3** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 241 / 58 | **-35 / +1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 200 / 28 | 0 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| Test inventory | 5,372 | +27 | 0 |
+
+Validation includes a clean CMake regeneration and 68-step incremental build,
+all 31 pipeline tests, all 94 ConSan runtime-hook unit tests, and the structural
+architecture-boundary test. The complete nonphysical and serialized physical
+inventories passed immediately before this narrow slice at checkpoint 20; this
+checkpoint does not misattribute those earlier full runs to the later change.
+No test was removed or disabled.
+
+This closes the last independently stored static runtime projection found on
+the main observation-to-runtime spine, but it is only a small deletion payoff.
+The fifth refactoring remains incomplete: production is 289 implementation
+lines above baseline, and the wider Section 14 architecture, locality,
+extension, cross-axis-composition, size, and independent-audit evidence remains
+open.

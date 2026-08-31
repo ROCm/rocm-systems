@@ -565,7 +565,6 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
 
 void TransformResult::publish_lowering_artifacts(ConSanTransformArtifacts lowering) {
   program_inventory = std::move(lowering.program_inventory);
-  runtime_static_mapping = lowering.coverage_ledger.runtime_static_mapping();
   coverage_ledger = std::move(lowering.coverage_ledger);
   mutation = std::move(lowering.mutation);
   replacement = std::move(lowering.replacement);
@@ -602,8 +601,6 @@ bool TransformResult::well_formed() const {
   if (!code_object.valid() || !dispatch_requirements.well_formed()) {
     return false;
   }
-  if (coverage_ledger.runtime_static_mapping() != runtime_static_mapping)
-    return false;
   for (size_t index = 0; index < stages.size(); ++index) {
     if (!stages[index].well_formed(kConSanPipelineStages[index])) {
       return false;
@@ -673,7 +670,6 @@ void TransformResult::discard_replacement(std::string warning) {
   outcome = ConSanTransformOutcome::Unsupported;
   replacement.clear();
   private_lowering_.patches.clear();
-  runtime_static_mapping = {};
   coverage_ledger.discard_instrumented_lowerings();
   std::vector<ConSanCommittedLowering> rejections;
   for (const ConSanProbeIntent &intent : observation_plan().probe_intents) {
@@ -1138,7 +1134,6 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
       result.outcome = ConSanTransformOutcome::Unsupported;
       result.replacement.clear();
       result.private_lowering_.patches.clear();
-      result.runtime_static_mapping = {};
       result.coverage_ledger.discard_instrumented_lowerings();
       result.dispatch_requirements = {};
     }

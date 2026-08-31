@@ -693,11 +693,13 @@ foreach(_file IN LISTS _consan_production_files)
         "synchronization lowering must coalesce at the coverage-ledger owner"
     )
 endforeach()
-_consan_assert_no_match(
-    "${_consan_dir}/consan_result.h.inc"
-    "ConSanRuntimeStaticMapping[ \t]+runtime_static_mapping[ \t]*;"
-    "the transformation bus must derive runtime attribution from committed lowering"
-)
+foreach(_result_bus IN ITEMS consan_result.h.inc consan_pipeline.h)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_result_bus}"
+        "ConSanRuntimeStaticMapping[ \t]+runtime_static_mapping[ \t]*;"
+        "result buses must derive runtime attribution from committed lowering"
+    )
+endforeach()
 file(READ "${_consan_dir}/consan_observation_plan.h.inc" _coverage_ledger_contract)
 foreach(
     _owned_lowering_operation
