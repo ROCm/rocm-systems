@@ -24,6 +24,8 @@ THE SOFTWARE.
 #ifndef ELFIO_RELOCATION_HPP
 #define ELFIO_RELOCATION_HPP
 
+#include <cstring>
+
 namespace amd {
 namespace ELFIO {
 
@@ -67,25 +69,25 @@ template <class S> class relocation_section_accessor_template {
   //------------------------------------------------------------------------------
   bool get_entry(Elf_Xword index, Elf64_Addr& offset, Elf_Word& symbol, Elf_Word& type,
                  Elf_Sxword& addend) const {
-    if (index >= get_entries_num()) {  // Is index valid
+    if (index >= get_entries_num()) {
       return false;
     }
 
     if (elf_file.get_class() == ELFCLASS32) {
       if (SHT_REL == relocation_section->get_type()) {
-        generic_get_entry_rel<Elf32_Rel>(index, offset, symbol, type, addend);
+        return generic_get_entry_rel<Elf32_Rel>(index, offset, symbol, type, addend);
       } else if (SHT_RELA == relocation_section->get_type()) {
-        generic_get_entry_rela<Elf32_Rela>(index, offset, symbol, type, addend);
+        return generic_get_entry_rela<Elf32_Rela>(index, offset, symbol, type, addend);
       }
     } else {
       if (SHT_REL == relocation_section->get_type()) {
-        generic_get_entry_rel<Elf64_Rel>(index, offset, symbol, type, addend);
+        return generic_get_entry_rel<Elf64_Rel>(index, offset, symbol, type, addend);
       } else if (SHT_RELA == relocation_section->get_type()) {
-        generic_get_entry_rela<Elf64_Rela>(index, offset, symbol, type, addend);
+        return generic_get_entry_rela<Elf64_Rela>(index, offset, symbol, type, addend);
       }
     }
 
-    return true;
+    return false;
   }
 
   //------------------------------------------------------------------------------
@@ -93,8 +95,20 @@ template <class S> class relocation_section_accessor_template {
                  std::string& symbolName, Elf_Word& type, Elf_Sxword& addend,
                  Elf_Sxword& calcValue) const {
     // Do regular job
-    Elf_Word symbol;
-    bool ret = get_entry(index, offset, symbol, type, addend);
+    Elf_Word symbol = 0;
+    if (!get_entry(index, offset, symbol, type, addend)) {
+      return false;
+    }
+
+    Elf_Word symbol_table_index = get_symbol_table_index();
+    if (symbol_table_index >= elf_file.sections.size()) {
+      return false;
+    }
+    const section* symbol_table = elf_file.sections[symbol_table_index];
+    if (symbol_table == nullptr ||
+        (symbol_table->get_type() != SHT_SYMTAB && symbol_table->get_type() != SHT_DYNSYM)) {
+      return false;
+    }
 
     // Find the symbol
     Elf_Xword size;
@@ -103,9 +117,9 @@ template <class S> class relocation_section_accessor_template {
     Elf_Half section;
     unsigned char other;
 
-    symbol_section_accessor symbols(elf_file, elf_file.sections[get_symbol_table_index()]);
-    ret = ret && symbols.get_symbol(symbol, symbolName, symbolValue, size, bind, symbolType,
-                                    section, other);
+    const_symbol_section_accessor symbols(elf_file, symbol_table);
+    bool ret =
+        symbols.get_symbol(symbol, symbolName, symbolValue, size, bind, symbolType, section, other);
 
     if (ret) {  // Was it successful?
       switch (type) {
@@ -204,36 +218,59 @@ template <class S> class relocation_section_accessor_template {
   //------------------------------------------------------------------------------
  private:
   //------------------------------------------------------------------------------
-  Elf_Half get_symbol_table_index() const { return (Elf_Half)relocation_section->get_link(); }
+  template <class T> bool read_entry(Elf_Xword index, T& entry) const {
+    Elf_Xword entry_size = relocation_section->get_entry_size();
+    Elf_Xword size = relocation_section->get_size();
+    if (entry_size < sizeof(T) || index >= size / entry_size) {
+      return false;
+    }
+
+    const char* data = relocation_section->get_data();
+    if (data == nullptr) {
+      return false;
+    }
+
+    std::memcpy(&entry, data + index * entry_size, sizeof(entry));
+    return true;
+  }
 
   //------------------------------------------------------------------------------
-  template <class T> void generic_get_entry_rel(Elf_Xword index, Elf64_Addr& offset,
+  Elf_Word get_symbol_table_index() const { return relocation_section->get_link(); }
+
+  //------------------------------------------------------------------------------
+  template <class T> bool generic_get_entry_rel(Elf_Xword index, Elf64_Addr& offset,
                                                 Elf_Word& symbol, Elf_Word& type,
                                                 Elf_Sxword& addend) const {
     const endianess_convertor& convertor = elf_file.get_convertor();
 
-    const T* pEntry = reinterpret_cast<const T*>(relocation_section->get_data() +
-                                                 index * relocation_section->get_entry_size());
-    offset = convertor(pEntry->r_offset);
-    Elf_Xword tmp = convertor(pEntry->r_info);
+    T entry;
+    if (!read_entry(index, entry)) {
+      return false;
+    }
+    offset = convertor(entry.r_offset);
+    Elf_Xword tmp = convertor(entry.r_info);
     symbol = get_sym_and_type<T>::get_r_sym(tmp);
     type = get_sym_and_type<T>::get_r_type(tmp);
     addend = 0;
+    return true;
   }
 
   //------------------------------------------------------------------------------
-  template <class T> void generic_get_entry_rela(Elf_Xword index, Elf64_Addr& offset,
+  template <class T> bool generic_get_entry_rela(Elf_Xword index, Elf64_Addr& offset,
                                                  Elf_Word& symbol, Elf_Word& type,
                                                  Elf_Sxword& addend) const {
     const endianess_convertor& convertor = elf_file.get_convertor();
 
-    const T* pEntry = reinterpret_cast<const T*>(relocation_section->get_data() +
-                                                 index * relocation_section->get_entry_size());
-    offset = convertor(pEntry->r_offset);
-    Elf_Xword tmp = convertor(pEntry->r_info);
+    T entry;
+    if (!read_entry(index, entry)) {
+      return false;
+    }
+    offset = convertor(entry.r_offset);
+    Elf_Xword tmp = convertor(entry.r_info);
     symbol = get_sym_and_type<T>::get_r_sym(tmp);
     type = get_sym_and_type<T>::get_r_type(tmp);
-    addend = convertor(pEntry->r_addend);
+    addend = convertor(entry.r_addend);
+    return true;
   }
 
   //------------------------------------------------------------------------------
