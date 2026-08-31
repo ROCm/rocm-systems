@@ -324,8 +324,8 @@ TEST_F(TorchTraceCollectorTest, EvictsOldestPastMaxEntriesPerShard)
 {
     const auto sequence_numbers = sequence_numbers_on_shard(0,
                                                             kThreadA,
-                                                            SnapshotStore::kMaxEntriesPerShard + 1);
-    for (std::size_t i = 0; i < SnapshotStore::kMaxEntriesPerShard; ++i)
+                                                            SnapshotStore::Shard::kMaxEntriesPerShard + 1);
+    for (std::size_t i = 0; i < SnapshotStore::Shard::kMaxEntriesPerShard; ++i)
     {
         snapshots().save(sequence_numbers[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
     }
@@ -343,9 +343,9 @@ TEST_F(TorchTraceCollectorTest, EvictionIsPerShard)
 {
     const auto sequence_numbers = sequence_numbers_on_shard(0,
                                                             kThreadA,
-                                                            SnapshotStore::kMaxEntriesPerShard + 1);
+                                                            SnapshotStore::Shard::kMaxEntriesPerShard + 1);
     const auto other_shard_sequence_numbers = sequence_numbers_on_shard(1, kThreadA, 1);
-    for (std::size_t i = 0; i < SnapshotStore::kMaxEntriesPerShard; ++i)
+    for (std::size_t i = 0; i < SnapshotStore::Shard::kMaxEntriesPerShard; ++i)
     {
         snapshots().save(sequence_numbers[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
     }
@@ -674,7 +674,7 @@ TEST_F(TorchTraceCollectorRealOpsTest, DetachedForwardBounded)
 
     EXPECT_GT(stats().snapshots_saved.load(), 0u);
     EXPECT_EQ(stats().callback_errors.load(), 0u);
-    EXPECT_LT(snapshots().pending(), SnapshotStore::kMaxEntriesPerShard);
+    EXPECT_LT(snapshots().pending(), SnapshotStore::Shard::kMaxEntriesPerShard);
     EXPECT_EQ(stats().snapshots_dropped.load(), 0u);
 }
 

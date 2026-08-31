@@ -64,8 +64,16 @@ using rocprofiler_compute_tool::common::synchronized_t;
 class SnapshotStore
 {
 public:
-    static constexpr std::size_t kNumShards          = 64;
-    static constexpr std::size_t kMaxEntriesPerShard = 10000;
+    static constexpr std::size_t kNumShards = 64;
+
+    struct Shard
+    {
+        static constexpr std::size_t kMaxEntriesPerShard = 10000;
+
+        std::unordered_map<SnapshotKey, std::vector<StackEntry>>          snapshots;
+        std::list<SnapshotKey>                                            lru_order;
+        std::unordered_map<SnapshotKey, std::list<SnapshotKey>::iterator> lru_idx;
+    };
 
     explicit SnapshotStore(Stats& stats)
         : stats_(stats)
@@ -83,13 +91,6 @@ public:
     void        clear();
 
 private:
-    struct Shard
-    {
-        std::unordered_map<SnapshotKey, std::vector<StackEntry>>          snapshots;
-        std::list<SnapshotKey>                                            lru_order;
-        std::unordered_map<SnapshotKey, std::list<SnapshotKey>::iterator> lru_idx;
-    };
-
     synchronized_t<Shard>& shard_for(const SnapshotKey& key);
     static void            lru_remove(Shard& shard, const SnapshotKey& key);
     static void            lru_touch(Shard& shard, const SnapshotKey& key);
