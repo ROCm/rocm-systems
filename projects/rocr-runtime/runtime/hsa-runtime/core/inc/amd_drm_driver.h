@@ -166,6 +166,8 @@ public:
                               uint32_t* queue_cu_mask) const override;
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
                              uint32_t* first_gws) const override;
+  hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
+                              const void* buffer_base, uint64_t buffer_base_size) const override;
 
   // Legacy DestroyQueue signature for backward compatibility
   hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
@@ -244,6 +246,12 @@ public:
 
   /// @brief Store doorbell info state per agent.
   std::unordered_map<core::Agent *, doorbell_info_t *> db_info_by_agent;
+
+  /// @brief Render-VM-mapped TMA buffer supplied to the CWSR L2 trap handler,
+  /// per agent. Allocated lazily by SetTrapHandler when the runtime hands it a
+  /// NULL TMA (exception-debugging path); freed in ReleaseResources. Mutable so
+  /// the const SetTrapHandler override can cache it.
+  mutable std::unordered_map<core::Agent *, void *> trap_tma_by_agent_;
 
 };
 
