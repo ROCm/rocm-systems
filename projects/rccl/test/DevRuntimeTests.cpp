@@ -161,6 +161,16 @@ TEST_F(ComputeLsaSizeTest, UnevenNodes_ReturnsGcdOfRuns) {
   EXPECT_EQ(computeLsaSize(comm), 1);
 }
 
+// Three runs, so the fold inside the loop has to carry a value forward.
+// With only two runs it cannot be observed: lsaSize starts at 0 and
+// gcd(0, n) == n, so dropping the mid-loop fold gives the same answer. Here
+// runs of 3, 3 and 2 fold to gcd(gcd(3, 3), 2) == 1, where skipping the
+// in-loop folds would yield 2.
+TEST_F(ComputeLsaSizeTest, ThreeRuns_FoldsEveryRunNotJustTheLast) {
+  SetTopology({0, 0, 0, 1, 1, 1, 2, 2});
+  EXPECT_EQ(computeLsaSize(comm), 1);
+}
+
 // Boundary: nRanks == 1 skips the loop; gcd(0, 1) == 1.
 TEST_F(ComputeLsaSizeTest, SingleRank_ReturnsOne) {
   SetTopology({0});
