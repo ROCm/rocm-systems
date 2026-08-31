@@ -38,12 +38,6 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
-inline uint64_t
-next_chunk_id(std::vector<uint64_t>& per_shader_engine, size_t shader_engine_id)
-{
-    return per_shader_engine[shader_engine_id]++;
-}
-
 /// Performs a blocking async copy while honoring the supplied signal dependency.
 void
 copy_data_sync(void*         dst,

@@ -59,8 +59,7 @@ typedef enum rocprofiler_thread_trace_parameter_type_t
                                                      ///< producer/consumer pipeline. 0 (default)
                                                      ///< and 1 = single buffer mode (synchronous,
                                                      ///< no async copy). 2 is not allowed. Values
-                                                     ///< >= 3 enable the async copy pipeline and
-                                                     ///< require a single shader engine.
+                                                     ///< >= 3 enable the async copy pipeline.
     ROCPROFILER_THREAD_TRACE_PARAMETER_LAST
 } rocprofiler_thread_trace_parameter_type_t;
 
@@ -120,7 +119,7 @@ typedef struct rocprofiler_thread_trace_shader_data_t
     void*    data;              ///< Pointer to the buffer containing the ATT data.
     uint64_t data_size;         ///< Number of bytes in data.
     int64_t  shader_engine_id;  ///< ID of shader engine, as enabled by SE_MASK.
-    uint64_t chunk_index;       ///< 0-based position of this chunk in the per-trace sequence.
+    uint64_t chunk_index;       ///< 0-based position in this shader engine's per-trace sequence.
     uint64_t read_offset;       ///< Offset into data where valid unread data begins.
 
     rocprofiler_agent_id_t                       agent;  ///< Identifier for the target agent.
@@ -132,20 +131,19 @@ typedef struct rocprofiler_thread_trace_shader_data_t
  *
  * With NUM_BUFFERS >= 3 the SDK invokes this callback from a pool of worker
  * threads, so callbacks for the same trace can run concurrently and may be
- * delivered out of source order. Each chunk carries a monotonic
- * @p chunk_index that, together with @p shader_engine_id, identifies its
- * position in the original GPU output stream. To reconstruct the trace the
- * caller should buffer chunks per @p shader_engine_id and process them in
- * ascending @p chunk_index order; ::FLAGS_END marks a segment boundary
+ * delivered out of source order. Each shader engine has an independent,
+ * monotonic @p chunk_index sequence. To reconstruct a trace, the caller should
+ * buffer chunks per @p shader_engine_id and process them in ascending
+ * @p chunk_index order; ::FLAGS_END marks a segment boundary
  * inserted by the SDK on a CPU_BUFFER_FULL / GPU_BUFFER_FULL restart and is
  * itself part of the indexed sequence.
  *
  * @param [in] args Shader data bundle. @p args.chunk_index is the 0-based position of this chunk
- * in the per-trace emission sequence. Index 0 is the buffering-mode header (when present) or the
- * first GPU data chunk otherwise. The index increments by exactly 1 per
- *  callback invocation and never resets within a single
- *  start_thread_trace/stop_thread_trace lifetime, so consumers can detect
- *  drops or reorder out-of-sequence deliveries by sorting on it. In
+ * in the shader engine's per-trace emission sequence. Index 0 is that engine's buffering-mode
+ * header (when present) or first GPU data chunk otherwise. The index increments by exactly 1 for
+ * each callback for the same @p shader_engine_id and never resets within a single
+ * start_thread_trace/stop_thread_trace lifetime, so consumers can detect drops or reorder
+ * out-of-sequence deliveries by sorting each shader engine's chunks on it. In
  *  single-buffer mode (NUM_BUFFERS == 1) callbacks are sequential and
  *  @p args.chunk_index is the underlying ATT iterator index.
  * @param [in] userdata Passed back to user from rocprofiler_thread_trace_dispatch_callback_t()

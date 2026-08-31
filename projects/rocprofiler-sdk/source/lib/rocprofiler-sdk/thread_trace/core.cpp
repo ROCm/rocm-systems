@@ -96,7 +96,7 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
     shader_data.data             = buffer;
     shader_data.data_size        = size;
     shader_data.shader_engine_id = shader;
-    shader_data.chunk_index      = next_chunk_id(cb_data.next_chunks, shader);
+    shader_data.chunk_index      = cb_data.next_chunks[shader]++;
     shader_data.read_offset      = 0;
     shader_data.agent            = cb_data.agent;
     shader_data.flags            = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
@@ -151,10 +151,7 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
     // becomes 0xF on a four-SE agent instead of creating packets for non-existent engines.
     constexpr uint32_t max_shader_engines = std::numeric_limits<uint32_t>::digits;
     num_shader_engines = std::min(agent->get_rocp_agent()->num_shader_banks, max_shader_engines);
-    const auto valid_shader_engine_mask =
-        (num_shader_engines == max_shader_engines)
-            ? static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())
-            : ((uint64_t{1} << num_shader_engines) - 1);
+    const auto valid_shader_engine_mask = (uint64_t{1} << num_shader_engines) - 1;
     params.shader_engine_mask &= valid_shader_engine_mask;
 
     if(params.shader_engine_mask == 0)
