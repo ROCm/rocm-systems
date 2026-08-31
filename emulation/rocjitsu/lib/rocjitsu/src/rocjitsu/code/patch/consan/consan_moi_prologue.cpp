@@ -2306,13 +2306,13 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanMoiOperatingPoi
 }
 
 [[nodiscard]] bool moi_owner_epoch_prologue_uses_vgpr(
-    const ConSanMoiOperatingPoint &point,
+    const ConSanMoiOperatingPoint &point, const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs,
     const std::optional<ConSanMoiWorkgroupShadowLayout> &workgroup_shadow, uint16_t vgpr,
     rj_code_arch_t arch) {
   const auto overlaps = [vgpr](std::optional<uint16_t> base, uint16_t width = 1u) {
     return base && range_overlaps(vgpr, 1u, *base, width);
   };
-  if (overlaps(moi_owner_vgpr(point)))
+  if (overlaps(owner_epoch_vgprs.owner))
     return true;
   const ConSanTargetProfile *target = consan_target_profile(arch);
   const uint16_t epoch_width =
@@ -2321,7 +2321,7 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanMoiOperatingPoi
                                       ? moi_workgroup_shadow_preferred_zero_vgpr_count(*target)
                                       : 2u)
           : 1u;
-  if (overlaps(moi_epoch_vgpr(point), epoch_width) || overlaps(point.moi_workgroup_key_vgpr) ||
+  if (overlaps(owner_epoch_vgprs.epoch, epoch_width) || overlaps(point.moi_workgroup_key_vgpr) ||
       overlaps(point.moi_dispatch_identity.vgpr(), 2u)) {
     return true;
   }
@@ -2471,6 +2471,7 @@ void try_apply_owner_epoch_prologue_patch(
       return;
     }
     const ConSanMoiDispatchIdCapture dispatch_capture = dispatch_id_capture(kernel_options);
+    ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(kernel_options);
     if (options.moi_persistent_sgprs.complete()) {
       const auto scratch =
           std::ranges::find(prologue_scratch_assignments, kernel.descriptor_file_offset,
@@ -2481,8 +2482,10 @@ void try_apply_owner_epoch_prologue_patch(
             kernel.name + "'");
         return;
       }
-      kernel_options.set_materialized_moi_owner_epoch_vgprs(
-          scratch->scratch_vgpr, static_cast<uint16_t>(scratch->scratch_vgpr + 1u));
+      owner_epoch_vgprs = {
+          .owner = scratch->scratch_vgpr,
+          .epoch = static_cast<uint16_t>(scratch->scratch_vgpr + 1u),
+      };
     }
     const auto descriptor_value =
         read_kernel_descriptor(active_bytes, active.descriptor_file_offset);
@@ -2688,9 +2691,9 @@ void try_apply_owner_epoch_prologue_patch(
         const uint32_t tail_end = has_live_accvgpr_bank ? original_allocation : kMaxVgprs;
         std::optional<uint16_t> backup_vgpr;
         for (uint32_t candidate = tail_begin; candidate < tail_end; ++candidate) {
-          if (!moi_owner_epoch_prologue_uses_vgpr(
-                  static_cast<const ConSanMoiOperatingPoint &>(kernel_options), workgroup_shadow,
-                  static_cast<uint16_t>(candidate), arch)) {
+          if (!moi_owner_epoch_prologue_uses_vgpr(kernel_options, owner_epoch_vgprs,
+                                                  workgroup_shadow,
+                                                  static_cast<uint16_t>(candidate), arch)) {
             backup_vgpr = static_cast<uint16_t>(candidate);
             break;
           }
@@ -2702,9 +2705,9 @@ void try_apply_owner_epoch_prologue_patch(
         // window is restored before the displaced guest entry executes.
         for (uint32_t candidate = entry_abi_vgpr_count;
              !backup_vgpr && candidate < std::min(original_allocation, kMaxVgprs); ++candidate) {
-          if (!moi_owner_epoch_prologue_uses_vgpr(
-                  static_cast<const ConSanMoiOperatingPoint &>(kernel_options), workgroup_shadow,
-                  static_cast<uint16_t>(candidate), arch)) {
+          if (!moi_owner_epoch_prologue_uses_vgpr(kernel_options, owner_epoch_vgprs,
+                                                  workgroup_shadow,
+                                                  static_cast<uint16_t>(candidate), arch)) {
             backup_vgpr = static_cast<uint16_t>(candidate);
           }
         }
@@ -2730,8 +2733,8 @@ void try_apply_owner_epoch_prologue_patch(
           inline_shadow_visible_evidence_sgpr(kernel_options, kernel_options);
     }
     MoiOwnerEpochPrologueEmissionPlan emission{
-        .owner_vgpr = *moi_owner_vgpr(kernel_options),
-        .epoch_vgpr = *moi_epoch_vgpr(kernel_options),
+        .owner_vgpr = *owner_epoch_vgprs.owner,
+        .epoch_vgpr = *owner_epoch_vgprs.epoch,
         .workgroup_key_vgpr = kernel_options.moi_workgroup_key_vgpr,
         .owner_shift_bits = owner_shift_bits,
         .owner_source = kernel_options.moi_owner_source,

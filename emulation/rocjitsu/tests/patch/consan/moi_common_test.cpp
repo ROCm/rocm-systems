@@ -1259,13 +1259,14 @@ TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
     SCOPED_TRACE(present_mask);
     MoiOptions options;
     options.moi_persistent_sgprs.set_owner_epoch(40u, 41u);
-    options.set_materialized_moi_owner_epoch_vgprs(
-        present_mask & 1u ? std::optional<uint16_t>{6u} : std::nullopt,
-        present_mask & 2u ? std::optional<uint16_t>{7u} : std::nullopt);
+    const ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs{
+        .owner = present_mask & 1u ? std::optional<uint16_t>{6u} : std::nullopt,
+        .epoch = present_mask & 2u ? std::optional<uint16_t>{7u} : std::nullopt,
+    };
     std::vector<std::string> errors;
 
-    EXPECT_FALSE(consan_detail::validate_scalar_state_temporaries(
-        options, moi_owner_epoch_vgpr_sources(options), "test consumer", errors));
+    EXPECT_FALSE(consan_detail::validate_scalar_state_temporaries(options, owner_epoch_vgprs,
+                                                                  "test consumer", errors));
     ASSERT_EQ(errors.size(), 1u);
     EXPECT_NE(errors.front().find("test consumer has no scalar-state VGPR temporaries"),
               std::string::npos);

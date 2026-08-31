@@ -943,21 +943,23 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
           "ConSan MOI sampled barrier sync lost its transient scalar assignment");
       return false;
     }
+    ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs;
     if (planned.private_layout || candidate_options.moi_persistent_sgprs.complete()) {
-      candidate_options.set_materialized_moi_owner_epoch_vgprs(
-          static_cast<uint16_t>(planned.resources.base + 7u),
-          static_cast<uint16_t>(planned.resources.base + 8u));
+      owner_epoch_vgprs = {
+          .owner = static_cast<uint16_t>(planned.resources.base + 7u),
+          .epoch = static_cast<uint16_t>(planned.resources.base + 8u),
+      };
     } else if (!apply_moi_persistent_vgpr_assignment(
                    candidate_options, result.moi_operating_point,
                    planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI sampled barrier sync lost its persistent VGPR assignment");
       return false;
-    }
+    } else
+      owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_options);
     auto cave_words = build_sampled_barrier_sync_cave_words(
         bytes, planned.candidate, candidate_options, candidate_options, candidate_options,
-        moi_owner_epoch_vgpr_sources(candidate_options), planned.resources.base,
-        planned.spill ? &*planned.spill : nullptr,
+        owner_epoch_vgprs, planned.resources.base, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, layout, cave_offset,
         site.text_offset + site.size, planned.private_layout ? &*planned.private_layout : nullptr,
         std::nullopt, result.errors);
@@ -966,8 +968,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
           "ConSan MOI sampled barrier sync could not encode its probe with scratch v" +
           std::to_string(planned.resources.base) + ":v" +
           std::to_string(planned.resources.base + planned.resources.count - 1u) + " epoch v" +
-          (moi_epoch_vgpr(candidate_options) ? std::to_string(*moi_epoch_vgpr(candidate_options))
-                                             : std::string("<unassigned>")) +
+          (owner_epoch_vgprs.epoch ? std::to_string(*owner_epoch_vgprs.epoch)
+                                   : std::string("<unassigned>")) +
           " EXEC-save s" +
           (candidate_options.moi_exec_save_sgpr
                ? std::to_string(*candidate_options.moi_exec_save_sgpr)
@@ -1252,25 +1254,27 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
               "ConSan MOI sampled dense barrier lost its transient scalar assignment");
           return;
         }
+        ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs;
         if (planned.private_layout || candidate_options.moi_persistent_sgprs.complete()) {
-          candidate_options.set_materialized_moi_owner_epoch_vgprs(
-              static_cast<uint16_t>(planned.resources.base + 7u),
-              static_cast<uint16_t>(planned.resources.base + 8u));
+          owner_epoch_vgprs = {
+              .owner = static_cast<uint16_t>(planned.resources.base + 7u),
+              .epoch = static_cast<uint16_t>(planned.resources.base + 8u),
+          };
         } else if (!apply_moi_persistent_vgpr_assignment(
                        candidate_options, result.moi_operating_point,
                        planned.resources.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
               "ConSan MOI sampled dense barrier lost its persistent VGPR assignment");
           return;
-        }
+        } else
+          owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_options);
         const uint64_t body_offset = new_text.size();
         const auto vgpr_msb_mode = consan_selectable_vgpr_bank_mode_at(
             arch, active_bytes, planned.candidate.barrier.text_file_offset,
             planned.candidate.barrier.container_entry_text_offset, site.file_offset);
         auto body_words = build_sampled_barrier_sync_cave_words(
             bytes, planned.candidate, candidate_options, candidate_options, candidate_options,
-            moi_owner_epoch_vgpr_sources(candidate_options), planned.resources.base,
-            planned.spill ? &*planned.spill : nullptr,
+            owner_epoch_vgprs, planned.resources.base, planned.spill ? &*planned.spill : nullptr,
             planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, layout, body_offset,
             site.text_offset + site.size,
             planned.private_layout ? &*planned.private_layout : nullptr, vgpr_msb_mode,
@@ -2068,26 +2072,30 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
           "ConSan MOI sampled atomic sync lost its transient scalar assignment");
       return std::nullopt;
     }
+    ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs;
     if (planned.private_layout || candidate_options.moi_persistent_sgprs.complete()) {
-      candidate_options.set_materialized_moi_owner_epoch_vgprs(
-          static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kOwner),
-          static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kEpoch));
+      owner_epoch_vgprs = {
+          .owner =
+              static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kOwner),
+          .epoch =
+              static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kEpoch),
+      };
     } else if (!apply_moi_persistent_vgpr_assignment(
                    candidate_options, result.moi_operating_point,
                    planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI sampled atomic sync lost its persistent VGPR assignment");
       return std::nullopt;
-    }
+    } else
+      owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_options);
     const uint64_t return_text_offset =
         preserve_guest_at_anchor ? planned.physical_anchor_offset
                                  : planned.physical_anchor_offset + planned.relocated_guest_size;
     return planned.candidate.deferred_acquire
                ? build_sampled_pending_acquire_cave_words(
                      bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
-                     candidate_options, candidate_options,
-                     moi_owner_epoch_vgpr_sources(candidate_options), planned.resources.base,
-                     planned.spill ? &*planned.spill : nullptr,
+                     candidate_options, candidate_options, owner_epoch_vgprs,
+                     planned.resources.base, planned.spill ? &*planned.spill : nullptr,
                      planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                      planned.private_layout ? &*planned.private_layout : nullptr, arch,
                      planned.candidate.selected_slot, planned.candidate.bank_count,
@@ -2096,9 +2104,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                      planned.trailing_guest_words)
                : build_sampled_atomic_sync_cave_words(
                      bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
-                     candidate_options, candidate_options,
-                     moi_owner_epoch_vgpr_sources(candidate_options), planned.resources.base,
-                     planned.spill ? &*planned.spill : nullptr,
+                     candidate_options, candidate_options, owner_epoch_vgprs,
+                     planned.resources.base, planned.spill ? &*planned.spill : nullptr,
                      planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                      planned.private_layout ? &*planned.private_layout : nullptr, arch,
                      planned.candidate.selected_slot, planned.candidate.bank_count, layout,

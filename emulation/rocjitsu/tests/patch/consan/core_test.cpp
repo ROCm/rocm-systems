@@ -438,14 +438,13 @@ TEST(ConSan, MoiOperatingPointPersistentOwnerEpochVgprsAreAllOrNothing) {
   EXPECT_FALSE(moi_epoch_vgpr(point));
 }
 
-TEST(ConSan, MoiSiteMaterializationDoesNotWeakenAcceptedOwnerEpochPair) {
-  MoiOptions options;
-  options.set_moi_owner_epoch_vgprs(12u, 13u);
-  options.set_materialized_moi_owner_epoch_vgprs(std::nullopt, 31u);
+TEST(ConSan, MoiSiteSourcesRemainDistinctFromAcceptedOwnerEpochPair) {
+  ConSanMoiOperatingPoint accepted;
+  accepted.set_moi_owner_epoch_vgprs(12u, 13u);
+  const ConSanMoiOwnerEpochVgprSources materialized{.owner = std::nullopt, .epoch = 31u};
 
-  EXPECT_FALSE(moi_owner_vgpr(options));
-  EXPECT_EQ(moi_epoch_vgpr(options), 31u);
-  const ConSanMoiOperatingPoint &accepted = options;
+  EXPECT_FALSE(materialized.owner);
+  EXPECT_EQ(materialized.epoch, 31u);
   EXPECT_EQ(moi_owner_vgpr(accepted), 12u);
   EXPECT_EQ(moi_epoch_vgpr(accepted), 13u);
 }

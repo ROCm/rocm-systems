@@ -1045,13 +1045,6 @@ struct ConSanMoiOperatingPoint {
 /// output. Public orchestration and report planning never consume this type;
 /// narrow per-patch plans own the decisions that cross semantic boundaries.
 struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {
-  /// Site-local materialization may legitimately need only one half of the
-  /// accepted persistent pair: for example, Sampled can derive owner at the
-  /// probe while loading epoch from private state. Keeping that temporary
-  /// override out of `ConSanMoiOperatingPoint` prevents an emission detail
-  /// from weakening the accepted allocation invariant.
-  std::optional<ConSanMoiOwnerEpochVgprSources> materialized_moi_owner_epoch_vgprs;
-
   MoiOptions() = default;
   /// Start a fresh MOI attempt from caller input. The implicit conversion is
   /// intentional at the internal lowering boundary: production callers carry no
@@ -1064,26 +1057,7 @@ struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {
       set_moi_owner_epoch_vgprs(*options.requested_moi_owner_vgpr,
                                 *options.requested_moi_epoch_vgpr);
   }
-
-  void set_materialized_moi_owner_epoch_vgprs(std::optional<uint16_t> owner,
-                                              std::optional<uint16_t> epoch) {
-    materialized_moi_owner_epoch_vgprs = ConSanMoiOwnerEpochVgprSources{owner, epoch};
-  }
 };
-
-[[nodiscard]] inline ConSanMoiOwnerEpochVgprSources
-moi_owner_epoch_vgpr_sources(const MoiOptions &options) {
-  return options.materialized_moi_owner_epoch_vgprs.value_or(
-      moi_owner_epoch_vgpr_sources(static_cast<const ConSanMoiOperatingPoint &>(options)));
-}
-
-[[nodiscard]] inline std::optional<uint16_t> moi_owner_vgpr(const MoiOptions &options) {
-  return moi_owner_epoch_vgpr_sources(options).owner;
-}
-
-[[nodiscard]] inline std::optional<uint16_t> moi_epoch_vgpr(const MoiOptions &options) {
-  return moi_owner_epoch_vgpr_sources(options).epoch;
-}
 
 /// Process-local exact-one budget for repeated dynamic loads of one stable
 /// fault-site identity. The caller serializes observe() with code-object load

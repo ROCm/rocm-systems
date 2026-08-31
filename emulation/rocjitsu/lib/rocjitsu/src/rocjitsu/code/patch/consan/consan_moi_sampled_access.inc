@@ -26,12 +26,12 @@ sampled_reserved_barrier_island_count(const ConSanObservationPlan &observation_p
                 static_cast<size_t>(layout.sampled_watchpoint_capacity), planned}));
 }
 
-void materialize_sampled_owner_epoch_tail(MoiOptions &options, uint16_t exclusive_tail,
-                                          bool needs_owner) {
+[[nodiscard]] ConSanMoiOwnerEpochVgprSources
+materialize_sampled_owner_epoch_tail(uint16_t exclusive_tail, bool needs_owner) {
   std::optional<uint16_t> owner;
   if (needs_owner)
     owner = --exclusive_tail;
-  options.set_materialized_moi_owner_epoch_vgprs(owner, --exclusive_tail);
+  return {.owner = owner, .epoch = --exclusive_tail};
 }
 
 void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
@@ -431,11 +431,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     const bool entry_island_at_anchor = entry_plan.at_anchor;
     std::vector<uint32_t> &displaced_tail_words = entry_plan.displaced_tail_words;
     const uint32_t displaced_original_size = entry_plan.original_size;
-    if (private_layout || candidate_options.moi_persistent_sgprs.complete()) {
-      materialize_sampled_owner_epoch_tail(
-          candidate_options, static_cast<uint16_t>(resources->base + resources->count),
+    ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs =
+        moi_owner_epoch_vgpr_sources(candidate_options);
+    if (private_layout || candidate_options.moi_persistent_sgprs.complete())
+      owner_epoch_vgprs = materialize_sampled_owner_epoch_tail(
+          static_cast<uint16_t>(resources->base + resources->count),
           !private_layout || private_layout->owner_offset.has_value());
-    }
     const bool has_private_workgroup_sources =
         candidate_options.moi_record_replay_workgroup_private_offsets.complete();
     const bool runtime_fast_gate = !candidate_options.has_compact_moi_scalar_spill() &&
@@ -463,10 +464,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     uint32_t guest_instruction_word_count = 0;
     auto words = build_direct_sampled_watchpoint_words(
         bytes, lowered_candidate, candidate_options, candidate_options, candidate_options,
-        moi_owner_epoch_vgpr_sources(candidate_options), resources->base, arch, next_record_index,
-        prior_first_record_index, prior_access_range_count, window_bank_count,
-        layout.sampled_causal_windows_offset, layout.sampled_watchpoints_offset,
-        layout.sampled_pending_acquires_offset,
+        owner_epoch_vgprs, resources->base, arch, next_record_index, prior_first_record_index,
+        prior_access_range_count, window_bank_count, layout.sampled_causal_windows_offset,
+        layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
         consan_moi_sampled_pending_acquire_owner_bank_count(layout.sampled_pending_acquire_capacity,
                                                             layout.sampled_causal_window_capacity),
         spill_overlaps_guest_operands, spill_backed_operand_recovery, spill ? &*spill : nullptr,
@@ -743,24 +743,23 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       candidate_options.scratch_vgpr = planned_patch.resources.base;
       candidate_options.moi_record_replay_workgroup_private_offsets =
           planned_patch.private_workgroup_offsets;
-      if (planned_patch.private_epoch_offset || candidate_options.moi_persistent_sgprs.complete()) {
-        materialize_sampled_owner_epoch_tail(
-            candidate_options,
+      ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs =
+          moi_owner_epoch_vgpr_sources(candidate_options);
+      if (planned_patch.private_epoch_offset || candidate_options.moi_persistent_sgprs.complete())
+        owner_epoch_vgprs = materialize_sampled_owner_epoch_tail(
             static_cast<uint16_t>(planned_patch.resources.base + planned_patch.resources.count),
             !planned_patch.private_epoch_offset ||
                 (planned_patch.owner_derivation &&
                  planned_patch.owner_derivation->entry_workitem_x_private_offset));
-      }
       ConSanMoiCandidate lowered_candidate = candidate;
       lowered_candidate.kernel_descriptor_file_offset =
           planned_patch.workgroup_descriptor_file_offset;
       auto words = build_direct_sampled_watchpoint_words(
           bytes, lowered_candidate, candidate_options, candidate_options, candidate_options,
-          moi_owner_epoch_vgpr_sources(candidate_options), planned_patch.resources.base, arch,
-          planned_patch.first_record_index, planned_patch.prior_first_record_index,
-          planned_patch.prior_access_range_count, window_bank_count,
-          layout.sampled_causal_windows_offset, layout.sampled_watchpoints_offset,
-          layout.sampled_pending_acquires_offset,
+          owner_epoch_vgprs, planned_patch.resources.base, arch, planned_patch.first_record_index,
+          planned_patch.prior_first_record_index, planned_patch.prior_access_range_count,
+          window_bank_count, layout.sampled_causal_windows_offset,
+          layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
           consan_moi_sampled_pending_acquire_owner_bank_count(
               layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity),
           planned_patch.spill_overlaps_guest_operands, planned_patch.spill_backed_operand_recovery,
@@ -1123,22 +1122,22 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             candidate_options.scratch_vgpr = planned_patch.resources.base;
             candidate_options.moi_record_replay_workgroup_private_offsets =
                 planned_patch.private_workgroup_offsets;
+            ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs =
+                moi_owner_epoch_vgpr_sources(candidate_options);
             if (planned_patch.private_epoch_offset ||
-                candidate_options.moi_persistent_sgprs.complete()) {
-              materialize_sampled_owner_epoch_tail(
-                  candidate_options,
+                candidate_options.moi_persistent_sgprs.complete())
+              owner_epoch_vgprs = materialize_sampled_owner_epoch_tail(
                   static_cast<uint16_t>(planned_patch.resources.base +
                                         planned_patch.resources.count),
                   !planned_patch.private_epoch_offset ||
                       (planned_patch.owner_derivation &&
                        planned_patch.owner_derivation->entry_workitem_x_private_offset));
-            }
             ConSanMoiCandidate lowered_candidate = *planned_patch.candidate;
             lowered_candidate.kernel_descriptor_file_offset =
                 planned_patch.workgroup_descriptor_file_offset;
             auto words = build_direct_sampled_watchpoint_words(
                 bytes, lowered_candidate, candidate_options, candidate_options, candidate_options,
-                moi_owner_epoch_vgpr_sources(candidate_options), planned_patch.resources.base, arch,
+                owner_epoch_vgprs, planned_patch.resources.base, arch,
                 planned_patch.first_record_index, planned_patch.prior_first_record_index,
                 planned_patch.prior_access_range_count, window_bank_count,
                 layout.sampled_causal_windows_offset, layout.sampled_watchpoints_offset,
