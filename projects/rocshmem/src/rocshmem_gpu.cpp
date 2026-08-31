@@ -3022,6 +3022,8 @@ INT_REDUCTION_GEN(long)
 INT_REDUCTION_GEN(long long)
 FLOAT_REDUCTION_GEN(float)
 FLOAT_REDUCTION_GEN(double)
+FLOAT_REDUCTION_GEN(__half)
+FLOAT_REDUCTION_GEN(__hip_bfloat16)
 // long double reduction fails. hipcc/device may not support long double.
 // so disable it for now.
 // FLOAT_REDUCTION_GEN(long double)
@@ -3040,7 +3042,6 @@ RMA_GEN(unsigned short)
 RMA_GEN(unsigned int)
 RMA_GEN(unsigned long)
 RMA_GEN(unsigned long long)
-
 RMA_GEN(__half)
 RMA_GEN(__hip_bfloat16)
 
@@ -3086,6 +3087,8 @@ INT_REDUCTION_DEF_GEN(long, long)
 INT_REDUCTION_DEF_GEN(long long, longlong)
 FLOAT_REDUCTION_DEF_GEN(float, float)
 FLOAT_REDUCTION_DEF_GEN(double, double)
+FLOAT_REDUCTION_DEF_GEN(__half, half)
+FLOAT_REDUCTION_DEF_GEN(__hip_bfloat16, bfloat16)
 // long double reduction fails. hipcc/device may not support long double.
 // so disable it for now.
 // FLOAT_REDUCTION_DEF_GEN(long double, longdouble)
@@ -3114,7 +3117,6 @@ RMA_DEF_GEN(uint32_t, uint32)
 RMA_DEF_GEN(uint64_t, uint64)
 RMA_DEF_GEN(size_t, size)
 RMA_DEF_GEN(ptrdiff_t, ptrdiff)
-
 RMA_DEF_GEN(__half, half)
 RMA_DEF_GEN(__hip_bfloat16, bfloat16)
 
@@ -3177,6 +3179,8 @@ INT_REDUCTION_ON_STREAM_KERNEL_GEN(short, short)
 
 FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(float, float)
 FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(double, double)
+FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(__half, half)
+FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(__hip_bfloat16, bfloat16)
 // clang-format on
 
 }  // namespace rocshmem
