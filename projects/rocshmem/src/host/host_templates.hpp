@@ -448,7 +448,7 @@ __host__ int HostInterface::reduce_on_stream(rocshmem_team_t team,
 
   int optimal_block_size = 0;
   int grid_size = 0;
-  CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, 
+  CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size,
                                               &optimal_block_size,
                                               rocshmem_reduce_on_stream_kernel<T, Op>, 0,
                                               0));
