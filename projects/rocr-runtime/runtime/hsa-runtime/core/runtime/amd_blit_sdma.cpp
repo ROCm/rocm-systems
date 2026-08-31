@@ -1528,7 +1528,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
 
     const uint32_t per_pkt_dws = is_swap
         ? static_cast<uint32_t>(sizeof(SDMA_PKT_COPY_LINEAR_SWAP) / sizeof(uint32_t))
-        : static_cast<uint32_t>(sizeof(SDMA_PKT_COPY_LINEAR) / sizeof(uint32_t));
+        : static_cast<uint32_t>(linear_copy_command_size() / sizeof(uint32_t));
 
     std::vector<uint32_t> chunks(num_entries);
     uint32_t total_copy_bytes = 0;
