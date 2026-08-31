@@ -339,7 +339,7 @@ static void topology_reset_snapshot_state(void) {
   /* Whatever brought us here, no caller holds a reference once the snapshot is
    * gone.
    */
-  dxg_topology->snapshot_refs_.Clear();
+  dxg_topology->snapshot_refs_.store(0, std::memory_order_relaxed);
 
   // Free heap GPU VA BEFORE deleting adapters
   // The GPU VA free requires adapters to be alive
@@ -405,7 +405,7 @@ void topology_drop_snapshot_at_last_close(void) {
   pr_warn(
       "hsaKmtCloseKFD with %u topology snapshot reference(s) outstanding; "
       "dropping the snapshot\n",
-      dxg_topology->snapshot_refs_.count());
+      dxg_topology->snapshot_refs_.load(std::memory_order_relaxed));
 
   topology_reset_snapshot_state();
 }
@@ -454,7 +454,7 @@ hsaKmtAcquireSystemProperties(HsaSystemProperties *SystemProperties) {
    * caller only until the last holder releases it.
    */
   if (dxg_topology->g_system) {
-    dxg_topology->snapshot_refs_.AddReference();
+    dxg_topology->snapshot_refs_.fetch_add(1, std::memory_order_relaxed);
     *SystemProperties = *dxg_topology->g_system;
     goto out;
   }
@@ -479,10 +479,12 @@ hsaKmtAcquireSystemProperties(HsaSystemProperties *SystemProperties) {
   if (err != HSAKMT_STATUS_SUCCESS)
     goto init_doorbells_failed;
 
-  /* First successful acquisition of this snapshot. A failed acquire never
-   * gets here, so it never leaves a reference behind.
+  /* First successful acquisition of this snapshot. The count is assigned, not
+   * incremented: nothing can hold a reference to a snapshot that did not exist
+   * a moment ago, and an acquire that failed part way never gets here, so it
+   * never leaves a reference behind.
    */
-  dxg_topology->snapshot_refs_.OnSnapshotPublished();
+  dxg_topology->snapshot_refs_.store(1, std::memory_order_relaxed);
   *SystemProperties = *dxg_topology->g_system;
 
   goto out;
@@ -506,33 +508,36 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtReleaseSystemProperties(void) {
 
   std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
 
-  switch (dxg_topology->snapshot_refs_.Release()) {
-  case wsl::thunk::SnapshotRefcount::ReleaseAction::kUnbalanced:
-    /* Reject an unmatched release the way hsaKmtCloseKFD() rejects an
-     * unmatched close, rather than tearing down a snapshot another component
-     * still owns.
-     */
+  /* Reject an unmatched release the way hsaKmtCloseKFD() rejects an unmatched
+   * close, rather than tearing down a snapshot another component still owns.
+   * The check also keeps the decrement below from wrapping to UINT32_MAX, which
+   * would strand the snapshot for the life of the process.
+   */
+  if (dxg_topology->snapshot_refs_.load(std::memory_order_relaxed) == 0) {
     pr_err("hsaKmtReleaseSystemProperties with no reference held. Most likely an HSA "
            "runtime older than this thunk, whose release-before-acquire reset predates "
            "this reference count. Rejecting is deliberate: such a runtime also disagrees "
            "about sizeof(HsaNodeProperties), so tolerating it would corrupt the heap.\n");
     return HSAKMT_STATUS_INVALID_PARAMETER;
-  case wsl::thunk::SnapshotRefcount::ReleaseAction::kDropSnapshot:
+  }
+
+  /* Only the last reference tears the snapshot down; the others just go away. */
+  if (dxg_topology->snapshot_refs_.fetch_sub(1, std::memory_order_relaxed) == 1) {
     topology_drop_snapshot();
-    break;
-  case wsl::thunk::SnapshotRefcount::ReleaseAction::kKeepSnapshot:
-    break;
   }
 
   return HSAKMT_STATUS_SUCCESS;
 }
 
 /* Called from the pthread_atfork child handler, so it must stay
- * async-signal-safe: a plain store, no allocation and no locking. It only
- * severs the child's claim on the inherited references; the objects behind
- * them are dealt with later by topology_abandon_after_fork().
+ * async-signal-safe: a single relaxed store, no allocation and no locking -
+ * only the forking thread survives into the child, so there is nothing left to
+ * race with. It only severs the child's claim on the inherited references; the
+ * objects behind them are dealt with later by topology_abandon_after_fork().
  */
-void topology_clear_snapshot_refs(void) { dxg_topology->snapshot_refs_.Clear(); }
+void topology_clear_snapshot_refs(void) {
+  dxg_topology->snapshot_refs_.store(0, std::memory_order_relaxed);
+}
 
 /* Called from the fork child once it is back in normal context.
  *
@@ -546,7 +551,7 @@ void topology_clear_snapshot_refs(void) { dxg_topology->snapshot_refs_.Clear(); 
  * genuinely ours to free.
  */
 void topology_abandon_after_fork(void) {
-  dxg_topology->snapshot_refs_.Clear();
+  dxg_topology->snapshot_refs_.store(0, std::memory_order_relaxed);
   dxg_topology->g_props.clear();
 
   free(dxg_topology->g_system);

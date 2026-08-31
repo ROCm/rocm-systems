@@ -505,8 +505,9 @@ static void child_fork_handler(void) {
    * entry point can act on them. CHECK_DXG_OPEN() already rejects calls while
    * is_forked is set, but zeroing the counts means that even a path that
    * bypasses it cannot decrement the parent's bookkeeping. The inherited open
-   * and snapshot counts are cleared with plain stores; heavier snapshot and
-   * object teardown waits for clear_after_fork().
+   * count is cleared with a plain store and the snapshot count with a relaxed
+   * store on a lock-free atomic, so neither allocates nor takes a lock; heavier
+   * snapshot and object teardown waits for clear_after_fork().
    */
   dxg_runtime->dxg_open_count = 0;
   topology_clear_snapshot_refs();

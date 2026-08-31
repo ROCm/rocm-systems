@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "snapshot_refcount.hpp"
+#include <atomic>
 
 /* Number of memory banks added by thunk on top of topology
  * This only includes static heaps like LDS, scratch and SVM,
@@ -29,9 +29,11 @@ struct _topology_props {
   std::vector<node_props_t> g_props;
   std::vector<wsl::thunk::WDDMDevice *> wdevices_;
   /* Outstanding hsaKmtAcquireSystemProperties() references. Guarded by
-   * hsakmtRuntime::hsakmt_mutex.
+   * hsakmtRuntime::hsakmt_mutex; the relaxed ordering at the call sites leans
+   * on that lock rather than on the atomic, because the teardown a final
+   * release triggers touches g_system, g_props and wdevices_ as well.
    */
-  wsl::thunk::SnapshotRefcount snapshot_refs_;
+  std::atomic<uint32_t> snapshot_refs_{0};
   uint32_t wdevice_num_ = 0;
   uint32_t num_sysfs_nodes = 0;
   uint32_t numa_node_count_ = 0;
