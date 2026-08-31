@@ -1068,9 +1068,6 @@ rocprofsys_finalize_hidden(void)
     // Fix 2 – write the causal output files BEFORE the SDK shutdown.  This
     //   ensures output is on disk even if SDK shutdown takes longer than expected.
     //
-    // Both causal_gotcha::shutdown() and causal::finish_experimenting() are
-    // idempotent (they check whether they have already run) so calling them a
-    // second time here is safe.
     // -----------------------------------------------------------------------
     if(get_use_causal())
     {
@@ -1183,9 +1180,7 @@ rocprofsys_finalize_hidden(void)
 
     if(get_use_causal())
     {
-        LOG_DEBUG("Finishing the causal experiments...");
-        causal::finish_experimenting();
-
+        LOG_DEBUG("Registering causal output files...");
         auto _base = config::get_causal_output_filename();
         _output_registry.register_file(fmt::format("{}.json", _base),
                                        output_format::causal_json);
