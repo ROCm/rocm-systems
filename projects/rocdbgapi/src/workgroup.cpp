@@ -68,6 +68,12 @@ workgroup_t::group_ids_in_cluster () const
   const auto nwgs = cluster ().num_wgs ();
   const auto &gids = m_group_ids.value ();
 
+  log_level = AMD_DBGAPI_LOG_LEVEL_VERBOSE;
+  log_info ("nwgs:{%u,%u,%u}, gids:{%u,%u,%u}\n",
+            nwgs[0],nwgs[1],nwgs[2],
+            gids[0],gids[1],gids[2]);
+  log_level = AMD_DBGAPI_LOG_LEVEL_NONE;
+
   std::array<uint32_t, 3> ids
     { gids[0] % nwgs[0],
       gids[1] % nwgs[1],
