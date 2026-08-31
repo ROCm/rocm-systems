@@ -175,8 +175,9 @@ TEST_CASE("Unit_device_memcpy_async") {
 }
 
 // Exercise the cooperative_groups::memcpy_async() API surface: supported group types, edge cases,
-// and the layout overload. All of them assume the documented contract, that the copy is complete
-// once the group has synced, and skip on devices where it is not.
+// and the layout overload. All of them assert the documented contract, that the copy is complete
+// once the group has synced. Reading the destination without a group sync is undefined, so there
+// is no device on which failing this is acceptable behaviour.
 
 namespace {
 
@@ -344,64 +345,9 @@ __global__ void global_to_global_kernel(float* out, const float* in, size_t byte
   tb.sync();
 }
 
-// Counts elements that still hold the sentinel, i.e. bytes the copy had not delivered by the time
-// the group sync returned.
-__global__ void probe_copy_lands_kernel(unsigned int* mismatches, const float* in, size_t bytes) {
-  namespace cg = cooperative_groups;
-  extern __shared__ float smem[];
-  auto tb = cg::this_thread_block();
-
-  smem[threadIdx.x] = kSentinel;
-  tb.sync();
-
-  cg::memcpy_async(tb, smem, in, bytes);
-  tb.sync();
-
-  if (smem[threadIdx.x] != in[threadIdx.x]) atomicAdd(mismatches, 1u);
-}
-
 }  // namespace
 
-// True when a copy is still not visible once the group sync has returned, which is the defect the
-// tests below would otherwise report as a failure. Probing the observable behaviour rather than the
-// target arch keeps this correct whichever path memcpy_async lowers to, and lets the coverage
-// re-enable itself as soon as the runtime honours the contract. Runs once per process.
-static bool MemcpyAsyncDoesNotLand() {
-  static const bool does_not_land = [] {
-    constexpr unsigned int threads = 64;
-    constexpr size_t bytes = threads * sizeof(float);
-
-    float* d_in;
-    unsigned int* d_mismatches;
-    HIP_CHECK(hipMalloc(&d_in, bytes));
-    HIP_CHECK(hipMalloc(&d_mismatches, sizeof(unsigned int)));
-
-    std::vector<float> in(threads);
-    for (unsigned int i = 0; i < threads; i++) in[i] = static_cast<float>(i + 1);
-    HIP_CHECK(hipMemcpy(d_in, in.data(), bytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemset(d_mismatches, 0, sizeof(unsigned int)));
-
-    probe_copy_lands_kernel<<<1, threads, bytes>>>(d_mismatches, d_in, bytes);
-    HIP_CHECK(hipGetLastError());
-
-    unsigned int mismatches = 0;
-    HIP_CHECK(hipMemcpy(&mismatches, d_mismatches, sizeof(unsigned int), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_mismatches));
-    return mismatches != 0;
-  }();
-  return does_not_land;
-}
-
-#define SKIP_IF_MEMCPY_ASYNC_DOES_NOT_LAND()                                                       \
-  if (MemcpyAsyncDoesNotLand()) {                                                                  \
-    HIP_SKIP_TEST(                                                                                 \
-        "cooperative_groups::memcpy_async is not complete after group.sync() on this device "      \
-        "(AIRUNTIME-2623)");                                                                       \
-  }
-
 HIP_TEST_CASE(Unit_coop_memcpy_async_thread_block_tile_Basic) {
-  SKIP_IF_MEMCPY_ASYNC_DOES_NOT_LAND();
   constexpr unsigned int kTile = 32;
   for (const unsigned int block_threads : {32u, 64u, 128u, 256u}) {
     if (block_threads % kTile != 0) continue;
@@ -436,7 +382,6 @@ HIP_TEST_CASE(Unit_coop_memcpy_async_thread_block_tile_Basic) {
 }
 
 HIP_TEST_CASE(Unit_coop_memcpy_async_coalesced_group_Basic) {
-  SKIP_IF_MEMCPY_ASYNC_DOES_NOT_LAND();
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   const unsigned int wave = static_cast<unsigned int>(prop.warpSize);
@@ -477,7 +422,6 @@ HIP_TEST_CASE(Unit_coop_memcpy_async_coalesced_group_Basic) {
 }
 
 HIP_TEST_CASE(Unit_coop_memcpy_async_LayoutMin) {
-  SKIP_IF_MEMCPY_ASYNC_DOES_NOT_LAND();
   // Try all three orderings: dst<src, dst==src, dst>src.
   for (const auto& [dst_count, src_count] :
        std::vector<std::pair<size_t, size_t>>{{32, 64}, {64, 64}, {128, 64}}) {
@@ -516,7 +460,6 @@ HIP_TEST_CASE(Unit_coop_memcpy_async_LayoutMin) {
 }
 
 HIP_TEST_CASE(Unit_coop_memcpy_async_ZeroCount) {
-  SKIP_IF_MEMCPY_ASYNC_DOES_NOT_LAND();
   constexpr size_t size = 32;
   const size_t smem_bytes = size * sizeof(float);
 
@@ -545,7 +488,6 @@ HIP_TEST_CASE(Unit_coop_memcpy_async_ZeroCount) {
 }
 
 HIP_TEST_CASE(Unit_coop_memcpy_async_Unaligned) {
-  SKIP_IF_MEMCPY_ASYNC_DOES_NOT_LAND();
   // Byte-granularity sizes including non-multiples of 16/8/4 and sizes smaller than the group,
   // plus sizes with a tail beyond the per-thread share.
   for (const size_t bytes : {1u, 3u, 7u, 15u, 31u, 33u, 65u, 129u}) {
@@ -575,7 +517,6 @@ HIP_TEST_CASE(Unit_coop_memcpy_async_Unaligned) {
 
 // Regression: group.sync() must wait for an in-flight async copy.
 HIP_TEST_CASE(Unit_coop_memcpy_async_SyncPublishesCopy) {
-  SKIP_IF_MEMCPY_ASYNC_DOES_NOT_LAND();
   for (const unsigned int threads : {32u, 64u, 256u}) {
     const size_t bytes = threads * sizeof(float);
 
@@ -604,7 +545,6 @@ HIP_TEST_CASE(Unit_coop_memcpy_async_SyncPublishesCopy) {
 
 // Same regression, on a tile whose sync() is a wavefront fence rather than a barrier.
 HIP_TEST_CASE(Unit_coop_memcpy_async_SyncPublishesCopy_Tile) {
-  SKIP_IF_MEMCPY_ASYNC_DOES_NOT_LAND();
   constexpr unsigned int kTile = 32;
   const unsigned int threads = kTile;
   const size_t bytes = threads * sizeof(float);
@@ -633,7 +573,6 @@ HIP_TEST_CASE(Unit_coop_memcpy_async_SyncPublishesCopy_Tile) {
 // Regression: the wait has to happen before the barrier, so that data copied by one wave is
 // visible to every other wave once the barrier releases.
 HIP_TEST_CASE(Unit_coop_memcpy_async_CrossWaveVisibility) {
-  SKIP_IF_MEMCPY_ASYNC_DOES_NOT_LAND();
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
 
@@ -666,7 +605,6 @@ HIP_TEST_CASE(Unit_coop_memcpy_async_CrossWaveVisibility) {
 
 // A copy that is not global<->LDS must still move the data.
 HIP_TEST_CASE(Unit_coop_memcpy_async_GlobalToGlobal) {
-  SKIP_IF_MEMCPY_ASYNC_DOES_NOT_LAND();
   for (const size_t elems : {32u, 129u}) {
     const size_t bytes = elems * sizeof(float);
 
