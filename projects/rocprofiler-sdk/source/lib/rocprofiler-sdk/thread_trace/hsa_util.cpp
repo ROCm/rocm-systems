@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,243 +20,259 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Utilities that wrap HSA primitives used by thread trace triple buffering.
 #include "lib/rocprofiler-sdk/thread_trace/hsa_util.hpp"
-#include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 
-#define CHECK_HSA(fn, message)                                                                     \
-    {                                                                                              \
-        auto _status = (fn);                                                                       \
-        ROCP_FATAL_IF(_status != HSA_STATUS_SUCCESS) << message << ": " << _status;                \
-    }
+#include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/kfd_resource.hpp"
+
+#include <atomic>
+#include <cstring>
+#include <thread>
+#include <utility>
 
 namespace rocprofiler
 {
 namespace thread_trace
 {
-constexpr size_t QUEUE_SIZE = 512;  // Small dedicated queue for SQTT control traffic
-
-// --- signal free functions ---
-
-hsa_signal_t
-signal_create()
-{
-    auto  sig = hsa_signal_t{};
-    auto* ext = CHECK_NOTNULL(hsa::get_amd_ext_table());
-    CHECK_HSA(ext->hsa_amd_signal_create_fn(0, 0, nullptr, 0, &sig), "failed to create signal");
-    return sig;
-}
-
-hsa_signal_t
-signal_create(hsa_ext_amd_aql_pm4_packet_t* packet)
-{
-    auto sig                  = signal_create();
-    packet->completion_signal = sig;
-    signal_reset(sig);
-    return sig;
-}
-
-void
-signal_destroy(hsa_signal_t sig)
-{
-    signal_wait(sig);
-    auto _status = CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_destroy_fn(sig);
-    ROCP_CI_LOG_IF(WARNING, _status != HSA_STATUS_SUCCESS) << "Failed: " << _status;
-}
-
-bool
-signal_wait(hsa_signal_t sig, int64_t timeout)
-{
-    auto wait_fn = CHECK_NOTNULL(hsa::get_core_table()->hsa_signal_wait_scacquire_fn);
-    auto t0      = std::chrono::steady_clock::now();
-
-    while(wait_fn(sig, HSA_SIGNAL_CONDITION_EQ, 0, timeout, HSA_WAIT_STATE_BLOCKED) != 0)
-    {
-        if(timeout < INT64_MAX && (std::chrono::steady_clock::now() - t0).count() > timeout)
-        {
-            CHECK_NOTNULL(hsa::get_core_table()->hsa_signal_store_screlease_fn)(sig, 0);
-            ROCP_ERROR << "Signal timeout reached!";
-            return false;
-        }
-        sched_yield();
-    }
-    return true;
-}
-
-void
-signal_reset(hsa_signal_t sig)
-{
-    CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_store_screlease_fn(sig, 1);
-}
-
-void
-signal_deleter_t::operator()(hsa_signal_t* s) const
-{
-    if(s)
-    {
-        signal_destroy(*s);
-        delete s;
-    }
-}
-
-signal_ptr_t
-make_signal()
-{
-    auto* s = new hsa_signal_t{signal_create()};
-    return signal_ptr_t{s};
-}
-
-signal_ptr_t
-make_signal(hsa_ext_amd_aql_pm4_packet_t* packet)
-{
-    auto* s = new hsa_signal_t{signal_create(packet)};
-    return signal_ptr_t{s};
-}
-
-// --- att_queue_t free functions ---
-
 namespace
 {
+constexpr size_t QUEUE_SIZE = 512;
+
 void
-default_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, hsa_signal_t* completion)
+hsa_submit(const att_queue_t& queue, hsa_ext_amd_aql_pm4_packet_t* packet, att_signal_t* completion)
 {
-    ROCP_TRACE << "Submit packet";
-    auto* core = CHECK_NOTNULL(hsa::get_core_table());
+    auto*          core        = CHECK_NOTNULL(hsa::get_core_table());
+    const uint64_t write_index = core->hsa_queue_add_write_index_relaxed_fn(queue.hsa_queue, 1);
+    const size_t   index       = (write_index % queue.hsa_queue->size) * sizeof(*packet);
+    auto*          slot =
+        reinterpret_cast<uint32_t*>(static_cast<char*>(queue.hsa_queue->base_address) + index);
+    const auto* packet_words = reinterpret_cast<const uint32_t*>(packet);
 
-    // NOTE: This does not check for queue-full. With QUEUE_SIZE=256 and bursts of
-    // up to 6 packets per buffer swap, the producer can in theory overrun the queue
-    // if the GPU stalls. In practice the GPU consumes packets fast enough relative
-    // to the producer's ~2ms polling cadence. If queue overrun is observed, add a
-    // load_read_index check + wait here.
-    const uint64_t write_idx = core->hsa_queue_add_write_index_relaxed_fn(q.hsa_queue, 1);
-
-    size_t index = (write_idx % q.hsa_queue->size) * sizeof(hsa_ext_amd_aql_pm4_packet_t);
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    auto* queue_slot = reinterpret_cast<uint32_t*>(size_t(q.hsa_queue->base_address) + index);
-
-    const auto* slot_data = reinterpret_cast<const uint32_t*>(packet);
-
-    memcpy(&queue_slot[1], &slot_data[1], sizeof(hsa_ext_amd_aql_pm4_packet_t) - sizeof(uint32_t));
+    std::memcpy(&slot[1], &packet_words[1], sizeof(*packet) - sizeof(uint32_t));
     if(completion)
     {
-        signal_reset(*completion);
-        reinterpret_cast<hsa_ext_amd_aql_pm4_packet_t*>(queue_slot)->completion_signal =
-            *completion;
+        completion->reset();
+        reinterpret_cast<hsa_ext_amd_aql_pm4_packet_t*>(slot)->completion_signal =
+            completion->handle();
     }
-    auto* header = reinterpret_cast<std::atomic<uint32_t>*>(queue_slot);
+    reinterpret_cast<std::atomic<uint32_t>*>(slot)->store(packet_words[0],
+                                                          std::memory_order_release);
+    core->hsa_signal_store_screlease_fn(queue.hsa_queue->doorbell_signal, write_index);
+}
 
-    header->store(slot_data[0], std::memory_order_release);
-    core->hsa_signal_store_screlease_fn(q.hsa_queue->doorbell_signal, write_idx);
+void
+kfd_submit(const att_queue_t& queue, hsa_ext_amd_aql_pm4_packet_t* packet, att_signal_t* completion)
+{
+    auto completion_handle = hsa_signal_t{};
+    if(completion)
+    {
+        completion->reset();
+        completion_handle = completion->handle();
+    }
+    CHECK_NOTNULL(queue.kfd_copy_queue.get())->submit(*packet, completion_handle);
 }
 }  // namespace
 
-att_queue_t
-att_queue_create(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers)
+att_signal_t::att_signal_t(std::shared_ptr<kfd_memory_pool_t> kfd_memory)
 {
-    ROCP_TRACE << "Constructing Async queue.";
+    if(kfd_memory)
+    {
+        _kfd_signal = std::make_unique<kfd_signal_t>(std::move(kfd_memory));
+        return;
+    }
 
-    auto q        = att_queue_t{};
-    q.agent_id    = CHECK_NOTNULL(agent.get_rocp_agent())->id;
-    q.buffer_size = buffer_size;
-    q.hsa_agent   = agent.get_hsa_agent();
-    q.near_cpu    = agent.near_cpu();
-    q.submit_fn   = default_submit;
+    auto* ext    = CHECK_NOTNULL(hsa::get_amd_ext_table());
+    auto  status = ext->hsa_amd_signal_create_fn(0, 0, nullptr, 0, &_hsa_signal);
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to create thread trace signal";
+}
 
-    auto* core = CHECK_NOTNULL(hsa::get_core_table());
-    auto* ext  = CHECK_NOTNULL(hsa::get_amd_ext_table());
+att_signal_t::~att_signal_t()
+{
+    if(_kfd_signal) return;
+    wait();
+    auto status = CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_destroy_fn(_hsa_signal);
+    ROCP_WARNING_IF(status != HSA_STATUS_SUCCESS) << "Failed to destroy thread trace signal";
+}
 
-    // MULTI is required because submissions arrive from multiple producers:
-    //   - the producer_loop thread (multi-buffer mode)
-    //   - HSA loader threads driving load_codeobj/unload_codeobj callbacks
-    // The default_submit path uses an atomic write-index increment and a release
-    // store of the packet header, which is safe under MULTI. Doorbell stores from
-    // racing producers may be written out of order, but the HSA runtime tolerates
-    // monotonic-or-greater doorbell values, so the worst case is a slightly
-    // delayed wakeup on the GPU side.
-    auto status = core->hsa_queue_create_fn(q.hsa_agent,
+hsa_signal_t
+att_signal_t::handle() const
+{
+    return _kfd_signal ? _kfd_signal->handle() : _hsa_signal;
+}
+
+void
+att_signal_t::reset()
+{
+    if(_kfd_signal)
+        _kfd_signal->reset();
+    else
+        CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_store_screlease_fn(_hsa_signal, 1);
+}
+
+void
+att_signal_t::wait() const
+{
+    if(_kfd_signal)
+    {
+        _kfd_signal->wait();
+        return;
+    }
+
+    auto wait_fn = CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_wait_scacquire_fn;
+    while(wait_fn(_hsa_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) != 0)
+        std::this_thread::yield();
+}
+
+void
+signal_wait(const att_signal_t& signal)
+{
+    signal.wait();
+}
+
+signal_ptr_t
+make_signal(const att_queue_t& queue)
+{
+    return std::make_unique<att_signal_t>(queue.kfd_memory);
+}
+
+att_queue_t
+att_queue_create(rocprofiler_agent_id_t             agent_id,
+                 size_t                             buffer_size,
+                 size_t                             num_buffers,
+                 std::shared_ptr<kfd_memory_pool_t> kfd_memory)
+{
+    auto queue        = att_queue_t{};
+    queue.agent_id    = agent_id;
+    queue.buffer_size = buffer_size;
+    queue.kfd_memory  = std::move(kfd_memory);
+
+    if(queue.kfd_memory)
+    {
+        queue.kfd_copy_queue = std::make_shared<kfd_copy_queue_t>(queue.kfd_memory, buffer_size);
+        queue.submit_fn      = kfd_submit;
+        queue.cpu_buffers.resize(num_buffers, nullptr);
+        for(auto& memory : queue.cpu_buffers)
+            memory = queue.kfd_memory->allocate(buffer_size, kfd_memory_kind_t::host);
+        return queue;
+    }
+
+    const auto* cache =
+        CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
+    queue.hsa_agent = cache->get_hsa_agent();
+    queue.near_cpu  = cache->near_cpu();
+
+    queue.submit_fn = hsa_submit;
+    auto* core      = CHECK_NOTNULL(hsa::get_core_table());
+    auto* ext       = CHECK_NOTNULL(hsa::get_amd_ext_table());
+    auto  status    = core->hsa_queue_create_fn(queue.hsa_agent,
                                             QUEUE_SIZE,
                                             HSA_QUEUE_TYPE_MULTI,
                                             nullptr,
                                             nullptr,
                                             UINT32_MAX,
                                             UINT32_MAX,
-                                            &q.hsa_queue);
-
+                                            &queue.hsa_queue);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to create thread trace async queue";
 
-    if(buffer_size != 0 && num_buffers != 0)
+    queue.cpu_buffers.resize(num_buffers, nullptr);
+    for(auto& memory : queue.cpu_buffers)
     {
-        q.cpu_buffers.resize(num_buffers, nullptr);
-        for(auto& memory : q.cpu_buffers)
+        status = ext->hsa_amd_memory_pool_allocate_fn(cache->cpu_pool(), buffer_size, 0, &memory);
+        ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to allocate thread trace memory";
+        status = ext->hsa_amd_agents_allow_access_fn(1, &queue.near_cpu, nullptr, memory);
+        ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to allow CPU access";
+        status = ext->hsa_amd_agents_allow_access_fn(1, &queue.hsa_agent, nullptr, memory);
+        ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to allow GPU access";
+    }
+    if(num_buffers > 0) queue.copy_signal = make_signal(queue);
+    return queue;
+}
+
+void
+att_queue_destroy(att_queue_t& queue)
+{
+    queue.copy_signal.reset();
+    if(queue.kfd_memory)
+    {
+        queue.kfd_copy_queue.reset();
+        for(auto* memory : queue.cpu_buffers)
+            queue.kfd_memory->deallocate(memory);
+        queue.kfd_memory.reset();
+    }
+    else
+    {
+        auto* core   = CHECK_NOTNULL(hsa::get_core_table());
+        auto* ext    = CHECK_NOTNULL(hsa::get_amd_ext_table());
+        auto  status = core->hsa_queue_destroy_fn(queue.hsa_queue);
+        ROCP_WARNING_IF(status != HSA_STATUS_SUCCESS) << "Failed to destroy thread trace queue";
+        for(auto* memory : queue.cpu_buffers)
         {
-            CHECK_HSA(
-                ext->hsa_amd_memory_pool_allocate_fn(agent.cpu_pool(), buffer_size, 0, &memory),
-                "failed to allocate contiguous memory");
-            CHECK_HSA(ext->hsa_amd_agents_allow_access_fn(1, &q.near_cpu, nullptr, memory),
-                      "failed to allow cpu access");
-            CHECK_HSA(ext->hsa_amd_agents_allow_access_fn(1, &q.hsa_agent, nullptr, memory),
-                      "failed to allow gpu access");
+            status = ext->hsa_amd_memory_pool_free_fn(memory);
+            ROCP_WARNING_IF(status != HSA_STATUS_SUCCESS) << "Failed to free thread trace memory";
         }
+        queue.hsa_queue = nullptr;
     }
-
-    ROCP_TRACE << "Done constructing Async queue.";
-    return q;
+    queue.cpu_buffers.clear();
 }
 
 void
-att_queue_destroy(att_queue_t& q)
-{
-    ROCP_TRACE << "Destroying Async Queue...";
-    auto _queue_status = hsa::get_core_table()->hsa_queue_destroy_fn(q.hsa_queue);
-    ROCP_WARNING_IF(_queue_status != HSA_STATUS_SUCCESS)
-        << "Failed to destroy queue: " << _queue_status;
-
-    for(auto* memory : q.cpu_buffers)
-    {
-        if(memory == nullptr) continue;
-        auto _mem_status = hsa::get_amd_ext_table()->hsa_amd_memory_pool_free_fn(memory);
-        ROCP_WARNING_IF(_mem_status != HSA_STATUS_SUCCESS)
-            << "Failed to free memory pool: " << _mem_status;
-    }
-    q.cpu_buffers.clear();
-    q.hsa_queue = nullptr;
-}
-
-void
-att_queue_submit(const att_queue_t&            q,
+att_queue_submit(const att_queue_t&            queue,
                  hsa_ext_amd_aql_pm4_packet_t* packet,
-                 hsa_signal_t*                 completion)
+                 att_signal_t*                 completion)
 {
-    q.submit_fn(q, packet, completion);
+    queue.submit_fn(queue, packet, completion);
 }
 
 signal_ptr_t
-att_queue_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, bool wait)
+att_queue_submit(const att_queue_t& queue, hsa_ext_amd_aql_pm4_packet_t* packet, bool wait)
 {
-    signal_ptr_t sig{nullptr};
-    if(wait) sig = make_signal();
-
-    att_queue_submit(q, packet, sig.get());
-    return sig;
+    auto signal = signal_ptr_t{};
+    if(wait) signal = make_signal(queue);
+    att_queue_submit(queue, packet, signal.get());
+    return signal;
 }
 
 void
-att_queue_deleter_t::operator()(att_queue_t* q) const
+att_queue_copy(att_queue_t& queue, void* dst, const void* src, size_t size)
 {
-    if(q)
+    if(queue.kfd_copy_queue)
     {
-        att_queue_destroy(*q);
-        delete q;
+        queue.kfd_copy_queue->copy(dst, src, size);
+        return;
+    }
+
+    auto& completion = *CHECK_NOTNULL(queue.copy_signal.get());
+    completion.reset();
+    auto status =
+        CHECK_NOTNULL(hsa::get_amd_ext_table())
+            ->hsa_amd_memory_async_copy_fn(
+                dst, queue.near_cpu, src, queue.hsa_agent, size, 0, nullptr, completion.handle());
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to copy thread trace memory";
+    completion.wait();
+}
+
+void
+att_queue_deleter_t::operator()(att_queue_t* queue) const
+{
+    if(queue)
+    {
+        att_queue_destroy(*queue);
+        delete queue;
     }
 }
 
 att_queue_ptr_t
-make_att_queue(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers)
+make_att_queue(rocprofiler_agent_id_t             agent_id,
+               size_t                             buffer_size,
+               size_t                             num_buffers,
+               std::shared_ptr<kfd_memory_pool_t> kfd_memory)
 {
-    auto* q = new att_queue_t{att_queue_create(agent, buffer_size, num_buffers)};
-    return att_queue_ptr_t{q};
+    auto* queue = new att_queue_t{
+        att_queue_create(agent_id, buffer_size, num_buffers, std::move(kfd_memory))};
+    return att_queue_ptr_t{queue};
 }
 
-};  // namespace thread_trace
-};  // namespace rocprofiler
+}  // namespace thread_trace
+}  // namespace rocprofiler

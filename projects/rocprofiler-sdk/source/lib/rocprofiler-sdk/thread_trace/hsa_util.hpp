@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,106 +32,97 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
-// Lifecycle
-hsa_signal_t
-signal_create();
+class kfd_copy_queue_t;
+class kfd_memory_pool_t;
+class kfd_signal_t;
 
-hsa_signal_t
-signal_create(hsa_ext_amd_aql_pm4_packet_t* packet);
-
-void
-signal_destroy(hsa_signal_t sig);
-
-// Operations
-bool
-signal_wait(hsa_signal_t sig, int64_t timeout = INT64_MAX);
-
-void
-signal_reset(hsa_signal_t sig);
-
-// RAII helpers
-struct signal_deleter_t
+class att_signal_t
 {
-    void operator()(hsa_signal_t* s) const;
+public:
+    explicit att_signal_t(std::shared_ptr<kfd_memory_pool_t> kfd_memory = {});
+    ~att_signal_t();
+
+    att_signal_t(const att_signal_t&) = delete;
+    att_signal_t& operator=(const att_signal_t&) = delete;
+
+    hsa_signal_t handle() const;
+    void         reset();
+    void         wait() const;
+
+private:
+    hsa_signal_t                  _hsa_signal{};
+    std::unique_ptr<kfd_signal_t> _kfd_signal{};
 };
-using signal_ptr_t = std::unique_ptr<hsa_signal_t, signal_deleter_t>;
 
-signal_ptr_t
-make_signal();
+using signal_ptr_t = std::unique_ptr<att_signal_t>;
 
-signal_ptr_t
-make_signal(hsa_ext_amd_aql_pm4_packet_t* packet);
-
-/// Plain data struct for the async DMA queue used by thread trace copies.
 struct att_queue_t
 {
-    hsa_queue_t* hsa_queue{nullptr};
-    /// CPU staging buffers; size matches the user-supplied NUM_BUFFERS. Empty
-    /// in single-buffer (synchronous) mode.
-    std::vector<void*>     cpu_buffers{};
-    rocprofiler_agent_id_t agent_id{};
-    size_t                 buffer_size{0};
-    hsa_agent_t            hsa_agent{};
-    hsa_agent_t            near_cpu{};
+    std::shared_ptr<kfd_memory_pool_t> kfd_memory{};
+    std::shared_ptr<kfd_copy_queue_t>  kfd_copy_queue{};
+    signal_ptr_t                       copy_signal{};
+    hsa_queue_t*                       hsa_queue{nullptr};
+    std::vector<void*>                 cpu_buffers{};
+    rocprofiler_agent_id_t             agent_id{};
+    size_t                             buffer_size{0};
+    hsa_agent_t                        hsa_agent{};
+    hsa_agent_t                        near_cpu{};
 
-    /// Function pointer for submit — allows test injection (replaces virtual dispatch).
     void (*submit_fn)(const att_queue_t&            self,
                       hsa_ext_amd_aql_pm4_packet_t* packet,
-                      hsa_signal_t*                 completion){nullptr};
+                      att_signal_t*                 completion){nullptr};
 };
 
-/// @param buffer_size Bytes per CPU staging buffer (0 disables staging).
-/// @param num_buffers Number of CPU staging buffers to allocate (0 if unused).
-att_queue_t
-att_queue_create(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers = 0);
-
 void
-att_queue_destroy(att_queue_t& q);
+signal_wait(const att_signal_t& signal);
 
 signal_ptr_t
-att_queue_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, bool wait);
+make_signal(const att_queue_t& queue);
+
+att_queue_t
+att_queue_create(rocprofiler_agent_id_t             agent_id,
+                 size_t                             buffer_size,
+                 size_t                             num_buffers = 0,
+                 std::shared_ptr<kfd_memory_pool_t> kfd_memory  = {});
 
 void
-att_queue_submit(const att_queue_t&            q,
-                 hsa_ext_amd_aql_pm4_packet_t* packet,
-                 hsa_signal_t*                 completion);
+att_queue_destroy(att_queue_t& queue);
 
-/// Enqueues a sequence of packets and returns the completion signal of the last
-/// entry without waiting on it. Useful when the caller wants to fan out submissions
-/// to multiple queues and wait on them in parallel afterwards, or when a worker
-/// thread will be the one to observe completion.
+signal_ptr_t
+att_queue_submit(const att_queue_t& queue, hsa_ext_amd_aql_pm4_packet_t* packet, bool wait);
+
+void
+att_queue_submit(const att_queue_t&            queue,
+                 hsa_ext_amd_aql_pm4_packet_t* packet,
+                 att_signal_t*                 completion);
+
+void
+att_queue_copy(att_queue_t& queue, void* dst, const void* src, size_t size);
+
 template <typename VecType>
 signal_ptr_t
-att_queue_submit_signal_last(const att_queue_t& q, VecType& vec)
+att_queue_submit_signal_last(const att_queue_t& queue, VecType& packets)
 {
-    for(size_t i = 0; i < vec.size(); i++)
+    for(size_t i = 0; i < packets.size(); ++i)
     {
-        auto sig = att_queue_submit(q, &vec.at(i), i == vec.size() - 1);
-        if(sig) return sig;
+        auto signal = att_queue_submit(queue, &packets.at(i), i + 1 == packets.size());
+        if(signal) return signal;
     }
     return nullptr;
 }
 
-/// Enqueues a sequence of packets, waits for the last packet to complete, and
-/// returns its completion signal. AQL packets execute in submission order, so
-/// waiting on the last signal guarantees the entire batch has drained.
-template <typename VecType>
-signal_ptr_t
-att_queue_submit_and_wait_last(const att_queue_t& q, VecType& vec)
-{
-    auto sig = att_queue_submit_signal_last(q, vec);
-    if(sig) signal_wait(*sig);
-    return sig;
-}
-
 struct att_queue_deleter_t
 {
-    void operator()(att_queue_t* q) const;
+    void operator()(att_queue_t* queue) const;
 };
+
 using att_queue_ptr_t = std::unique_ptr<att_queue_t, att_queue_deleter_t>;
 
 att_queue_ptr_t
-make_att_queue(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers = 0);
+make_att_queue(rocprofiler_agent_id_t             agent_id,
+               size_t                             buffer_size,
+               size_t                             num_buffers = 0,
+               std::shared_ptr<kfd_memory_pool_t> kfd_memory  = {});
 
-};  // namespace thread_trace
-};  // namespace rocprofiler
+}  // namespace thread_trace
+}  // namespace rocprofiler
