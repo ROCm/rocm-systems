@@ -60,8 +60,21 @@ Nobody has shown that 100–300 MiB device-to-device copies, or concurrent cache
 kernels, are hot for a workload we care about. That is what decides whether this is ever worth
 enabling.
 
-## Side findings from the investigation
+## Where the measurements live
 
+The full investigation - measurement core, eight experiments, the inspection scripts, and the
+result set every figure above is pinned to - is on
+[`users/victzhan/AIRUNTIME-28-investigation`](https://github.com/ROCm/rocm-systems/tree/users/victzhan/AIRUNTIME-28-investigation/airuntime28),
+under `airuntime28/`. **That branch is not for merging**; it exists so these numbers can be
+re-derived rather than taken on trust.
+
+Start at `airuntime28/REPORT.md`. `METHOD.md` covers the controls and, more usefully, what is
+not controlled. `CHANGELOG.md` lists every claim an earlier revision of this work made and this
+one withdraws. Re-run everything with `airuntime28/remote/run_all.sh`, which writes a
+timestamped result set with provenance and fails loudly if any variant stops compiling to the
+instruction it claims.
+
+## Side findings from the investigation
 Two things worth knowing independently of this change:
 
 1. **gfx1250 does not retain GL2 across a kernel dispatch.** Not the fence scope (forcing

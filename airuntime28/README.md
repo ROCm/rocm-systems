@@ -26,3 +26,15 @@ results/<stamp>/  one self-describing result set per run, with provenance
 
 Run everything with `remote/run_all.sh`; see [REPRODUCE.md](REPRODUCE.md). The report's tables
 are regenerated from a result set's `rows.tsv` rather than hand-copied.
+
+## Where this lives
+
+| | |
+|---|---|
+| the CLR change | commit `81e65d6bbb` on [`users/victzhan/AIRUNTIME-28-nt-blit`](https://github.com/ROCm/rocm-systems/tree/users/victzhan/AIRUNTIME-28-nt-blit), based on `develop` |
+| this artifact | [`users/victzhan/AIRUNTIME-28-investigation`](https://github.com/ROCm/rocm-systems/tree/users/victzhan/AIRUNTIME-28-investigation/airuntime28) under `airuntime28/`. **Never merged** - it is a durable home for the measurements, not product code. |
+| PR description | [PR-BODY.md](PR-BODY.md), kept in the repo so it can be regenerated rather than retyped |
+
+The remote copy is pushed from here with `git archive --prefix=airuntime28/`, so this working
+copy is the source and that branch is the published form. Update it by re-pushing rather than
+by editing it in place, or the two will drift.
