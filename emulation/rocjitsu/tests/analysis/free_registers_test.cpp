@@ -23,20 +23,6 @@ namespace {
   return set;
 }
 
-TEST(FreeRegisters, AnyInRangeIsHalfOpen) {
-  const RegisterSet set = sgprs({4});
-  EXPECT_TRUE(any_in_range(set, RegClass::SGPR, 4, 1));
-  EXPECT_TRUE(any_in_range(set, RegClass::SGPR, 2, 3));
-  EXPECT_FALSE(any_in_range(set, RegClass::SGPR, 2, 2)) << "s4 is outside [2, 4)";
-  EXPECT_FALSE(any_in_range(set, RegClass::SGPR, 5, 4));
-}
-
-TEST(FreeRegisters, AnyInRangeIsClassSpecific) {
-  const RegisterSet set = sgprs({0});
-  EXPECT_TRUE(any_in_range(set, RegClass::SGPR, 0, 1));
-  EXPECT_FALSE(any_in_range(set, RegClass::VGPR, 0, 1));
-}
-
 TEST(FreeRegisters, FindsLowestQualifyingBase) {
   EXPECT_EQ(find_free_run(sgprs({0, 1}), RegClass::SGPR, 1, 0, 1, 16), 2);
   EXPECT_EQ(find_free_run(RegisterSet{}, RegClass::SGPR, 1, 0, 1, 16), 0);

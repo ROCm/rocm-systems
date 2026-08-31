@@ -24,10 +24,6 @@
 
 namespace rocjitsu {
 
-/// @brief Whether any register of @p cls in [@p base, @p base + @p count) is in @p set.
-[[nodiscard]] bool any_in_range(const RegisterSet &set, RegClass cls, uint16_t base,
-                                uint16_t count);
-
 /// @brief Lowest base of @p count consecutive registers absent from @p unavailable.
 ///
 /// @param unavailable Registers that must not be selected. Its meaning is the
@@ -35,7 +31,8 @@ namespace rocjitsu {
 /// @param cls Register class to search. Must be one RegisterSet models --
 ///        SGPR, VGPR, or ACC_VGPR. RegisterSet::contains() answers false for
 ///        every other class, so searching one would report the whole space free.
-/// @param count Number of consecutive registers required; must be non-zero.
+/// @param count Number of consecutive registers required; must be non-zero and
+///        must fit RegisterRef::width, which the tuple is tested through.
 /// @param search_start Lowest candidate base. Rounded up to @p base_alignment.
 /// @param base_alignment Required tuple-base alignment; must be a non-zero power
 ///        of two. Host operands that name a register pair need an even base.
