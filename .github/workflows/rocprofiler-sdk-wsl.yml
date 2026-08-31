@@ -144,14 +144,51 @@ jobs:
             echo "         the gnulinux platform instead and the WSL path goes untested."
           fi
 
+          # A ROCm for WSL install may only expose the versioned directory if the
+          # unversioned /opt/rocm symlink was never created. Accept the newest
+          # /opt/rocm-* in that case, and report which one was picked - the rest of
+          # the job reads the resolved path back from this file.
           if [ ! -d "${ROCM_PATH}" ]; then
-            echo "ERROR: ROCm not found at ${ROCM_PATH}."
+            newest=""
+            for candidate in /opt/rocm-*; do
+              [ -d "${candidate}" ] || continue
+              newest="${candidate}"
+            done
+            if [ -n "${newest}" ]; then
+              echo "NOTE: ${ROCM_PATH} does not exist; using ${newest} instead."
+              ROCM_PATH="${newest}"
+            fi
+          fi
+
+          if [ ! -d "${ROCM_PATH}" ]; then
+            echo "ERROR: no ROCm installation found at /opt/rocm or /opt/rocm-*."
             echo "       This job expects ROCm for WSL to be preinstalled in the"
             echo "       '${WSL_DISTRIBUTION}' distro on the runner."
             fail=1
           fi
 
-          [ "${fail}" -eq 0 ] || exit 1
+          if [ "${fail}" -ne 0 ]; then
+            # One failed run should be enough to tell us what this distro actually has,
+            # so dump the state a human would otherwise have to ask for.
+            echo "::group::WSL environment diagnostics"
+            echo "--- /etc/os-release ---"
+            cat /etc/os-release || true
+            echo "--- /dev/dxg, /dev/kfd ---"
+            ls -la /dev/dxg /dev/kfd 2>&1 || true
+            echo "--- /opt ---"
+            ls -la /opt 2>&1 || true
+            echo "--- installed rocm/hsa/amdgpu packages ---"
+            dpkg-query -W -f='${Package} ${Version}\n' 2>/dev/null \
+              | grep -E 'rocm|hsa|amdgpu|hip' || echo "(none)"
+            echo "--- apt sources mentioning radeon/rocm ---"
+            grep -rn -E 'radeon|rocm' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null \
+              || echo "(none)"
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          # Consumed by "Prepare build environment".
+          echo "${ROCM_PATH}" > "${HOME}/rocm-path.txt"
 
           echo "ROCm: $(readlink -f "${ROCM_PATH}")"
           cmake --version | head -1
@@ -184,8 +221,11 @@ jobs:
           set -euo pipefail
           # GitHub Actions `env:` does not cross the Windows/WSL boundary (that needs
           # WSLENV), so trusted values are interpolated into the script text instead.
-          ROCM_PATH='${{ env.ROCM_PATH }}'
           GPU_TARGET_FALLBACK='${{ env.GPU_TARGET_FALLBACK }}'
+
+          # "Verify WSL environment" already resolved this, possibly to a versioned
+          # /opt/rocm-* directory; use its answer rather than re-deriving it.
+          ROCM_PATH="$(cat "${HOME}/rocm-path.txt")"
           WIN_SDK_VERSION='${{ steps.detect-sdk.outputs.SDK_VERSION }}'
 
           if [ -z "${WIN_SDK_VERSION}" ]; then
