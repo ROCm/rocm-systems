@@ -432,7 +432,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     std::vector<uint32_t> &displaced_tail_words = entry_plan.displaced_tail_words;
     const uint32_t displaced_original_size = entry_plan.original_size;
     ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs =
-        moi_owner_epoch_vgpr_sources(candidate_options);
+        moi_owner_epoch_vgpr_sources(candidate_options.moi_owner_epoch_vgprs);
     if (private_layout || candidate_options.moi_persistent_sgprs.complete())
       owner_epoch_vgprs = materialize_sampled_owner_epoch_tail(
           static_cast<uint16_t>(resources->base + resources->count),
@@ -744,7 +744,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       candidate_options.moi_record_replay_workgroup_private_offsets =
           planned_patch.private_workgroup_offsets;
       ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs =
-          moi_owner_epoch_vgpr_sources(candidate_options);
+          moi_owner_epoch_vgpr_sources(candidate_options.moi_owner_epoch_vgprs);
       if (planned_patch.private_epoch_offset || candidate_options.moi_persistent_sgprs.complete())
         owner_epoch_vgprs = materialize_sampled_owner_epoch_tail(
             static_cast<uint16_t>(planned_patch.resources.base + planned_patch.resources.count),
@@ -1123,7 +1123,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             candidate_options.moi_record_replay_workgroup_private_offsets =
                 planned_patch.private_workgroup_offsets;
             ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs =
-                moi_owner_epoch_vgpr_sources(candidate_options);
+                moi_owner_epoch_vgpr_sources(candidate_options.moi_owner_epoch_vgprs);
             if (planned_patch.private_epoch_offset ||
                 candidate_options.moi_persistent_sgprs.complete())
               owner_epoch_vgprs = materialize_sampled_owner_epoch_tail(

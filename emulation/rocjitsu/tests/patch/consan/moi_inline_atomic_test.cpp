@@ -1057,7 +1057,8 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
         << "a full-table mask can address beyond the selected namespace";
     const auto mix_consumer_epoch = instrumentation::build_v_mul_lo_u32_literal(
         target.token_transaction_vsrc, /*temporary_vgpr=*/8u,
-        kConSanMoiInlineTokenConsumerEpochMultiplier, *moi_epoch_vgpr(options), target.arch);
+        kConSanMoiInlineTokenConsumerEpochMultiplier, options.moi_owner_epoch_vgprs->epoch,
+        target.arch);
     ASSERT_TRUE(mix_consumer_epoch);
     EXPECT_GT(count_subsequence(cave_words, *mix_consumer_epoch), 0u)
         << "reusable barriers must retain acquired evidence per consumer segment";
@@ -1071,9 +1072,9 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
     EXPECT_NE(std::find(cave_words.begin(), cave_words.end(),
                         build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, target.arch)),
               cave_words.end());
-    const auto advance_consumer_segment =
-        instrumentation::build_v_add_u32(*moi_epoch_vgpr(options), scalar_positive_inline_u32(1),
-                                         *moi_epoch_vgpr(options), target.arch);
+    const auto advance_consumer_segment = instrumentation::build_v_add_u32(
+        options.moi_owner_epoch_vgprs->epoch, scalar_positive_inline_u32(1),
+        options.moi_owner_epoch_vgprs->epoch, target.arch);
     ASSERT_TRUE(advance_consumer_segment);
     EXPECT_EQ(count_subsequence(cave_words, *advance_consumer_segment), 0u)
         << "release-sequence inheritance must not advance the consumer segment";
@@ -3788,9 +3789,9 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
   const ConSanMoiReportBufferLayout layout =
       consan_moi_inline_shadow_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
   EXPECT_TRUE(contains_subsequence(
-      release_words,
-      make_expected_offset_store_words(offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id),
-                                       *moi_owner_vgpr(options), *options.scratch_vgpr)));
+      release_words, make_expected_offset_store_words(
+                         offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id),
+                         options.moi_owner_epoch_vgprs->owner, *options.scratch_vgpr)));
   EXPECT_TRUE(contains_subsequence(
       release_words,
       make_expected_offset_store_words(offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch_plus_one),
@@ -3891,12 +3892,12 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
       acquire_words, make_expected_offset_store_words(
                          offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one),
                          /*value_vgpr=*/27, *options.scratch_vgpr)));
-  const auto advance_consumer_segment =
-      instrumentation::build_v_add_u32(*moi_epoch_vgpr(options), scalar_positive_inline_u32(1),
-                                       *moi_epoch_vgpr(options), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto advance_consumer_segment = instrumentation::build_v_add_u32(
+      options.moi_owner_epoch_vgprs->epoch, scalar_positive_inline_u32(1),
+      options.moi_owner_epoch_vgprs->epoch, ROCJITSU_CODE_ARCH_RDNA4);
   const auto saturate_consumer_segment = instrumentation::build_v_min_u32_literal(
-      *moi_epoch_vgpr(options), consan_moi_exact_shadow::max_epoch, *moi_epoch_vgpr(options),
-      ROCJITSU_CODE_ARCH_RDNA4);
+      options.moi_owner_epoch_vgprs->epoch, consan_moi_exact_shadow::max_epoch,
+      options.moi_owner_epoch_vgprs->epoch, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(advance_consumer_segment);
   ASSERT_TRUE(saturate_consumer_segment);
   std::vector<uint32_t> consumer_segment_advance(advance_consumer_segment->begin(),
@@ -3925,8 +3926,8 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
          "reservation odd";
 
   const auto forbidden_epoch_import =
-      build_v_add_nc_u32_e32(*moi_epoch_vgpr(options), scalar_positive_inline_u32(1), /*vsrc1=*/10,
-                             ROCJITSU_CODE_ARCH_RDNA4);
+      build_v_add_nc_u32_e32(options.moi_owner_epoch_vgprs->epoch, scalar_positive_inline_u32(1),
+                             /*vsrc1=*/10, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_original_exec =
       build_s_mov_b64(kRdna4ExecLo, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u),
                       ROCJITSU_CODE_ARCH_RDNA4);
@@ -4005,12 +4006,12 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   constexpr uint16_t kScalarInlineNegativeOneOperand = 193u;
   const auto widen_consumer_segment = instrumentation::build_s_mov_b64(
       kRdna4ExecLo, kScalarInlineNegativeOneOperand, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto advance_consumer_segment =
-      instrumentation::build_v_add_u32(*moi_epoch_vgpr(options), scalar_positive_inline_u32(1),
-                                       *moi_epoch_vgpr(options), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto advance_consumer_segment = instrumentation::build_v_add_u32(
+      options.moi_owner_epoch_vgprs->epoch, scalar_positive_inline_u32(1),
+      options.moi_owner_epoch_vgprs->epoch, ROCJITSU_CODE_ARCH_RDNA4);
   const auto saturate_consumer_segment = instrumentation::build_v_min_u32_literal(
-      *moi_epoch_vgpr(options), consan_moi_exact_shadow::max_epoch, *moi_epoch_vgpr(options),
-      ROCJITSU_CODE_ARCH_RDNA4);
+      options.moi_owner_epoch_vgprs->epoch, consan_moi_exact_shadow::max_epoch,
+      options.moi_owner_epoch_vgprs->epoch, ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_validated_acquire_exec =
       instrumentation::build_s_mov_b64(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 16u),
                                        kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);

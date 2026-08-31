@@ -6295,8 +6295,8 @@ TEST(ConSanMoi, SampledQualifiedBarrierPublishesSelectedEpochTransition) {
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
   EXPECT_NE(std::ranges::find(trampoline, words[kWait]), trampoline.end());
   const auto advance =
-      build_v_add_nc_u32_e32(*moi_epoch_vgpr(options), scalar_positive_inline_u32(1),
-                             *moi_epoch_vgpr(options), ROCJITSU_CODE_ARCH_RDNA4);
+      build_v_add_nc_u32_e32(options.moi_owner_epoch_vgprs->epoch, scalar_positive_inline_u32(1),
+                             options.moi_owner_epoch_vgprs->epoch, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(advance);
   EXPECT_NE(std::ranges::find(trampoline, *advance), trampoline.end());
   const auto descriptor = encode_consan_moi_sampled_sync_metadata({
@@ -6313,8 +6313,9 @@ TEST(ConSanMoi, SampledQualifiedBarrierPublishesSelectedEpochTransition) {
   EXPECT_TRUE(contains_subsequence(trampoline, *descriptor_literal));
   expect_sampled_barrier_exact_existing_metadata_path(result, *patch, ROCJITSU_CODE_ARCH_RDNA4);
 
-  const auto select_owner_zero = build_v_cmp_eq_u32_e32_vcc(
-      scalar_positive_inline_u32(0), *moi_owner_vgpr(options), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto select_owner_zero =
+      build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0),
+                                 options.moi_owner_epoch_vgprs->owner, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_owner_wave =
       build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(select_owner_zero);
@@ -8306,8 +8307,9 @@ TEST(ConSanMoi, Gfx1250SampledBarrierDoesNotGateWorkgroupsForAddressSampling) {
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
   const auto obsolete_workgroup_gate_shift = build_s_lshr_b32(
       /*sdst=*/85u, /*ssrc0=*/86u, scalar_positive_inline_u32(6u), ROCJITSU_CODE_ARCH_CDNA5);
-  const auto owner_election = build_v_cmp_eq_u32_e32_vcc(
-      scalar_positive_inline_u32(0), *moi_owner_vgpr(options), ROCJITSU_CODE_ARCH_CDNA5);
+  const auto owner_election =
+      build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0),
+                                 options.moi_owner_epoch_vgprs->owner, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(owner_election);
   const auto barrier = std::ranges::find(trampoline, words[401]);
   const auto owner = std::ranges::find(trampoline, *owner_election);

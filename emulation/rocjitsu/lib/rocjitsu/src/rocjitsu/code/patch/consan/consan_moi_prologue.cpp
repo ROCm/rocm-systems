@@ -2353,7 +2353,7 @@ void try_apply_owner_epoch_prologue_patch(
     if (!result.errors.empty() || result.moi_operating_point.owner_persistent_vgprs.empty())
       return;
   }
-  if ((!moi_owner_vgpr(options) || !moi_epoch_vgpr(options)) &&
+  if (!options.moi_owner_epoch_vgprs.complete() &&
       result.moi_operating_point.owner_persistent_vgprs.empty() &&
       !options.moi_persistent_sgprs.complete()) {
     result.errors.emplace_back(
@@ -2361,8 +2361,8 @@ void try_apply_owner_epoch_prologue_patch(
         "RJ_CONSAN_MOI_EPOCH_VGPR");
     return;
   }
-  if (moi_owner_vgpr(options) && moi_epoch_vgpr(options) &&
-      *moi_owner_vgpr(options) == *moi_epoch_vgpr(options)) {
+  if (options.moi_owner_epoch_vgprs.complete() &&
+      options.moi_owner_epoch_vgprs->owner == options.moi_owner_epoch_vgprs->epoch) {
     result.errors.emplace_back("ConSan MOI owner and epoch VGPRs must be distinct");
     return;
   }
@@ -2471,7 +2471,8 @@ void try_apply_owner_epoch_prologue_patch(
       return;
     }
     const ConSanMoiDispatchIdCapture dispatch_capture = dispatch_id_capture(kernel_options);
-    ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(kernel_options);
+    ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs =
+        moi_owner_epoch_vgpr_sources(kernel_options.moi_owner_epoch_vgprs);
     if (options.moi_persistent_sgprs.complete()) {
       const auto scratch =
           std::ranges::find(prologue_scratch_assignments, kernel.descriptor_file_offset,

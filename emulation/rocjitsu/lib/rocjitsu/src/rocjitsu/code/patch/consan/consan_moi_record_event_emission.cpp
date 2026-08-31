@@ -65,13 +65,13 @@ using consan_moi_detail::kFenceRecordLayout;
         "ConSan MOI barrier record patch requires an even RJ_CONSAN_MOI_EXEC_SAVE_SGPR in 0..100");
     return std::nullopt;
   }
-  if (reject_optional_scratch_range_overlap(moi_owner_vgpr(options), *options.scratch_vgpr, 6,
-                                            "MOI owner", errors))
+  if (reject_optional_scratch_range_overlap(options.moi_owner_epoch_vgprs.owner(),
+                                            *options.scratch_vgpr, 6, "MOI owner", errors))
     return std::nullopt;
 
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
-  if (!moi_owner_vgpr(options) && !options.moi_persistent_sgprs.owner()) {
+  if (!options.moi_owner_epoch_vgprs.owner() && !options.moi_persistent_sgprs.owner()) {
     if (!derived_owner) {
       errors.emplace_back("ConSan MOI barrier record patch requires a planned owner derivation");
       return std::nullopt;
@@ -202,11 +202,11 @@ using consan_moi_detail::kFenceRecordLayout;
           barrier_record_base + offsetof(ConSanMoiBarrierRecord, lane_mask) + sizeof(uint32_t),
           static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u), slot_vgpr, *options.scratch_vgpr,
           arch) ||
-      (moi_owner_vgpr(options) &&
+      (options.moi_owner_epoch_vgprs.owner() &&
        !append_dynamic_record_store_u32_vgpr(
            record_words, kBarrierRecordLayout,
            barrier_record_base + offsetof(ConSanMoiBarrierRecord, wave_id),
-           *moi_owner_vgpr(options), slot_vgpr, *options.scratch_vgpr, arch)) ||
+           options.moi_owner_epoch_vgprs->owner, slot_vgpr, *options.scratch_vgpr, arch)) ||
       (options.moi_persistent_sgprs.owner() &&
        !append_dynamic_record_store_u32_scalar_src(
            record_words, kBarrierRecordLayout,
@@ -281,10 +281,12 @@ using consan_moi_detail::kFenceRecordLayout;
   }
   if (reject_atomic_candidate_scratch_overlap(candidate.lowering_form, *options.scratch_vgpr,
                                               address_plan.scratch_vgpr_count, errors) ||
-      reject_optional_scratch_range_overlap(moi_owner_vgpr(options), *options.scratch_vgpr,
-                                            address_plan.scratch_vgpr_count, "MOI owner", errors) ||
-      reject_optional_scratch_range_overlap(moi_epoch_vgpr(options), *options.scratch_vgpr,
-                                            address_plan.scratch_vgpr_count, "MOI epoch", errors))
+      reject_optional_scratch_range_overlap(options.moi_owner_epoch_vgprs.owner(),
+                                            *options.scratch_vgpr, address_plan.scratch_vgpr_count,
+                                            "MOI owner", errors) ||
+      reject_optional_scratch_range_overlap(options.moi_owner_epoch_vgprs.epoch(),
+                                            *options.scratch_vgpr, address_plan.scratch_vgpr_count,
+                                            "MOI epoch", errors))
     return std::nullopt;
 
   if (!address_plan.supported()) {
@@ -295,7 +297,7 @@ using consan_moi_detail::kFenceRecordLayout;
   (void)record_index;
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
-  if (!moi_owner_vgpr(options) && !options.moi_persistent_sgprs.owner()) {
+  if (!options.moi_owner_epoch_vgprs.owner() && !options.moi_persistent_sgprs.owner()) {
     if (!derived_owner) {
       errors.emplace_back("ConSan MOI atomic record patch requires a planned owner derivation");
       return std::nullopt;
@@ -595,16 +597,16 @@ using consan_moi_detail::kFenceRecordLayout;
           record_words, kAtomicRecordLayout,
           atomic_record_base + offsetof(ConSanMoiAtomicRecord, workgroup_z), workgroup_sources.z,
           slot_vgpr, *options.scratch_vgpr, arch) ||
-      (moi_owner_vgpr(options) &&
+      (options.moi_owner_epoch_vgprs.owner() &&
        !append_dynamic_record_store_u32_vgpr(
            record_words, kAtomicRecordLayout,
-           atomic_record_base + offsetof(ConSanMoiAtomicRecord, owner_id), *moi_owner_vgpr(options),
-           slot_vgpr, *options.scratch_vgpr, arch)) ||
-      (moi_epoch_vgpr(options) &&
+           atomic_record_base + offsetof(ConSanMoiAtomicRecord, owner_id),
+           options.moi_owner_epoch_vgprs->owner, slot_vgpr, *options.scratch_vgpr, arch)) ||
+      (options.moi_owner_epoch_vgprs.epoch() &&
        !append_dynamic_record_store_u32_vgpr(
            record_words, kAtomicRecordLayout,
-           atomic_record_base + offsetof(ConSanMoiAtomicRecord, epoch), *moi_epoch_vgpr(options),
-           slot_vgpr, *options.scratch_vgpr, arch)) ||
+           atomic_record_base + offsetof(ConSanMoiAtomicRecord, epoch),
+           options.moi_owner_epoch_vgprs->epoch, slot_vgpr, *options.scratch_vgpr, arch)) ||
       (options.moi_persistent_sgprs.epoch() &&
        !append_dynamic_record_store_u32_scalar_src(
            record_words, kAtomicRecordLayout,
@@ -740,10 +742,12 @@ using consan_moi_detail::kFenceRecordLayout;
       reject_atomic_candidate_scratch_overlap(candidate.communication_lowering_form,
                                               *options.scratch_vgpr,
                                               address_plan.scratch_vgpr_count, errors) ||
-      reject_optional_scratch_range_overlap(moi_owner_vgpr(options), *options.scratch_vgpr,
-                                            address_plan.scratch_vgpr_count, "MOI owner", errors) ||
-      reject_optional_scratch_range_overlap(moi_epoch_vgpr(options), *options.scratch_vgpr,
-                                            address_plan.scratch_vgpr_count, "MOI epoch", errors))
+      reject_optional_scratch_range_overlap(options.moi_owner_epoch_vgprs.owner(),
+                                            *options.scratch_vgpr, address_plan.scratch_vgpr_count,
+                                            "MOI owner", errors) ||
+      reject_optional_scratch_range_overlap(options.moi_owner_epoch_vgprs.epoch(),
+                                            *options.scratch_vgpr, address_plan.scratch_vgpr_count,
+                                            "MOI epoch", errors))
     return std::nullopt;
   if (candidate.patch_file_offset > bytes.size() ||
       candidate.patch_size > bytes.size() - candidate.patch_file_offset) {
@@ -753,7 +757,7 @@ using consan_moi_detail::kFenceRecordLayout;
 
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
-  if (!moi_owner_vgpr(options) && !options.moi_persistent_sgprs.owner()) {
+  if (!options.moi_owner_epoch_vgprs.owner() && !options.moi_persistent_sgprs.owner()) {
     if (!derived_owner) {
       errors.emplace_back("ConSan MOI fence record patch requires a planned owner derivation");
       return std::nullopt;
@@ -935,20 +939,20 @@ using consan_moi_detail::kFenceRecordLayout;
             record_words, kFenceRecordLayout,
             record_base + offsetof(ConSanMoiFenceRecord, workgroup_z), workgroup_sources.z,
             slot_vgpr, *options.scratch_vgpr, arch) ||
-        (moi_owner_vgpr(options) &&
+        (options.moi_owner_epoch_vgprs.owner() &&
          !append_dynamic_record_store_u32_vgpr(
              record_words, kFenceRecordLayout,
-             record_base + offsetof(ConSanMoiFenceRecord, owner_id), *moi_owner_vgpr(options),
-             slot_vgpr, *options.scratch_vgpr, arch)) ||
+             record_base + offsetof(ConSanMoiFenceRecord, owner_id),
+             options.moi_owner_epoch_vgprs->owner, slot_vgpr, *options.scratch_vgpr, arch)) ||
         (options.moi_persistent_sgprs.owner() &&
          !append_dynamic_record_store_u32_scalar_src(
              record_words, kFenceRecordLayout,
              record_base + offsetof(ConSanMoiFenceRecord, owner_id),
              *options.moi_persistent_sgprs.owner(), slot_vgpr, *options.scratch_vgpr, arch)) ||
-        (moi_epoch_vgpr(options) &&
+        (options.moi_owner_epoch_vgprs.epoch() &&
          !append_dynamic_record_store_u32_vgpr(
              record_words, kFenceRecordLayout, record_base + offsetof(ConSanMoiFenceRecord, epoch),
-             *moi_epoch_vgpr(options), slot_vgpr, *options.scratch_vgpr, arch)) ||
+             options.moi_owner_epoch_vgprs->epoch, slot_vgpr, *options.scratch_vgpr, arch)) ||
         (options.moi_persistent_sgprs.epoch() &&
          !append_dynamic_record_store_u32_scalar_src(
              record_words, kFenceRecordLayout, record_base + offsetof(ConSanMoiFenceRecord, epoch),

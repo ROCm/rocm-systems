@@ -68,13 +68,13 @@ bool moi_has_runtime_hardware_dispatch_id(const ConSanMoiOperatingPoint &point) 
 void note_moi_persistent_vgpr_state(ConSanPatchAbiEffects &effects,
                                     const ConSanMoiOperatingPoint &point,
                                     const ConSanMoiOperatingPoint &allocation) {
-  effects.persistent_owner_vgpr = moi_owner_vgpr(point);
-  effects.persistent_epoch_vgpr = moi_epoch_vgpr(point);
+  effects.persistent_owner_vgpr = point.moi_owner_epoch_vgprs.owner();
+  effects.persistent_epoch_vgpr = point.moi_owner_epoch_vgprs.epoch();
   effects.persistent_workgroup_key_vgpr = point.moi_workgroup_key_vgpr;
   effects.persistent_record_replay_workgroup_vgprs = point.moi_record_replay_workgroup_vgprs;
   effects.persistent_vgpr_state_owner_local = !allocation.owner_persistent_vgprs.empty();
   effects.persistent_vgpr_state_is_abi =
-      moi_owner_vgpr(point) && moi_epoch_vgpr(point) && !point.moi_persistent_sgprs.complete();
+      point.moi_owner_epoch_vgprs.complete() && !point.moi_persistent_sgprs.complete();
 }
 
 } // namespace rocjitsu::consan_moi_detail

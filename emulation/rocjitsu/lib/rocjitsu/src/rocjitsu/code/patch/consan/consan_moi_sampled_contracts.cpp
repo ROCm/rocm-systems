@@ -19,7 +19,7 @@ bool sampled_access_supports_spill_backed_operand_recovery(const ConSanRequest &
 bool sampled_access_can_emit_spill_over_guest_operands(const ConSanMoiOperatingPoint &point,
                                                        const ConSanMoiCandidate &candidate) {
   return candidate.lowering.form && !candidate.lowering.form->destination_vgpr &&
-         !candidate.is_direct_to_lds() && moi_owner_vgpr(point) &&
+         !candidate.is_direct_to_lds() && point.moi_owner_epoch_vgprs.owner() &&
          !point.automatic_moi_private_epoch && !point.moi_persistent_sgprs.complete() &&
          !candidate_requires_flat_address_materialization(candidate);
 }

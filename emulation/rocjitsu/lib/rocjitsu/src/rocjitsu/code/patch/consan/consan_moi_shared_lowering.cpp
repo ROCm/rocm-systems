@@ -98,8 +98,8 @@ common_moi_workitem_owner_shift(std::span<const uint8_t> image,
 [[nodiscard]] bool moi_record_uses_private_owner(const ConSanRequest &request,
                                                  const ConSanMoiOperatingPoint &point) {
   return moi_initializes_owner_epoch(request, point) && point.automatic_moi_private_epoch &&
-         request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId && !moi_owner_vgpr(point) &&
-         !point.moi_persistent_sgprs.owner();
+         request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId &&
+         !point.moi_owner_epoch_vgprs.owner() && !point.moi_persistent_sgprs.owner();
 }
 
 [[nodiscard]] std::optional<MoiWorkitemOwnerDerivationPlan> resolve_moi_private_workitem_owner(
@@ -793,10 +793,10 @@ private:
         "s_*_saveexec");
     return std::nullopt;
   }
-  if (reject_optional_scratch_range_overlap(moi_owner_vgpr(point), scratch_vgpr, scratch_count,
-                                            "MOI owner", errors) ||
-      reject_optional_scratch_range_overlap(moi_epoch_vgpr(point), scratch_vgpr, scratch_count,
-                                            "MOI epoch", errors) ||
+  if (reject_optional_scratch_range_overlap(point.moi_owner_epoch_vgprs.owner(), scratch_vgpr,
+                                            scratch_count, "MOI owner", errors) ||
+      reject_optional_scratch_range_overlap(point.moi_owner_epoch_vgprs.epoch(), scratch_vgpr,
+                                            scratch_count, "MOI epoch", errors) ||
       reject_optional_scratch_range_overlap(point.moi_workgroup_key_vgpr, scratch_vgpr,
                                             scratch_count, "MOI workgroup key", errors))
     return std::nullopt;
@@ -826,7 +826,7 @@ private:
   }
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
-  if (!moi_owner_vgpr(point) && !point.moi_persistent_sgprs.owner()) {
+  if (!point.moi_owner_epoch_vgprs.owner() && !point.moi_persistent_sgprs.owner()) {
     if (!owner_derivation) {
       errors.emplace_back("ConSan MOI first-light probe requires a planned owner derivation");
       return std::nullopt;
@@ -858,8 +858,8 @@ private:
 
   std::vector<uint32_t> words;
   words.reserve(candidate.size() / sizeof(uint32_t) + 1u + 7u * 12u + 9u + 10u + 20u + 24u +
-                (moi_owner_vgpr(point) || derived_owner_vgpr ? 9u : 0u) +
-                (moi_epoch_vgpr(point) ? 9u : 0u) + derived_owner_words.size());
+                (point.moi_owner_epoch_vgprs.owner() || derived_owner_vgpr ? 9u : 0u) +
+                (point.moi_owner_epoch_vgprs.epoch() ? 9u : 0u) + derived_owner_words.size());
   InstructionSequence sequence(words);
   const auto restore_exec_label = sequence.make_label();
   // A DS load may overwrite the same VGPR that supplied its address. Preserve
@@ -1061,16 +1061,16 @@ private:
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, lane_mask) + sizeof(uint32_t),
               static_cast<uint16_t>(*point.moi_exec_save_sgpr + 1u), slot_vgpr, scratch_vgpr,
               arch) ||
-          (moi_owner_vgpr(point) &&
+          (point.moi_owner_epoch_vgprs.owner() &&
            !append_dynamic_record_store_u32_vgpr(
                words, kAccessRecordLayout,
                dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
-               *moi_owner_vgpr(point), slot_vgpr, scratch_vgpr, arch)) ||
-          (moi_epoch_vgpr(point) &&
+               point.moi_owner_epoch_vgprs->owner, slot_vgpr, scratch_vgpr, arch)) ||
+          (point.moi_owner_epoch_vgprs.epoch() &&
            !append_dynamic_record_store_u32_vgpr(
                words, kAccessRecordLayout,
-               dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch), *moi_epoch_vgpr(point),
-               slot_vgpr, scratch_vgpr, arch)) ||
+               dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch),
+               point.moi_owner_epoch_vgprs->epoch, slot_vgpr, scratch_vgpr, arch)) ||
           !append_dynamic_record_store_u32_literal(
               words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, instruction_offset),
@@ -1211,9 +1211,9 @@ private:
     return append.emit_all(low_xor_literal, low_xor, high_xor_literal, high_xor);
   };
   const auto append_owner_id = [&](uint16_t destination_vgpr) {
-    if (moi_owner_vgpr(point)) {
-      words.push_back(
-          build_v_mov_b32_e32(destination_vgpr, vector_source_vgpr(*moi_owner_vgpr(point)), arch));
+    if (point.moi_owner_epoch_vgprs.owner()) {
+      words.push_back(build_v_mov_b32_e32(
+          destination_vgpr, vector_source_vgpr(point.moi_owner_epoch_vgprs->owner), arch));
       return true;
     }
     if (point.moi_persistent_sgprs.owner()) {
@@ -1788,13 +1788,15 @@ private:
                            automatic_banked_capture
                                ? static_cast<uint16_t>(address_group_exec_sgpr + 1u)
                                : static_cast<uint16_t>(*point.moi_exec_save_sgpr + 1u)) ||
-        (moi_owner_vgpr(point) &&
-         !record.store_vgpr(offsetof(ConSanMoiAccessRecord, wave_id), *moi_owner_vgpr(point))) ||
+        (point.moi_owner_epoch_vgprs.owner() &&
+         !record.store_vgpr(offsetof(ConSanMoiAccessRecord, wave_id),
+                            point.moi_owner_epoch_vgprs->owner)) ||
         (point.moi_persistent_sgprs.owner() &&
          !record.store_sgpr(offsetof(ConSanMoiAccessRecord, wave_id),
                             *point.moi_persistent_sgprs.owner())) ||
-        (moi_epoch_vgpr(point) &&
-         !record.store_vgpr(offsetof(ConSanMoiAccessRecord, epoch), *moi_epoch_vgpr(point))) ||
+        (point.moi_owner_epoch_vgprs.epoch() &&
+         !record.store_vgpr(offsetof(ConSanMoiAccessRecord, epoch),
+                            point.moi_owner_epoch_vgprs->epoch)) ||
         !record.store_literal(offsetof(ConSanMoiAccessRecord, instruction_offset),
                               static_cast<uint32_t>(candidate.anchor())) ||
         !record.store_literal(offsetof(ConSanMoiAccessRecord, site_token), site_token) ||
@@ -2324,8 +2326,8 @@ private:
     uint16_t owner_backup_vgpr, rj_code_arch_t arch,
     const std::optional<MoiWorkitemOwnerDerivationPlan> &owner_derivation,
     std::vector<std::string> &errors) {
-  if (moi_owner_vgpr(point)) {
-    return append_add_shifted_vgpr_field(words, low_vgpr, *moi_owner_vgpr(point),
+  if (point.moi_owner_epoch_vgprs.owner()) {
+    return append_add_shifted_vgpr_field(words, low_vgpr, point.moi_owner_epoch_vgprs->owner,
                                          consan_moi_exact_shadow::owner_shift,
                                          consan_moi_exact_shadow::max_owner, tmp_vgpr, arch);
   }
@@ -2412,8 +2414,8 @@ private:
                                                     uint16_t low_vgpr, uint16_t tmp_vgpr,
                                                     rj_code_arch_t arch,
                                                     std::vector<std::string> &errors) {
-  if (moi_epoch_vgpr(point)) {
-    return append_add_shifted_vgpr_field(words, low_vgpr, *moi_epoch_vgpr(point),
+  if (point.moi_owner_epoch_vgprs.epoch()) {
+    return append_add_shifted_vgpr_field(words, low_vgpr, point.moi_owner_epoch_vgprs->epoch,
                                          consan_moi_exact_shadow::epoch_shift,
                                          consan_moi_exact_shadow::max_epoch, tmp_vgpr, arch);
   }

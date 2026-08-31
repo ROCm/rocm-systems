@@ -956,7 +956,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
           "ConSan MOI sampled barrier sync lost its persistent VGPR assignment");
       return false;
     } else
-      owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_options);
+      owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_options.moi_owner_epoch_vgprs);
     auto cave_words = build_sampled_barrier_sync_cave_words(
         bytes, planned.candidate, candidate_options, candidate_options, candidate_options,
         owner_epoch_vgprs, planned.resources.base, planned.spill ? &*planned.spill : nullptr,
@@ -1267,7 +1267,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
               "ConSan MOI sampled dense barrier lost its persistent VGPR assignment");
           return;
         } else
-          owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_options);
+          owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_options.moi_owner_epoch_vgprs);
         const uint64_t body_offset = new_text.size();
         const auto vgpr_msb_mode = consan_selectable_vgpr_bank_mode_at(
             arch, active_bytes, planned.candidate.barrier.text_file_offset,
@@ -2087,7 +2087,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
           "ConSan MOI sampled atomic sync lost its persistent VGPR assignment");
       return std::nullopt;
     } else
-      owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_options);
+      owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_options.moi_owner_epoch_vgprs);
     const uint64_t return_text_offset =
         preserve_guest_at_anchor ? planned.physical_anchor_offset
                                  : planned.physical_anchor_offset + planned.relocated_guest_size;

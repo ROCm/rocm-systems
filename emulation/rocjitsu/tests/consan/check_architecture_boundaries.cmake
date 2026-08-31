@@ -201,6 +201,11 @@ foreach(_file IN LISTS _consan_production_files)
         "moi_(inline|record_replay)_(indirect_(pc|scc)|dispatch_key|call_return)_sgpr|moi_router_(indirect_(pc|scc)|dispatch_key|call_return)_sgpr|moi_inline_(branch_only_scalar_spill|dynamic_stack_borrowed_sgpr)"
         "scalar-router and branch-only preservation state must remain shared typed allocations"
     )
+    _consan_assert_no_match(
+        "${_file}"
+        "(^|[^A-Za-z0-9_])moi_(owner|epoch)_vgpr[(]"
+        "accepted owner and epoch projections must stay on the typed pair"
+    )
 endforeach()
 
 # Dispatch identity is one typed allocation. Its scalar/vector choice and
@@ -252,6 +257,21 @@ _consan_assert_no_match(
     "std::optional<uint16_t>[ \t]+(owner|epoch)[ \t]*;"
     "relay-visible persistent owner and epoch VGPRs must remain one typed pair"
 )
+_consan_assert_match_count_at_most(
+    "${_consan_dir}/consan_options.h.inc"
+    "std::optional<ConSanMoiOwnerEpochRegisters>"
+    1
+    "only the typed owner/epoch state may store an optional raw pair"
+)
+foreach(_file IN LISTS _consan_production_files)
+    if(NOT _file STREQUAL "${_consan_dir}/consan_options.h.inc")
+        _consan_assert_no_match(
+            "${_file}"
+            "std::optional<ConSanMoiOwnerEpochRegisters>"
+            "accepted owner/epoch carriers must reuse the typed state"
+        )
+    endif()
+endforeach()
 
 # Semantic policy owns meaning, never an ISA recipe or product identity.
 set(

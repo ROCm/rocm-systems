@@ -272,6 +272,34 @@ struct ConSanMoiOwnerEpochRegisters {
   auto operator<=>(const ConSanMoiOwnerEpochRegisters &) const = default;
 };
 
+/// Optional accepted owner/epoch register state. The pair can be absent but
+/// cannot be represented or mutated one register at a time.
+class ConSanMoiOwnerEpochRegisterState {
+public:
+  ConSanMoiOwnerEpochRegisterState() = default;
+  ConSanMoiOwnerEpochRegisterState(ConSanMoiOwnerEpochRegisters registers)
+      : registers_(registers) {}
+
+  [[nodiscard]] std::optional<uint16_t> owner() const {
+    return registers_ ? std::optional{registers_->owner} : std::nullopt;
+  }
+  [[nodiscard]] std::optional<uint16_t> epoch() const {
+    return registers_ ? std::optional{registers_->epoch} : std::nullopt;
+  }
+  [[nodiscard]] bool complete() const { return registers_.has_value(); }
+  [[nodiscard]] explicit operator bool() const { return complete(); }
+  [[nodiscard]] const ConSanMoiOwnerEpochRegisters *operator->() const { return &*registers_; }
+  void set_owner_epoch(uint16_t owner, uint16_t epoch) {
+    registers_ = ConSanMoiOwnerEpochRegisters{owner, epoch};
+  }
+  void reset_owner_epoch() { registers_.reset(); }
+
+  auto operator<=>(const ConSanMoiOwnerEpochRegisterState &) const = default;
+
+private:
+  std::optional<ConSanMoiOwnerEpochRegisters> registers_;
+};
+
 /// Effective per-site vector sources. Unlike accepted persistent allocation,
 /// materialization may provide only one half when the other value is derived
 /// directly at the probe.
@@ -280,20 +308,9 @@ struct ConSanMoiOwnerEpochVgprSources {
   std::optional<uint16_t> epoch;
 };
 
-template <typename State>
-[[nodiscard]] ConSanMoiOwnerEpochVgprSources moi_owner_epoch_vgpr_sources(const State &state) {
-  return state.moi_owner_epoch_vgprs
-             ? ConSanMoiOwnerEpochVgprSources{state.moi_owner_epoch_vgprs->owner,
-                                              state.moi_owner_epoch_vgprs->epoch}
-             : ConSanMoiOwnerEpochVgprSources{};
-}
-
-template <typename State> [[nodiscard]] std::optional<uint16_t> moi_owner_vgpr(const State &state) {
-  return moi_owner_epoch_vgpr_sources(state).owner;
-}
-
-template <typename State> [[nodiscard]] std::optional<uint16_t> moi_epoch_vgpr(const State &state) {
-  return moi_owner_epoch_vgpr_sources(state).epoch;
+[[nodiscard]] inline ConSanMoiOwnerEpochVgprSources
+moi_owner_epoch_vgpr_sources(const ConSanMoiOwnerEpochRegisterState &state) {
+  return {state.owner(), state.epoch()};
 }
 
 /// Exact ordinary-SGPR ABI that retains MOI state across arbitrary guest
@@ -304,19 +321,8 @@ template <typename State> [[nodiscard]] std::optional<uint16_t> moi_epoch_vgpr(c
 /// kernel consumes that choice. Emitted prologue metadata records the same
 /// value so the final mechanism remains self-describing after mutable lowering
 /// state is gone; it is not an independently reconstructed representation.
-class ConSanMoiPersistentSgprState {
+class ConSanMoiPersistentSgprState : public ConSanMoiOwnerEpochRegisterState {
 public:
-  [[nodiscard]] std::optional<uint16_t> owner() const {
-    return owner_epoch_ ? std::optional{owner_epoch_->owner} : std::nullopt;
-  }
-  [[nodiscard]] std::optional<uint16_t> epoch() const {
-    return owner_epoch_ ? std::optional{owner_epoch_->epoch} : std::nullopt;
-  }
-  void set_owner_epoch(uint16_t owner, uint16_t epoch) {
-    owner_epoch_ = ConSanMoiOwnerEpochRegisters{owner, epoch};
-  }
-  void reset_owner_epoch() { owner_epoch_.reset(); }
-
   /// Compact workgroup identity used by InlineShadow when that engine does
   /// not require the exact coordinate tuple.
   std::optional<uint16_t> workgroup_key;
@@ -324,14 +330,7 @@ public:
   /// Record/Replay and Sampled instrumentation.
   ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup;
 
-  /// Return whether the mandatory owner/epoch pair is present. Optional
-  /// workgroup state refines that pair but cannot make a partial pair usable.
-  [[nodiscard]] bool complete() const { return owner_epoch_.has_value(); }
-
   auto operator<=>(const ConSanMoiPersistentSgprState &) const = default;
-
-private:
-  std::optional<ConSanMoiOwnerEpochRegisters> owner_epoch_;
 };
 
 /// Persistent vector state selected for one connected set of owning kernels.
@@ -945,7 +944,7 @@ struct ConSanMoiOperatingPoint {
   /// Code-object-wide persistent per-lane owner/epoch pair accepted by
   /// placement. Some operating points instead use per-owner assignments,
   /// scalar state, or private state, in which case this value is empty.
-  std::optional<ConSanMoiOwnerEpochRegisters> moi_owner_epoch_vgprs;
+  ConSanMoiOwnerEpochRegisterState moi_owner_epoch_vgprs;
   /// Internal marker set after ConSan assigns persistent owner/epoch VGPRs.
   bool automatic_moi_persistent_vgprs = false;
   /// Internal marker set when inline shadow derives owner at each probe and
@@ -1017,9 +1016,9 @@ struct ConSanMoiOperatingPoint {
     return automatic_moi_scalar_spill_layout == ConSanMoiScalarSpillLayout::Compact;
   }
   void set_moi_owner_epoch_vgprs(uint16_t owner, uint16_t epoch) {
-    moi_owner_epoch_vgprs = ConSanMoiOwnerEpochRegisters{owner, epoch};
+    moi_owner_epoch_vgprs.set_owner_epoch(owner, epoch);
   }
-  void reset_moi_owner_epoch_vgprs() { moi_owner_epoch_vgprs.reset(); }
+  void reset_moi_owner_epoch_vgprs() { moi_owner_epoch_vgprs.reset_owner_epoch(); }
 
   /// Visit every fixed-width auxiliary scalar reservation represented by this
   /// operating point. EXEC, owner, dispatch, and persistent state have
