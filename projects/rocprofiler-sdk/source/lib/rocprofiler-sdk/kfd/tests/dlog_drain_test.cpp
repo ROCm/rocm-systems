@@ -315,11 +315,11 @@ TEST(dlog_drain, evict_stale_starts)
 TEST(dlog_drain, pending_starts_size_cap_evicts_oldest)
 {
     auto mk_start = [](uint32_t dispatch_id, uint64_t ts) {
-        auto c              = copied_record{};
-        c.rec.record_type   = kRecStart;
-        c.rec.doorbell_off  = 4100;
-        c.rec.dispatch_id   = dispatch_id;
-        c.rec.ts_lo         = static_cast<uint32_t>(ts);
+        auto c             = copied_record{};
+        c.rec.record_type  = kRecStart;
+        c.rec.doorbell_off = 4100;
+        c.rec.dispatch_id  = dispatch_id;
+        c.rec.ts_lo        = static_cast<uint32_t>(ts);
         return c;
     };
 
