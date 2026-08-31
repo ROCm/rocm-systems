@@ -36,6 +36,8 @@ from amdisa.gpuisa import (
     IsaSpec,
     Operand,
     OperandNamePattern,
+    opcode_constant_base_name,
+    opcode_name_fragment,
 )
 from amdisa.fieldless_policy import (
     FieldlessCategory,
@@ -475,20 +477,11 @@ class CodeGenerator:
         meant to be read and used directly by handwritten DBT code, so split a
         few packed ISA abbreviations that commonly appear inside one XML token.
         """
-        token = token.lower()
-        if token.endswith('exec') and len(token) > len('exec'):
-            return f'{token[:-4].capitalize()}Exec'
-        if token.endswith('pc') and len(token) > len('pc'):
-            return f'{token[:-2].capitalize()}Pc'
-        return token.capitalize()
+        return opcode_name_fragment(token)
 
     @classmethod
     def _opcode_const_base_name(cls, mnemonic: str) -> str:
-        return 'k' + ''.join(
-            cls._opcode_name_fragment(token)
-            for token in mnemonic.lower().split('_')
-            if token
-        )
+        return opcode_constant_base_name(mnemonic)
 
     @staticmethod
     def _emit_opcode_constant(name: str, value: int) -> str:
