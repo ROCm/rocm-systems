@@ -340,6 +340,7 @@ if(AIS_INSTALL_EXAMPLES)
     add_subdirectory(examples/api)
     add_subdirectory(examples/common)
     add_subdirectory(examples/basics)
+    add_subdirectory(examples/batch)
     add_subdirectory(examples/async)
 endif()
 

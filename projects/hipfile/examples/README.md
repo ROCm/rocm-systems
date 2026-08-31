@@ -1,8 +1,8 @@
 # hipFile examples
 
 This directory contains working examples of the hipFile API, grouped by what
-they demonstrate. The `basics` and `async` programs verify their results with
-an FNV-1a hash and print `OK …` on success.
+they demonstrate. The `basics`, `batch`, and `async` programs verify their
+results with an FNV-1a hash and print `OK …` on success.
 
 Most examples move data through the GPU on hipFile's fast path, which opens
 files with `O_DIRECT`; running them as written therefore requires an AMD GPU
@@ -19,9 +19,10 @@ query the library and need neither a GPU nor an `O_DIRECT` filesystem.
 | --- | --- |
 | [`api`](api) | Minimal examples of the non-I/O API — calls that query or configure the library (e.g. `get-version`). No `O_DIRECT` filesystem or file arguments needed. |
 | [`basics`](basics) | Small, single-purpose programs that each exercise one facet of the synchronous API: buffer registration, the `O_DIRECT` fast path vs. compat fallback, chunked reads, device-buffer offsets, sub-region writes, GPU memory types, and a full round trip. |
+| [`batch`](batch) | A registered-buffer round trip using 4 KiB batch requests and the submit/status APIs. |
 | [`async`](async) | Examples of the asynchronous, stream-based API (`hipFileReadAsync` / `hipFileWriteAsync`), including single-stream, non-blocking-stream, and concurrent multi-stream round trips. |
 | [`aiscp`](aiscp) | A standalone `cp`-like utility built on hipFile (`aiscp SOURCE DEST`). |
-| [`common`](common) | Not an example — a small static library (`examples_common`) of helpers shared by `basics` and `async` (alignment math, pattern fill, hashing, file open/register). |
+| [`common`](common) | Not an example — a small static library (`examples_common`) of helpers shared by `basics`, `batch`, and `async` (alignment math, pattern fill, hashing, file open/register). |
 
 ## Building
 
@@ -40,12 +41,12 @@ run snippets below assume you have `cd build`'d into that directory first.
 
 Drop the `-DCMAKE_PREFIX_PATH` argument if ROCm and hipFile are installed in
 standard locations. If the install tree is read-only, copy the directory (and,
-for `basics`/`async`, the sibling [`common`](common) directory) somewhere
-writable first.
+for `basics`/`batch`/`async`, the sibling [`common`](common) directory)
+somewhere writable first.
 
-`basics` and `async` link the shared helpers in [`common`](common) and pull it
-in via `add_subdirectory(../common …)`, so keep the `common` directory alongside
-them when you build.
+`basics`, `batch`, and `async` link the shared helpers in [`common`](common) and
+pull it in via `add_subdirectory(../common …)`, so keep the `common` directory
+alongside them when you build.
 
 ### Finding the library at runtime
 
@@ -144,6 +145,36 @@ filesystem (ext4 mounted `data=ordered`, or xfs); verify with
 
 ---
 
+## `batch`
+
+The batch example creates or truncates and seeds an input file, then copies it
+through a whole-file GPU buffer registered with `hipFileBufRegister`. It divides
+the file into 4 KiB requests and initially submits up to 128 requests with
+`hipFileBatchIOSubmit`. Each call to `hipFileBatchIOGetStatus` requests at least
+one completion, and the program immediately submits one replacement per event
+to keep the batch full. All reads complete before the separately submitted
+write phase begins. After the writes finish, the program truncates any final
+alignment padding and verifies the output by FNV-1a hash.
+
+All four arguments are required:
+
+```text
+batch-roundtrip READ_FILE WRITE_FILE FILE_SIZE GPUID
+```
+
+`FILE_SIZE` is a positive base-10 byte count. `READ_FILE` is created if it does
+not exist; an existing file is truncated and reseeded to exactly that size.
+`WRITE_FILE` must identify a different file and is created or truncated. Both
+paths must be on an `O_DIRECT`-capable local filesystem. The registered GPU
+buffer holds the whole file rounded up to the next 4 KiB boundary.
+
+```bash
+cd build
+./batch-roundtrip input.bin output.bin 1048577 0
+```
+
+---
+
 ## `async`
 
 Examples of hipFile's asynchronous, stream-based API
@@ -204,14 +235,15 @@ aiscp SOURCE DEST
 ## `common`
 
 Not an example — a small static library (`examples_common`) of helpers shared
-by the [`basics`](basics) and [`async`](async) examples. It was pulled out to
-remove verbatim duplication; each example still drives the hipFile API directly
-in its own `main()` so the example flow stays readable top-to-bottom.
+by the [`basics`](basics), [`batch`](batch), and [`async`](async) examples. It
+was pulled out to remove verbatim duplication; each example still drives the
+hipFile API directly in its own `main()` so the example flow stays readable
+top-to-bottom.
 
-There is nothing to run or build here on its own. The `basics`/`async`
+There is nothing to run or build here on its own. The `basics`/`batch`/`async`
 directories pull it in via `add_subdirectory(../common …)`, so the helper code
 is compiled once and shared rather than duplicated into each example. Keep this
-directory alongside `basics`/`async` when building them.
+directory alongside them when building.
 
 ### What's in it
 
