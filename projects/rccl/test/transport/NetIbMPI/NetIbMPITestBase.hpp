@@ -99,9 +99,7 @@ extern ncclNet_t netIbCast;
 // tests disagree about which plugin an NCCL_NET value selects, a suite can
 // silently exercise a plugin it was not meant to cover.
 inline const char* CanonicalNetName(const char* env) {
-    if (env == nullptr) return nullptr;
-    if (strcasecmp(env, "ROCM-IB") == 0) return netIbCast.name;
-    return env;
+    return rcclCanonicalNetName(env);
 }
 
 // nullptr means "names no internal IB plugin", so the caller can tell "wrong

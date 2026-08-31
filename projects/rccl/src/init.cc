@@ -3054,8 +3054,7 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
 
   envNetName = ncclGetEnv("NCCL_NET");
   if (envNetName) {
-    if (strcasecmp(envNetName, "ROCM-IB") == 0) tmpNetName = "IB-CAST";
-    else tmpNetName = envNetName;
+    tmpNetName = rcclCanonicalNetName(envNetName);
   }
   if (tmpNetName != NULL) {
     if (comm->config.netName != NCCL_CONFIG_UNDEF_PTR) {
