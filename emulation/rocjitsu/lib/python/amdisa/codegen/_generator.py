@@ -3543,8 +3543,14 @@ class CodeGenerator:
                             if self.semantics
                             else None
                         )
-                        if sem is not None and sem.semantic_class.startswith(
-                            ('pk_', 'dot2_')
+                        # Packed disassembly defaults are part of the ISA
+                        # encoding, not its execution implementation.  A
+                        # model-only V_PK_* instruction intentionally has no
+                        # semantic class, but still defaults OP_SEL_HI to one
+                        # for every encoded source.
+                        if inst.name.startswith('V_PK_') or (
+                            sem is not None
+                            and sem.semantic_class.startswith(('pk_', 'dot2_'))
                         ):
                             packed_default_opcodes.append(inst.opcode)
                         if inst.name in profile.vop3p_source_modifier_omissions:
