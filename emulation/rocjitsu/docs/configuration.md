@@ -10,6 +10,7 @@ Pre-built simulator configs are in `configs/`:
 
 | File | Description |
 |---|---|
+| `gfx90a_mi210_kmd.json` | Single CDNA2 GPU (daemon/KFD mode) |
 | `gfx942_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
 | `gfx942_cdna3_kmd.json` | Single CDNA3 GPU (daemon/KFD mode) |
 | `gfx950_mi355x.json` | Single CDNA4 GPU (standalone simulation) |
@@ -117,12 +118,16 @@ Components are defined hierarchically under `topology.root`. Range
 expansion (`xcd[0:8]`) creates multiple instances. Links connect
 component ports using pattern expressions with loop variables.
 
-### KFD device section
+### KFD device sections
 
-KFD-mode configs include a `vm.gpu.device` section that defines the
-properties reported through the simulated sysfs topology (GPU ID,
-vendor/device IDs, CU counts, memory sizes, etc.). These must match
-the component hierarchy defined in `topology`.
+KFD device identity can be defined by `vm.gpu.device` for a simulated GPU and
+by `dbt_guest.guest_device` for a DBT guest. These sections define properties
+reported through the simulated sysfs topology (GPU ID, vendor/device IDs, CU
+counts, memory sizes, etc.). A simulated device's properties must match the
+component hierarchy defined in `topology`.
+
+In either device section, a device with one or more regular SDMA engines must
+explicitly set a nonzero `num_sdma_queues_per_engine` value.
 
 ## FlatBuffers schema
 

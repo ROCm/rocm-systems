@@ -289,6 +289,12 @@ if(BUILD_TESTS)
   target_link_options(rccl-UnitTests PRIVATE
     "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12")
 
+  # AICOMRCCL-2183: RcclMockFuncs.hpp's empty ncclDebugLog, needed to link the Release-only
+  # sources above, overrides librccl.so's own in Debug and silences all library logging. Hidden
+  # keeps it linkable here but out of .dynsym, as rccl-UnitTestsFixturesDebug does below.
+  target_compile_options(rccl-UnitTests PRIVATE
+    -fvisibility=hidden -fvisibility-inlines-hidden)
+
   # A real shared library, unlike the net plugin above: ProfilerPluginCloseTests checks
   # that RCCL unloads an external profiler plugin, so it needs a separately loadable
   # object. It lands beside rccl-UnitTests in the build tree and is installed beside it
@@ -347,6 +353,13 @@ if(BUILD_TESTS)
 
   if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
     list(APPEND TEST_FIXTURE_SOURCE_FILES
+      # GIN rocSHMEM-GDA device template test. Self-contained: supplies its own
+      # rocshmem::QueuePair device stubs in-TU (no librocshmem device link, no
+      # header shadow). Its body is guarded by NCCL_GIN_ROCSHMEM_GDA_ENABLE, which
+      # gin_device_common.h sets when ENABLE_ROCSHMEM_GIN is defined on HIP.
+      # Built here alongside the Anvil-SDMA template test under GIN_ANVIL_UNIT_TESTS
+      # or when librccl is built with full ENABLE_ROCSHMEM.
+      device/GinRocshmemGdaTemplate_test.cpp
       device/GinAnvilSdmaTemplate_test.cpp
     )
   endif()
@@ -375,7 +388,10 @@ if(BUILD_TESTS)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM_GIN)
   endif()
 
-  if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
+  # Match librccl.so ABI: ENABLE_ROCSHMEM changes ncclComm/ncclProxyState layout.
+  # GIN CI builds librccl with ENABLE_ROCSHMEM_GIN only; device templates need
+  # ENABLE_ROCSHMEM_GIN (above), not ENABLE_ROCSHMEM on this target.
+  if(ENABLE_ROCSHMEM_GIN AND ENABLE_ROCSHMEM)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM)
   endif()
 
@@ -855,6 +871,35 @@ if(BUILD_TESTS)
           ${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a
           ibverbs hsa-runtime64 hsakmt numa ${_ROCSHMEM_DRM} ${_ROCSHMEM_DRM_AMDGPU})
       target_link_options(${test_executable} PRIVATE -fgpu-rdc --hip-link ${_ROCSHMEM_OFFLOAD_FLAGS} -rdynamic)
+    endif()
+
+    # librccl.so built with ENABLE_ROCSHMEM_GIN but without host librocshmem
+    # (ENABLE_ROCSHMEM=OFF, e.g. gin CI --rocshmem-gin) leaves
+    # rocshmem::envvar::log_flags undefined at load time. Link host rocSHMEM
+    # into the Fixtures binary so the executable satisfies those symbols when
+    # the dynamic loader brings in librccl.so.
+    if(ENABLE_ROCSHMEM_GIN AND GIN_ANVIL_UNIT_TESTS AND NOT ENABLE_ROCSHMEM
+       AND ROCSHMEM_INSTALL_DIR AND "${test_executable}" STREQUAL "rccl-UnitTestsFixtures")
+      set(_ROCSHMEM_FIXTURES_OFFLOAD_FLAGS "")
+      foreach(_g IN LISTS GPU_TARGETS)
+        if(_g)
+          list(APPEND _ROCSHMEM_FIXTURES_OFFLOAD_FLAGS "--offload-arch=${_g}")
+        endif()
+      endforeach()
+      find_library(_ROCSHMEM_FIXTURES_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      find_library(_ROCSHMEM_FIXTURES_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      if(NOT _ROCSHMEM_FIXTURES_DRM)
+        set(_ROCSHMEM_FIXTURES_DRM drm)
+      endif()
+      if(NOT _ROCSHMEM_FIXTURES_DRM_AMDGPU)
+        set(_ROCSHMEM_FIXTURES_DRM_AMDGPU drm_amdgpu)
+      endif()
+      target_link_libraries(${test_executable} PRIVATE
+        ${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a
+        ibverbs hsa-runtime64 hsakmt numa
+        ${_ROCSHMEM_FIXTURES_DRM} ${_ROCSHMEM_FIXTURES_DRM_AMDGPU})
+      target_link_options(${test_executable} PRIVATE
+        -fgpu-rdc --hip-link ${_ROCSHMEM_FIXTURES_OFFLOAD_FLAGS} -rdynamic)
     endif()
 
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
