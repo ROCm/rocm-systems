@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Launch the test-roctx-recordfn gtest with its shared library paths.
+"""Launch the test-torch-trace-collector gtest with its shared library paths.
 
 Torch and ROCm live wherever the machine running the test put them, which is
 not where the build machine had them, so the search mirrors the CMake logic at
