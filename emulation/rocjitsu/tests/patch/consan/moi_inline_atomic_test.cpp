@@ -237,8 +237,7 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence) {
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
   options.moi_dispatch_identity.set_sgpr(20);
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1;
@@ -295,8 +294,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquireOutwaitsCausalSnapshotPublica
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8u;
     options.moi_exec_save_sgpr = 80u;
-    options.moi_owner_vgpr = 40u;
-    options.moi_epoch_vgpr = 41u;
+    options.set_moi_owner_epoch_vgprs(40u, 41u);
     options.moi_dispatch_identity.set_sgpr(20u);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -352,8 +350,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquirePersistsEpochBeforeGuestRetur
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8u;
     options.moi_exec_save_sgpr = 80u;
-    options.moi_owner_vgpr = 40u;
-    options.moi_epoch_vgpr = 41u;
+    options.set_moi_owner_epoch_vgprs(40u, 41u);
     options.moi_persistent_sgprs.set_owner_epoch(70u, 71u);
     options.moi_dispatch_identity.set_sgpr(20u);
     options.moi_report_buffer_address = 0x123456780000ull;
@@ -495,8 +492,7 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireReleaseUsesExactVscntBoundary) {
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_dispatch_identity.set_sgpr(20);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -558,8 +554,7 @@ TEST(ConSanMoi, Gfx1100VglobalAtomicAcquireCoversVectorAndScalarAddressForms) {
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8;
     options.moi_exec_save_sgpr = 80;
-    options.moi_owner_vgpr = 40;
-    options.moi_epoch_vgpr = 41;
+    options.set_moi_owner_epoch_vgprs(40, 41);
     options.moi_dispatch_identity.set_sgpr(20);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -727,8 +722,7 @@ TEST(ConSanMoi, Cdna4InlineAtomicAcquireReleaseEmitsNativeTransaction) {
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1;
@@ -786,8 +780,7 @@ TEST(ConSanMoi, Cdna4InlineRelocatesOrdinaryAtomicAcquireSequence) {
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 64;
   options.moi_dispatch_identity.set_vgpr(50);
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 2;
@@ -855,8 +848,7 @@ TEST(ConSanMoi, Cdna4InlinePublishesOrdinaryReleaseStoreBeforeGuestCommit) {
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 64;
   options.moi_dispatch_identity.set_vgpr(50);
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1;
@@ -938,8 +930,7 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_exec_save_sgpr = 4u;
   options.moi_router_jump = ConSanMoiIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr};
   options.moi_router_call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr};
@@ -1018,8 +1009,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8;
     options.moi_exec_save_sgpr = 80;
-    options.moi_owner_vgpr = 40;
-    options.moi_epoch_vgpr = 41;
+    options.set_moi_owner_epoch_vgprs(40, 41);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
     options.max_patches = 1;
@@ -1067,7 +1057,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
         << "a full-table mask can address beyond the selected namespace";
     const auto mix_consumer_epoch = instrumentation::build_v_mul_lo_u32_literal(
         target.token_transaction_vsrc, /*temporary_vgpr=*/8u,
-        kConSanMoiInlineTokenConsumerEpochMultiplier, *options.moi_epoch_vgpr, target.arch);
+        kConSanMoiInlineTokenConsumerEpochMultiplier, *moi_epoch_vgpr(options), target.arch);
     ASSERT_TRUE(mix_consumer_epoch);
     EXPECT_GT(count_subsequence(cave_words, *mix_consumer_epoch), 0u)
         << "reusable barriers must retain acquired evidence per consumer segment";
@@ -1082,8 +1072,8 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
                         build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, target.arch)),
               cave_words.end());
     const auto advance_consumer_segment =
-        instrumentation::build_v_add_u32(*options.moi_epoch_vgpr, scalar_positive_inline_u32(1),
-                                         *options.moi_epoch_vgpr, target.arch);
+        instrumentation::build_v_add_u32(*moi_epoch_vgpr(options), scalar_positive_inline_u32(1),
+                                         *moi_epoch_vgpr(options), target.arch);
     ASSERT_TRUE(advance_consumer_segment);
     EXPECT_EQ(count_subsequence(cave_words, *advance_consumer_segment), 0u)
         << "release-sequence inheritance must not advance the consumer segment";
@@ -1244,8 +1234,7 @@ TEST(ConSanMoi, CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering) {
       options.moi_track_atomics = true;
       options.scratch_vgpr = 8;
       options.moi_exec_save_sgpr = 80;
-      options.moi_owner_vgpr = 40;
-      options.moi_epoch_vgpr = 41;
+      options.set_moi_owner_epoch_vgprs(40, 41);
       options.moi_report_buffer_address = 0x123456780000ull;
       options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
       options.max_patches = 1;
@@ -1401,8 +1390,7 @@ TEST(ConSanMoi, GenerationTaggedLocalAtomicLookupUsesPersistentWorkgroupKey) {
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 16;
-  options.moi_owner_vgpr = 48;
-  options.moi_epoch_vgpr = 49;
+  options.set_moi_owner_epoch_vgprs(48, 49);
   options.moi_workgroup_key_vgpr = 50;
   options.moi_exec_save_sgpr = 40;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -2124,8 +2112,7 @@ TEST(ConSanMoi, FinalValidationPinsVersionedCausalReleaseTransaction) {
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -3335,8 +3322,7 @@ TEST(ConSanMoi, SampledAccessAndAtomicShareSelectedCausalSlot) {
   MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 20;
-  options.moi_epoch_vgpr = 21;
+  options.set_moi_owner_epoch_vgprs(20, 21);
   options.moi_report_buffer_address = 0x123456780000ull;
   constexpr uint64_t slot_bytes = direct_sampled_report_bytes(1) - sizeof(ConSanMoiReportHeader);
   options.moi_report_buffer_size = sizeof(ConSanMoiReportHeader) + 2u * slot_bytes;
@@ -3374,8 +3360,7 @@ TEST(ConSanMoi, FenceRecordsDynamicallyPublishExactAtomicAddresses) {
   options.max_patches = 3;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = kExecSaveSgpr;
-  options.moi_owner_vgpr = 20;
-  options.moi_epoch_vgpr = 21;
+  options.set_moi_owner_epoch_vgprs(20, 21);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_dispatch_id = 0x1122334455667788ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(3, 0, 0, 0, 0, 3, 3);
@@ -3519,8 +3504,7 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8u;
     options.moi_exec_save_sgpr = 80u;
-    options.moi_owner_vgpr = 40u;
-    options.moi_epoch_vgpr = 41u;
+    options.set_moi_owner_epoch_vgprs(40u, 41u);
     options.moi_report_dispatch_id = 0x1122334455667788ull;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 0, 2, 2);
@@ -3637,8 +3621,7 @@ TEST(ConSanMoi, AtomicRecordCapturesVglobalCasThroughSharedAddressPlan) {
     MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8;
-    options.moi_owner_vgpr = 16;
-    options.moi_epoch_vgpr = 17;
+    options.set_moi_owner_epoch_vgprs(16, 17);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -3674,8 +3657,7 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 2;
@@ -3808,7 +3790,7 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
   EXPECT_TRUE(contains_subsequence(
       release_words,
       make_expected_offset_store_words(offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id),
-                                       *options.moi_owner_vgpr, *options.scratch_vgpr)));
+                                       *moi_owner_vgpr(options), *options.scratch_vgpr)));
   EXPECT_TRUE(contains_subsequence(
       release_words,
       make_expected_offset_store_words(offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch_plus_one),
@@ -3910,10 +3892,10 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
                          offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one),
                          /*value_vgpr=*/27, *options.scratch_vgpr)));
   const auto advance_consumer_segment =
-      instrumentation::build_v_add_u32(*options.moi_epoch_vgpr, scalar_positive_inline_u32(1),
-                                       *options.moi_epoch_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
+      instrumentation::build_v_add_u32(*moi_epoch_vgpr(options), scalar_positive_inline_u32(1),
+                                       *moi_epoch_vgpr(options), ROCJITSU_CODE_ARCH_RDNA4);
   const auto saturate_consumer_segment = instrumentation::build_v_min_u32_literal(
-      *options.moi_epoch_vgpr, consan_moi_exact_shadow::max_epoch, *options.moi_epoch_vgpr,
+      *moi_epoch_vgpr(options), consan_moi_exact_shadow::max_epoch, *moi_epoch_vgpr(options),
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(advance_consumer_segment);
   ASSERT_TRUE(saturate_consumer_segment);
@@ -3943,7 +3925,7 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
          "reservation odd";
 
   const auto forbidden_epoch_import =
-      build_v_add_nc_u32_e32(*options.moi_epoch_vgpr, scalar_positive_inline_u32(1), /*vsrc1=*/10,
+      build_v_add_nc_u32_e32(*moi_epoch_vgpr(options), scalar_positive_inline_u32(1), /*vsrc1=*/10,
                              ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_original_exec =
       build_s_mov_b64(kRdna4ExecLo, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u),
@@ -3981,8 +3963,7 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 16;
-  options.moi_owner_vgpr = 48;
-  options.moi_epoch_vgpr = 49;
+  options.set_moi_owner_epoch_vgprs(48, 49);
   options.moi_exec_save_sgpr = 40;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -4025,10 +4006,10 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   const auto widen_consumer_segment = instrumentation::build_s_mov_b64(
       kRdna4ExecLo, kScalarInlineNegativeOneOperand, ROCJITSU_CODE_ARCH_RDNA4);
   const auto advance_consumer_segment =
-      instrumentation::build_v_add_u32(*options.moi_epoch_vgpr, scalar_positive_inline_u32(1),
-                                       *options.moi_epoch_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
+      instrumentation::build_v_add_u32(*moi_epoch_vgpr(options), scalar_positive_inline_u32(1),
+                                       *moi_epoch_vgpr(options), ROCJITSU_CODE_ARCH_RDNA4);
   const auto saturate_consumer_segment = instrumentation::build_v_min_u32_literal(
-      *options.moi_epoch_vgpr, consan_moi_exact_shadow::max_epoch, *options.moi_epoch_vgpr,
+      *moi_epoch_vgpr(options), consan_moi_exact_shadow::max_epoch, *moi_epoch_vgpr(options),
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_validated_acquire_exec =
       instrumentation::build_s_mov_b64(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 16u),
@@ -4251,8 +4232,7 @@ TEST(ConSanMoi, InlineAtomicScalarPersistentAcquireGuardsEpochAdvanceAndPersist)
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_persistent_sgprs.set_owner_epoch(70u, 71u);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -4323,8 +4303,7 @@ TEST(ConSanMoi, InlineAtomicRetainsDisplacedVglobalAcquireAndPublishesToken) {
   options.moi_track_atomics = true;
   options.scratch_vgpr = 12;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 2;
@@ -4440,8 +4419,7 @@ TEST(ConSanMoi, InlineVglobalReleaseMaterializesAddressWithTransactionPlan) {
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1;
@@ -4488,8 +4466,7 @@ TEST(ConSanMoi, InlineAtomicReturningCasClaimsBeforeGuestAndRollsBackFailedLanes
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -4582,8 +4559,7 @@ TEST(ConSanMoi, InlineVglobalReturningCasImportsOnlyInsideClaimedSuccessfulTrans
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8;
     options.moi_exec_save_sgpr = 80;
-    options.moi_owner_vgpr = 40;
-    options.moi_epoch_vgpr = 41;
+    options.set_moi_owner_epoch_vgprs(40, 41);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -4703,8 +4679,7 @@ TEST(ConSanMoi, InlineVglobalNoReturnCasFailsClosedWithoutOutcome) {
     options.moi_track_atomics = true;
     options.scratch_vgpr = 8;
     options.moi_exec_save_sgpr = 80;
-    options.moi_owner_vgpr = 13;
-    options.moi_epoch_vgpr = 14;
+    options.set_moi_owner_epoch_vgprs(13, 14);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -4727,8 +4702,7 @@ TEST(ConSanMoi, InlineAtomicNoReturnCasFailsClosedWithoutOutcome) {
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 13;
-  options.moi_epoch_vgpr = 14;
+  options.set_moi_owner_epoch_vgprs(13, 14);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -4841,8 +4815,7 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   atomic_only_words[lds_access_word + 1u] = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
   MoiOptions atomic_only_options = options;
   atomic_only_options.scratch_vgpr = 82u;
-  atomic_only_options.moi_owner_vgpr = 80u;
-  atomic_only_options.moi_epoch_vgpr = 81u;
+  atomic_only_options.set_moi_owner_epoch_vgprs(80u, 81u);
   atomic_only_options.moi_exec_save_sgpr = 4u;
   atomic_only_options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   atomic_only_options.moi_inline_visible_evidence_sgpr = 40u;
@@ -4880,8 +4853,7 @@ TEST(ConSanMoi, InlineAtomicScalarSpillRejectsAliasedGuestScalarAddress) {
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 82u;
-  options.moi_owner_vgpr = 80u;
-  options.moi_epoch_vgpr = 81u;
+  options.set_moi_owner_epoch_vgprs(80u, 81u);
   // VGLOBAL reads its address from s[4:5]. An automatic scalar spill may
   // surround a vector-only FLAT atomic, but it must not clobber this pair.
   options.moi_exec_save_sgpr = 4u;
@@ -5073,8 +5045,7 @@ TEST(ConSanMoi, InlineAtomicUsesIndirectIslandsForFarAppendedHelpers) {
   options.scratch_vgpr = 32;
   options.moi_exec_save_sgpr = 80;
   options.moi_dispatch_identity.set_sgpr(60);
-  options.moi_owner_vgpr = 14;
-  options.moi_epoch_vgpr = 15;
+  options.set_moi_owner_epoch_vgprs(14, 15);
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;

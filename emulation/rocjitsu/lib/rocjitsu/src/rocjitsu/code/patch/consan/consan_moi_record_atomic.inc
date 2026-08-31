@@ -126,7 +126,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
       continue;
     }
     MoiAtomicEvidenceSitePlan planned_candidate = candidate;
-    if (!options.moi_owner_vgpr && !planned_candidate.kernel_descriptor_file_offset) {
+    if (!moi_owner_vgpr(options) && !planned_candidate.kernel_descriptor_file_offset) {
       if (resources->owner_descriptor_file_offsets.empty()) {
         result.warnings.emplace_back(
             "ConSan MOI atomic record patch requires an owning kernel descriptor");

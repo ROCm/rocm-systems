@@ -20,7 +20,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         "ConSan MOI inline atomic patch has no release or acquired-token metadata slot");
     return;
   }
-  if ((!options.moi_owner_vgpr || !options.moi_epoch_vgpr) &&
+  if ((!moi_owner_vgpr(options) || !moi_epoch_vgpr(options)) &&
       !options.moi_persistent_sgprs.complete() && !options.automatic_moi_private_epoch) {
     result.warnings.emplace_back("ConSan MOI inline atomic patch requires "
                                  "RJ_CONSAN_MOI_OWNER_VGPR and RJ_CONSAN_MOI_EPOCH_VGPR");

@@ -429,8 +429,7 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithRetainedInlineShadowProbe) {
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.fault_atomic_wrong_address = true;
@@ -854,8 +853,7 @@ TEST(ConSanMoi, Rdna4DenseMoiRelaysRespectPreappliedBarrierMoveContinuation) {
     options.scratch_vgpr = 8;
     options.moi_exec_save_sgpr = 80;
     options.moi_dispatch_identity.set_sgpr(70);
-    options.moi_owner_vgpr = 40;
-    options.moi_epoch_vgpr = 41;
+    options.set_moi_owner_epoch_vgprs(40, 41);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = 64u * 1024u * 1024u;
     options.moi_runtime_sample_stride = 16'384;
@@ -948,8 +946,7 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
   options.moi_dispatch_identity.set_sgpr(70);
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2u * kBarrierCount);
   options.moi_runtime_sample_stride = 64;
@@ -1020,8 +1017,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
 
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.scratch_vgpr = 82;
-  options.moi_owner_vgpr = 80;
-  options.moi_epoch_vgpr = 81;
+  options.set_moi_owner_epoch_vgprs(80, 81);
   options.moi_exec_save_sgpr = 60;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;

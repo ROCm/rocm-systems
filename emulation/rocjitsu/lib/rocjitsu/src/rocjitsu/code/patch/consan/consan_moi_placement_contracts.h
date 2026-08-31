@@ -193,8 +193,7 @@ struct MoiDenseRelayHostRequest {
 /// Persistent VGPRs that cannot be borrowed by an entry relay before the
 /// probe's ordinary spill transaction has run.
 struct MoiPersistentVgprStateView {
-  std::optional<uint16_t> owner;
-  std::optional<uint16_t> epoch;
+  std::optional<ConSanMoiOwnerEpochRegisters> moi_owner_epoch_vgprs;
   std::optional<uint16_t> workgroup_key;
   std::optional<uint16_t> dispatch_id;
   ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup;

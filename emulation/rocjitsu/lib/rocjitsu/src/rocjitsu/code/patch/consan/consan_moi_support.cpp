@@ -602,16 +602,17 @@ bool consan_detail::scalar_owner_contexts_admit_reserved_window(
           !scalar_owner_contexts_conflict_with_physical_vcc(contexts, ranges));
 }
 
-bool consan_detail::validate_scalar_state_temporaries(const ConSanMoiOperatingPoint &point,
-                                                      std::string_view consumer,
-                                                      std::vector<std::string> &errors) {
-  if (!point.moi_persistent_sgprs.complete() || (point.moi_owner_vgpr && point.moi_epoch_vgpr)) {
+bool consan_detail::validate_scalar_state_temporaries(
+    const ConSanMoiOperatingPoint &point, const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs,
+    std::string_view consumer, std::vector<std::string> &errors) {
+  if (!point.moi_persistent_sgprs.complete() ||
+      (owner_epoch_vgprs.owner && owner_epoch_vgprs.epoch)) {
     return true;
   }
   errors.emplace_back("ConSan MOI " + std::string(consumer) +
                       " has no scalar-state VGPR temporaries (owner=" +
-                      std::string(point.moi_owner_vgpr ? "set" : "unset") +
-                      ", epoch=" + std::string(point.moi_epoch_vgpr ? "set" : "unset") + ")");
+                      std::string(owner_epoch_vgprs.owner ? "set" : "unset") +
+                      ", epoch=" + std::string(owner_epoch_vgprs.epoch ? "set" : "unset") + ")");
   return false;
 }
 

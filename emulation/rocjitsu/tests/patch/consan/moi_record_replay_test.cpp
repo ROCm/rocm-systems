@@ -114,8 +114,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayZerosUnusedPersistentClusterCoordinate) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_init_owner_epoch = true;
   options.moi_persistent_sgprs.record_replay_workgroup =
       ConSanMoiPersistentWorkgroupRegisters{50u, 51u, 52u, kClusterCoordinateSgpr};
@@ -188,8 +187,7 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   options.test_kernel_name_filter = "shared_owner";
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 30u;
-  options.moi_owner_vgpr = 14u;
-  options.moi_epoch_vgpr = 15u;
+  options.set_moi_owner_epoch_vgprs(14u, 15u);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
   options.moi_track_barriers = true;
@@ -282,8 +280,7 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAtomicOnceForEveryOwner) {
   options.scratch_vgpr = 16u;
   options.moi_exec_save_sgpr = 80u;
   options.moi_dispatch_identity.set_sgpr(70u);
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(
@@ -360,8 +357,7 @@ TEST(ConSanMoi, RecordReplayDenseAliasedKernelBarriersUseKernelRelayBounds) {
   options.test_kernel_name_filter = "shared_owner";
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size =
@@ -1278,8 +1274,7 @@ TEST(ConSanMoi, AutoRecordReplaySpillsWideAddressGroupStateAtScalarPressure) {
 
     MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.scratch_vgpr = 8;
-    options.moi_owner_vgpr = 40;
-    options.moi_epoch_vgpr = 41;
+    options.set_moi_owner_epoch_vgprs(40, 41);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = report_plan.required_bytes;
     options.moi_report_layout = *bound_layout;
@@ -1312,8 +1307,7 @@ TEST(ConSanMoi, RejectsInvalidPersistentDispatchVgprOverrides) {
   const auto expect_unsupported = [&](MoiOptions options, std::string_view diagnostic) {
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
-    options.moi_owner_vgpr = 40u;
-    options.moi_epoch_vgpr = 41u;
+    options.set_moi_owner_epoch_vgprs(40u, 41u);
     options.moi_init_owner_epoch = true;
     const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
@@ -1401,8 +1395,7 @@ TEST(ConSanMoi, AutoRecordReplayAddsExactTupleToExplicitOwnerEpoch) {
   ASSERT_TRUE(bound_layout);
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = report_plan.required_bytes;
@@ -1464,8 +1457,7 @@ TEST(ConSanMoi, RecordReplayRuntimeGateUsesPersistentWorkgroupTuple) {
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
   options.moi_dispatch_identity.set_sgpr(70u);
-  options.moi_owner_vgpr = 30u;
-  options.moi_epoch_vgpr = 31u;
+  options.set_moi_owner_epoch_vgprs(30u, 31u);
   options.moi_persistent_sgprs.record_replay_workgroup =
       ConSanMoiPersistentWorkgroupRegisters{40u, 41u, 42u};
   options.moi_init_owner_epoch = true;
@@ -1642,8 +1634,7 @@ TEST(ConSanMoi, RecordReplayRuntimeGateCoversBarrierRecords) {
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
   options.moi_dispatch_identity.set_sgpr(70u);
-  options.moi_owner_vgpr = 30u;
-  options.moi_epoch_vgpr = 31u;
+  options.set_moi_owner_epoch_vgprs(30u, 31u);
   options.moi_persistent_sgprs.record_replay_workgroup =
       ConSanMoiPersistentWorkgroupRegisters{40u, 41u, 42u};
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -1683,8 +1674,7 @@ TEST(ConSanMoi, RecordReplayRuntimeGateCoversStandaloneAtomicAndFenceRecords) {
   options.scratch_vgpr = 16u;
   options.moi_exec_save_sgpr = 80u;
   options.moi_dispatch_identity.set_sgpr(70u);
-  options.moi_owner_vgpr = 30u;
-  options.moi_epoch_vgpr = 31u;
+  options.set_moi_owner_epoch_vgprs(30u, 31u);
   options.moi_persistent_sgprs.record_replay_workgroup =
       ConSanMoiPersistentWorkgroupRegisters{40u, 41u, 42u};
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -1863,9 +1853,9 @@ TEST(ConSanMoi, RecordReplayRejectsPartialPersistentOwnerEpochOverride) {
     SCOPED_TRACE(owner_only ? "owner only" : "epoch only");
     MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     if (owner_only)
-      options.moi_owner_vgpr = 14u;
+      options.requested_moi_owner_vgpr = 14u;
     else
-      options.moi_epoch_vgpr = 15u;
+      options.requested_moi_epoch_vgpr = 15u;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -2821,8 +2811,7 @@ TEST(ConSanMoi, FirstLightProbeWritesOneNativeLdsAccessRecord) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   MoiOptions options = moi_options();
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 15;
-  options.moi_epoch_vgpr = 16;
+  options.set_moi_owner_epoch_vgprs(15, 16);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -2966,8 +2955,7 @@ TEST(ConSanMoi, Cdna4FirstLightProbeEmitsNativeVariableLengthRecipes) {
   const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words);
   MoiOptions options = moi_options();
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 15;
-  options.moi_epoch_vgpr = 16;
+  options.set_moi_owner_epoch_vgprs(15, 16);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -3030,8 +3018,7 @@ TEST(ConSanMoi, Cdna4RecordReplayNormalizesTransposeAndTwoAddressLdsRanges) {
     const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words);
     MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.scratch_vgpr = 20;
-    options.moi_owner_vgpr = 40;
-    options.moi_epoch_vgpr = 41;
+    options.set_moi_owner_epoch_vgprs(40, 41);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size =
         consan_moi_report_buffer_min_bytes(expected_byte_offsets.size(), 0, 0, 0);
@@ -3093,8 +3080,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySupportsSubwordNativeLdsSites) {
     const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words);
     MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.scratch_vgpr = 20;
-    options.moi_owner_vgpr = 40;
-    options.moi_epoch_vgpr = 41;
+    options.set_moi_owner_epoch_vgprs(40, 41);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -4226,8 +4212,7 @@ TEST(ConSanMoi, DynamicAccessRecordProbeAppendsPerLaneRecords) {
   MoiOptions options = moi_options();
   options.scratch_vgpr = 16;
   options.moi_exec_save_sgpr = 30;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_dynamic_access_records = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0);
@@ -4342,8 +4327,7 @@ TEST(ConSanMoi, DynamicRecordKindsUseLiteralDispatchIdentityAtFullScalarPressure
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = kExecSaveSgpr;
-  options.moi_owner_vgpr = 20u;
-  options.moi_epoch_vgpr = 21u;
+  options.set_moi_owner_epoch_vgprs(20u, 21u);
   options.moi_dynamic_access_records = true;
   options.moi_track_barriers = true;
   options.moi_track_atomics = true;
@@ -4566,8 +4550,7 @@ TEST(ConSanMoi, FirstLightProbeCapturesCompleteHardwareGridAtEntry) {
 
   MoiOptions options = moi_options();
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 15;
-  options.moi_epoch_vgpr = 16;
+  options.set_moi_owner_epoch_vgprs(15, 16);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -4864,8 +4847,7 @@ TEST(ConSanMoi, FirstLightProbeAddsNativeLdsImmediateOffset) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   MoiOptions options = moi_options();
   options.scratch_vgpr = 20;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.set_moi_owner_epoch_vgprs(11, 12);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -4906,8 +4888,7 @@ TEST(ConSanMoi, FirstLightProbeLowersTwoAddressNativeLdsSitesToTwoRecords) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   MoiOptions options = moi_options();
   options.scratch_vgpr = 20;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.set_moi_owner_epoch_vgprs(11, 12);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
 
@@ -4946,8 +4927,7 @@ TEST(ConSanMoi, FirstLightRecordLinearizesBeforeDisplacedTwoAddressLoad) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 21;
-  options.moi_owner_vgpr = 70;
-  options.moi_epoch_vgpr = 71;
+  options.set_moi_owner_epoch_vgprs(70, 71);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
 
@@ -4987,8 +4967,7 @@ TEST(ConSanMoi, DynamicAccessRecordProbeLowersTwoAddressNativeLdsSites) {
   MoiOptions options = moi_options();
   options.scratch_vgpr = 20;
   options.moi_exec_save_sgpr = 30;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_dynamic_access_records = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0);
@@ -5050,8 +5029,7 @@ TEST(ConSanMoi, DynamicAccessRecordProbeDrainsTerminalAppendedCaveBeforeEndpgm) 
   MoiOptions options = moi_options();
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 30;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_dynamic_access_records = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0);
@@ -5097,8 +5075,7 @@ TEST(ConSanMoi, DynamicAccessRecordProbePreservesOverlappingLoadAddress) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 30;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_dynamic_access_records = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0);
@@ -5179,8 +5156,7 @@ TEST(ConSanMoi, FirstLightProbeCanPatchTwoNativeLdsAccessRecords) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   MoiOptions options = moi_options();
   options.scratch_vgpr = 20;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.set_moi_owner_epoch_vgprs(11, 12);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
   options.max_patches = 2;
@@ -5234,8 +5210,7 @@ TEST(ConSanMoi, FirstLightProbeCanPatchTwoAppendedCaveAccessRecords) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   MoiOptions options = moi_options();
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 14;
-  options.moi_epoch_vgpr = 15;
+  options.set_moi_owner_epoch_vgprs(14, 15);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
   options.max_patches = 2;
@@ -5268,8 +5243,7 @@ TEST(ConSanMoi, RecordReplayFindsDeadSgprsBelowAHighTransientReference) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -5296,8 +5270,7 @@ TEST(ConSanMoi, RecordReplayDeadSgprWindowRejectsAnyLiveLane) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -5339,8 +5312,7 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveUsesSafePerOwnerWindows) {
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -5412,8 +5384,7 @@ TEST(ConSanMoi, Gfx1250SparseRecordReplaySpillSkipsUninitializedScalarWindow) {
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_init_owner_epoch = true;
   options.moi_runtime_sample_stride = 65'536u;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -5488,8 +5459,7 @@ TEST(ConSanMoi, SparseRecordReplaySpillSkipsUninitializedEntryHashWindowAcrossTa
 
     MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.scratch_vgpr = 8u;
-    options.moi_owner_vgpr = 40u;
-    options.moi_epoch_vgpr = 41u;
+    options.set_moi_owner_epoch_vgprs(40u, 41u);
     options.moi_init_owner_epoch = true;
     options.moi_exec_save_sgpr = kExecSaveSgpr;
     options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
@@ -5529,8 +5499,7 @@ TEST(ConSanMoi, IncompleteRecordReplaySpillStateFailsBeforeEncodingIndirectJump)
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_init_owner_epoch = true;
   options.moi_exec_save_sgpr = 80u;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
@@ -5622,8 +5591,7 @@ TEST(ConSanMoi, RecordReplaySharedHelperUsesOneSpillBackedWindowAcrossOwners) {
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -5704,8 +5672,7 @@ TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnRdna) {
 
       MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
       options.scratch_vgpr = 8;
-      options.moi_owner_vgpr = 40;
-      options.moi_epoch_vgpr = 41;
+      options.set_moi_owner_epoch_vgprs(40, 41);
       options.moi_report_buffer_address = 0x123456780000ull;
       options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(
           access_count, 0, 0, 0, arch == ROCJITSU_CODE_ARCH_RDNA4 ? 2u : 0u);
@@ -5766,8 +5733,7 @@ TEST(ConSanMoi, Gfx1100RecordReplayRoutesDenseBarrierInventory) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size =
       consan_moi_report_buffer_min_bytes(kSiteCount, 0u, 0u, 0u, kSiteCount);
@@ -5811,8 +5777,7 @@ TEST(ConSanMoi, RecordReplayDynamicStackKernelEntryRelayUsesSpecialStateOnly) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
@@ -5885,8 +5850,7 @@ TEST(ConSanMoi, Gfx1250OwnerPrologueUsesOwnerLocalEntryAndReturnRelays) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 80u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
@@ -5994,8 +5958,7 @@ TEST(ConSanMoi, RecordReplaySpillBackedLocalEntryIslandsDoNotOverlap) {
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0u, 0u, 0u);
   options.moi_track_barriers = false;
@@ -6054,8 +6017,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_dispatch_identity.set_sgpr(20u);
   options.moi_init_owner_epoch = true;
   options.moi_track_barriers = true;
@@ -6184,8 +6146,7 @@ TEST(ConSanMoi, RecordReplayUsesBranchOnlySpillWithoutDeadRouterScalars) {
 
     MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.scratch_vgpr = 8;
-    options.moi_owner_vgpr = 40;
-    options.moi_epoch_vgpr = 41;
+    options.set_moi_owner_epoch_vgprs(40, 41);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(9, 0, 0, 0);
     options.moi_track_barriers = false;
@@ -6251,8 +6212,7 @@ TEST(ConSanMoi, Rdna4SpillBackedTwoSiteDenseDispatcherIncludesSharedHostArm) {
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -6304,8 +6264,7 @@ TEST(ConSanMoi, Gfx1250SpillBackedSingleSiteDenseDispatcherReservesSpillArm) {
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
   options.moi_track_barriers = false;
@@ -6349,8 +6308,7 @@ TEST(ConSanMoi, Rdna4ModerateSpillBackedDispatcherKeepsCompactRelaySpacing) {
   const uint64_t original_text_size = original.text_sections().front()->size();
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -6392,8 +6350,7 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostPreservesBarrierAndCapturedCallK
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size =
@@ -6469,8 +6426,7 @@ TEST(ConSanMoi, Gfx1250RecordReplaySpillBackedDenseBarrierUsesCapturedEntryKey) 
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size =
@@ -6545,8 +6501,7 @@ TEST(ConSanMoi, Gfx1250DenseBarrierHostAvoidsImplicitHighVgprBank) {
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size =
@@ -6617,8 +6572,7 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostAvoidsTransientSgprLiveRange) {
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -6664,8 +6618,7 @@ TEST(ConSanMoi, RecordReplayReservedRelaySpaceComposesWithBarrierEpochs) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(9, 0, 0, 0, 9);
@@ -6736,8 +6689,7 @@ TEST(ConSanMoi, RecordReplayAllowsScratchBetweenDisjointGfx1250StoreTuples) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 32;
   options.moi_exec_save_sgpr = 60;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -6786,8 +6738,7 @@ TEST(ConSanMoi, RecordReplaySplitsLargeGfx1250TwoAddressOffsetsWithPlannedScratc
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 32;
   options.moi_exec_save_sgpr = 60;
-  options.moi_owner_vgpr = 50;
-  options.moi_epoch_vgpr = 51;
+  options.set_moi_owner_epoch_vgprs(50, 51);
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -6833,8 +6784,7 @@ TEST(ConSanMoi, FirstLightProbeWritesOneLikelyGroupFlatAccessRecord) {
       make_rdna4_code_object_with_local_function(kernel_words, function_words);
   MoiOptions options = moi_options();
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 14;
-  options.moi_epoch_vgpr = 15;
+  options.set_moi_owner_epoch_vgprs(14, 15);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -6888,8 +6838,7 @@ TEST(ConSanMoi, RecordReplayUsesBranchIslandForFunctionOwnedAccess) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 14;
-  options.moi_epoch_vgpr = 15;
+  options.set_moi_owner_epoch_vgprs(14, 15);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -6928,8 +6877,7 @@ TEST(ConSanMoi, Rdna4DenseFunctionAccessesUseRelocatableHost) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -6982,8 +6930,7 @@ TEST(ConSanMoi, BarrierRecordPatchTrampolinesBarrierAndWritesRecord) {
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 30;
-  options.moi_owner_vgpr = 14;
-  options.moi_epoch_vgpr = 15;
+  options.set_moi_owner_epoch_vgprs(14, 15);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
 
@@ -7103,8 +7050,7 @@ TEST(ConSanMoi, Cdna4AdjacentFullBarriersShareOneRecordProbe) {
   options.moi_track_atomics = false;
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 30u;
-  options.moi_owner_vgpr = 14u;
-  options.moi_epoch_vgpr = 15u;
+  options.set_moi_owner_epoch_vgprs(14u, 15u);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u, 1u);
   options.max_patches = 2u;
@@ -7164,8 +7110,7 @@ TEST(ConSanMoi, BarrierRecordUsesLocalIndirectIslandForFarAppendedHelper) {
   options.moi_track_atomics = false;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 30;
-  options.moi_owner_vgpr = 14;
-  options.moi_epoch_vgpr = 15;
+  options.set_moi_owner_epoch_vgprs(14, 15);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
 
@@ -7201,8 +7146,7 @@ TEST(ConSanMoi, BarrierRecordUsesEntryCapturedWorkgroupIds) {
   options.moi_track_barriers = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 30;
-  options.moi_owner_vgpr = 14;
-  options.moi_epoch_vgpr = 15;
+  options.set_moi_owner_epoch_vgprs(14, 15);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
 
@@ -7421,8 +7365,7 @@ TEST(ConSanMoi, RecordReplayPersistentEpochStillEmitsBarrierRecords) {
   options.moi_track_barriers = true;
   options.moi_init_owner_epoch = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 24;
-  options.moi_epoch_vgpr = 25;
+  options.set_moi_owner_epoch_vgprs(24, 25);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0, 8);
 
@@ -7452,8 +7395,7 @@ TEST(ConSanMoi, Cdna4RecordReplayPersistentEpochEmitsBarrierRecord) {
   options.moi_track_barriers = true;
   options.moi_init_owner_epoch = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 24;
-  options.moi_epoch_vgpr = 25;
+  options.set_moi_owner_epoch_vgprs(24, 25);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0, 8);
 
@@ -10082,8 +10024,7 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
   MoiOptions options = moi_options();
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 15;
-  options.moi_epoch_vgpr = 16;
+  options.set_moi_owner_epoch_vgprs(15, 16);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -10225,8 +10166,7 @@ TEST(ConSanMoi, Gfx1250AtomicRecordPatchesOrderedFlatAtomic) {
   MoiOptions options = moi_options();
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 15;
-  options.moi_epoch_vgpr = 16;
+  options.set_moi_owner_epoch_vgprs(15, 16);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -10265,8 +10205,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayMaterializesSignedFlatAccessOffset) {
   options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
   options.scratch_vgpr = 16;
   options.moi_exec_save_sgpr = 60;
-  options.moi_owner_vgpr = 24;
-  options.moi_epoch_vgpr = 25;
+  options.set_moi_owner_epoch_vgprs(24, 25);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -10333,8 +10272,7 @@ TEST(ConSanMoi, Gfx1250IsolatedLdsReleaseIsRetainedWithAccessReplay) {
   MoiOptions options = moi_options();
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 15;
-  options.moi_epoch_vgpr = 16;
+  options.set_moi_owner_epoch_vgprs(15, 16);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 0, 1, 1);
   options.max_patches = 2;
@@ -10385,8 +10323,7 @@ TEST(ConSanMoi, Rdna4FamilyDenseAccessesShareOneWordCallRelay) {
     MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.scratch_vgpr = 8;
     options.moi_exec_save_sgpr = 80;
-    options.moi_owner_vgpr = 40;
-    options.moi_epoch_vgpr = 41;
+    options.set_moi_owner_epoch_vgprs(40, 41);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
     options.moi_track_barriers = false;
@@ -10451,8 +10388,7 @@ TEST(ConSanMoi, Gfx1250FarOrdinaryAcquireUsesOwnerLocalEntryWithAutomaticExecSav
   options.moi_track_atomics = true;
   options.moi_runtime_sample_stride = 65'536u;
   options.scratch_vgpr = 8u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.max_patches = 128u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(
@@ -10530,8 +10466,7 @@ TEST(ConSanMoi, Gfx1250DenseRuntimeGatePreservesCallReturnPair) {
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = kExecSaveSgpr;
   options.moi_dispatch_identity.set_sgpr(kDispatchIdSgpr);
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_persistent_sgprs.record_replay_workgroup =
       ConSanMoiPersistentWorkgroupRegisters{50u, 51u, 52u};
   options.moi_init_owner_epoch = true;
@@ -10584,8 +10519,7 @@ TEST(ConSanMoi, Gfx1250DenseRuntimeGateSupportsVectorWorkgroupTupleWithCluster) 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 40u;
-  options.moi_owner_vgpr = 38u;
-  options.moi_epoch_vgpr = 39u;
+  options.set_moi_owner_epoch_vgprs(38u, 39u);
   options.moi_record_replay_workgroup_vgprs =
       ConSanMoiPersistentWorkgroupRegisters{94u, 95u, 96u, 97u};
   options.moi_init_owner_epoch = true;
@@ -10626,8 +10560,7 @@ TEST(ConSanMoi, Cdna4DenseRecordReplayAccessesDoNotRequireBarrierRouter) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -10686,8 +10619,7 @@ TEST(ConSanMoi, Cdna4DenseRecordReplayRouteRestoresGuestSccBeforeAccessBody) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = kExecSaveSgpr;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0u, 0u, 0u);
   options.moi_track_barriers = false;
@@ -10749,8 +10681,7 @@ TEST(ConSanMoi, Cdna4PartitionedDenseHostsAvoidEveryAccessCandidate) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -10812,8 +10743,7 @@ TEST(ConSanMoi, Rdna4DenseRecordReplayBarriersUseRelocatedRouter) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size =
@@ -11170,8 +11100,7 @@ TEST(ConSanMoi, Cdna4FarRecordReplayBarriersUseRelocatedRouterBelowCompactCountL
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size =
@@ -11302,8 +11231,7 @@ TEST(ConSanMoi, Rdna4DenseFunctionBarriersUseRelocatableRouter) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size =
@@ -11350,8 +11278,7 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPartitionRelayWindowsAcrossLargeKernel) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size =
       consan_moi_report_buffer_min_bytes(2u * kAccessesPerWindow, 0, 0, 0);
@@ -11390,8 +11317,7 @@ TEST(ConSanMoi, RecordReplayAllSupportedPolicyIgnoresNominalPatchLimit) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -11430,8 +11356,7 @@ TEST(ConSanMoi, Gfx1250DenseAccessesUseRelocatableHostPastKernelEntry) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -11486,8 +11411,7 @@ TEST(ConSanMoi, Gfx1250DenseAccessRouterPreservesOrdinaryAcquireSequence) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 16u;
   options.moi_exec_save_sgpr = 80u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size =
       consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0, 0, kAccessCount, kAccessCount);
@@ -11555,8 +11479,7 @@ TEST(ConSanMoi, Gfx1250DenseAccessesRejectUnreachableHostWhenOwnerUsesRouterStat
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
   options.moi_track_barriers = false;
@@ -11601,8 +11524,7 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_dynamic_access_records = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
@@ -11667,8 +11589,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayCapturesHighBankLdsAddressBeforeSelectingScra
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = 30u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_dynamic_access_records = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8u, 0u, 0u, 0u);
@@ -11733,8 +11654,7 @@ TEST(ConSanMoi, Gfx1250RecordReplaySavesSpillBeforeCompositeHighBankAddressCaptu
 
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_exec_save_sgpr = 30u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_dynamic_access_records = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8u, 0u, 0u, 0u);
@@ -11846,8 +11766,7 @@ TEST(ConSanMoi, AtomicRecordUsesLocalIndirectIslandForFarAppendedHelper) {
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 30;
-  options.moi_owner_vgpr = 16;
-  options.moi_epoch_vgpr = 17;
+  options.set_moi_owner_epoch_vgprs(16, 17);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -11902,8 +11821,7 @@ TEST(ConSanMoi, FenceRecordRelocatesSccDeadPrefixForCompactFarEntry) {
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 30;
-  options.moi_owner_vgpr = 16;
-  options.moi_epoch_vgpr = 17;
+  options.set_moi_owner_epoch_vgprs(16, 17);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -11937,8 +11855,7 @@ TEST(ConSanMoi, AtomicRecordKeepsAcquireResultBeforeReporting) {
   options.moi_track_atomics = true;
   options.max_patches = 2;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 15;
-  options.moi_epoch_vgpr = 16;
+  options.set_moi_owner_epoch_vgprs(15, 16);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 0, 2, 2);
 
@@ -11985,8 +11902,7 @@ TEST(ConSanMoi, RecordReplayNeutralizesWorkgroupReleaseScalarClauseAcrossRdnaTar
     options.moi_init_owner_epoch = true;
     options.scratch_vgpr = 16u;
     options.moi_exec_save_sgpr = 30u;
-    options.moi_owner_vgpr = 40u;
-    options.moi_epoch_vgpr = 41u;
+    options.set_moi_owner_epoch_vgprs(40u, 41u);
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u, 0u, 2u, 2u);
     options.max_patches = 1u;
@@ -12021,8 +11937,7 @@ TEST(ConSanMoi, AtomicRecordKeepsReturningReleaseAtEndOfProbe) {
   MoiOptions options = moi_options();
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 15;
-  options.moi_epoch_vgpr = 16;
+  options.set_moi_owner_epoch_vgprs(15, 16);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -12052,8 +11967,7 @@ TEST(ConSanMoi, FenceRecordPatchCardinalityIsBoundedAndPrefixComplete) {
   options.moi_track_atomics = true;
   options.max_patches = 1;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 30;
-  options.moi_epoch_vgpr = 31;
+  options.set_moi_owner_epoch_vgprs(30, 31);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 0, 2, 2);
 
@@ -12095,8 +12009,7 @@ TEST(ConSanMoi, FenceRecordAcceptsSupportedRdna4OrdinaryAcquireAddress) {
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
   options.scratch_vgpr = 16;
-  options.moi_owner_vgpr = 30;
-  options.moi_epoch_vgpr = 31;
+  options.set_moi_owner_epoch_vgprs(30, 31);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -12143,8 +12056,7 @@ TEST(ConSanMoi, Cdna4FenceRecordUsesCacheOrderingWithoutRdnaTh) {
   options.max_patches = 1;
   options.scratch_vgpr = 8;
   options.moi_exec_save_sgpr = 80;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -12181,8 +12093,7 @@ TEST(ConSanMoi, FenceRecordPatchRejectsStaleCommunicationIdentityWithoutGuessing
   options.moi_track_atomics = true;
   options.max_patches = 3;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.set_moi_owner_epoch_vgprs(11, 12);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(3, 0, 0, 0, 0, 3, 3);
 
@@ -12232,8 +12143,7 @@ TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
   options.moi_track_atomics = true;
   options.max_patches = 3;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.set_moi_owner_epoch_vgprs(11, 12);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(3, 0, 0, 0, 0, 3, 3);
 
@@ -12260,8 +12170,7 @@ TEST(ConSanMoi, AtomicRecordMarksCompareExchangeOutcomeUnavailableUntilCaptured)
   MoiOptions options = moi_options();
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 16;
-  options.moi_epoch_vgpr = 17;
+  options.set_moi_owner_epoch_vgprs(16, 17);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -12495,8 +12404,7 @@ TEST(ConSanMoi, AtomicRecordSpillsSpecialStateOnRdna4) {
   options.moi_track_atomics = true;
   options.max_patches = 2u;
   options.scratch_vgpr = 16u;
-  options.moi_owner_vgpr = 30u;
-  options.moi_epoch_vgpr = 31u;
+  options.set_moi_owner_epoch_vgprs(30u, 31u);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 0, 2, 2);
 
@@ -12549,8 +12457,7 @@ TEST(ConSanMoi, Cdna3RecordReplayAtomicEmitsValidatedNativeTransaction) {
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
   options.scratch_vgpr = 16u;
-  options.moi_owner_vgpr = 30u;
-  options.moi_epoch_vgpr = 31u;
+  options.set_moi_owner_epoch_vgprs(30u, 31u);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -12745,8 +12652,7 @@ TEST(ConSanMoi, AtomicRecordRetainsIsolatedNoReturnReleaseAndAccessReplay) {
   options.moi_dynamic_access_records = true;
   options.scratch_vgpr = 16;
   options.moi_exec_save_sgpr = 30;
-  options.moi_owner_vgpr = 40;
-  options.moi_epoch_vgpr = 41;
+  options.set_moi_owner_epoch_vgprs(40, 41);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0, 0, 1, 1);
 

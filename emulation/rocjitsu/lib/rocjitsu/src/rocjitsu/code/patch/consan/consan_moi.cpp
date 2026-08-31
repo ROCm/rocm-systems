@@ -85,7 +85,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   object_facts.has_admitted_barrier = object_facts.admitted_barrier_count != 0u;
   object_facts.target_supports_dense_barrier_router = consan_is_capability_arch(arch);
   object_facts.has_explicit_persistent_state =
-      effective_options.moi_owner_vgpr || effective_options.moi_epoch_vgpr;
+      moi_owner_vgpr(effective_options) || moi_epoch_vgpr(effective_options);
   object_facts.has_report_buffer = effective_options.moi_report_buffer_address.has_value();
   AmdGpuCodeObject original_code_object(code_object_bytes.data(), code_object_bytes.size());
   const uint64_t original_text_size = original_code_object.text_sections().size() == 1

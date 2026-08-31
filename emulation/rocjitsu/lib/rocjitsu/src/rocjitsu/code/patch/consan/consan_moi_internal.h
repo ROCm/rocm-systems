@@ -1336,9 +1336,10 @@ resolve_scalar_owner_contexts(bool planning_state_valid,
 /// Validate the site-local VGPR half of scalar-persistent MOI state before
 /// emission. This remains release-active because ConSan rewrites untrusted
 /// code objects and must fail cleanly if placement and emission ever diverge.
-[[nodiscard]] bool validate_scalar_state_temporaries(const ConSanMoiOperatingPoint &point,
-                                                     std::string_view consumer,
-                                                     std::vector<std::string> &errors);
+[[nodiscard]] bool
+validate_scalar_state_temporaries(const ConSanMoiOperatingPoint &point,
+                                  const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs,
+                                  std::string_view consumer, std::vector<std::string> &errors);
 
 /// Materialize one persistent workgroup-coordinate source, including any
 /// ABI-specific extraction applied after a scalar, vector, or private load.

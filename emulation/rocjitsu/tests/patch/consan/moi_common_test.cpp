@@ -1249,7 +1249,8 @@ TEST(ConSanMoi, PrivateWorkgroupSourceAppliesPackedCoordinateExtraction) {
 TEST(ConSanMoi, ScalarPersistentTemporaryValidationIsNoopWhenDisabled) {
   MoiOptions disabled;
   std::vector<std::string> errors;
-  EXPECT_TRUE(consan_detail::validate_scalar_state_temporaries(disabled, "test consumer", errors));
+  EXPECT_TRUE(consan_detail::validate_scalar_state_temporaries(
+      disabled, moi_owner_epoch_vgpr_sources(disabled), "test consumer", errors));
   EXPECT_TRUE(errors.empty());
 }
 
@@ -1258,14 +1259,13 @@ TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
     SCOPED_TRACE(present_mask);
     MoiOptions options;
     options.moi_persistent_sgprs.set_owner_epoch(40u, 41u);
-    if (present_mask & 1u)
-      options.moi_owner_vgpr = 6u;
-    if (present_mask & 2u)
-      options.moi_epoch_vgpr = 7u;
+    options.set_materialized_moi_owner_epoch_vgprs(
+        present_mask & 1u ? std::optional<uint16_t>{6u} : std::nullopt,
+        present_mask & 2u ? std::optional<uint16_t>{7u} : std::nullopt);
     std::vector<std::string> errors;
 
-    EXPECT_FALSE(
-        consan_detail::validate_scalar_state_temporaries(options, "test consumer", errors));
+    EXPECT_FALSE(consan_detail::validate_scalar_state_temporaries(
+        options, moi_owner_epoch_vgpr_sources(options), "test consumer", errors));
     ASSERT_EQ(errors.size(), 1u);
     EXPECT_NE(errors.front().find("test consumer has no scalar-state VGPR temporaries"),
               std::string::npos);
@@ -1273,10 +1273,10 @@ TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
 
   MoiOptions valid;
   valid.moi_persistent_sgprs.set_owner_epoch(40u, 41u);
-  valid.moi_owner_vgpr = 6u;
-  valid.moi_epoch_vgpr = 7u;
+  valid.set_moi_owner_epoch_vgprs(6u, 7u);
   std::vector<std::string> errors;
-  EXPECT_TRUE(consan_detail::validate_scalar_state_temporaries(valid, "test consumer", errors));
+  EXPECT_TRUE(consan_detail::validate_scalar_state_temporaries(
+      valid, moi_owner_epoch_vgpr_sources(valid), "test consumer", errors));
   EXPECT_TRUE(errors.empty());
 }
 
@@ -2176,8 +2176,7 @@ TEST(ConSanMoi, Cdna4SharedInlineExecSaveAvoidsEveryOwnerPhysicalVcc) {
 
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.scratch_vgpr = 12u;
-  options.moi_owner_vgpr = 40u;
-  options.moi_epoch_vgpr = 41u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -2256,8 +2255,7 @@ TEST(ConSanMoi, SharedHelperAtomicSpillUsesOneLayoutForEveryOwner) {
   MoiOptions options = moi_options();
   options.moi_track_atomics = true;
   options.test_force_vgpr_spill = true;
-  options.moi_owner_vgpr = 10;
-  options.moi_epoch_vgpr = 11;
+  options.set_moi_owner_epoch_vgprs(10, 11);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -3450,8 +3448,7 @@ TEST(ConSanMoi, OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   MoiOptions options = moi_options();
   options.moi_init_owner_epoch = true;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.set_moi_owner_epoch_vgprs(11, 12);
 
   const auto result = test_lower_consan(bytes, options);
 
@@ -3522,8 +3519,7 @@ TEST(ConSanMoi, Cdna4OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
   const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words, "owner_epoch");
   MoiOptions options = moi_options();
   options.moi_init_owner_epoch = true;
-  options.moi_owner_vgpr = 10;
-  options.moi_epoch_vgpr = 11;
+  options.set_moi_owner_epoch_vgprs(10, 11);
 
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
@@ -3558,8 +3554,7 @@ TEST(ConSanMoi, OwnerEpochPrologueUsesIndirectReturnBeyondSoppRange) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   MoiOptions options = moi_options();
   options.moi_init_owner_epoch = true;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.set_moi_owner_epoch_vgprs(11, 12);
   options.moi_exec_save_sgpr = 30;
 
   const auto result = test_lower_consan(bytes, options);
@@ -3616,8 +3611,7 @@ TEST(ConSanMoi, OwnerEpochPrologueUsesWave32DescriptorForOwnerShift) {
             0u);
   MoiOptions options = moi_options();
   options.moi_init_owner_epoch = true;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.set_moi_owner_epoch_vgprs(11, 12);
 
   const auto result = test_lower_consan(bytes, options);
 
@@ -3647,8 +3641,7 @@ TEST(ConSanMoi, OwnerEpochPrologueGrowsKernelDescriptorVgprAllocation) {
       make_rdna4_lds_code_object(text_words, "lds_probe", /*vgpr_granulated=*/0);
   MoiOptions options = moi_options();
   options.moi_init_owner_epoch = true;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.set_moi_owner_epoch_vgprs(11, 12);
 
   const auto result = test_lower_consan(bytes, options);
 
@@ -3677,8 +3670,7 @@ TEST(ConSanMoi, OwnerEpochPrologueHwIdOwnerSourceRequiresOwnerSgpr) {
   MoiOptions options = moi_options();
   options.moi_init_owner_epoch = true;
   options.moi_owner_source = ConSanMoiOwnerSource::HwId;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.set_moi_owner_epoch_vgprs(11, 12);
 
   const auto result = test_lower_consan(bytes, options);
 
@@ -3703,8 +3695,7 @@ TEST(ConSanMoi, OwnerEpochPrologueCanUseHwIdOwnerSource) {
   options.moi_init_owner_epoch = true;
   options.moi_owner_source = ConSanMoiOwnerSource::HwId;
   options.moi_owner_sgpr.set(20);
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.set_moi_owner_epoch_vgprs(11, 12);
 
   const auto result = test_lower_consan(bytes, options);
 
@@ -3774,8 +3765,7 @@ TEST(ConSanMoi, Gfx1100OwnerEpochPrologueUsesHwId1ResidentWaveIdentity) {
   options.moi_init_owner_epoch = true;
   options.moi_owner_source = ConSanMoiOwnerSource::HwId;
   options.moi_owner_sgpr.set(20);
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.set_moi_owner_epoch_vgprs(11, 12);
 
   const auto result = test_lower_consan(bytes, options);
 
@@ -3827,8 +3817,7 @@ TEST(ConSanMoi, InlineShadowHwIdOwnerPrologueRemapsReservedZero) {
   options.moi_init_owner_epoch = true;
   options.moi_owner_source = ConSanMoiOwnerSource::HwId;
   options.moi_owner_sgpr.set(20);
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.set_moi_owner_epoch_vgprs(11, 12);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -3959,8 +3948,7 @@ TEST(ConSanMoi, AtomicConsumersRejectUnqualifiedStandaloneMemoryRole) {
   MoiOptions options = moi_options();
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 11;
-  options.moi_epoch_vgpr = 12;
+  options.set_moi_owner_epoch_vgprs(11, 12);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 

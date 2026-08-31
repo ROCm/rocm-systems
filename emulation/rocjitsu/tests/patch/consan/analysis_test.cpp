@@ -2264,8 +2264,7 @@ TEST(ConSanMoi, EveryEngineSupportsEveryD16GroupFlatLoadOnEveryTarget) {
         options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
         options.scratch_vgpr = 8;
         options.moi_exec_save_sgpr = engine == ConSanMoiEngine::InlineShadow ? 60u : 80u;
-        options.moi_owner_vgpr = 40;
-        options.moi_epoch_vgpr = 41;
+        options.set_moi_owner_epoch_vgprs(40, 41);
         options.moi_report_buffer_address = 0x100000000ull;
         options.moi_report_buffer_size =
             engine == ConSanMoiEngine::RecordReplay ? consan_moi_report_buffer_min_bytes(1, 0, 0, 0)
@@ -2401,8 +2400,7 @@ TEST(ConSanMoi, EveryEngineSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
         options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
         options.scratch_vgpr = 8;
         options.moi_exec_save_sgpr = engine == ConSanMoiEngine::InlineShadow ? 60u : 80u;
-        options.moi_owner_vgpr = 40;
-        options.moi_epoch_vgpr = 41;
+        options.set_moi_owner_epoch_vgprs(40, 41);
         options.moi_report_buffer_address = 0x100000000ull;
         options.moi_report_buffer_size =
             engine == ConSanMoiEngine::RecordReplay ? consan_moi_report_buffer_min_bytes(1, 0, 0, 0)
@@ -2650,8 +2648,7 @@ TEST(ConSanMoi, Cdna4RecordAndInlineEmitStronglyClassifiedGroupFlatAccess) {
     MoiOptions options = moi_options(engine);
     options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
     options.scratch_vgpr = 8;
-    options.moi_owner_vgpr = 24;
-    options.moi_epoch_vgpr = 25;
+    options.set_moi_owner_epoch_vgprs(24, 25);
     if (engine == ConSanMoiEngine::InlineShadow) {
       options.moi_workgroup_key_vgpr = 26;
       options.moi_init_owner_epoch = true;
@@ -2711,8 +2708,7 @@ TEST(ConSanMoi, Cdna4RecordReplayEmitsGroupFlatShortAccesses) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 24;
-  options.moi_epoch_vgpr = 25;
+  options.set_moi_owner_epoch_vgprs(24, 25);
   options.max_patches = 2;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
@@ -2768,8 +2764,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayEmitsGroupFlatShortAccesses) {
   MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
   options.scratch_vgpr = 8;
-  options.moi_owner_vgpr = 24;
-  options.moi_epoch_vgpr = 25;
+  options.set_moi_owner_epoch_vgprs(24, 25);
   options.max_patches = 2;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);

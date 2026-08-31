@@ -113,8 +113,7 @@ void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, MoiOptions
     // Planning may admit access sites whose bodies all fail placement. Drop
     // automatic state only when no standalone record can consume it.
     options.moi_initialize_owner_epoch = false;
-    options.moi_owner_vgpr.reset();
-    options.moi_epoch_vgpr.reset();
+    options.reset_moi_owner_epoch_vgprs();
     options.moi_record_replay_workgroup_vgprs = {};
     options.moi_persistent_sgprs.record_replay_workgroup = {};
     options.moi_dispatch_identity.reset_vgpr();

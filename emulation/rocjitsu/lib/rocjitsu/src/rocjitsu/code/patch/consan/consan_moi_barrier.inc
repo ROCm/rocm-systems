@@ -342,16 +342,16 @@ private:
     }
     return words;
   }
-  if (!point.moi_epoch_vgpr) {
+  if (!moi_epoch_vgpr(point)) {
     errors.emplace_back(
         "ConSan MOI inline-shadow barrier epoch patch requires RJ_CONSAN_MOI_EPOCH_VGPR");
     return std::nullopt;
   }
 
   const auto increment_epoch = instrumentation::build_v_add_u32(
-      *point.moi_epoch_vgpr, scalar_positive_inline_u32(1), *point.moi_epoch_vgpr, arch);
+      *moi_epoch_vgpr(point), scalar_positive_inline_u32(1), *moi_epoch_vgpr(point), arch);
   const auto saturate_epoch = instrumentation::build_v_min_u32_literal(
-      *point.moi_epoch_vgpr, consan_moi_exact_shadow::max_epoch, *point.moi_epoch_vgpr, arch);
+      *moi_epoch_vgpr(point), consan_moi_exact_shadow::max_epoch, *moi_epoch_vgpr(point), arch);
   if (!increment_epoch || !saturate_epoch) {
     errors.emplace_back(
         "ConSan MOI inline-shadow barrier epoch patch could not encode saturating epoch add");
@@ -764,13 +764,13 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         "ConSan MOI inline-shadow barrier epoch patch does not support this architecture");
     return;
   }
-  if (!options.moi_epoch_vgpr && result.moi_operating_point.owner_persistent_vgprs.empty() &&
+  if (!moi_epoch_vgpr(options) && result.moi_operating_point.owner_persistent_vgprs.empty() &&
       !options.moi_persistent_sgprs.epoch() && !options.automatic_moi_private_epoch) {
     result.warnings.emplace_back(
         "ConSan MOI inline-shadow barrier epoch patch has no persistent epoch state");
     return;
   }
-  if (options.moi_epoch_vgpr && static_cast<uint32_t>(*options.moi_epoch_vgpr) + 1u > kMaxVgprs) {
+  if (moi_epoch_vgpr(options) && static_cast<uint32_t>(*moi_epoch_vgpr(options)) + 1u > kMaxVgprs) {
     result.warnings.emplace_back(
         "ConSan MOI inline-shadow barrier epoch patch needs one epoch VGPR");
     return;
@@ -934,7 +934,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           continue;
         }
         std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
-        if (!candidate_options.moi_owner_vgpr && !candidate_options.moi_persistent_sgprs.owner()) {
+        if (!moi_owner_vgpr(candidate_options) && !candidate_options.moi_persistent_sgprs.owner()) {
           const auto owner_shift =
               common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
           if (!owner_shift)
@@ -1050,7 +1050,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   } else if (!options.automatic_moi_private_epoch) {
     for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       persistent_epoch_vgpr_requirements.emplace(
-          kernel.descriptor_file_offset, static_cast<uint32_t>(*options.moi_epoch_vgpr) + 1u);
+          kernel.descriptor_file_offset, static_cast<uint32_t>(*moi_epoch_vgpr(options)) + 1u);
     }
   }
   for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
@@ -2335,7 +2335,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       continue;
     }
     MoiBarrierEvidenceSitePlan planned_candidate = candidate;
-    if (!options.moi_owner_vgpr && !planned_candidate.kernel_descriptor_file_offset) {
+    if (!moi_owner_vgpr(options) && !planned_candidate.kernel_descriptor_file_offset) {
       if (resources->owner_descriptor_file_offsets.empty()) {
         warnings.emplace_back(
             "ConSan MOI barrier record patch requires an owning kernel descriptor");
@@ -2531,8 +2531,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
           *standalone_resource_state, planned.resources.owner_descriptor_file_offsets,
           site.text_offset, planned.resources.required_vgpr_count,
           {
-              .owner = emission.moi_owner_vgpr,
-              .epoch = emission.moi_epoch_vgpr,
+              .moi_owner_epoch_vgprs = emission.moi_owner_epoch_vgprs,
               .workgroup_key = emission.moi_workgroup_key_vgpr,
               .dispatch_id = emission.moi_dispatch_id_vgpr,
               .record_replay_workgroup = emission.moi_record_replay_workgroup_vgprs,

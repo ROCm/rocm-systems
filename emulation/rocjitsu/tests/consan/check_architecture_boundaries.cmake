@@ -232,10 +232,25 @@ _consan_assert_no_match(
     "std::optional<(uint16_t|uint32_t)>[ \t]+(x|y|z|cluster_workgroup_id)[ \t]*;"
     "persistent workgroup coordinates must not regain independent optional storage"
 )
+# Accepted persistent state must not regain independently optional fields.
+# `ConSanMoiOwnerEpochVgprSources` deliberately permits partial, site-local
+# materialization under the short names `owner` and `epoch`, so the guard is
+# scoped to the accepted-state field spellings rather than every optional
+# owner/epoch projection in this contracts file.
+foreach(_persistent_state_file IN ITEMS
+    consan_options.h.inc
+    consan_moi_record_event_emission.h
+)
+  _consan_assert_no_match(
+      "${_consan_dir}/${_persistent_state_file}"
+      "std::optional<uint16_t>[ \t]+moi_(owner|epoch)_vgpr[ \t]*;"
+      "accepted persistent owner and epoch VGPRs must remain one typed pair"
+  )
+endforeach()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_options.h.inc"
-    "(std::optional<uint16_t>[ \t]+(owner|epoch)|uint16_t[ \t]+(owner_vgpr|epoch_vgpr))[ \t]*;"
-    "persistent owner and epoch registers must remain one shared semantic pair"
+    "${_consan_dir}/consan_moi_placement_contracts.h"
+    "std::optional<uint16_t>[ \t]+(owner|epoch)[ \t]*;"
+    "relay-visible persistent owner and epoch VGPRs must remain one typed pair"
 )
 
 # Semantic policy owns meaning, never an ISA recipe or product identity.

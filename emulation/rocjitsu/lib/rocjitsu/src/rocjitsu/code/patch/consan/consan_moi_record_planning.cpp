@@ -73,8 +73,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
   return MoiRecordEventEmissionPlan{
       .scratch_vgpr = scratch_vgpr,
       .moi_exec_save_sgpr = point.moi_exec_save_sgpr,
-      .moi_owner_vgpr = point.moi_owner_vgpr,
-      .moi_epoch_vgpr = point.moi_epoch_vgpr,
+      .moi_owner_epoch_vgprs = point.moi_owner_epoch_vgprs,
       .moi_workgroup_key_vgpr = point.moi_workgroup_key_vgpr,
       .moi_dispatch_id_vgpr = point.moi_dispatch_identity.vgpr(),
       .moi_record_replay_workgroup_vgprs = point.moi_record_replay_workgroup_vgprs,
@@ -153,7 +152,7 @@ plan_moi_record_event(std::span<const uint8_t> bytes, const ProgramInventory &in
   }
 
   std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
-  if (!event_point.moi_owner_vgpr && !event_point.moi_persistent_sgprs.owner()) {
+  if (!moi_owner_vgpr(event_point) && !event_point.moi_persistent_sgprs.owner()) {
     if (moi_record_uses_private_owner(request, event_point)) {
       ResolvedMoiScratchPlan owner_resources = resources;
       if (active_private_segment_size)

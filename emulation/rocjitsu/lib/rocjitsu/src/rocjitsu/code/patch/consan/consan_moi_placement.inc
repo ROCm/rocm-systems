@@ -610,7 +610,7 @@ apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
                                      const ConSanMoiOperatingPoint &allocation,
                                      std::span<const uint64_t> owner_descriptor_offsets) {
   if (allocation.owner_persistent_vgprs.empty()) {
-    return point.moi_owner_vgpr.has_value() || point.moi_persistent_sgprs.complete() ||
+    return moi_owner_vgpr(point).has_value() || point.moi_persistent_sgprs.complete() ||
            point.automatic_moi_private_epoch;
   }
   const ConSanMoiPersistentVgprAssignment *selected = nullptr;
@@ -631,8 +631,7 @@ apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
   if (!selected) {
     if (!point.automatic_moi_private_epoch)
       return false;
-    point.moi_owner_vgpr.reset();
-    point.moi_epoch_vgpr.reset();
+    point.reset_moi_owner_epoch_vgprs();
     point.moi_workgroup_key_vgpr.reset();
     point.moi_record_replay_workgroup_vgprs = {};
     point.moi_dispatch_identity.reset_vgpr();
@@ -651,8 +650,8 @@ apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
   // private representation.
   if (selected->dispatch_id_vgpr)
     point.moi_dispatch_identity.set_private_fallback(false);
-  point.moi_owner_vgpr = selected->owner_epoch_vgprs.owner;
-  point.moi_epoch_vgpr = selected->owner_epoch_vgprs.epoch;
+  point.set_moi_owner_epoch_vgprs(selected->owner_epoch_vgprs.owner,
+                                  selected->owner_epoch_vgprs.epoch);
   point.moi_workgroup_key_vgpr = selected->workgroup_key_vgpr;
   point.moi_record_replay_workgroup_vgprs = selected->record_replay_workgroup_vgprs;
   point.moi_dispatch_identity.set_vgpr(selected->dispatch_id_vgpr);
@@ -2246,8 +2245,8 @@ void forbid_moi_persistent_vgprs(RegisterSet &forbidden, const ConSanMoiOperatin
     for (std::optional<uint16_t> reg : registers.values())
       forbid_vgpr(reg);
   };
-  forbid_vgpr(point.moi_owner_vgpr);
-  forbid_vgpr(point.moi_epoch_vgpr);
+  forbid_vgpr(moi_owner_vgpr(point));
+  forbid_vgpr(moi_epoch_vgpr(point));
   forbid_vgpr(point.moi_workgroup_key_vgpr);
   forbid_vgpr(point.moi_dispatch_identity.vgpr(), 2u);
   forbid_workgroup_tuple(point.moi_record_replay_workgroup_vgprs);
@@ -2441,7 +2440,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
                                 static_cast<uint8_t>(atomic_form->destination_register_count)});
     }
   }
-  if (!point.moi_owner_vgpr && state.register_allocation.owner_persistent_vgprs.empty() &&
+  if (!moi_owner_vgpr(point) && state.register_allocation.owner_persistent_vgprs.empty() &&
       semantic_request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId)
     request.forbidden.expand({RegClass::VGPR, kRdna4WorkitemIdX, 1});
   forbid_moi_persistent_vgprs(request.forbidden, point, state.register_allocation,
@@ -2925,8 +2924,8 @@ template <typename PersistentVgprState>
     if (reg)
       forbidden.expand({RegClass::VGPR, *reg, count});
   };
-  forbid(options.moi_owner_vgpr);
-  forbid(options.moi_epoch_vgpr);
+  forbid(moi_owner_vgpr(options));
+  forbid(moi_epoch_vgpr(options));
   forbid(options.moi_workgroup_key_vgpr);
   forbid(options.moi_dispatch_identity.vgpr(), 2u);
   for (std::optional<uint16_t> reg : options.moi_record_replay_workgroup_vgprs.values()) {
@@ -2991,15 +2990,13 @@ std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr_for_state(
     MoiResourcePlanningState &state, std::span<const uint64_t> owners, uint64_t text_offset,
     uint16_t allocated_vgpr_count, const MoiPersistentVgprStateView &persistent_state) {
   struct PersistentStateAdapter {
-    std::optional<uint16_t> moi_owner_vgpr;
-    std::optional<uint16_t> moi_epoch_vgpr;
+    std::optional<ConSanMoiOwnerEpochRegisters> moi_owner_epoch_vgprs;
     std::optional<uint16_t> moi_workgroup_key_vgpr;
     ConSanMoiDispatchIdentityAllocation moi_dispatch_identity;
     ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_vgprs;
   };
   PersistentStateAdapter adapter{
-      .moi_owner_vgpr = persistent_state.owner,
-      .moi_epoch_vgpr = persistent_state.epoch,
+      .moi_owner_epoch_vgprs = persistent_state.moi_owner_epoch_vgprs,
       .moi_workgroup_key_vgpr = persistent_state.workgroup_key,
       .moi_dispatch_identity = {},
       .moi_record_replay_workgroup_vgprs = persistent_state.record_replay_workgroup,
@@ -3082,13 +3079,13 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
     resolved.original_private_segment_size = plan.original_private_segment_size;
     resolved.owner_descriptor_file_offsets = plan.owner_descriptor_file_offsets;
     resolved.source = plan.source;
-    if (site_point.moi_owner_vgpr) {
+    if (moi_owner_vgpr(site_point)) {
       resolved.required_vgpr_count = std::max<uint16_t>(
-          resolved.required_vgpr_count, static_cast<uint16_t>(*site_point.moi_owner_vgpr + 1u));
+          resolved.required_vgpr_count, static_cast<uint16_t>(*moi_owner_vgpr(site_point) + 1u));
     }
-    if (site_point.moi_epoch_vgpr) {
+    if (moi_epoch_vgpr(site_point)) {
       resolved.required_vgpr_count = std::max<uint16_t>(
-          resolved.required_vgpr_count, static_cast<uint16_t>(*site_point.moi_epoch_vgpr + 1u));
+          resolved.required_vgpr_count, static_cast<uint16_t>(*moi_epoch_vgpr(site_point) + 1u));
     }
     if (site_point.moi_workgroup_key_vgpr) {
       resolved.required_vgpr_count =
@@ -4817,8 +4814,8 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
   const auto overlaps = [&](std::optional<uint16_t> reg) {
     return reg && range_overlaps(base, 2u, *reg, 1u);
   };
-  bool overlaps_persistent_state = overlaps(point.moi_owner_vgpr) ||
-                                   overlaps(point.moi_epoch_vgpr) ||
+  bool overlaps_persistent_state = overlaps(moi_owner_vgpr(point)) ||
+                                   overlaps(moi_epoch_vgpr(point)) ||
                                    overlaps(point.moi_workgroup_key_vgpr);
   for (const std::optional<uint16_t> reg : point.moi_record_replay_workgroup_vgprs.values()) {
     overlaps_persistent_state |= overlaps(reg);
@@ -4986,14 +4983,14 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
       (is_rdna_dispatch_vgpr_arch && persistent_demand.needs_persistent_dispatch_capture) ||
       persistent_demand.private_dispatch_incompatible_with_dynamic_stack;
   const bool needs_workgroup_key = persistent_demand.needs_workgroup_key;
-  const bool has_explicit_owner_epoch = options.moi_owner_vgpr && options.moi_epoch_vgpr;
+  const bool has_explicit_owner_epoch = options.moi_owner_epoch_vgprs.has_value();
   if (!record_replay_entry_workgroup_capture_is_unambiguous(options)) {
     update.rejection = ConSanMoiPlacementRejection::AmbiguousWorkgroupCapture;
     diagnostics.emplace_back(
         "ConSan MOI Record/Replay has multiple persistent workgroup-tuple representations");
     return update;
   }
-  if ((options.moi_owner_vgpr || options.moi_epoch_vgpr) && !has_explicit_owner_epoch) {
+  if (debug.requested_moi_owner_vgpr.has_value() != debug.requested_moi_epoch_vgpr.has_value()) {
     update.rejection = ConSanMoiPlacementRejection::PartialOwnerEpochVgprOverride;
     diagnostics.emplace_back(
         "ConSan MOI persistent VGPR overrides require both owner and epoch registers");
@@ -5027,7 +5024,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
   }
   if (has_explicit_owner_epoch) {
     persistent_base = std::max<uint32_t>(
-        persistent_base, std::max(*options.moi_owner_vgpr, *options.moi_epoch_vgpr) + 1u);
+        persistent_base, std::max(*moi_owner_vgpr(options), *moi_epoch_vgpr(options)) + 1u);
   }
 
   if (!found_owned_scope) {
@@ -5368,8 +5365,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
         if (workgroup_scalar_base && owner_epoch_vector_base) {
           const uint16_t scalar_base = *workgroup_scalar_base;
           const uint16_t vector_base = *owner_epoch_vector_base;
-          options.moi_owner_vgpr = vector_base;
-          options.moi_epoch_vgpr = static_cast<uint16_t>(vector_base + 1u);
+          options.set_moi_owner_epoch_vgprs(vector_base, static_cast<uint16_t>(vector_base + 1u));
           options.moi_persistent_sgprs.record_replay_workgroup =
               ConSanMoiPersistentWorkgroupRegisters{scalar_base,
                                                     static_cast<uint16_t>(scalar_base + 1u),
@@ -5651,7 +5647,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
         uint16_t next = static_cast<uint16_t>(component_base);
         if (has_explicit_owner_epoch) {
           assignment.owner_epoch_vgprs =
-              ConSanMoiOwnerEpochRegisters{*options.moi_owner_vgpr, *options.moi_epoch_vgpr};
+              ConSanMoiOwnerEpochRegisters{*moi_owner_vgpr(options), *moi_epoch_vgpr(options)};
         } else {
           assignment.owner_epoch_vgprs =
               ConSanMoiOwnerEpochRegisters{next, static_cast<uint16_t>(next + 1u)};
@@ -5861,8 +5857,9 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
 
   uint16_t next_persistent_vgpr = static_cast<uint16_t>(persistent_base);
   if (!has_explicit_owner_epoch) {
-    options.moi_owner_vgpr = next_persistent_vgpr++;
-    options.moi_epoch_vgpr = next_persistent_vgpr++;
+    const uint16_t owner_vgpr = next_persistent_vgpr++;
+    const uint16_t epoch_vgpr = next_persistent_vgpr++;
+    options.set_moi_owner_epoch_vgprs(owner_vgpr, epoch_vgpr);
   }
   if (needs_workgroup_key)
     options.moi_workgroup_key_vgpr = next_persistent_vgpr++;

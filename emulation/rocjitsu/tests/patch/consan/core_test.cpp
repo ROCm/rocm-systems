@@ -126,8 +126,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .moi_initialize_owner_epoch = true,
       .moi_exec_save_sgpr = 2u,
       .moi_owner_sgpr = {},
-      .moi_owner_vgpr = 4u,
-      .moi_epoch_vgpr = 5u,
+      .moi_owner_epoch_vgprs = ConSanMoiOwnerEpochRegisters{4u, 5u},
       .automatic_moi_persistent_vgprs = true,
       .automatic_moi_private_epoch = true,
       .automatic_moi_partial_exec_save_sgprs = true,
@@ -168,8 +167,9 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   expect_field_participates([](auto &value) { value.moi_initialize_owner_epoch = false; });
   expect_field_participates([](auto &value) { value.moi_exec_save_sgpr.reset(); });
   expect_field_participates([](auto &value) { value.moi_owner_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.moi_owner_vgpr.reset(); });
-  expect_field_participates([](auto &value) { value.moi_epoch_vgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_owner_epoch_vgprs.reset(); });
+  expect_field_participates([](auto &value) { value.moi_owner_epoch_vgprs->owner = 5u; });
+  expect_field_participates([](auto &value) { value.moi_owner_epoch_vgprs->epoch = 6u; });
   expect_field_participates([](auto &value) { value.automatic_moi_persistent_vgprs = false; });
   expect_field_participates([](auto &value) { value.automatic_moi_private_epoch = false; });
   expect_field_participates(
@@ -209,13 +209,12 @@ TEST(ConSan, MoiOptionsSeedsSelectedRegistersWithoutMutatingCallerInput) {
   MoiOptions attempt(input);
   EXPECT_EQ(attempt.moi_exec_save_sgpr, 2u);
   EXPECT_EQ(attempt.moi_owner_sgpr.base(), 3u);
-  EXPECT_EQ(attempt.moi_owner_vgpr, 4u);
-  EXPECT_EQ(attempt.moi_epoch_vgpr, 5u);
+  EXPECT_EQ(moi_owner_vgpr(attempt), 4u);
+  EXPECT_EQ(moi_epoch_vgpr(attempt), 5u);
 
   attempt.moi_exec_save_sgpr = 12u;
   attempt.moi_owner_sgpr.reset();
-  attempt.moi_owner_vgpr = 14u;
-  attempt.moi_epoch_vgpr.reset();
+  attempt.set_moi_owner_epoch_vgprs(14u, 15u);
 
   EXPECT_EQ(input.requested_moi_exec_save_sgpr, 2u);
   EXPECT_EQ(input.requested_moi_owner_sgpr, 3u);
@@ -224,8 +223,8 @@ TEST(ConSan, MoiOptionsSeedsSelectedRegistersWithoutMutatingCallerInput) {
   const MoiOptions fresh_attempt(input);
   EXPECT_EQ(fresh_attempt.moi_exec_save_sgpr, 2u);
   EXPECT_EQ(fresh_attempt.moi_owner_sgpr.base(), 3u);
-  EXPECT_EQ(fresh_attempt.moi_owner_vgpr, 4u);
-  EXPECT_EQ(fresh_attempt.moi_epoch_vgpr, 5u);
+  EXPECT_EQ(moi_owner_vgpr(fresh_attempt), 4u);
+  EXPECT_EQ(moi_epoch_vgpr(fresh_attempt), 5u);
 }
 
 TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
@@ -390,8 +389,7 @@ TEST(ConSan, MoiOperatingPointUpdateCarriesPointDiagnosticsAndTypedRejectionToge
 
 TEST(ConSan, MoiPersistentPlacementUpdateKeepsEntryScratchWithItsOperatingPoint) {
   ConSanMoiPersistentPlacementUpdate accepted;
-  accepted.attempted_operating_point.moi_owner_vgpr = 40u;
-  accepted.attempted_operating_point.moi_epoch_vgpr = 41u;
+  accepted.attempted_operating_point.set_moi_owner_epoch_vgprs(40u, 41u);
   accepted.changed = true;
   accepted.prologue_scratch_assignments.push_back(
       {.descriptor_file_offset = 96u, .scratch_vgpr = 42u});
@@ -421,6 +419,35 @@ TEST(ConSan, MoiPersistentScalarStateRequiresTheOwnerEpochPair) {
   EXPECT_FALSE(state.complete());
   EXPECT_FALSE(state.owner());
   EXPECT_FALSE(state.epoch());
+}
+
+TEST(ConSan, MoiOperatingPointPersistentOwnerEpochVgprsAreAllOrNothing) {
+  ConSanMoiOperatingPoint point;
+  EXPECT_FALSE(point.moi_owner_epoch_vgprs);
+  EXPECT_FALSE(moi_owner_vgpr(point));
+  EXPECT_FALSE(moi_epoch_vgpr(point));
+
+  point.set_moi_owner_epoch_vgprs(12u, 13u);
+  ASSERT_TRUE(point.moi_owner_epoch_vgprs);
+  EXPECT_EQ(moi_owner_vgpr(point), 12u);
+  EXPECT_EQ(moi_epoch_vgpr(point), 13u);
+
+  point.reset_moi_owner_epoch_vgprs();
+  EXPECT_FALSE(point.moi_owner_epoch_vgprs);
+  EXPECT_FALSE(moi_owner_vgpr(point));
+  EXPECT_FALSE(moi_epoch_vgpr(point));
+}
+
+TEST(ConSan, MoiSiteMaterializationDoesNotWeakenAcceptedOwnerEpochPair) {
+  MoiOptions options;
+  options.set_moi_owner_epoch_vgprs(12u, 13u);
+  options.set_materialized_moi_owner_epoch_vgprs(std::nullopt, 31u);
+
+  EXPECT_FALSE(moi_owner_vgpr(options));
+  EXPECT_EQ(moi_epoch_vgpr(options), 31u);
+  const ConSanMoiOperatingPoint &accepted = options;
+  EXPECT_EQ(moi_owner_vgpr(accepted), 12u);
+  EXPECT_EQ(moi_epoch_vgpr(accepted), 13u);
 }
 
 TEST(ConSan, MoiPersistentWorkgroupTupleIsAllOrNothing) {

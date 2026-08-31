@@ -136,7 +136,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
           std::string(consan_moi_atomic_address_support_name(address_plan.support)));
       continue;
     }
-    if (!options.moi_owner_vgpr && !candidate.kernel_descriptor_file_offset) {
+    if (!moi_owner_vgpr(options) && !candidate.kernel_descriptor_file_offset) {
       if (resources->owner_descriptor_file_offsets.empty()) {
         result.warnings.emplace_back(
             "ConSan MOI fence record patch requires an owning kernel descriptor");

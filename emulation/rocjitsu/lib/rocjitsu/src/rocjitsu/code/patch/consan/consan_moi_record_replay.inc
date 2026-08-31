@@ -596,7 +596,7 @@ void try_apply_first_light_access_record_patch(
       continue;
     }
     std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
-    if (!candidate_options.moi_owner_vgpr && !candidate_options.moi_persistent_sgprs.owner()) {
+    if (!moi_owner_vgpr(candidate_options) && !candidate_options.moi_persistent_sgprs.owner()) {
       const auto owner_shift =
           common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
       if (!owner_shift)

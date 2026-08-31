@@ -272,6 +272,30 @@ struct ConSanMoiOwnerEpochRegisters {
   auto operator<=>(const ConSanMoiOwnerEpochRegisters &) const = default;
 };
 
+/// Effective per-site vector sources. Unlike accepted persistent allocation,
+/// materialization may provide only one half when the other value is derived
+/// directly at the probe.
+struct ConSanMoiOwnerEpochVgprSources {
+  std::optional<uint16_t> owner;
+  std::optional<uint16_t> epoch;
+};
+
+template <typename State>
+[[nodiscard]] ConSanMoiOwnerEpochVgprSources moi_owner_epoch_vgpr_sources(const State &state) {
+  return state.moi_owner_epoch_vgprs
+             ? ConSanMoiOwnerEpochVgprSources{state.moi_owner_epoch_vgprs->owner,
+                                              state.moi_owner_epoch_vgprs->epoch}
+             : ConSanMoiOwnerEpochVgprSources{};
+}
+
+template <typename State> [[nodiscard]] std::optional<uint16_t> moi_owner_vgpr(const State &state) {
+  return moi_owner_epoch_vgpr_sources(state).owner;
+}
+
+template <typename State> [[nodiscard]] std::optional<uint16_t> moi_epoch_vgpr(const State &state) {
+  return moi_owner_epoch_vgpr_sources(state).epoch;
+}
+
 /// Exact ordinary-SGPR ABI that retains MOI state across arbitrary guest
 /// instructions.
 ///
@@ -918,14 +942,10 @@ struct ConSanMoiOperatingPoint {
   /// the probe-local normalized resident-wave identity when the selected
   /// engine represents that identity in transient scalar state.
   ConSanMoiSgprAllocation moi_owner_sgpr;
-  /// Persistent per-lane owner VGPR accepted by placement. Some operating
-  /// points instead use per-owner assignments, scalar state, or private state,
-  /// in which case this code-object-wide value is empty.
-  std::optional<uint16_t> moi_owner_vgpr;
-  /// Persistent per-lane epoch VGPR accepted by placement. This value is empty
-  /// when the accepted operating point uses a per-owner assignment, persistent
-  /// scalar state, or a private-memory epoch representation.
-  std::optional<uint16_t> moi_epoch_vgpr;
+  /// Code-object-wide persistent per-lane owner/epoch pair accepted by
+  /// placement. Some operating points instead use per-owner assignments,
+  /// scalar state, or private state, in which case this value is empty.
+  std::optional<ConSanMoiOwnerEpochRegisters> moi_owner_epoch_vgprs;
   /// Internal marker set after ConSan assigns persistent owner/epoch VGPRs.
   bool automatic_moi_persistent_vgprs = false;
   /// Internal marker set when inline shadow derives owner at each probe and
@@ -996,6 +1016,10 @@ struct ConSanMoiOperatingPoint {
   [[nodiscard]] bool has_compact_moi_scalar_spill() const {
     return automatic_moi_scalar_spill_layout == ConSanMoiScalarSpillLayout::Compact;
   }
+  void set_moi_owner_epoch_vgprs(uint16_t owner, uint16_t epoch) {
+    moi_owner_epoch_vgprs = ConSanMoiOwnerEpochRegisters{owner, epoch};
+  }
+  void reset_moi_owner_epoch_vgprs() { moi_owner_epoch_vgprs.reset(); }
 
   /// Visit every fixed-width auxiliary scalar reservation represented by this
   /// operating point. EXEC, owner, dispatch, and persistent state have
@@ -1021,6 +1045,13 @@ struct ConSanMoiOperatingPoint {
 /// output. Public orchestration and report planning never consume this type;
 /// narrow per-patch plans own the decisions that cross semantic boundaries.
 struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {
+  /// Site-local materialization may legitimately need only one half of the
+  /// accepted persistent pair: for example, Sampled can derive owner at the
+  /// probe while loading epoch from private state. Keeping that temporary
+  /// override out of `ConSanMoiOperatingPoint` prevents an emission detail
+  /// from weakening the accepted allocation invariant.
+  std::optional<ConSanMoiOwnerEpochVgprSources> materialized_moi_owner_epoch_vgprs;
+
   MoiOptions() = default;
   /// Start a fresh MOI attempt from caller input. The implicit conversion is
   /// intentional at the internal lowering boundary: production callers carry no
@@ -1029,10 +1060,30 @@ struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {
   MoiOptions(const ConSanOptions &options) : ConSanOptions(options) {
     moi_exec_save_sgpr = options.requested_moi_exec_save_sgpr;
     moi_owner_sgpr.set(options.requested_moi_owner_sgpr);
-    moi_owner_vgpr = options.requested_moi_owner_vgpr;
-    moi_epoch_vgpr = options.requested_moi_epoch_vgpr;
+    if (options.requested_moi_owner_vgpr && options.requested_moi_epoch_vgpr)
+      set_moi_owner_epoch_vgprs(*options.requested_moi_owner_vgpr,
+                                *options.requested_moi_epoch_vgpr);
+  }
+
+  void set_materialized_moi_owner_epoch_vgprs(std::optional<uint16_t> owner,
+                                              std::optional<uint16_t> epoch) {
+    materialized_moi_owner_epoch_vgprs = ConSanMoiOwnerEpochVgprSources{owner, epoch};
   }
 };
+
+[[nodiscard]] inline ConSanMoiOwnerEpochVgprSources
+moi_owner_epoch_vgpr_sources(const MoiOptions &options) {
+  return options.materialized_moi_owner_epoch_vgprs.value_or(
+      moi_owner_epoch_vgpr_sources(static_cast<const ConSanMoiOperatingPoint &>(options)));
+}
+
+[[nodiscard]] inline std::optional<uint16_t> moi_owner_vgpr(const MoiOptions &options) {
+  return moi_owner_epoch_vgpr_sources(options).owner;
+}
+
+[[nodiscard]] inline std::optional<uint16_t> moi_epoch_vgpr(const MoiOptions &options) {
+  return moi_owner_epoch_vgpr_sources(options).epoch;
+}
 
 /// Process-local exact-one budget for repeated dynamic loads of one stable
 /// fault-site identity. The caller serializes observe() with code-object load

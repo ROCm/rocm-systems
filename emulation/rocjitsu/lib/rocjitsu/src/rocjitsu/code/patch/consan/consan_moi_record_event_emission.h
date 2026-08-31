@@ -21,8 +21,7 @@ namespace rocjitsu::consan_moi_impl {
 struct MoiRecordEventEmissionPlan {
   std::optional<uint16_t> scratch_vgpr;
   std::optional<uint16_t> moi_exec_save_sgpr;
-  std::optional<uint16_t> moi_owner_vgpr;
-  std::optional<uint16_t> moi_epoch_vgpr;
+  std::optional<ConSanMoiOwnerEpochRegisters> moi_owner_epoch_vgprs;
   std::optional<uint16_t> moi_workgroup_key_vgpr;
   std::optional<uint16_t> moi_dispatch_id_vgpr;
   ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_vgprs;

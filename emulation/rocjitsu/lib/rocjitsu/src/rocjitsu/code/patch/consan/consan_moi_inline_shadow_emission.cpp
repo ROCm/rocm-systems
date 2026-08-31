@@ -372,7 +372,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   if (!skip_diagnostic_if_empty())
     return false;
 
-  const bool has_epoch = point.moi_epoch_vgpr || point.moi_persistent_sgprs.epoch() ||
+  const bool has_epoch = moi_epoch_vgpr(point) || point.moi_persistent_sgprs.epoch() ||
                          point.automatic_moi_private_epoch;
   if (has_epoch) {
     if (!append_extract_exact_shadow_field(words, tmp_vgpr, old_value_vgpr,
@@ -2602,14 +2602,14 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   if (!spill_overlaps_guest_operands &&
       reject_candidate_scratch_range_overlap(candidate, scratch_vgpr, scratch_count, errors))
     return std::nullopt;
-  if (!point.moi_owner_vgpr && !point.moi_persistent_sgprs.owner() &&
+  if (!moi_owner_vgpr(point) && !point.moi_persistent_sgprs.owner() &&
       !point.automatic_moi_private_epoch) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires persistent owner state");
     return std::nullopt;
   }
-  if (reject_optional_scratch_range_overlap(point.moi_owner_vgpr, scratch_vgpr, scratch_count,
+  if (reject_optional_scratch_range_overlap(moi_owner_vgpr(point), scratch_vgpr, scratch_count,
                                             "MOI owner", errors) ||
-      reject_optional_scratch_range_overlap(point.moi_epoch_vgpr, scratch_vgpr, scratch_count,
+      reject_optional_scratch_range_overlap(moi_epoch_vgpr(point), scratch_vgpr, scratch_count,
                                             "MOI epoch", errors) ||
       reject_optional_scratch_range_overlap(point.moi_workgroup_key_vgpr, scratch_vgpr,
                                             scratch_count, "MOI workgroup key", errors))
@@ -2702,7 +2702,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
 
   std::vector<uint32_t> words;
   words.reserve(candidate.size() / sizeof(uint32_t) + 64u + (point.moi_exec_save_sgpr ? 120u : 0u) +
-                (point.moi_epoch_vgpr ? 2u : 0u));
+                (moi_epoch_vgpr(point) ? 2u : 0u));
   if (private_dispatch_id_offset) {
     if (!point.moi_dispatch_identity.sgpr()) {
       errors.emplace_back(
