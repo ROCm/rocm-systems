@@ -1761,7 +1761,15 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       qpCreateAttrs.channelId = channelId;
       qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
       qpCreateAttrs.useIonic = IbCastAinicRoce;
-      IbCastQpCreateAttrInitSharing(&qpCreateAttrs);
+      if (IbCastCommIsPrimary(&rComm->base)) {
+        // Flush QP is shared across comms in the group — enable WR depth
+        // scaling and group-based UDMA pinning so it matches the data QPs.
+        qpCreateAttrs.isQpSharingEnabled = true;
+        qpCreateAttrs.qpSharingGroupIdx = remMeta->sharedGroupIdx;
+        qpCreateAttrs.cqDepthMultiplier = depthMult;
+      } else {
+        IbCastQpCreateAttrInitSharing(&qpCreateAttrs);
+      }
 
       NCCLCHECK(IbCastQpCreate(&rCommDev->gpuFlush.qp, &qpCreateAttrs));
       rCommDev->gpuFlush.qp.channelId = channelId;
