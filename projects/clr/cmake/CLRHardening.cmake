@@ -13,12 +13,13 @@ if(NOT CLR_ENABLE_HARDENING)
   return()
 endif()
 
-# GCC/Clang driver and ELF linker syntax, which MSVC and clang-cl reject.
-if(NOT UNIX)
+# GNU driver and ELF linker syntax: MSVC and clang-cl reject it, and the -z
+# options are not valid for Mach-O.
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
   return()
 endif()
 
-# FORTIFY_SOURCE reports false positives under sanitizers.
+# _FORTIFY_SOURCE reports false positives under sanitizers.
 if(ADDRESS_SANITIZER OR THEROCK_SANITIZER OR ENABLE_ADDRESS_SANITIZER)
   message(STATUS "CLR hardening: disabled for sanitizer build")
   return()
@@ -26,6 +27,7 @@ endif()
 
 include(CheckCXXCompilerFlag)
 include(CheckCXXSourceCompiles)
+include(CMakePushCheckState)
 
 # gcc and clang reject -fstack-clash-protection outright where unsupported.
 foreach(_clr_hardening_flag -fstack-protector-strong -fstack-clash-protection)
@@ -43,10 +45,11 @@ add_link_options("-Wl,-z,relro,-z,now" "-Wl,-z,noexecstack")
 
 # Ubuntu 24.04 and others default to level 3; pinning the report's 2 would remove
 # fortification. Probed under -Werror so level-2-only toolchains fall back.
+cmake_push_check_state(RESET)
 set(CMAKE_REQUIRED_FLAGS "-Werror -O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3")
 check_cxx_source_compiles("#include <string.h>\nint main(void) { return 0; }"
   CLR_HAVE_fortify_source_3)
-unset(CMAKE_REQUIRED_FLAGS)
+cmake_pop_check_state()
 if(CLR_HAVE_fortify_source_3)
   set(_clr_fortify_level 3)
 else()
