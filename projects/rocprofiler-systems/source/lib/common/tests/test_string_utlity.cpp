@@ -56,3 +56,64 @@ TEST(to_upper, single_character)
     EXPECT_EQ(to_upper("a"), "A");
     EXPECT_EQ(to_upper("A"), "A");
 }
+
+TEST(ltrim, basic_check) { EXPECT_EQ(ltrim("  hello"), "hello"); }
+
+TEST(ltrim, empty_string_returns_empty_string) { EXPECT_EQ(ltrim(""), ""); }
+
+TEST(ltrim, all_whitespace_returns_empty_string) { EXPECT_EQ(ltrim("   "), ""); }
+
+TEST(ltrim, no_leading_whitespace_is_unchanged)
+{
+    EXPECT_EQ(ltrim("nowhitespace"), "nowhitespace");
+}
+
+TEST(ltrim, trailing_whitespace_is_unaffected) { EXPECT_EQ(ltrim("hello  "), "hello  "); }
+
+TEST(ltrim, mixed_whitespace_characters)
+{
+    EXPECT_EQ(ltrim(" \t\n\r\f\vhello"), "hello");
+}
+
+TEST(rtrim, basic_check) { EXPECT_EQ(rtrim("hello  "), "hello"); }
+
+TEST(rtrim, empty_string_returns_empty_string) { EXPECT_EQ(rtrim(""), ""); }
+
+TEST(rtrim, all_whitespace_returns_empty_string) { EXPECT_EQ(rtrim("   "), ""); }
+
+TEST(rtrim, no_trailing_whitespace_is_unchanged)
+{
+    EXPECT_EQ(rtrim("nowhitespace"), "nowhitespace");
+}
+
+TEST(rtrim, leading_whitespace_is_unaffected) { EXPECT_EQ(rtrim("  hello"), "  hello"); }
+
+TEST(rtrim, mixed_whitespace_characters)
+{
+    EXPECT_EQ(rtrim("hello \t\n\r\f\v"), "hello");
+}
+
+TEST(trim, basic_check) { EXPECT_EQ(trim("  hello  "), "hello"); }
+
+TEST(trim, empty_string_returns_empty_string) { EXPECT_EQ(trim(""), ""); }
+
+TEST(trim, all_whitespace_returns_empty_string) { EXPECT_EQ(trim("   "), ""); }
+
+TEST(trim, no_whitespace_is_unchanged)
+{
+    EXPECT_EQ(trim("nowhitespace"), "nowhitespace");
+}
+
+TEST(trim, leading_only_whitespace) { EXPECT_EQ(trim("   hello"), "hello"); }
+
+TEST(trim, trailing_only_whitespace) { EXPECT_EQ(trim("hello   "), "hello"); }
+
+TEST(trim, mixed_whitespace_characters)
+{
+    EXPECT_EQ(trim(" \t\n\r\f\vhello \t\n\r\f\v"), "hello");
+}
+
+TEST(trim, internal_whitespace_is_preserved)
+{
+    EXPECT_EQ(trim("  hello   world  "), "hello   world");
+}

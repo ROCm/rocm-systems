@@ -102,15 +102,13 @@ private:
         if(!raw) return fallback;
 
         // Trim surrounding whitespace so values such as " 1.5 " still parse.
-        constexpr std::string_view whitespace = " \t\n\r\f\v";
-        std::string_view           token{ raw };
-        const auto                 first = token.find_first_not_of(whitespace);
-        if(first == std::string_view::npos)
+        const auto token =
+            utility::string::rtrim(utility::string::ltrim(std::string_view{ raw }));
+        if(token.empty())
         {
             LOG_ERROR("[get_env] Cannot convert empty getenv(\"{}\") to float", env_id);
             return fallback;
         }
-        token = token.substr(first, token.find_last_not_of(whitespace) - first + 1);
 
 #if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
         // Locale-independent, non-throwing parse mirroring the integral path: a
@@ -143,15 +141,13 @@ private:
         if(!raw) return fallback;
 
         // Trim surrounding whitespace so values such as " 42 " still parse.
-        constexpr std::string_view whitespace = " \t\n\r\f\v";
-        std::string_view           token{ raw };
-        const auto                 first = token.find_first_not_of(whitespace);
-        if(first == std::string_view::npos)
+        const auto token =
+            utility::string::rtrim(utility::string::ltrim(std::string_view{ raw }));
+        if(token.empty())
         {
             LOG_ERROR("[get_env] Cannot convert empty getenv(\"{}\") to integer", env_id);
             return fallback;
         }
-        token = token.substr(first, token.find_last_not_of(whitespace) - first + 1);
 
         // std::from_chars parses against the exact target type: it rejects a
         // leading '-' for unsigned Tp and reports result_out_of_range, so

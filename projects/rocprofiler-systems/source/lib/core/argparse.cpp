@@ -1353,10 +1353,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
 
     if(_add_group)
     {
-        auto _group_label = _group_name;
-        for(auto& c : _group_label)
-            c = toupper(c);
-        _parser.start_group(_group_label);
+        _parser.start_group(utility::string::to_upper(_group_name));
     }
 
     for(const auto& itr : _settings)
