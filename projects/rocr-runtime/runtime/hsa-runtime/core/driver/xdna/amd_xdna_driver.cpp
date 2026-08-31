@@ -857,7 +857,28 @@ static hsa_status_t ResolveDeviceBuffer(int fd, void* ptr, const core::Agent& ag
 /// they need no device address -- only to be listed so the driver keeps them resident.
 static hsa_status_t AddKernargBOs(const hsa_amd_aie_kernel_dispatch_packet_t* pkt,
                                   const core::Agent& agent, std::vector<uint32_t>& bo_handles) {
-  if (pkt->num_kernargs != 0 && pkt->kernarg_address == nullptr) {
+  if (pkt->num_kernargs == 0) return HSA_STATUS_SUCCESS;
+  if (pkt->kernarg_address == nullptr) return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+
+  // The packet promises 2 * num_kernargs entries -- the addresses followed by their sizes -- and
+  // this function and FlushArguments between them read every one. num_kernargs comes straight off
+  // the packet, so it has to be shown to fit before either of them touches the buffer: a packet
+  // claiming the uint16 maximum would otherwise walk half a megabyte past the caller's
+  // allocation. Resolving the buffer is a runtime lookup, not an ioctl.
+  uint32_t kernarg_bo = AMDXDNA_INVALID_BO_HANDLE;
+  void* kernarg_base = nullptr;
+  size_t kernarg_alloc_size = 0;
+  hsa_status_t bound_err =
+      ResolveBOHandle(pkt->kernarg_address, agent, &kernarg_bo, &kernarg_base, &kernarg_alloc_size);
+  if (bound_err != HSA_STATUS_SUCCESS) {
+    return bound_err;
+  }
+  const size_t kernarg_offset =
+      static_cast<uint8_t*>(pkt->kernarg_address) - static_cast<uint8_t*>(kernarg_base);
+  const size_t kernarg_avail =
+      (kernarg_offset <= kernarg_alloc_size) ? kernarg_alloc_size - kernarg_offset : 0;
+  if (pkt->num_kernargs > kernarg_avail / (2 * sizeof(uint64_t))) {
+    log_warning_n(10, "AIE packet declares more kernel arguments than its buffer holds.\n");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
 

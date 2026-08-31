@@ -2282,8 +2282,8 @@ TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
   std::iota(input, input + aie_vector_scalar_kernel::element_count, 0);
   std::fill_n(output, aie_vector_scalar_kernel::element_count, 0);
 
-  // Two packets in one batch: the first introduces the PDI, the second is rejected because its
-  // argument count would overflow the command's 11-bit length field.
+  // Two packets in one batch: the first introduces the PDI, the second is rejected because it
+  // declares far more kernel arguments than its kernarg buffer holds.
   hsa_signal_t signal{};
   ASSERT_EQ(hsa_signal_create(2, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
   aie_vector_scalar_kernel::dispatch_packet(pdi_buf, insts_buf, insts_size, input, output, kernargs,
