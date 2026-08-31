@@ -367,7 +367,8 @@ def format_stall_reasons(loc: LocationStats, max_reasons: int = 3) -> str:
     if not loc.stall_reasons:
         return ""
     return ", ".join(
-        f"{reason} ({count})" for reason, count in loc.stall_reasons.most_common(max_reasons)
+        f"{reason} ({count})"
+        for reason, count in loc.stall_reasons.most_common(max_reasons)
     )
 
 

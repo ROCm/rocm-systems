@@ -165,7 +165,9 @@ class AnalyzePcSamplingTests(unittest.TestCase):
             report = analyze.parse_inputs(path)
             text = analyze.render_report(report, top_n=5, kernel_filter=None)
 
-        self.assertIn("| Source | Instruction | Count | % Samples | Issued | % Issued |", text)
+        self.assertIn(
+            "| Source | Instruction | Count | % Samples | Issued | % Issued |", text
+        )
         self.assertIn("/tmp/example.cpp:42", text)
         self.assertIn("WAITCNT", text)
         self.assertIn("50.0%", text)
