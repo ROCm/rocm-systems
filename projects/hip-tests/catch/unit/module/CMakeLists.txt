@@ -421,9 +421,12 @@ add_dependencies(ModuleTest empty_module)
 if(HIP_PLATFORM MATCHES "amd")
   # SPIR-V builds compile copyKernel.s for --offload-arch=amdgcnspirv, which emits
   # SPIR-V rather than GCN assembly, so it has no AMDGPU .uniform_work_group_size
-  # metadata. Signal the CheckCodeObjAttr test to skip itself in that case.
+  # metadata. Signal the CheckCodeObjAttr test to skip itself in that case. Set the
+  # define on the source file rather than the ModuleTest target so it also reaches
+  # the per-file executable created when STANDALONE_TESTS=ON.
   if(ENABLE_SPIRV)
-    target_compile_definitions(ModuleTest PRIVATE HIP_TESTS_SPIRV_BUILD)
+    set_source_files_properties(hipExtModuleLaunchKernel.cc PROPERTIES
+      COMPILE_DEFINITIONS HIP_TESTS_SPIRV_BUILD)
   endif()
   # Wire kernel artifacts to ModuleTest so `make ModuleTest` builds them.
   # These are loaded at runtime by tests in the ModuleTest binary.
