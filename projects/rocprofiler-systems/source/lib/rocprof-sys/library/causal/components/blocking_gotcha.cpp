@@ -16,8 +16,10 @@
 #include <timemory/utility/types.hpp>
 
 #include <atomic>
+#include <cerrno>
 #include <csignal>
 #include <cstdint>
+#include <ctime>
 #include <pthread.h>
 #include <signal.h>
 #include <stdexcept>
@@ -178,7 +180,7 @@ blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
 }
 
 int
-blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*func)(const sigset_t*, int*),
+blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*func)(const sigset_t*, int*),  // NOLINT(misc-include-cleaner)
                             const sigset_t* set_v, int* sig) const noexcept
 {
     // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
@@ -191,7 +193,7 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*func)(const sigset_
 
     sigset_t set = *set_v;
     causal_gotcha::remove_signals(&set);
-    siginfo_t _info;
+    siginfo_t _info;  // NOLINT(misc-include-cleaner)
 
     const std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
 
@@ -203,7 +205,7 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*func)(const sigset_
     causal::sampling::unblock_backtrace_samples();
 
     // Woken up by another thread if the call did not fail and this is waking process
-    if(_active && ret != -1 && _info.si_pid == process::get_id())
+    if(_active && ret != -1 && _info.si_pid == process::get_id())  // NOLINT(misc-include-cleaner)
     {
         causal::delay::postblock(_delay_value);
     }
