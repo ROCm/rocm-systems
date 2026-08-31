@@ -37,38 +37,11 @@ jobs:
 
       - name: Detect changed components
         id: configure
-        run: |
-          NVIDIA=false
-          WSL=false
-          HIP_CONTRACT_TESTS=false
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: python .github/scripts/configure_component_ci.py
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            NVIDIA=true
-            WSL=true
-            HIP_CONTRACT_TESTS=true
-          else
-            CHANGED_FILES=$(git diff --name-only "${BASE_REF}")
-            echo "Changed files:"
-            echo "${CHANGED_FILES}"
-
-            if echo "${CHANGED_FILES}" | grep -qE '^projects/(clr|hip|hip-tests|hipother)/|^\.github/workflows/(component-ci|hip-nvidia-ci)\.yml'; then
-              NVIDIA=true
-            fi
-
-            if echo "${CHANGED_FILES}" | grep -qE '^projects/(rocr-runtime|clr|hip|hip-tests)/|^\.github/workflows/(component-ci|rocr-runtime-wsl)\.yml|^shared/amdgpu-windows-interop/wkmi'; then
-              WSL=true
-            fi
-
-            if echo "${CHANGED_FILES}" | grep -qE '^projects/hip/include/hip/|^projects/hip-tests/catch/(contract|tools)/|^projects/hip-tests/catch/config/configs/contract\.yaml|^projects/hip-tests/catch/TEST_PLAN\.md|^\.github/workflows/(component-ci|hip-contract-coverage)\.yml'; then
-              HIP_CONTRACT_TESTS=true
-            fi
-          fi
-
-          echo "nvidia=${NVIDIA}" >> "${GITHUB_OUTPUT}"
-          echo "wsl=${WSL}" >> "${GITHUB_OUTPUT}"
-          echo "hip-contract-tests=${HIP_CONTRACT_TESTS}" >> "${GITHUB_OUTPUT}"
-
-  nvidia:
+  nvidia-build:
     name: "NVIDIA"
     needs: changes
     if: ${{ needs.changes.outputs.nvidia == 'true' }}
