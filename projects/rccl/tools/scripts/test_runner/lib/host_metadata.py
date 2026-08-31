@@ -256,7 +256,8 @@ def collect(rocm_version=None):
         "bdfs": _gpu_bdfs(),
     }
 
-    hip = _run(["hipconfig", "--version"], timeout=15)
+    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    hip = _read(os.path.join(rocm_path, ".info", "version"))
     ucx = _run(["ucx_info", "-v"], timeout=15)
     mpi = _run(["mpirun", "--version"], timeout=15)
     md["versions"] = {
@@ -264,7 +265,7 @@ def collect(rocm_version=None):
         "amdgpu": _read("/sys/module/amdgpu/version"),
         "sbios": _read("/sys/class/dmi/id/bios_version"),
         "kernel": md["kernel"],
-        "hip": hip.splitlines()[0] if hip else None,
+        "hip": hip,
         "ucx": (re.search(r"Library version:\s*(\S+)", ucx).group(1) if ucx and re.search(r"Library version:\s*(\S+)", ucx) else None),
         "mpi": mpi.splitlines()[0] if mpi else None,
     }
