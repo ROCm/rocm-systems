@@ -26,7 +26,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <map>

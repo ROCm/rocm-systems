@@ -5,24 +5,25 @@
 /// @brief CDNA4-to-RDNA4 handwritten semantic expansion rules.
 
 #include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 #include "rocjitsu/code/dbt/semantic/cdna4_to_rdna_common.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include "rocjitsu/code/dbt/generated/matrix_conversions.h"
 
 #include <array>
 #include <cstring>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -237,6 +238,10 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
   // Drain WMMA before ds_bpermute reads its VGPR outputs.
   words.push_back(rdna4::build_sopp(rdna4::kSWaitIdle)[0]);
 
+  // EXEC was already restored to its saved value above (before the WMMA), and the
+  // address-permute block is the only site that narrows it. The ds_bpermute loop
+  // therefore intentionally runs under full EXEC: lanes outside the permuted
+  // range carry identity addresses, so a full-mask bpermute is a no-op for them.
   for (int r = 0; r < 4; ++r) {
     auto [w0, w1] = build_ds_bpermute(vdst + r, vaddr, vdst + r);
     words.push_back(w0);
@@ -244,13 +249,12 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
   }
   words.push_back(rdna4::build_sopp(rdna4::kSWaitDscnt)[0]);
 
-  words.push_back(build_s_mov_b64(kExecLo, kExecSave));
-
   return ExpandResult::success(std::move(words));
 }
 
-ExpandResult expand_waitcnt(const Instruction &inst, uint32_t, uint64_t, const LivenessAnalysis &,
-                            TranslationContext &, const LaneLayout *, const LaneLayout *) {
+ExpandResult expand_waitcnt(const Instruction &inst, uint32_t, uint64_t, std::span<const uint8_t>,
+                            const LivenessAnalysis &, TranslationContext &, const LaneLayout *,
+                            const LaneLayout *) {
   if (!inst.raw_encoding())
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " matched the waitcnt expansion rule without raw encoding");
@@ -263,19 +267,21 @@ ExpandResult expand_waitcnt(const Instruction &inst, uint32_t, uint64_t, const L
 }
 
 ExpandResult expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
-                                 const LivenessAnalysis &, TranslationContext &, const LaneLayout *,
-                                 const LaneLayout *) {
+                                 std::span<const uint8_t>, const LivenessAnalysis &,
+                                 TranslationContext &, const LaneLayout *, const LaneLayout *) {
   return lower_accvgpr_read(inst);
 }
 
-ExpandResult expand_accvgpr_write(const Instruction &, uint32_t, uint64_t, const LivenessAnalysis &,
-                                  TranslationContext &, const LaneLayout *, const LaneLayout *) {
+ExpandResult expand_accvgpr_write(const Instruction &, uint32_t, uint64_t, std::span<const uint8_t>,
+                                  const LivenessAnalysis &, TranslationContext &,
+                                  const LaneLayout *, const LaneLayout *) {
   // AccVGPR writes are already represented by the unified VGPR mapping that
   // descriptor translation reserves for RDNA targets.
   return ExpandResult::success({build_s_nop()});
 }
 
 ExpandResult expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t, uint64_t,
+                                          std::span<const uint8_t>,
                                           const LivenessAnalysis &liveness,
                                           TranslationContext &context, const LaneLayout *,
                                           const LaneLayout *) {
@@ -283,7 +289,7 @@ ExpandResult expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t, uin
 }
 
 // Table MUST be sorted by (src_encoding_id, src_opcode) for binary search.
-const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
+constexpr TranslationRule kExpandRules_cdna4_to_rdna4[] = {
     {cdna4::encoding::kSopp, cdna4::kSWaitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt,
      nullptr, nullptr},
     {cdna4::encoding::kVop3OpHi4, cdna4::kVLshlAddU64, RuleAction::Expand, 0, 0, nullptr,
@@ -295,6 +301,9 @@ const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
     {cdna4::encoding::kVop3pMfma, cdna4::kVAccvgprWrite, RuleAction::Expand, 0, 0, nullptr,
      expand_accvgpr_write, nullptr, nullptr},
 };
+
+static_assert(translation_rules_sorted(kExpandRules_cdna4_to_rdna4),
+              "the CDNA4-to-RDNA4 rule table must stay sorted by (encoding id, opcode)");
 
 static_assert(rocjitsu::kMatrixConversionCount >= 2,
               "Auto-generated matrix conversion table too small");

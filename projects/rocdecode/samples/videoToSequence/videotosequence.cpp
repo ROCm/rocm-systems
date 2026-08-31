@@ -362,6 +362,7 @@ int main(int argc, char **argv) {
     int disp_delay = 1;
     bool b_extract_sei_messages = false;
     bool b_flush_frames_during_reconfig = true, b_dump_output_frames = false;
+    bool b_unsupported_codec = false;
     Rect *p_crop_rect = nullptr;            // specify crop_rect if output cropping is needed
     OutputSurfaceMemoryType mem_type = OUT_SURFACE_MEM_DEV_INTERNAL;      // set to internal
 
@@ -481,7 +482,9 @@ int main(int argc, char **argv) {
                 std::right << std::hex << pci_domain_id << "." << pci_device_id << std::dec << std::endl;
             }
             if (!v_dec_info[thread_idx]->viddec->CodecSupported(v_dec_info[thread_idx]->dec_device_id, v_dec_info[thread_idx]->rocdec_codec_id, v_dec_info[thread_idx]->bit_depth)) {
-                std::cerr << "Codec not supported on GPU, skipping this file!" << std::endl;
+                std::cerr << "Error: Codec not supported on GPU for " << input_file_names[j] << "!" << std::endl;
+                v_dec_info[thread_idx]->decoding_complete = true;
+                b_unsupported_codec = true;
                 continue;
             }
             thread_pool.ExecuteJob(std::bind(DecProc, v_dec_info[thread_idx]->viddec.get(), v_demuxer[j].get(), &v_frame[j], &v_fps[j], std::ref(v_dec_info[thread_idx]->decoding_complete), 
@@ -492,6 +495,10 @@ int main(int argc, char **argv) {
         for (int i = 0; i < num_files; i++) {
             total_fps += v_fps[i] * static_cast<double>(n_threads) / static_cast<double>(num_files);
             n_total += v_frame[i];
+        }
+        if (n_total == 0) {
+            std::cerr << "Error: No frames were decoded!" << std::endl;
+            return 1;
         }
         if (!b_dump_output_frames) {
             std::cout << "info: Total frame decoded: " << n_total  << std::endl;
@@ -516,5 +523,5 @@ int main(int argc, char **argv) {
     }
 
 
-    return 0;
+    return b_unsupported_codec ? 1 : 0;
 }

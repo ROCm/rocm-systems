@@ -375,7 +375,9 @@ class Command : public Event {
   }
   bool getPktCapturingState() const { return packetCapturing_; }
 
-  //! Sets AQL capture state, aql packet to capture and where to copy kernArgs
+  //! Sets AQL capture state, aql packet to capture and where to copy kernArgs.
+  //! |metadataPacket|, when non-null, also enables capturing the metadata-prefetch
+  //! packet that parallels each captured AQL packet.
   void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,
                             amd::GraphKernelArgManager* graphKernArgMgr,
                             const std::string** capturedKernelName,
@@ -1672,18 +1674,23 @@ class Marker : public Command {
 };
 
 class AccumulateCommand : public Command {
+ public:
+  //! One graph kernel dispatch. The name and queue are known when the AQL packet
+  //! is written; its signal fills the timing later by dispatch slot, so signal
+  //! drain order cannot change which name receives the timing.
+  struct KernelDispatch {
+    const char* kernel_name;
+    //! vGPU slot of the stream this dispatch ran on; one accumulate command can
+    //! span several streams when the graph is segmented.
+    uint32_t queue_index;
+    uint64_t start_ns;
+    uint64_t end_ns;
+  };
+
  private:
-  //! Kernel names and timestamps list for activity profiling
-  std::vector<const std::string*> kernelNames_;
-  const std::vector<const std::string*>* kernelNamesRef_ = nullptr;
-  //! Optional owner of the borrowed kernel-name strings (e.g. the GraphExec
-  //! whose nodes own them). Retained while this command lives so the strings
-  //! outlive ReportActivity(), which runs at the end of setStatus(CL_COMPLETE)
-  //! -- after OnLaunchComplete() may have dropped the launch's reference. This
-  //! ties the strings' lifetime to the consumer (this command) rather than to
-  //! the graph launch, with no string copies. Set via the constructor.
-  ReferenceCountedObject* kernelNamesOwner_ = nullptr;
-  std::vector<std::pair<uint64_t, uint64_t>> tsList_;
+  //! Graph kernel dispatches in AQL packet order. Non-dispatch packets are
+  //! omitted; an unprocessed or invalid signal leaves its slot timing at zero.
+  std::vector<KernelDispatch> kernel_dispatches_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
   //! When false, the destructor does not destroy hw_events_ (an external owner,
@@ -1691,21 +1698,9 @@ class AccumulateCommand : public Command {
   bool owns_hw_events_ = true;
 
  public:
-  //! Create a new accumulate command. kernelNamesOwner, when given, is the
-  //! object that owns the borrowed kernel-name strings (e.g. the GraphExec);
-  //! it is retained for the command's whole lifetime and released in the
-  //! destructor, so the borrowed strings stay valid through ReportActivity()
-  //! even after OnLaunchComplete() drops the launch's reference -- with no
-  //! string copies.
   AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
-                    const Event* waitingEvent = nullptr,
-                    ReferenceCountedObject* kernelNamesOwner = nullptr)
-      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent),
-        kernelNamesOwner_(kernelNamesOwner) {
-    if (kernelNamesOwner_ != nullptr) {
-      kernelNamesOwner_->retain();
-    }
-  }
+                    const Event* waitingEvent = nullptr)
+      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent) {}
 
   //! Destructor - release all retained HW events
   virtual ~AccumulateCommand();
@@ -1733,33 +1728,23 @@ class AccumulateCommand : public Command {
   //! them across launches instead.
   void setOwnsHwEvents(bool owns) { owns_hw_events_ = owns; }
 
-  //! Add kernel name to the list if available
-  void addKernelName(const std::string* kernelName) { kernelNames_.push_back(kernelName); }
-
-  //! Add multiple kernel names in bulk
-  void addKernelNames(const std::vector<const std::string*>& kernelNames) {
-    kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
+  //! Reserve one graph kernel dispatch slot and return its index. |name| must
+  //! not be nullptr — use "<unknown>" when it cannot be resolved.
+  uint32_t addKernelDispatch(const char* name, uint32_t queue_index) {
+    kernel_dispatches_.push_back({name, queue_index, 0, 0});
+    return static_cast<uint32_t>(kernel_dispatches_.size() - 1);
   }
 
-  //! Set kernel names by reference (cheap; borrows the caller's vector and
-  //! strings). Safe only while that storage outlives this command. Used on the
-  //! hot path when no profiler is active, where the names are never read.
-  void setKernelNamesRef(const std::vector<const std::string*>* kernelNames) {
-    kernelNamesRef_ = kernelNames;
+  //! Fill the timing for the dispatch slot owned by a completed signal.
+  void setDispatchTiming(uint32_t dispatch_slot, uint64_t start_ns, uint64_t end_ns) {
+    kernel_dispatches_[dispatch_slot].start_ns = start_ns;
+    kernel_dispatches_[dispatch_slot].end_ns = end_ns;
   }
 
-  //! Add kernel timestamp to the list if available
-  void addTimestamps(uint64_t startTs, uint64_t endTs) {
-    tsList_.push_back(std::make_pair(startTs, endTs));
+  //! Return graph kernel dispatches in AQL packet order.
+  const std::vector<KernelDispatch>& getKernelDispatches() const {
+    return kernel_dispatches_;
   }
-
-  //! Return the kernel names (pointers to stable strings, no copies)
-  const std::vector<const std::string*>& getKernelNames() const {
-    return kernelNamesRef_ != nullptr ? *kernelNamesRef_ : kernelNames_;
-  }
-
-  //! Return the kernel timestamps
-  const std::vector<std::pair<uint64_t, uint64_t>>& getTimestamps() const { return tsList_; }
 
   //! The command implementation
   virtual void submit(device::VirtualDevice& device) { device.submitAccumulate(*this); }
@@ -2192,9 +2177,10 @@ class CopyMemoryP2PCommand : public CopyMemoryCommand {
  public:
   CopyMemoryP2PCommand(HostQueue& queue, cl_command_type cmdType,
                        const EventWaitList& eventWaitList, Memory& srcMemory, Memory& dstMemory,
-                       Coord3D srcOrigin, Coord3D dstOrigin, Coord3D size)
+                       Coord3D srcOrigin, Coord3D dstOrigin, Coord3D size,
+                       amd::CopyMetadata copyMetadata = amd::CopyMetadata())
       : CopyMemoryCommand(queue, cmdType, eventWaitList, srcMemory, dstMemory, srcOrigin, dstOrigin,
-                          size) {}
+                          size, copyMetadata) {}
 
   CopyMemoryP2PCommand(HostQueue& queue, cl_command_type cmdType,
                        const EventWaitList& eventWaitList, Memory& srcMemory, Memory& dstMemory,
@@ -2202,7 +2188,7 @@ class CopyMemoryP2PCommand : public CopyMemoryCommand {
                        const BufferRect& srcRect, const BufferRect& dstRect,
                        amd::CopyMetadata copyMetadata = amd::CopyMetadata())
       : CopyMemoryCommand(queue, cmdType, eventWaitList, srcMemory, dstMemory, srcOrigin, dstOrigin,
-                          size, srcRect, dstRect) {}
+                          size, srcRect, dstRect, copyMetadata) {}
 
   virtual void submit(device::VirtualDevice& device) { device.submitCopyMemoryP2P(*this); }
 

@@ -27,6 +27,7 @@
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/hsa_util.hpp"
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <memory>
@@ -47,33 +48,68 @@ copy_data_sync(void*         dst,
 
 typedef decltype(copy_data_sync) copy_data_t;
 
-/// Shared state used to coordinate the producer and consumer sides of the triple buffer.
+/// Shared state coordinating the single producer and N worker threads.
+///
+/// Each slot is owned by exactly one consumer thread; the producer hands
+/// chunks to whichever slot is currently free. A single global `stopping`
+/// flag tells all consumers to exit during shutdown.
+///
+/// Producer flow:
+///   1. Linear-scan slots for `filled == false`. If none free → CPU stall.
+///   2. Populate slot fields (memory, size, flags, chunk_index, se_id).
+///   3. Lock the slot's mutex, set `filled = true`, notify its cv.
+///
+/// Consumer flow (one thread per slot):
+///   1. Wait on its own slot's cv until `filled == true || stopping`.
+///   2. If `filled`, run the user callback then store `filled = false`.
+///   3. If `stopping` and the slot is empty, exit.
+///
+/// Note: callbacks across slots run in parallel — chunk_index is provided so
+/// downstream consumers can reorder if they need a strict sequence.
 struct triple_buffer_shared_data_t
 {
-    /// Per-buffer state: mutex for synchronization, flags for buffer status, and CPU-side memory
     struct buffer_slot_t
     {
-        std::mutex mutex{};
-        int        flags{};
-        void*      memory{nullptr};
-        size_t     size{};
+        void*    memory{nullptr};
+        size_t   size{};
+        int      flags{};
+        int64_t  se_id{0};
+        uint64_t chunk_index{0};
+        uint64_t read_offset{0};
+
+        /// Producer sets true after writing slot fields; consumer stores
+        /// false after running the callback.
+        std::atomic<bool>       filled{false};
+        std::mutex              mut{};
+        std::condition_variable cv{};
     };
 
-    att_queue_t*            queue{nullptr};  // non-owning; ThreadTracerAgent owns the queue
-    std::atomic<bool>       consumer_running{true};
-    std::condition_variable write_cv{};
-    std::atomic<size_t>     write_index{0};
-    std::atomic<size_t>     read_index{0};
+    /// Maximum number of slots. Capped at 16 to keep the per-slot thread
+    /// count bounded; the public API rejects values above this.
+    static constexpr size_t MAX_SLOTS = 16;
 
-    std::array<buffer_slot_t, NUM_CPU_BUFFERS> buffers{};
+    att_queue_t* queue{nullptr};  // non-owning; ThreadTracerAgent owns the queue
+
+    /// Global shutdown flag. Producer sets true after draining final chunks
+    /// and notifies every slot's cv so consumers can exit.
+    std::atomic<bool> stopping{false};
+
+    /// Fixed-capacity storage; the active prefix has length `num_buffers`.
+    /// Backed by std::array because `buffer_slot_t` holds non-movable
+    /// synchronization primitives.
+    std::array<buffer_slot_t, MAX_SLOTS> buffers{};
+    size_t                               num_buffers{0};
 };
 
-/// Parameters passed into the consumer worker thread.
+/// Parameters passed into each worker thread (one instance per worker).
+/// Each consumer is bound to a single slot index in the shared state.
 struct triple_buffer_consumer_data_t
 {
     rocprofiler_thread_trace_shader_data_callback_t callback_fn{};
     rocprofiler_user_data_t                         userdata{};
     std::shared_ptr<triple_buffer_shared_data_t>    shared{};
+    /// Index of the slot this consumer thread owns.
+    size_t slot_index{0};
 };
 
 /// Parameters passed into the producer worker thread.
@@ -85,6 +121,7 @@ struct triple_buffer_producer_data_t
     std::unique_ptr<hsa::TraceControlAQLPacket>  control_packet{};
     std::shared_ptr<triple_buffer_shared_data_t> shared{};
     std::unique_ptr<hsa::SQTTBufferingPackets>   buffer_packet{};
+    int64_t                                      shader_engine_id{0};
 };
 
 // Worker flags have three states: stop (either stopped or stopping), running and (global)destructor
@@ -92,13 +129,15 @@ enum worker_flag_status_t
 {
     WORKER_FLAG_STOP = 0,
     WORKER_FLAG_RUNNING,
-    WORKER_FLAG_DESTRUCTOR
+    WORKER_FLAG_DESTRUCTOR,
+    WORKER_FLAG_ERROR
 };
 
 void
 producer_loop(triple_buffer_producer_data_t parameters);
 
-/// Important: Only one consumer is allowed per instance of "parameters"
+/// One instance per worker thread; spawn one per slot in the shared state,
+/// each with a unique `slot_index`.
 void
 consumer_loop(triple_buffer_consumer_data_t parameters);
 

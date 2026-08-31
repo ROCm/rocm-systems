@@ -76,11 +76,8 @@ typedef struct rocshmem_gin_qp_set* rocshmem_gin_qp_set_t;
  *
  * @return 0 on success, non-zero on failure.
  */
-GIN_QP_API int rocshmem_gin_create_qps(int nRanks, int myRank,
-                             int (*allgather)(void* ctx, void* buf, size_t size),
-                             void* allgather_ctx,
-                             rocshmem_gin_qp_set_t* out_qp_set,
-                             void*** out_gpu_qps);
+GIN_QP_API int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, void* buf, size_t size),
+                                       void* allgather_ctx, rocshmem_gin_qp_set_t* out_qp_set, void*** out_gpu_qps);
 
 /**
  * @brief Destroy a set of GIN QPs and release all IB resources.
@@ -102,9 +99,8 @@ GIN_QP_API void rocshmem_gin_destroy_qps(rocshmem_gin_qp_set_t qp_set);
  *
  * @return 0 on success, non-zero on failure.
  */
-GIN_QP_API int rocshmem_gin_reg_mr(rocshmem_gin_qp_set_t qp_set,
-                         void* addr, size_t size, int atomic,
-                         void** out_mr, uint32_t* out_lkey, uint32_t* out_rkey);
+GIN_QP_API int rocshmem_gin_reg_mr(rocshmem_gin_qp_set_t qp_set, void* addr, size_t size, int atomic, void** out_mr,
+                                   uint32_t* out_lkey, uint32_t* out_rkey);
 
 /**
  * @brief Register a VMM-allocated memory buffer for RDMA.
@@ -113,9 +109,8 @@ GIN_QP_API int rocshmem_gin_reg_mr(rocshmem_gin_qp_set_t qp_set,
  * for both hipMalloc and VMM allocations), then ibv_reg_dmabuf_mr.
  * Falls back to ibv_reg_mr_iova2. Both use iova=VA.
  */
-GIN_QP_API int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set,
-                              void* addr, size_t size, int atomic,
-                              void** out_mr, uint32_t* out_lkey, uint32_t* out_rkey);
+GIN_QP_API int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set, void* addr, size_t size, int atomic, void** out_mr,
+                                       uint32_t* out_lkey, uint32_t* out_rkey);
 
 /**
  * @brief Deregister a memory buffer.
@@ -153,7 +148,6 @@ GIN_QP_API int rocshmem_gin_probe_devices(void);
  * @param[in] rank     This rank's index (for device-side log messages).
  */
 GIN_QP_API void rocshmem_gin_init_constmem(int provider, int rank);
-
 
 #ifdef __cplusplus
 }

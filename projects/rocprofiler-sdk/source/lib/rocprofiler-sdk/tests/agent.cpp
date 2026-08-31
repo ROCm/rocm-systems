@@ -35,7 +35,7 @@
 #include <rocprofiler-sdk/cxx/operators.hpp>
 #include <rocprofiler-sdk/cxx/utility.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>

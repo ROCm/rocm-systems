@@ -38,7 +38,8 @@ class Settings : public device::Settings {
       uint blocking_blit_ : 1;         //!< Blit ops can be blocking on CPU
       uint queue_pipe_dist_ : 1;       //!< gfx94x queue pipe distribution
       uint ext_dispatch_packet_ : 1;   //!< Uses new ext dispatch packet for all launches
-      uint reserved_ : 18;
+      uint aql_barrier_opt_ : 1;       //!< Per-stream barrier-bit optimization
+      uint reserved_ : 17;
     };
     uint value_;
   };
@@ -69,7 +70,7 @@ class Settings : public device::Settings {
 
   //! Creates settings
   bool create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups = false,
-              bool isXgmi = false, bool hasValidHDPFlush = true);
+              bool isXgmi = false);
 
  private:
   //! Disable copy constructor
@@ -83,7 +84,7 @@ class Settings : public device::Settings {
 
   //! Determine how kernel arguments should be implemented given ASIC (host
   //! memory, device memory, device memory with memory ordering workaround)
-  void setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidHDPFlush);
+  void setKernelArgImpl(const amd::Isa& isa, bool isXgmi);
 };
 
 /*@}*/  // namespace amd::roc

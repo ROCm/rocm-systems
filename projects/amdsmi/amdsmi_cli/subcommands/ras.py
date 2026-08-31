@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import logging
 import os
@@ -134,7 +117,7 @@ class RasCommands:
 
         if self.logger.is_json_format():
             self.logger.multiple_device_output = results
-            self.logger.print_output(multiple_device_enabled=True)
+            self.logger.print_output(multiple_device_enabled=True, emit_empty=True)
         else:
             print(f"{'file_name':<32} list of afids")
             for entry in results:
@@ -241,7 +224,7 @@ class RasCommands:
             if partition_id != 0 and primary_partition_gpu_id is not None:
                 primary_partition_gpu_ids.add(primary_partition_gpu_id)
 
-        if partition_warning_flag:
+        if partition_warning_flag and not self.logger.is_json_format():
             # Create a list of the primary partitions
             primary_partitions_str = " ".join(
                 f"GPU{gpu_id}" for gpu_id in primary_partition_gpu_ids
@@ -289,9 +272,9 @@ class RasCommands:
                     cper_counter=cper_counter,
                 )
                 all_json_rows.extend(rows)
-            if is_json and all_json_rows:
+            if is_json and (all_json_rows or not args.follow):
                 self.logger.multiple_device_output = all_json_rows
-                self.logger.print_output(multiple_device_enabled=True)
+                self.logger.print_output(multiple_device_enabled=True, emit_empty=True)
             if not args.follow:
                 break
             time.sleep(1)

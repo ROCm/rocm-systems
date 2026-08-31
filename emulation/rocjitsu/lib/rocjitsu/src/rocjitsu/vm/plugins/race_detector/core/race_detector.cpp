@@ -30,10 +30,11 @@ void RaceDetector::setProfiler(ProfilerInterface &p) {
 
 EventId RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
                                       std::vector<uint32_t> registers, uint64_t execMask,
-                                      uint8_t byteMask, IntervalSet ldsIntervals) {
+                                      uint8_t byteMask, IntervalSet ldsIntervals,
+                                      amdgpu::WaitCounterType waitCounterType) {
   bool hasLds = !ldsIntervals.empty();
   EventId eid = events_.add(waveId, pc, type, std::move(registers), execMask, byteMask,
-                            std::move(ldsIntervals));
+                            std::move(ldsIntervals), waitCounterType);
   if (hasLds) {
     const auto &ivs = events_.ldsIntervals(eid);
     if (isToLds(type)) {
@@ -77,11 +78,18 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes) con
   }
 
   for (EventId eventId : ldsWriteEvents) {
-    if (wave == events_.waveId(eventId) && events_.status(eventId) == EventStatus::WAVE_COMPLETE) {
-      continue;
+    if (wave == events_.waveId(eventId)) {
+      // Ordinary DS operations from one wave are ordered by the LDS pipeline,
+      // so a later DS read cannot overtake this wave's earlier DS write. A
+      // direct-to-LDS VMEM operation is different: a same-wave DS read of its
+      // destination bytes must wait for vmcnt.
+      if (events_.type(eventId) == MemoryEventType::VGPR_TO_LDS ||
+          events_.status(eventId) == EventStatus::WAVE_COMPLETE) {
+        continue;
+      }
     }
     if (events_.ldsIntervals(eventId).overlapsRange(addr, addr + nBytes)) {
-      raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, false, workgroupId});
+      raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, false, workgroupId, eventId});
     }
   }
 }
@@ -102,11 +110,15 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes) co
   }
 
   for (EventId eventId : ldsReadEvents) {
-    if (wave == events_.waveId(eventId) && events_.status(eventId) == EventStatus::WAVE_COMPLETE) {
+    // A later ordinary DS write from the same wave cannot overtake an earlier
+    // DS read. The read's destination VGPR remains independently protected by
+    // lgkmcnt until it is safe to consume or overwrite. This WAR check does
+    // not cover LDS write/write ordering, which is not currently checked.
+    if (wave == events_.waveId(eventId)) {
       continue;
     }
     if (events_.ldsIntervals(eventId).overlapsRange(addr, addr + nBytes)) {
-      raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, true, workgroupId});
+      raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, true, workgroupId, eventId});
     }
   }
 }
@@ -126,8 +138,7 @@ void RaceDetector::adjustByteCounts(const IntervalSet &ivs, std::vector<int> &co
 }
 
 std::string
-RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc,
-                                WaveRaceState *waveRaceState, int numSourceLines,
+RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc, int numSourceLines,
                                 std::function<std::string_view(int)> getSourceLine) const {
 
   auto printCodeBlock = [&](std::ostringstream &oss, int64_t startLine, int64_t endLine,
@@ -180,12 +191,7 @@ RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc,
         << ") in workgroup (" << workgroupId.x << "," << workgroupId.y << "," << workgroupId.z
         << "). Conflicting events:\n\n";
 
-    std::vector<uint64_t> eventPcs{wavePc};
-    if (waveRaceState) {
-      for (EventId evtId : waveRaceState->getVgprMemoryEvents(e.index)) {
-        eventPcs.push_back(events_.pc(evtId));
-      }
-    }
+    std::vector<uint64_t> eventPcs{wavePc, events_.pc(e.conflictingEvent)};
     printCodeBlocks(oss, std::move(eventPcs));
     return oss.str();
   }
@@ -196,19 +202,18 @@ RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc,
         << workgroupId.x << "," << workgroupId.y << "," << workgroupId.z
         << "). Conflicting events:\n\n";
 
-    std::vector<uint64_t> eventPcs{wavePc};
-    if (waveRaceState) {
-      for (EventId evtId : waveRaceState->getWaveMemoryEvents()) {
-        if (isToSgpr(events_.type(evtId))) {
-          for (uint32_t reg : events_.registers(evtId)) {
-            if (reg == static_cast<uint32_t>(e.index)) {
-              eventPcs.push_back(events_.pc(evtId));
-              break;
-            }
-          }
-        }
-      }
-    }
+    std::vector<uint64_t> eventPcs{wavePc, events_.pc(e.conflictingEvent)};
+    printCodeBlocks(oss, std::move(eventPcs));
+    return oss.str();
+  }
+
+  if (e.space == RaceViolation::Space::TTMP) {
+    std::ostringstream oss;
+    oss << "\nTTMP race detected on line " << wavePc << " (wave " << e.wave << ") in workgroup ("
+        << workgroupId.x << "," << workgroupId.y << "," << workgroupId.z
+        << "). Conflicting events:\n\n";
+
+    std::vector<uint64_t> eventPcs{wavePc, events_.pc(e.conflictingEvent)};
     printCodeBlocks(oss, std::move(eventPcs));
     return oss.str();
   }
@@ -223,17 +228,10 @@ RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc,
       int wave;
       int lane;
     };
-    std::vector<PcWaveLane> entries{{wavePc, e.wave, e.lane}};
-
-    auto scanEvents = [&](const std::vector<EventId> &events) {
-      for (EventId eventId : events) {
-        if (events_.ldsIntervals(eventId).contains(e.index)) {
-          entries.push_back({events_.pc(eventId), events_.waveId(eventId).value, -1});
-        }
-      }
+    std::vector<PcWaveLane> entries{
+        {wavePc, e.wave, e.lane},
+        {events_.pc(e.conflictingEvent), events_.waveId(e.conflictingEvent).value, -1},
     };
-    scanEvents(ldsWriteEvents);
-    scanEvents(ldsReadEvents);
     std::sort(entries.begin(), entries.end(), [](const PcWaveLane &a, const PcWaveLane &b) {
       return std::tie(a.pc, a.wave) < std::tie(b.pc, b.wave);
     });

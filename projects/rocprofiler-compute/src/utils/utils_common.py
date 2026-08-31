@@ -7,7 +7,6 @@ import ctypes
 import errno
 import io
 import os
-import pty
 import re
 import select
 import shutil
@@ -36,6 +35,17 @@ from vendored import yaml
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
+PROFILE_OUTPUT_FORMAT = "rocpd"
+
+# Shared suffix for the invalid --block error in the profile and analyze paths.
+INVALID_BLOCK_HINT = (
+    "\n\tRun rocprof-compute --list-blocks <arch> to see all block ids/aliases."
+)
+
+
+def is_gfx9(gpu_arch: Optional[str]) -> bool:
+    """Return True if gpu_arch is a gfx9 (CDNA) architecture."""
+    return bool(gpu_arch and gpu_arch.startswith("gfx9"))
 
 
 def is_gfx115x(gpu_arch: Optional[str]) -> bool:
@@ -468,7 +478,7 @@ def capture_subprocess_output(
     # Use a PTY in profile mode to prevent instrumentation output from
     # being interleaved with workload output.
     if profileMode:
-        pty_parent_fd, pty_child_fd = pty.openpty()
+        pty_parent_fd, pty_child_fd = os.openpty()
         stdout_arg = pty_child_fd
         stderr_arg = pty_child_fd
     else:
@@ -694,7 +704,7 @@ def load_panel_configs(
                 panel_config = config_yml["Panel Config"]
                 for data_source in panel_config["data source"]:
                     metric_table = data_source.get("metric_table")
-                    if metric_table and metric_table["metric"] is None:
+                    if metric_table and metric_table.get("metric") is None:
                         metric_table["metric"] = {}
                 configs[panel_config["id"]] = panel_config
 
@@ -902,10 +912,7 @@ def convert_filter_blocks_to_panel_ids(
         token = str(bid)
         if not METRIC_ID_RE.match(token):
             if token not in alias_map:
-                console_error(
-                    f"Invalid --block value {token}. "
-                    "Run rocprof-compute --list-blocks to see valid values."
-                )
+                console_error(f"Invalid --block value {token!r}.{INVALID_BLOCK_HINT}")
             token = alias_map[token]
         resolved.add(int(convert_metric_id_to_panel_info(token)[0]))
     return resolved
@@ -970,7 +977,7 @@ def get_arch_panel_id_to_alias(arch: str) -> dict[str, str]:
     filename prefix matches arch. Empty/None aliases stay as "".
     Returns {} when no template matches the arch."""
     analysis_dir = (
-        Path(config.rocprof_compute_home) / "rocprof_compute_soc" / "analysis_configs"
+        config.rocprof_compute_home / "rocprof_compute_soc" / "analysis_configs"
     )
     for path in sorted(analysis_dir.glob("*_config_template.yaml")):
         m = re.match(r"(gfx\d+)_config_template\.yaml$", path.name)
@@ -1145,6 +1152,17 @@ def reconfigure_stdio_utf8() -> None:
             pass
 
 
+def _workload_base_dir(workload_dir: Union[str, list, None]) -> Optional[str]:
+    """Extract the base workload directory from the (possibly nested) value."""
+    if isinstance(workload_dir, list):
+        return (
+            workload_dir[0][0]
+            if isinstance(workload_dir[0], (list, tuple))
+            else workload_dir[0]
+        )
+    return workload_dir
+
+
 def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, str]:
     """
     Validate roofline.csv exists and has consistent structure.
@@ -1154,14 +1172,9 @@ def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, s
                is_valid=True if CSV is valid, False otherwise
                error_message contains description if invalid
     """
-    if isinstance(workload_dir, list):
-        base_dir = (
-            workload_dir[0][0]
-            if isinstance(workload_dir[0], (list, tuple))
-            else workload_dir[0]
-        )
-    else:
-        base_dir = workload_dir
+    base_dir = _workload_base_dir(workload_dir)
+    if base_dir is None:
+        return False, "Workload directory is not set"
 
     benchmark_results = Path(base_dir) / "roofline.csv"
 

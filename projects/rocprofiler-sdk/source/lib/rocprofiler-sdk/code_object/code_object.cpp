@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -175,6 +176,13 @@ using user_data_t                    = rocprofiler_user_data_t;
 using context_array_t                = context::context_array_t;
 using context_user_data_map_t        = std::unordered_map<const context_t*, user_data_t>;
 using amd_compute_pgm_rsrc_three32_t = uint32_t;
+
+RocAttachDispatchTable**
+get_attach_table()
+{
+    static auto* table = common::static_object<RocAttachDispatchTable*>::construct();
+    return table;
+}
 
 struct kernel_descriptor_t
 {
@@ -738,12 +746,28 @@ code_object_load_callback(hsa_executable_t         executable,
     }
     else if(_storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
     {
-        ROCP_HSA_VEN_LOADER_GET_CODE_OBJECT_INFO(
-            HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_BASE,
-            &data.memory_base);
-        ROCP_HSA_VEN_LOADER_GET_CODE_OBJECT_INFO(
-            HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_SIZE,
-            &data.memory_size);
+        // In attach mode rocprofiler-sdk-attach captured a stable copy of the ELF
+        // bytes at freeze time, before the application could free the original buffer.
+        // Use that copy when available; fall back to querying the loader otherwise.
+        const auto* cached_base  = static_cast<const void*>(nullptr);
+        auto        cached_size  = uint64_t{0};
+        const auto* attach_table = *(get_attach_table());
+        if(attach_table &&
+           attach_table->rocprofiler_attach_lookup_memory_codeobj_data(
+               loaded_code_object, &cached_base, &cached_size) == ROCPROFILER_STATUS_SUCCESS)
+        {
+            data.memory_base = reinterpret_cast<uint64_t>(cached_base);
+            data.memory_size = cached_size;
+        }
+        else
+        {
+            ROCP_HSA_VEN_LOADER_GET_CODE_OBJECT_INFO(
+                HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_BASE,
+                &data.memory_base);
+            ROCP_HSA_VEN_LOADER_GET_CODE_OBJECT_INFO(
+                HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_SIZE,
+                &data.memory_size);
+        }
     }
     else if(_storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_NONE)
     {
@@ -1063,9 +1087,13 @@ executable_freeze_internal(hsa_executable_t executable)
                                     // when kernel_symbol_device_map kernels are not present in
                                     // host_function_map, skip.
                                     if(host_data.device_function == nullptr) return;
-                                    host_data.code_object_id   = sym_data.code_object_id;
-                                    host_data.kernel_id        = sym_data.kernel_id;
-                                    host_data.host_function_id = ++get_host_function_id();
+                                    host_data.code_object_id = sym_data.code_object_id;
+                                    host_data.kernel_id      = sym_data.kernel_id;
+                                    // the id identifies the symbol, not this notification, so
+                                    // allocate it on the first context and reuse it for the rest
+                                    if(sitr->host_function_id == 0)
+                                        sitr->host_function_id = ++get_host_function_id();
+                                    host_data.host_function_id = sitr->host_function_id;
                                     auto hip_record = rocprofiler_callback_tracing_record_t{
                                         .context_id = rocprofiler_context_id_t{citr->context_idx},
                                         .thread_id  = tidx,
@@ -1245,6 +1273,12 @@ shutdown(hsa_executable_t executable)
     // Code-object unload callbacks often invalidate tool-side kernel symbol metadata. Drain inline
     // queue-interposition completion records first so pending dispatch records are delivered while
     // that metadata is still valid.
+    // Hub-aware sync: joining already-enqueued tasks is not enough once a
+    // firmware record can still be sitting in the ring or parked in the retry
+    // owner. This additionally fences registration/publication, the reader's
+    // drain, and the ready-task handoff, so no completion can run against symbol
+    // metadata this unload is about to invalidate. No-op with signal-less off.
+    ::rocprofiler::kfd::signal_less_fence_completions();
     ::rocprofiler::hsa::queue_interposition::interposition_sync();
 
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
@@ -1318,13 +1352,6 @@ shutdown(hsa_executable_t executable)
     }
 
     return _unloaded;
-}
-
-RocAttachDispatchTable**
-get_attach_table()
-{
-    static auto* table = common::static_object<RocAttachDispatchTable*>::construct();
-    return table;
 }
 
 void
@@ -1412,6 +1439,11 @@ get_kernel_id(uint64_t kernel_object)
 void
 finalize()
 {
+    // Same mutex executable_destroy_internal() holds across shutdown(), so a runtime-thread
+    // destroy cannot run the unload callbacks concurrently with finalization. is_shutdown is
+    // both tested and set under the lock, so a destroy arriving afterwards observes it.
+    auto _lk = std::unique_lock{get_destroy_mutex()};
+
     if(is_shutdown.load(std::memory_order_acquire) || !get_executables() || !get_code_objects())
         return;
 

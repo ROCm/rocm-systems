@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "src/cuid_file.h"
 #include "smbios_util.h"
@@ -37,6 +18,7 @@
 #include <fcntl.h>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -456,8 +438,12 @@ amdcuid_status_t CuidFile::load() {
           current_entry.derived_cuid = string_to_cuid(value);
         } else if (key == "device_node") {
           current_entry.device_node = value;
-        } else if (key == "package_core_id") {
-          current_entry.package_core_id = value;
+        } else if (key == "package_id") {
+          current_entry.package_id =
+              static_cast<uint16_t>(std::stoul(value, nullptr, 16));
+        } else if (key == "core_id") {
+          current_entry.core_id =
+              static_cast<uint16_t>(std::stoul(value, nullptr, 16));
         } else if (key == "bdf") {
           current_entry.bdf = value;
         } else if (key == "mac_address") {
@@ -572,44 +558,50 @@ amdcuid_status_t CuidFile::save() {
 
       // Write hardware fingerprint (privileged file only)
       if (is_privileged_) {
-        file << "hardware_fingerprint=" << std::hex << std::setw(16)
+        file << "hardware_fingerprint=0x" << std::hex << std::setw(16)
              << std::setfill('0') << entry.hardware_fingerprint << "\n";
       }
 
       // Write device-specific fields
       if (entry.vendor_id != 0) {
-        file << "vendor_id=" << std::hex << std::setw(4) << std::setfill('0')
+        file << "vendor_id=0x" << std::hex << std::setw(4) << std::setfill('0')
              << entry.vendor_id << "\n";
       }
       if (entry.device_id != 0) {
-        file << "device_id=" << std::hex << std::setw(4) << std::setfill('0')
+        file << "device_id=0x" << std::hex << std::setw(4) << std::setfill('0')
              << entry.device_id << "\n";
       }
       if (entry.revision_id != 0) {
-        file << "revision_id=" << std::hex << std::setw(2) << std::setfill('0')
-             << static_cast<uint16_t>(entry.revision_id) << "\n";
+        file << "revision_id=0x" << std::hex << std::setw(2)
+             << std::setfill('0') << static_cast<uint16_t>(entry.revision_id)
+             << "\n";
       }
       if (entry.family != 0) {
-        file << "family=" << std::hex << std::setw(4) << std::setfill('0')
+        file << "family=0x" << std::hex << std::setw(4) << std::setfill('0')
              << entry.family << "\n";
       }
       if (entry.model != 0) {
-        file << "model=" << std::hex << std::setw(4) << std::setfill('0')
+        file << "model=0x" << std::hex << std::setw(4) << std::setfill('0')
              << entry.model << "\n";
       }
       if (entry.pci_class != 0) {
-        file << "pci_class=" << std::hex << std::setw(4) << std::setfill('0')
+        file << "pci_class=0x" << std::hex << std::setw(4) << std::setfill('0')
              << entry.pci_class << "\n";
       }
-      if (entry.unit_id != 0) {
-        file << "unit_id=" << std::hex << std::setw(4) << std::setfill('0')
+      if (entry.unit_id != std::numeric_limits<uint16_t>::max()) {
+        file << "unit_id=0x" << std::hex << std::setw(4) << std::setfill('0')
              << entry.unit_id << "\n";
       }
       if (!entry.device_node.empty()) {
         file << "device_node=" << entry.device_node << "\n";
       }
-      if (!entry.package_core_id.empty()) {
-        file << "package_core_id=" << entry.package_core_id << "\n";
+      if (entry.package_id != std::numeric_limits<uint16_t>::max()) {
+        file << "package_id=0x" << std::hex << std::setw(4) << std::setfill('0')
+             << entry.package_id << "\n";
+      }
+      if (entry.core_id != std::numeric_limits<uint16_t>::max()) {
+        file << "core_id=0x" << std::hex << std::setw(4) << std::setfill('0')
+             << entry.core_id << "\n";
       }
       if (!entry.bdf.empty()) {
         file << "bdf=" << entry.bdf << "\n";
@@ -697,11 +689,10 @@ amdcuid_status_t CuidFile::find_by_bdf(const std::string &bdf,
   return AMDCUID_STATUS_DEVICE_NOT_FOUND;
 }
 
-amdcuid_status_t
-CuidFile::find_by_package_core_id(const std::string &package_core_id,
-                                  CuidFileEntry &entry) const {
+amdcuid_status_t CuidFile::find_by_package_id(uint16_t package_id,
+                                              CuidFileEntry &entry) const {
   for (const auto &e : entries_) {
-    if (e.package_core_id == package_core_id) {
+    if (e.package_id == package_id) {
       entry = e;
       return AMDCUID_STATUS_SUCCESS;
     }
@@ -847,20 +838,18 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
         entry.family = info.header.fields.cpu.family;
         entry.model = info.header.fields.cpu.model;
         entry.unit_id = info.header.fields.cpu.unit_id;
-        // Format: package:core
-        entry.package_core_id =
-            std::to_string(info.header.fields.cpu.physical_id) + ":" +
-            std::to_string(info.header.fields.cpu.core);
+        entry.package_id = info.header.fields.cpu.physical_id;
+        entry.core_id = info.header.fields.cpu.core;
         // Store device path (unique per logical CPU, needed for SMT)
         std::string cpu_device_path;
         if (cpu->get_device_path(cpu_device_path) == AMDCUID_STATUS_SUCCESS) {
           entry.device_node = cpu_device_path;
         }
         // if temp CUID, make the fallback fingerprint based on the CPU's
-        // package:core
+        // package
         if (is_temporary) {
-          CuidUtilities::make_fallback_fingerprint(entry.package_core_id,
-                                                   entry.hardware_fingerprint);
+          CuidUtilities::make_fallback_fingerprint(
+              std::to_string(entry.package_id), entry.hardware_fingerprint);
         }
       }
       break;

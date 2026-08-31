@@ -24,16 +24,18 @@ Known XML spec bugs handled by this parser (as of spec version 1.1.1):
    instead of a single ``op`` field; skipped via profile skip_encodings.
 6. **V_SWAP_B32 (CDNA4)** - operands marked output-only even though the
    instruction reads both registers; compensated in codegen execute().
-7. **V_FMAMK/V_FMAAK (CDNA4)** - missing ``simm32`` operand; codegen
-   falls back to ``inst_.simm32`` directly.
+7. **V_FMAMK/V_FMAAK (CDNA4)** - the ``simm32`` literal has no
+   ``<FieldName>`` in the MR ISA. It is now carried as a fieldless
+   ``OPR_SIMM32`` operand so codegen reads the literal through the normal
+   operand accessor rather than falling back to ``inst_.simm32`` directly.
 8. **Operand direction bug** - some read-modify-write destinations are
    marked output-only instead of input+output; codegen detects these
    by checking instruction semantics that require the old value.
 """
 
+from collections.abc import Sequence
 import re
 import xml.etree.ElementTree as elem_tree
-
 
 from amdisa import xml_schema as xs
 from amdisa.gpuisa import (
@@ -45,7 +47,15 @@ from amdisa.gpuisa import (
     Operand,
     OperandNamePattern,
     OperandSelector,
+    synthesize_fieldless_name,
 )
+from amdisa.isa_additions import (
+    ADDITION_SOURCE_ATTR,
+    IsaAdditionError,
+    apply_isa_additions,
+    parse_encoding_identifier_mask as _parse_enc_id_masks,
+)
+from amdisa.fieldless_policy import validate_fieldless_taxonomy
 from amdisa.isa_profile import IsaProfile
 
 
@@ -89,54 +99,44 @@ def _fill_padding_gaps(
     return pads
 
 
-def _parse_enc_id_masks(
-    enc_id_mask: str,
-    max_enc_bits: int,
-    enc_field_bit_cnt: int,
-    op_field_bit_cnt: int,
-) -> tuple[tuple[int, int], tuple[int, int], int]:
-    """Parse an encoding identifier mask into (flat_enc_mask, op_mask, dont_care_bits).
+def _uniquify_fieldless_names(opnds: list[Operand]) -> None:
+    """Make fieldless operand names unique within one instruction, in place.
 
-    The encoding identifier mask is a binary string where '1' bits mark the
-    encoding field and '0' bits separate encoding from opcode. This function
-    derives the slice positions for the encoding field and opcode field, plus
-    the number of don't-care bits available in the primary decode table index.
+    Field-bearing operand names come from the encoding and are already unique.
+    Fieldless operands are named from their type and can collide.
+    Disambiguate deterministically: keep the base if free, else append
+        ``_out``/``_in`` by role, else ``_<order>``.
 
-    Args:
-        enc_id_mask: Binary string identifier mask (e.g. '111111111000000000000000').
-        max_enc_bits: Maximum bits for the primary decode table index.
-        enc_field_bit_cnt: Bit width of the encoding identifier field.
-        op_field_bit_cnt: Bit width of the opcode field.
-
-    Returns:
-        Tuple of (flat_enc_mask, op_mask, dont_care_bits) where each mask is
-        a (start, end) slice pair into the identifier string.
+    ``opnds`` must already be sorted by ``order`` so assignment is stable across
+    regenerations.
     """
-    bit_masks = [(x.start(), x.end()) for x in re.finditer(r'1+', enc_id_mask)]
-    flat_enc_mask = bit_masks[0]
-    if len(bit_masks) == 1:
-        op_mask = (
-            bit_masks[0][0] + enc_field_bit_cnt,
-            bit_masks[0][0] + enc_field_bit_cnt + op_field_bit_cnt,
-        )
-        if (flat_enc_mask[1] - flat_enc_mask[0]) > max_enc_bits:
-            flat_enc_mask = (
-                flat_enc_mask[0],
-                flat_enc_mask[0] + max_enc_bits,
-            )
-    else:
-        op_mask = (
-            bit_masks[1][0],
-            bit_masks[1][0] + op_field_bit_cnt,
-        )
-    dont_care_bits = max_enc_bits - (flat_enc_mask[1] - flat_enc_mask[0])
-    return flat_enc_mask, op_mask, dont_care_bits
+    used = {op.name for op in opnds if not op.fieldless}
+    for op in opnds:
+        if not op.fieldless:
+            continue
+        base = op.name
+        if base not in used:
+            used.add(base)
+            continue
+        role = '_out' if op.is_output and not op.is_input else '_in'
+        for candidate in (f'{base}{role}', f'{base}_{op.order}'):
+            if candidate not in used:
+                op.name = candidate
+                break
+        else:
+            # Extremely defensive: fall back to a guaranteed-unique suffix.
+            suffix = 0
+            while f'{base}_{op.order}_{suffix}' in used:
+                suffix += 1
+            op.name = f'{base}_{op.order}_{suffix}'
+        used.add(op.name)
 
 
 def _collapse_register_ranges(
     pairs: list,
     opnd_type_name: str,
     flt_name_map: dict,
+    lowercase_symbolic_names: bool = False,
 ) -> tuple[list[tuple[str, str]], list[OperandNamePattern]]:
     """Process predefined value pairs into (enum_name, value) list and name patterns.
 
@@ -161,8 +161,22 @@ def _collapse_register_ranges(
     current_range_max_idx = -1
     current_int_min_enum = ''
 
+    def integer_name(index: int) -> int | None:
+        if index < 0 or index >= len(pairs):
+            return None
+        name = xs.get_node_text(pairs[index].find(xs.NAME))
+        try:
+            return int(name)
+        except ValueError:
+            return None
+
     for pair_idx, predef_val_pair in enumerate(pairs):
         predef_name = xs.get_node_text(predef_val_pair.find(xs.NAME))
+        if lowercase_symbolic_names:
+            # Schema 1.1.1 uppercases predefined symbolic names.  Operand
+            # disassembly and register-range recognition use the established
+            # lowercase spelling, while generated enum names remain uppercase.
+            predef_name = predef_name.lower()
         predef_val = xs.get_node_text(predef_val_pair.find(xs.VALUE))
         original_name = predef_name
         reg_match = re.match(r'^\s*(v|s|ttmp|acc)([0-9]+)$', predef_name)
@@ -190,6 +204,8 @@ def _collapse_register_ranges(
                 next_pair = None
                 if pair_idx + 1 < len(pairs):
                     next_name = xs.get_node_text(pairs[pair_idx + 1].find(xs.NAME))
+                    if lowercase_symbolic_names:
+                        next_name = next_name.lower()
                     next_match = re.match(r'^\s*(v|s|ttmp|acc)([0-9]+)$', next_name)
                     if next_match:
                         next_pair = next_match.group(1)
@@ -209,36 +225,32 @@ def _collapse_register_ranges(
         else:
             try:
                 int_val = int(predef_name)
-                if int_val < 0:
-                    if int_val == -1:
-                        predef_name = opnd_type_name + '_NEG_INT_MIN'
-                        current_int_min_enum = predef_name
-                    elif int_val == -16:
-                        predef_name = opnd_type_name + '_NEG_INT_MAX'
-                        name_patterns.append(
-                            OperandNamePattern(
-                                OperandNamePattern.NEG_INT,
-                                min_enum=current_int_min_enum,
-                                max_enum=predef_name,
-                            )
-                        )
-                    else:
-                        continue
+                kind = (
+                    OperandNamePattern.NEG_INT
+                    if int_val < 0
+                    else OperandNamePattern.POS_INT
+                )
+                label = 'NEG_INT' if int_val < 0 else 'POS_INT'
+                step = -1 if int_val < 0 else 1
+                starts_range = integer_name(pair_idx - 1) != int_val - step
+                ends_range = integer_name(pair_idx + 1) != int_val + step
+
+                if starts_range:
+                    predef_name = f'{opnd_type_name}_{label}_MIN'
+                    current_int_min_enum = predef_name
+                elif ends_range:
+                    predef_name = f'{opnd_type_name}_{label}_MAX'
                 else:
-                    if int_val == 0:
-                        predef_name = opnd_type_name + '_POS_INT_MIN'
-                        current_int_min_enum = predef_name
-                    elif int_val == 64:
-                        predef_name = opnd_type_name + '_POS_INT_MAX'
-                        name_patterns.append(
-                            OperandNamePattern(
-                                OperandNamePattern.POS_INT,
-                                min_enum=current_int_min_enum,
-                                max_enum=predef_name,
-                            )
+                    continue
+
+                if ends_range:
+                    name_patterns.append(
+                        OperandNamePattern(
+                            kind,
+                            min_enum=current_int_min_enum,
+                            max_enum=predef_name,
                         )
-                    else:
-                        continue
+                    )
             except ValueError:
                 try:
                     flt_val = float(predef_name)
@@ -281,6 +293,8 @@ class Parser:
     Attributes:
         isa_xml: Path to XML file for the ISA specification.
         profile: ISA-specific encoding rules used during parsing.
+        addition_xmls: Ordered ISA additions XML paths to validate and merge
+            before decode-table and instruction parsing.
         tree: XML element tree obtained by parsing the XML file.
         root: Root of the XML element tree.
         isa_spec: ISA specification object.
@@ -289,7 +303,12 @@ class Parser:
         operand_types_node: Element tree node pointing to the operand types.
     """
 
-    def __init__(self, isa_xml: str, profile: IsaProfile) -> None:
+    def __init__(
+        self,
+        isa_xml: str,
+        profile: IsaProfile,
+        addition_xmls: Sequence[str] = (),
+    ) -> None:
         self.isa_xml = isa_xml
         self.profile = profile
         self.tree = elem_tree.parse(self.isa_xml)
@@ -307,7 +326,17 @@ class Parser:
         arch_family = arch_parts[1].lower()
         arch_version = arch_parts[2].replace('.', '_')
         arch_name = profile.generated_arch_name or f'{arch_family}{arch_version}'
-        self.isa_spec = IsaSpec(arch_name, version, profile)
+        generated_dir_name = profile.generated_dir_name or arch_name
+        cpp_namespace = profile.cpp_namespace or arch_name
+        self.isa_spec = IsaSpec(
+            arch_name,
+            version,
+            profile,
+            generated_dir_name,
+            cpp_namespace,
+        )
+        self.addition_xmls = tuple(addition_xmls)
+        self._addition_by_id = {}
 
         self.encodings_node = xs.get_node(isa_node, xs.ENCODINGS)
         self.insts_node = xs.get_node(isa_node, xs.INSTS)
@@ -319,36 +348,232 @@ class Parser:
         Returns:
             Populated IsaSpec object.
         """
+        self.isa_spec.applied_additions = apply_isa_additions(
+            self.root, self.addition_xmls, self.profile
+        )
+        self._addition_by_id = {
+            addition.identifier: addition
+            for addition in self.isa_spec.applied_additions
+        }
         self.parse_encodings()
         self.parse_insts()
-        self._inject_compat_insts()
+        self._validate_addition_decode_reachability()
         self.parse_operand_types()
+        self._inject_compat_insts()
+        self._collect_fieldless_operand_types()
+        validate_fieldless_taxonomy(self.isa_spec)
         return self.isa_spec
+
+    def _validate_addition_decode_reachability(self) -> None:
+        """Check the final decode pointers for every active added instruction form."""
+        for inst_node in self.insts_node:
+            addition_id = inst_node.attrib.get(ADDITION_SOURCE_ATTR)
+            if addition_id is None:
+                continue
+            inst_name = xs.get_node_text(xs.get_node(inst_node, xs.INST_NAME))
+            provenance = self._addition_by_id.get(addition_id)
+            if provenance is None:
+                raise IsaAdditionError(
+                    f'{self.isa_xml}: instruction {inst_name!r} has unknown '
+                    f'{ADDITION_SOURCE_ATTR} value {addition_id!r}; the attribute '
+                    'was not produced by a configured ISA additions document'
+                )
+            for inst_enc_node in xs.get_node(inst_node, xs.INST_ENCODINGS):
+                enc_name = xs.get_node_text(
+                    xs.get_node(inst_enc_node, xs.ENCODING_NAME)
+                )
+                if enc_name in self.profile.skip_encodings:
+                    continue
+                condition = xs.get_node_text(
+                    xs.get_node(inst_enc_node, xs.ENCODING_COND)
+                )
+                if self.profile.skip_inst_encoding(enc_name, condition):
+                    continue
+                opcode = int(xs.get_node_text(xs.get_node(inst_enc_node, xs.OPCODE)))
+                pointers = self.isa_spec.encoding_map[enc_name].primary_dt_ptrs
+                if (
+                    pointers is None
+                    or opcode >= len(pointers)
+                    or pointers[opcode] == -1
+                ):
+                    raise IsaAdditionError(
+                        f'{provenance.path}: additions document {addition_id!r} '
+                        f'instruction {inst_name!r} encoding {enc_name!r} '
+                        f'opcode {opcode} is '
+                        'unreachable in the final primary decode table'
+                    )
+
+    def implicit_operand_accesses(
+        self, operand_type: str
+    ) -> dict[tuple[str, str], tuple[bool, bool]]:
+        """Return active instruction-encoding reads and writes for an implicit operand."""
+        accesses: dict[tuple[str, str], tuple[bool, bool]] = {}
+        for inst_node in self.insts_node:
+            inst_name = xs.get_node_text(xs.get_node(inst_node, xs.INST_NAME))
+            encodings = xs.get_node(inst_node, xs.INST_ENCODINGS)
+            for enc_node in encodings:
+                enc_name = xs.get_node_text(xs.get_node(enc_node, xs.ENCODING_NAME))
+                enc_cond = xs.get_node_text(xs.get_node(enc_node, xs.ENCODING_COND))
+                if (
+                    enc_name in self.profile.skip_encodings
+                    or self.profile.skip_inst_encoding(enc_name, enc_cond)
+                ):
+                    continue
+
+                reads = False
+                writes = False
+                for opnd in xs.get_node(enc_node, xs.OPERANDS):
+                    is_implicit = (
+                        opnd.attrib[xs.OPERAND_ATTR_IS_IMPLICIT].lower() == 'true'
+                    )
+                    opnd_type = xs.get_node_text(xs.get_node(opnd, xs.OPERAND_TYPE))
+                    if not is_implicit or opnd_type != operand_type:
+                        continue
+                    reads |= opnd.attrib[xs.OPERAND_ATTR_INPUT].lower() == 'true'
+                    writes |= opnd.attrib[xs.OPERAND_ATTR_OUTPUT].lower() == 'true'
+
+                key = (inst_name, enc_name)
+                previous_reads, previous_writes = accesses.get(key, (False, False))
+                accesses[key] = (previous_reads or reads, previous_writes or writes)
+
+        for enc in self.isa_spec.inst_encodings:
+            for inst in enc.insts:
+                accesses.setdefault((inst.name, inst.enc_name), (False, False))
+        return accesses
+
+    def _collect_fieldless_operand_types(self) -> None:
+        """Record every fieldless operand type seen across all instructions.
+
+        Derived from the fully-parsed instruction list (rather than accumulated
+        at operand construction time) so it is robust against any current or
+        future operand creation path -- the taxonomy gate keys off exactly what
+        ends up in the spec.
+        """
+        self.isa_spec.fieldless_operand_types = {
+            op.operand_type
+            for enc in self.isa_spec.inst_encodings
+            for inst in enc.insts
+            for op in inst.operands
+            if op.fieldless
+        }
 
     def _inject_compat_insts(self) -> None:
         """Add instructions accepted by LLVM but missing from selected XML specs."""
-        if self.isa_spec.arch_name not in {'rdna4', 'gfx1250'}:
+        self._inject_s_waitcnt_compat()
+        self._inject_cdna5_permlane64_compat()
+
+    def _compatibility_instruction_slot(
+        self, expected_instruction_name: str
+    ) -> tuple[str, int, str]:
+        """Return the profile-owned instruction triple for its injector."""
+        slots = self.profile.compatibility_instruction_slots
+        matches = [
+            (enc_name, opcode, instruction_name)
+            for (enc_name, opcode), instruction_name in slots.items()
+            if instruction_name == expected_instruction_name
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f'{self.isa_spec.arch_name} profile must declare exactly one '
+                f'compatibility instruction named {expected_instruction_name}, '
+                f'found {matches}'
+            )
+        return matches[0]
+
+    def _inject_s_waitcnt_compat(self) -> None:
+        """Add the legacy monolithic S_WAITCNT accepted by LLVM on GFX12."""
+        if self.isa_spec.arch_name != 'rdna4':
             return
 
         # The RDNA4/GFX12 XML only lists split S_WAIT_* instructions, but LLVM
         # still accepts and emits the monolithic SOPP opcode-9 S_WAITCNT
         # compatibility form for sources such as "s_waitcnt lgkmcnt(0)".
-        enc = self.isa_spec.encoding_map.get('ENC_SOPP')
-        if enc is None or enc.primary_dt_ptrs is None:
+        enc_name, opcode, instruction_name = self._compatibility_instruction_slot(
+            'S_WAITCNT'
+        )
+        enc = self.isa_spec.encoding_map.get(enc_name)
+        if enc is None:
+            raise ValueError(
+                f'RDNA4 {instruction_name} compatibility injection requires '
+                f'{enc_name}'
+            )
+        if enc.primary_dt_ptrs is None:
+            raise ValueError(
+                f'RDNA4 {instruction_name} compatibility injection requires an '
+                f'{enc_name} primary decode route table'
+            )
+        if any(
+            inst.name == instruction_name and inst.opcode == opcode
+            for inst in enc.insts
+        ):
             return
-        if any(inst.name == 'S_WAITCNT' and inst.opcode == 9 for inst in enc.insts):
-            return
-        if len(enc.primary_dt_ptrs) <= 9:
-            return
+        occupied = next((inst for inst in enc.insts if inst.opcode == opcode), None)
+        if occupied is not None:
+            raise ValueError(
+                f'RDNA4 {instruction_name} compatibility opcode {opcode} is '
+                f'already occupied by {occupied.name}'
+            )
+        if len(enc.primary_dt_ptrs) <= opcode:
+            raise ValueError(
+                f'RDNA4 {enc_name} primary decode route table does not contain '
+                f'{instruction_name} opcode {opcode}'
+            )
 
-        dt_ptr = enc.primary_dt_ptrs[9]
-        if dt_ptr == -1:
-            return
+        dt_ptr = enc.primary_dt_ptrs[opcode]
+        patch_route = dt_ptr == -1
+        if patch_route:
+            # Schema 1.1.1 omits the reserved opcode-9 identifier from
+            # RDNA4 ENC_SOPP. LLVM still accepts that compatibility opcode,
+            # so bind it to the same primary entry as the other SOPP slots.
+            matching_dt_ptrs = {
+                ptr
+                for ptr in enc.primary_dt_ptrs
+                if 0 <= ptr < len(self.isa_spec.primary_decode_table)
+                and self.isa_spec.primary_decode_table[ptr].enc is enc
+            }
+            if not matching_dt_ptrs:
+                raise ValueError(
+                    f'RDNA4 {instruction_name} opcode {opcode} has no {enc_name} '
+                    'primary decode route'
+                )
+            if len(matching_dt_ptrs) != 1:
+                raise ValueError(
+                    f'RDNA4 {instruction_name} opcode {opcode} requires exactly '
+                    f'one unique {enc_name} primary decode route, found '
+                    f'{sorted(matching_dt_ptrs)}'
+                )
+            dt_ptr = matching_dt_ptrs.pop()
+        if dt_ptr < 0 or dt_ptr >= len(self.isa_spec.primary_decode_table):
+            raise ValueError(
+                f'RDNA4 {instruction_name} opcode {opcode} resolves to invalid primary '
+                f'decode-table index {dt_ptr}'
+            )
+
+        dte = self.isa_spec.primary_decode_table[dt_ptr]
+        if dte.sub_decode_funcs is not None:
+            if opcode >= len(dte.sub_decode_funcs):
+                raise ValueError(
+                    f'RDNA4 {instruction_name} opcode {opcode} is outside the '
+                    'selected subdecode table'
+                )
+            if dte.sub_decode_funcs[opcode] not in (None, 'decodeInvalid'):
+                raise ValueError(
+                    f'RDNA4 {instruction_name} opcode {opcode} subdecode slot is '
+                    'already occupied by '
+                    f'{dte.sub_decode_funcs[opcode]}'
+                )
+        elif (
+            getattr(dte, 'decode_func', None) is not None
+            or getattr(dte, 'inst_name', None) is not None
+        ):
+            raise ValueError(
+                f'RDNA4 {instruction_name} terminal decode entry is already occupied'
+            )
 
         inst = Instruction(
-            'S_WAITCNT',
-            'ENC_SOPP',
-            9,
+            instruction_name,
+            enc_name,
+            opcode,
             [
                 Operand(
                     'simm16',
@@ -361,6 +586,7 @@ class Parser:
                     1,
                 )
             ],
+            available_encodings=frozenset({enc_name}),
         )
         insert_idx = next(
             (
@@ -371,11 +597,142 @@ class Parser:
             len(enc.insts),
         )
         enc.insts.insert(insert_idx, inst)
+        if patch_route:
+            enc.primary_dt_ptrs[opcode] = dt_ptr
+
+        # The 2026-08-06 RDNA4 and CDNA5 specifications omit the operand type
+        # definition along with S_WAITCNT itself.  Keep the synthetic
+        # instruction's operand taxonomy self-contained so generated code can
+        # name and format the compatibility immediate.
+        if 'OPR_WAITCNT' not in self.isa_spec.operand_types:
+            self.isa_spec.operand_types.append('OPR_WAITCNT')
 
         dte = self.isa_spec.primary_decode_table[dt_ptr]
         decode_func = f'decode{inst.fmt_name}'
         if dte.sub_decode_funcs is not None:
-            dte.sub_decode_funcs[inst.opcode] = decode_func
+            dte.sub_decode_funcs[opcode] = decode_func
+        else:
+            dte.decode_func = decode_func
+            dte.inst_name = inst.fmt_name
+
+    def _inject_cdna5_permlane64_compat(self) -> None:
+        """Add compiler-visible V_PERMLANE64_B32 omitted by the CDNA5 XML."""
+        if self.isa_spec.arch_name != 'cdna5':
+            return
+
+        enc_name, opcode, instruction_name = self._compatibility_instruction_slot(
+            'V_PERMLANE64_B32'
+        )
+        enc = self.isa_spec.encoding_map.get(enc_name)
+        if enc is None:
+            raise ValueError(
+                f'CDNA5 {instruction_name} compatibility injection requires '
+                f'{enc_name}'
+            )
+        if enc.primary_dt_ptrs is None:
+            raise ValueError(
+                f'CDNA5 {instruction_name} compatibility injection requires '
+                f'an {enc_name} primary decode route table'
+            )
+        if any(
+            inst.name == instruction_name and inst.opcode == opcode
+            for inst in enc.insts
+        ):
+            return
+        occupied = next((inst for inst in enc.insts if inst.opcode == opcode), None)
+        if occupied is not None:
+            raise ValueError(
+                f'CDNA5 {instruction_name} compatibility opcode {opcode} is '
+                f'already occupied by {occupied.name}'
+            )
+        if len(enc.primary_dt_ptrs) <= opcode:
+            raise ValueError(
+                f'CDNA5 {enc_name} primary decode route table does not contain '
+                f'{instruction_name} opcode {opcode}'
+            )
+
+        dt_ptr = enc.primary_dt_ptrs[opcode]
+        patch_route = dt_ptr == -1
+        if dt_ptr == -1:
+            adjacent_routes = {
+                enc.primary_dt_ptrs[neighbor]
+                for neighbor in (opcode - 1, opcode + 1)
+                if 0 <= neighbor < len(enc.primary_dt_ptrs)
+                and enc.primary_dt_ptrs[neighbor] != -1
+            }
+            if len(adjacent_routes) != 1:
+                raise ValueError(
+                    f'CDNA5 {instruction_name} opcode {opcode} requires exactly '
+                    f'one adjacent {enc_name} decode route'
+                )
+            dt_ptr = adjacent_routes.pop()
+        if dt_ptr < 0 or dt_ptr >= len(self.isa_spec.primary_decode_table):
+            raise ValueError(
+                f'CDNA5 {instruction_name} opcode {opcode} resolves to invalid primary '
+                f'decode-table index {dt_ptr}'
+            )
+
+        dte = self.isa_spec.primary_decode_table[dt_ptr]
+        if dte.sub_decode_funcs is not None:
+            if opcode >= len(dte.sub_decode_funcs):
+                raise ValueError(
+                    f'CDNA5 {instruction_name} opcode {opcode} is outside the '
+                    'selected subdecode table'
+                )
+            if dte.sub_decode_funcs[opcode] not in (None, 'decodeInvalid'):
+                raise ValueError(
+                    f'CDNA5 {instruction_name} opcode {opcode} subdecode slot is '
+                    f'already occupied by {dte.sub_decode_funcs[opcode]}'
+                )
+        elif (
+            getattr(dte, 'decode_func', None) is not None
+            or getattr(dte, 'inst_name', None) is not None
+        ):
+            raise ValueError(
+                f'CDNA5 {instruction_name} terminal decode entry is already occupied'
+            )
+
+        inst = Instruction(
+            instruction_name,
+            enc_name,
+            opcode,
+            [
+                Operand(
+                    'vdst',
+                    32,
+                    'OPR_VGPR',
+                    False,
+                    True,
+                    False,
+                    True,
+                    1,
+                    'FMT_NUM_B32',
+                ),
+                Operand(
+                    'src0',
+                    32,
+                    'OPR_SRC_VGPR',
+                    True,
+                    False,
+                    False,
+                    True,
+                    2,
+                    'FMT_NUM_B32',
+                ),
+            ],
+            available_encodings=frozenset({enc_name}),
+        )
+        insert_idx = next(
+            (idx for idx, existing in enumerate(enc.insts) if existing.opcode > opcode),
+            len(enc.insts),
+        )
+        enc.insts.insert(insert_idx, inst)
+        if patch_route:
+            enc.primary_dt_ptrs[opcode] = dt_ptr
+
+        decode_func = f'decode{inst.fmt_name}'
+        if dte.sub_decode_funcs is not None:
+            dte.sub_decode_funcs[opcode] = decode_func
         else:
             dte.decode_func = decode_func
             dte.inst_name = inst.fmt_name
@@ -562,21 +919,36 @@ class Parser:
         for field in enc_node.findall(f'./{xs.UCODE_FMT}/{xs.BITMAP}/{xs.FIELD}'):
             field_name = xs.get_node_text(field.find(xs.FIELD_NAME)).lower()
             field_name = renames.get(field_name, field_name)
-            field_bit_cnt = int(
-                xs.get_node_text(field.find(f'{xs.BIT_LAYOUT}/{xs.RANGE}/{xs.BIT_CNT}'))
+            ranges = sorted(
+                field.findall(f'{xs.BIT_LAYOUT}/{xs.RANGE}'),
+                key=lambda node: int(node.attrib.get('Order', 0)),
             )
-            field_bit_offset = int(
-                xs.get_node_text(field.find(f'{xs.BIT_LAYOUT}/{xs.RANGE}/{xs.BIT_OFF}'))
-            )
-            ucode_fields.append(
-                MicrocodeField(field_name, field_bit_cnt, field_bit_offset)
-            )
-            if field_name == 'encoding':
-                enc_field_bit_cnt = field_bit_cnt
-            elif field_name == 'op':
-                op_field_bit_cnt = field_bit_cnt
-            elif field_name == 'opm':
-                opm_field_bit_cnt = field_bit_cnt
+            logical_bit_offset = 0
+            for range_index, range_node in enumerate(ranges):
+                field_bit_cnt = int(xs.get_node_text(range_node.find(xs.BIT_CNT)))
+                field_bit_offset = int(xs.get_node_text(range_node.find(xs.BIT_OFF)))
+                range_name = field_name
+                if range_index > 0:
+                    # Schema 1.1.1 represents the former OPM field as a
+                    # second, non-contiguous OP range. Retain the normalized
+                    # names consumed by decode and generated C++ code. Other
+                    # partitioned fields use their logical bit offset as a
+                    # stable suffix (for example OP_SEL_HI bit 2).
+                    range_name = (
+                        'opm'
+                        if field_name == 'op' and range_index == 1
+                        else f'{field_name}_{logical_bit_offset}'
+                    )
+                ucode_fields.append(
+                    MicrocodeField(range_name, field_bit_cnt, field_bit_offset)
+                )
+                if range_name == 'encoding':
+                    enc_field_bit_cnt = field_bit_cnt
+                elif range_name == 'op':
+                    op_field_bit_cnt = field_bit_cnt
+                elif range_name == 'opm':
+                    opm_field_bit_cnt = field_bit_cnt
+                logical_bit_offset += field_bit_cnt
         ucode_fields.sort(key=lambda x: x.bit_offset)
 
         # XML bug: versions 1.0.0 and 1.1.0 omit reserved/padding fields
@@ -851,6 +1223,16 @@ class Parser:
             inst_name_node = xs.get_node(inst_node, xs.INST_NAME)
             inst_encs_node = xs.get_node(inst_node, xs.INST_ENCODINGS)
             inst_name = inst_name_node.text
+            addition_id = inst_node.attrib.get(ADDITION_SOURCE_ATTR)
+            source_addition = (
+                self._addition_by_id.get(addition_id) if addition_id else None
+            )
+            available_encodings = frozenset(
+                xs.get_node_text(xs.get_node(inst_enc_node, xs.ENCODING_NAME))
+                for inst_enc_node in inst_encs_node
+                if xs.get_node_text(xs.get_node(inst_enc_node, xs.ENCODING_NAME))
+                not in self.profile.skip_encodings
+            )
             for inst_enc_node in inst_encs_node:
                 enc_name_node = xs.get_node(inst_enc_node, xs.ENCODING_NAME)
                 enc_cond_node = xs.get_node(inst_enc_node, xs.ENCODING_COND)
@@ -878,30 +1260,59 @@ class Parser:
                     )
                     order = int(opnd.attrib[xs.OPERAND_ATTR_ORDER])
                     field_name_node = opnd.find(xs.FIELD_NAME)
+                    data_format_name_node = opnd.find(xs.DATA_FORMAT_NAME)
                     opnd_size = int(xs.get_node_text(opnd.find(xs.OPERAND_SIZE)))
                     opnd_type = xs.get_node_text(opnd.find(xs.OPERAND_TYPE))
+                    # Fieldless operands have no <FieldName> in the MR ISA, so
+                    # synthesize a name; make them unique below.
                     if field_name_node is not None:
                         field_name = xs.get_node_text(field_name_node).lower()
-                        opnds.append(
-                            Operand(
-                                field_name,
-                                opnd_size,
-                                opnd_type,
-                                is_in,
-                                is_out,
-                                is_implicit,
-                                is_bin_ucode_required,
-                                order,
-                            )
+                        opnd_name = self.profile.normalize_operand_field_name(
+                            enc_name,
+                            field_name,
                         )
+                        opnd_type = self.profile.normalize_operand_type(
+                            enc_name, field_name, opnd_type
+                        )
+                        data_format_name = (
+                            xs.get_node_text(data_format_name_node)
+                            if data_format_name_node is not None
+                            else ''
+                        )
+                        is_fieldless = False
+                    else:
+                        opnd_name = synthesize_fieldless_name(opnd_type)
+                        data_format_name = ''
+                        is_fieldless = True
+                    opnds.append(
+                        Operand(
+                            opnd_name,
+                            opnd_size,
+                            opnd_type,
+                            is_in,
+                            is_out,
+                            is_implicit,
+                            is_bin_ucode_required,
+                            order,
+                            data_format_name,
+                            is_fieldless,
+                        )
+                    )
                 opnds.sort(key=lambda x: x.order)
+                _uniquify_fieldless_names(opnds)
 
                 enc = self.isa_spec.encoding_map[enc_name]
                 is_implied_literal = (
                     enc_name in self.isa_spec.alt_encs_with_implied_literal
                 )
                 inst = Instruction(
-                    inst_name, enc_name, opcode, opnds, is_implied_literal
+                    inst_name,
+                    enc_name,
+                    opcode,
+                    opnds,
+                    is_implied_literal,
+                    available_encodings,
+                    source_addition,
                 )
 
                 # Implied-literal instructions go to the parent encoding's
@@ -911,7 +1322,10 @@ class Parser:
                     parent_name = self.profile.derive_parent_enc_name(enc_name)
                     parent_enc = self.isa_spec.encoding_map[parent_name]
                     parent_enc.insts.append(inst)
-                    parent_enc.implied_literal_ops.append(str(inst.opcode))
+                    extension_words = self.implied_literal_extension_words(
+                        enc, parent_enc
+                    )
+                    parent_enc.implied_literal_ops[str(inst.opcode)] = extension_words
                 else:
                     enc.insts.append(inst)
 
@@ -950,9 +1364,25 @@ class Parser:
             if opnd_predefined_val is not None:
                 pairs = list(opnd_predefined_val)
                 predef_vals_list, name_patterns = _collapse_register_ranges(
-                    pairs, opnd_type_name, self.profile.flt_name_map
+                    pairs,
+                    opnd_type_name,
+                    self.profile.flt_name_map,
+                    self.profile.lowercase_operand_selector_names,
                 )
                 self.isa_spec.opnd_selectors.append(
                     OperandSelector(opnd_type_name, predef_vals_list, name_patterns)
                 )
             self.isa_spec.operand_types.append(opnd_type_name)
+
+    @staticmethod
+    def implied_literal_extension_words(
+        encoding: InstEncoding, parent_encoding: InstEncoding
+    ) -> int:
+        """Return the number of literal DWORDs appended to the parent form."""
+        extension_bits = encoding.bit_cnt - parent_encoding.bit_cnt
+        if extension_bits <= 0 or extension_bits % 32 != 0:
+            raise ValueError(
+                f'implied-literal encoding {encoding.enc_name} has invalid size '
+                f'relative to parent {parent_encoding.enc_name}'
+            )
+        return extension_bits // 32

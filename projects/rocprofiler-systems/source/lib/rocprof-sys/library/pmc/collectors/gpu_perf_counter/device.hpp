@@ -13,7 +13,6 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -63,6 +62,10 @@ concept backend_contract = requires(
         backend.configure_device_counting_service(context, buffer, agent, service_cb,
                                                   data)
     } -> std::same_as<typename Backend::status_t>;
+    // Status/flag constants read directly by device<Backend> during sampling.
+    { Backend::flag_none } -> std::convertible_to<typename Backend::counter_flag_t>;
+    { Backend::status_success } -> std::convertible_to<typename Backend::status_t>;
+    { Backend::status_hsa_not_loaded } -> std::convertible_to<typename Backend::status_t>;
 };
 
 template <backend_contract Backend>
@@ -71,19 +74,20 @@ class device
 public:
     device(std::shared_ptr<Backend> backend, typename Backend::context_id_t context,
            std::shared_ptr<rocprofsys::agent>    agent,
-           typename Backend::counter_config_id_t profile_config,
+           typename Backend::counter_config_id_t counter_config,
            std::vector<counter_metadata>         counter_meta)
     : m_backend_api{ std::move(backend) }
     , m_context{ context }
     , m_agent{ std::move(agent) }
-    , m_profile_config{ profile_config }
+    , m_counter_config{ counter_config }
     , m_counter_meta{ std::move(counter_meta) }
     {
-        // *2: each counter may produce multiple dimension instances (e.g. per-WGP).
-        // The factor of 2 gives headroom beyond the metadata count, which only
-        // covers distinct (name, dimension) combinations enumerated at init time.
-        // 256 is the floor to avoid an under-sized buffer for low-counter devices.
-        m_record_buffer.resize(std::max<size_t>(m_counter_meta.size() * 2, 256));
+        // Each counter may produce multiple dimension instances (e.g. per-WGP);
+        // the headroom factor gives slack beyond the enumerated metadata count.
+        // The minimum size guards against an under-sized buffer on sparse devices.
+        m_record_buffer.resize(
+            std::max<size_t>(m_counter_meta.size() * k_record_buffer_headroom_factor,
+                             k_record_buffer_min_size));
     }
 
     [[nodiscard]] bool is_supported() const noexcept { return !m_counter_meta.empty(); }
@@ -108,8 +112,9 @@ public:
         return m_counter_meta;
     }
 
-    [[nodiscard]] const metrics& get_gpu_perf_counter_metrics(
-        const enabled_metrics& /*enabled*/, std::uint64_t /*timestamp*/)
+    [[nodiscard]] const metrics& sample_metrics(
+        [[maybe_unused]] const enabled_metrics& enabled,
+        [[maybe_unused]] std::uint64_t          timestamp)
     {
         m_result_cache.clear();
 
@@ -118,6 +123,7 @@ public:
         // Retry here until it succeeds; once m_context_started is true this is a single
         // branch-predicted branch with no further work.
         if(!m_context_started) start();
+        if(!m_context_started) return m_result_cache;
 
         auto rec_count = m_record_buffer.size();
 
@@ -149,19 +155,15 @@ public:
 
             typename Backend::counter_id_t config_id{};
             m_backend_api->query_record_counter_id(record, &config_id);
-            auto   id      = config_id.handle;
-            auto   raw     = record.counter_value;
-            auto   prev_it = m_prev_values.find(id);
-            double delta   = raw;
-            if(prev_it != m_prev_values.end())
-            {
-                delta = raw - prev_it->second;
-            }
-            m_prev_values[id] = raw;
+            auto         id     = config_id.handle;
+            const double raw    = record.counter_value;
+            auto [it, inserted] = m_prev_values.try_emplace(id, raw);
+            const double delta  = inserted ? raw : raw - it->second;
+            if(!inserted) it->second = raw;
             m_result_cache.push_back({ id, delta });
         }
 
-        return std::move(m_result_cache);
+        return m_result_cache;
     }
 
     void start()
@@ -196,10 +198,13 @@ public:
     }
 
 private:
+    static constexpr size_t k_record_buffer_headroom_factor = 2;
+    static constexpr size_t k_record_buffer_min_size        = 256;
+
     std::shared_ptr<Backend>                        m_backend_api;
     typename Backend::context_id_t                  m_context;
     std::shared_ptr<rocprofsys::agent>              m_agent;
-    typename Backend::counter_config_id_t           m_profile_config;
+    typename Backend::counter_config_id_t           m_counter_config;
     std::vector<counter_metadata>                   m_counter_meta;
     std::vector<typename Backend::counter_record_t> m_record_buffer;
     metrics                                         m_result_cache;

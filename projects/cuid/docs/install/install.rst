@@ -49,11 +49,11 @@ To build and install the CUID library from source, follow these steps:
 
       The default install directory is ``/opt/rocm/core``. However, you can choose a different directory using the ``-DCMAKE_INSTALL_PREFIX`` option.
 
-3. Configure the Daemon mode by setting the ``daemonize`` variable in the ``amdcuid_daemon.conf`` file in the ``daemon`` directory. Setting the ``daemonize`` variable to ``true`` installs a ``systemd`` service and a set of ``udev`` rules to detect devices and generate CUIDs for them automatically. Whereas, setting ``daemonize`` to ``false`` installs a cron job, which detects devices only during system boot and generates CUIDs for the devices found during system boot. The default setting is ``false``.
+3. (Optional — daemon only) Configure the daemon mode by setting the ``daemonize`` variable in the ``amdcuid_daemon.conf`` file in the ``daemon`` directory before building. Setting ``daemonize`` to ``true`` installs a ``systemd`` service and a set of ``udev`` rules to detect devices and generate CUIDs automatically. Setting it to ``false`` installs a one-shot boot service that detects devices at startup only. The default is ``false``. Skip this step if you are not building the daemon (``-DBUILD_DAEMON=OFF``).
 
-4. Perform the install and post-install tasks by running the post-install script located at ``<install prefix>/share/amdcuid/amdcuid_postinst.sh``. This script needs to be run as root or with ``sudo`` as it restarts the ``systemd`` and ``udev`` services.
+4. Perform the install and post-install tasks. The unified post-install script at ``<install prefix>/share/amdcuid/amdcuid_postinst.sh`` handles all required setup automatically: it always provisions the HMAC key for the library, and also configures the ``systemd`` service and ``udev`` rules when the daemon is installed. Run it as root or with ``sudo``.
 
    .. code-block:: shell
 
     make install
-    <install prefix>/share/amdcuid/amdcuid_postinst.sh
+    sudo <install prefix>/share/amdcuid/amdcuid_postinst.sh

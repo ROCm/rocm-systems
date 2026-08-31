@@ -35,13 +35,13 @@ ext-plugins/
 │       └── valid_config_without_wildcards.conf
 └── tests/                       # Test suite directory
     ├── conftest.py              # Pytest fixtures and shared test configuration
-    ├── ext-tuner/               # CSV Tuner Plugin specific tests (sources at plugins/tuner/)
+    ├── ext-tuner/               # CSV Tuner Plugin tests (plugin sources at plugins/tuner/)
     │   ├── test_allreduce.py
     │   ├── test_broadcast.py
     │   ├── test_reduce.py
     │   ├── test_allgather.py
     │   └── test_reducescatter.py
-    ├── ext-profiler/            # Profiler Plugin specific tests (sources at plugins/profiler/)
+    ├── ext-profiler/            # Profiler Plugin tests (plugin sources at plugins/profiler/)
     │   ├── test_allreduce.py
     │   ├── test_broadcast.py
     │   ├── test_reduce.py
@@ -99,12 +99,12 @@ This will compile the plugin and create `libnccl-tuner-example.so` in the same d
 
 #### Building the Profiler Plugin
 
-The profiler plugin is located in the `ext-plugins/example` directory.
+The profiler plugin is located in the `plugins/profiler/example` directory.
 
 **Step 1: Navigate to the plugin directory**
 
 ```bash
-cd rccl/test/ext-plugins/example
+cd rccl/plugins/profiler/example
 ```
 
 **Step 2: Build the plugin**
@@ -113,7 +113,7 @@ cd rccl/test/ext-plugins/example
 make
 ```
 
-This will compile the plugin and create `libnccl-profiler.so` in the same directory. The profiler plugin captures detailed runtime events including:
+This will compile the plugin and create `librccl-profiler-example.so` in the same directory. The profiler plugin captures detailed runtime events including:
 - **Group events**: High-level operation grouping
 - **Collective events**: AllReduce, Broadcast, Reduce, ReduceScatter operations
 - **P2P events**: Send, Recv, AllGather, AllToAll operations
@@ -216,6 +216,7 @@ pytest -m sendrecv --cache-clear       # SendRecv tests (profiler only)
 pytest -m "ext_profiler and allreduce" --cache-clear    # Profiler AllReduce tests only
 pytest -m "ext_tuner and broadcast" --cache-clear       # Tuner Broadcast tests only
 pytest -m "ext_inspector and allreduce" --cache-clear   # Inspector AllReduce tests only
+pytest -m inspector_regression --cache-clear            # NCCL #2000 teardown regression tests
 ```
 
 ### Run Tests with Log Output
@@ -246,3 +247,31 @@ pytest --verbose --tb=short
 - **Profiler Output**: Profiler plugin tests generate JSON trace files in the `profiler_dumps/` directory. These files contain detailed event traces that can be analyzed for debugging or performance analysis. The directory is automatically cleaned before each test session by the pytest fixture.
 
 - **Inspector Output**: Inspector plugin tests generate JSONL log files in the `inspector_dumps/` directory, with one file per rank per test. Each line is a self-contained JSON record containing header, metadata, and collective performance data. The directory is automatically cleaned before each test session.
+
+### NCCL Issue #2000 regression tests
+
+Regression coverage for inspector plugin deadlock/UAF teardown (NCCL issue #2000):
+
+**Native unit test** (no GPU required):
+
+```bash
+make -C rccl/plugins/profiler/inspector/test test
+```
+
+**Functional comm lifecycle stress** (requires RCCL, MPI, rccl-tests, and GPUs):
+
+Each pytest iteration launches a fresh `mpirun` job that performs comm init → collectives → destroy.
+
+```bash
+pytest -m inspector_regression tests/ext-inspector/test_lifecycle_stress.py --cache-clear
+```
+
+**Optional ASAN regression** (native tests always; functional stress when `RUN_FUNCTIONAL=1`):
+
+```bash
+./scripts/run_inspector_asan_stress.sh
+RUN_FUNCTIONAL=1 RCCL_INSTALL_DIR=... OMPI_INSTALL_DIR=... RCCL_TESTS_DIR=... \
+  ./scripts/run_inspector_asan_stress.sh
+```
+
+CI: `.github/workflows/rccl-inspector-regression.yml` runs the native lifecycle tests (including ASAN) on PRs touching inspector code.

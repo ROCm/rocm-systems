@@ -40,6 +40,7 @@ def generate_outputs_from_files(
     lib_path: str | Path | None = None,
     formats: str = "json,csv",
     base_name: str | None = None,
+    decode_markers: bool = True,
 ) -> list[Path]:
     inputs = _discover_inputs(files)
     if not inputs.att_files and not inputs.code_objects and inputs.code_json is None:
@@ -91,6 +92,7 @@ def generate_outputs_from_files(
         formats=formats,
         base_name=output_base_name,
         on_warning=_print_warning,
+        decode_markers=decode_markers,
     )
     if snapshot_source_dir:
         for output in outputs:
@@ -214,6 +216,13 @@ def build_argparser() -> argparse.ArgumentParser:
         "--base-name",
         help="Base name for default ui_output_<name><run> and stats_<...>.csv output names.",
     )
+    parser.add_argument(
+        "--no-decode-markers",
+        action="store_false",
+        dest="decode_markers",
+        default=True,
+        help="Leave packed marker IDs and JSON shaderdata timestamps unchanged.",
+    )
     return parser
 
 
@@ -225,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
         lib_path=args.lib,
         formats=args.formats,
         base_name=args.base_name,
+        decode_markers=args.decode_markers,
     )
     for path in outputs:
         print(path)

@@ -50,7 +50,7 @@ namespace internal_threading
 {
 namespace
 {
-using task_group_vec_t     = std::vector<task_group_t*>;
+using task_group_vec_t     = common::container::stable_vector<task_group_t*>;
 using thread_pool_config_t = PTL::ThreadPool::Config;
 
 auto affinity_functor(intmax_t)
@@ -149,7 +149,9 @@ constexpr auto creation_notifier_library_seq = library_sequence_t<ROCPROFILER_LI
                                                                   ROCPROFILER_RCCL_LIBRARY,
                                                                   ROCPROFILER_ROCDECODE_LIBRARY,
                                                                   ROCPROFILER_ROCJPEG_LIBRARY,
-                                                                  ROCPROFILER_OMPT_LIBRARY>{};
+                                                                  ROCPROFILER_OMPT_LIBRARY,
+                                                                  ROCPROFILER_ROCSHMEM_LIBRARY,
+                                                                  ROCPROFILER_HIPFILE_LIBRARY>{};
 
 // check that creation_notifier_library_seq is up to date
 static_assert((1 << (creation_notifier_library_seq.size() - 1)) == ROCPROFILER_LIBRARY_LAST,
@@ -267,6 +269,12 @@ initialize()
 {
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
+        // assume a task group per buffer so 1024 * 16 / 64 = 256 task group chunks
+        constexpr auto max_task_group_chunks_before_realloc =
+            (1UL << 10) * buffer::unique_buffer_vec_t::chunk_size;
+        get_task_groups()->reserve_chunks(max_task_group_chunks_before_realloc /
+                                          task_group_vec_t::chunk_size);
+
         // Note: create_callback_thread() must occur before atexit
         // registration or else the static objects it is pointing to
         // will be destroyed before finalize is invoked.

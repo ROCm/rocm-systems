@@ -256,6 +256,15 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Get HSA queue ID for core dump filtering
   HSA_QUEUEID aql_queue_id() const { return queue_id_; }
 
+  /// @brief Halt the queue without destroying it or fencing memory.
+  void Suspend();
+
+  /// @brief Resume the queue.
+  void Resume();
+
+  /// @brief Check if the queue is currently suspended.
+  bool IsSuspended() const { return suspended_; }
+
  protected:
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 
@@ -291,12 +300,6 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
 
   void FreeMainScratchSpace();
   void FreeAltScratchSpace();
-
-  /// @brief Halt the queue without destroying it or fencing memory.
-  void Suspend();
-
-  /// @brief Resume the queue.
-  void Resume();
 
   /// @brief Handle insufficient scratch
   void HandleInsufficientScratch(hsa_signal_value_t& error_code, hsa_signal_value_t& waitVal,

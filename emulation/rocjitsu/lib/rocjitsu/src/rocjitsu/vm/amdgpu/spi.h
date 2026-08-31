@@ -103,18 +103,22 @@ public:
 
       ComputeUnitCore *cu = placement->cu;
       uint32_t lds_base = placement->lds_base;
-      cu->begin_workgroup(wg.entry->dispatch_id, wg.global_wg_id, wg.entry->wfs_per_workgroup);
+      cu->begin_workgroup(wg.entry->dispatch_id, wg.global_wg_id, wg.entry->wfs_per_workgroup,
+                          wg.entry->num_named_barriers);
       std::vector<Wavefront *> wg_wfs;
       wg_wfs.reserve(wg.entry->wfs_per_workgroup);
       for (uint32_t w = 0; w < wg.entry->wfs_per_workgroup; ++w) {
-        Wavefront *wf = cu->dispatch_wf(wg.global_wg_id, wg.entry->kernel_entry_pc,
-                                        wg.entry->sgprs_per_wf, wg.entry->vgprs_per_wf);
+        Wavefront *wf =
+            cu->dispatch_wf(wg.global_wg_id, wg.entry->kernel_entry_pc, wg.entry->sgprs_per_wf,
+                            wg.entry->vgprs_per_wf, wg.entry->kernel_wave_size);
         assert(wf && "dispatch_wf failed after select_cu returned a CU");
         wf->set_lds_base(lds_base);
+        wf->set_lds_size(util::align_up(wg.entry->group_segment_fixed_size, 256u));
         wf->set_lds(placement->lds);
         wf->set_dispatch_id(wg.entry->dispatch_id);
         wf->set_process_id(wg.entry->process_id);
-        wf->set_exec(initial_exec_mask_for_wave(*wg.entry, wg.global_wg_id, w, cu->wf_size()));
+        wf->set_queue_id(wg.entry->queue_id);
+        wf->set_exec(initial_exec_mask_for_wave(*wg.entry, wg.global_wg_id, w, wf->wf_size()));
         init_wf(cu, wf, *wg.entry, wg.global_wg_id, w);
         wg_wfs.push_back(wf);
       }
@@ -129,23 +133,22 @@ public:
 
   /// @brief Step each CU once (one round-robin pass within this SE).
   bool step() {
-    bool any_active = false;
+    bool any_runnable = false;
     for (auto *cu : cus_) {
-      if (cu->has_active_wfs()) {
+      if (cu->has_runnable_wfs()) {
         cu->step();
-        any_active = true;
+        any_runnable = true;
       }
     }
-    return any_active;
+    return any_runnable;
   }
-
   /// @brief Check if any WGs are queued or any CU is active.
   bool has_pending() const {
     for (auto &q : pipe_queues_)
       if (!q.empty())
         return true;
     for (auto *cu : cus_)
-      if (cu->has_active_wfs())
+      if (cu->has_runnable_wfs())
         return true;
     return false;
   }
@@ -156,14 +159,13 @@ public:
     while (progress) {
       progress = false;
       for (auto *cu : cus_) {
-        if (cu->has_active_wfs()) {
+        if (cu->has_runnable_wfs()) {
           cu->step();
           progress = true;
         }
       }
     }
   }
-
   /// @brief Legacy: select a CU with capacity for direct dispatch.
   ///
   /// @details Used by dispatch_workgroups() fallback path when SPIs are not
@@ -174,7 +176,6 @@ public:
     for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
       size_t idx = (next_cu_ + attempt) % cus_.size();
       auto *cu = cus_[idx];
-      cu->retire_halted_wfs();
       const size_t wgp_index = cu_to_wgp_[idx];
       if (wgp_index != std::numeric_limits<size_t>::max() &&
           wgps_[wgp_index]->active_workgroups != 0)
@@ -206,8 +207,6 @@ public:
     for (size_t attempt = 0; attempt < wgps_.size(); ++attempt) {
       size_t wgp_index = (next_wgp_ + attempt) % wgps_.size();
       auto &wgp = *wgps_[wgp_index];
-      wgp.cu0->retire_halted_wfs();
-      wgp.cu1->retire_halted_wfs();
 
       // A WGP allocation cannot overlap CU-mode residents or cluster-pinned
       // CU-local LDS state. Existing WGP-mode workgroups may share the pool.

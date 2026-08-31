@@ -12,6 +12,9 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
+
+#include <sys/types.h>
 
 namespace rocjitsu::fb {
 struct DbtGuestConfig;
@@ -19,21 +22,74 @@ struct DbtGuestConfig;
 
 namespace rocjitsu::config {
 
+/// @brief Execution target used by DBT guest mode.
+enum class DbtExecutionBackend {
+  Hardware,  ///< Forward execution-facing operations to a real host GPU.
+  Simulator, ///< Forward execution-facing operations to a RocJITsu simulated GPU.
+};
+
+/// @brief Silicon revision for a DBT translation side.
+///
+/// @details gfx1250 A0 and B0 share an ELF machine ID, so the revision is
+/// carried out of band and selects the corresponding translation profile.
+/// Unspecified is the default for architectures whose machine ID identifies
+/// the silicon.
+enum class DbtSiliconRevision {
+  Unspecified,
+  Gfx1250A0,
+  Gfx1250B0,
+};
+
+/// @brief Host target selected for DBT translation and execution.
+struct DbtHostConfig {
+  std::string isa;     ///< Host ISA used for DBT output and ROCR execution.
+  uint32_t gpu_id = 0; ///< Host KFD topology gpu_id; 0 selects the first ISA match.
+  DbtExecutionBackend backend = DbtExecutionBackend::Hardware; ///< Hardware or simulator execution.
+  std::string simulator_config_path; ///< Optional external simulator host config.
+};
+
 /// @brief DBT guest-GPU discovery configuration.
 ///
 /// @details When enabled, the Linux KFD interposer exposes one synthetic guest
-/// GPU alongside the real host GPUs and the HSA tools hook maps guest-agent
-/// execution calls to the host agent. The KFD layer only owns discovery; DBT and
-/// HSA forwarding happen in the HSA hook.
+/// GPU. The hardware backend forwards host-facing KFD operations to real
+/// `/dev/kfd`; the simulator backend delegates them to SimulatedKfd. The HSA
+/// tools hook translates guest code and maps guest-agent execution calls to the
+/// selected hardware or simulated host agent.
 struct DbtGuestConfig {
   bool enabled = false;          ///< True when GuestKfd mode is active.
   std::string guest_isa;         ///< Guest ISA advertised by the synthetic agent.
-  std::string host_isa;          ///< Host ISA used for actual ROCR execution.
-  uint32_t host_gpu_id = 0;      ///< Host KFD topology gpu_id; 0 matches topology to host_isa.
+  DbtHostConfig host;            ///< Host translation and execution target.
   int log_level = 0;             ///< DBT hook logging level loaded from the config file.
   bool signal_backtrace = false; ///< Install a best-effort HSA-hook crash backtrace handler.
   KfdDeviceConfig guest_device;  ///< Synthetic guest device appended to KFD topology.
+  /// @brief Guest silicon revision (gfx1250 A0/B0 disambiguation); Unspecified otherwise.
+  DbtSiliconRevision guest_revision = DbtSiliconRevision::Unspecified;
+  /// @brief Host silicon revision for DBT output; Unspecified otherwise.
+  DbtSiliconRevision host_revision = DbtSiliconRevision::Unspecified;
 };
+
+/// @brief Parsed per-invocation config handoff shared by child runtime layers.
+struct DbtRuntimeConfigHandoff {
+  std::string config_path;
+  std::optional<std::string> resolved_gpu_id;
+};
+
+/// @brief Resolve the simulator host config selected by a DBT guest config.
+/// @details An empty host_config_path selects dbt_config_path itself. Relative
+/// external paths are resolved beside the DBT guest config. A non-empty path
+/// selects that external file instead of VM/topology in the DBT guest file.
+std::string resolve_dbt_host_config_path(const std::string &dbt_config_path,
+                                         const std::string &host_config_path);
+
+/// @brief Reject guest limits that exceed a simulator execution target.
+/// @details Simulator-backed discovery must not advertise resource limits that
+/// the selected target cannot execute. Limits not represented in KFD device
+/// topology, such as per-kernel VGPR usage, remain the translator/runtime's
+/// responsibility.
+/// @throws std::runtime_error when an execution-relevant guest limit is not
+/// supported by the simulator device.
+void validate_dbt_simulator_device_limits(const DbtGuestConfig &guest,
+                                          const KfdDeviceConfig &simulator_device);
 
 /// @brief Convert a generated FlatBuffers DBT guest table into runtime config.
 ///
@@ -49,6 +105,25 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest);
 /// sections.
 /// @throws std::runtime_error on file I/O, parse errors, or invalid config.
 DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path);
+
+/// @brief Apply the launcher's resolved GPU to an automatic DBT host config.
+/// @details Child processes read this value from the second line of the
+/// per-invocation config handoff. Explicit nonzero config values remain authoritative.
+/// @throws std::runtime_error when @p value is not a nonzero KFD gpu_id.
+void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view value);
+
+/// @brief Atomically write the per-invocation runtime config handoff.
+/// @returns false when enabled DBT lacks a resolved host GPU or the handoff cannot be published.
+bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtGuestConfig &config,
+                                      pid_t pid);
+
+/// @brief Parse the config path and optional resolved GPU ID from a runtime handoff.
+/// @returns std::nullopt when the first line does not contain a config path.
+std::optional<DbtRuntimeConfigHandoff> parse_dbt_runtime_config_handoff(std::string_view contents);
+
+/// @brief Load and validate the DBT guest config referenced by a runtime handoff.
+/// @throws std::runtime_error when automatic DBT host selection lacks a resolved GPU ID.
+DbtGuestConfig load_dbt_guest_config_from_handoff(const DbtRuntimeConfigHandoff &handoff);
 
 /// @brief Load only dbt_guest from the rocjitsu child-process runtime config file.
 ///

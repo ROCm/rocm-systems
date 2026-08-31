@@ -3,6 +3,10 @@
 
 /// @file hsa_ext_amd_minimal.h
 /// @brief Minimal AMD HSA extension ABI mirror used by rocjitsu hooks.
+///
+/// @details The source of truth is
+/// `projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_ext_amd.h`. Keep this mirror limited to the
+/// handles, structures, constants, and function signatures used by RocJITsu's HSA tools hooks.
 
 #pragma once
 
@@ -177,8 +181,9 @@ using hsa_amd_memory_async_copy_on_engine_fn_t =
                             const hsa_signal_t *, hsa_signal_t, hsa_amd_sdma_engine_id_t, bool);
 using hsa_amd_memory_copy_engine_status_fn_t = hsa_status_t(HSA_API *)(hsa_agent_t, hsa_agent_t,
                                                                        uint32_t *);
-using hsa_amd_memory_get_preferred_copy_engine_fn_t =
-    hsa_status_t(HSA_API *)(hsa_agent_t, hsa_agent_t, hsa_amd_sdma_engine_id_t *);
+using hsa_amd_memory_get_preferred_copy_engine_fn_t = hsa_status_t(HSA_API *)(hsa_agent_t,
+                                                                              hsa_agent_t,
+                                                                              uint32_t *);
 using hsa_amd_memory_lock_fn_t = hsa_status_t(HSA_API *)(void *, size_t, hsa_agent_t *, int,
                                                          void **);
 using hsa_amd_memory_fill_fn_t = hsa_status_t(HSA_API *)(void *, uint32_t, size_t);
