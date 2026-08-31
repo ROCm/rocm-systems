@@ -70,6 +70,11 @@ if(NOT Python3_Development.Module_FOUND)
     _skip_collector("Python 3 development headers not found")
 endif()
 
+# Skip rather than let target_compile_features fail the whole configure.
+if(NOT cxx_std_20 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    _skip_collector("compiler does not support C++20")
+endif()
+
 add_library(torch-trace-collector STATIC torch_trace_collector.cpp snapshot_store.cpp)
 target_include_directories(torch-trace-collector PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(torch-trace-collector SYSTEM PUBLIC ${_torch_include_dirs})
