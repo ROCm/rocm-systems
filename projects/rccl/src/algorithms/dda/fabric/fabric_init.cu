@@ -61,12 +61,12 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   const int nRanks = comm->nRanks;
   const int64_t llEnabled = rcclParamDdaLL();
   const int64_t ll128Enabled = rcclParamDdaLL128();
-  // Size the scratch from the caps the dispatch path will actually apply
-  // (env override, else this arch's table). AllReduce stands in for AR/AG/RS,
-  // which share their caps; comm->archThresholds is set before this runs.
+  // Size scratch to the largest DDA/CE-scratch table cap (all collectives,
+  // including graph VMM), not AllReduce VMM alone. Otherwise AG CE-Scratch
+  // or AR LL128 can win the selector and then fail the ddaScratchBytes check.
   const int64_t llThresh = (int64_t)rcclDdaLLThreshold(comm, ncclFuncAllReduce);
   const int64_t ll128Thresh = (int64_t)rcclDdaLL128Threshold(comm, ncclFuncAllReduce);
-  const int64_t simpleThresh = (int64_t)rcclDdaVmmThreshold(comm, ncclFuncAllReduce);
+  const int64_t simpleThresh = (int64_t)rcclDdaScratchPayloadCap(comm);
   const int64_t fabricScratchOverride = rcclParamDdaFabricBufferSizeForScratch();
 
   // Right-sized from the DDA thresholds and nRanks (env-overridable) instead of
