@@ -83,10 +83,8 @@ generate_db_output_path(int pid)
 // Thread-safety: handle() is driven by a single parser thread per config
 // (see post_processor.cpp), so there is no time-of-check/time-of-use race here.
 void
-ensure_queue_registered(profiler_hub::writer_t& writer,
-                        std::uint64_t           queue_id,
-                        std::size_t             node_id,
-                        std::size_t             process_id)
+ensure_queue_registered(profiler_hub::writer_t& writer, std::uint64_t queue_id,
+                        std::size_t node_id, std::size_t process_id)
 {
     profiler_hub::writer_types::queue_info_t qi;
     qi.queue_id   = queue_id;
