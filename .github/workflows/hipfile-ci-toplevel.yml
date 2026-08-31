@@ -57,7 +57,7 @@ jobs:
       ROCM_VERSIONS: >-
         [
           "7.2.4",
-          "7.13.0",
+          "10.0.0",
           "nightly"
         ]
       # MATRIX_INCLUDE / MATRIX_EXCLUDE: extra/removed matrix entries, passed
@@ -67,17 +67,13 @@ jobs:
         [
           {"supported_platforms": "ubuntu", "rocm_versions": "7.2.4", "cxx_compiler": "amdclang++", "cxx_standard": 23}
         ]
-      # 7.13.0 and nightly are ubuntu-only targets. They live in the base
-      # ROCM_VERSIONS axis and are removed from every other distro via
-      # MATRIX_EXCLUDE below. This is cleaner than specifying the full
-      # combination of CI parameters in include as the matrix axes grow.
       MATRIX_EXCLUDE: >-
         [
-          {"supported_platforms": "rocky", "rocm_versions": "7.13.0"},
+          {"supported_platforms": "rocky", "rocm_versions": "10.0.0"},
           {"supported_platforms": "rocky", "rocm_versions": "nightly"},
-          {"supported_platforms": "rocky8", "rocm_versions": "7.13.0"},
+          {"supported_platforms": "rocky8", "rocm_versions": "10.0.0"},
           {"supported_platforms": "rocky8", "rocm_versions": "nightly"},
-          {"supported_platforms": "suse", "rocm_versions": "7.13.0"},
+          {"supported_platforms": "suse", "rocm_versions": "10.0.0"},
           {"supported_platforms": "suse", "rocm_versions": "nightly"}
         ]
     steps:
