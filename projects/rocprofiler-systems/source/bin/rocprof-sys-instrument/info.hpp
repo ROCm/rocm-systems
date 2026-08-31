@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/path.hpp"
 #include "fwd.hpp"
 #include "module_function.hpp"
 
@@ -59,8 +60,10 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
     if(_ext == "txt")
     {
         std::ofstream ofs{};
-        if(!tim::filepath::open(ofs, _oname))
+        if(!rocprofsys::path::create_parent_dirs_and_open_ofstream(ofs, _oname))
+        {
             _handle_error();
+        }
         else
         {
             verbprintf_bare(_level, "%s", ::tim::log::color::source());
@@ -88,8 +91,10 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
         }
 
         std::ofstream ofs{};
-        if(!tim::filepath::open(ofs, _oname))
+        if(!rocprofsys::path::create_parent_dirs_and_open_ofstream(ofs, _oname))
+        {
             _handle_error();
+        }
         else
         {
             verbprintf_bare(_level, "%s", ::tim::log::color::source());
@@ -116,8 +121,10 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
         }
 
         std::ofstream ofs{};
-        if(!tim::filepath::open(ofs, _oname))
+        if(!rocprofsys::path::create_parent_dirs_and_open_ofstream(ofs, _oname))
+        {
             _handle_error();
+        }
         else
         {
             verbprintf_bare(_level, "%s", ::tim::log::color::source());
