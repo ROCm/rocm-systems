@@ -615,6 +615,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, IbCastRelaxedOrderingEnabled ? "[RO]" : "",
          IbCastIfName, ncclSocketToString(&IbCastIfAddr, addrline));
 
+    IbCastQpSharingGlobalEnable = rcclParamIbCastQpSharingEnable() > 0;
     IbCastUseInline = ncclParamIbCastUseInline();
     IbCastGdrFlushDisable = ncclParamIbCastGdrFlushDisable();
 
@@ -658,6 +659,12 @@ exit:
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : PORT_FAILOVER/RECOVERY enabled - disabling QP scheduler "
                                "(load balancer integration with resiliency is pending)");
     castGlobalQpSchedParms.enable = false;
+  }
+  if (ret == ncclSuccess && IbCastQpSharingEnabled() && rcclParamIbCastCommNGroups() < 1) {
+    WARN("NET/IB : QP sharing enabled (NCCL_IB_QP_SHARING_ENABLE=1) but NCCL_IB_COMM_NGROUPS=%ld is invalid "
+         "(must be >= 1). Disabling QP sharing.",
+         rcclParamIbCastCommNGroups());
+    IbCastQpSharingGlobalEnable = false;
   }
   if (ret == ncclSuccess && castGlobalQpSchedParms.enable && IbCastQpSharingEnabled()) {
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : QP sharing enabled - disabling QP scheduler");

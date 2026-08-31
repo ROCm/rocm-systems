@@ -5,7 +5,9 @@
  * QP Sharing infrastructure for IB CAST transport layer.
  * Allows multiple RCCL communicator channels to share physical IB QPs,
  * reducing QP count and improving scalability.
- * Controlled via NCCL_IB_COMM_NGROUPS (0=disabled).
+ * Controlled via NCCL_IB_QP_SHARING_ENABLE (0=disabled, 1=enabled).
+ * When enabled, NCCL_IB_COMM_NGROUPS (default 4) and
+ * NCCL_IB_QP_DEPTH_MULTIPLIER (default 8) tune sharing behavior.
  ************************************************************************/
 
 #ifndef NET_IB_CAST_QP_SHARING_H_
@@ -16,10 +18,12 @@
 #include <mutex>
 
 // QP sharing configuration parameters
-// Accessible as RCCL_IB_COMM_NGROUPS / NCCL_IB_COMM_NGROUPS
-// 0 = disabled, >0 = enable QP sharing with N groups
+// Master switch: RCCL_IB_QP_SHARING_ENABLE / NCCL_IB_QP_SHARING_ENABLE
+// 0 = disabled (default), 1 = enabled with sensible defaults
+extern int64_t rcclParamIbCastQpSharingEnable();
+// Number of sharing groups (default 4, effective only when master switch is on)
 extern int64_t rcclParamIbCastCommNGroups();
-// CQ/WR depth scaling for primary QPs
+// CQ/WR depth scaling for primary QPs (default 8, effective only when master switch is on)
 extern int64_t rcclParamIbCastQpDepthMultiplier();
 
 // QP sharing role for a comm during connection setup.
@@ -31,9 +35,13 @@ enum IbCastQpSharingRole {
   QP_SHARING_SECONDARY,  // secondary — QPs already assigned, skip creation
 };
 
-// Returns true when QP sharing is enabled (NCCL_IB_COMM_NGROUPS > 0)
+// Global runtime enable flag — set from master switch param during init,
+// can be cleared if configuration is invalid (e.g. NGROUPS < 1).
+extern bool IbCastQpSharingGlobalEnable;
+
+// Returns true when QP sharing is enabled at runtime.
 static inline bool IbCastQpSharingEnabled(void) {
-  return rcclParamIbCastCommNGroups() > 0;
+  return IbCastQpSharingGlobalEnable;
 }
 
 // Returns true when this comm is actively sharing QPs (sharing enabled AND
