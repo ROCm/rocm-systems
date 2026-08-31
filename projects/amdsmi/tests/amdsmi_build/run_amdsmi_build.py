@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """
 run_amdsmi_build.py - Local runner for the AMDSMI build and install workflow.
 
