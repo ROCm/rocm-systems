@@ -4,6 +4,7 @@
 #include "utility.hpp"
 
 #include "common/delimit.hpp"
+#include "common/string_utility.hpp"
 #include "logger/debug.hpp"
 
 #include <cstdint>
@@ -46,9 +47,8 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
         return var;
     };
 
-    for(auto& itr : _input_string)
-        itr = tolower(itr);
-    auto _result = ContainerT{};
+    _input_string = utility::string::to_lower(_input_string);
+    auto _result  = ContainerT{};
     for(auto _v : rocprofsys::delimit(_input_string, ",; \t\n\r"))
     {
         if(_v.find_first_not_of("0123456789-:") != std::string::npos)

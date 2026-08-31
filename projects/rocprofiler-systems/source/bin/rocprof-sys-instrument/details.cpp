@@ -10,6 +10,7 @@
 #include <timemory/components/timing/wall_clock.hpp>
 
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "core/demangler.hpp"
 
 #include <spdlog/fmt/ranges.h>
@@ -1347,27 +1348,18 @@ to_string(error_level_t _level)
     }
 }
 
-namespace
-{
-std::string&&
-to_lower(std::string&& _v)
-{
-    for(auto& itr : std::move(_v))
-        itr = tolower(itr);
-    return std::move(_v);
-}
-}  // namespace
-
 std::string
 to_string(symbol_visibility_t _v)
 {
-    return to_lower(SymTab::Symbol::symbolVisibility2Str(_v) + 3);
+    return rocprofsys::utility::string::to_lower(
+        SymTab::Symbol::symbolVisibility2Str(_v) + 3);
 }
 
 std::string
 to_string(symbol_linkage_t _v)
 {
-    return to_lower(SymTab::Symbol::symbolLinkage2Str(_v) + 3);
+    return rocprofsys::utility::string::to_lower(SymTab::Symbol::symbolLinkage2Str(_v) +
+                                                 3);
 }
 }  // namespace std
 

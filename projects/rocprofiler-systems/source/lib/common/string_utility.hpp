@@ -22,4 +22,16 @@ to_lower(std::string_view value)
 
     return str_copy;
 }
+
+inline std::string
+to_upper(std::string_view value)
+{
+    std::string str_copy{ value };
+
+    std::ranges::transform(str_copy, str_copy.begin(), [](unsigned char chr) {
+        return static_cast<char>(std::toupper(chr));
+    });
+
+    return str_copy;
+}
 }  // namespace rocprofsys::utility::string
