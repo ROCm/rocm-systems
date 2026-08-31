@@ -55,7 +55,7 @@ struct TileView {
 // Layout classes for 2D tiles (element strides).
 __device__ __forceinline__ TileLayout tile_classify_2d(
     size_t src_stride0, size_t src_stride1, size_t dst_stride0,
-    size_t dst_stride1, size_t extent0, size_t extent1) {
+    size_t dst_stride1, [[maybe_unused]] size_t extent0, size_t extent1) {
   const bool row_contig = (src_stride1 == 1 && dst_stride1 == 1);
   const bool col_contig = (src_stride0 == 1 && dst_stride0 == 1);
   if (row_contig && src_stride0 == extent1 && dst_stride0 == extent1) {
