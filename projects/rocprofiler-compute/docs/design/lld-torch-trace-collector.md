@@ -160,11 +160,10 @@ ROCTX range, the leaf, then those extras.
 Search is rooted at the executing Python package (checkout: `src/`; install: `<prefix>/libexec/rocprofiler-compute/`). Order, via `find_prebuilt_artifacts` in `native_tool_finder.py`:
 
 1. `<package_root>/../../lib*/rocprofiler-compute/torch_trace_collector-*.so`
-2. `$CMAKE_BINARY_DIR/lib` when that env var is set
-3. `<package_root>/../build/lib`
-4. `<package_root>/lib/_build/lib`
+2. `<package_root>/../build/lib`
+3. `<package_root>/lib/_build/lib`
 
-First unique resolved path per version wins. Install is scanned first, so a packaged `.so` beats a source build **in the same process**. Run the in-tree `rocprof-compute` (package root `src/`) to use a source build; the install glob then does not see `/opt/rocm`. `CMAKE_BINARY_DIR` does not override an installed module with the same version.
+First unique resolved path per version wins. Install is scanned first, so a packaged `.so` beats a source build **in the same process**. Run the in-tree `rocprof-compute` (package root `src/`) to use a source build; the install glob then does not see `/opt/rocm`.
 
 ---
 

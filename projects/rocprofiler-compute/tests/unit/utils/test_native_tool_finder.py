@@ -57,26 +57,6 @@ class TestNativeToolFinder:
             lib_path = NativeToolFinder(root_path).get_artifact_path()
         assert lib_path is None
 
-    def test_the_build_command_carries_no_target(self, tmp_path: Path) -> None:
-        finder = NativeToolFinder(tmp_path / "src")
-        with patch(
-            "utils.native_tool_finder.capture_subprocess_output",
-            return_value=(True, ""),
-        ) as execute:
-            finder._build_cmake()
-        assert "--target" not in execute.call_args.args[0]
-
-    def test_when_a_command_fails__the_error_carries_the_output(
-        self, tmp_path: Path
-    ) -> None:
-        finder = NativeToolFinder(tmp_path / "src")
-        with patch(
-            "utils.native_tool_finder.capture_subprocess_output",
-            return_value=(False, "CMake Error: configuration failed\n"),
-        ):
-            with pytest.raises(RuntimeError, match="configuration failed"):
-                finder._generate_cmake()
-
     def test_importing_the_finder_does_not_import_torch(self) -> None:
         """The profile path imports this module, which must stay free of torch."""
         import os

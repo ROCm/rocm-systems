@@ -3,9 +3,8 @@
 
 """Load the ``torch_trace_collector`` extension for the workload PyTorch version.
 
-Searches ``<prefix>/lib*/rocprofiler-compute/``, ``<project>/build/lib``,
-``src/lib/_build/lib``, and ``$CMAKE_BINARY_DIR/lib`` when ``CMAKE_BINARY_DIR``
-is set.
+Searches ``<prefix>/lib*/rocprofiler-compute/``, ``<project>/build/lib``, and
+``src/lib/_build/lib``.
 """
 
 import importlib.util
