@@ -17,6 +17,14 @@
 
 namespace rocjitsu {
 
+[[nodiscard]] static ConSanTransformArtifacts
+finalize_consan_exception(std::span<const uint8_t> code_object_bytes, std::string error,
+                          ConSanLoweringExecution *execution) {
+  ConSanTransformArtifacts result;
+  result.errors.push_back(std::move(error));
+  return finalize_consan_result(std::move(result), code_object_bytes, 0, false, nullptr, execution);
+}
+
 ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
     ConSanMoiRetryInventory retry_inventory, ConSanOptions options,
     std::span<const uint8_t> code_object_bytes, ConSanLoweringExecution *execution,
@@ -100,16 +108,12 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
     return finalize_consan_result(std::move(result), code_object_bytes,
                                   options.moi_report_dispatch_id, false, nullptr, execution);
   } catch (const std::exception &error) {
-    ConSanTransformArtifacts result;
-    result.errors.emplace_back(std::string("ConSan MOI inventory retry threw an exception: ") +
-                               error.what());
-    return finalize_consan_result(std::move(result), code_object_bytes, 0, false, nullptr,
-                                  execution);
+    return finalize_consan_exception(
+        code_object_bytes,
+        std::string("ConSan MOI inventory retry threw an exception: ") + error.what(), execution);
   } catch (...) {
-    ConSanTransformArtifacts result;
-    result.errors.emplace_back("ConSan MOI inventory retry threw a non-standard exception");
-    return finalize_consan_result(std::move(result), code_object_bytes, 0, false, nullptr,
-                                  execution);
+    return finalize_consan_exception(
+        code_object_bytes, "ConSan MOI inventory retry threw a non-standard exception", execution);
   }
 }
 
@@ -132,27 +136,23 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
     const bool stopped_after_observation = extent == ConSanLoweringExtent::ThroughObservationPlan &&
                                            execution != nullptr &&
                                            execution->observation_plan_passes != 0u;
-    if ((stopped_after_inventory || stopped_after_observation) && execution != nullptr &&
+    if ((stopped_after_inventory || stopped_after_observation) &&
         execution->resource_solving_and_lowering_passes == 0u) {
       if (!result.errors.empty())
         result.outcome = ConSanTransformOutcome::Invalid;
       return result;
     }
     try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
-    result =
-        finalize_consan_result(std::move(result), code_object_bytes, options.moi_report_dispatch_id,
-                               false, inspected_perturbation, execution);
-    return result;
+    return finalize_consan_result(std::move(result), code_object_bytes,
+                                  options.moi_report_dispatch_id, false, inspected_perturbation,
+                                  execution);
   } catch (const std::exception &error) {
-    ConSanTransformArtifacts result;
-    result.errors.emplace_back(std::string("ConSan transform threw an exception: ") + error.what());
-    return finalize_consan_result(std::move(result), code_object_bytes, 0, false, nullptr,
-                                  execution);
+    return finalize_consan_exception(
+        code_object_bytes, std::string("ConSan transform threw an exception: ") + error.what(),
+        execution);
   } catch (...) {
-    ConSanTransformArtifacts result;
-    result.errors.emplace_back("ConSan transform threw a non-standard exception");
-    return finalize_consan_result(std::move(result), code_object_bytes, 0, false, nullptr,
-                                  execution);
+    return finalize_consan_exception(code_object_bytes,
+                                     "ConSan transform threw a non-standard exception", execution);
   }
 }
 

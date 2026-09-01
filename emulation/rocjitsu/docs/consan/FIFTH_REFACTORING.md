@@ -7366,3 +7366,46 @@ non-material relative to the 91,450-line baseline. Remaining broad lowering
 mutation surfaces, target and mode locality, larger legacy harvesting,
 material whole-refactoring shrinkage, and the independent completion audit
 remain open. The goal therefore remains active.
+
+### 16.101 Convergence checkpoint 100: one native exception finalizer
+
+The native ingress trace followed exception handling through both fresh
+lowering and late-bound MOI inventory retry. Each path separately constructed
+a new transform transaction, appended one diagnostic, and invoked the same
+terminal finalizer; standard and non-standard exceptions duplicated that
+sequence again. The only semantic variation was the diagnostic text.
+
+All four paths now call one internal exception finalizer. It alone constructs
+the failed transaction and invokes final validation/publication, while callers
+retain their precise diagnostics. The same cleanup removes a redundant
+execution-pointer guard already implied by both stopped-stage predicates and
+returns ordinary finalization directly. The architecture gate caps
+`consan.cpp` at nine reviewed broad-transaction sites, preventing per-ingress
+exception transaction construction from returning.
+
+| Signal | Checkpoint 100 | Cumulative change | Slice change from checkpoint 99 |
+| --- | ---: | ---: | ---: |
+| Production files | 274 | +45 | 0 |
+| Physical production lines | 102,906 | **-2,070** | 0 |
+| Nonblank production lines | 96,666 | **-2,418** | **-1** |
+| Production implementation lines | 88,976 | **-2,474** | **-1** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | **-2 / 0** |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Whole-transaction mentions in native ingress | **9** | n/a | **-2** |
+| Native exception transaction constructors | **1** | n/a | **-3** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and all **41/41** invalid-input,
+retry, deferred, lowering, and architecture-boundary tests. Checkpoint 98
+passed all 1,295 host/component tests, and checkpoint 91 passed all 4,776
+nonphysical tests across the five-target simulator matrix. No test was added,
+removed, renamed, disabled, or replaced, and no physical gfx1201 test was run.
+
+This slice strengthens Sections 14.1, 14.5, and 14.7 by giving terminal native
+failure one authority instead of four visually similar transaction paths. Its
+size payoff is intentionally reported as small. Remaining broad lowering
+mutation surfaces, target and mode locality, larger legacy harvesting,
+material whole-refactoring shrinkage, and the independent completion audit
+remain open. The goal therefore remains active.

@@ -319,6 +319,12 @@ _consan_assert_match_count_at_most(
     12
     "composition helpers must consume exact inventory and stage products"
 )
+_consan_assert_match_count_at_most(
+    "${_consan_dir}/consan.cpp"
+    "ConSanTransformArtifacts"
+    9
+    "native lowering failures must share one terminal publication authority"
+)
 _consan_assert_no_match(
     "${_consan_dir}/consan_result.h.inc"
     "validate_consan_modified_elf"
