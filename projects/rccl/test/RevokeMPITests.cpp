@@ -960,8 +960,10 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ReturnsInProgress)
     ASSERT_MPI_EQ(ncclInvalidUsage, collRes);
 }
 
-// Race commRevokeAsync (worker thread) against an immediate ncclCommShrink
-// on the same parent; shrink must still succeed across kIterations runs.
+// Non-blocking revoke -> shrink recovery on the same parent, following the
+// non-blocking contract: each async op is drained via ncclCommGetAsyncError
+// (waitForAsyncResult) before the next op, and the child handle is only read
+// after the shrink job completes. Regression for AICOMRCCL-2232.
 TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
 {
     ASSERT_TRUE(validateTestPrerequisites(2,
@@ -981,10 +983,14 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
 
         ncclComm_t parent = getActiveCommunicator();
 
-        // Revoke parent and DO NOT poll before invoking shrink. This is
-        // the exact pattern that triggers the worker-thread race.
+        // Non-blocking revoke returns immediately while commRevokeAsync tears
+        // down the parent's proxy/sockets on a worker thread. The non-blocking
+        // contract requires draining it (poll parent to ncclSuccess) before the
+        // next op on the same comm; skipping this drain lets shrink race the
+        // teardown and child bootstrap fails with connection-refused.
         ncclResult_t res = ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT);
         ASSERT_MPI_TRUE(res == ncclSuccess || res == ncclInProgress);
+        ASSERT_MPI_EQ(ncclSuccess, waitForAsyncResult(parent));
 
         MPI_Barrier(MPI_COMM_WORLD);
 
@@ -1003,6 +1009,13 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
                                  NCCL_SHRINK_DEFAULT);
             ASSERT_TRUE(res == ncclSuccess || res == ncclInProgress)
                 << "iter=" << iter << " shrink returned " << res;
+            // On a non-blocking parent *newcomm stays NCCL_COMM_NULL until the
+            // child init async job completes, and a NULL handle cannot be
+            // polled. Drain via the PARENT first; only then is the child handle
+            // guaranteed populated. These asserts are LOCAL (not ASSERT_MPI_*):
+            // the excluded rank skips this branch, so a collective assert here
+            // would desync against it.
+            ASSERT_EQ(ncclSuccess, waitForAsyncResult(parent));
             ASSERT_NE(child, nullptr);
             ASSERT_EQ(ncclSuccess, waitForAsyncResult(child));
         }
