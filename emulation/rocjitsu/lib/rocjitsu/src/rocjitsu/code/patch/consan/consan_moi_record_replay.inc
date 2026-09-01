@@ -1,5 +1,6 @@
 void try_apply_first_light_access_record_patch(
-    std::span<const uint8_t> bytes, const MoiOptions &options, const ConSanTargetProfile &target,
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &operating_point, const ConSanTargetProfile &target,
     MoiResourcePlanningState &resource_state, MoiRecordReplayAccessOutput &access_output,
     std::span<const ConSanMoiCandidate> admitted, ConSanTransformArtifacts &result) {
   const rj_code_arch_t arch = target.arch;
@@ -23,20 +24,20 @@ void try_apply_first_light_access_record_patch(
   if (options.max_patches == 0 || layout.access_record_capacity == 0)
     return;
   if (!options.moi_dynamic_access_records && layout.record_replay_access_dispatch_bank_count > 1u &&
-      !moi_has_runtime_hardware_dispatch_id(options)) {
+      !moi_has_runtime_hardware_dispatch_id(operating_point)) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.warnings.emplace_back(
         "ConSan MOI automatic Record/Replay identity tables require runtime hardware dispatch "
         "identity");
     return;
   }
-  if (options.moi_dynamic_access_records && !options.moi_exec_save_sgpr) {
+  if (options.moi_dynamic_access_records && !operating_point.moi_exec_save_sgpr) {
     result.warnings.emplace_back(
         "ConSan MOI dynamic access-record probe requires RJ_CONSAN_MOI_EXEC_SAVE_SGPR");
     return;
   }
-  if (options.moi_dynamic_access_records &&
-      (*options.moi_exec_save_sgpr > 100u || *options.moi_exec_save_sgpr % 2u != 0u)) {
+  if (options.moi_dynamic_access_records && (*operating_point.moi_exec_save_sgpr > 100u ||
+                                             *operating_point.moi_exec_save_sgpr % 2u != 0u)) {
     result.warnings.emplace_back(
         "ConSan MOI dynamic access-record probe requires an even RJ_CONSAN_MOI_EXEC_SAVE_SGPR in "
         "0..100");
@@ -132,7 +133,7 @@ void try_apply_first_light_access_record_patch(
                !compute_sopp_branch_simm16(candidate->anchor(), original_text_size);
       });
   const bool use_indirect_appended =
-      options.moi_exec_save_sgpr.has_value() &&
+      operating_point.moi_exec_save_sgpr.has_value() &&
       (options.moi_runtime_sample_stride > 1u || candidates.size() > 8u ||
        has_unreachable_function_candidate || has_spill_backed_scalar_assignment);
   // Compact lowering patches every split-barrier member, while the dense
@@ -141,10 +142,11 @@ void try_apply_first_light_access_record_patch(
   // plus every fence candidate; otherwise the access pass can consume every
   // reachable island before a later synchronization pass runs.
   const uint64_t reserved_sync_island_count =
-      use_indirect_appended ? moi_reserved_access_sync_island_count(result.program_inventory,
-                                                                    result.observation_plan(),
-                                                                    options, options, options)
-                            : 0u;
+      use_indirect_appended
+          ? moi_reserved_access_sync_island_count(result.program_inventory,
+                                                  result.observation_plan(), options, options,
+                                                  operating_point)
+          : 0u;
   const uint64_t reserved_sync_slot_words =
       has_branch_only_scalar_assignment
           ? kMoiRecordReplayBarrierRelaySlotWords
@@ -170,10 +172,10 @@ void try_apply_first_light_access_record_patch(
                                 moi_resource_reserved_ranges(resource_state));
   }
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
-      result.program_inventory, result.resource_plans, options, options, arch, resource_state,
-      original_text, candidates, target.has_selectable_vgpr_bank ? 0u : 64u, access_island_begin,
-      access_slot_words, use_indirect_appended, MoiDenseAccessRouteAbi::RecordReplay,
-      local_entry_islands ? &*local_entry_islands : nullptr);
+      result.program_inventory, result.resource_plans, options, operating_point, arch,
+      resource_state, original_text, candidates, target.has_selectable_vgpr_bank ? 0u : 64u,
+      access_island_begin, access_slot_words, use_indirect_appended,
+      MoiDenseAccessRouteAbi::RecordReplay, local_entry_islands ? &*local_entry_islands : nullptr);
   const auto &dense_candidates = dense_routes.partition;
   const auto &candidate_indices = dense_candidates.index_by_candidate;
   auto &dense_entry_islands = dense_routes.entry_islands;
@@ -517,9 +519,9 @@ void try_apply_first_light_access_record_patch(
       continue;
     }
     const uint16_t access_scratch_count =
-        record_replay_access_scratch_vgpr_count(options, options, options, candidate, arch);
-    const auto resources =
-        resolve_moi_scratch(result.resource_plans, candidate, options, access_scratch_count);
+        record_replay_access_scratch_vgpr_count(options, options, operating_point, candidate, arch);
+    const auto resources = resolve_moi_scratch(result.resource_plans, candidate, operating_point,
+                                               access_scratch_count);
     if (!resources) {
       const ConSanCandidateResourcePlan *plan =
           resource_plan_for_candidate(result.resource_plans, candidate);
@@ -534,10 +536,8 @@ void try_apply_first_light_access_record_patch(
       }
       continue;
     }
-    MoiOptions candidate_options = options;
-    candidate_options.scratch_vgpr = resources->base;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
-                                             result.moi_operating_point,
+    ConSanMoiOperatingPoint candidate_point = operating_point;
+    if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
                                              resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI first-light probe found no common transient SGPR assignment");
@@ -547,16 +547,16 @@ void try_apply_first_light_access_record_patch(
     // stack component with an owner-local VGPR tuple for a disconnected
     // dynamic-stack component. Resolve that choice before building private
     // offsets; the code-object-wide marker alone does not describe this site.
-    if (!apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
+    if (!apply_moi_persistent_vgpr_assignment(candidate_point, result.moi_operating_point,
                                               resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI first-light probe found no common persistent assignment");
       continue;
     }
     std::optional<MoiPrivateEpochLayout> private_layout;
-    if (candidate_options.automatic_moi_private_epoch) {
+    if (candidate_point.automatic_moi_private_epoch) {
       const bool persist_workitem_owner =
-          candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
+          options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
       if (resources->owner_descriptor_file_offsets.size() == 1u) {
         const uint64_t descriptor = resources->owner_descriptor_file_offsets.front();
         auto [cached, inserted] =
@@ -583,12 +583,12 @@ void try_apply_first_light_access_record_patch(
       }
     }
     if (private_layout) {
-      candidate_options.moi_record_replay_workgroup_private_offsets =
+      candidate_point.moi_record_replay_workgroup_private_offsets =
           private_layout->record_replay_workgroup_offsets;
     }
     const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
         result.moi_operating_point, resources->owner_descriptor_file_offsets);
-    if (!apply_record_replay_entry_workgroup_assignment(candidate_options, candidate_options,
+    if (!apply_record_replay_entry_workgroup_assignment(options, candidate_point,
                                                         result.moi_operating_point,
                                                         resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
@@ -596,8 +596,8 @@ void try_apply_first_light_access_record_patch(
       continue;
     }
     std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
-    if (!candidate_options.moi_owner_epoch_vgprs.owner() &&
-        !candidate_options.moi_persistent_sgprs.owner()) {
+    if (!candidate_point.moi_owner_epoch_vgprs.owner() &&
+        !candidate_point.moi_persistent_sgprs.owner()) {
       const auto owner_shift =
           common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
       if (!owner_shift)
@@ -609,20 +609,17 @@ void try_apply_first_light_access_record_patch(
       };
     }
     const std::optional<ConSanMoiWorkgroupSources> runtime_workgroup_sources =
-        record_replay_persistent_workgroup_sources(candidate_options.moi_engine, candidate_options);
+        record_replay_persistent_workgroup_sources(options.moi_engine, candidate_point);
     const bool has_probe_entry_runtime_workgroup_gate =
         runtime_workgroup_sources &&
         moi_has_probe_entry_runtime_workgroup_gate(*runtime_workgroup_sources);
     const bool needs_vgpr_spill =
         resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-        moi_scalar_spill_requires_dynamic_vgpr_frame(
-            result.program_inventory, *resources,
-            static_cast<const ConSanMoiOperatingPoint &>(candidate_options));
+        moi_scalar_spill_requires_dynamic_vgpr_frame(result.program_inventory, *resources,
+                                                     candidate_point);
     auto probe = plan_moi_probe_resources(
-        result.program_inventory, *resources, static_cast<const ConSanRequest &>(candidate_options),
-        static_cast<const BoundRuntimeResources &>(candidate_options),
-        static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
-        private_layout, candidate_options.has_compact_moi_scalar_spill(), result.warnings);
+        result.program_inventory, *resources, options, options, candidate_point, spill_managers,
+        arch, private_layout, candidate_point.has_compact_moi_scalar_spill(), result.warnings);
     if (!probe) {
       if (needs_vgpr_spill) {
         result.warnings.emplace_back(
@@ -639,7 +636,7 @@ void try_apply_first_light_access_record_patch(
           candidate, resources->base, resources->count, ignored_overlap_errors);
     }
     const uint32_t candidate_entry_island_words =
-        moi_record_replay_entry_island_words(candidate_options.has_compact_moi_scalar_spill());
+        moi_record_replay_entry_island_words(candidate_point.has_compact_moi_scalar_spill());
     const auto &access_ranges = candidate.ranges;
     if (access_ranges.empty()) {
       result.warnings.emplace_back(
@@ -672,8 +669,8 @@ void try_apply_first_light_access_record_patch(
     uint32_t probe_guest_instruction_offset = 0;
     uint32_t guest_instruction_word_count = 0;
     auto words = build_first_light_access_record_words(
-        bytes, candidate, candidate_options, candidate_options, candidate_options, resources->base,
-        arch, 0, 0, planned_logical_range_count, layout, spill_overlaps_guest_operands,
+        bytes, candidate, options, options, candidate_point, resources->base, arch, 0, 0,
+        planned_logical_range_count, layout, spill_overlaps_guest_operands,
         spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         owner_derivation, candidate_errors, &probe_guest_instruction_offset,
@@ -733,10 +730,10 @@ void try_apply_first_light_access_record_patch(
           std::vector<uint32_t> displaced_words =
               borrowed_entry_words_for_candidate(candidate_ptr).value_or(std::vector<uint32_t>{});
           const size_t candidate_words = candidate.size() / sizeof(uint32_t);
-          const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options, candidate_options);
+          const auto jump_sgprs = moi_indirect_jump_sgprs(options, candidate_point);
           const auto backup_vgpr = find_moi_borrowed_entry_backup_vgpr_for_point(
               resource_state, resources->owner_descriptor_file_offsets, candidate.anchor(),
-              resources->required_vgpr_count, candidate_options);
+              resources->required_vgpr_count, candidate_point);
           if (jump_sgprs && backup_vgpr && candidate_words <= displaced_words.size() &&
               displaced_words.size() * sizeof(uint32_t) <= std::numeric_limits<uint32_t>::max()) {
             borrowed_entry_prototype = build_moi_borrowed_record_replay_entry(
@@ -793,7 +790,7 @@ void try_apply_first_light_access_record_patch(
         if (borrowed_entry_prototype) {
           actual_borrowed_entry = build_moi_borrowed_record_replay_entry(
               candidate.anchor(), reservation->body_offset, borrowed_entry_prototype->backup_vgpr,
-              *moi_indirect_jump_sgprs(candidate_options, candidate_options),
+              *moi_indirect_jump_sgprs(options, candidate_point),
               displaced_original_size / sizeof(uint32_t), arch);
         }
         if ((borrowed_entry_prototype && !actual_borrowed_entry) ||
@@ -841,10 +838,9 @@ void try_apply_first_light_access_record_patch(
                                        ? displaced_original_size
                                        : candidate_entry_island_words * sizeof(uint32_t));
       }
-      const bool dense_runtime_workgroup_gate = use_dense_call &&
-                                                options.moi_runtime_sample_stride > 1u &&
-                                                !candidate_options.has_compact_moi_scalar_spill() &&
-                                                has_probe_entry_runtime_workgroup_gate;
+      const bool dense_runtime_workgroup_gate =
+          use_dense_call && options.moi_runtime_sample_stride > 1u &&
+          !candidate_point.has_compact_moi_scalar_spill() && has_probe_entry_runtime_workgroup_gate;
       const uint64_t patch_bytes =
           static_cast<uint64_t>((words->size() + displaced_tail_words.size()) * sizeof(uint32_t)) +
           spill_bytes + scalar_spill_bytes + vgpr_bank_transition_bytes +
@@ -852,7 +848,7 @@ void try_apply_first_light_access_record_patch(
       if (!branch_only_scalar_spill) {
         const uint64_t return_words =
             use_dense_call ? (target.direct_call_form != ConSanDirectCallForm::SCallI64 ||
-                                      candidate_options.has_compact_moi_scalar_spill()
+                                      candidate_point.has_compact_moi_scalar_spill()
                                   ? 7u
                                   : 1u)
                            : 6u;
@@ -913,10 +909,10 @@ void try_apply_first_light_access_record_patch(
     planned.dense_call_anchor = use_dense_call;
     planned.runtime_workgroup_gate =
         uses_reserved_entry_relay && options.moi_runtime_sample_stride > 1u &&
-        !candidate_options.has_compact_moi_scalar_spill() && has_probe_entry_runtime_workgroup_gate;
+        !candidate_point.has_compact_moi_scalar_spill() && has_probe_entry_runtime_workgroup_gate;
     planned.dense_runtime_workgroup_gate =
         use_dense_call && options.moi_runtime_sample_stride > 1u &&
-        !candidate_options.has_compact_moi_scalar_spill() && has_probe_entry_runtime_workgroup_gate;
+        !candidate_point.has_compact_moi_scalar_spill() && has_probe_entry_runtime_workgroup_gate;
     if (planned.runtime_workgroup_gate || planned.dense_runtime_workgroup_gate)
       planned.runtime_workgroup_sources = runtime_workgroup_sources;
     if (use_dense_call)
@@ -1065,7 +1061,7 @@ void try_apply_first_light_access_record_patch(
   // every planned reservoir when synchronization is enabled; otherwise an
   // access batch that happens not to claim one can strand a later pass.
   if (moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan(),
-                                            options, options, options) != 0u) {
+                                            options, options, operating_point) != 0u) {
     for (BranchOnlyDirectRelayReservoir &reservoir : direct_branch_reservoirs.reservoirs)
       reservoir.used = true;
   }
@@ -1113,19 +1109,18 @@ void try_apply_first_light_access_record_patch(
   MoiDescriptorPrivateRequirements private_requirements;
   for (const PlannedAccessRecordPatch &planned_patch : planned_patches) {
     note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
-    MoiOptions candidate_options = options;
-    candidate_options.moi_record_replay_workgroup_private_offsets =
+    ConSanMoiOperatingPoint candidate_point = operating_point;
+    candidate_point.moi_record_replay_workgroup_private_offsets =
         planned_patch.private_workgroup_offsets;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
-                                             result.moi_operating_point,
+    if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
                                              planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     if (!apply_record_replay_entry_workgroup_assignment(
-            candidate_options, candidate_options, result.moi_operating_point,
+            options, candidate_point, result.moi_operating_point,
             planned_patch.resources.owner_descriptor_file_offsets))
       continue;
-    note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, candidate_options,
-                               candidate_options, candidate_options, arch);
+    note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, options, options,
+                               candidate_point, arch);
     note_moi_access_private_requirements(private_requirements, planned_patch);
   }
 
@@ -1136,9 +1131,8 @@ void try_apply_first_light_access_record_patch(
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
     if (!apply_moi_appended_access_descriptor_requirements(
-            patcher, code_object, static_cast<const RuntimeCapabilities &>(options),
-            descriptor_requirements, scalar_requirements, private_requirements, nullptr, arch,
-            result))
+            patcher, code_object, options, descriptor_requirements, scalar_requirements,
+            private_requirements, nullptr, arch, result))
       return;
     std::vector<uint8_t> new_text;
     std::vector<ConSanPatchInfo> patches;
@@ -1160,25 +1154,24 @@ void try_apply_first_light_access_record_patch(
       return;
     for (const PlannedAccessRecordPatch &planned_patch : planned_patches) {
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-      MoiOptions candidate_options = options;
-      candidate_options.scratch_vgpr = planned_patch.resources.base;
-      candidate_options.moi_record_replay_workgroup_private_offsets =
+      ConSanMoiOperatingPoint candidate_point = operating_point;
+      candidate_point.moi_record_replay_workgroup_private_offsets =
           planned_patch.private_workgroup_offsets;
       if (!apply_moi_transient_sgpr_assignment(
-              candidate_options, candidate_options, result.moi_operating_point,
+              options, candidate_point, result.moi_operating_point,
               planned_patch.resources.owner_descriptor_file_offsets) ||
           !apply_record_replay_entry_workgroup_assignment(
-              candidate_options, candidate_options, result.moi_operating_point,
+              options, candidate_point, result.moi_operating_point,
               planned_patch.resources.owner_descriptor_file_offsets) ||
-          !candidate_options.moi_exec_save_sgpr) {
+          !candidate_point.moi_exec_save_sgpr) {
         result.errors.emplace_back(
             "ConSan MOI first-light probe lost its owner-local register assignment");
         return;
       }
       auto words = build_first_light_access_record_words(
-          bytes, candidate, candidate_options, candidate_options, candidate_options,
-          planned_patch.resources.base, arch, planned_patch.record_index, planned_record_count,
-          planned_patch.logical_range_index, layout, planned_patch.spill_overlaps_guest_operands,
+          bytes, candidate, options, options, candidate_point, planned_patch.resources.base, arch,
+          planned_patch.record_index, planned_record_count, planned_patch.logical_range_index,
+          layout, planned_patch.spill_overlaps_guest_operands,
           planned_patch.spill ? &*planned_patch.spill : nullptr, planned_patch.private_epoch_offset,
           planned_patch.owner_derivation, result.errors);
       if (!words)
@@ -1193,7 +1186,7 @@ void try_apply_first_light_access_record_patch(
       info.branch_only_borrowed_indirect_entry = planned_patch.borrowed_entry.has_value();
       if (planned_patch.borrowed_entry) {
         const ConSanMoiIndirectJumpSgprs jump_sgprs =
-            *moi_indirect_jump_sgprs(candidate_options, candidate_options);
+            *moi_indirect_jump_sgprs(options, candidate_point);
         info.indirect_pc_sgpr = jump_sgprs.pc_sgpr;
         info.indirect_saved_scc_sgpr = jump_sgprs.scc_save_sgpr;
         info.branch_only_borrowed_backup_vgpr = planned_patch.borrowed_entry->backup_vgpr;
@@ -1231,8 +1224,8 @@ void try_apply_first_light_access_record_patch(
 
         if (planned_patch.entry_island_offset && !planned_patch.dense_call_anchor) {
           const MoiSpecialStateSgprs special_state =
-              *moi_special_state_sgprs(candidate_options, candidate_options);
-          const auto indirect_jump = moi_indirect_jump_sgprs(candidate_options, candidate_options);
+              *moi_special_state_sgprs(options, candidate_point);
+          const auto indirect_jump = moi_indirect_jump_sgprs(options, candidate_point);
           if (!indirect_jump) {
             result.errors.emplace_back(
                 "ConSan MOI first-light probe lost its indirect-jump SGPR assignment");
@@ -1248,8 +1241,7 @@ void try_apply_first_light_access_record_patch(
               return;
             }
             const auto gate_plan = plan_moi_runtime_workgroup_gate(
-                candidate_options, candidate_options, candidate_options,
-                *planned_patch.runtime_workgroup_sources,
+                options, options, candidate_point, *planned_patch.runtime_workgroup_sources,
                 MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay, arch);
             if (gate_plan) {
               auto gate = build_moi_runtime_workgroup_gate_island_words(
@@ -1284,8 +1276,7 @@ void try_apply_first_light_access_record_patch(
             return;
           }
           const auto gate_plan = plan_moi_runtime_workgroup_gate(
-              candidate_options, candidate_options, candidate_options,
-              *planned_patch.runtime_workgroup_sources,
+              options, options, candidate_point, *planned_patch.runtime_workgroup_sources,
               MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay, arch);
           if (!gate_plan) {
             result.errors.emplace_back(
@@ -1309,7 +1300,7 @@ void try_apply_first_light_access_record_patch(
             result.errors.emplace_back(
                 "ConSan MOI first-light probe could not encode its dense runtime gate at " +
                 std::to_string(candidate.anchor()) + " with exec-save s" +
-                std::to_string(*candidate_options.moi_exec_save_sgpr) + " and workgroup sources " +
+                std::to_string(*candidate_point.moi_exec_save_sgpr) + " and workgroup sources " +
                 describe_source(planned_patch.runtime_workgroup_sources->x) + "," +
                 describe_source(planned_patch.runtime_workgroup_sources->y) + "," +
                 describe_source(planned_patch.runtime_workgroup_sources->z) + "," +
@@ -1330,7 +1321,7 @@ void try_apply_first_light_access_record_patch(
         if (moi_access_requires_high_bank_address_capture(candidate, arch)) {
           const uint16_t base_scratch_count =
               record_replay_uses_automatic_banked_capture(
-                  candidate_options, layout.record_replay_dispatch_token_capacity)
+                  options, layout.record_replay_dispatch_token_capacity)
                   ? 10u
                   : 6u;
           body_options.high_bank_address_source = candidate.lowering.form->address_vgpr;
@@ -1382,13 +1373,13 @@ void try_apply_first_light_access_record_patch(
         }
         if (planned_patch.dense_call_anchor) {
           if (target.direct_call_form != ConSanDirectCallForm::SCallI64 ||
-              candidate_options.has_compact_moi_scalar_spill()) {
+              candidate_point.has_compact_moi_scalar_spill()) {
             const MoiSpecialStateSgprs special_state =
-                *moi_special_state_sgprs(candidate_options, candidate_options);
+                *moi_special_state_sgprs(options, candidate_point);
             const size_t return_begin = cave_words->size();
             if (!append_moi_scc_preserving_indirect_jump(
                     *cave_words, cave_text_offset, planned_patch.placement.return_target,
-                    moi_indirect_jump_sgprs(candidate_options, candidate_options)->pc_sgpr,
+                    moi_indirect_jump_sgprs(options, candidate_point)->pc_sgpr,
                     special_state.scc_save_sgpr, /*capture_scc=*/true, arch)) {
               result.errors.emplace_back(
                   "ConSan MOI first-light probe could not encode its dense long return");
@@ -1398,7 +1389,7 @@ void try_apply_first_light_access_record_patch(
               cave_words->push_back(build_s_nop(0, arch));
           } else {
             const uint16_t call_return_sgpr =
-                static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 6u);
+                static_cast<uint16_t>(*candidate_point.moi_exec_save_sgpr + 6u);
             cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));
           }
         } else if (planned_patch.borrowed_entry) {
@@ -1417,10 +1408,10 @@ void try_apply_first_light_access_record_patch(
           cave_words->push_back(build_s_branch(*direct_return, arch));
         } else if (planned_patch.entry_island_offset) {
           const MoiSpecialStateSgprs special_state =
-              *moi_special_state_sgprs(candidate_options, candidate_options);
+              *moi_special_state_sgprs(options, candidate_point);
           if (!append_moi_scc_preserving_indirect_jump(
                   *cave_words, cave_text_offset, planned_patch.placement.return_target,
-                  moi_indirect_jump_sgprs(candidate_options, candidate_options)->pc_sgpr,
+                  moi_indirect_jump_sgprs(options, candidate_point)->pc_sgpr,
                   special_state.scc_save_sgpr,
                   /*capture_scc=*/false, arch)) {
             result.errors.emplace_back(
@@ -1538,20 +1529,19 @@ void try_apply_first_light_access_record_patch(
           bytes, planned_patches, descriptor_requirements, scalar_requirements,
           private_requirements, nullptr, nullptr, "first-light probe", arch,
           [&](const PlannedAccessRecordPatch &planned_patch) {
-            MoiOptions candidate_options = options;
-            candidate_options.scratch_vgpr = planned_patch.resources.base;
-            candidate_options.moi_record_replay_workgroup_private_offsets =
+            ConSanMoiOperatingPoint candidate_point = operating_point;
+            candidate_point.moi_record_replay_workgroup_private_offsets =
                 planned_patch.private_workgroup_offsets;
             if (!apply_moi_transient_sgpr_assignment(
-                    candidate_options, candidate_options, result.moi_operating_point,
+                    options, candidate_point, result.moi_operating_point,
                     planned_patch.resources.owner_descriptor_file_offsets) ||
                 !apply_record_replay_entry_workgroup_assignment(
-                    candidate_options, candidate_options, result.moi_operating_point,
+                    options, candidate_point, result.moi_operating_point,
                     planned_patch.resources.owner_descriptor_file_offsets))
               return std::optional<std::vector<uint32_t>>{};
             return build_first_light_access_record_words(
-                bytes, *planned_patch.candidate, candidate_options, candidate_options,
-                candidate_options, planned_patch.resources.base, arch, planned_patch.record_index,
+                bytes, *planned_patch.candidate, options, options, candidate_point,
+                planned_patch.resources.base, arch, planned_patch.record_index,
                 planned_record_count, planned_patch.logical_range_index, layout,
                 planned_patch.spill_overlaps_guest_operands,
                 planned_patch.spill ? &*planned_patch.spill : nullptr,

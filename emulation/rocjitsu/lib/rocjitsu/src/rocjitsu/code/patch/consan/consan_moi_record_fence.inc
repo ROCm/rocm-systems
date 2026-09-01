@@ -1,4 +1,5 @@
-void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
+void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
+                                  const ConSanMoiOperatingPoint &operating_point,
                                   rj_code_arch_t arch, ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics)
     return;
@@ -43,7 +44,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
   std::vector<PlannedFenceRecord> selected;
   MoiResourcePlanningStatePtr resource_state = make_moi_resource_planning_state(
       bytes, arch, result.program_inventory, result.observation_plan(), result.resource_plans,
-      options, options, options);
+      options, options, operating_point);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;
@@ -76,7 +77,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     ConSanCandidateResourcePlan plan =
         existing_plan
             ? *existing_plan
-            : plan_moi_resource_site(*resource_state, options, options, options,
+            : plan_moi_resource_site(*resource_state, options, options, operating_point,
                                      ConSanResourceSiteKind::Fence, candidate_index,
                                      candidate.patch_text_offset,
                                      candidate.kernel_descriptor_file_offset, scratch_count,
@@ -88,14 +89,14 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
       result.resource_plans.push_back(plan);
     }
     const auto resources =
-        resolve_moi_scratch_plan(plan, options, result.moi_operating_point, scratch_count);
+        resolve_moi_scratch_plan(plan, operating_point, result.moi_operating_point, scratch_count);
     if (!resources) {
       result.warnings.emplace_back("ConSan MOI fence record patch has no usable resource plan");
       continue;
     }
     std::optional<uint32_t> active_private_size;
     if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-        options.has_compact_moi_scalar_spill()) {
+        operating_point.has_compact_moi_scalar_spill()) {
       active_private_size = 0u;
       bool active_descriptor_missing = false;
       for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
@@ -136,7 +137,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
           std::string(consan_moi_atomic_address_support_name(address_plan.support)));
       continue;
     }
-    if (!options.moi_owner_epoch_vgprs.owner() && !candidate.kernel_descriptor_file_offset) {
+    if (!operating_point.moi_owner_epoch_vgprs.owner() &&
+        !candidate.kernel_descriptor_file_offset) {
       if (resources->owner_descriptor_file_offsets.empty()) {
         result.warnings.emplace_back(
             "ConSan MOI fence record patch requires an owning kernel descriptor");
@@ -146,8 +148,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     }
     auto record_event =
         plan_moi_record_event(bytes, result.program_inventory, result.warnings, *resources, options,
-                              options, options, result.moi_operating_point, spill_managers, arch,
-                              "ConSan MOI fence record patch", active_private_size);
+                              options, operating_point, result.moi_operating_point, spill_managers,
+                              arch, "ConSan MOI fence record patch", active_private_size);
     if (!record_event)
       continue;
     note_moi_probe_private_requirements(private_requirements, *record_event);

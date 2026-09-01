@@ -27,14 +27,17 @@ struct MoiRecordReplayAccessOutput {
 };
 
 void try_apply_first_light_access_record_patch(
-    std::span<const uint8_t> bytes, const MoiOptions &options, const ConSanTargetProfile &target,
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &operating_point, const ConSanTargetProfile &target,
     MoiResourcePlanningState &resource_state, MoiRecordReplayAccessOutput &access_output,
     std::span<const ConSanMoiCandidate> admitted, ConSanTransformArtifacts &result);
 
-void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
+void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
+                                   const ConSanMoiOperatingPoint &operating_point,
                                    rj_code_arch_t arch, ConSanTransformArtifacts &result);
 
-void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
+void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
+                                  const ConSanMoiOperatingPoint &operating_point,
                                   rj_code_arch_t arch, ConSanTransformArtifacts &result);
 
 } // namespace rocjitsu::consan_moi_impl

@@ -3441,3 +3441,63 @@ Other modes, common barriers and prologues, architecture peepholes, placement
 and validation concentrations, code-size convergence, the extension exercises,
 and the independent deep-read completion audit remain open. The goal therefore
 remains active.
+
+### 16.36 Convergence checkpoint 35: typed Record/Replay construction boundary
+
+The Sampled boundary work made the adjacent Record/Replay contrast explicit.
+Record/Replay access, atomic-event, and fence-event construction still accepted
+the inherited `MoiOptions` attempt. Access construction copied the complete
+aggregate four times for candidate planning, descriptor accounting, appended
+emission, and inline emission, and used three `scratch_vgpr` assignments to
+carry bases already present in the selected resource plans. Atomic and fence
+construction did not copy the aggregate, but silently obtained semantic input,
+bound resources, and accepted placement state through the same inheritance.
+
+Those three Record/Replay-owned construction facets now receive immutable
+`ConSanOptions` and `ConSanMoiOperatingPoint` separately. Candidate-local access
+binding copies only the operating point; scratch bases remain explicit;
+resource and record-event planning name the accepted point; and request,
+runtime-resource, policy, debug, and growth-limit input remains immutable. The
+mode entry retains the broad mutable attempt because it owns the existing
+post-placement decision to discard unconsumed automatic state, then passes its
+two base products into access and event construction. No compatibility
+overload, replacement view, or parallel implementation was added.
+
+The architecture-boundary gate rejects `MoiOptions` and inherited input/point
+casts in the Record/Replay internal header and its access, atomic, and fence
+owners. It budgets at most one broad-attempt reference in the mode entry. This
+exercises the typed mode-component boundary on a second engine and prevents
+future Record/Replay event work from restoring inheritance as a shortcut. The
+shared barrier owner remains a separate exact-subset/common-mechanism boundary
+and is deliberately not misrepresented as Record/Replay-local by this gate.
+
+| Signal | Checkpoint 35 | Cumulative change | Slice change from checkpoint 34 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,472 | +497 | **-3** |
+| Nonblank production lines | 99,188 | +105 | **-3** |
+| Production implementation lines | 91,471 | **+21** | **-3** |
+| `MoiOptions` references / files | 63 / 21 | **-24 / -4** | **-10 / -4** |
+| `ConSanTransformArtifacts` references / files | 207 / 56 | **-69 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 205 / 28 | +5 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 316 / 57 | +26 / +6 | **+8 / +3** |
+| `MoiOptions` references in Record/Replay-owned construction | 1 | n/a | **-10** |
+| Record/Replay whole-attempt candidate copies | 0 | n/a | **-4** |
+| Record/Replay immutable scratch-field assignments | 0 | n/a | **-3** |
+| Test inventory | 5,379 | +34 | 0 |
+
+Validation includes a full final-tree `-j16` rebuild; all 825 `ConSanMoi` and
+architecture-boundary focused tests in 4.65 seconds; all 4,744 nonphysical
+tests at `-j16` in 199.85 seconds, including the unchanged 2,908 simulator rows
+over five targets; and all 635 physical gfx1201 tests serialized at `-j1` in
+108.88 seconds. No test was removed, renamed, disabled, added, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.7, 14.8, and 14.9:
+two mode packages now use the same explicit immutable-input/resolved-state
+boundary without duplicating an adapter, and the legacy broad copies and side
+channel are deleted from the migrated Record/Replay surface. Production
+implementation remains 21 lines above baseline, so material whole-refactoring
+shrinkage is still open. InlineShadow, the exact-subset barrier owner, common
+prologues, architecture peepholes, placement and validation concentrations,
+the extension exercises, and the independent deep-read completion audit also
+remain open. The goal therefore remains active.

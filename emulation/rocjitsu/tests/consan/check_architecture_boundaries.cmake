@@ -567,6 +567,26 @@ if(NOT _moi_record_replay_indexed_address_call_count EQUAL 2)
         "ConSan RecordReplay access and dispatch tables must share indexed addressing"
     )
 endif()
+foreach(
+    _record_replay_owner
+    IN ITEMS
+        consan_moi_record_replay.h
+        consan_moi_record_replay.inc
+        consan_moi_record_atomic.inc
+        consan_moi_record_fence.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_record_replay_owner}"
+        "MoiOptions|static_cast<const ConSan(Request|MoiOperatingPoint|BoundRuntimeResources)"
+        "Record/Replay components must separate immutable input from operating-point state"
+    )
+endforeach()
+_consan_assert_match_count_at_most(
+    "${_consan_dir}/consan_moi_record_replay.cpp"
+    "MoiOptions"
+    1
+    "Record/Replay may use the broad attempt only at its mode entry"
+)
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
     "GFX90A_ACCUM_OFFSET"

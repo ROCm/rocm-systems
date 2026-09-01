@@ -1,4 +1,5 @@
-void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
+void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
+                                   const ConSanMoiOperatingPoint &operating_point,
                                    rj_code_arch_t arch, ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics)
     return;
@@ -57,7 +58,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
   selected_candidates.reserve(max_candidates);
   MoiResourcePlanningStatePtr resource_state = make_moi_resource_planning_state(
       bytes, arch, result.program_inventory, result.observation_plan(), result.resource_plans,
-      options, options, options);
+      options, options, operating_point);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;
@@ -101,7 +102,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
     ConSanCandidateResourcePlan plan =
         existing_plan
             ? *existing_plan
-            : plan_moi_resource_site(*resource_state, options, options, options,
+            : plan_moi_resource_site(*resource_state, options, options, operating_point,
                                      ConSanResourceSiteKind::Atomic, candidate_index,
                                      site.text_offset, candidate.kernel_descriptor_file_offset,
                                      scratch_count, nullptr, &candidate.lowering_form);
@@ -109,7 +110,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
     if (!existing_plan)
       result.resource_plans.push_back(plan);
     const auto resources =
-        resolve_moi_scratch_plan(plan, options, result.moi_operating_point, scratch_count);
+        resolve_moi_scratch_plan(plan, operating_point, result.moi_operating_point, scratch_count);
     if (!resources) {
       result.warnings.emplace_back(
           "ConSan MOI atomic record patch has no usable resource plan in " +
@@ -126,7 +127,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
       continue;
     }
     MoiAtomicEvidenceSitePlan planned_candidate = candidate;
-    if (!options.moi_owner_epoch_vgprs.owner() &&
+    if (!operating_point.moi_owner_epoch_vgprs.owner() &&
         !planned_candidate.kernel_descriptor_file_offset) {
       if (resources->owner_descriptor_file_offsets.empty()) {
         result.warnings.emplace_back(
@@ -136,9 +137,10 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
       planned_candidate.kernel_descriptor_file_offset =
           resources->owner_descriptor_file_offsets.front();
     }
-    auto record_event = plan_moi_record_event(
-        bytes, result.program_inventory, result.warnings, *resources, options, options, options,
-        result.moi_operating_point, spill_managers, arch, "ConSan MOI atomic record patch");
+    auto record_event =
+        plan_moi_record_event(bytes, result.program_inventory, result.warnings, *resources, options,
+                              options, operating_point, result.moi_operating_point, spill_managers,
+                              arch, "ConSan MOI atomic record patch");
     if (!record_event)
       continue;
     selected_candidates.push_back(
