@@ -8,11 +8,6 @@ subtrees:
   - entries:
     - file: what-is-rocprof-sys.rst
 
-  - caption: Quick Reference
-    entries:
-    - file: quick-reference/rocprofiler-systems-at-a-glance.rst
-      title: ROCm Systems Profiler at a glance
-
   - caption: Install
     entries:
     - file: install/install.rst
