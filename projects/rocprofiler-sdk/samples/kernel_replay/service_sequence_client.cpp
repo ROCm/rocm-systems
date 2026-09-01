@@ -44,6 +44,7 @@ std::atomic<int> g_att_records{0};
 std::atomic<int> g_spm_records{0};
 
 bool g_services_first = true;
+bool g_fully_initialized = false;
 
 const char*
 service_name(service_kind kind)
@@ -374,12 +375,19 @@ tool_init(rocprofiler_client_finalize_t, void*)
     }
 
     KR_CHECK(rocprofiler_start_context(g_replay_ctx));
+    g_fully_initialized = true;
     return 0;
 }
 
 void
 tool_fini(void*)
 {
+    if(!g_fully_initialized)
+    {
+        fprintf(stderr, "[service-sequence] SKIPPED: tool was not fully initialized\n");
+        return;
+    }
+
     if(g_pcs_buffer.handle != 0) rocprofiler_flush_buffer(g_pcs_buffer);
     fprintf(stderr,
             "[service-sequence] order=%s counters=%d pcs=%d att=%d spm=%d\n",
