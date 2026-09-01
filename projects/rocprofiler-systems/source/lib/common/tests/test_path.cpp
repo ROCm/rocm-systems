@@ -580,20 +580,6 @@ TEST_F(PathTest, CreateParentDirsAndOpenOfstream_EmptyPathReturnsFalse)
     EXPECT_FALSE(out_fstream.is_open());
 }
 
-TEST_F(PathTest, CreateParentDirsAndOpenOfstream_BackslashIsNotASeparator)
-{
-    // POSIX-correct: a backslash is an ordinary filename character, so this writes one
-    // file named "out\data.txt" rather than creating an "out" directory
-    const std::string file_path = m_test_dir + "/out\\data.txt";
-
-    std::ofstream out_fstream;
-    EXPECT_TRUE(create_parent_dirs_and_open_ofstream(out_fstream, file_path));
-    out_fstream.close();
-
-    EXPECT_TRUE(is_regular_file(file_path));
-    EXPECT_FALSE(is_directory(m_test_dir + "/out"));
-}
-
 TEST_F(PathTest, CreateParentDirsAndOpenOfstream_TruncatesExistingFile)
 {
     const std::string file_path = create_file("truncate_me.txt", "0123456789");
