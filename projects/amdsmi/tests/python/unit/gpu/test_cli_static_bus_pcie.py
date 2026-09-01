@@ -22,9 +22,20 @@ import sys
 import types
 import unittest
 
+from common.common import ModuleIsolationMixin
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
 STATIC_PATH = os.path.join(_REPO_ROOT, "amdsmi_cli", "subcommands", "static.py")
+
+# Every name _install_fake_modules() writes into sys.modules.
+_STUBBED_MODULES = (
+    "amdsmi",
+    "amdsmi.amdsmi_interface",
+    "amdsmi.amdsmi_exception",
+    "amdsmi_helpers",
+    "amdsmi_cli_exceptions",
+)
 
 
 class _FakeLibraryException(Exception):
@@ -174,15 +185,18 @@ def _build_args():
     )
 
 
-class TestCliStaticBusPcieNA(unittest.TestCase):
+class TestCliStaticBusPcieNA(ModuleIsolationMixin, unittest.TestCase):
     """``max_pcie_speed``/``pcie_interface_version`` as the string ``"N/A"``
     sentinel (the WSL2 case) must not crash ``static_gpu`` and must render as
     ``N/A`` rather than a bogus formatted value."""
+
+    ISOLATED_MODULES = _STUBBED_MODULES
 
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(STATIC_PATH):
             raise unittest.SkipTest(f"amd-smi CLI static.py not found at {STATIC_PATH}")
+        super().setUpClass()
         cls.interface = _install_fake_modules(
             {
                 "max_pcie_width": "N/A",
@@ -223,14 +237,17 @@ class TestCliStaticBusPcieNA(unittest.TestCase):
         self.assertEqual(bus_info["pcie_interface_version"], "N/A")
 
 
-class TestCliStaticBusPcieValid(unittest.TestCase):
+class TestCliStaticBusPcieValid(ModuleIsolationMixin, unittest.TestCase):
     """Sanity check: a normal numeric PCIe reading still formats correctly
     after the ``unit_format`` refactor."""
+
+    ISOLATED_MODULES = _STUBBED_MODULES
 
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(STATIC_PATH):
             raise unittest.SkipTest(f"amd-smi CLI static.py not found at {STATIC_PATH}")
+        super().setUpClass()
         cls.interface = _install_fake_modules(
             {
                 "max_pcie_width": 16,

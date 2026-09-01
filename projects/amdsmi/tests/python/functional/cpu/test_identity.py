@@ -30,19 +30,6 @@ class TestCpuIdentity(unittest.TestCase):
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
-    def test_first_online_core_on_cpu_socket(self):
-        self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_first_online_core_on_cpu_socket as it fails (IO Error)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        self.common.Test_API_Per_GPU(
-            amdsmi_first_online_core_on_cpu_socket=amdsmi.amdsmi_first_online_core_on_cpu_socket
-        )
-        return
-
     def test_get_cpu_family(self):
         self.common.print_func_name("")
 

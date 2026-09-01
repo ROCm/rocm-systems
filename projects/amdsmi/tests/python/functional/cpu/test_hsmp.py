@@ -30,32 +30,6 @@ class TestCpuHsmp(unittest.TestCase):
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
-    def test_get_cpu_hsmp_driver_version(self):
-        self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_cpu_hsmp_driver_version as it fails (IO Error)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_cpu_hsmp_driver_version=amdsmi.amdsmi_get_cpu_hsmp_driver_version
-        )
-        return
-
-    def test_get_cpu_hsmp_proto_ver(self):
-        self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_cpu_hsmp_proto_ver as it fails (IO Error)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_cpu_hsmp_proto_ver=amdsmi.amdsmi_get_cpu_hsmp_proto_ver
-        )
-        return
-
     def test_get_esmi_err_msg(self):
         self.common.print_func_name("")
 

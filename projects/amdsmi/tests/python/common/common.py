@@ -680,8 +680,9 @@ def run_test_dir(subdirs, title, top_level_dir):
         print_test_ids(suite)
         sys.exit(0)
 
-    # Detect if ran without sudo or root privileges
-    if os.geteuid() != 0:
+    # Detect if ran without sudo or root privileges. The unit tier reaches no
+    # device, so root is only required once a device-driven tier is selected.
+    if os.geteuid() != 0 and not set(tiers) <= {"unit"}:
         print(
             "Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n",
             file=sys.stderr,
@@ -879,7 +880,7 @@ class Common:
     for member in amdsmi.AmdSmiVirtualizationMode:
         VIRTUALIZATION_MODE_MAP[amdsmi.AmdSmiVirtualizationMode(member.value)] = member.name
 
-    def __init__(self, verbose, *args, **kwargs):
+    def __init__(self, verbose, *args, probe_devices=True, **kwargs):
         self.verbose = verbose
         self.max_num_physical_devices = (
             amdsmi.amdsmi_interface.AMDSMI_MAX_NUM_XCP * amdsmi.amdsmi_interface.AMDSMI_MAX_DEVICES
@@ -907,7 +908,9 @@ class Common:
             self.virt_mode = []
             self.asic_info = []
             self.board_info = []
-            for gpu in self.processors:
+            # Only print_device_header() reads these; skipping the probe saves an
+            # init/enumerate cycle plus three calls per device for callers that don't.
+            for gpu in self.processors if probe_devices else []:
                 # Get virtualization mode info
                 try:
                     ret = amdsmi.amdsmi_get_gpu_virtualization_mode(gpu)

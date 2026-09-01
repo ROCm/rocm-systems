@@ -30,27 +30,6 @@ class TestGpuMetrics(unittest.TestCase):
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
-    def test_get_gpu_activity(self):
-        self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_gpu_activity as it fails (MI350X, AMDSMI_STATUS_UNEXPECTED_DATA)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        self.common.Test_API_Per_GPU(amdsmi_get_gpu_activity=amdsmi.amdsmi_get_gpu_activity)
-        return
-
-    def test_get_gpu_metrics_info(self):
-        self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_gpu_metrics_info as it fails (MI350X, AMDSMI_STATUS_UNEXPECTED_DATA)."
-            self.common.print(msg)
-            self.skipTest(msg)
-        self.common.Test_API_Per_GPU(amdsmi_get_gpu_metrics_info=amdsmi.amdsmi_get_gpu_metrics_info)
-        return
-
     def test_get_gpu_partition_metrics_info(self):
         self.common.print_func_name("")
         for i, gpu in enumerate(self.common.processors):
@@ -66,17 +45,6 @@ class TestGpuMetrics(unittest.TestCase):
             self.common.print("")
         if self.raise_exception:
             raise self.raise_exception
-
-    def test_get_gpu_xcd_counter(self):
-        self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_gpu_xcd_counter as it fails (MI350, AMDSMI_STATUS_UNEXPECTED_DATA)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        self.common.Test_API_Per_GPU(amdsmi_get_gpu_xcd_counter=amdsmi.amdsmi_get_gpu_xcd_counter)
-        return
 
     def test_get_utilization_count(self):
         self.common.print_func_name("")

@@ -115,7 +115,7 @@ that marker and enforces the contract.
 They all share the same option set and the same GTest-style summary, because
 they all delegate to `common.run_test_dir()`.
 
-`integration/test_memory_partition_lifecycle.py` is a standalone script rather than a
+`integration/memory_partition_lifecycle.py` is a standalone script rather than a
 suite: it reloads the driver, so it is run on its own with `sudo` and contributes no
 tests to the runner.
 
