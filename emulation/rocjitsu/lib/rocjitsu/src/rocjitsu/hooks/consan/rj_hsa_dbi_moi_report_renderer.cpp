@@ -55,7 +55,6 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
     return rendered;
   }
 
-  const bool partition_mask_debug = decoded.partition_mask_debug;
   const ConSanMoiEngine expected_engine = decoded.engine;
   const ConSanMoiReportHeader *header = &decoded.header;
   const uint32_t access_record_count = decoded.access_record_count;
@@ -169,22 +168,6 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
     default:
       break;
     }
-  }
-  if (partition_mask_debug) {
-    const uint64_t group_mask = header->dispatch_id;
-    const uint64_t first_exchange_address =
-        static_cast<uint64_t>(header->access_record_count) |
-        (static_cast<uint64_t>(header->barrier_record_count) << 32u);
-    const uint64_t final_exchange_address = static_cast<uint64_t>(header->atomic_record_count) |
-                                            (static_cast<uint64_t>(header->flags) << 32u);
-    log_message(kLogInfo,
-                "ConSan MOI partition-mask debug reader=%llu acceptance=false "
-                "final_group=0x%016llx exchange_count=%u "
-                "first_exchange_address=0x%016llx final_exchange_address=0x%016llx",
-                static_cast<unsigned long long>(input.reader),
-                static_cast<unsigned long long>(group_mask), header->event_counter,
-                static_cast<unsigned long long>(first_exchange_address),
-                static_cast<unsigned long long>(final_exchange_address));
   }
   log_message(
       kLogSummary,

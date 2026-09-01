@@ -1858,13 +1858,12 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
 [[nodiscard]] bool append_wave_coalesced_exact_shadow_swap(
     std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanRequest &request,
     const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &point,
-    uint16_t scratch_vgpr, bool partition_mask_debug, rj_code_arch_t arch,
-    const ConSanMoiReportBufferLayout &layout, uint16_t address_lo_vgpr, uint16_t current_low_vgpr,
-    uint16_t current_high_vgpr, uint16_t old_value_vgpr, uint16_t lds_byte_offset_vgpr,
-    uint32_t static_byte_offset, uint32_t byte_count, uint32_t shadow_granule_bytes,
-    uint32_t relative_cell_index, std::optional<uint16_t> relative_cell_index_vgpr,
-    const VgprSpillSequence *spill, std::optional<uint16_t> spill_backed_lds_byte_offset_source,
-    std::vector<std::string> &errors) {
+    uint16_t scratch_vgpr, rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout,
+    uint16_t address_lo_vgpr, uint16_t current_low_vgpr, uint16_t current_high_vgpr,
+    uint16_t old_value_vgpr, uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset,
+    uint32_t byte_count, uint32_t shadow_granule_bytes, uint32_t relative_cell_index,
+    std::optional<uint16_t> relative_cell_index_vgpr, const VgprSpillSequence *spill,
+    std::optional<uint16_t> spill_backed_lds_byte_offset_source, std::vector<std::string> &errors) {
   struct FailureStage {
     std::vector<std::string> &errors;
     std::string_view stage = "preflight";
@@ -1948,22 +1947,6 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   words.push_back(save_address_hi);
   words.push_back(save_current_low);
   words.push_back(save_current_high);
-  if (partition_mask_debug) {
-    // Capture the first incoming lane's address before loop temporaries can
-    // reuse these SGPRs. InlineShadow leaves all three record counts at zero,
-    // so the debug reader can use count fields without corrupting the layout
-    // capacities that locate the exact-shadow array.
-    const uint64_t report_base = *bound_resources.moi_report_buffer_address;
-    words.push_back(*read_address);
-    words.push_back(*read_address_high);
-    if (!append_store_u32_sgpr(words,
-                               report_base + offsetof(ConSanMoiReportHeader, access_record_count),
-                               address_key_sgpr, current_low_vgpr, address_lo_vgpr, arch) ||
-        !append_store_u32_sgpr(words,
-                               report_base + offsetof(ConSanMoiReportHeader, barrier_record_count),
-                               value_key_sgpr, current_low_vgpr, address_lo_vgpr, arch))
-      return false;
-  }
   const size_t loop = words.size();
   words.push_back(*select_pending);
   words.push_back(restore_address_lo);
@@ -1974,22 +1957,6 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   words.push_back(*read_value);
   words.push_back(*address_equal);
   words.push_back(*narrow_address);
-  if (partition_mask_debug) {
-    // Capture the current group's exchange address before diagnostics can
-    // reuse working VGPRs. Each group overwrites this pair, matching the
-    // retained final_group mask. The old-value pair has not been populated by
-    // the shadow exchange yet, so it is the only safe address scratch here.
-    // In particular, do not use saved_address_lo_vgpr: doing so corrupts the
-    // per-lane loop invariant before the first exchange and makes the debug
-    // path observe different behavior from the production path.
-    const uint64_t report_base = *bound_resources.moi_report_buffer_address;
-    if (!append_store_u32_vgpr(words,
-                               report_base + offsetof(ConSanMoiReportHeader, atomic_record_count),
-                               address_lo_vgpr, old_value_vgpr, arch) ||
-        !append_store_u32_vgpr(words, report_base + offsetof(ConSanMoiReportHeader, flags),
-                               static_cast<uint16_t>(address_lo_vgpr + 1u), old_value_vgpr, arch))
-      return false;
-  }
   words.push_back(*value_equal);
   words.push_back(*narrow_value);
   failure.stage = "composite-key provenance";
@@ -2102,20 +2069,6 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
           static_cast<uint16_t>(old_value_vgpr + 7u), relative_cell_index_vgpr,
           relative_cell_index))
     return false;
-
-  if (partition_mask_debug) {
-    // Debug-only side channel for gfx1201 qualification. The report fields are
-    // otherwise unused by InlineShadow. Capture before the subtraction while
-    // group EXEC is still active; the matching hook log labels the run as
-    // non-acceptance telemetry.
-    const uint64_t report_base = *bound_resources.moi_report_buffer_address;
-    if (!append_store_u32_sgpr(words, report_base + offsetof(ConSanMoiReportHeader, dispatch_id),
-                               group_exec_sgpr, current_low_vgpr, address_lo_vgpr, arch) ||
-        !append_store_u32_sgpr(
-            words, report_base + offsetof(ConSanMoiReportHeader, dispatch_id) + sizeof(uint32_t),
-            static_cast<uint16_t>(group_exec_sgpr + 1u), current_low_vgpr, address_lo_vgpr, arch))
-      return false;
-  }
 
   // The selected group is a subset of pending EXEC, so XOR removes exactly
   // that group. Keep this independent of the gfx12 AND-NOT operand convention;
@@ -2550,7 +2503,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
     const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr,
-    const MoiObjectModeSemantics &semantics, bool partition_mask_debug, rj_code_arch_t arch,
+    const MoiObjectModeSemantics &semantics, rj_code_arch_t arch,
     const ConSanMoiReportBufferLayout &layout, const ConSanMoiWorkgroupSources &workgroup_sources,
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
     bool byte_granular_external_shadow, std::optional<uint32_t> private_epoch_offset,
@@ -2566,10 +2519,6 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
         target->dispatch_identity != ConSanDispatchIdentitySource::CodeObjectLiteral))) {
     errors.emplace_back(
         "ConSan MOI versioned exact-shadow probe requires EXEC-save and dispatch-ID state");
-    return std::nullopt;
-  }
-  if (partition_mask_debug && (!point.moi_exec_save_sgpr || layout.diagnostic_capacity == 0)) {
-    errors.emplace_back("ConSan MOI partition-mask debug requires wave-coalesced InlineShadow");
     return std::nullopt;
   }
   const uint16_t normal_scratch_count =
@@ -3253,10 +3202,10 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
         words.insert(words.end(), add_cell->begin(), add_cell->end());
       }
       if (!append_wave_coalesced_exact_shadow_swap(
-              words, candidate, request, bound_resources, point, scratch_vgpr, partition_mask_debug,
-              arch, layout, address_lo_vgpr, low_vgpr, high_vgpr, old_value_vgpr,
-              *lds_byte_offset_vgpr, candidate.lowering_offset(range), range.byte_width,
-              external_shadow_granule_bytes, cell_index,
+              words, candidate, request, bound_resources, point, scratch_vgpr, arch, layout,
+              address_lo_vgpr, low_vgpr, high_vgpr, old_value_vgpr, *lds_byte_offset_vgpr,
+              candidate.lowering_offset(range), range.byte_width, external_shadow_granule_bytes,
+              cell_index,
               loop_external_cells ? std::optional<uint16_t>(loop_counter_vgpr) : std::nullopt,
               spill, spill_backed_lds_byte_offset_source, errors)) {
         errors.emplace_back(

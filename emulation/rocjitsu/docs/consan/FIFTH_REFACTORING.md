@@ -5717,3 +5717,58 @@ Remaining architecture and mode locality, broader operating-point and mutable-
 transaction surfaces, larger legacy harvesting, material whole-refactoring
 shrinkage, and the independent Section 14 completion audit remain open. The
 goal therefore remains active.
+
+### 16.71 Convergence checkpoint 70: retire physical-qualification report mode
+
+The architecture-locality and legacy-harvest deep read found a temporary
+gfx1201 qualification facility still installed as a production-visible hidden
+mode. `RJ_CONSAN_MOI_PARTITION_MASK_DEBUG` flowed through hook configuration,
+the broad debug request, every InlineShadow access-application path, generated
+wave-partition code, report-header fields borrowed from unrelated engines, a
+decoder exception that suppressed ordinary counts, and a dedicated renderer
+branch. The renderer itself labeled the output `acceptance=false`: the path
+was diagnostic scaffolding used to investigate the now-accepted production
+wave-coalescing implementation, not supported ConSan behavior.
+
+The complete side channel is deleted. InlineShadow now has one generated
+wave-partition path; the report header has one meaning; the runtime decoder has
+one accounting interpretation; and hook configuration no longer exposes an
+architecture-bring-up control. The existing focused emitter test is retained
+at the same inventory position but now names and proves the durable production
+invariant that the qualification work established: both diagnostic and address-
+group publishers rank lanes within the active subset. A structural gate scans
+both the lowerer and the HSA hook and rejects reintroduction of either the
+field or environment variable.
+
+| Signal | Checkpoint 70 | Cumulative change | Slice change from checkpoint 69 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 105,131 | +155 | **-93** |
+| Nonblank production lines | 98,798 | **-286** | **-91** |
+| Production implementation lines | 91,044 | **-406** | **-71** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **174 / 52** | **-102 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 354 / 63 | +64 / +12 | 0 / 0 |
+| Partition-mask debug production authorities | **0** | n/a | option, emitter, decoder, renderer deleted |
+| Test inventory | **5,406** | **+61** | 0 |
+
+Validation includes a clean `-j16` rebuild; five direct configuration,
+emission, decoder, renderer, and architecture-boundary tests; 45 broader
+InlineShadow, request-construction, and typed report-pipeline tests; and all
+4,771 nonphysical tests over the five emulated targets at `-j16` in 206.92
+seconds, including all 2,918 simulator tests. The physical gfx1201 gate was
+stopped at the requested lower physical-test cadence after 593 of 635 tests
+had passed with no failure; this partial run is not counted as a validation
+gate. The test inventory is unchanged; one temporary-debug assertion was
+converted and renamed to state the corresponding permanent production
+invariant.
+
+This checkpoint strengthens Sections 14.1, 14.2, 14.3, 14.5, 14.7, 14.8, and
+14.9. Architecture-specific bring-up machinery no longer cuts across a mode,
+the common request, and the runtime report pipeline, and the deletion harvests
+71 implementation lines. Cumulative shrinkage is 406 lines, which is still not
+material completion. Remaining architecture and mode locality, broader
+operating-point and mutable-transaction surfaces, larger legacy harvesting,
+material whole-refactoring shrinkage, and the independent Section 14
+completion audit remain open. The goal therefore remains active.

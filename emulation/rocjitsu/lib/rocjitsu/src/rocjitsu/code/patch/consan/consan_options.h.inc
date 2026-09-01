@@ -584,8 +584,6 @@ struct ConSanDebugOverrides {
   bool probe_flat_trap = false;
   /// Turn a statically unique unmatched barrier wait into a fail-fast probe.
   bool abort_unmatched_barrier_wait = false;
-  /// Retain address-partition masks for diagnostic inspection.
-  bool moi_partition_mask_debug = false;
   /// Force the legacy VGPR spill path even when a cheaper plan exists.
   bool test_force_vgpr_spill = false;
   /// Force private epoch state even when persistent VGPR state is available.

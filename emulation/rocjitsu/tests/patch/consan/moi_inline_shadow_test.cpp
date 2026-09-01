@@ -5929,13 +5929,12 @@ TEST(ConSanMoi, InlineShadowWaveCoalescingRejectsScalarSaveWindowOverSpecialRegi
   })) << testing::PrintToString(result.warnings);
 }
 
-TEST(ConSanMoi, InlineShadowPartitionMaskDebugIsBoundedAndExplicit) {
+TEST(ConSanMoi, InlineShadowWaveCoalescingRanksWithinActiveSubsets) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.scratch_vgpr = 8;
   options.set_moi_owner_epoch_vgprs(24, 25);
   options.moi_exec_save_sgpr = 30;
-  options.moi_partition_mask_debug = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -5948,44 +5947,6 @@ TEST(ConSanMoi, InlineShadowPartitionMaskDebugIsBoundedAndExplicit) {
   const auto *text_section = patched.text_sections().front();
   std::vector<uint32_t> text_words(text_section->size() / sizeof(uint32_t));
   std::memcpy(text_words.data(), text_section->data(), text_section->size());
-
-  const std::array<size_t, 7> offsets = {
-      offsetof(ConSanMoiReportHeader, dispatch_id),
-      offsetof(ConSanMoiReportHeader, dispatch_id) + sizeof(uint32_t),
-      offsetof(ConSanMoiReportHeader, flags),
-      offsetof(ConSanMoiReportHeader, access_record_count),
-      offsetof(ConSanMoiReportHeader, barrier_record_count),
-      offsetof(ConSanMoiReportHeader, atomic_record_count),
-      offsetof(ConSanMoiReportHeader, event_counter),
-  };
-  for (size_t index = 0; index < offsets.size(); ++index) {
-    const size_t offset = offsets[index];
-    ASSERT_LE(offset + sizeof(uint32_t), sizeof(ConSanMoiReportHeader));
-    const auto address = build_v_mov_b32_e64_literal(
-        /*vdst=*/index == 2 || index == 5 ? 13 : 8,
-        static_cast<uint32_t>(*options.moi_report_buffer_address + offset),
-        ROCJITSU_CODE_ARCH_RDNA4);
-    ASSERT_TRUE(address);
-    EXPECT_TRUE(contains_subsequence(text_words, *address));
-  }
-  const std::array<size_t, 7> protected_capacity_offsets = {
-      offsetof(ConSanMoiReportHeader, access_record_capacity),
-      offsetof(ConSanMoiReportHeader, barrier_record_capacity),
-      offsetof(ConSanMoiReportHeader, atomic_record_capacity),
-      offsetof(ConSanMoiReportHeader, diagnostic_capacity),
-      offsetof(ConSanMoiReportHeader, exact_shadow_entry_capacity),
-      offsetof(ConSanMoiReportHeader, sampled_watchpoint_capacity),
-      offsetof(ConSanMoiReportHeader, inline_atomic_release_capacity),
-  };
-  for (size_t offset : protected_capacity_offsets) {
-    for (uint16_t address_vgpr : {8u, 15u}) {
-      const auto address = build_v_mov_b32_e64_literal(
-          address_vgpr, static_cast<uint32_t>(*options.moi_report_buffer_address + offset),
-          ROCJITSU_CODE_ARCH_RDNA4);
-      ASSERT_TRUE(address);
-      EXPECT_FALSE(contains_subsequence(text_words, *address));
-    }
-  }
 
   // MBCNT ranks a lane against the active subset supplied in src0. Using the
   // inline -1 source computes the physical lane id instead, so only lane zero

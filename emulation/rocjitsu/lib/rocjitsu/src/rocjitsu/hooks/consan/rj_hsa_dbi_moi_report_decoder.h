@@ -120,7 +120,6 @@ struct AutoMoiDecodedReport {
   ConSanMoiEngine engine = ConSanMoiEngine::RecordReplay;
   ConSanMoiReportHeader header;
   AutoMoiReportSummary summary;
-  bool partition_mask_debug = false;
 
   uint32_t access_record_count = 0;
   uint32_t barrier_record_count = 0;
@@ -154,7 +153,6 @@ struct AutoMoiDecodedReport {
 
 [[nodiscard]] AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &input,
                                                           const AutoMoiReportSnapshot &snapshot,
-                                                          AutoMoiReportSummary initial_summary,
-                                                          bool partition_mask_debug);
+                                                          AutoMoiReportSummary initial_summary);
 
 } // namespace rocjitsu::consan_hook

@@ -953,9 +953,6 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     return std::nullopt;
   if (!parse_bool_env("RJ_CONSAN_MOI_SAMPLED_CHECK", false, &config.moi_sampled_check))
     return std::nullopt;
-  if (!parse_bool_env("RJ_CONSAN_MOI_PARTITION_MASK_DEBUG", false,
-                      &config.moi_partition_mask_debug))
-    return std::nullopt;
   // Deliberately test-only: this is not part of the public ConSan knob set.
   if (!parse_bool_env("RJ_CONSAN_TEST_FORCE_VGPR_SPILL", false, &config.test_force_vgpr_spill))
     return std::nullopt;

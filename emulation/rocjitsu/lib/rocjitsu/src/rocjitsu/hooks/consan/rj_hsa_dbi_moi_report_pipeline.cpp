@@ -8,20 +8,12 @@
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_decoder.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_renderer.h"
 
-#include <cstdlib>
-#include <string_view>
-
 namespace rocjitsu::consan_hook {
 
 AutoMoiReportSummary summarize_auto_moi_report(const AutoMoiReportPipelineInput &input,
                                                const AutoMoiReportSnapshot &snapshot,
                                                AutoMoiReportSummary summary) {
-  const bool partition_mask_debug = [] {
-    const char *debug = std::getenv("RJ_CONSAN_MOI_PARTITION_MASK_DEBUG");
-    return debug != nullptr && std::string_view(debug) == "1";
-  }();
-  const AutoMoiDecodedReport decoded =
-      decode_auto_moi_report(input, snapshot, summary, partition_mask_debug);
+  const AutoMoiDecodedReport decoded = decode_auto_moi_report(input, snapshot, summary);
   summary = decoded.summary;
 
   AutoMoiSampledConflictAnalysis sampled_analysis;

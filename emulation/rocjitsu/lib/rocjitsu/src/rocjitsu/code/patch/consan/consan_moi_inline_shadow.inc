@@ -509,9 +509,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::vector<std::string> candidate_errors;
     uint32_t guest_instruction_word_count = 0;
     auto words = build_inline_shadow_words(
-        bytes, candidate, options, options, candidate_point, resources->base, semantics,
-        options.moi_partition_mask_debug, arch, layout, *workgroup_sources, workgroup_shadow,
-        requires_wave_partitioned_exact_shadow,
+        bytes, candidate, options, options, candidate_point, resources->base, semantics, arch,
+        layout, *workgroup_sources, workgroup_shadow, requires_wave_partitioned_exact_shadow,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         owner_derivation, private_layout ? private_layout->workgroup_key_offset : std::nullopt,
         private_layout ? private_layout->dispatch_id_offset : std::nullopt,
@@ -941,8 +940,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       }
       auto words = build_inline_shadow_words(
           bytes, candidate, options, options, candidate_point, planned_patch.resources.base,
-          semantics, options.moi_partition_mask_debug, arch, layout,
-          planned_patch.workgroup_sources, planned_patch.workgroup_shadow,
+          semantics, arch, layout, planned_patch.workgroup_sources, planned_patch.workgroup_shadow,
           requires_wave_partitioned_exact_shadow, planned_patch.private_epoch_offset,
           planned_patch.owner_derivation, planned_patch.private_workgroup_key_offset,
           planned_patch.private_dispatch_id_offset, planned_patch.workgroup_shadow_compact_token,
@@ -1358,8 +1356,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             }
             return build_inline_shadow_words(
                 bytes, *planned_patch.candidate, options, options, candidate_point,
-                planned_patch.resources.base, semantics, options.moi_partition_mask_debug, arch,
-                layout, planned_patch.workgroup_sources, planned_patch.workgroup_shadow,
+                planned_patch.resources.base, semantics, arch, layout,
+                planned_patch.workgroup_sources, planned_patch.workgroup_shadow,
                 requires_wave_partitioned_exact_shadow, planned_patch.private_epoch_offset,
                 planned_patch.owner_derivation, planned_patch.private_workgroup_key_offset,
                 planned_patch.private_dispatch_id_offset,

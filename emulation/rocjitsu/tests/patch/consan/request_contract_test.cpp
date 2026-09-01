@@ -751,7 +751,6 @@ TEST(ConSanOptionsConstructionTest, PreservesPolicyDebugAndRuntimeCapabilityFiel
   debug.probe_lds_endpgm = true;
   debug.probe_flat_trap = true;
   debug.abort_unmatched_barrier_wait = true;
-  debug.moi_partition_mask_debug = true;
   debug.test_force_vgpr_spill = true;
   debug.test_force_private_epoch = true;
   debug.test_seed_inline_exact_odd = true;
@@ -797,7 +796,6 @@ TEST(ConSanOptionsConstructionTest, PreservesPolicyDebugAndRuntimeCapabilityFiel
   EXPECT_TRUE(options.probe_lds_endpgm);
   EXPECT_TRUE(options.probe_flat_trap);
   EXPECT_TRUE(options.abort_unmatched_barrier_wait);
-  EXPECT_TRUE(options.moi_partition_mask_debug);
   EXPECT_EQ(options.test_kernel_name_filter, "kernel");
   EXPECT_EQ(options.scratch_vgpr, 1);
   EXPECT_EQ(options.requested_moi_exec_save_sgpr, 2);

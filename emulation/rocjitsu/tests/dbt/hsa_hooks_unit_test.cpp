@@ -3659,8 +3659,8 @@ TEST(HsaHooksUnitTest, AutoReportDecoderProducesTypedEventsFailuresAndLoss) {
   input.source_address = 0x1000;
   input.size = snapshot.bytes.size();
   input.layout = report.layout;
-  const auto decoded = rocjitsu::consan_hook::decode_auto_moi_report(
-      input, snapshot, initial_summary, /*partition_mask_debug=*/false);
+  const auto decoded =
+      rocjitsu::consan_hook::decode_auto_moi_report(input, snapshot, initial_summary);
   ASSERT_TRUE(decoded.complete());
   EXPECT_EQ(decoded.engine, rocjitsu::ConSanMoiEngine::RecordReplay);
   EXPECT_EQ(decoded.visible_record_slot_count, report.layout.access_record_capacity);
@@ -3675,8 +3675,7 @@ TEST(HsaHooksUnitTest, AutoReportDecoderProducesTypedEventsFailuresAndLoss) {
   }));
 
   snapshot.bytes[0] = 0;
-  const auto malformed = rocjitsu::consan_hook::decode_auto_moi_report(
-      input, snapshot, {}, /*partition_mask_debug=*/false);
+  const auto malformed = rocjitsu::consan_hook::decode_auto_moi_report(input, snapshot, {});
   EXPECT_EQ(malformed.failure, rocjitsu::consan_hook::AutoMoiReportDecodeFailure::InvalidHeader);
 }
 

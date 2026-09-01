@@ -27,8 +27,7 @@ compact_record_replay_access_records(std::span<const ConSanMoiAccessRecord> reco
 
 AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &input,
                                             const AutoMoiReportSnapshot &snapshot,
-                                            AutoMoiReportSummary initial_summary,
-                                            bool partition_mask_debug) {
+                                            AutoMoiReportSummary initial_summary) {
   AutoMoiDecodedReport result;
   result.summary = initial_summary;
   AutoMoiReportSummary &summary = result.summary;
@@ -56,13 +55,9 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
     result.failure = AutoMoiReportDecodeFailure::LayoutMismatch;
     return result;
   }
-  // The bounded partition debugger reuses record-count words as an explicit
-  // non-acceptance side channel. Keep those words out of the ordinary
-  // overflow/accounting summary while preserving the registered capacities
-  // that define the report layout.
-  const uint32_t access_record_count = partition_mask_debug ? 0 : header->access_record_count;
-  const uint32_t barrier_record_count = partition_mask_debug ? 0 : header->barrier_record_count;
-  const uint32_t atomic_record_count = partition_mask_debug ? 0 : header->atomic_record_count;
+  const uint32_t access_record_count = header->access_record_count;
+  const uint32_t barrier_record_count = header->barrier_record_count;
+  const uint32_t atomic_record_count = header->atomic_record_count;
   const uint32_t visible_records = std::min(access_record_count, header->access_record_capacity);
   const uint32_t visible_barriers = std::min(barrier_record_count, header->barrier_record_capacity);
   const uint32_t visible_atomics = std::min(atomic_record_count, header->atomic_record_capacity);
@@ -715,8 +710,7 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   summary.visible_atomic_record_count = visible_atomics;
   summary.visible_fence_record_count = visible_fences;
   summary.visible_diagnostic_record_count = visible_diagnostics;
-  summary.visible_inline_publication_count =
-      input.inline_shadow && !partition_mask_debug ? header->event_counter : 0;
+  summary.visible_inline_publication_count = input.inline_shadow ? header->event_counter : 0;
   summary.visible_exact_shadow_entry_count = visible_exact_shadow.size();
   summary.visible_inline_atomic_release_count = visible_inline_atomic_releases.size();
   summary.visible_inline_acquired_token_count = visible_inline_acquired_tokens.size();
@@ -739,8 +733,7 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
       sampled_watchpoint_capacity != 0 ? header->sampled_unsupported_sync_count : 0;
   summary.sampled_malformed_sync_count +=
       sampled_watchpoint_capacity != 0 ? header->sampled_malformed_sync_count : 0;
-  summary.inline_undercoverage_count =
-      input.inline_shadow && !partition_mask_debug ? header->inline_undercoverage_count : 0;
+  summary.inline_undercoverage_count = input.inline_shadow ? header->inline_undercoverage_count : 0;
   summary.inline_overflow_count = input.inline_shadow ? header->inline_overflow_count : 0;
   summary.inline_unsupported_count = input.inline_shadow ? header->inline_unsupported_count : 0;
   summary.inline_malformed_count += input.inline_shadow ? header->inline_malformed_count : 0;
@@ -748,7 +741,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   result.failure = AutoMoiReportDecodeFailure::None;
   result.engine = expected_engine;
   result.header = *header;
-  result.partition_mask_debug = partition_mask_debug;
   result.access_record_count = access_record_count;
   result.barrier_record_count = barrier_record_count;
   result.atomic_record_count = atomic_record_count;

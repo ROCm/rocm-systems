@@ -1540,6 +1540,17 @@ foreach(_file IN LISTS _hook_sources)
     )
 endforeach()
 
+# Temporary physical-GPU qualification telemetry must not return as a hidden
+# report-ABI mode. The accepted InlineShadow path and ordinary report decoder
+# now cover the behavior that the side channel was created to investigate.
+foreach(_file IN LISTS _consan_production_files _hook_sources)
+    _consan_assert_no_match(
+        "${_file}"
+        "moi_partition_mask_debug|RJ_CONSAN_MOI_PARTITION_MASK_DEBUG"
+        "retired partition-mask qualification telemetry must remain deleted"
+    )
+endforeach()
+
 # Coverage publication consumes intents and typed lowering commits, never
 # patch kinds or mutation geometry.
 foreach(
