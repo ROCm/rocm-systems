@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 
 #include <algorithm>
@@ -109,20 +110,17 @@ struct MoiOperandOverlapSpillPolicy {
 
 struct MoiOperandOverlapSpillContext {
   const ConSanRequest &request;
-  const ConSanMoiOperatingPoint &point;
+  const MoiAccessResourceFacts &resource_facts;
   const ConSanMoiCandidate *access_candidate = nullptr;
   ConSanResourceSiteKind site_kind = ConSanResourceSiteKind::Access;
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
-  bool guest_replay_requires_disjoint_address_scratch = false;
 };
 
 /// Mode-owned request for a smaller spill-backed transaction after ordinary
 /// access placement. Common placement retries with the returned scratch size.
 struct MoiAccessSpillFallbackContext {
   const ConSanRequest &request;
-  const ConSanMoiOperatingPoint &point;
+  const MoiAccessResourceFacts &resource_facts;
   const ConSanMoiCandidate &candidate;
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
   bool no_ordinary_window = false;
   bool spill_required = false;
   bool initial_spill_overlaps_guest = false;
@@ -286,8 +284,7 @@ struct MoiModeOperations {
                 rj_code_arch_t, MoiResourcePlanningState &, std::span<const ConSanMoiCandidate>,
                 const MoiObjectFacts &, const MoiObjectModeSemantics &, ConSanTransformArtifacts &);
   uint16_t (*access_scratch_vgpr_count)(const ConSanRequest &, const BoundRuntimeResources &,
-                                        const ConSanMoiOperatingPoint &, const ConSanMoiCandidate &,
-                                        rj_code_arch_t);
+                                        const MoiAccessResourceFacts &, const ConSanMoiCandidate &);
   MoiOperationalEvidenceKinds operational_evidence;
   std::optional<uint16_t> dynamic_stack_frame_save_sgpr_offset;
   uint16_t (*exec_save_sgpr_count)(const MoiExecSaveRequirement &, const MoiExecSaveTargetFacts &);

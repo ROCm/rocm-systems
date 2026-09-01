@@ -281,10 +281,10 @@ void try_apply_direct_sampled_watchpoint_patch(
                      ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery &&
                  alternative.outcome == ConSanResourcePlanAlternativeOutcome::Selected;
         });
+    const MoiAccessResourceFacts access_resource_facts =
+        resolve_moi_access_resource_facts(candidate_point, candidate, arch);
     const uint16_t expected_scratch_count =
-        planned_spill_backed_operand_recovery
-            ? sampled_spill_backed_scratch_count(options, candidate_point, candidate, arch)
-            : direct_sampled_scratch_count(options, candidate_point, candidate, arch);
+        direct_sampled_scratch_count(options, access_resource_facts);
     const auto resources = resolve_moi_scratch(result.resource_plans, candidate, candidate_point,
                                                expected_scratch_count);
     if (!resources) {
@@ -332,13 +332,13 @@ void try_apply_direct_sampled_watchpoint_patch(
     bool spill_overlaps_guest_operands = false;
     bool spill_backed_operand_recovery = false;
     if (spill && planned_spill_backed_operand_recovery &&
-        sampled_access_supports_spill_backed_operand_recovery(options, candidate, arch)) {
+        access_resource_facts.supports_native_lds_spill_recovery) {
       std::vector<std::string> ignored_overlap_errors;
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);
       spill_backed_operand_recovery = spill_overlaps_guest_operands;
-    } else if (spill &&
-               sampled_access_can_emit_spill_over_guest_operands(candidate_point, candidate)) {
+    } else if (spill && sampled_access_can_emit_spill_over_guest_operands(access_resource_facts,
+                                                                          candidate)) {
       std::vector<std::string> ignored_overlap_errors;
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);

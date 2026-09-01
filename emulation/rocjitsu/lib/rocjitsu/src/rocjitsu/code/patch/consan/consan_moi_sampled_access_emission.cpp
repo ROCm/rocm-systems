@@ -360,8 +360,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     const ConSanMoiWorkgroupSources &workgroup_sources,
     const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs, uint16_t scratch_vgpr,
     rj_code_arch_t arch, uint32_t record_index, std::span<const uint32_t> prior_record_indices,
-    uint32_t window_bank_count, bool spill_overlaps_guest_operands,
-    bool spill_backed_operand_recovery, bool relocate_instruction,
+    uint32_t window_bank_count, bool spill_overlaps_guest_operands, bool relocate_instruction,
     uint32_t pending_acquire_owner_bank_count,
     std::optional<uint16_t> preserved_lds_byte_offset_vgpr, const VgprSpillSequence *spill,
     std::optional<uint16_t> spilled_lds_byte_offset_vgpr, size_t sampled_causal_windows_offset,
@@ -374,6 +373,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     errors.emplace_back("ConSan MOI sampled probe has no target profile");
     return std::nullopt;
   }
+  const MoiAccessResourceFacts access_resource_facts =
+      resolve_moi_access_resource_facts(point, candidate, arch);
   if (pending_acquire_owner_bank_count == 0u ||
       !std::has_single_bit(pending_acquire_owner_bank_count) ||
       pending_acquire_owner_bank_count > kConSanMoiSampledPendingAcquireOwnerBankCount) {
@@ -388,10 +389,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
   const bool dedicated_bank_vgpr = request.moi_runtime_sample_stride > 1 || window_bank_count > 1;
   const uint16_t base_scratch_count = static_cast<uint16_t>((request.moi_sampled_check ? 7u : 5u) +
                                                             (dedicated_bank_vgpr ? 1u : 0u));
-  const uint16_t scratch_count = static_cast<uint16_t>(
-      (spill_backed_operand_recovery
-           ? sampled_spill_backed_scratch_count(request, point, candidate, arch)
-           : direct_sampled_scratch_count(request, point, candidate, arch)));
+  const uint16_t scratch_count = direct_sampled_scratch_count(request, access_resource_facts);
   const bool reserve_two_address_replay_scratch =
       moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
   if (static_cast<uint32_t>(scratch_vgpr) + scratch_count > kMaxVgprs) {
@@ -1102,6 +1100,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     errors.emplace_back("ConSan MOI sampled probe has no target profile");
     return std::nullopt;
   }
+  const MoiAccessResourceFacts access_resource_facts =
+      resolve_moi_access_resource_facts(point, candidate, arch);
   if (!candidate.kernel_descriptor_file_offset) {
     errors.emplace_back("ConSan MOI sampled probe requires exact workgroup-id sources");
     return std::nullopt;
@@ -1118,8 +1118,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
   const bool capture_high_bank_address =
       moi_access_requires_high_bank_address_capture(candidate, arch);
   if (spill_backed_operand_recovery &&
-      (spill == nullptr ||
-       !sampled_access_supports_spill_backed_operand_recovery(request, candidate, arch))) {
+      (spill == nullptr || !access_resource_facts.supports_native_lds_spill_recovery)) {
     errors.emplace_back("ConSan MOI sampled probe has an invalid spill-backed operand plan");
     return std::nullopt;
   }
@@ -1139,10 +1138,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
   const uint16_t base_scratch_count = static_cast<uint16_t>(
       (request.moi_sampled_check ? 7u : 5u) +
       (request.moi_runtime_sample_stride > 1 || window_bank_count > 1 ? 1u : 0u));
-  const uint16_t scratch_count = static_cast<uint16_t>(
-      (spill_backed_operand_recovery
-           ? sampled_spill_backed_scratch_count(request, point, candidate, arch)
-           : direct_sampled_scratch_count(request, point, candidate, arch)));
+  const uint16_t scratch_count = direct_sampled_scratch_count(request, access_resource_facts);
   const bool reserve_two_address_replay_scratch =
       moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
   if (capture_high_bank_address) {
@@ -1255,7 +1251,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
         bytes, candidate, access_ranges[range_index], request, bound_resources, point,
         *workgroup_sources, owner_epoch_vgprs, scratch_vgpr, arch,
         first_record_index + range_index * window_bank_count, prior_record_indices,
-        window_bank_count, spill_overlaps_guest_operands, spill_backed_operand_recovery,
+        window_bank_count, spill_overlaps_guest_operands,
         range_index == 0u && !spill_backed_operand_recovery, pending_acquire_owner_bank_count,
         preserved_lds_byte_offset_vgpr, spill, spilled_lds_byte_offset_vgpr,
         sampled_causal_windows_offset, sampled_watchpoints_offset, sampled_pending_acquires_offset,

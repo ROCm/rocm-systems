@@ -271,10 +271,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     // operand-recovery alternative proves that the smaller window can either
     // reload an overlapping address or leave a disjoint address intact until
     // the deferred guest load.
+    const MoiAccessResourceFacts access_resource_facts =
+        resolve_moi_access_resource_facts(operating_point, candidate, arch);
     const uint16_t expected_scratch_count =
         selected_reduced_spill_recovery
-            ? inline_shadow_spill_backed_scratch_count(options, operating_point, candidate, arch)
-            : inline_shadow_scratch_count(options, operating_point, candidate, arch);
+            ? inline_shadow_spill_backed_scratch_count(options, access_resource_facts, candidate)
+            : inline_shadow_scratch_count(options, access_resource_facts, candidate);
     const auto resources = resolve_moi_scratch_plan(
         *resource_plan, operating_point, result.moi_operating_point, expected_scratch_count);
     if (!resources)

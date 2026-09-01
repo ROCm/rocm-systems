@@ -98,42 +98,24 @@ bool validate_inline_shadow_exec_save_sgpr(const ConSanRequest &request,
 }
 
 uint16_t inline_shadow_scratch_count(const ConSanRequest &request,
-                                     const ConSanMoiOperatingPoint &point,
-                                     const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
-  const uint16_t flat_offset_address_count = flat_access_address_scratch_count(candidate);
-  const uint16_t dynamic_stack_reservoir_count =
-      consan_uses_gfx12_encoding(arch) && point.moi_dynamic_stack_spill
-          ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
-          : 0u;
-  const uint16_t two_address_replay_count = consan_uses_gfx12_cdna_execution(arch) &&
-                                                    candidate.is_native_two_range() &&
-                                                    candidate.encoded_offset_scale_bytes() > 8u
-                                                ? 1u
-                                                : 0u;
-  return static_cast<uint16_t>(
-      consan_detail::inline_shadow_transaction_scratch_count(point.moi_exec_save_sgpr.has_value(),
-                                                             request.moi_track_atomics) +
-      inline_shadow_loop_scratch_count(candidate) +
-      ((candidate.is_direct_to_lds() || moi_load_clobbers_address(candidate) ||
-        moi_access_requires_high_bank_address_capture(candidate, arch)) &&
-               flat_offset_address_count == 0u
-           ? 1u
-           : 0u) +
-      flat_offset_address_count + dynamic_stack_reservoir_count + two_address_replay_count);
+                                     const MoiAccessResourceFacts &resource_facts,
+                                     const ConSanMoiCandidate &candidate) {
+  return static_cast<uint16_t>(consan_detail::inline_shadow_transaction_scratch_count(
+                                   resource_facts.has_exec_save, request.moi_track_atomics) +
+                               inline_shadow_loop_scratch_count(candidate) +
+                               resource_facts.address_scratch_vgpr_count +
+                               resource_facts.dynamic_stack_reservoir_vgpr_count +
+                               resource_facts.two_address_replay_vgpr_count);
 }
 
 uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
-                                                  const ConSanMoiOperatingPoint &point,
-                                                  const ConSanMoiCandidate &candidate,
-                                                  rj_code_arch_t arch) {
-  const uint16_t normal_count = inline_shadow_scratch_count(request, point, candidate, arch);
+                                                  const MoiAccessResourceFacts &resource_facts,
+                                                  const ConSanMoiCandidate &candidate) {
+  const uint16_t normal_count = inline_shadow_scratch_count(request, resource_facts, candidate);
   // A spill-backed CDNA probe can recover an overlapping guest address from
   // its authoritative private slot into a phase-shared transaction register.
-  const bool can_reload_clobbered_address =
-      consan_uses_gfx9_cdna_encoding(arch) && !candidate.is_flat() &&
-      moi_load_clobbers_address(candidate) &&
-      !candidate_requires_flat_address_materialization(candidate);
-  return static_cast<uint16_t>(normal_count - (can_reload_clobbered_address ? 1u : 0u));
+  return static_cast<uint16_t>(normal_count -
+                               (resource_facts.supports_clobbered_address_spill_reload ? 1u : 0u));
 }
 
 [[nodiscard]] bool append_inline_shadow_diagnostic_words(
@@ -2521,10 +2503,12 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
         "ConSan MOI versioned exact-shadow probe requires EXEC-save and dispatch-ID state");
     return std::nullopt;
   }
+  const MoiAccessResourceFacts access_resource_facts =
+      resolve_moi_access_resource_facts(point, candidate, arch);
   const uint16_t normal_scratch_count =
-      inline_shadow_scratch_count(request, point, candidate, arch);
+      inline_shadow_scratch_count(request, access_resource_facts, candidate);
   const uint16_t spill_scratch_count =
-      inline_shadow_spill_backed_scratch_count(request, point, candidate, arch);
+      inline_shadow_spill_backed_scratch_count(request, access_resource_facts, candidate);
   if (scratch_count != normal_scratch_count &&
       (spill == nullptr || scratch_count != spill_scratch_count)) {
     errors.emplace_back(

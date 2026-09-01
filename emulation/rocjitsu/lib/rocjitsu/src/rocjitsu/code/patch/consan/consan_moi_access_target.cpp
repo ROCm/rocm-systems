@@ -13,6 +13,46 @@ namespace rocjitsu::consan_moi_impl {
 
 using consan_detail::range_overlaps;
 
+MoiAccessResourceFacts resolve_moi_access_resource_facts(const ConSanMoiOperatingPoint &point,
+                                                         const ConSanMoiCandidate &candidate,
+                                                         rj_code_arch_t arch) {
+  const uint16_t flat_address_scratch_count = flat_access_address_scratch_count(candidate);
+  const bool needs_address_capture = flat_address_scratch_count != 0u ||
+                                     candidate.is_direct_to_lds() ||
+                                     moi_load_clobbers_address(candidate) ||
+                                     moi_access_requires_high_bank_address_capture(candidate, arch);
+  const bool requires_flat_materialization =
+      candidate_requires_flat_address_materialization(candidate);
+  return {
+      .address_scratch_vgpr_count = flat_address_scratch_count != 0u
+                                        ? flat_address_scratch_count
+                                        : static_cast<uint16_t>(needs_address_capture),
+      .two_address_replay_vgpr_count = static_cast<uint16_t>(
+          consan_uses_gfx12_cdna_execution(arch) && candidate.is_native_two_range() &&
+          candidate.encoded_offset_scale_bytes() > 8u),
+      .dynamic_stack_reservoir_vgpr_count =
+          static_cast<uint16_t>(consan_uses_gfx12_encoding(arch) && point.moi_dynamic_stack_spill
+                                    ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
+                                    : 0u),
+      .has_exec_save = point.moi_exec_save_sgpr.has_value(),
+      .initialize_owner_epoch = point.moi_initialize_owner_epoch,
+      .has_persistent_owner_vgpr = point.moi_owner_epoch_vgprs.owner().has_value(),
+      .uses_private_epoch = point.automatic_moi_private_epoch,
+      .has_complete_persistent_sgprs = point.moi_persistent_sgprs.complete(),
+      .target_available = consan_is_capability_arch(arch),
+      .supports_native_lds_spill_recovery =
+          candidate.is_native_lds() &&
+          (consan_arch_is_rdna(arch) || consan_uses_gfx9_cdna_encoding(arch)) &&
+          !requires_flat_materialization,
+      .supports_clobbered_address_spill_reload =
+          consan_uses_gfx9_cdna_encoding(arch) && !candidate.is_flat() &&
+          moi_load_clobbers_address(candidate) && !requires_flat_materialization,
+      .guest_replay_requires_disjoint_address_scratch =
+          consan_arch_has_selectable_vgpr_bank(arch) && candidate.is_native_two_range() &&
+          candidate.encoded_offset_scale_bytes() > 8u,
+  };
+}
+
 [[nodiscard]] bool append_compute_effective_lds_byte_offset(std::vector<uint32_t> &words,
                                                             uint16_t dst_vgpr, uint16_t addr_vgpr,
                                                             uint32_t static_byte_offset,

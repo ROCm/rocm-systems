@@ -188,10 +188,9 @@ void apply_sampled_mode_patches(std::span<const uint8_t> bytes, const ConSanOpti
 
 uint16_t sampled_access_scratch_vgpr_count(const ConSanRequest &request,
                                            const BoundRuntimeResources &,
-                                           const ConSanMoiOperatingPoint &point,
-                                           const ConSanMoiCandidate &candidate,
-                                           rj_code_arch_t arch) {
-  return direct_sampled_scratch_count(request, point, candidate, arch);
+                                           const MoiAccessResourceFacts &resource_facts,
+                                           const ConSanMoiCandidate &) {
+  return direct_sampled_scratch_count(request, resource_facts);
 }
 
 MoiPersistentStateDemand plan_sampled_persistent_state_demand(
@@ -217,7 +216,7 @@ MoiPersistentStateDemand plan_sampled_persistent_state_demand(
 
 MoiOperandOverlapSpillPolicy
 sampled_operand_overlap_spill(const MoiOperandOverlapSpillContext &context) {
-  if (!consan_is_capability_arch(context.arch))
+  if (!context.resource_facts.target_available)
     return {};
   if (context.site_kind == ConSanResourceSiteKind::Atomic) {
     MoiOperandOverlapSpillPolicy policy;
@@ -225,15 +224,14 @@ sampled_operand_overlap_spill(const MoiOperandOverlapSpillContext &context) {
     return policy;
   }
   if (context.site_kind != ConSanResourceSiteKind::Access || context.access_candidate == nullptr ||
-      context.guest_replay_requires_disjoint_address_scratch) {
+      context.resource_facts.guest_replay_requires_disjoint_address_scratch) {
     return {};
   }
   const ConSanMoiCandidate &candidate = *context.access_candidate;
-  const bool spill_backed_recovery = sampled_access_supports_spill_backed_operand_recovery(
-      context.request, candidate, context.arch);
+  const bool spill_backed_recovery = context.resource_facts.supports_native_lds_spill_recovery;
   MoiOperandOverlapSpillPolicy policy;
-  policy.supported = sampled_access_can_plan_spill_over_guest_operands(context.request,
-                                                                       context.point, candidate) ||
+  policy.supported = sampled_access_can_plan_spill_over_guest_operands(
+                         context.request, context.resource_facts, candidate) ||
                      spill_backed_recovery;
   if (spill_backed_recovery && candidate.lowering.form &&
       candidate.lowering.form->destination_vgpr) {
@@ -245,13 +243,11 @@ sampled_operand_overlap_spill(const MoiOperandOverlapSpillContext &context) {
 
 std::optional<uint16_t>
 sampled_access_spill_fallback(const MoiAccessSpillFallbackContext &context) {
-  if (!sampled_access_supports_spill_backed_operand_recovery(context.request, context.candidate,
-                                                             context.arch) ||
+  if (!context.resource_facts.supports_native_lds_spill_recovery ||
       (!context.no_ordinary_window && !context.initial_spill_overlaps_guest)) {
     return std::nullopt;
   }
-  return sampled_spill_backed_scratch_count(context.request, context.point, context.candidate,
-                                            context.arch);
+  return direct_sampled_scratch_count(context.request, context.resource_facts);
 }
 
 MoiDispatchIdentityPlan plan_sampled_dispatch_identity(const ConSanRequest &request,

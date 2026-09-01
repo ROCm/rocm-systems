@@ -3,19 +3,19 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 
 namespace rocjitsu::consan_moi_impl {
 
 [[nodiscard]] uint16_t inline_shadow_loop_scratch_count(const ConSanMoiCandidate &candidate);
 [[nodiscard]] uint16_t inline_shadow_scratch_count(const ConSanRequest &request,
-                                                   const ConSanMoiOperatingPoint &point,
-                                                   const ConSanMoiCandidate &candidate,
-                                                   rj_code_arch_t arch);
+                                                   const MoiAccessResourceFacts &resource_facts,
+                                                   const ConSanMoiCandidate &candidate);
 [[nodiscard]] uint16_t
 inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
-                                         const ConSanMoiOperatingPoint &point,
-                                         const ConSanMoiCandidate &candidate, rj_code_arch_t arch);
+                                         const MoiAccessResourceFacts &resource_facts,
+                                         const ConSanMoiCandidate &candidate);
 
 [[nodiscard]] bool validate_inline_shadow_exec_save_sgpr(const ConSanRequest &request,
                                                          const BoundRuntimeResources &resources,

@@ -5982,3 +5982,70 @@ and mode locality, broader operating-point and mutable-transaction surfaces,
 larger legacy harvesting, material whole-refactoring shrinkage, and the
 independent Section 14 completion audit remain open. The goal therefore
 remains active.
+
+### 16.75 Convergence checkpoint 74: one normalized access-resource fact product
+
+The access-resource deep read found one coherent mode/target interaction still
+crossing the common placement boundary in unnormalized form. Access scratch
+sizing, operand-overlap spill admission, and spill-backed retry accepted the
+complete `ConSanMoiOperatingPoint` and raw architecture identity. Record/Replay,
+Sampled, and InlineShadow then independently reconstructed address-capture
+scratch, gfx1250 two-address replay scratch, dynamic-stack reservoir demand,
+target admission, and architecture-sensitive spill-recovery predicates. Two
+Sampled helpers were parallel adapters: one repeated the target predicate and
+one merely forwarded to the ordinary scratch counter.
+
+Access targeting now publishes one `MoiAccessResourceFacts` value for each
+site. Common normalization composes the candidate, target capabilities, and
+only the relevant operating-point projections into mechanism-named facts:
+address and replay scratch counts, dynamic-stack reservoir demand, persistent
+state availability, target availability, native-LDS recovery,
+clobbered-address recovery, and the disjoint-address constraint. The three
+mode owners consume those facts without receiving a raw architecture or the
+broad operating point through their scratch or spill-policy contracts.
+Placement recomputes the same value after owner-local persistent assignment,
+so the provisional and committed resource transactions retain one authority.
+
+The migration is complete rather than additive. The old
+`sampled_access_supports_spill_backed_operand_recovery` target adapter and
+`sampled_spill_backed_scratch_count` forwarding counter are deleted. Repeated
+address-scratch and two-address formulas are deleted from the three mode
+owners, and the no-longer-observed spill-recovery parameter is removed from
+Sampled emission. One direct contract test exercises CDNA5, RDNA4, and CDNA4
+normalization as well as the persistent-to-private epoch transition. The
+architecture gate requires the normalized product, rejects broad-point or
+raw-architecture fields in both spill-policy contexts, and prevents the two
+retired Sampled adapters from returning.
+
+| Signal | Checkpoint 74 | Cumulative change | Slice change from checkpoint 73 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 105,248 | +272 | **-8** |
+| Nonblank production lines | 98,898 | **-186** | **-8** |
+| Production implementation lines | 91,136 | **-314** | **-11** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 174 / 52 | **-102 / -5** | +1 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 342 / 63 | +52 / +12 | **-13 / +2** |
+| Broad-point / raw-architecture fields in migrated spill contexts | **0 / 0** | n/a | completed |
+| Retired Sampled access-resource adapters | **0** | n/a | **-2** |
+| Test inventory | **5,410** | **+65** | **+1** |
+
+Validation includes a final-tree `-j16` build; all 17 mode-planning and
+architecture-boundary tests; and all 4,775 nonphysical tests over the five
+emulated targets at `-j16` in 204.77 seconds, including all 2,918 simulator
+tests. The final source-only cleanup removed an obsolete capability include
+and was followed by the final build and focused contract gate. No test was
+removed, renamed, disabled, or replaced. In accordance with the reduced
+physical-test cadence, no physical gfx1201 test was run for this slice.
+
+This checkpoint strengthens Sections 14.2, 14.3, and 14.5 through 14.7. One
+common composition product now separates target normalization and mutable
+placement state from mode policy, while retaining distinct mode-owned choices.
+It also reverses checkpoint 73's local size growth, but cumulative production
+is only 314 implementation lines smaller than the baseline and therefore still
+does not satisfy Section 14.8. The broad operating point remains spread across
+63 production files despite the lower reference count, and the mutable
+transaction, remaining placement knots, both extension exercises, material
+legacy harvesting, and independent completion audit remain open. The goal
+therefore remains active.

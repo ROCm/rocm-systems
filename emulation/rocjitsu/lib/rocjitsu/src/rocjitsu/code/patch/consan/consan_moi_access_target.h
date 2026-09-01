@@ -7,6 +7,30 @@
 
 namespace rocjitsu::consan_moi_impl {
 
+/// Target-normalized and operating-point-projected facts for one access site's
+/// resource transaction. Mode owners consume this value without inspecting a
+/// concrete architecture or the complete mutable MOI operating point.
+struct MoiAccessResourceFacts {
+  uint16_t address_scratch_vgpr_count = 0;
+  uint16_t two_address_replay_vgpr_count = 0;
+  uint16_t dynamic_stack_reservoir_vgpr_count = 0;
+  bool has_exec_save = false;
+  bool initialize_owner_epoch = false;
+  bool has_persistent_owner_vgpr = false;
+  bool uses_private_epoch = false;
+  bool has_complete_persistent_sgprs = false;
+  bool target_available = false;
+  bool supports_native_lds_spill_recovery = false;
+  bool supports_clobbered_address_spill_reload = false;
+  bool guest_replay_requires_disjoint_address_scratch = false;
+
+  bool operator==(const MoiAccessResourceFacts &) const = default;
+};
+
+[[nodiscard]] MoiAccessResourceFacts
+resolve_moi_access_resource_facts(const ConSanMoiOperatingPoint &point,
+                                  const ConSanMoiCandidate &candidate, rj_code_arch_t arch);
+
 [[nodiscard]] std::optional<uint16_t>
 candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
                                std::vector<std::string> &errors);

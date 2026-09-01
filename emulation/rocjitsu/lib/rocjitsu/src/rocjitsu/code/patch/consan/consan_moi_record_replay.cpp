@@ -141,21 +141,11 @@ void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, const ConS
 
 uint16_t record_replay_access_scratch_vgpr_count(const ConSanRequest &request,
                                                  const BoundRuntimeResources &resources,
-                                                 const ConSanMoiOperatingPoint &,
-                                                 const ConSanMoiCandidate &candidate,
-                                                 rj_code_arch_t arch) {
-  const uint16_t address_count = flat_access_address_scratch_count(candidate);
+                                                 const MoiAccessResourceFacts &resource_facts,
+                                                 const ConSanMoiCandidate &) {
   return static_cast<uint16_t>(
       (record_replay_uses_automatic_banked_capture(request, resources) ? 10u : 6u) +
-      (address_count != 0u ? address_count
-       : candidate.is_direct_to_lds() || moi_load_clobbers_address(candidate) ||
-               moi_access_requires_high_bank_address_capture(candidate, arch)
-           ? 1u
-           : 0u) +
-      (consan_uses_gfx12_cdna_execution(arch) && candidate.is_native_two_range() &&
-               candidate.encoded_offset_scale_bytes() > 8u
-           ? 1u
-           : 0u));
+      resource_facts.address_scratch_vgpr_count + resource_facts.two_address_replay_vgpr_count);
 }
 
 MoiPersistentStateDemand plan_record_replay_persistent_state_demand(
@@ -189,8 +179,8 @@ record_replay_operand_overlap_spill(const MoiOperandOverlapSpillContext &context
   MoiOperandOverlapSpillPolicy policy;
   policy.supported =
       context.access_candidate != nullptr && context.site_kind == ConSanResourceSiteKind::Access &&
-      consan_is_capability_arch(context.arch) && !context.request.moi_dynamic_access_records &&
-      !context.guest_replay_requires_disjoint_address_scratch;
+      context.resource_facts.target_available && !context.request.moi_dynamic_access_records &&
+      !context.resource_facts.guest_replay_requires_disjoint_address_scratch;
   return policy;
 }
 

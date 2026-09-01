@@ -2384,17 +2384,15 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
                        : ConSanResourcePlanAlternativeOutcome::Rejected,
     });
   }
-  const bool guest_replay_needs_disjoint_address_scratch =
-      access_candidate != nullptr && consan_arch_has_selectable_vgpr_bank(state.arch) &&
-      access_candidate->is_native_two_range() &&
-      access_candidate->encoded_offset_scale_bytes() > 8u;
+  const MoiAccessResourceFacts access_resource_facts =
+      access_candidate != nullptr
+          ? resolve_moi_access_resource_facts(point, *access_candidate, state.arch)
+          : MoiAccessResourceFacts{.target_available = consan_is_capability_arch(state.arch)};
   const MoiOperandOverlapSpillPolicy operand_overlap_spill = plan_moi_operand_overlap_spill({
       semantic_request,
-      point,
+      access_resource_facts,
       access_candidate,
       site_kind,
-      state.arch,
-      guest_replay_needs_disjoint_address_scratch,
   });
   if (register_plan.source == ConSanRegisterAllocationSource::Unsupported &&
       register_plan.reason == ConSanRegisterPlanReason::NoLegalWindow &&
@@ -2512,9 +2510,11 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
   for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
     const ConSanMoiCandidate &candidate = candidates[candidate_index];
     ConSanMoiOperatingPoint site_point = point;
+    MoiAccessResourceFacts site_resource_facts =
+        resolve_moi_access_resource_facts(site_point, candidate, state.arch);
     uint16_t scratch_count =
         moi_mode_operations(request.moi_engine)
-            .access_scratch_vgpr_count(request, resources, site_point, candidate, state.arch);
+            .access_scratch_vgpr_count(request, resources, site_resource_facts, candidate);
     ConSanCandidateResourcePlan plan = plan_moi_resource_site(
         state, request, debug, site_point, ConSanResourceSiteKind::Access, candidate_index,
         candidate.anchor(), candidate.kernel_descriptor_file_offset, scratch_count, &candidate);
@@ -2525,15 +2525,18 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
     ConSanMoiOperatingPoint owner_point = site_point;
     if (apply_moi_persistent_vgpr_assignment(owner_point, state.register_allocation,
                                              plan.owner_descriptor_file_offsets)) {
+      const MoiAccessResourceFacts owner_resource_facts =
+          resolve_moi_access_resource_facts(owner_point, candidate, state.arch);
       const uint16_t owner_scratch_count =
           moi_mode_operations(request.moi_engine)
-              .access_scratch_vgpr_count(request, resources, owner_point, candidate, state.arch);
+              .access_scratch_vgpr_count(request, resources, owner_resource_facts, candidate);
       if (owner_scratch_count != scratch_count) {
         scratch_count = owner_scratch_count;
         plan = plan_moi_resource_site(
             state, request, debug, owner_point, ConSanResourceSiteKind::Access, candidate_index,
             candidate.anchor(), candidate.kernel_descriptor_file_offset, scratch_count, &candidate);
       }
+      site_resource_facts = owner_resource_facts;
       site_point = std::move(owner_point);
     }
     bool initial_spill_overlaps_guest = false;
@@ -2547,7 +2550,7 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
     const auto fallback_planner = moi_mode_operations(request.moi_engine).access_spill_fallback;
     const std::optional<uint16_t> spill_scratch_count =
         fallback_planner
-            ? fallback_planner({request, site_point, candidate, state.arch, no_ordinary_window,
+            ? fallback_planner({request, site_resource_facts, candidate, no_ordinary_window,
                                 plan.source == ConSanRegisterAllocationSource::SpillRequired,
                                 initial_spill_overlaps_guest})
             : std::nullopt;

@@ -149,10 +149,9 @@ void apply_inline_shadow_mode_patches(std::span<const uint8_t> bytes, const ConS
 
 uint16_t inline_shadow_access_scratch_vgpr_count(const ConSanRequest &request,
                                                  const BoundRuntimeResources &,
-                                                 const ConSanMoiOperatingPoint &point,
-                                                 const ConSanMoiCandidate &candidate,
-                                                 rj_code_arch_t arch) {
-  return inline_shadow_scratch_count(request, point, candidate, arch);
+                                                 const MoiAccessResourceFacts &resource_facts,
+                                                 const ConSanMoiCandidate &candidate) {
+  return inline_shadow_scratch_count(request, resource_facts, candidate);
 }
 
 MoiPersistentStateDemand
@@ -178,23 +177,21 @@ inline_shadow_operand_overlap_spill(const MoiOperandOverlapSpillContext &context
   MoiOperandOverlapSpillPolicy policy;
   policy.supported = context.access_candidate != nullptr &&
                      context.site_kind == ConSanResourceSiteKind::Access &&
-                     !context.guest_replay_requires_disjoint_address_scratch;
+                     !context.resource_facts.guest_replay_requires_disjoint_address_scratch;
   return policy;
 }
 
 std::optional<uint16_t>
 inline_shadow_access_spill_fallback(const MoiAccessSpillFallbackContext &context) {
-  if (!consan_uses_gfx9_cdna_encoding(context.arch) || context.candidate.is_flat() ||
-      !moi_load_clobbers_address(context.candidate) ||
-      candidate_requires_flat_address_materialization(context.candidate) ||
+  if (!context.resource_facts.supports_clobbered_address_spill_reload ||
       (!context.spill_required && !context.no_ordinary_window)) {
     return std::nullopt;
   }
   // The compact transaction omits a dedicated address snapshot. Emission
   // either recovers a spilled address or consumes the original address before
   // the deferred application load.
-  return inline_shadow_spill_backed_scratch_count(context.request, context.point, context.candidate,
-                                                  context.arch);
+  return inline_shadow_spill_backed_scratch_count(context.request, context.resource_facts,
+                                                  context.candidate);
 }
 
 MoiDispatchIdentityPlan

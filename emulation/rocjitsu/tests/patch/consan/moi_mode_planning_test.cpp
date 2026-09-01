@@ -19,6 +19,7 @@ using consan_moi_impl::plan_moi_object_mode;
 using consan_moi_impl::plan_moi_operand_overlap_spill;
 using consan_moi_impl::plan_moi_persistent_state_demand;
 using consan_moi_impl::plan_moi_scalar_abi;
+using consan_moi_impl::resolve_moi_access_resource_facts;
 
 consan_moi_impl::MoiObjectModePlan
 plan_hypothetical_mode(const ConSanRequest &, const BoundRuntimeResources &,
@@ -159,13 +160,73 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsDynamicStackSpillPolicy) {
             24u);
 }
 
+TEST(ConSanMoiModePlanning, AccessResourceFactsNormalizePointAndTargetBeforeModePolicy) {
+  ConSanMoiOperatingPoint point;
+  point.moi_exec_save_sgpr = 10u;
+  point.moi_initialize_owner_epoch = true;
+  point.set_moi_owner_epoch_vgprs(12u, 13u);
+  point.moi_persistent_sgprs.set_owner_epoch(20u, 21u);
+  point.moi_dynamic_stack_spill = true;
+
+  ConSanMoiCandidate candidate;
+  candidate.lowering.form.emplace();
+  candidate.lowering.form->kind = ConSanAccessLoweringFormKind::NativeTwoRange;
+  candidate.lowering.form->encoded_offset_scale_bytes = 16u;
+  candidate.lowering.form->address_vgpr = 4u;
+  candidate.lowering.form->address_vgpr_count = 1u;
+  candidate.lowering.form->destination_vgpr = 4u;
+  candidate.lowering.form->destination_register_count = 1u;
+  candidate.incoming_vgpr_bank_mode = 1u;
+
+  const auto gfx1250 =
+      resolve_moi_access_resource_facts(point, candidate, ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(gfx1250.address_scratch_vgpr_count, 1u);
+  EXPECT_EQ(gfx1250.two_address_replay_vgpr_count, 1u);
+  EXPECT_GT(gfx1250.dynamic_stack_reservoir_vgpr_count, 0u);
+  EXPECT_TRUE(gfx1250.has_exec_save);
+  EXPECT_TRUE(gfx1250.initialize_owner_epoch);
+  EXPECT_TRUE(gfx1250.has_persistent_owner_vgpr);
+  EXPECT_FALSE(gfx1250.uses_private_epoch);
+  EXPECT_TRUE(gfx1250.has_complete_persistent_sgprs);
+  EXPECT_TRUE(gfx1250.target_available);
+  EXPECT_FALSE(gfx1250.supports_native_lds_spill_recovery);
+  EXPECT_FALSE(gfx1250.supports_clobbered_address_spill_reload);
+  EXPECT_TRUE(gfx1250.guest_replay_requires_disjoint_address_scratch);
+
+  const auto gfx1201 =
+      resolve_moi_access_resource_facts(point, candidate, ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(gfx1201.two_address_replay_vgpr_count, 0u);
+  EXPECT_GT(gfx1201.dynamic_stack_reservoir_vgpr_count, 0u);
+  EXPECT_TRUE(gfx1201.supports_native_lds_spill_recovery);
+  EXPECT_FALSE(gfx1201.supports_clobbered_address_spill_reload);
+  EXPECT_FALSE(gfx1201.guest_replay_requires_disjoint_address_scratch);
+
+  candidate.lowering.form->kind = ConSanAccessLoweringFormKind::NativeSingleRange;
+  candidate.lowering.form->encoded_offset_scale_bytes = 0u;
+  candidate.incoming_vgpr_bank_mode.reset();
+  const auto gfx950 = resolve_moi_access_resource_facts(point, candidate, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(gfx950.two_address_replay_vgpr_count, 0u);
+  EXPECT_EQ(gfx950.dynamic_stack_reservoir_vgpr_count, 0u);
+  EXPECT_TRUE(gfx950.supports_native_lds_spill_recovery);
+  EXPECT_TRUE(gfx950.supports_clobbered_address_spill_reload);
+
+  point.moi_persistent_sgprs.reset_owner_epoch();
+  point.automatic_moi_private_epoch = true;
+  const auto private_epoch =
+      resolve_moi_access_resource_facts(point, candidate, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_TRUE(private_epoch.uses_private_epoch);
+  EXPECT_FALSE(private_epoch.has_complete_persistent_sgprs);
+}
+
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsOperandOverlapSpillPolicy) {
   ConSanRequest request;
   const ConSanMoiOperatingPoint point;
   const ConSanMoiCandidate candidate;
   const auto plan = [&](ConSanResourceSiteKind kind, rj_code_arch_t arch, bool disjoint,
                         const ConSanMoiCandidate *access) {
-    return plan_moi_operand_overlap_spill({request, point, access, kind, arch, disjoint});
+    auto resource_facts = resolve_moi_access_resource_facts(point, candidate, arch);
+    resource_facts.guest_replay_requires_disjoint_address_scratch = disjoint;
+    return plan_moi_operand_overlap_spill({request, resource_facts, access, kind});
   };
 
   request.moi_engine = ConSanMoiEngine::RecordReplay;

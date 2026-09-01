@@ -404,6 +404,36 @@ if(NOT _moi_private_layout_contract MATCHES "struct MoiPrivateStateDemand" OR
         "ConSan private-state lowering lost its typed demand or shared descriptor cache"
     )
 endif()
+
+# Access scratch sizing and spill policy compose one target-normalized,
+# operating-point-projected fact product. Mode providers may not regain the
+# broad point or raw architecture identity through either policy context.
+file(READ "${_consan_dir}/consan_moi_access_target.h" _moi_access_resource_contract)
+file(READ "${_consan_dir}/consan_moi_mode_planning.h" _moi_mode_planning_contract)
+if(NOT _moi_access_resource_contract MATCHES "struct MoiAccessResourceFacts" OR
+   NOT _moi_access_resource_contract MATCHES "resolve_moi_access_resource_facts" OR
+   NOT _moi_mode_planning_contract MATCHES
+       "access_scratch_vgpr_count[^;]*MoiAccessResourceFacts")
+    message(FATAL_ERROR
+        "ConSan access resource planning lost its normalized fact product"
+    )
+endif()
+foreach(_context IN ITEMS MoiOperandOverlapSpillContext MoiAccessSpillFallbackContext)
+    if(_moi_mode_planning_contract MATCHES
+       "struct ${_context}[^}]*ConSanMoiOperatingPoint" OR
+       _moi_mode_planning_contract MATCHES "struct ${_context}[^}]*rj_code_arch_t")
+        message(FATAL_ERROR
+            "ConSan ${_context} must not expose the broad point or raw architecture"
+        )
+    endif()
+endforeach()
+foreach(_file IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_file}"
+        "sampled_(spill_backed_scratch_count|access_supports_spill_backed_operand_recovery)"
+        "retired Sampled access-resource adapters must not return"
+    )
+endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_resource_types.h.inc"
     "bool[ \t]+changed"
