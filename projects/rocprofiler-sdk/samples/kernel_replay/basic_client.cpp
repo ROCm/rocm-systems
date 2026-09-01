@@ -18,8 +18,7 @@ rocprofiler_context_id_t g_replay_ctx{0};
 std::atomic<int>         g_replayed{0};
 std::atomic<int>         g_passes_seen{0};
 
-uint64_t
-replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kPasses;
 }

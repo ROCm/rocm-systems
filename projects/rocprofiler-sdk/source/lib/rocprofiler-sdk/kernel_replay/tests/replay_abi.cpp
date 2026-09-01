@@ -43,8 +43,7 @@
 
 // Implemented in replay_abi_c.c, compiled as C against the same public header. See that file for
 // why the C translation unit exists.
-extern "C"
-{
+extern "C" {
 size_t
 rocprofiler_test_c_replay_record_size(void);
 size_t

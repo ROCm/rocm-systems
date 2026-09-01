@@ -75,8 +75,7 @@ pass_sequence()
             service_kind::spm};
 }
 
-uint64_t
-replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kPasses;
 }
@@ -179,8 +178,7 @@ att_dispatch_cb(rocprofiler_agent_id_t,
                                           : ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }
 
-void
-att_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)
+void att_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)
 {
     g_att_records.fetch_add(1);
 }

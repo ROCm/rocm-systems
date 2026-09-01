@@ -157,8 +157,7 @@ gpu_agents()
     return agents;
 }
 
-uint64_t
-replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return static_cast<uint64_t>(g_passes);
 }
@@ -365,8 +364,7 @@ att_dispatch_cb(rocprofiler_agent_id_t,
     return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
 }
 
-void
-att_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)
+void att_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)
 {
     g_att_shader.fetch_add(1);
 }
