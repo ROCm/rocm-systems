@@ -71,23 +71,31 @@ target_include_directories(amdcuid_static PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} PRI
 # the HMAC key is shared and CUIDs remain stable across version upgrades.
 target_compile_definitions(amdcuid_static PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}")
 
-# SHA-256/HMAC comes from shared/sha256, built from source.
-set(ROCM_SHA256_DIR
+# SHA-256/HMAC comes from shared/sha256, built from source. The cache variable
+# is project-prefixed so that a build which configures cuid and another
+# rocm-systems project together does not have them fight over one entry.
+set(CUID_ROCM_SHA256_DIR
     "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/sha256"
     CACHE PATH
     "Path to the shared SHA-256 component"
 )
 if(NOT TARGET rocm-sha256)
-    if(NOT EXISTS "${ROCM_SHA256_DIR}/CMakeLists.txt")
+    if(NOT EXISTS "${CUID_ROCM_SHA256_DIR}/CMakeLists.txt")
         message(
             FATAL_ERROR
-            "Shared SHA-256 not found at ${ROCM_SHA256_DIR}. Set ROCM_SHA256_DIR "
-            "when building cuid outside the rocm-systems tree."
+            "Shared SHA-256 not found at ${CUID_ROCM_SHA256_DIR}. Set "
+            "CUID_ROCM_SHA256_DIR when building cuid outside the rocm-systems tree."
         )
     endif()
-    add_subdirectory(${ROCM_SHA256_DIR} ${CMAKE_CURRENT_BINARY_DIR}/rocm-sha256)
+    add_subdirectory(${CUID_ROCM_SHA256_DIR} ${CMAKE_CURRENT_BINARY_DIR}/rocm-sha256)
 endif()
-target_link_libraries(amdcuid_static PUBLIC rocm-sha256)
+
+# PRIVATE so the OBJECT library's objects land in amdcuid_static and the
+# installed archive defines the SHA-256 symbols rather than importing them.
+# The headers stay public (hmac.h consumers include rocm/sha2/sha256.h), and
+# BUILD_INTERFACE because shared/sha256 is not installed.
+target_link_libraries(amdcuid_static PRIVATE rocm-sha256)
+target_include_directories(amdcuid_static PUBLIC $<BUILD_INTERFACE:${CUID_ROCM_SHA256_DIR}/include>)
 
 # The only external dependency left is the platform CSPRNG.
 if(WIN32)
