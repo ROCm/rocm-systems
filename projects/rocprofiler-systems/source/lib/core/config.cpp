@@ -1491,11 +1491,10 @@ configure_settings(bool _init)
         }
         else if(!papi_events.empty())
         {
-            LOG_DEBUG(
-                "perf_event_paranoid={} but all PAPI events use the net component "
-                "(reads /proc/net/dev, no perf_event required). "
-                "Proceeding with NIC profiling.",
-                _paranoid);
+            LOG_DEBUG("perf_event_paranoid={} but all PAPI events use the net component "
+                      "(reads /proc/net/dev, no perf_event required). "
+                      "Proceeding with NIC profiling.",
+                      _paranoid);
         }
     }
     else
