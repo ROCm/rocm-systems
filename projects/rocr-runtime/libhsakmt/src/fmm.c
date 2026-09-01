@@ -4942,6 +4942,127 @@ HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
 	if (gpu_id_array_size > 0 && !gpu_id_array)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
+	/* DRM import path: use amdgpu_bo_import instead of KFD ioctls */
+	if (hsakmt_enable_drm) {
+		struct amdgpu_bo_import_result import_res = {0};
+		struct amdgpu_bo_info bo_info = {0};
+		amdgpu_device_handle dev;
+		uint32_t gpu_id;
+
+		/* Resolve the GPU and device handle first — amdgpu_bo_import
+		 * needs a valid amdgpu_device_handle, not NULL. */
+		gpu_id = fmm_ctx->first_gpu_mem ? fmm_ctx->first_gpu_mem->gpu_id : 0;
+		if (gpu_id_array && gpu_id_array_size > 0)
+			gpu_id = gpu_id_array[0];
+
+		gpu_mem_id = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
+		if (gpu_mem_id < 0)
+			return HSAKMT_STATUS_ERROR;
+
+		dev = fmm_get_amdgpu_device_handle(fmm_ctx, gpu_id);
+		if (!dev) {
+			pr_err("DRM import: no device handle for gpu_id 0x%x\n", gpu_id);
+			return HSAKMT_STATUS_ERROR;
+		}
+
+		r = amdgpu_bo_import(dev, amdgpu_bo_handle_type_dma_buf_fd,
+				     (uint32_t)GraphicsResourceHandle, &import_res);
+		if (r) {
+			pr_err("DRM dmabuf import failed: %d\n", r);
+			return HSAKMT_STATUS_ERROR;
+		}
+
+		r = amdgpu_bo_query_info(import_res.buf_handle, &bo_info);
+		if (r) {
+			pr_err("DRM bo_query_info failed: %d\n", r);
+			amdgpu_bo_free(import_res.buf_handle);
+			return HSAKMT_STATUS_ERROR;
+		}
+
+		/* Choose aperture */
+		if (!gpu_id_array && gpu_id_array_size == 0 && !RegisterFlags.ui32.requiresVAddr) {
+			aperture = &fmm_ctx->mem_handle_aperture;
+		} else if (hsakmt_topology_is_svm_needed(fmm_ctx->gpu_mem[gpu_mem_id].EngineId)) {
+			aperture = fmm_ctx->svm.dgpu_aperture;
+		} else {
+			aperture = &fmm_ctx->gpu_mem[gpu_mem_id].gpuvm_aperture;
+			aperture_base = aperture->base;
+		}
+		if (!aperture_is_valid(aperture->base, aperture->limit)) {
+			amdgpu_bo_free(import_res.buf_handle);
+			return HSAKMT_STATUS_ERROR;
+		}
+
+		/* Allocate VA range */
+		pthread_mutex_lock(&aperture->fmm_mutex);
+		mem = aperture_allocate_area_aligned(aperture, NULL,
+						     import_res.alloc_size, IMAGE_ALIGN);
+		if (!mem) {
+			pthread_mutex_unlock(&aperture->fmm_mutex);
+			amdgpu_bo_free(import_res.buf_handle);
+			return HSAKMT_STATUS_NO_MEMORY;
+		}
+
+		/* Map BO into GPU VA via DRM */
+		int32_t drm_index = fmm_get_drm_index(fmm_ctx, gpu_id);
+		if (drm_index < 0) {
+			pthread_mutex_unlock(&aperture->fmm_mutex);
+			aperture_release_area(aperture, mem, import_res.alloc_size);
+			amdgpu_bo_free(import_res.buf_handle);
+			return HSAKMT_STATUS_ERROR;
+		}
+		syncobj_point_t *ptu_syncobj = &(drm_ptu_syncobj[drm_index]);
+
+		r = amdgpu_bo_va_op_raw2(dev, import_res.buf_handle, 0,
+					 import_res.alloc_size, (uint64_t)mem,
+					 AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE,
+					 AMDGPU_VA_OP_MAP,
+					 ptu_syncobj->handle,
+					 get_next_ptu_sync_point(ptu_syncobj),
+					 0, 0);
+		if (r) {
+			pr_err("DRM import: bo_va_op_raw2 MAP failed: %d\n", r);
+			pthread_mutex_unlock(&aperture->fmm_mutex);
+			aperture_release_area(aperture, mem, import_res.alloc_size);
+			amdgpu_bo_free(import_res.buf_handle);
+			return HSAKMT_STATUS_ERROR;
+		}
+		sync_ptu_updates(fmm_ctx, &gpu_id, 1);
+
+		/* Track the imported BO */
+		mflags.Value = 0;
+		mflags.ui32.CoarseGrain = 1;
+		handle.drm = import_res.buf_handle;
+		obj = aperture_allocate_object(aperture, mem, handle,
+					       import_res.alloc_size, mflags);
+		if (!obj) {
+			amdgpu_bo_va_op_raw2(dev, import_res.buf_handle, 0,
+					     import_res.alloc_size, (uint64_t)mem,
+					     0, AMDGPU_VA_OP_UNMAP,
+					     ptu_syncobj->handle,
+					     get_next_ptu_sync_point(ptu_syncobj),
+					     0, 0);
+			sync_ptu_updates(fmm_ctx, &gpu_id, 1);
+			pthread_mutex_unlock(&aperture->fmm_mutex);
+			aperture_release_area(aperture, mem, import_res.alloc_size);
+			amdgpu_bo_free(import_res.buf_handle);
+			return HSAKMT_STATUS_NO_MEMORY;
+		}
+		obj->registered_device_id_array = gpu_id_array;
+		obj->registered_device_id_array_size = gpu_id_array_size;
+		hsakmt_gpuid_to_nodeid(ctx, gpu_id, &obj->node_id);
+		pthread_mutex_unlock(&aperture->fmm_mutex);
+
+		GraphicsResourceInfo->MemoryAddress = mem;
+		GraphicsResourceInfo->SizeInBytes = import_res.alloc_size;
+		GraphicsResourceInfo->Metadata = NULL;
+		GraphicsResourceInfo->MetadataSizeInBytes = 0;
+		hsakmt_gpuid_to_nodeid(ctx, gpu_id, &GraphicsResourceInfo->NodeId);
+
+		return HSAKMT_STATUS_SUCCESS;
+	}
+
+	/* KFD import path (original) */
 	infoArgs.dmabuf_fd = GraphicsResourceHandle;
 	infoArgs.metadata_size = GRAPHICS_METADATA_DEFAULT_SIZE;
 	metadata = calloc(infoArgs.metadata_size, 1);
