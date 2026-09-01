@@ -137,3 +137,21 @@ install(
     COMPONENT ${TESTS_COMPONENT}
     PATTERN "__pycache__" EXCLUDE
 )
+
+# Hardware-free unit test for the fwupd UMA carveout adapter. On a host without
+# the fwupd carveout BIOS setting -- i.e. any CI machine: no APU firmware exposes
+# it, and typically no fwupd daemon or D-Bus system bus is present -- both entry
+# points must report NOT_SUPPORTED so the amdgpu sysfs node stays the sole UMA
+# carveout interface. Kept in its own target/subdir so the aux_source_directory()
+# sweep above does not pull it into ${TEST}.
+add_executable(
+    fwupd_carveout_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/fwupd_carveout_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/amd_smi/fwupd_carveout.cc
+)
+target_include_directories(
+    fwupd_carveout_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include ${CMAKE_CURRENT_SOURCE_DIR}/../../src/amd_smi
+)
+target_link_libraries(fwupd_carveout_test GTest::gtest GTest::gtest_main ${CMAKE_DL_LIBS})
+add_test(NAME fwupd_carveout_test COMMAND fwupd_carveout_test)

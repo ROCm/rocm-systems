@@ -46,6 +46,9 @@ set(NIC_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/")
 
 set(SRC_LIST
     "${SRC_DIR}/amd_smi.cc"
+    # UMA carveout adapter: talks to the fwupd daemon over D-Bus by loading
+    # libdbus-1 at runtime, so it adds no build- or link-time dependency.
+    "${SRC_DIR}/fwupd_carveout.cc"
     "${SRC_DIR}/amd_smi_cper.cc"
     "${SRC_DIR}/amd_smi_common.cc"
     "${SRC_DIR}/amd_smi_drm.cc"

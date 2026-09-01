@@ -57,6 +57,7 @@
 #ifdef ENABLE_WSL_BACKEND
 #include "amd_smi/impl/amd_smi_wsl_device.h"
 #endif
+#include "fwupd_carveout.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -8455,6 +8456,17 @@ static bool is_dry_run() {
   return (dry_run != nullptr && std::string(dry_run) == "1");
 }
 
+// The fwupd UMA carveout is a platform-wide APU BIOS setting, so it must only be
+// consulted for the integrated (FUSION) GPU -- never a discrete GPU that merely
+// lacks the amdgpu sysfs node. Uses the ASIC AMDGPU_IDS_FLAGS_FUSION flag.
+static bool gpu_handle_is_apu(amdsmi_processor_handle processor_handle) {
+  amdsmi_asic_info_t asic_info = {};
+  if (amdsmi_get_gpu_asic_info(processor_handle, &asic_info) != AMDSMI_STATUS_SUCCESS) {
+    return false;
+  }
+  return (asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0;
+}
+
 static amdsmi_status_t get_gpu_uma_carveout_info_internal(amd::smi::AMDSmiGPUDevice* gpu_device,
                                                           amdsmi_uma_carveout_info_t* info) {
   if (gpu_device == nullptr || info == nullptr) {
@@ -8568,7 +8580,16 @@ amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(amdsmi_processor_handle process
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
+  // The fwupd carveout is a platform-wide APU BIOS setting (PolicyKit-brokered,
+  // and the only carveout interface on UEFI-HII platforms); consult it first for
+  // the integrated GPU, then fall back to the amdgpu sysfs node.
+  const bool is_apu = gpu_handle_is_apu(processor_handle);
+
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+
+  if (is_apu && amd::smi::fwupd_get_carveout_info(info) == AMDSMI_STATUS_SUCCESS) {
+    return AMDSMI_STATUS_SUCCESS;
+  }
 
   return get_gpu_uma_carveout_info_internal(gpu_device, info);
 }
@@ -8586,7 +8607,19 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(amdsmi_processor_handle processor_ha
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
+  // The fwupd carveout is a platform-wide APU BIOS setting; only route the write
+  // there for the integrated GPU. fwupd/PolicyKit brokers privilege, then fall
+  // back to the amdgpu sysfs node when fwupd cannot service the request.
+  const bool is_apu = gpu_handle_is_apu(processor_handle);
+
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+
+  if (is_apu) {
+    amdsmi_status_t fwupd_ret = amd::smi::fwupd_set_carveout(option_index);
+    if (fwupd_ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+      return fwupd_ret;
+    }
+  }
 
   // Get GPU path for sysfs
   std::string gpu_path = gpu_device->get_gpu_path();
