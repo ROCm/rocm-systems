@@ -1008,7 +1008,8 @@ WriteInterceptor(const void* packets,
                     "running this dispatch once without replay");
                 kernel_replay::execute_config_phase_exit(
                     replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
-                if(drain_signal.handle != 0) get_core_table()->hsa_signal_destroy_fn(drain_signal);
+                if(drain_signal != null_hsa_signal)
+                    get_core_table()->hsa_signal_destroy_fn(drain_signal);
                 process_packet_batch(packets_arr,
                                      1,
                                      forward_to_writer,
