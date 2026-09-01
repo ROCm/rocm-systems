@@ -228,3 +228,8 @@ def normalize_kernel_name(name: str) -> str:
 def normalize_kernel_names(names: Set[str]) -> Set[str]:
     """Return the normalized form of each name in ``names``."""
     return {normalize_kernel_name(name) for name in names}
+
+
+def exiting_console_error():
+    """Mock for console_error that records the call then exits, as the real one does."""
+    return Mock(side_effect=SystemExit(1))

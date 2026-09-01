@@ -13,6 +13,8 @@ from utils.file_io import (
     create_df_kernel_top_stats,
     create_df_pmc,
     is_single_panel_config,
+    rank_kernels_by_total_duration,
+    validate_kernel_filter_ids,
 )
 
 
@@ -36,7 +38,6 @@ def test_returns_valid_dataframes() -> None:
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
             time_unit="ns",
-            sortby="sum",
         )
 
         assert isinstance(kernel_top_df, pd.DataFrame)
@@ -70,7 +71,6 @@ def test_grouping_and_aggregation() -> None:
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
             time_unit="ns",
-            sortby="sum",
         )
 
         # kernel_a appears twice in input and must group into one row.
@@ -82,18 +82,74 @@ def test_grouping_and_aggregation() -> None:
         sum_values = kernel_top_df["Sum(ns)"].tolist()
         assert sum_values == sorted(sum_values, reverse=True)
 
-        kernel_top_df_sorted, _ = create_df_kernel_top_stats(
-            df_in=_raw_pmc(),
+
+def test_ranking_uses_total_duration_not_longest_dispatch(
+    repeated_dispatch_frame,
+) -> None:
+    """A kernel that runs often outranks one with a single longer dispatch."""
+    assert rank_kernels_by_total_duration(repeated_dispatch_frame) == [
+        "kernel_frequent",
+        "kernel_long",
+    ]
+
+
+def test_kernel_top_stats_rows_follow_the_ranking(repeated_dispatch_frame) -> None:
+    """Top stats rows are ordered by the ranking that -k indexes into."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        kernel_top_df, _ = create_df_kernel_top_stats(
+            df_in=repeated_dispatch_frame,
             raw_data_dir=temp_dir,
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
             time_unit="ns",
-            sortby="kernel",
         )
 
-        # Sorting by kernel name is ascending.
-        kernel_names = kernel_top_df_sorted["Kernel_Name"].tolist()
-        assert kernel_names == sorted(kernel_names)
+        assert kernel_top_df["Kernel_Name"].tolist() == (
+            rank_kernels_by_total_duration(repeated_dispatch_frame)
+        )
+
+
+class TestValidateKernelFilterIds:
+    """Tests for utils.file_io.validate_kernel_filter_ids."""
+
+    def test_ids_within_range_are_accepted(self) -> None:
+        validate_kernel_filter_ids([0, 2], kernel_count=3)
+
+    def test_id_above_range_exits(self, monkeypatch) -> None:
+        """An out-of-range id reports the valid range instead of crashing."""
+        errors = common.patch_console(
+            monkeypatch,
+            "utils.file_io",
+            "error",
+            error=common.exiting_console_error(),
+        )
+        with pytest.raises(SystemExit):
+            validate_kernel_filter_ids([99], kernel_count=3)
+        assert "99 is an invalid kernel id" in str(errors["error"].call_args)
+        assert "0-2" in str(errors["error"].call_args)
+
+    def test_negative_id_exits(self, monkeypatch) -> None:
+        """A negative id is rejected instead of wrapping to the last kernel."""
+        common.patch_console(
+            monkeypatch,
+            "utils.file_io",
+            "error",
+            error=common.exiting_console_error(),
+        )
+        with pytest.raises(SystemExit):
+            validate_kernel_filter_ids([-1], kernel_count=3)
+
+    def test_no_kernels_exits(self, monkeypatch) -> None:
+        """Filtering a workload with no kernels reports that, not a range."""
+        errors = common.patch_console(
+            monkeypatch,
+            "utils.file_io",
+            "error",
+            error=common.exiting_console_error(),
+        )
+        with pytest.raises(SystemExit):
+            validate_kernel_filter_ids([0], kernel_count=0)
+        assert "No kernels found" in str(errors["error"].call_args)
 
 
 def test_filters() -> None:
