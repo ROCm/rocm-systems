@@ -98,7 +98,7 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     uint64_t total_passes;
 
     rocprofiler_status_t (*replay_start_context)(rocprofiler_context_id_t context_id);
-    rocprofiler_status_t (*replay_local_disable_context_cb)(rocprofiler_context_id_t context_id);
+    rocprofiler_status_t (*replay_stop_context)(rocprofiler_context_id_t context_id);
 
     uint8_t reserved_padding[64];  ///< reserved for extensions w/o ABI break
 
