@@ -90,7 +90,7 @@ RCCL_PARAM(IgnoreArchTable, "IGNORE_ARCH_TABLE", 0);
 // Returns true when the user has restricted the algorithm set via NCCL_ALGO.
 // When true, CE / DDA / Symmetric dispatch is skipped so getAlgoInfo() reaches
 // Ring/Tree exactly as the user requested.  Cached to avoid repeated getenv().
-static bool rcclNcclAlgoEnvIsSet() {
+bool rcclNcclAlgoEnvIsSet() {
   static int cached = -1;
   if (cached == -1) cached = (ncclGetEnv("NCCL_ALGO") != nullptr) ? 1 : 0;
   return cached == 1;
