@@ -13,6 +13,7 @@ exclude: |
     | projects/rdc/
     | projects/rocm-smi-lib/
     | projects/rocprofiler-compute/
+    | projects/rocprofiler-systems/
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -56,3 +57,10 @@ repos:
     rev: 0.25.1
     hooks:
       - id: gersemi
+        # rocprofiler-sdk formats its CMake with cmake-format, enforced by the
+        # cmake job in rocprofiler-sdk-formatting.yml, and the two tools disagree
+        # about the same files. Running gersemi there rewrites files cmake-format
+        # considers clean and breaks that project's CI. It has no
+        # pre-commit-config.yaml of its own, so it is excluded here rather than
+        # in the top-level exclude, which would also drop the generic hooks.
+        exclude: ^projects/rocprofiler-sdk/
