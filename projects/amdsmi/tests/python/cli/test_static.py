@@ -78,3 +78,39 @@ class TestStatic(TestCliBase):
         msg = f"{self.tab}Static mem-carveout and node GTT tests passed (display mode only)"
         self.common.print(msg)
         return
+
+    def test_tray(self):
+        """Test node --tray flag (display/--json/--csv)"""
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi node --tray"
+        self.common.print(msg)
+
+        # Test tray display
+        cmd = "amd-smi node --tray"
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+
+        # Test tray with JSON output
+        cmd = "amd-smi node --tray --json"
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+        if data:
+            try:
+                json_data = json.loads(data)
+                self.assertIsInstance(json_data, (list, dict))
+                node_info = json_data.get("node", {}) if isinstance(json_data, dict) else {}
+                tray_info = node_info.get("tray")
+                if tray_info:
+                    self.assertIn("max_acc_per_tray", tray_info)
+                    self.assertIn("tray_type", tray_info)
+            except json.JSONDecodeError:
+                self.fail(f"Invalid JSON output for command '{cmd}'")
+
+        # Test tray with CSV output
+        cmd = "amd-smi node --tray --csv"
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+
+        msg = f"{self.tab}Node tray tests passed"
+        self.common.print(msg)
+        return

@@ -108,6 +108,7 @@ struct ncclSideStream {
 
 inline std::unordered_map<ncclSideStreamKey, ncclSideStream, ncclSideStreamKeyHash> sideStream;
 inline pthread_mutex_t sideStreamLock = PTHREAD_MUTEX_INITIALIZER;
+
 extern ncclResult_t getBusId(int cudaDev, int64_t* busId);
 
 // Clamp a requested stream priority into the device-supported range.
@@ -648,12 +649,22 @@ static inline ncclResult_t ncclCuMemAlloc(void** ptr, CUmemGenericAllocationHand
   {
     cudaStreamCaptureMode capMode = cudaStreamCaptureModeRelaxed;
     CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&capMode), result, fail);
-    cudaStream_t zeroStream;
-    CUDACHECKGOTO(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), result, restoreCapMode);
+    // Reuse the pooled side stream when an allocation scope is active (comm
+    // init / P2P connect burst) so this per-allocation zeroing does not churn a
+    // scarce GPU hardware queue via create/destroy on every VMM allocation.
+    // Fall back to a private non-blocking stream when no scope is active.
+    cudaStream_t sidestream = nullptr, zeroStream = nullptr;
+    NCCLCHECKGOTO(getSideStream(&sidestream), result, restoreCapMode);
+    zeroStream = sidestream;
+    if (sidestream == nullptr) {
+      CUDACHECKGOTO(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), result, restoreCapMode);
+    }
     CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, size, zeroStream), result, destroyStream);
     CUDACHECKGOTO(cudaStreamSynchronize(zeroStream), result, destroyStream);
   destroyStream:
-    CUDACHECK(cudaStreamDestroy(zeroStream));
+    if (sidestream == nullptr) {
+      CUDACHECK(cudaStreamDestroy(zeroStream));
+    }
   restoreCapMode:
     CUDACHECK(cudaThreadExchangeStreamCaptureMode(&capMode));
     if (result != ncclSuccess) goto fail;
@@ -888,20 +899,22 @@ ncclResult_t ncclCudaCallocDebug(T** ptr, size_t nelem, const char* filefunc, in
 
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (nelem > 0) {
-    // Need a side stream so as not to interfere with graph capture.
-    cudaStream_t stream, sidestream;
-    NCCLCHECK(getSideStream(&sidestream));
-    stream = sidestream;
-    if (sidestream == nullptr) CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
     if (ncclCuMemEnable()) {
+      // ncclCuMemAlloc already zeroes the buffer (ROCM-20370 residue scrub),
+      // reusing the pooled side stream, so no extra memset/stream is needed.
       NCCLCHECKGOTO(ncclCuMemAlloc((void**)ptr, NULL, ncclCuMemHandleType, nelem * ncclSizeOfT<T>(), manager, memType),
                     result, finish);
     } else {
+      // Need a side stream so as not to interfere with graph capture.
+      cudaStream_t stream, sidestream;
+      NCCLCHECK(getSideStream(&sidestream));
+      stream = sidestream;
+      if (sidestream == nullptr) CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
       CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem * ncclSizeOfT<T>(), flags), result, finish);
+      CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
+      CUDACHECKGOTO(cudaStreamSynchronize(stream), result, finish);
+      if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
     }
-    CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
-    CUDACHECKGOTO(cudaStreamSynchronize(stream), result, finish);
-    if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
   }
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
@@ -951,12 +964,14 @@ ncclResult_t ncclCudaCallocAsyncDebug(T** ptr, size_t nelem, hipStream_t stream,
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (nelem > 0) {
     if (ncclCuMemEnable()) {
+      // ncclCuMemAlloc already zeroes the buffer (ROCM-20370 residue scrub),
+      // reusing the pooled side stream, so no extra memset is needed.
       NCCLCHECKGOTO(ncclCuMemAlloc((void**)ptr, NULL, ncclCuMemHandleType, nelem * ncclSizeOfT<T>(), manager, memType),
                     result, finish);
     } else {
       CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem * ncclSizeOfT<T>(), flags), result, finish);
+      CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
     }
-    CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
   }
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));

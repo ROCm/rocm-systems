@@ -1535,6 +1535,12 @@ ncclResult_t ncclOsGetPciDeviceClass(nvmlDevice_t device, char* deviceClass, siz
   return ncclSuccess;
 }
 
+// Windows exposes no compute-partition attribute; report "unknown" so callers fall back.
+ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* /*busId*/, char* partition, size_t maxLen) {
+  if (partition && maxLen > 0) partition[0] = '\0';
+  return ncclSystemError;
+}
+
 ncclResult_t ncclOsGetPciDeviceParent(nvmlDevice_t device, char** parentBusId) {
   *parentBusId = NULL;
 

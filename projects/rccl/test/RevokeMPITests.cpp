@@ -946,8 +946,9 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ReturnsInProgress)
     ASSERT_MPI_EQ(ncclInvalidUsage, collRes);
 }
 
-// Race commRevokeAsync (worker thread) against an immediate ncclCommShrink
-// on the same parent; shrink must still succeed across kIterations runs.
+// Non-blocking revoke -> shrink on the same parent, per the non-blocking
+// contract: drain each async op (waitForAsyncResult) before the next.
+// Regression for AICOMRCCL-2232.
 TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
 {
     SKIP_UNLESS_MPI_PREREQS(2,
@@ -962,14 +963,17 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
 
     for(int iter = 0; iter < kIterations; ++iter)
     {
+        SCOPED_TRACE("iteration " + std::to_string(iter));
+
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
         ncclComm_t parent = getActiveCommunicator();
 
-        // Revoke parent and DO NOT poll before invoking shrink. This is
-        // the exact pattern that triggers the worker-thread race.
+        // Drain the async revoke before reusing the comm; otherwise shrink
+        // races the parent teardown and child bootstrap fails (conn-refused).
         ncclResult_t res = ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT);
         ASSERT_MPI_TRUE(res == ncclSuccess || res == ncclInProgress);
+        ASSERT_MPI_EQ(ncclSuccess, waitForAsyncResult(parent));
 
         MPI_Barrier(MPI_COMM_WORLD);
 
@@ -977,7 +981,10 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
         bool             isExcluded = false;
         computeSymmetricExclude(rank, world_size, excludeList, isExcluded);
 
-        ncclComm_t child = NCCL_COMM_NULL;
+        // Excluded ranks do not shrink; they contribute a trivial pass so the
+        // collective assert below stays balanced across all ranks.
+        ncclComm_t child    = NCCL_COMM_NULL;
+        bool       shrinkOk = true;
         if(!isExcluded)
         {
             res = ncclCommShrink(parent,
@@ -986,11 +993,35 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
                                  &child,
                                  nullptr,
                                  NCCL_SHRINK_DEFAULT);
-            ASSERT_TRUE(res == ncclSuccess || res == ncclInProgress)
-                << "iter=" << iter << " shrink returned " << res;
-            ASSERT_NE(child, nullptr);
-            ASSERT_EQ(ncclSuccess, waitForAsyncResult(child));
+            // *newcomm stays NCCL_COMM_NULL until the child job completes, so
+            // drain the parent first, then the now-populated child handle. Each
+            // stage records a non-fatal ADD_FAILURE (which does not return), so
+            // the collective assert below still reports the failing stage and
+            // iteration without leaving excluded ranks stuck in the barriers.
+            if(res != ncclSuccess && res != ncclInProgress)
+            {
+                shrinkOk = false;
+                ADD_FAILURE() << "shrink returned " << res;
+            }
+            else if(waitForAsyncResult(parent) != ncclSuccess)
+            {
+                shrinkOk = false;
+                ADD_FAILURE() << "parent drain after shrink did not reach ncclSuccess";
+            }
+            else if(child == nullptr)
+            {
+                shrinkOk = false;
+                ADD_FAILURE() << "child handle still NULL after parent drain";
+            }
+            else if(waitForAsyncResult(child) != ncclSuccess)
+            {
+                shrinkOk = false;
+                ADD_FAILURE() << "child drain did not reach ncclSuccess";
+            }
         }
+        // Collective: every rank participates, so a failure on any included rank
+        // fails the run instead of hanging excluded ranks in the barriers below.
+        ASSERT_MPI_TRUE(shrinkOk);
 
         MPI_Barrier(MPI_COMM_WORLD);
 
