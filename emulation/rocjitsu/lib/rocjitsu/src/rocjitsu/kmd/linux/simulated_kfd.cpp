@@ -4,6 +4,7 @@
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
+#include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
@@ -112,8 +113,38 @@ namespace {
 /// @details Routes through the process-wide libc_passthrough() table so the
 /// driver's own mappings never re-enter the interposer's mmap hook. The table is
 /// resolved once in the SimulatedKfd constructor.
+///
+/// Bypassing the interposer also bypasses the interposer's mapping lock, and an
+/// ioctl-routed mmap reaches here without ever passing through it. So it takes
+/// the lock itself: an emulated atomic holds a raw pointer across a permission
+/// check and the store it authorises, and a replacement in between would land
+/// that store in whatever took the page's place.
+///
+/// Held for the syscall alone. The driver's surrounding mapping work re-enters
+/// the memory model and takes its VMID lock, which an atomic already holds when
+/// it reaches this lock, so widening the region would invert the two orders.
 void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+  auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
   return libc_passthrough().mmap(addr, length, prot, flags, fd, offset);
+}
+
+/// @brief munmap via the real libc, with the mapping layout held still.
+/// @details Withdrawing a page is the sharper half of the hazard safe_mmap()
+/// describes: an atomic that has already validated the page is left storing
+/// through a pointer to nothing. Allocation teardown drops the GPU page-table
+/// entry first, so a concurrent access can miss the page table, fall through to
+/// the identity path, and validate the very host page this call removes.
+int safe_munmap(void *addr, size_t length) {
+  auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
+  return libc_passthrough().munmap(addr, length);
+}
+
+/// @brief mprotect via the real libc, with the mapping layout held still.
+/// @details Revoking write permission is as damaging to an in-flight atomic as
+/// removing the page, and for the same reason.
+int safe_mprotect(void *addr, size_t length, int prot) {
+  auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
+  return libc_passthrough().mprotect(addr, length, prot);
 }
 
 /// @brief Return whether two non-empty half-open address ranges overlap.
@@ -170,7 +201,7 @@ public:
   }
   void reset(void *addr = MAP_FAILED, size_t size = 0) {
     if (addr_ != MAP_FAILED)
-      libc_passthrough().munmap(addr_, size_);
+      safe_munmap(addr_, size_);
     addr_ = addr;
     size_ = size;
   }
@@ -332,10 +363,10 @@ uint32_t SimulatedKfd::alloc_flags_for_handle(uint64_t handle) const {
 }
 
 void SimulatedKfd::map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
-                              amdgpu::Mtype mtype) {
+                              amdgpu::Mtype mtype, KfdProcess::HostExtentOwner owner) {
   util::Logger::cp("MAP pid=", proc.process_id(), " va=0x", std::hex, gpu_va, " size=0x", size,
                    std::dec, " mtype=", static_cast<int>(mtype));
-  proc.map_pages(gpu_va, host_ptr, size, mtype);
+  proc.map_pages(gpu_va, host_ptr, size, mtype, owner);
 }
 
 void SimulatedKfd::unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size) {
@@ -393,7 +424,9 @@ SimulatedKfd::SimulatedKfd(SoC &soc, bool daemon_mode,
   // passthrough call site ever triggers a first-time dlsym under a per-process
   // lock. Idempotent: a no-op if the interposer already resolved the table.
   libc_passthrough().resolve();
-  gpus_.push_back({&soc, 0, false, {}});
+  GpuDevice device;
+  device.soc = &soc;
+  gpus_.push_back(std::move(device));
 }
 
 SimulatedKfd::SimulatedKfd(std::vector<SoC *> socs, std::vector<uint32_t> gpu_ids, bool daemon_mode,
@@ -402,8 +435,12 @@ SimulatedKfd::SimulatedKfd(std::vector<SoC *> socs, std::vector<uint32_t> gpu_id
       debug_identity_validation_hook_(std::move(debug_identity_validation_hook)),
       debug_session_reaper_([this](std::stop_token stop) { reap_exited_debug_sessions(stop); }) {
   libc_passthrough().resolve();
-  for (size_t i = 0; i < socs.size(); ++i)
-    gpus_.push_back({socs[i], i < gpu_ids.size() ? gpu_ids[i] : socs[i]->gpu_id(), false, {}});
+  for (size_t i = 0; i < socs.size(); ++i) {
+    GpuDevice device;
+    device.soc = socs[i];
+    device.gpu_id = i < gpu_ids.size() ? gpu_ids[i] : socs[i]->gpu_id();
+    gpus_.push_back(std::move(device));
+  }
 }
 
 SimulatedKfd::GpuDevice *SimulatedKfd::find_gpu(uint32_t gpu_id) {
@@ -440,6 +477,13 @@ SimulatedKfd::~SimulatedKfd() {
   for (auto pid : pids) {
     while (find_process(pid))
       close(pid);
+  }
+
+  // The memory model may outlive this driver, and it holds a bare pointer to
+  // us for fault reporting. Retract it while we are still whole.
+  for (auto &g : gpus_) {
+    if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+      mem->set_memory_fault_reporter(nullptr);
   }
 }
 
@@ -747,6 +791,7 @@ int SimulatedKfd::open() {
     if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
       mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
                             proc->page_table_generation(), proc->page_table_request_mutex());
+      mem->set_memory_fault_reporter(fault_reporter_for(g));
       if (!daemon_mode_)
         mem->set_passthrough(true);
     }
@@ -762,6 +807,43 @@ int SimulatedKfd::open() {
   init_command_processors_locked();
 
   return fd_.load(std::memory_order_acquire);
+}
+
+SimulatedKfd::GpuFaultReporter *SimulatedKfd::fault_reporter_for(GpuDevice &gpu) {
+  if (!gpu.fault_reporter)
+    gpu.fault_reporter = std::make_unique<GpuFaultReporter>(this, gpu.gpu_id);
+  return gpu.fault_reporter.get();
+}
+
+void SimulatedKfd::report_memory_fault(uint32_t vmid, uint64_t addr, uint32_t gpu_id,
+                                       amdgpu::MemoryFaultCause cause) {
+  std::shared_ptr<KfdProcess> proc;
+  {
+    std::lock_guard<std::mutex> lk(process_mutex_);
+    auto it = processes_.find(vmid);
+    if (it == processes_.end())
+      return;
+    proc = it->second;
+  }
+
+  MemoryFault fault{};
+  fault.va = addr;
+  fault.gpu_id = gpu_id;
+  // Indeterminate deliberately sets neither failure bit: the violation is real
+  // but its cause was never established, and naming a protection the address
+  // may not have would send the runtime after the wrong problem. It does not
+  // set `imprecise` either -- that reports an inexact faulting address, which
+  // is not what is uncertain here.
+  fault.not_present = cause == amdgpu::MemoryFaultCause::NotPresent;
+  fault.read_only = cause == amdgpu::MemoryFaultCause::ReadOnly;
+
+  // Reporting is best effort by design: a process that never created a
+  // memory-exception event has no channel for this, exactly as on hardware,
+  // and the warning is the only remaining place the violation can surface.
+  if (!proc->event_state_.signal_memory_fault(fault)) {
+    util::Logger::warn("GPU memory violation at 0x", std::hex, addr, std::dec, " (process ", vmid,
+                       ") has no registered memory-exception event to report it on");
+  }
 }
 
 void SimulatedKfd::set_process_client_pid(uint32_t process_id, pid_t client_pid) {
@@ -809,6 +891,7 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
       if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
         mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
                               proc->page_table_generation(), proc->page_table_request_mutex());
+        mem->set_memory_fault_reporter(fault_reporter_for(g));
         if (client_pid > 0)
           mem->set_process_client_pid(pid, client_pid);
       }
@@ -1044,7 +1127,7 @@ int SimulatedKfd::close(uint32_t process_id) {
         leaked_handles.push_back(handle);
       if (alloc.host_ptr && alloc.host_ptr_owned) {
         unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
-        libc_passthrough().munmap(alloc.host_ptr, alloc.size);
+        safe_munmap(alloc.host_ptr, alloc.size);
         alloc.host_ptr = nullptr;
         alloc.host_ptr_owned = false;
       }
@@ -1092,10 +1175,10 @@ int SimulatedKfd::close(uint32_t process_id) {
       if (view.gpu_va && doorbell_page_size)
         unmap_from_gpu(proc, view.gpu_va, doorbell_page_size);
       if (view.page != MAP_FAILED && doorbell_page_size)
-        libc_passthrough().munmap(view.page, doorbell_page_size);
+        safe_munmap(view.page, doorbell_page_size);
     }
     if (doorbell_monitor_page && doorbell_page_size)
-      libc_passthrough().munmap(doorbell_monitor_page, doorbell_page_size);
+      safe_munmap(doorbell_monitor_page, doorbell_page_size);
     if (doorbell_memfd >= 0) {
       {
         std::lock_guard<std::mutex> flk(owned_fds_mutex_);
@@ -1545,7 +1628,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
         if (init_ptr != MAP_FAILED) {
           libc_passthrough().madvise(init_ptr, size, MADV_POPULATE_WRITE);
           std::memset(init_ptr, 0xFF, size);
-          libc_passthrough().munmap(init_ptr, size);
+          safe_munmap(init_ptr, size);
         }
       }
       safe_fcntl(backing, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW);
@@ -1587,7 +1670,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       }
     }
     if (alloc.user_va && (flags & MAP_FIXED) && addr != nullptr) {
-      auto prot_rc = libc_passthrough().mprotect(addr, length, PROT_READ | PROT_WRITE);
+      auto prot_rc = safe_mprotect(addr, length, PROT_READ | PROT_WRITE);
       if (prot_rc == 0) {
         constexpr size_t page_size = 4096;
         size_t num_pages = (length + page_size - 1) / page_size;
@@ -1607,7 +1690,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
               }
             }
           }
-          libc_passthrough().munmap(temp_mapping, length);
+          safe_munmap(temp_mapping, length);
         }
       }
     }
@@ -1621,7 +1704,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
   } else {
     bool reuse_pages = false;
     if (alloc.user_va && (flags & MAP_FIXED) && addr != nullptr) {
-      auto rc = libc_passthrough().mprotect(addr, length, PROT_READ | PROT_WRITE);
+      auto rc = safe_mprotect(addr, length, PROT_READ | PROT_WRITE);
       reuse_pages = (rc == 0);
     }
     if (reuse_pages) {
@@ -1726,13 +1809,13 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
       if (last_doorbell_view)
         update_cp_doorbell_base(doorbell_ord, proc.process_id(), nullptr);
       if (doorbell_monitor_page && doorbell_page_size)
-        libc_passthrough().munmap(doorbell_monitor_page, doorbell_page_size);
+        safe_munmap(doorbell_monitor_page, doorbell_page_size);
       // Unmap the exact page we mapped: use the recorded doorbell page size, not
       // the caller-provided length. A length that differs from the tracked mapping
       // would otherwise partially unmap the CPU page and leave it inconsistent with
       // the GPU page-table unmap above.
       if (addr != MAP_FAILED && doorbell_page_size)
-        libc_passthrough().munmap(addr, doorbell_page_size);
+        safe_munmap(addr, doorbell_page_size);
       if (doorbell_memfd >= 0) {
         {
           std::lock_guard<std::mutex> flk(owned_fds_mutex_);
@@ -1747,14 +1830,14 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
   // the CP interrupt thread holds when reading them in signal_interrupt, so the
   // munmap below cannot race a concurrent signal writing into the mapping.
   if (proc.event_state_.release_page(addr)) {
-    libc_passthrough().munmap(addr, length);
+    safe_munmap(addr, length);
     return 0;
   }
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
   for (auto &[handle, alloc] : proc.allocations_) {
     if (alloc.host_ptr == addr) {
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
-      libc_passthrough().munmap(addr, length);
+      safe_munmap(addr, length);
       alloc.host_ptr = nullptr;
       alloc.host_ptr_owned = false;
       return 0;
@@ -1933,7 +2016,10 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
           if (mapped != MAP_FAILED) {
             alloc.host_ptr = mapped;
             alloc.host_ptr_owned = true;
-            map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype);
+            // Driver-owned: this is our memfd, mapped read-write here and held
+            // open, so nothing outside can change its protection or unmap it.
+            map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype,
+                       KfdProcess::HostExtentOwner::Driver);
           }
         }
       }
@@ -2038,7 +2124,10 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
   }
   libc_passthrough().close(memfd);
   std::memset(host_ptr, 0, aligned_size);
-  proc->map_pages(gpu_va, host_ptr, aligned_size);
+  // Driver-owned for the same reason as the allocation path: the backing is a
+  // memfd this function created and mapped read-write.
+  proc->map_pages(gpu_va, host_ptr, aligned_size, amdgpu::Mtype::RW,
+                  KfdProcess::HostExtentOwner::Driver);
 
   {
     std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
@@ -2466,7 +2555,7 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
       proc.remap_page_host_ptrs(alloc.gpu_va, alloc.host_ptr, new_host_ptr, alloc.size);
 
       if (alloc.host_ptr_owned)
-        libc_passthrough().munmap(alloc.host_ptr, alloc.size);
+        safe_munmap(alloc.host_ptr, alloc.size);
 
       alloc.host_ptr = new_host_ptr;
       alloc.host_ptr_owned = true;
@@ -2987,7 +3076,15 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
   bool publish_ok = true;
   auto write_block = [&](uint64_t address, std::span<const uint8_t> bytes) {
     if (target_mem.get() < 0) {
-      memory->write_block(address, bytes, process_id);
+      // A refused write publishes nothing, so reporting success would tell the
+      // debugger a context is available at an address that holds none of it.
+      // The pwrite path below fails publication on a short write for the same
+      // reason; this is that failure arriving through the memory model.
+      if (memory->write_block(address, bytes, process_id) == amdgpu::AccessOutcome::Faulted) {
+        publish_ok = false;
+        util::Logger::warn("CWSR target write faulted: addr=0x", std::hex, address, std::dec,
+                           " pid=", proc->client_pid());
+      }
       return;
     }
     const ssize_t written =
@@ -3695,7 +3792,17 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
       bool read_ok = true;
       auto read_block = [&](uint64_t address, std::span<uint8_t> bytes) {
         if (target_mem.get() < 0) {
-          memory->read_block(address, bytes, proc->process_id());
+          // A refused read leaves the span zero-filled, which deserializes as a
+          // valid-looking context: waves would resume with cleared registers and
+          // a zero program counter rather than staying stopped. The pread path
+          // below already treats a short read that way, and this is the same
+          // failure arriving through the memory model instead of the kernel.
+          if (memory->read_block(address, bytes, proc->process_id()) ==
+              amdgpu::AccessOutcome::Faulted) {
+            read_ok = false;
+            util::Logger::warn("CWSR target read faulted: addr=0x", std::hex, address, std::dec,
+                               " pid=", proc->client_pid());
+          }
           return;
         }
         const ssize_t bytes_read =

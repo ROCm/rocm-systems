@@ -59,6 +59,22 @@ on:
         type: string
         default: ""
         description: "Workflow run ID to copy prebuilt stage artifacts from; required when prebuilt_stages is set"
+      build_python_packages:
+        type: boolean
+        default: false
+        description: "Build ROCm Python packages"
+      build_pytorch:
+        type: boolean
+        default: false
+        description: "Build PyTorch wheels"
+      build_jax:
+        type: boolean
+        default: false
+        description: "Build JAX wheels"
+      build_native_linux:
+        type: boolean
+        default: false
+        description: "Build native Linux packages and run install tests"
       baseline_repository:
         type: string
         default: ""
@@ -128,6 +144,10 @@ jobs:
       # Hard-coding to empty for now.
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      build_python_packages: ${{ inputs.build_python_packages || false }}
+      build_pytorch: ${{ inputs.build_pytorch || false }}
+      build_jax: ${{ inputs.build_jax || false }}
+      build_native_linux: ${{ inputs.build_native_linux || false }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines
       # and determines which stages to rebuild based on changed files

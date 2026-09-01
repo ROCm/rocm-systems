@@ -12,8 +12,8 @@
 #include "common/json_config.hpp"
 #include "common/path.hpp"
 
+#include <fmt/format.h>
 #include <nlohmann/json.hpp>
-#include <spdlog/fmt/fmt.h>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/settings.hpp>
