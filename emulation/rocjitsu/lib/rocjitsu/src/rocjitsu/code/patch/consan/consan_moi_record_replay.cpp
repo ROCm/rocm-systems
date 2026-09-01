@@ -164,7 +164,7 @@ MoiPersistentStateDemand plan_record_replay_persistent_state_demand(
   MoiPersistentStateDemand demand =
       make_exact_workgroup_capture_demand(request, resources, point, facts);
   demand.needs_persistent_state =
-      moi_initializes_owner_epoch(request, point) || demand.needs_entry_workgroup_tuple;
+      point.moi_initialize_owner_epoch || demand.needs_entry_workgroup_tuple;
   demand.needs_persistent_dispatch_capture =
       facts.access_count && record_replay_uses_automatic_banked_capture(request, resources) &&
       !consan_moi_detail::moi_has_runtime_hardware_dispatch_id(point) &&

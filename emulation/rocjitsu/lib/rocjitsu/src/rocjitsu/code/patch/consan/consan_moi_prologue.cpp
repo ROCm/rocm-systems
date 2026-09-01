@@ -2321,7 +2321,7 @@ void try_apply_owner_epoch_prologue_patch(
     std::span<const ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments,
     const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch,
     ConSanTransformArtifacts &result) {
-  if (!moi_initializes_owner_epoch(options, operating_point))
+  if (!operating_point.moi_initialize_owner_epoch)
     return;
   if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back(

@@ -331,21 +331,18 @@ TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
 }
 
 TEST(ConSan, MoiOwnerEpochInitializationIsAnOperatingPointDecision) {
-  ConSanRequest request;
-  ConSanMoiOperatingPoint point;
+  ConSanOptions options;
+  EXPECT_FALSE(initial_consan_moi_operating_point(options).moi_initialize_owner_epoch);
 
-  EXPECT_FALSE(moi_initializes_owner_epoch(request, point));
-  request.moi_init_owner_epoch = true;
-  EXPECT_TRUE(moi_initializes_owner_epoch(request, point));
+  options.moi_init_owner_epoch = true;
+  ConSanMoiOperatingPoint point = initial_consan_moi_operating_point(options);
+  EXPECT_TRUE(point.moi_initialize_owner_epoch);
 
+  options.moi_init_owner_epoch = false;
+  EXPECT_TRUE(point.moi_initialize_owner_epoch);
   point.moi_initialize_owner_epoch = false;
-  EXPECT_FALSE(moi_initializes_owner_epoch(request, point));
-  EXPECT_TRUE(request.moi_init_owner_epoch);
-
-  request.moi_init_owner_epoch = false;
-  point.moi_initialize_owner_epoch = true;
-  EXPECT_TRUE(moi_initializes_owner_epoch(request, point));
-  EXPECT_FALSE(request.moi_init_owner_epoch);
+  EXPECT_FALSE(point.moi_initialize_owner_epoch);
+  EXPECT_FALSE(options.moi_init_owner_epoch);
 }
 
 TEST(ConSan, MoiResourceProblemBindsImmutableSolverInputs) {

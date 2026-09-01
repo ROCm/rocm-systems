@@ -39,7 +39,7 @@ struct MoiObjectModePlan {
   ConSanMoiOwnerSource owner_source = ConSanMoiOwnerSource::Automatic;
   bool track_atomics = false;
   bool track_barriers = false;
-  std::optional<bool> initialize_owner_epoch;
+  bool initialize_owner_epoch = false;
   MoiObjectModeSemantics semantics;
   bool inline_atomic_without_access = false;
   bool reserve_dynamic_stack_prologue_entry = false;

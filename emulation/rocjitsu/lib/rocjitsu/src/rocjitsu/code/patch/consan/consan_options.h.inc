@@ -961,10 +961,11 @@ enum class ConSanMoiScalarSpillLayout : uint8_t {
 };
 
 struct ConSanMoiOperatingPoint {
-  /// Placement's effective owner/epoch-prologue decision. An empty value
-  /// preserves the immutable request; a concrete value records a solver-owned
-  /// enable or disable decision without rewriting caller configuration.
-  std::optional<bool> moi_initialize_owner_epoch;
+  /// Placement's effective owner/epoch-prologue decision. Initial point
+  /// construction resolves the caller request into this value once; mode
+  /// planning and placement may subsequently refine it without requiring
+  /// downstream components to consult a parallel configuration authority.
+  bool moi_initialize_owner_epoch = false;
   /// First SGPR in the code-object-wide EXEC/VCC/SCC save window accepted by
   /// placement. This is seeded from the corresponding caller override when
   /// present, but thereafter records the selected lowering state rather than
@@ -1067,6 +1068,7 @@ struct ConSanMoiOperatingPoint {
 [[nodiscard]] inline ConSanMoiOperatingPoint
 initial_consan_moi_operating_point(const ConSanOptions &options) {
   ConSanMoiOperatingPoint point;
+  point.moi_initialize_owner_epoch = options.moi_init_owner_epoch;
   point.moi_exec_save_sgpr = options.requested_moi_exec_save_sgpr;
   point.moi_owner_sgpr.set(options.requested_moi_owner_sgpr);
   if (options.requested_moi_owner_vgpr && options.requested_moi_epoch_vgpr) {

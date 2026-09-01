@@ -250,7 +250,7 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
     return result;
   }
   if (mode_plan.reserve_dynamic_stack_prologue_entry &&
-      moi_initializes_owner_epoch(effective_options, effective_point)) {
+      effective_point.moi_initialize_owner_epoch) {
     for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       if (!kernel.has_text_range || !kernel.uses_dynamic_stack.value_or(false))
         continue;
@@ -283,7 +283,7 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
                plan.source != ConSanRegisterAllocationSource::Unsupported;
       });
   if (result.errors.empty() && inline_atomic_without_access && has_usable_atomic_plan &&
-      moi_initializes_owner_epoch(effective_options, effective_point)) {
+      effective_point.moi_initialize_owner_epoch) {
     // Atomic-only objects do not need access-layout information in their
     // owner/epoch prologue. Emit it before the large atomic helpers so the
     // original kernel entry can reach it without consuming a scarce local

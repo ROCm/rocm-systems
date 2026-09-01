@@ -316,6 +316,11 @@ foreach(_file IN LISTS _consan_production_files)
     )
     _consan_assert_no_match(
         "${_file}"
+        "moi_initializes_owner_epoch|moi_initialize_owner_epoch[.]value_or"
+        "owner/epoch initialization must remain one resolved operating-point decision"
+    )
+    _consan_assert_no_match(
+        "${_file}"
         "moi_record_replay_workgroup_private_offsets"
         "site-local private workgroup capture must not return to the code-object-wide operating point"
     )
@@ -345,6 +350,13 @@ foreach(_file IN LISTS _consan_production_files)
         "mode semantics must not return to the mutable operating point"
     )
 endforeach()
+file(READ "${_consan_dir}/consan_options.h.inc" _consan_options_contract)
+if(NOT _consan_options_contract MATCHES
+       "point[.]moi_initialize_owner_epoch[ \t]*=[ \t]*options[.]moi_init_owner_epoch")
+    message(FATAL_ERROR
+        "ConSan initial operating-point construction must resolve owner/epoch initialization"
+    )
+endif()
 file(READ "${_consan_dir}/consan_capability_contract.h" _target_neutral_abi_contract)
 foreach(_operand IN ITEMS ExecLo ExecHi VccLo VccHi WorkitemIdX ScopeDevice)
     if(NOT _target_neutral_abi_contract MATCHES "kAmdGpu${_operand}")

@@ -97,7 +97,7 @@ common_moi_workitem_owner_shift(std::span<const uint8_t> image,
 
 [[nodiscard]] bool moi_record_uses_private_owner(const ConSanRequest &request,
                                                  const ConSanMoiOperatingPoint &point) {
-  return moi_initializes_owner_epoch(request, point) && point.automatic_moi_private_epoch &&
+  return point.moi_initialize_owner_epoch && point.automatic_moi_private_epoch &&
          request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId &&
          !point.moi_owner_epoch_vgprs.owner() && !point.moi_persistent_sgprs.owner();
 }

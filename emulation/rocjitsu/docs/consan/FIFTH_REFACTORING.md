@@ -5657,3 +5657,63 @@ and mode locality, broader operating-point and mutable-transaction surfaces,
 larger legacy harvesting, material whole-refactoring shrinkage, and the
 independent Section 14 completion audit remain open. The goal therefore
 remains active.
+
+### 16.70 Convergence checkpoint 69: one resolved owner/epoch-initialization authority
+
+The operating-point deep read found that owner/epoch initialization still had
+two authorities. `ConSanMoiOperatingPoint::moi_initialize_owner_epoch` was an
+optional refinement, while downstream placement, prologue, and mode code used
+`moi_initializes_owner_epoch` to fall back to the immutable request whenever
+the point had no value. Consequently, the supposedly accepted operating point
+did not completely describe the transformation that consumers would emit.
+
+Initial operating-point construction now resolves the request exactly once
+into a non-optional Boolean. Planning and placement may refine that value, and
+all later lowering consumes only the accepted point. The fallback helper is
+deleted, as is the optional state in the mode plan. The architecture gate
+forbids both the retired helper and optional-value fallback in production and
+requires the request-to-point assignment at the construction boundary.
+
+The existing direct operating-point test now proves snapshot semantics: it
+changes the request after constructing a point and verifies that mode planning
+continues to obey the resolved point. The first broad MOI gate also exposed 18
+test-fixture failures. `MoiOptions`, the tests' convenience type, intentionally
+lets fixtures default-construct and then mutate request fields; its lowering
+adapter now performs the same explicit request-to-point resolution at that
+test-only boundary while preserving all independently seeded allocation
+state. This keeps fixture ergonomics without reintroducing a production
+fallback authority. All 18 affected reproducers and the complete MOI gate pass.
+
+Between checkpoint 68 and this slice, urgent gfx950 private-dispatch fallback
+commit `f9428fa1ba6` added eight production implementation lines and eleven
+tests. This slice removes five implementation lines, leaving the exact current
+tree three implementation lines larger than checkpoint 68.
+
+| Signal | Checkpoint 69 | Cumulative change | Slice change from `f9428fa1ba6` |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 105,224 | +248 | **-7** |
+| Nonblank production lines | 98,889 | **-195** | **-5** |
+| Production implementation lines | 91,115 | **-335** | **-5** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **174 / 52** | **-102 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 354 / 63 | +64 / +12 | **-2 / 0** |
+| Production request-fallback authorities | **0** | n/a | helper deleted |
+| Test inventory | **5,406** | **+61** | 0 |
+
+Validation includes a final-tree `-j16` build; 15 direct mode-planning,
+ownership, and architecture-boundary tests; all 18 initially affected fixture
+reproducers; all 897 MOI tests; all 4,771 nonphysical tests over the five
+emulated targets at `-j16` in 211.36 seconds, including 2,918 simulator tests;
+and all 635 physical gfx1201 tests serialized at `-j1` in 109.49 seconds. No
+test was removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, 14.8, and
+14.9. Owner/epoch initialization is now fully resolved before consumers see an
+operating point, and the obsolete parallel request path is gone. Cumulative
+implementation shrinkage is 335 lines, which is still not material completion.
+Remaining architecture and mode locality, broader operating-point and mutable-
+transaction surfaces, larger legacy harvesting, material whole-refactoring
+shrinkage, and the independent Section 14 completion audit remain open. The
+goal therefore remains active.

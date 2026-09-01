@@ -480,11 +480,6 @@ resolve_moi_exec_save_requirement(const ConSanRequest &request,
   };
 }
 
-bool moi_initializes_owner_epoch(const ConSanRequest &request,
-                                 const ConSanMoiOperatingPoint &operating_point) {
-  return operating_point.moi_initialize_owner_epoch.value_or(request.moi_init_owner_epoch);
-}
-
 uint16_t moi_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement, rj_code_arch_t arch) {
   consan_moi_impl::MoiExecSaveTargetFacts target_facts;
   if (const ConSanTargetProfile *target = consan_target_profile(arch))

@@ -3176,7 +3176,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   // special state, while persistent owner/epoch values live in VGPRs. Do not
   // turn entry ABI inputs into false live-through constraints for that
   // site-local window.
-  if (moi_initializes_owner_epoch(request, options) && !inline_layout) {
+  if (options.moi_initialize_owner_epoch && !inline_layout) {
     for (const ConSanKernelInfo &kernel : problem.inventory().kernels())
       include_site(kernel.entry_text_offset);
   }
@@ -3986,7 +3986,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     if (!plan.owner_descriptor_file_offsets.empty())
       include_site(plan.text_offset);
   }
-  if (moi_initializes_owner_epoch(request, options)) {
+  if (options.moi_initialize_owner_epoch) {
     for (const ConSanKernelInfo &kernel : problem.inventory().kernels())
       include_site(kernel.entry_text_offset);
   }

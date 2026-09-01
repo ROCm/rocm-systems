@@ -120,10 +120,6 @@ resolve_moi_exec_save_requirement(const ConSanRequest &request,
                                   const ConSanMoiOperatingPoint &operating_point,
                                   const consan_moi_impl::MoiObjectModeSemantics &mode_semantics);
 
-/// Resolve the solver-owned prologue decision without mutating the request.
-[[nodiscard]] bool moi_initializes_owner_epoch(const ConSanRequest &request,
-                                               const ConSanMoiOperatingPoint &operating_point);
-
 [[nodiscard]] std::optional<uint16_t>
 moi_dynamic_stack_frame_save_sgpr_offset(ConSanMoiEngine engine);
 

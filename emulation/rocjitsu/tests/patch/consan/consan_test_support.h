@@ -61,6 +61,15 @@ struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {
   MoiOptions(const ConSanOptions &options)
       : ConSanOptions(options),
         ConSanMoiOperatingPoint(initial_consan_moi_operating_point(options)) {}
+
+  /// Focused fixtures commonly assign request fields after default
+  /// construction. Recreate production's one request-to-point resolution at
+  /// the test boundary while preserving every explicitly seeded allocation.
+  [[nodiscard]] ConSanMoiOperatingPoint resolved_operating_point() const {
+    ConSanMoiOperatingPoint point = *this;
+    point.moi_initialize_owner_epoch = moi_init_owner_epoch;
+    return point;
+  }
 };
 
 /// Focused classifier/planner tests start from decoded sites so they can
@@ -149,8 +158,8 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
 [[nodiscard]] inline ConSanTransformArtifacts
 test_lower_consan(std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
                   ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
-  return complete_consan_lowering_with_operating_point(code_object_bytes, options, options,
-                                                       inspected_perturbation);
+  return complete_consan_lowering_with_operating_point(
+      code_object_bytes, options, options.resolved_operating_point(), inspected_perturbation);
 }
 
 /// Lower one focused fixture whose input image already contains committed
@@ -160,8 +169,8 @@ test_lower_consan(std::span<const uint8_t> code_object_bytes, const MoiOptions &
 [[nodiscard]] inline ConSanTransformArtifacts test_lower_consan_with_preapplied_mutation(
     std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
     const ConSanPreappliedMutationLayout &preapplied_mutation) {
-  return complete_consan_lowering_with_operating_point(code_object_bytes, options, options, nullptr,
-                                                       preapplied_mutation);
+  return complete_consan_lowering_with_operating_point(
+      code_object_bytes, options, options.resolved_operating_point(), nullptr, preapplied_mutation);
 }
 
 /// Lower one focused fixture from an explicitly selected owner-local transient
@@ -173,7 +182,7 @@ test_lower_consan(std::span<const uint8_t> code_object_bytes, const MoiOptions &
 test_lower_consan_with_owner_transient_sgpr_assignment(
     std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
     const ConSanMoiTransientSgprAssignment &assignment) {
-  ConSanMoiOperatingPoint point = options;
+  ConSanMoiOperatingPoint point = options.resolved_operating_point();
   point.owner_transient_sgprs = {assignment};
   return complete_consan_lowering_with_operating_point(code_object_bytes, options, point);
 }
@@ -185,8 +194,8 @@ test_lower_consan_with_owner_transient_sgpr_assignment(
 test_semantic_inventory(std::span<const uint8_t> code_object_bytes, MoiOptions options,
                         ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
   options.fault_dry_run = true;
-  return complete_consan_lowering_with_operating_point(code_object_bytes, options, options,
-                                                       inspected_perturbation);
+  return complete_consan_lowering_with_operating_point(
+      code_object_bytes, options, options.resolved_operating_point(), inspected_perturbation);
 }
 
 /// Build the dry-run semantic inventory required to select a barrier-move
@@ -197,8 +206,8 @@ test_barrier_move_inventory(std::span<const uint8_t> code_object_bytes, MoiOptio
                             ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
   options.fault_move_barrier = true;
   options.fault_dry_run = true;
-  return complete_consan_lowering_with_operating_point(code_object_bytes, options, options,
-                                                       inspected_perturbation);
+  return complete_consan_lowering_with_operating_point(
+      code_object_bytes, options, options.resolved_operating_point(), inspected_perturbation);
 }
 namespace {
 

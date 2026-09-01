@@ -40,7 +40,7 @@ bool sampled_access_can_plan_spill_over_guest_operands(const ConSanRequest &requ
   // Automatic persistent-state placement runs after the first resource pass.
   // Admit the overlap provisionally when entry-persistent owner state will be
   // resolved later; emission still requires a concrete persistent owner VGPR.
-  return moi_initializes_owner_epoch(request, point) || request.moi_track_atomics ||
+  return point.moi_initialize_owner_epoch || request.moi_track_atomics ||
          request.moi_track_barriers || request.moi_runtime_sample_stride > 1u;
 }
 
