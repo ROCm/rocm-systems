@@ -47,10 +47,11 @@ struct ncclInfo {
   // A config copied from config passed by user so older user config can be safely accessed
   // during synchronous host scheduling (never at launch/replay).
   ncclCollConfig_t collConfig;
-  // Implementation decision precomputed by ncclAllReduce_impl() via
-  // rcclSelectAllReduce() and consumed by taskAppend() to avoid recomputing the
-  // CE-vs-kernel choice and graph-capture state. Valid only when decisionValid
-  // is true (false for non-AllReduce collectives and the WithBias path).
+  // Implementation decision precomputed by ncclAllReduce_impl() /
+  // ncclAllGather_impl() via rcclSelectAllReduce() / rcclSelectAllGather() and
+  // consumed by taskAppend() so it does not recompute CE-vs-kernel or
+  // graph-capture state. Valid only when decisionValid is true (false for
+  // collectives that have not been wired yet, and the AllReduce WithBias path).
   struct rcclCollDecision decision;
   bool decisionValid;
 };
