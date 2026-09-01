@@ -6,8 +6,8 @@
 
 #include "rocjitsu/code/dbt/legalization/gfx1250_b0_to_a0.h"
 
-#include "rocjitsu/analysis/def_use_chain.h"
-#include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"

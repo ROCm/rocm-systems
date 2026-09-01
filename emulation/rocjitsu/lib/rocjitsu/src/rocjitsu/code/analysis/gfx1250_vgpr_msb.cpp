@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
+#include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
 
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"

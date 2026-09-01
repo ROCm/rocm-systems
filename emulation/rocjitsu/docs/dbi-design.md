@@ -192,7 +192,7 @@ Enumerates a code object's kernel descriptors and derives per-kernel allocation 
 
 ### Register Liveness Analysis [shared with DBT]
 
-**Files:** `analysis/liveness.h`, `analysis/liveness.cpp`, `analysis/def_use_chain.h`, `analysis/def_use_chain.cpp`
+**Files:** `code/analysis/liveness.h`, `code/analysis/liveness.cpp`, `code/analysis/def_use_chain.h`, `code/analysis/def_use_chain.cpp`
 **Used by:** DBT semantic translator; the DBI probe-call register planner (liveness at the anchor feeds dead-register selection for the link/target pairs and SCC temp, and the spill-set computation)
 
 Kernel-scoped backward register liveness over the CFG embedded in `BasicBlock`. Callers construct a `LivenessAnalysis` from one `KernelBlockScope` (the blocks reachable from one kernel descriptor entry). Successor/predecessor edges that leave the scope are ignored, so one decoded code object containing N kernels yields N independent analyses.
