@@ -20,43 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+// SHA-256 (FIPS 180-4) and HMAC-SHA-256 (RFC 2104).
 //
-// SHA-256 (FIPS 180-4) and HMAC-SHA-256 (FIPS 198-1 / RFC 2104).
+// Copy of projects/rocprofiler-sdk/source/lib/common/sha256.{hpp,cpp}, so CUID
+// needs nothing beyond the standard library. Kept API-compatible with it and in
+// a neutral namespace so the two can be merged later by moving these files.
+// tests/check_sha256_drift.py enforces that they stay identical; only update()
+// differs, by rocprofiler's logging call.
 //
-// This is the implementation already carried in this repository at
-// projects/rocprofiler-sdk/source/lib/common/sha256.{hpp,cpp}, copied here so
-// that CUID has no dependency beyond the C++17 standard library. The class API
-// is kept source-compatible with that original -- same members, same method
-// names, same private helpers -- so the two copies can be collapsed into one
-// shared component later without touching either caller. The namespace is
-// deliberately neutral rather than cuid-specific for the same reason: the move
-// should be a file move, not an API change.
-//
-// The complete set of deviations from the rocprofiler-sdk original, for
-// whoever reconciles the two:
-//
-//   1. The rocprofiler-internal includes (defines.hpp / mpl.hpp / logging.hpp)
-//      and the two ROCP_CI_LOG_IF diagnostics in update() are dropped. Those
-//      diagnostics only logged; the `if(m_finalized) return;` guards they sat
-//      next to are retained.
-//   2. reset() additionally clears m_data and m_finalized. In the original,
-//      reset() is private and only ever runs from the constructor, so the
-//      omission is unobservable there; clearing them makes the method correct
-//      if it is ever exposed for object reuse.
-//   3. transform() casts each byte to uint32_t before shifting. The original
-//      relies on integer promotion to int; that is well defined for these
-//      values, so this is legibility, not a fix.
-//   4. transform() scrubs its message schedule before returning.
-//   5. digest(), sha256_digest(), hmac_sha256() and secure_zero() are new.
-//
-// Deviations 1-4 are behaviour-preserving: the two implementations were run
-// side by side over the padding-boundary lengths (0, 55, 56, 63, 64, 65, 127,
-// 128, 129) plus randomised lengths and randomised chunked updates, and agree
-// bit for bit.
-//
-// Not constant-time and not side-channel hardened. It exists for identifier
-// derivation (CUID), not for bulk secret processing.
-//
+// Not constant-time. For identifier derivation, not bulk secret processing.
 
 #ifndef ROCM_SHA2_SHA256_H
 #define ROCM_SHA2_SHA256_H

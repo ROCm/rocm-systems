@@ -81,7 +81,8 @@ std::string_view trim(std::string_view str) {
   auto last_itr = std::find_if_not(str.rbegin(), str.rend(),
                                    [](unsigned char character) { return std::isspace(character); });
 
-  return str.substr(first_itr - str.begin(), last_itr.base() - first_itr);
+  return str.substr(static_cast<size_t>(first_itr - str.begin()),
+                    static_cast<size_t>(last_itr.base() - first_itr));
 }
 
 // Given original string and string to remove (removeMe)
@@ -440,10 +441,16 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
     max = current_freq;
     min = current_freq;
   }
-  if (num_dpm) *num_dpm = dpm;
-  if (max_freq) *max_freq = max;
-  if (min_freq) *min_freq = min;
-  if (sleep_state_freq) *sleep_state_freq = sleep_freq;
+  if ((num_dpm && dpm > static_cast<unsigned int>(INT_MAX)) ||
+      (max_freq && max > static_cast<unsigned int>(INT_MAX)) ||
+      (min_freq && min > static_cast<unsigned int>(INT_MAX)) ||
+      (sleep_state_freq && sleep_freq > static_cast<unsigned int>(INT_MAX))) {
+    return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+  }
+  if (num_dpm) *num_dpm = static_cast<int>(dpm);
+  if (max_freq) *max_freq = static_cast<int>(max);
+  if (min_freq) *min_freq = static_cast<int>(min);
+  if (sleep_state_freq) *sleep_state_freq = static_cast<int>(sleep_freq);
 
   ranges.close();
   return AMDSMI_STATUS_SUCCESS;
@@ -796,7 +803,7 @@ amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* devic
   std::string line;
   if (std::getline(fs, line)) {
     try {
-      uint32_t line_value = std::stoul(std::string(trim(line)));
+      uint32_t line_value = static_cast<uint32_t>(std::stoul(std::string(trim(line))));
       if (line_value > 100) {
         // max of uint32_t is used to indicate the erroneous value
         *vcn_busy_percent = std::numeric_limits<uint32_t>::max();

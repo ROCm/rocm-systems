@@ -22,11 +22,13 @@
 
 CuidCpu::CuidCpu(const amdcuid_cpu_info& i) : m_info(i) {}
 
+namespace {
+
 /**
  * @brief Get CPU information from CPUID instruction (x86_64)
  */
-static bool get_cpuid_info(uint16_t& vendor_id, uint16_t& family, uint16_t& model,
-                           uint16_t& device_id, uint8_t& stepping) {
+bool get_cpuid_info(uint16_t& vendor_id, uint16_t& family, uint16_t& model, uint16_t& device_id,
+                    uint8_t& stepping) {
 #ifdef __x86_64__
   uint32_t eax, ebx, ecx, edx;
 
@@ -76,6 +78,8 @@ static bool get_cpuid_info(uint16_t& vendor_id, uint16_t& family, uint16_t& mode
 #endif
 }
 
+}  // namespace
+
 /**
  * @brief CPU information parsed from /proc/cpuinfo
  */
@@ -91,13 +95,15 @@ struct ProcCpuInfo {
   bool is_amd = false;
 };
 
+namespace {
+
 /**
  * @brief Parse /proc/cpuinfo to discover CPUs without root privileges
  *
  * This is the primary method for CPU discovery that works without sudo.
  * Returns information about all logical processors on the system.
  */
-static amdcuid_status_t parse_proc_cpuinfo(std::vector<ProcCpuInfo>& cpus) {
+amdcuid_status_t parse_proc_cpuinfo(std::vector<ProcCpuInfo>& cpus) {
   std::ifstream cpuinfo("/proc/cpuinfo");
   if (!cpuinfo) {
     return AMDCUID_STATUS_CPUINFO_ERROR;
@@ -159,6 +165,8 @@ static amdcuid_status_t parse_proc_cpuinfo(std::vector<ProcCpuInfo>& cpus) {
 
   return AMDCUID_STATUS_SUCCESS;
 }
+
+}  // namespace
 
 /**
  * @brief Discover CPUs without root privileges using /proc/cpuinfo
@@ -296,13 +304,15 @@ amdcuid_status_t CuidCpu::discover_single(amdcuid_cpu_info* cpu_info,
   return AMDCUID_STATUS_SUCCESS;
 }
 
+namespace {
+
 /**
  * @brief Try to read PPIN (Protected Processor Inventory Number) from MSR
  *
  * PPIN is available on AMD CPUs (CPUID Fn8000_0008.EBX[23]) via MSR 0xC001_083B
  * Requires root privileges to read MSR.
  */
-static bool try_read_ppin(uint64_t& ppin, uint32_t core_id) {
+bool try_read_ppin(uint64_t& ppin, uint32_t core_id) {
 #ifdef __x86_64__
   // Check if PPIN is supported via CPUID
   uint32_t eax, ebx, ecx, edx;
@@ -338,6 +348,8 @@ static bool try_read_ppin(uint64_t& ppin, uint32_t core_id) {
   return false;
 #endif
 }
+
+}  // namespace
 
 /**
  * @brief Get hardware fingerprint for CPU at socket granularity.

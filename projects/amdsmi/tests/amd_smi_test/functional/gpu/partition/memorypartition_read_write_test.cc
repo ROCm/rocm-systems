@@ -77,9 +77,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
   constexpr uint32_t k255Len = 255;
   constexpr uint32_t k0Len = 0;
   char orig_memory_partition[k255Len];
-  char current_memory_partition[k255Len];
   orig_memory_partition[0] = '\0';
-  current_memory_partition[0] = '\0';
   amdsmi_memory_partition_config_t current_memory_config;
   const uint32_t kMAX_UINT32 = std::numeric_limits<uint32_t>::max();
   std::map<uint32_t, AcceleratorProfileConfig> orig_dev_config;  // index, ProfileConfig
