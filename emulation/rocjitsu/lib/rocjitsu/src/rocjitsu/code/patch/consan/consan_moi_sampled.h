@@ -19,7 +19,9 @@ sampled_reserved_barrier_island_count(const ConSanObservationPlan &observation_p
     const BoundRuntimeResources &resources, const TransformPolicy &policy);
 
 void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
-                                               const MoiOptions &options, rj_code_arch_t arch,
+                                               const ConSanOptions &options,
+                                               const ConSanMoiOperatingPoint &operating_point,
+                                               rj_code_arch_t arch,
                                                MoiResourcePlanningState &resource_state,
                                                std::span<const ConSanMoiCandidate> admitted,
                                                ConSanTransformArtifacts &result);

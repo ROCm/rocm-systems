@@ -505,10 +505,18 @@ if(NOT _moi_sampled_atomic_indexed_address_count EQUAL 6)
     )
 endif()
 file(READ "${_consan_dir}/consan_moi_sampled_sync.inc" _moi_sampled_sync_owner)
-_consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled_sync.inc"
-    "MoiOptions|static_cast<const ConSan(Request|MoiOperatingPoint|BoundRuntimeResources)"
-    "Sampled synchronization must separate immutable input from operating-point state"
+foreach(_sampled_owner IN ITEMS consan_moi_sampled.h consan_moi_sampled_access.inc consan_moi_sampled_sync.inc)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_sampled_owner}"
+        "MoiOptions|static_cast<const ConSan(Request|MoiOperatingPoint|BoundRuntimeResources)"
+        "Sampled components must separate immutable input from operating-point state"
+    )
+endforeach()
+_consan_assert_match_count_at_most(
+    "${_consan_dir}/consan_moi_sampled.cpp"
+    "MoiOptions"
+    1
+    "Sampled may use the broad attempt only at its mode entry"
 )
 string(
     REGEX MATCHALL

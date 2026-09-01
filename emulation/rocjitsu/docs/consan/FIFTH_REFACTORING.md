@@ -3379,3 +3379,65 @@ narrow component contract. Other Sampled regions, the remaining mode owners,
 common barriers and prologues, architecture peepholes, placement and validation
 concentrations, and the independent completion audit remain open. The goal
 therefore remains active.
+
+### 16.35 Convergence checkpoint 34: typed Sampled access attempt boundary
+
+The synchronization boundary in checkpoint 33 left the adjacent Sampled
+access owner as the last compiled Sampled component that accepted the inherited
+`MoiOptions` attempt. That owner copied the complete aggregate four times while
+planning, accounting, finalizing, and emitting candidate-local patches. It then
+assigned the immutable debug `scratch_vgpr` field in three of those copies even
+though scratch bases were already explicit resource-plan values. As in the
+synchronization owner, inheritance obscured which reads were immutable mode
+input and which were resolved operating-point state.
+
+The Sampled access boundary now receives `ConSanOptions` and
+`ConSanMoiOperatingPoint` separately. Candidate-local binding copies only the
+operating point; request, runtime-resource, policy, and delay inputs remain
+immutable; and candidate scratch bases remain explicit values. The public
+Sampled internal header, access owner, and synchronization owner contain no
+`MoiOptions`, inherited input/point casts, or scratch-field assignments. The
+mode entry is now the sole compiled Sampled location that accepts the broad
+attempt and decomposes it into the two existing products. No replacement view,
+compatibility overload, or parallel path was introduced.
+
+The architecture-boundary gate applies that prohibition to all three compiled
+Sampled component surfaces and budgets at most one `MoiOptions` reference in
+the mode entry. This is a containment rule rather than only an occurrence
+reduction: future access or synchronization work cannot regain the inherited
+attempt as a convenience. Existing Sampled tests already exercise direct,
+spill-backed, dense, workgroup-gated, private-epoch, barrier, and atomic paths
+across the supported emulation targets, so no replacement behavioral test was
+needed.
+
+| Signal | Checkpoint 34 | Cumulative change | Slice change from checkpoint 33 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,475 | +500 | **-4** |
+| Nonblank production lines | 99,191 | +108 | **-4** |
+| Production implementation lines | 91,474 | **+24** | **-4** |
+| `MoiOptions` references / files | 73 / 25 | **-14 / 0** | **-6 / -2** |
+| `ConSanTransformArtifacts` references / files | 207 / 56 | **-69 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 205 / 28 | +5 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 308 / 54 | +18 / +3 | **+5 / 0** |
+| `MoiOptions` references in compiled Sampled components | 1 | n/a | **-6** |
+| Sampled whole-attempt candidate copies | 0 | n/a | **-4** |
+| Sampled immutable scratch-field assignments | 0 | n/a | **-3** |
+| Test inventory | 5,379 | +34 | 0 |
+
+Validation includes a full final-tree `-j16` rebuild; all 159 Sampled and
+architecture-boundary focused tests in 1.98 seconds; all 4,744 nonphysical
+tests at `-j16` in 196.69 seconds, including the unchanged 2,908 simulator rows
+over five targets; and all 635 physical gfx1201 tests serialized at `-j1` in
+108.33 seconds. No test was removed, renamed, disabled, added, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.7, 14.8, and 14.9:
+all compiled implementation regions of one mode now expose immutable input and
+resolved state separately, broad attempt copies and their scratch side channel
+are deleted, and the physical boundary enforces the result. Production
+implementation is still 24 lines above baseline, and the operating point
+remains wider than the access and synchronization owners ultimately need.
+Other modes, common barriers and prologues, architecture peepholes, placement
+and validation concentrations, code-size convergence, the extension exercises,
+and the independent deep-read completion audit remain open. The goal therefore
+remains active.

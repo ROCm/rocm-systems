@@ -158,8 +158,8 @@ void apply_sampled_mode_patches(std::span<const uint8_t> bytes, MoiOptions &opti
                                 rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
                                 std::span<const ConSanMoiCandidate> candidates,
                                 const MoiObjectFacts &, ConSanTransformArtifacts &result) {
-  try_apply_direct_sampled_watchpoint_patch(bytes, options, arch, resource_state, candidates,
-                                            result);
+  try_apply_direct_sampled_watchpoint_patch(bytes, options, options, arch, resource_state,
+                                            candidates, result);
   if (result.errors.empty())
     try_apply_sampled_atomic_sync_patch(bytes, options, options, arch, resource_state, result);
   if (result.errors.empty())
