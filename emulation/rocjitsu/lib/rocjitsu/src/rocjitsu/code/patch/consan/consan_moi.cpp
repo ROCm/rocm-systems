@@ -164,7 +164,8 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   if (!dispatch_placement.accepted()) {
     result.outcome = ConSanTransformOutcome::Unsupported;
   } else {
-    const bool dispatch_placement_changed = dispatch_placement.changed;
+    const bool dispatch_placement_changed =
+        dispatch_placement.attempted_operating_point != effective_point;
     effective_point = std::move(dispatch_placement.attempted_operating_point);
     if (dispatch_placement_changed)
       rebuild_resource_plans();
@@ -230,7 +231,8 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   if (!persistent_placement.accepted()) {
     result.outcome = ConSanTransformOutcome::Unsupported;
   } else {
-    const bool persistent_placement_changed = persistent_placement.changed;
+    const bool persistent_placement_changed =
+        persistent_placement.attempted_operating_point != effective_point;
     effective_point = std::move(persistent_placement.attempted_operating_point);
     prologue_scratch_assignments = std::move(persistent_placement.prologue_scratch_assignments);
     if (persistent_placement_changed)

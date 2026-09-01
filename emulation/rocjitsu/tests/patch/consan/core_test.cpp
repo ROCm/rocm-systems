@@ -460,10 +460,8 @@ TEST(ConSan, MoiOperatingPointAttemptPublishesOnlyTypedAcceptedFallbacks) {
 TEST(ConSan, MoiOperatingPointUpdateCarriesPointDiagnosticsAndTypedRejectionTogether) {
   ConSanMoiOperatingPointUpdate accepted;
   accepted.attempted_operating_point.moi_dispatch_identity.set_sgpr(40u);
-  accepted.changed = true;
   accepted.diagnostics.emplace_back("accepted placement");
   EXPECT_TRUE(accepted.accepted());
-  EXPECT_TRUE(accepted.changed);
   EXPECT_EQ(accepted.attempted_operating_point.moi_dispatch_identity.sgpr(), 40u);
   EXPECT_EQ(accepted.diagnostics, std::vector<std::string>{"accepted placement"});
 
@@ -476,11 +474,9 @@ TEST(ConSan, MoiOperatingPointUpdateCarriesPointDiagnosticsAndTypedRejectionToge
 TEST(ConSan, MoiPersistentPlacementUpdateKeepsEntryScratchWithItsOperatingPoint) {
   ConSanMoiPersistentPlacementUpdate accepted;
   accepted.attempted_operating_point.set_moi_owner_epoch_vgprs(40u, 41u);
-  accepted.changed = true;
   accepted.prologue_scratch_assignments.push_back(
       {.descriptor_file_offset = 96u, .scratch_vgpr = 42u});
   EXPECT_TRUE(accepted.accepted());
-  EXPECT_TRUE(accepted.changed);
   ASSERT_EQ(accepted.prologue_scratch_assignments.size(), 1u);
   EXPECT_EQ(accepted.prologue_scratch_assignments.front().descriptor_file_offset, 96u);
   EXPECT_EQ(accepted.prologue_scratch_assignments.front().scratch_vgpr, 42u);

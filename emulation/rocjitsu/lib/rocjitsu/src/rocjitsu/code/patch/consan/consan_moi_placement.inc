@@ -4283,7 +4283,6 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
                                           const MoiResourcePlanningState &state) {
   ConSanMoiOperatingPointUpdate update{
       .attempted_operating_point = base,
-      .changed = false,
       .rejection = std::nullopt,
       .diagnostics = {},
   };
@@ -4389,7 +4388,6 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
                                     "state SGPRs s" +
                                     std::to_string(*dispatch_base) + ":s" +
                                     std::to_string(*dispatch_base + dispatch_state_count - 1u));
-    update.changed = true;
     return update;
   }
 
@@ -4435,7 +4433,6 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
       update.diagnostics.emplace_back(
           "ConSan MOI reserved a high dispatch-ID SGPR pair and excluded only "
           "incompatible full-pressure owner groups");
-      update.changed = true;
       return update;
     }
   }
@@ -4498,7 +4495,6 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
             "ConSan MOI assigned persistent dispatch-ID state to a proven-unused " +
             std::string(rj_code_arch_name(arch)) + " SGPR pair" +
             std::string(used_complete_text_summary ? " using complete-text coverage" : ""));
-        update.changed = true;
         return update;
       }
     }
@@ -4550,7 +4546,6 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
           "ConSan MOI deferred hardware dispatch-ID state to persistent VGPR placement because "
           "owner-private state is incompatible with a dynamic stack");
     }
-    update.changed = true;
     return update;
   }
   update.rejection = ConSanMoiPlacementRejection::DispatchIdSgprUnavailable;
@@ -4808,7 +4803,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
     const MoiResourcePlanningState &planning_state) {
   ConSanMoiPersistentPlacementUpdate update{
       .attempted_operating_point = base,
-      .changed = false,
       .rejection = std::nullopt,
       .diagnostics = {},
       .prologue_scratch_assignments = {},
@@ -5009,7 +5003,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       diagnostics.emplace_back(
           "ConSan MOI retained owner/epoch and dispatch identity in entry-captured private state "
           "below a CDNA AccVGPR boundary");
-      update.changed = true;
       return update;
     }
     if (cdna_overflow_strategy == MoiCdnaPersistentOverflowStrategy::ExactWorkgroupState &&
@@ -5019,7 +5012,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       diagnostics.emplace_back(
           "ConSan MOI selected entry-captured private Record/Replay state below a CDNA "
           "ordinary-VGPR boundary");
-      update.changed = true;
       return update;
     }
     if (cdna_overflow_strategy == MoiCdnaPersistentOverflowStrategy::OwnerSnapshot &&
@@ -5029,7 +5021,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       diagnostics.emplace_back(
           "ConSan MOI selected entry-snapshotted private owner/epoch state below a CDNA ordinary "
           "VGPR boundary for Sampled instrumentation");
-      update.changed = true;
       return update;
     }
     if (cdna_overflow_strategy == MoiCdnaPersistentOverflowStrategy::ExactWorkgroupState &&
@@ -5088,7 +5079,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
         options.moi_initialize_owner_epoch = true;
         prologue_scratch_assignments = std::move(prologue_scratch);
         diagnostics.push_back(scalar_state_description + std::move(diagnostic_suffix));
-        update.changed = true;
       };
       if (scalar_tail) {
         commit_exact_workgroup_scalar_state(*scalar_tail, " state for CDNA Record/Replay");
@@ -5259,7 +5249,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
               "ConSan MOI assigned hybrid persistent vector owner/epoch and scalar "
               "exact-workgroup-tuple state to proven-unused CDNA register holes" +
               std::string(used_complete_text_summary ? " using complete-text coverage" : ""));
-          update.changed = true;
           return update;
         }
       }
@@ -5301,7 +5290,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
         diagnostics.emplace_back(
             "ConSan MOI retained exact Record/Replay entry state in private storage below a "
             "CDNA AccVGPR boundary");
-        update.changed = true;
         return update;
       }
       // A dynamic stack makes fixed private offsets non-persistent, but it
@@ -5472,7 +5460,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       if (crosses_encoded_component_boundary && persistent_demand.scalar_state_supported &&
           !debug.test_force_private_epoch && !component_needs_persistent_dispatch_vgprs &&
           try_assign_scalar_persistent_state()) {
-        update.changed = true;
         return update;
       }
       if (component_base + component_persistent_count > component_limit) {
@@ -5485,7 +5472,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
         if (!crosses_encoded_component_boundary && persistent_demand.scalar_state_supported &&
             !debug.test_force_private_epoch && !component_needs_persistent_dispatch_vgprs &&
             try_assign_scalar_persistent_state()) {
-          update.changed = true;
           return update;
         }
         if (persistent_demand.scalar_state_supported && has_dynamic_stack_owner) {
@@ -5570,7 +5556,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
               "boundaries"
             : "ConSan MOI assigned per-owner persistent VGPR tuples below CDNA AccVGPR "
               "boundaries");
-    update.changed = true;
     return update;
   }
   const bool would_grow_descriptor =
@@ -5696,7 +5681,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
           std::string(needs_record_replay_workgroup_tuple ? "/exact-workgroup-tuple" : "") +
           " state for an " + rdna_arch_name + " " + consan_moi_engine_name(request.moi_engine) +
           " owner without growing the VGPR allocation");
-      update.changed = true;
       return update;
     }
     if (has_dynamic_stack_owner) {
@@ -5727,7 +5711,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
         std::string("ConSan MOI automatically selected derived-owner/private-"
                     "epoch persistent state") +
         (would_grow_descriptor ? " to preserve the guest VGPR allocation" : ""));
-    update.changed = true;
     return update;
   }
   if (needs_private_epoch) {
@@ -5773,7 +5756,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
            ? " with descriptor growth because private epoch storage is incompatible with a "
              "dynamic-stack owner"
            : ""));
-  update.changed = true;
   return update;
 }
 

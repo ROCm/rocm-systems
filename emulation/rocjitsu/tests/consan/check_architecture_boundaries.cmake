@@ -330,6 +330,23 @@ if(NOT _moi_private_layout_contract MATCHES "struct MoiPrivateStateDemand" OR
         "ConSan private-state lowering lost its typed demand or shared descriptor cache"
     )
 endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_resource_types.h.inc"
+    "bool[ \t]+changed"
+    "placement products must not duplicate an operating-point transition bit"
+)
+file(READ "${_consan_dir}/consan_moi.cpp" _moi_coordinator)
+string(REGEX MATCHALL
+    "attempted_operating_point[ \t\n]*!=[ \t\n]*effective_point"
+    _derived_operating_point_transitions
+    "${_moi_coordinator}"
+)
+list(LENGTH _derived_operating_point_transitions _derived_operating_point_transition_count)
+if(NOT _derived_operating_point_transition_count EQUAL 2)
+    message(FATAL_ERROR
+        "ConSan coordinator must derive both accepted placement transitions"
+    )
+endif()
 file(READ "${_consan_dir}/consan_moi_sync_emission.h" _moi_sync_commit_contract)
 if(NOT _moi_sync_commit_contract MATCHES "append_moi_sync_lowering_commit" OR
    NOT _moi_sync_commit_contract MATCHES "plan[.]intent_ids[(][)]")

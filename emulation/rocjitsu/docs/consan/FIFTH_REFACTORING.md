@@ -5162,3 +5162,61 @@ architecture locality, broader operating-point and mutable-transaction
 surfaces, larger legacy harvesting, material Section 14.8 evidence, and the
 independent Section 14 completion audit remain open. The goal therefore remains
 active.
+
+### 16.62 Convergence checkpoint 61: derived placement transitions
+
+The operating-point deep read traced the coordinator's resource-replanning
+decision back through both placement products. Dispatch placement and
+persistent placement each returned the complete attempted operating point, but
+also carried a mutable `changed` bit. Seventeen accepted exits manually set
+that bit after mutating some subset of the point. The coordinator therefore
+trusted a second, weaker authority for a fact already represented exactly by
+the product it accepted.
+
+Both placement products now publish only their attempted point, typed
+rejection, diagnostics, and—in the persistent case—the scratch assignments
+that belong to that attempt. Before accepting either point, the coordinator
+compares it with the effective point and derives whether resource plans must be
+rebuilt. `ConSanMoiOperatingPoint` equality covers the complete point, so a new
+field or a newly accepted placement path cannot silently omit maintenance of a
+parallel transition flag. Rejected attempts retain their attempted point and
+diagnostics exactly as before and never reach the replanning decision.
+
+The 17 assignments, two product fields, and their initializer/test ceremony
+are deleted rather than deprecated. The architecture gate rejects restoration
+of a placement-product `changed` field and requires both coordinator
+transitions to be derived from the complete attempted and effective points.
+Existing automatic dispatch-SGPR, persistent private/VGPR/scalar-state,
+descriptor-growth, dynamic-stack, accepted-fallback, and typed-rejection tests
+exercise the affected exits.
+
+| Signal | Checkpoint 61 | Cumulative change | Slice change from checkpoint 60 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,190 | +215 | **-18** |
+| Nonblank production lines | 98,880 | **-203** | **-18** |
+| Production implementation lines | 91,152 | **-298** | **-18** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **174 / 52** | **-102 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Mutable placement-transition authorities | **0** | n/a | **-2 fields / -17 writes** |
+| Derived accepted-point transition checks | **2** | n/a | **+2** |
+| Test inventory | **5,388** | **+43** | 0 |
+
+Validation includes a final-tree `-j16` build; the focused placement-product,
+automatic-placement, persistent-state, dispatch-identity, and
+architecture-boundary tests; and all 4,753 nonphysical tests over the five
+emulated targets at `-j16`. The immediately preceding checkpoint's final tree
+also passed all 635 physical gfx1201 tests serialized at `-j1`; this host-only
+product simplification does not change generated GPU code. No test was
+removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.5, 14.6, 14.7, 14.8, and 14.9.
+The coordinator now derives resource replanning from the narrow product it
+actually accepts, and the superseded mutable authority is gone. The slice
+brings cumulative production reduction to 298 implementation lines, which is
+still not material whole-refactoring shrinkage. Remaining architecture
+locality, broader operating-point and mutable-transaction surfaces, larger
+legacy harvesting, material Section 14.8 evidence, and the independent Section
+14 completion audit remain open. The goal therefore remains active.

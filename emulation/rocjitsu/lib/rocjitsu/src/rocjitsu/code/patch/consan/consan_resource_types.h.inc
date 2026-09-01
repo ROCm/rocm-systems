@@ -140,7 +140,6 @@ enum class ConSanMoiPlacementRejection : uint8_t {
 /// the placement component, responsible for changing the transform outcome.
 struct ConSanMoiOperatingPointUpdate {
   ConSanMoiOperatingPoint attempted_operating_point;
-  bool changed = false;
   std::optional<ConSanMoiPlacementRejection> rejection;
   std::vector<std::string> diagnostics;
 
@@ -154,7 +153,6 @@ struct ConSanMoiOperatingPointUpdate {
 /// prologue resources after rejecting or replacing the corresponding point.
 struct ConSanMoiPersistentPlacementUpdate {
   ConSanMoiOperatingPoint attempted_operating_point;
-  bool changed = false;
   std::optional<ConSanMoiPlacementRejection> rejection;
   std::vector<std::string> diagnostics;
   std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments;
