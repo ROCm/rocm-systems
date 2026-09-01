@@ -1406,16 +1406,16 @@ def multipass_source(cli_multipass, num_input_jobs, cli_has_pmc, input_has_pmc):
     return None
 
 
-def multipass_incompatible_message(source, pid, collection_period):
+def multipass_incompatible_message(source, has_pid, has_collection_period):
     """Rejection message when multi-pass is combined with --pid/--collection-period."""
     if source is None:
         return None
-    if pid:
+    if has_pid:
         return (
             f"Multi-pass counter collection ({source}) is not compatible "
             "with attach mode (--pid)"
         )
-    if collection_period:
+    if has_collection_period:
         return (
             f"Multi-pass counter collection ({source}) is not compatible "
             "with --collection-period"
@@ -1423,12 +1423,9 @@ def multipass_incompatible_message(source, pid, collection_period):
     return None
 
 
-def first_set_attr(objs, key):
-    """First non-None value of `key` across `objs`, or None if none set it."""
-    for itr in objs:
-        if has_set_attr(itr, key):
-            return getattr(itr, key)
-    return None
+def any_set_attr(objs, key):
+    """Return whether `key` is explicitly set on any object in `objs`."""
+    return any(has_set_attr(itr, key) for itr in objs)
 
 
 def patch_args(data):
@@ -2500,8 +2497,9 @@ def main(argv=None):
     # period windows each pass independently. Reject both wherever they were set.
     incompatible = multipass_incompatible_message(
         multipass_reason,
-        cmd_args.pid or first_set_attr(inp_args, "pid"),
-        cmd_args.collection_period or first_set_attr(inp_args, "collection_period"),
+        has_set_attr(cmd_args, "pid") or any_set_attr(inp_args, "pid"),
+        has_set_attr(cmd_args, "collection_period")
+        or any_set_attr(inp_args, "collection_period"),
     )
     if incompatible is not None:
         fatal_error(incompatible)
