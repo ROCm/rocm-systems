@@ -3566,3 +3566,65 @@ exact-subset barrier owner, common prologues, the remaining orchestration and
 placement attempts, architecture peepholes, extension exercises, and the
 independent deep-read completion audit remain open. The goal therefore remains
 active.
+
+### 16.38 Convergence checkpoint 37: typed shared barrier boundary
+
+Once the three MOI engine packages stopped inheriting the broad attempt, their
+shared barrier owner became the largest remaining mode-adjacent exception. It
+implements one exact-subset mechanism for Record/Replay barrier records and
+InlineShadow epoch advancement: common site planning, owner-local resource
+binding, private-state handling, spill preservation, direct and dense routing,
+dispatcher construction, and proof publication surround two distinct evidence
+bodies. The owner nevertheless accepted `MoiOptions` through its public and
+private entries, copied it ten times for owners, candidates, groups, lambdas,
+and the Inline barrier wrapper, and assigned `scratch_vgpr` twice even though
+both bases were explicit resource products.
+
+The barrier contract now receives immutable `ConSanOptions` and
+`ConSanMoiOperatingPoint` separately. Owner-, candidate-, and group-local
+binding copies only the operating point. Record/Replay emission keeps its
+typed record-event plan; InlineShadow emission keeps its epoch policy; shared
+routing and preservation mechanics consume the same request/state contracts.
+The Inline spill-backed wrapper still suppresses its barrier-local EXEC-save
+window, but does so in a point-only copy. Scratch bases remain explicit, and
+the internal body-builder lambda carries only candidate state. No mechanism
+was copied into either engine package and no compatibility path remains.
+
+The architecture-boundary gate rejects `MoiOptions` and inherited input/point
+casts in both the compiled barrier header and implementation. This makes the
+exact-subset ownership mechanically visible: the mode entries choose the
+shared barrier operation, while the barrier owner can inspect immutable engine
+policy and resolved allocation state without receiving either complete mode
+implementation or the mutable attempt bus.
+
+| Signal | Checkpoint 37 | Cumulative change | Slice change from checkpoint 36 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,449 | +474 | **-4** |
+| Nonblank production lines | 99,165 | +82 | **-4** |
+| Production implementation lines | 91,448 | **-2** | **-4** |
+| `MoiOptions` references / files | 31 / 16 | **-56 / -9** | **-17 / -2** |
+| `ConSanTransformArtifacts` references / files | 207 / 56 | **-69 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 205 / 28 | +5 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 338 / 58 | +48 / +7 | **+12 / 0** |
+| `MoiOptions` references in shared barrier construction | 0 | n/a | **-17** |
+| Shared-barrier whole-attempt copy sites | 0 | n/a | **-10** |
+| Shared-barrier immutable scratch-field assignments | 0 | n/a | **-2** |
+| Record/Replay + InlineShadow barrier implementations | 1 | n/a | unchanged |
+| Test inventory | 5,379 | +34 | 0 |
+
+Validation includes a full final-tree `-j16` rebuild; all 825 `ConSanMoi` and
+architecture-boundary focused tests; all 4,744 nonphysical tests at `-j16` in
+193.89 seconds, including the unchanged 2,908 simulator rows over five targets;
+and all 635 physical gfx1201 tests serialized at `-j1` in 108.86 seconds. No
+test was removed, renamed, disabled, added, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, 14.8, and
+14.9. The three MOI modes and their principal exact-subset synchronization
+mechanism now share one explicit input/state architecture, and the migrated
+surface contains neither a legacy broad path nor mode-local duplication.
+Production implementation is two lines below baseline for the first time, but
+that is parity rather than the material reduction required by Section 14.8.
+Common prologues, orchestration and placement attempts, remaining architecture
+peepholes, extension exercises, and the independent deep-read completion audit
+remain open. The goal therefore remains active.

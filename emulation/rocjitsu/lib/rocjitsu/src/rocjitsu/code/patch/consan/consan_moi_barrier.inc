@@ -754,7 +754,9 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
 }
 
 void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
-                                                 const MoiOptions &options, rj_code_arch_t arch,
+                                                 const ConSanOptions &options,
+                                                 const ConSanMoiOperatingPoint &operating_point,
+                                                 rj_code_arch_t arch,
                                                  MoiResourcePlanningState &resource_state,
                                                  const MoiRecordReplayAccessOutput &access_output,
                                                  ConSanTransformArtifacts &result) {
@@ -766,15 +768,16 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         "ConSan MOI inline-shadow barrier epoch patch does not support this architecture");
     return;
   }
-  if (!options.moi_owner_epoch_vgprs.epoch() &&
+  if (!operating_point.moi_owner_epoch_vgprs.epoch() &&
       result.moi_operating_point.owner_persistent_vgprs.empty() &&
-      !options.moi_persistent_sgprs.epoch() && !options.automatic_moi_private_epoch) {
+      !operating_point.moi_persistent_sgprs.epoch() &&
+      !operating_point.automatic_moi_private_epoch) {
     result.warnings.emplace_back(
         "ConSan MOI inline-shadow barrier epoch patch has no persistent epoch state");
     return;
   }
-  if (options.moi_owner_epoch_vgprs.epoch() &&
-      static_cast<uint32_t>(options.moi_owner_epoch_vgprs->epoch) + 1u > kMaxVgprs) {
+  if (operating_point.moi_owner_epoch_vgprs.epoch() &&
+      static_cast<uint32_t>(operating_point.moi_owner_epoch_vgprs->epoch) + 1u > kMaxVgprs) {
     result.warnings.emplace_back(
         "ConSan MOI inline-shadow barrier epoch patch needs one epoch VGPR");
     return;
@@ -877,7 +880,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   MoiDescriptorPrivateRequirements visible_evidence_private_requirements;
   const MoiBarrierResourcePlanIndex resource_plan_index(result.resource_plans);
   const MoiBarrierPatchOwnerIndex patch_owner_index(result.patches);
-  if (options.automatic_moi_private_epoch) {
+  if (operating_point.automatic_moi_private_epoch) {
     for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
       const ConSanCandidateResourcePlan *plan =
           resource_plan_index.find(candidate.site.text_offset);
@@ -888,15 +891,14 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         continue;
       }
       const std::vector<uint64_t> &owners = plan->owner_descriptor_file_offsets;
-      MoiOptions owner_options = options;
-      if (!apply_moi_persistent_vgpr_assignment(owner_options, result.moi_operating_point,
-                                                owners)) {
+      ConSanMoiOperatingPoint owner_point = operating_point;
+      if (!apply_moi_persistent_vgpr_assignment(owner_point, result.moi_operating_point, owners)) {
         result.warnings.emplace_back(
             "ConSan MOI private epoch barrier lost its owner-local persistent assignment in " +
             candidate.container_name);
         continue;
       }
-      if (!owner_options.automatic_moi_private_epoch)
+      if (!owner_point.automatic_moi_private_epoch)
         continue;
       const ConSanPatchLoweringProduct *access_patch =
           patch_owner_index.persistent_access_patch_for(owners);
@@ -908,7 +910,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       if (options.moi_engine == ConSanMoiEngine::RecordReplay) {
         const auto resources =
-            resolve_moi_scratch_plan(*plan, owner_options, result.moi_operating_point,
+            resolve_moi_scratch_plan(*plan, owner_point, result.moi_operating_point,
                                      /*expected_count=*/6u);
         if (!resources ||
             !access_patch->persistent_record_replay_workgroup_private_offsets.complete()) {
@@ -918,28 +920,27 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
               candidate.container_name);
           continue;
         }
-        MoiOptions candidate_options = std::move(owner_options);
-        candidate_options.scratch_vgpr = resources->base;
-        candidate_options.moi_record_replay_workgroup_private_offsets =
+        ConSanMoiOperatingPoint candidate_point = std::move(owner_point);
+        candidate_point.moi_record_replay_workgroup_private_offsets =
             access_patch->persistent_record_replay_workgroup_private_offsets;
-        if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
+        if (!apply_moi_transient_sgpr_assignment(options, candidate_point,
                                                  result.moi_operating_point, owners) ||
-            !apply_record_replay_entry_workgroup_assignment(candidate_options, candidate_options,
+            !apply_record_replay_entry_workgroup_assignment(options, candidate_point,
                                                             result.moi_operating_point, owners)) {
           result.warnings.emplace_back(
               "ConSan MOI Record/Replay dense barrier lost its private owner-local assignment");
           continue;
         }
         const auto record_emission = resolve_moi_record_event_emission_plan(
-            candidate_options, candidate_options, candidate_options, resources->base, arch);
+            options, options, candidate_point, resources->base, arch);
         if (!record_emission) {
           result.warnings.emplace_back(
               "ConSan MOI Record/Replay dense barrier has an incomplete emission plan");
           continue;
         }
         std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
-        if (!candidate_options.moi_owner_epoch_vgprs.owner() &&
-            !candidate_options.moi_persistent_sgprs.owner()) {
+        if (!candidate_point.moi_owner_epoch_vgprs.owner() &&
+            !candidate_point.moi_persistent_sgprs.owner()) {
           const auto owner_shift =
               common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
           if (!owner_shift)
@@ -952,23 +953,18 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         const uint32_t persistent_end = access_patch->persistent_private_state_end.value_or(0u);
         std::optional<VgprSpillSequence> spill;
         if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-            moi_scalar_spill_requires_dynamic_vgpr_frame(
-                result.program_inventory, *resources,
-                static_cast<const ConSanMoiOperatingPoint &>(candidate_options))) {
-          spill = build_moi_spill_sequence(result.program_inventory, *resources, candidate_options,
-                                           candidate_options, candidate_options,
-                                           visible_evidence_spill_managers, arch, result.warnings,
-                                           persistent_end);
+            moi_scalar_spill_requires_dynamic_vgpr_frame(result.program_inventory, *resources,
+                                                         candidate_point)) {
+          spill = build_moi_spill_sequence(result.program_inventory, *resources, options, options,
+                                           candidate_point, visible_evidence_spill_managers, arch,
+                                           result.warnings, persistent_end);
           if (!spill)
             continue;
         }
         std::optional<SgprSpillSequence> scalar_spill;
-        if (candidate_options.has_compact_moi_scalar_spill()) {
+        if (candidate_point.has_compact_moi_scalar_spill()) {
           scalar_spill = build_moi_sgpr_spill_sequence(
-              result.program_inventory, *resources,
-              static_cast<const ConSanRequest &>(candidate_options),
-              static_cast<const BoundRuntimeResources &>(candidate_options),
-              static_cast<const ConSanMoiOperatingPoint &>(candidate_options),
+              result.program_inventory, *resources, options, options, candidate_point,
               visible_evidence_spill_managers, arch, result.warnings, persistent_end,
               spill ? &*spill : nullptr);
           if (!scalar_spill)
@@ -1032,10 +1028,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       });
     }
   }
-  if (options.moi_persistent_sgprs.complete()) {
+  if (operating_point.moi_persistent_sgprs.complete()) {
     // The owner-kernel entry prologue grows each descriptor for this scalar
     // tuple after all emitted patch ownership is known.
-  } else if (options.automatic_moi_persistent_vgprs) {
+  } else if (operating_point.automatic_moi_persistent_vgprs) {
     for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
       const ConSanCandidateResourcePlan *plan =
           resource_plan_index.find(candidate.site.text_offset);
@@ -1052,11 +1048,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
               static_cast<uint16_t>(assignment->owner_epoch_vgprs.epoch + 1u);
       }
     }
-  } else if (!options.automatic_moi_private_epoch) {
+  } else if (!operating_point.automatic_moi_private_epoch) {
     for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       persistent_epoch_vgpr_requirements.emplace(
           kernel.descriptor_file_offset,
-          static_cast<uint32_t>(options.moi_owner_epoch_vgprs->epoch) + 1u);
+          static_cast<uint32_t>(operating_point.moi_owner_epoch_vgprs->epoch) + 1u);
     }
   }
   for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
@@ -1067,32 +1063,31 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     }
     if (owners.empty() && candidate.kernel_descriptor_file_offset)
       owners.push_back(*candidate.kernel_descriptor_file_offset);
-    if ((options.automatic_moi_persistent_vgprs || options.moi_persistent_sgprs.complete() ||
-         options.automatic_moi_private_epoch) &&
+    if ((operating_point.automatic_moi_persistent_vgprs ||
+         operating_point.moi_persistent_sgprs.complete() ||
+         operating_point.automatic_moi_private_epoch) &&
         owners.empty())
       continue;
-    MoiOptions candidate_options = options;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
-                                             result.moi_operating_point, owners) ||
-        !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
+    ConSanMoiOperatingPoint candidate_point = operating_point;
+    if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
+                                             owners) ||
+        !apply_moi_persistent_vgpr_assignment(candidate_point, result.moi_operating_point,
                                               owners)) {
       continue;
     }
-    if (candidate_options.automatic_moi_private_epoch)
+    if (candidate_point.automatic_moi_private_epoch)
       continue;
     std::optional<uint16_t> scratch_vgpr;
     std::optional<VgprSpillSequence> spill;
     std::optional<SgprSpillSequence> scalar_spill;
     std::optional<MoiRecordEventEmissionPlan> record_emission;
     uint32_t required_private_bytes = 0u;
-    const uint16_t scratch_count = inline_shadow_barrier_scratch_count(
-        static_cast<const ConSanRequest &>(candidate_options),
-        static_cast<const BoundRuntimeResources &>(candidate_options),
-        static_cast<const ConSanMoiOperatingPoint &>(candidate_options));
-    const bool needs_record_replay_scalar_spill = candidate_options.has_compact_moi_scalar_spill();
+    const uint16_t scratch_count =
+        inline_shadow_barrier_scratch_count(options, options, candidate_point);
+    const bool needs_record_replay_scalar_spill = candidate_point.has_compact_moi_scalar_spill();
     const bool needs_scalar_spill =
         needs_record_replay_scalar_spill ||
-        (scratch_count > 1u && candidate_options.has_inline_moi_scalar_spill());
+        (scratch_count > 1u && candidate_point.has_inline_moi_scalar_spill());
     if (scratch_count > 1u || needs_scalar_spill) {
       if (plan == nullptr) {
         result.warnings.emplace_back(
@@ -1100,7 +1095,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             candidate.container_name);
         continue;
       }
-      const auto resources = resolve_moi_scratch_plan(*plan, candidate_options,
+      const auto resources = resolve_moi_scratch_plan(*plan, candidate_point,
                                                       result.moi_operating_point, scratch_count);
       if (!resources) {
         result.warnings.emplace_back(
@@ -1116,12 +1111,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         scratch_vgpr = resources->base;
       owners = resources->owner_descriptor_file_offsets;
       if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-          moi_scalar_spill_requires_dynamic_vgpr_frame(
-              result.program_inventory, *resources,
-              static_cast<const ConSanMoiOperatingPoint &>(candidate_options))) {
-        spill = build_moi_spill_sequence(result.program_inventory, *resources, candidate_options,
-                                         candidate_options, candidate_options,
-                                         visible_evidence_spill_managers, arch, result.warnings);
+          moi_scalar_spill_requires_dynamic_vgpr_frame(result.program_inventory, *resources,
+                                                       candidate_point)) {
+        spill = build_moi_spill_sequence(result.program_inventory, *resources, options, options,
+                                         candidate_point, visible_evidence_spill_managers, arch,
+                                         result.warnings);
         if (!spill)
           continue;
         required_private_bytes = spill->total_private_bytes;
@@ -1129,13 +1123,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                            *spill);
       }
       if (needs_scalar_spill) {
-        scalar_spill = build_moi_sgpr_spill_sequence(
-            result.program_inventory, *resources,
-            static_cast<const ConSanRequest &>(candidate_options),
-            static_cast<const BoundRuntimeResources &>(candidate_options),
-            static_cast<const ConSanMoiOperatingPoint &>(candidate_options),
-            visible_evidence_spill_managers, arch, result.warnings, std::nullopt,
-            spill ? &*spill : nullptr);
+        scalar_spill =
+            build_moi_sgpr_spill_sequence(result.program_inventory, *resources, options, options,
+                                          candidate_point, visible_evidence_spill_managers, arch,
+                                          result.warnings, std::nullopt, spill ? &*spill : nullptr);
         if (!scalar_spill)
           continue;
         required_private_bytes =
@@ -1145,8 +1136,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                         scalar_spill->total_private_bytes);
       }
       note_descriptor_requirements(visible_evidence_vgpr_requirements, *resources);
-      note_moi_sgpr_requirements(visible_evidence_sgpr_requirements, *resources, candidate_options,
-                                 candidate_options, candidate_options, arch);
+      note_moi_sgpr_requirements(visible_evidence_sgpr_requirements, *resources, options, options,
+                                 candidate_point, arch);
     }
     if (options.moi_engine == ConSanMoiEngine::RecordReplay) {
       if (!scratch_vgpr) {
@@ -1154,17 +1145,16 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             "ConSan MOI Record/Replay dense barrier fallback has no scratch VGPR state");
         continue;
       }
-      candidate_options.scratch_vgpr = scratch_vgpr;
-      if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
-                                               result.moi_operating_point, owners) ||
-          !apply_record_replay_entry_workgroup_assignment(candidate_options, candidate_options,
+      if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
+                                               owners) ||
+          !apply_record_replay_entry_workgroup_assignment(options, candidate_point,
                                                           result.moi_operating_point, owners)) {
         result.warnings.emplace_back(
             "ConSan MOI Record/Replay dense barrier fallback lost its entry workgroup assignment");
         continue;
       }
-      record_emission = resolve_moi_record_event_emission_plan(
-          candidate_options, candidate_options, candidate_options, *scratch_vgpr, arch);
+      record_emission = resolve_moi_record_event_emission_plan(options, options, candidate_point,
+                                                               *scratch_vgpr, arch);
       if (!record_emission) {
         result.warnings.emplace_back(
             "ConSan MOI Record/Replay dense barrier fallback has an incomplete emission plan");
@@ -1201,11 +1191,12 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
   const uint64_t indirect_island_bytes = kIndirectIslandWords * sizeof(uint32_t);
   const std::optional<MoiReservedBarrierIslandLayout> barrier_island_layout =
-      options.moi_exec_save_sgpr
+      operating_point.moi_exec_save_sgpr
           ? find_record_replay_reserved_barrier_island_begin(
                 old_text, result, arch, access_output, planned_candidates.size(),
-                moi_reserved_access_sync_island_count(
-                    result.program_inventory, result.observation_plan(), options, options, options))
+                moi_reserved_access_sync_island_count(result.program_inventory,
+                                                      result.observation_plan(), options, options,
+                                                      operating_point))
           : std::nullopt;
   if (barrier_island_layout) {
     const uint64_t reserved_words =
@@ -1220,7 +1211,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   std::vector<size_t> dense_fallback_indices;
   const ConSanMoiReportBufferLayout record_layout = resolve_moi_report_layout(options, options);
   const auto build_engine_barrier_body =
-      [&](const PlannedInlineEpochBarrier &planned, MoiOptions candidate_options,
+      [&](const PlannedInlineEpochBarrier &planned, ConSanMoiOperatingPoint candidate_point,
           uint32_t original_barrier_word, uint64_t body_offset, uint64_t return_offset,
           std::optional<uint16_t> call_return_sgpr,
           std::optional<uint16_t> selectable_vgpr_bank_mode)
@@ -1240,14 +1231,14 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     }
     if (planned.private_epoch_offset && planned.scratch_vgpr && planned.spill) {
       return build_inline_shadow_private_epoch_barrier_cave_words(
-          planned.candidate.site, candidate_options, candidate_options, *planned.scratch_vgpr,
+          planned.candidate.site, options, candidate_point, *planned.scratch_vgpr,
           *planned.private_epoch_offset, *planned.spill,
           planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, original_barrier_word,
           body_offset, return_offset, call_return_sgpr, selectable_vgpr_bank_mode, result.errors);
     }
     return build_inline_shadow_barrier_epoch_cave_words(
-        planned.candidate.site, candidate_options, candidate_options, candidate_options, arch,
-        planned.scratch_vgpr, planned.spill ? &*planned.spill : nullptr,
+        planned.candidate.site, options, options, candidate_point, arch, planned.scratch_vgpr,
+        planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, original_barrier_word, body_offset,
         return_offset, call_return_sgpr, selectable_vgpr_bank_mode, result.errors);
   };
@@ -1262,16 +1253,15 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     const std::optional<uint16_t> selectable_vgpr_bank_mode = consan_selectable_vgpr_bank_mode_at(
         arch, active_bytes, candidate.text_file_offset, candidate.container_entry_text_offset,
         site.file_offset);
-    MoiOptions candidate_options = options;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
-                                             result.moi_operating_point,
+    ConSanMoiOperatingPoint candidate_point = operating_point;
+    if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
                                              planned.owner_descriptor_file_offsets)) {
       result.errors.emplace_back("ConSan MOI inline barrier lost its transient scalar assignment");
       return;
     }
     std::optional<uint64_t> oversized_local_body_island;
-    if (!planned.private_epoch_offset && !candidate_options.moi_persistent_sgprs.epoch() &&
-        !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
+    if (!planned.private_epoch_offset && !candidate_point.moi_persistent_sgprs.epoch() &&
+        !apply_moi_persistent_vgpr_assignment(candidate_point, result.moi_operating_point,
                                               planned.owner_descriptor_file_offsets)) {
       result.errors.emplace_back("ConSan MOI inline barrier lost its persistent VGPR assignment");
       return;
@@ -1283,13 +1273,13 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     // consuming temporary SGPR state on both the entry and return paths. The
     // private-epoch form is larger and continues to use the general appended
     // placement below.
-    if (!planned.private_epoch_offset && !candidate_options.moi_persistent_sgprs.epoch()) {
+    if (!planned.private_epoch_offset && !candidate_point.moi_persistent_sgprs.epoch()) {
       if (const auto local_body_offset =
               local_indirect_allocator.claim_reachable(site.text_offset)) {
         const uint64_t return_text_offset = site.text_offset + site.size;
         auto local_words = build_engine_barrier_body(
-            planned, candidate_options, original_barrier_word, *local_body_offset,
-            return_text_offset, std::nullopt, selectable_vgpr_bank_mode);
+            planned, candidate_point, original_barrier_word, *local_body_offset, return_text_offset,
+            std::nullopt, selectable_vgpr_bank_mode);
         if (!local_words)
           return;
         if (local_words->size() <= kMoiLocalIndirectIslandWords &&
@@ -1313,7 +1303,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           info.trampoline_size = static_cast<uint32_t>(local_words->size() * sizeof(uint32_t));
           info.relocated_guest_instruction_offset =
               *local_body_offset +
-              (candidate_options.moi_persistent_sgprs.epoch() ? sizeof(uint32_t) : 0u);
+              (candidate_point.moi_persistent_sgprs.epoch() ? sizeof(uint32_t) : 0u);
           info.owner_descriptor_file_offsets = planned.owner_descriptor_file_offsets;
           if (!append_moi_barrier_lowering_commit(result, candidate, info, "barrier epoch patch",
                                                   lowering_commits))
@@ -1340,18 +1330,18 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     // one otherwise-supported site must not abort the whole code object.
     if (cave_text_offset >= return_text_offset &&
         !compute_sopp_branch_simm16(cave_text_offset, return_text_offset) &&
-        !moi_indirect_jump_sgprs(candidate_options, candidate_options)) {
+        !moi_indirect_jump_sgprs(options, candidate_point)) {
       result.warnings.emplace_back(
-          candidate_options.moi_branch_only_spill
+          candidate_point.moi_branch_only_spill
               ? "ConSan MOI branch-only scalar-spill barrier has no encodable far return in " +
                     candidate.container_name
               : "ConSan MOI inline-shadow barrier has no encodable far return in " +
                     candidate.container_name);
       continue;
     }
-    std::optional<std::vector<uint32_t>> cave_words = build_engine_barrier_body(
-        planned, candidate_options, original_barrier_word, cave_text_offset, return_text_offset,
-        std::nullopt, selectable_vgpr_bank_mode);
+    std::optional<std::vector<uint32_t>> cave_words =
+        build_engine_barrier_body(planned, candidate_point, original_barrier_word, cave_text_offset,
+                                  return_text_offset, std::nullopt, selectable_vgpr_bank_mode);
     if (!cave_words)
       return;
 
@@ -1370,24 +1360,21 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                           : local_indirect_allocator.claim_reachable(site.text_offset);
       if (!island_offset) {
         const bool has_spill_backed_inline_router =
-            candidate_options.has_inline_moi_scalar_spill() &&
-            moi_inline_dense_router_scalar_abi(candidate_options, candidate_options, arch)
-                .has_value();
+            candidate_point.has_inline_moi_scalar_spill() &&
+            moi_inline_dense_router_scalar_abi(options, candidate_point, arch).has_value();
         const bool has_spill_backed_record_replay_router =
-            candidate_options.has_compact_moi_scalar_spill() &&
-            moi_indirect_jump_sgprs(candidate_options, candidate_options) &&
-            candidate_options.moi_router_call;
+            candidate_point.has_compact_moi_scalar_spill() &&
+            moi_indirect_jump_sgprs(options, candidate_point) && candidate_point.moi_router_call;
         const bool has_spill_backed_dense_router =
             has_spill_backed_inline_router || has_spill_backed_record_replay_router;
-        const bool has_dense_router =
-            consan_arch_has_selectable_vgpr_bank(arch) ||
-            (consan_is_capability_arch(arch) &&
-             ((candidate_options.moi_engine == ConSanMoiEngine::InlineShadow &&
-               !consan_uses_gfx11_encoding(arch)) ||
-              (candidate_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-               candidate_options.moi_record_replay_dense_barrier_router)));
+        const bool has_dense_router = consan_arch_has_selectable_vgpr_bank(arch) ||
+                                      (consan_is_capability_arch(arch) &&
+                                       ((options.moi_engine == ConSanMoiEngine::InlineShadow &&
+                                         !consan_uses_gfx11_encoding(arch)) ||
+                                        (options.moi_engine == ConSanMoiEngine::RecordReplay &&
+                                         candidate_point.moi_record_replay_dense_barrier_router)));
         if (has_dense_router &&
-            (candidate_options.moi_exec_save_sgpr || has_spill_backed_dense_router) &&
+            (candidate_point.moi_exec_save_sgpr || has_spill_backed_dense_router) &&
             !planned.owner_descriptor_file_offsets.empty()) {
           dense_fallback_indices.push_back(planned_index);
         } else {
@@ -1432,7 +1419,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       return;
     }
     if (island_offset) {
-      const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options, candidate_options);
+      const auto jump_sgprs = moi_indirect_jump_sgprs(options, candidate_point);
       std::vector<uint32_t> island_words;
       if (!jump_sgprs ||
           !append_moi_scc_preserving_indirect_jump(
@@ -1473,8 +1460,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
     } else {
       info.relocated_guest_instruction_offset =
-          cave_text_offset +
-          (candidate_options.moi_persistent_sgprs.epoch() ? sizeof(uint32_t) : 0u);
+          cave_text_offset + (candidate_point.moi_persistent_sgprs.epoch() ? sizeof(uint32_t) : 0u);
     }
     note_planned_resource_info(info, planned);
     if (!append_moi_barrier_lowering_commit(result, candidate, info, "barrier epoch patch",
@@ -1585,15 +1571,14 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       if (!relay)
         return ReusedDenseRelayResult::Unavailable;
 
-      MoiOptions group_options = options;
-      if (!apply_moi_transient_sgpr_assignment(group_options, group_options,
-                                               result.moi_operating_point, owners)) {
+      ConSanMoiOperatingPoint group_point = operating_point;
+      if (!apply_moi_transient_sgpr_assignment(options, group_point, result.moi_operating_point,
+                                               owners)) {
         result.errors.emplace_back(
             "ConSan MOI reused barrier relay lost its transient scalar assignment");
         return ReusedDenseRelayResult::Failed;
       }
-      const auto scalar_abi =
-          moi_inline_dense_router_scalar_abi(group_options, group_options, arch);
+      const auto scalar_abi = moi_inline_dense_router_scalar_abi(options, group_point, arch);
       if (!scalar_abi || !scalar_abi->call_return_sgpr) {
         result.errors.emplace_back("ConSan MOI reused barrier relay has no compatible scalar ABI");
         return ReusedDenseRelayResult::Failed;
@@ -1642,16 +1627,16 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             consan_selectable_vgpr_bank_mode_at(arch, active_bytes, candidate.text_file_offset,
                                                 candidate.container_entry_text_offset,
                                                 site.file_offset);
-        MoiOptions candidate_options = options;
-        if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
+        ConSanMoiOperatingPoint candidate_point = operating_point;
+        if (!apply_moi_transient_sgpr_assignment(options, candidate_point,
                                                  result.moi_operating_point,
                                                  planned.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
               "ConSan MOI reused barrier relay lost a site scalar assignment");
           return ReusedDenseRelayResult::Failed;
         }
-        if (!planned.private_epoch_offset && !candidate_options.moi_persistent_sgprs.epoch() &&
-            !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
+        if (!planned.private_epoch_offset && !candidate_point.moi_persistent_sgprs.epoch() &&
+            !apply_moi_persistent_vgpr_assignment(candidate_point, result.moi_operating_point,
                                                   planned.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
               "ConSan MOI reused barrier relay lost a persistent VGPR assignment");
@@ -1664,7 +1649,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         }
         const uint64_t body_offset = new_text.size() + staged_body_bytes;
         std::optional<std::vector<uint32_t>> body_words = build_engine_barrier_body(
-            planned, candidate_options, original_barrier_word, body_offset,
+            planned, candidate_point, original_barrier_word, body_offset,
             site.text_offset + site.size, call_return_sgpr, selectable_vgpr_bank_mode);
         if (!body_words)
           return ReusedDenseRelayResult::Failed;
@@ -1728,8 +1713,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           }
         } else {
           info.relocated_guest_instruction_offset =
-              body_offset +
-              (candidate_options.moi_persistent_sgprs.epoch() ? sizeof(uint32_t) : 0u);
+              body_offset + (candidate_point.moi_persistent_sgprs.epoch() ? sizeof(uint32_t) : 0u);
         }
         note_planned_resource_info(info, planned);
         staged_barriers.push_back({.planned_index = index,
@@ -1792,40 +1776,39 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       case ReusedDenseRelayResult::Unavailable:
         break;
       }
-      MoiOptions group_options = options;
-      if (!apply_moi_transient_sgpr_assignment(group_options, group_options,
-                                               result.moi_operating_point, group_owner)) {
+      ConSanMoiOperatingPoint group_point = operating_point;
+      if (!apply_moi_transient_sgpr_assignment(options, group_point, result.moi_operating_point,
+                                               group_owner)) {
         result.errors.emplace_back(
             "ConSan MOI dense barrier relay lost its transient scalar assignment");
         return;
       }
-      const auto special_state = moi_special_state_sgprs(group_options, group_options);
-      const auto indirect_state = moi_indirect_jump_sgprs(group_options, group_options);
-      const auto inline_dense_abi =
-          moi_inline_dense_router_scalar_abi(group_options, group_options, arch);
-      const bool spill_backed_inline_router = group_options.has_inline_moi_scalar_spill();
-      const bool spill_backed_record_replay_router = group_options.has_compact_moi_scalar_spill();
+      const auto special_state = moi_special_state_sgprs(options, group_point);
+      const auto indirect_state = moi_indirect_jump_sgprs(options, group_point);
+      const auto inline_dense_abi = moi_inline_dense_router_scalar_abi(options, group_point, arch);
+      const bool spill_backed_inline_router = group_point.has_inline_moi_scalar_spill();
+      const bool spill_backed_record_replay_router = group_point.has_compact_moi_scalar_spill();
       const bool spill_backed_router =
           spill_backed_inline_router || spill_backed_record_replay_router;
-      if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
+      if ((!spill_backed_router && (!group_point.moi_exec_save_sgpr || !special_state)) ||
           !indirect_state || (spill_backed_inline_router && !inline_dense_abi) ||
-          (spill_backed_record_replay_router && !group_options.moi_router_call)) {
+          (spill_backed_record_replay_router && !group_point.moi_router_call)) {
         result.errors.emplace_back(
             "ConSan MOI dense barrier relay requires scalar special-state storage");
         return;
       }
       const uint16_t jump_pc_sgpr =
-          spill_backed_router ? indirect_state->pc_sgpr : *group_options.moi_exec_save_sgpr;
+          spill_backed_router ? indirect_state->pc_sgpr : *group_point.moi_exec_save_sgpr;
       const uint16_t saved_scc_sgpr =
           spill_backed_router ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
-      uint16_t key_sgpr = static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 5u);
-      uint16_t call_return_sgpr = static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
+      uint16_t key_sgpr = static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 5u);
+      uint16_t call_return_sgpr = static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 6u);
       if (spill_backed_inline_router) {
         key_sgpr = inline_dense_abi->dispatch_key_sgpr;
         call_return_sgpr = jump_pc_sgpr;
       } else if (spill_backed_record_replay_router) {
-        key_sgpr = group_options.moi_router_call->dispatch_key_sgpr;
-        call_return_sgpr = group_options.moi_router_call->call_return_sgpr;
+        key_sgpr = group_point.moi_router_call->dispatch_key_sgpr;
+        call_return_sgpr = group_point.moi_router_call->call_return_sgpr;
       }
       const bool derive_key_at_entry = spill_backed_router;
       const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
@@ -1853,7 +1836,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         continue;
       }
       const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
-          group_options, group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
+          options, group_point, MoiRelocatableHostScalarState::BarrierRouter, arch);
       auto dense_host = find_moi_dense_relay_host_for_owners(
           resource_state, old_text,
           {
@@ -1902,16 +1885,16 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             consan_selectable_vgpr_bank_mode_at(arch, active_bytes, candidate.text_file_offset,
                                                 candidate.container_entry_text_offset,
                                                 site.file_offset);
-        MoiOptions candidate_options = options;
-        if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
+        ConSanMoiOperatingPoint candidate_point = operating_point;
+        if (!apply_moi_transient_sgpr_assignment(options, candidate_point,
                                                  result.moi_operating_point,
                                                  planned.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
               "ConSan MOI dense barrier relay lost its transient scalar assignment");
           return;
         }
-        if (!planned.private_epoch_offset && !candidate_options.moi_persistent_sgprs.epoch() &&
-            !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
+        if (!planned.private_epoch_offset && !candidate_point.moi_persistent_sgprs.epoch() &&
+            !apply_moi_persistent_vgpr_assignment(candidate_point, result.moi_operating_point,
                                                   planned.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
               "ConSan MOI dense barrier relay lost its persistent VGPR assignment");
@@ -1919,7 +1902,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         }
         const uint64_t body_offset = new_text.size();
         std::optional<std::vector<uint32_t>> body_words = build_engine_barrier_body(
-            planned, candidate_options, original_barrier_word, body_offset,
+            planned, candidate_point, original_barrier_word, body_offset,
             site.text_offset + site.size,
             spill_backed_router ? std::nullopt : std::optional<uint16_t>(call_return_sgpr),
             selectable_vgpr_bank_mode);
@@ -1931,7 +1914,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
              .offset = body_offset,
              .relocated_guest_instruction_offset =
                  body_offset +
-                 (candidate_options.moi_persistent_sgprs.epoch() ? sizeof(uint32_t) : 0u),
+                 (candidate_point.moi_persistent_sgprs.epoch() ? sizeof(uint32_t) : 0u),
              .words = std::move(*body_words)});
       }
 
@@ -2155,26 +2138,32 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
 }
 
 void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes,
-                                                  const MoiOptions &options, rj_code_arch_t arch,
+                                                  const ConSanOptions &options,
+                                                  const ConSanMoiOperatingPoint &operating_point,
+                                                  rj_code_arch_t arch,
                                                   const MoiRecordReplayAccessOutput &access_output,
                                                   std::vector<std::string> &warnings,
                                                   ConSanTransformArtifacts &result);
 
 void try_apply_inline_shadow_barrier_patch(std::span<const uint8_t> bytes,
-                                           const MoiOptions &options, rj_code_arch_t arch,
+                                           const ConSanOptions &options,
+                                           const ConSanMoiOperatingPoint &operating_point,
+                                           rj_code_arch_t arch,
                                            MoiResourcePlanningState &resource_state,
                                            ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers)
     return;
-  MoiOptions barrier_options = options;
-  if (barrier_options.has_inline_moi_scalar_spill())
-    barrier_options.moi_exec_save_sgpr.reset();
-  try_apply_inline_shadow_barrier_epoch_patch(bytes, barrier_options, arch, resource_state, {},
-                                              result);
+  ConSanMoiOperatingPoint barrier_point = operating_point;
+  if (barrier_point.has_inline_moi_scalar_spill())
+    barrier_point.moi_exec_save_sgpr.reset();
+  try_apply_inline_shadow_barrier_epoch_patch(bytes, options, barrier_point, arch, resource_state,
+                                              {}, result);
 }
 
 void try_apply_record_replay_barrier_patch(std::span<const uint8_t> bytes,
-                                           const MoiOptions &options, rj_code_arch_t arch,
+                                           const ConSanOptions &options,
+                                           const ConSanMoiOperatingPoint &operating_point,
+                                           rj_code_arch_t arch,
                                            MoiResourcePlanningState &resource_state,
                                            const MoiRecordReplayAccessOutput &access_output,
                                            ConSanTransformArtifacts &result) {
@@ -2182,8 +2171,8 @@ void try_apply_record_replay_barrier_patch(std::span<const uint8_t> bytes,
     return;
 
   std::vector<std::string> record_warnings;
-  try_apply_record_replay_barrier_record_patch(bytes, options, arch, access_output, record_warnings,
-                                               result);
+  try_apply_record_replay_barrier_record_patch(bytes, options, operating_point, arch, access_output,
+                                               record_warnings, result);
   const auto publish_record_warnings = [&](bool omit_recovered_route_failures) {
     for (std::string &warning : record_warnings) {
       const bool recovered_route_failure =
@@ -2212,8 +2201,8 @@ void try_apply_record_replay_barrier_patch(std::span<const uint8_t> bytes,
   publish_record_warnings(true);
   const size_t barrier_count_before = std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
-  try_apply_inline_shadow_barrier_epoch_patch(bytes, options, arch, resource_state, access_output,
-                                              result);
+  try_apply_inline_shadow_barrier_epoch_patch(bytes, options, operating_point, arch, resource_state,
+                                              access_output, result);
   const size_t barrier_count_after = std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   if (!result.errors.empty() || barrier_count_after - barrier_count_before < failed_entry_count) {
@@ -2227,7 +2216,9 @@ void try_apply_record_replay_barrier_patch(std::span<const uint8_t> bytes,
 }
 
 void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes,
-                                                  const MoiOptions &options, rj_code_arch_t arch,
+                                                  const ConSanOptions &options,
+                                                  const ConSanMoiOperatingPoint &operating_point,
+                                                  rj_code_arch_t arch,
                                                   const MoiRecordReplayAccessOutput &access_output,
                                                   std::vector<std::string> &warnings,
                                                   ConSanTransformArtifacts &result) {
@@ -2252,11 +2243,12 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     warnings.emplace_back("ConSan MOI barrier record patch has no barrier record capacity");
     return;
   }
-  if (!options.moi_exec_save_sgpr) {
+  if (!operating_point.moi_exec_save_sgpr) {
     warnings.emplace_back("ConSan MOI barrier record patch requires RJ_CONSAN_MOI_EXEC_SAVE_SGPR");
     return;
   }
-  if (*options.moi_exec_save_sgpr > 100u || *options.moi_exec_save_sgpr % 2u != 0u) {
+  if (*operating_point.moi_exec_save_sgpr > 100u ||
+      *operating_point.moi_exec_save_sgpr % 2u != 0u) {
     warnings.emplace_back(
         "ConSan MOI barrier record patch requires an even RJ_CONSAN_MOI_EXEC_SAVE_SGPR in 0..100");
     return;
@@ -2289,7 +2281,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   const MoiPatchAnchorRangeIndex occupied_anchors(result);
   MoiResourcePlanningStatePtr standalone_resource_state = make_moi_resource_planning_state(
       bytes, arch, result.program_inventory, result.observation_plan(), result.resource_plans,
-      options, options, options);
+      options, options, operating_point);
   MoiSpillManagers spill_managers;
   MoiDescriptorVgprRequirements descriptor_requirements;
   MoiDescriptorSgprRequirements scalar_requirements;
@@ -2318,22 +2310,22 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     ConSanCandidateResourcePlan plan =
         existing_plan
             ? *existing_plan
-            : plan_moi_resource_site(*standalone_resource_state, options, options, options,
+            : plan_moi_resource_site(*standalone_resource_state, options, options, operating_point,
                                      ConSanResourceSiteKind::Barrier, candidate_index,
                                      site.text_offset, candidate.kernel_descriptor_file_offset,
                                      /*scratch_count=*/6u);
     plan.intent_ids = {candidate.evidence_intent};
     if (!existing_plan)
       result.resource_plans.push_back(plan);
-    const auto resources = resolve_moi_scratch_plan(plan, options, result.moi_operating_point,
-                                                    /*expected_count=*/6u);
+    const auto resources = resolve_moi_scratch_plan(
+        plan, operating_point, result.moi_operating_point, /*expected_count=*/6u);
     if (!resources) {
       warnings.emplace_back("ConSan MOI barrier record patch has no usable resource plan in " +
                             candidate.container_name);
       continue;
     }
     MoiBarrierEvidenceSitePlan planned_candidate = candidate;
-    if (!options.moi_owner_epoch_vgprs.owner() &&
+    if (!operating_point.moi_owner_epoch_vgprs.owner() &&
         !planned_candidate.kernel_descriptor_file_offset) {
       if (resources->owner_descriptor_file_offsets.empty()) {
         warnings.emplace_back(
@@ -2344,7 +2336,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
           resources->owner_descriptor_file_offsets.front();
     }
     auto record_event = plan_moi_record_event(
-        bytes, result.program_inventory, warnings, *resources, options, options, options,
+        bytes, result.program_inventory, warnings, *resources, options, options, operating_point,
         result.moi_operating_point, spill_managers, arch, "ConSan MOI barrier record patch");
     if (!record_event)
       continue;
@@ -2361,11 +2353,11 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result.program_inventory, result.patches,
                                                 arch, kMoiLocalIndirectIslandWords);
-  if (options.moi_exec_save_sgpr) {
+  if (operating_point.moi_exec_save_sgpr) {
     const auto reserved_barrier_island_layout = find_record_replay_reserved_barrier_island_begin(
         old_text, result, arch, access_output, selected_candidates.size(),
         moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan(),
-                                              options, options, options));
+                                              options, options, operating_point));
     if (reserved_barrier_island_layout) {
       const uint64_t reserved_words = reserved_barrier_island_layout->reserved_slot_count *
                                       reserved_barrier_island_layout->slot_words;

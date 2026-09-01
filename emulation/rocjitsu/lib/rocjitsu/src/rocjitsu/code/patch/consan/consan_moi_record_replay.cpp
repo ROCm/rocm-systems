@@ -125,8 +125,8 @@ void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, MoiOptions
   }
   try_apply_atomic_record_patch(bytes, options, options, arch, result);
   if (result.errors.empty())
-    try_apply_record_replay_barrier_patch(bytes, options, arch, resource_state, access_output,
-                                          result);
+    try_apply_record_replay_barrier_patch(bytes, options, options, arch, resource_state,
+                                          access_output, result);
   if (result.errors.empty())
     try_apply_fence_record_patch(bytes, options, options, arch, result);
 }

@@ -133,7 +133,7 @@ void apply_inline_shadow_mode_patches(std::span<const uint8_t> bytes, MoiOptions
   try_apply_inline_shadow_patch(bytes, options, options, arch, resource_state, candidates, result);
   if (!result.errors.empty())
     return;
-  try_apply_inline_shadow_barrier_patch(bytes, options, arch, resource_state, result);
+  try_apply_inline_shadow_barrier_patch(bytes, options, options, arch, resource_state, result);
   if (result.errors.empty())
     try_apply_inline_atomic_ordering_patch(bytes, options, options, arch, result);
 }

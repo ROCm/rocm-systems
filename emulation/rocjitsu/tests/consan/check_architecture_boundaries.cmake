@@ -606,6 +606,13 @@ _consan_assert_match_count_at_most(
     1
     "InlineShadow may use the broad attempt only at its mode entry"
 )
+foreach(_barrier_owner IN ITEMS consan_moi_barrier.h consan_moi_barrier.inc)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_barrier_owner}"
+        "MoiOptions|static_cast<const ConSan(Request|MoiOperatingPoint|BoundRuntimeResources)"
+        "shared MOI barrier construction must separate immutable input from operating-point state"
+    )
+endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
     "GFX90A_ACCUM_OFFSET"
