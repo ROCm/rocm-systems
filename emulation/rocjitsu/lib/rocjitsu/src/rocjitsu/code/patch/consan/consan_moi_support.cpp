@@ -17,7 +17,9 @@
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
+#include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
@@ -446,15 +448,7 @@ uint16_t consan_detail::scalar_owner_tail_floor(const ScalarOwnerContextSummary 
 }
 
 std::optional<uint16_t> moi_dynamic_stack_frame_save_sgpr_offset(ConSanMoiEngine engine) {
-  switch (engine) {
-  case ConSanMoiEngine::InlineShadow:
-    return 24u;
-  case ConSanMoiEngine::RecordReplay:
-    return 5u;
-  case ConSanMoiEngine::Sampled:
-    return 8u;
-  }
-  return std::nullopt;
+  return consan_moi_impl::moi_mode_operations(engine).dynamic_stack_frame_save_sgpr_offset;
 }
 
 MoiExecSaveRequirement
@@ -466,9 +460,7 @@ resolve_moi_exec_save_requirement(const ConSanRequest &request,
       .has_report_buffer = resources.moi_report_buffer_address.has_value(),
       .track_atomics = request.moi_track_atomics,
       .automatic_banked_record_capture =
-          request.moi_engine == ConSanMoiEngine::RecordReplay &&
-          !request.moi_dynamic_access_records && resources.moi_report_layout &&
-          resources.moi_report_layout->record_replay_dispatch_token_capacity != 0u,
+          consan_moi_detail::record_replay_uses_automatic_banked_capture(request, resources),
       .runtime_sample_stride = request.moi_runtime_sample_stride,
       .scalar_spill = operating_point.has_compact_moi_scalar_spill(),
       .dynamic_stack_spill = operating_point.moi_dynamic_stack_spill,
@@ -483,53 +475,11 @@ bool moi_initializes_owner_epoch(const ConSanRequest &request,
 }
 
 uint16_t moi_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement, rj_code_arch_t arch) {
-  const auto dynamic_stack_count = [](ConSanMoiEngine engine) -> std::optional<uint16_t> {
-    const auto frame_save_offset = moi_dynamic_stack_frame_save_sgpr_offset(engine);
-    return frame_save_offset
-               ? std::optional<uint16_t>(static_cast<uint16_t>(*frame_save_offset + 1u))
-               : std::nullopt;
-  };
-  if (requirement.engine == ConSanMoiEngine::Sampled) {
-    if (!requirement.has_report_buffer)
-      return 0u;
-    if (requirement.scalar_spill)
-      return 8u;
-    if (requirement.dynamic_stack_spill)
-      return dynamic_stack_count(requirement.engine).value_or(0u);
-    if (consan_uses_gfx12_cdna_execution(arch))
-      return 8u;
-    return requirement.track_atomics ? 8u : 7u;
-  }
-  if (requirement.engine == ConSanMoiEngine::InlineShadow) {
-    if (!requirement.has_report_buffer)
-      return 0u;
-    const uint16_t engine_count =
-        requirement.inline_access_present ? kConSanMoiInlineExecSaveSgprCount : 22u;
-    const uint16_t stack_count =
-        requirement.dynamic_stack_spill ? dynamic_stack_count(requirement.engine).value_or(0u) : 0u;
-    return std::max(engine_count, stack_count);
-  }
-  if (requirement.automatic_banked_record_capture)
-    return 14u;
-
-  constexpr uint16_t kRuntimeWorkgroupGateSgprCount = 7u;
-  const uint16_t runtime_workgroup_gate_count =
-      requirement.engine == ConSanMoiEngine::RecordReplay && requirement.runtime_sample_stride > 1u
-          ? kRuntimeWorkgroupGateSgprCount
-          : 0u;
-  if (requirement.engine == ConSanMoiEngine::RecordReplay &&
-      requirement.dense_record_barrier_router)
-    return std::max<uint16_t>(8u, runtime_workgroup_gate_count);
-  if (requirement.scalar_spill) {
-    return requirement.engine == ConSanMoiEngine::Sampled
-               ? 8u
-               : std::max<uint16_t>(4u, runtime_workgroup_gate_count);
-  }
-  if (requirement.engine == ConSanMoiEngine::RecordReplay && requirement.dynamic_stack_spill) {
-    return std::max(dynamic_stack_count(requirement.engine).value_or(0u),
-                    runtime_workgroup_gate_count);
-  }
-  return requirement.has_report_buffer ? std::max<uint16_t>(5u, runtime_workgroup_gate_count) : 0u;
+  consan_moi_impl::MoiExecSaveTargetFacts target_facts;
+  if (const ConSanTargetProfile *target = consan_target_profile(arch))
+    target_facts.direct_call_form = target->direct_call_form;
+  const auto &operations = consan_moi_impl::moi_mode_operations(requirement.engine);
+  return operations.exec_save_sgpr_count(requirement, target_facts);
 }
 
 namespace {

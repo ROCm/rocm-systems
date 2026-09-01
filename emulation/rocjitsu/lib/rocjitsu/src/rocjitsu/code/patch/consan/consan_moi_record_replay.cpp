@@ -212,12 +212,31 @@ MoiScalarAbiPlan plan_record_replay_scalar_abi(const ConSanRequest &,
   return make_moi_scalar_abi_plan(point, special_state, 0u, false);
 }
 
+uint16_t record_replay_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
+                                            const MoiExecSaveTargetFacts &) {
+  if (requirement.automatic_banked_record_capture)
+    return 14u;
+
+  constexpr uint16_t kRuntimeWorkgroupGateSgprCount = 7u;
+  const uint16_t runtime_workgroup_gate_count =
+      requirement.runtime_sample_stride > 1u ? kRuntimeWorkgroupGateSgprCount : 0u;
+  if (requirement.dense_record_barrier_router)
+    return std::max<uint16_t>(8u, runtime_workgroup_gate_count);
+  if (requirement.scalar_spill)
+    return std::max<uint16_t>(4u, runtime_workgroup_gate_count);
+  if (requirement.dynamic_stack_spill)
+    return std::max<uint16_t>(6u, runtime_workgroup_gate_count);
+  return requirement.has_report_buffer ? std::max<uint16_t>(5u, runtime_workgroup_gate_count) : 0u;
+}
+
 const MoiModeOperations kRecordReplayModeOperations = {
     .plan = plan_record_replay_object_mode,
     .apply = apply_record_replay_mode_patches,
     .access_scratch_vgpr_count = record_replay_access_scratch_vgpr_count,
     .operational_evidence = {ConSanProbeIntentKind::BarrierRecord,
                              ConSanProbeIntentKind::AtomicRecord, true},
+    .dynamic_stack_frame_save_sgpr_offset = 5u,
+    .exec_save_sgpr_count = record_replay_exec_save_sgpr_count,
     .persistent_state_demand = plan_record_replay_persistent_state_demand,
     .transient_scalar_placement = {ConSanMoiScalarSpillLayout::Compact, false, true, 0u},
     .dynamic_stack_spill_without_target_backend = false,

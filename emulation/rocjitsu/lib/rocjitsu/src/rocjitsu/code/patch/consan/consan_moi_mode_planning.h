@@ -188,6 +188,13 @@ struct MoiOperationalEvidenceKinds {
   bool fence = false;
 };
 
+/// Narrow target facts that affect a mode's transient scalar ABI. Modes see
+/// the semantic facility, not an architecture identity or encoding-family
+/// predicate; adding a target therefore does not require editing a mode.
+struct MoiExecSaveTargetFacts {
+  ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
+};
+
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.
 [[nodiscard]] MoiPersistentStateDemand make_exact_workgroup_capture_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
@@ -255,6 +262,8 @@ struct MoiModeOperations {
                                         const ConSanMoiOperatingPoint &, const ConSanMoiCandidate &,
                                         rj_code_arch_t);
   MoiOperationalEvidenceKinds operational_evidence;
+  std::optional<uint16_t> dynamic_stack_frame_save_sgpr_offset;
+  uint16_t (*exec_save_sgpr_count)(const MoiExecSaveRequirement &, const MoiExecSaveTargetFacts &);
   MoiPersistentStateDemand (*persistent_state_demand)(const ConSanRequest &,
                                                       const BoundRuntimeResources &,
                                                       const ConSanMoiOperatingPoint &,

@@ -264,12 +264,27 @@ MoiScalarAbiPlan plan_sampled_scalar_abi(const ConSanRequest &request,
   return make_moi_scalar_abi_plan(point, special_state, 0u, false);
 }
 
+uint16_t sampled_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
+                                      const MoiExecSaveTargetFacts &target) {
+  if (!requirement.has_report_buffer)
+    return 0u;
+  if (requirement.scalar_spill)
+    return 8u;
+  if (requirement.dynamic_stack_spill)
+    return 9u;
+  if (target.direct_call_form == ConSanDirectCallForm::SCallI64)
+    return 8u;
+  return requirement.track_atomics ? 8u : 7u;
+}
+
 const MoiModeOperations kSampledModeOperations = {
     .plan = plan_sampled_object_mode,
     .apply = apply_sampled_mode_patches,
     .access_scratch_vgpr_count = sampled_access_scratch_vgpr_count,
     .operational_evidence = {ConSanProbeIntentKind::SampledBarrierEpoch,
                              ConSanProbeIntentKind::SampledAtomicOrdering, false},
+    .dynamic_stack_frame_save_sgpr_offset = 8u,
+    .exec_save_sgpr_count = sampled_exec_save_sgpr_count,
     .persistent_state_demand = plan_sampled_persistent_state_demand,
     .transient_scalar_placement = {ConSanMoiScalarSpillLayout::Compact, true, false, 8u},
     .dynamic_stack_spill_without_target_backend = false,

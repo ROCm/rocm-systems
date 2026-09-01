@@ -29,12 +29,21 @@ plan_hypothetical_mode(const ConSanRequest &, const ConSanMoiOperatingPoint &,
   return plan;
 }
 
+uint16_t hypothetical_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
+                                           const consan_moi_impl::MoiExecSaveTargetFacts &target) {
+  return requirement.has_report_buffer
+             ? (target.direct_call_form == ConSanDirectCallForm::SCallI64 ? 3u : 2u)
+             : 0u;
+}
+
 TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChanges) {
   enum class HypotheticalModeKey : uint8_t { FifthMode };
   consan_moi_impl::MoiModeOperations operations{};
   operations.plan = plan_hypothetical_mode;
   operations.operational_evidence = {ConSanProbeIntentKind::BarrierRecord,
                                      ConSanProbeIntentKind::SampledAtomicOrdering, false};
+  operations.dynamic_stack_frame_save_sgpr_offset = 1u;
+  operations.exec_save_sgpr_count = hypothetical_exec_save_sgpr_count;
   const std::array registrations{
       consan_moi_impl::MoiModeRegistrationFor<HypotheticalModeKey>{HypotheticalModeKey::FifthMode,
                                                                    &operations},
@@ -48,6 +57,9 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   EXPECT_FALSE(plan.track_atomics);
   EXPECT_EQ(selected->operational_evidence.barrier, ConSanProbeIntentKind::BarrierRecord);
   EXPECT_EQ(selected->operational_evidence.atomic, ConSanProbeIntentKind::SampledAtomicOrdering);
+  EXPECT_EQ(selected->exec_save_sgpr_count({.has_report_buffer = true},
+                                           {.direct_call_form = ConSanDirectCallForm::SCallI64}),
+            3u);
 }
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsAutomaticOwnerDefault) {
@@ -90,6 +102,12 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsDynamicStackSpillPolicy) {
   EXPECT_TRUE(record_unsupported.requires_every_owner_dynamic);
   EXPECT_TRUE(inline_unsupported.backend_supported);
   EXPECT_FALSE(inline_unsupported.requires_every_owner_dynamic);
+
+  EXPECT_EQ(moi_mode_operations(ConSanMoiEngine::RecordReplay).dynamic_stack_frame_save_sgpr_offset,
+            5u);
+  EXPECT_EQ(moi_mode_operations(ConSanMoiEngine::Sampled).dynamic_stack_frame_save_sgpr_offset, 8u);
+  EXPECT_EQ(moi_mode_operations(ConSanMoiEngine::InlineShadow).dynamic_stack_frame_save_sgpr_offset,
+            24u);
 }
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsOperandOverlapSpillPolicy) {

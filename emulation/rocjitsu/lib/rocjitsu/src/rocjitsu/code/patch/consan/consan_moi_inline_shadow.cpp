@@ -214,12 +214,24 @@ MoiScalarAbiPlan plan_inline_shadow_scalar_abi(const ConSanRequest &,
   return make_moi_scalar_abi_plan(point, special_state, 12u, true);
 }
 
+uint16_t inline_shadow_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
+                                            const MoiExecSaveTargetFacts &) {
+  if (!requirement.has_report_buffer)
+    return 0u;
+  const uint16_t engine_count =
+      requirement.inline_access_present ? kConSanMoiInlineExecSaveSgprCount : 22u;
+  const uint16_t stack_count = requirement.dynamic_stack_spill ? 25u : 0u;
+  return std::max(engine_count, stack_count);
+}
+
 const MoiModeOperations kInlineShadowModeOperations = {
     .plan = plan_inline_shadow_object_mode,
     .apply = apply_inline_shadow_mode_patches,
     .access_scratch_vgpr_count = inline_shadow_access_scratch_vgpr_count,
     .operational_evidence = {ConSanProbeIntentKind::ExactBarrierEpoch,
                              ConSanProbeIntentKind::ExactAtomicOrdering, false},
+    .dynamic_stack_frame_save_sgpr_offset = 24u,
+    .exec_save_sgpr_count = inline_shadow_exec_save_sgpr_count,
     .persistent_state_demand = plan_inline_shadow_persistent_state_demand,
     .transient_scalar_placement = {ConSanMoiScalarSpillLayout::Inline, false, false, 0u},
     .dynamic_stack_spill_without_target_backend = true,

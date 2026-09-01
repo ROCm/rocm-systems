@@ -3786,14 +3786,17 @@ The same definition-to-runtime trace found four further remnants. The public
 policy and inventory boundaries already render their different semantic
 diagnostics. Sampled access planning assigned `runtime_sample_index` but never
 read it. SuperCollider's candidate carried an `appended_cave_text_offset` that
-was never read and an `entry_island_is_appended` flag that was never assigned;
-its only branch therefore always selected `reserve_existing_range`, which is
-now stated directly. All seven positional candidate constructions shed the two
-arguments, preserving the existing reservation behavior for both local and
-generated islands. Finally, borrowed-entry VGPR selection no longer constructs
-a private duck-typed adapter: both call paths consume the already-declared
-`MoiPersistentVgprStateView`, and the operating-point entry explicitly projects
-that canonical view.
+was never read. The same audit classified `entry_island_is_appended` as dead
+because direct entry-island candidates always constructed it false. That
+classification was incomplete: generated-island seeds constructed it true and
+later acquired an island pointer through copying. The field itself remains
+unnecessary, but removing its semantic distinction made a reserved appended
+island look like unreserved existing text. A subsequent clean rebuild exposed
+the error, and checkpoint 42 derives the distinction from the island's actual
+location instead of restoring parallel state. Finally, borrowed-entry VGPR
+selection no longer constructs a private duck-typed adapter: both call paths
+consume the already-declared `MoiPersistentVgprStateView`, and the operating-
+point entry explicitly projects that canonical view.
 
 This slice deliberately adds no replacement abstraction. It removes an unused
 API, cross-mode telemetry, never-consumed candidate state, redundant writes,
@@ -3823,6 +3826,11 @@ mode-planning, atomic-classifier, Sampled, and SuperCollider tests; all 4,744
 nonphysical tests at `-j16`, including the unchanged 2,908 simulator rows over
 five targets; and all 635 physical gfx1201 tests serialized at `-j1`. No test
 was removed, renamed, disabled, added, or replaced.
+
+The checkpoint-42 clean rebuild invalidated the SuperCollider portion of that
+claim: seven far-relay tests failed deterministically until the generated-
+island reservation distinction was restored without restoring the field. The
+current-tree validation in checkpoint 42 supersedes this historical result.
 
 This checkpoint strengthens Sections 14.5, 14.7, 14.8, and 14.9: named products
 carry fewer facts that have no downstream semantic consumer; one canonical
@@ -3892,5 +3900,86 @@ That is recorded temporary growth, not code-size progress; it reduces the
 cumulative shrink from 73 to 51 lines and must be repaid by subsequent
 convergence and harvesting. Other reviewed common mode budgets, the broad
 transform transaction, material whole-refactoring shrinkage, and the
+independent Section 14 completion audit remain open. The goal therefore
+remains active.
+
+### 16.43 Convergence checkpoint 42: mode-owned transient scalar ABI
+
+The next common-mode audit found ten direct engine-enumerator references in
+`consan_moi_support.cpp`. They jointly implemented three unrelated transient
+scalar ABIs: each mode's complete EXEC-save window size, its dynamic-stack
+frame-save offset, and Record/Replay's automatic banked-capture classification.
+The common helper therefore needed editing for every new mode and mixed target
+variation into the same mode switch.
+
+Each `MoiModeOperations` registration now owns its exact EXEC-save sizing
+function and dynamic-stack frame-save offset. Record/Replay owns automatic
+banked capture, runtime workgroup-gate, compact spill, dense barrier-router,
+and dynamic-stack widths. Sampled owns publication, atomic, compact-spill, and
+dynamic-stack widths. InlineShadow owns access-present, atomic-only, and
+dynamic-stack widths. Common support constructs the already-narrow
+`MoiExecSaveRequirement`, resolves one `MoiExecSaveTargetFacts`, and invokes
+the selected operation. The old three-way switch, repeated engine guards,
+dynamic-stack count adapter, and duplicated banked-capture predicate are gone.
+
+The target variation is deliberately not a raw architecture parameter on the
+mode callback. Sampled needs to know whether its dense route has the target's
+`SCallI64` return-pair form; common support projects only that normalized
+`ConSanDirectCallForm` from the target profile. This preserves the exact five-
+target behavior while making the extension axes additive: a new target
+publishes its call form without editing Sampled, and a new mode supplies one
+scalar ABI operation without adding an architecture branch or editing common
+support. Focused tests cover every dynamic-stack offset and width as well as
+the existing RDNA3, RDNA4, and CDNA5 ordinary widths. The architecture gate
+replaces support's reviewed ten-occurrence mode budget with an exact zero rule.
+
+The full gate also found and repaired a regression introduced by checkpoint
+40's incomplete generated-island audit. Local SuperCollider NOP islands need
+an exclusive existing-text reservation, whereas generated islands already
+belong to a reserved appended prefix. Candidate selection now derives that
+fact from the island's actual text offset; it neither restores the removed
+boolean nor adds another provenance channel. Seven existing focused tests at
+the SuperCollider placement boundary directly reproduced the failure and now
+pass, including wide composite donors, shared gfx1250 owners, variable relay
+reservoirs, CDNA4 wave64 reservoirs, relocated second-word anchors, skipped-
+kernel donors, and generated-bank preplanning. The repair is checkpointed
+separately as `c1949b018c7`.
+
+| Signal | Checkpoint 42 | Cumulative change | Slice change from checkpoint 41 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,408 | +433 | +13 |
+| Nonblank production lines | 99,121 | +38 | +9 |
+| Production implementation lines | 91,400 | **-50** | +1 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 206 / 56 | **-70 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 205 / 28 | +5 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 361 / 63 | +71 / +12 | 0 / 0[^checkpoint-42-point-count] |
+| Direct mode references in common scalar-ABI support | **0** | n/a | **-10** |
+| Mode-local scalar-ABI registrations | 3 | n/a | +3 |
+| Common-support mode-switch gate | exact zero | n/a | strengthened from budget 10 |
+| Test inventory | 5,379 | +34 | 0 |
+
+[^checkpoint-42-point-count]: Recounting the checkpoint-41 tree finds 361
+    occurrences, not the 351 recorded in its table. This row corrects that
+    stale ledger value; the checkpoint-42 production slice adds none.
+
+Validation includes a clean final-tree `-j16` rebuild; all 877 `ConSanMoi*`,
+scalar-ABI, and architecture-boundary focused tests; the seven directly
+affected SuperCollider far-relay regressions; all 4,744 nonphysical tests at
+`-j16`, including the unchanged 2,908 simulator rows over five targets; and all
+635 physical gfx1201 tests serialized at `-j1`. The two existing scalar-ABI
+tests and the hypothetical-mode extension fixture gained assertions, but no
+test was removed, renamed, disabled, added, or replaced, so the inventory
+remains unchanged.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.4, 14.5, 14.6, 14.7,
+14.8, and 14.9. Common scalar support is now mode-neutral, modes consume a
+narrow target fact rather than architecture identity, all superseded dispatch
+logic is deleted, and a discovered legacy-harvest regression is fixed at its
+owning placement boundary. The slice costs one net implementation line after
+the regression repair, so it does not repay checkpoint 41's temporary growth
+or satisfy material shrinkage. Other reviewed common mode budgets, the broad
+operating point and transform transaction, remaining target locality, and the
 independent Section 14 completion audit remain open. The goal therefore
 remains active.

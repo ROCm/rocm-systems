@@ -316,18 +316,27 @@ TEST(ConSan, MoiExecSaveRequirementOwnsTargetAndFallbackSizing) {
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 8u);
   requirement.automatic_banked_record_capture = true;
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 14u);
+  requirement = {.has_report_buffer = true, .dynamic_stack_spill = true};
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 6u);
 
   requirement = {.engine = ConSanMoiEngine::Sampled, .has_report_buffer = true};
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 7u);
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_CDNA5), 8u);
   requirement.track_atomics = true;
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 8u);
+  requirement = {
+      .engine = ConSanMoiEngine::Sampled, .has_report_buffer = true, .dynamic_stack_spill = true};
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_CDNA5), 9u);
 
   requirement = {.engine = ConSanMoiEngine::InlineShadow, .has_report_buffer = true};
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA4), 22u);
   requirement.inline_access_present = true;
   EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA4),
             kConSanMoiInlineExecSaveSgprCount);
+  requirement = {.engine = ConSanMoiEngine::InlineShadow,
+                 .has_report_buffer = true,
+                 .dynamic_stack_spill = true};
+  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA4), 25u);
 }
 
 TEST(ConSan, MoiResourcePlanningResultSeparatesStructuralFailureFromUnsupportedSites) {

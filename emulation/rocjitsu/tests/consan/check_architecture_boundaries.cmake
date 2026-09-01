@@ -1355,7 +1355,7 @@ _consan_assert_reviewed_mode_switch_budget(
     consan_moi_pipeline.inc 0 "semantic-operation resource-plan orchestration"
 )
 _consan_assert_reviewed_mode_switch_budget(
-    consan_moi_support.cpp 10 "shared mode contract validation"
+    consan_moi_support.cpp 0 "mode-neutral scalar ABI dispatch"
 )
 _consan_assert_reviewed_mode_switch_budget(
     consan_types.cpp 6 "mode parsing naming and request validation"
