@@ -145,7 +145,6 @@ if(BUILD_CUID)
         HINTS ${ROCM_DIR_CORE}/include/amdcuid ${CMAKE_PREFIX_PATH}/include/amdcuid
         REQUIRED
     )
-    find_package(OpenSSL REQUIRED)
 endif(BUILD_CUID)
 #
 #   --- When BUILD_BOTH_LIBS: build shared and static; tests/examples link to static ---
@@ -211,7 +210,7 @@ function(amdsmi_configure_common_target _TARGET)
 
     if(BUILD_CUID)
         target_compile_definitions(${_TARGET} PRIVATE BUILD_CUID)
-        target_link_libraries(${_TARGET} PRIVATE ${AMDCUID_LIB} OpenSSL::Crypto)
+        target_link_libraries(${_TARGET} PRIVATE ${AMDCUID_LIB})
         target_include_directories(${_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
     endif()
 
