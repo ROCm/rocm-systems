@@ -10,7 +10,6 @@
 
 #include <cstddef>
 #include <cstdint>
-
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::gpu
