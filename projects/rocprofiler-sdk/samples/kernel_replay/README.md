@@ -28,7 +28,7 @@ service (same idea as `samples/counter_collection/`).
 |---|---|---|
 | `kernel-replay-basic` | 4 | Replay only. The app still sees one kernel completion. |
 | `kernel-replay-counters` | 3 | Dispatch counters; each pass selects a different counter configuration. |
-| `kernel-replay-counters-then-pc-sampling` | 4 | Counters on passes 0–2, PC sampling on pass 3 only. |
+| `kernel-replay-counters-then-pc-sampling` | — | Not currently supported: PC sampling ignores localized pass overrides. |
 | `kernel-replay-att` | 2 | Counters on pass 0, ATT on pass 1. |
 | `kernel-replay-spm` | 2 | Counters on pass 0, SPM on pass 1. |
 | `kernel-replay-opt-out` | 3 / 1 | Replays the `bump` kernel (`block.x == 67`); leaves `nudge` unreplayed. |
