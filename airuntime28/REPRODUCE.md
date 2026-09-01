@@ -164,9 +164,12 @@ dispatched — if `copyBufferNT` appears at both settings or neither, the compar
 ## Reading the output
 
 - **Negative is faster.** Every effect is expressed as a paired median difference in percent.
-- **`(ns)` means do not quote it.** The effect did not exceed the run's resolution limit — the
-  same arm measured twice in the same run — so it is not distinguishable from the rig's own
-  noise regardless of how tight its interval looks.
+- **`(ns)` = "not separable". Do not quote the number.** Two bars have to be cleared for a
+  result to count: its 95% interval must exclude zero, *and* its size must exceed the run's
+  resolution limit. `(ns)` means it failed at least one. The resolution limit is the widest
+  difference the rig reports between two slots running the *same* arm, where the true answer is
+  zero — so an effect no bigger than that is indistinguishable from the rig measuring nothing,
+  however tight its interval looks. It is a magnitude threshold, not a plus-or-minus band.
 - **`res_lim` bounds the negative results too.** A case reporting "no difference" at a 8 pp
   resolution limit has not ruled out a 5% regression.
 - **Absolute ms and GB/s in the 16-48 MiB band describe a run, not the hardware** — see the

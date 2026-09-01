@@ -12,7 +12,7 @@ gfx1250 (MI450 A0). Paired against the same kernel without the hint: one sample 
 
 | scenario | effect |
 |---|---|
-| isolated 1 GiB copy | -0.47% [-0.83, -0.11] - below the +/-0.74 pp resolution limit, so **no effect** |
+| isolated 1 GiB copy | -0.47% [-0.83, -0.11] - below the 0.74 pp resolution limit, so **no effect** |
 | isolated 96-192 MiB copy | roughly **-3% to -5%**, significant |
 | co-running cache-sensitive kernel's runtime | **-2.4% to -4.7%**, significant for an 8-128 MiB working set, peak near 32 MiB |
 

@@ -33,7 +33,7 @@ the same run.
 reported as "-44% bandwidth", now +77.4% time; `plain-32` as "-68.8%", now +221.0% time. Those
 are the same measurement — 1/(1-0.44) = 1.79 — and they agree to within a point. The shipped
 change's figure moved from -0.1% to -0.28% [-0.71, +0.50] and is still not separable from
-noise, now against a stated ±0.93 pp resolution limit rather than against nothing.
+noise, now against a stated 0.93 pp resolution limit rather than against nothing.
 
 ### `TH_STORE_NT_RT` was reported as a win. It is codegen.
 

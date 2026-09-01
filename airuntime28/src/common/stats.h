@@ -82,7 +82,9 @@ inline bool separable(const Delta& effect, const std::vector<Delta>& noiseFloors
   return std::abs(effect.median) > widest;
 }
 
-// "+1.23% [+1.10,+1.40]" or the same with a trailing " (ns)".
+// "+1.23% [+1.10,+1.40]" or the same with a trailing " (ns)", for "not separable":
+// the effect did not clear both bars in separable() above, so it is not evidence
+// of anything and its digits should not be quoted.
 inline void formatDelta(char* out, size_t n, const Delta& d, bool isSignificant) {
   std::snprintf(out, n, "%+6.2f%% [%+.2f,%+.2f]%s", d.median, d.lo, d.hi,
                 isSignificant ? "" : " (ns)");

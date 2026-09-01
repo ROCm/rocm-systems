@@ -194,7 +194,12 @@ inline void printArmTable(const SlotResults& r, const std::vector<std::string>& 
     }
     std::printf("  %-20s %11.4f   %-28s\n", armNames[a].c_str(), r.medianMs(slot), cell);
   }
-  std::printf("  resolution limit (same arm twice): +/-%.2f pp\n", r.resolutionLimit());
+  // Not written as +/- : this is the width of the interval on a same-arm-twice
+  // comparison, and an effect must exceed it outright, not merely land outside a
+  // band half that size.
+  std::printf("  resolution limit: %.2f pp, the widest gap between two slots running the same\n",
+              r.resolutionLimit());
+  std::printf("  arm. '(ns)' = not separable from that, so not evidence of an effect.\n");
 }
 
 // Machine-readable rows so report tables can be regenerated instead of

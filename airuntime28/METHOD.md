@@ -58,8 +58,13 @@ is the resolution limit of the rig: measured, per run, rather than assumed. A re
 only if its 95% bootstrap interval excludes zero **and** its magnitude exceeds the widest
 same-arm-twice gap in that run. The second test is what distinguishes a real 1% from a
 confidently-measured artefact — a tight interval says a measurement is repeatable, not that it
-is measuring the intended thing. Results failing it are printed with `(ns)` and must not be
-quoted as effects.
+is measuring the intended thing.
+
+Results failing either test are printed with **`(ns)`, for "not separable"**: not separable
+from the rig's own error, which is a stronger claim than "not statistically significant". They
+must not be quoted as effects. Note that the resolution limit is the *width* of the interval on
+a same-arm-twice comparison, so a limit of 0.74 pp means an effect must exceed 0.74 pp in
+magnitude — it is not a plus-or-minus band.
 
 Intervals come from a bootstrap on the median of the paired differences: 3000 resamples, fixed
 seed, one definition in `src/common/stats.h`. That last detail is not cosmetic — the previous

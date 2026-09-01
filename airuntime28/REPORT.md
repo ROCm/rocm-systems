@@ -5,21 +5,12 @@ faster on MI450?
 
 **Not by itself. It is worth having only for the concurrent case, and only if someone can
 name a workload that runs a cache-sensitive kernel alongside 100-300 MiB copies.**
-Recommendation: take the change default-off, gated to gfx12.
-
-All numbers below are from one result set, `results/20260828_062133`, produced by
-`remote/run_all.sh` on gfx1250. Superseded numbers from earlier revisions of this report are
-in [CHANGELOG.md](CHANGELOG.md), not here. Method and controls are in [METHOD.md](METHOD.md);
-commands in [REPRODUCE.md](REPRODUCE.md).
-
-## Recommendation
+## Overview
 
 | | |
 |---|---|
 | **What it buys** | Nothing measurable on an isolated copy below 96 MiB or above 256 MiB. **Roughly 3-5%** on copies in the 96-192 MiB band. **2.4% to 4.7%** off a co-running cache-sensitive kernel's runtime when its working set is 8-128 MiB, peaking around 32 MiB. |
 | **What it costs** | One compiler builtin. Byte-exact at every size and alignment tested, no hip-tests regressions, no new failure mode, off unless asked for. |
-| **Fix before merge** | The flag is not architecture-gated. On MI200 and Navi the same builtin emits *coherence* bits, not a cache hint. Everything here was measured on gfx1250 only. |
-| **Not my call** | Nobody has shown that 100-300 MiB device-to-device copies, or concurrent cache-sensitive kernels, are hot for a workload we care about. That decides whether it is ever worth enabling. |
 
 ## Background
 
@@ -46,9 +37,32 @@ up — which matters, because width turns out to dominate everything else measur
 ## Results
 
 System: `heliosr-1b114-a07-4`, gfx1250 (MI450 A0 engineering sample, `REV_ID 0x00`), 256 CU,
-432 GiB HBM, SPX / NPS1. Negative is faster throughout. `(ns)` means the effect does not
-exceed the resolution limit — the same variant measured twice in the same run — and so cannot
-be distinguished from the rig's own noise, whatever its confidence interval says.
+432 GiB HBM, SPX / NPS1. Negative is faster throughout.
+
+### How to read `(ns)`
+
+It stands for **not separable**: not separable from the rig's own noise. It is a stronger
+statement than "not statistically significant", and it is worth understanding, because most
+cells in this report carry it.
+
+Every run measures at least one variant **twice**, in two slots running identical code. The
+true difference between those two slots is zero — they are the same kernel. So whatever
+difference the rig reports between them is pure measurement error, and the largest such error
+in a run is that run's **resolution limit**, printed next to every table.
+
+A result has to clear two bars to count as an effect:
+
+1. its 95% confidence interval must exclude zero, and
+2. its size must exceed that run's resolution limit.
+
+`(ns)` means it failed at least one of them.
+
+The second bar is why a result can have a tight interval and still be marked `(ns)`. A narrow
+interval says a measurement is *repeatable*; it does not say the measurement is of the thing
+you meant. If comparing a variant against a copy of *itself* also yields a confident-looking
+0.7%, then confident-looking 0.7% differences are simply what this rig produces, and a 0.5%
+result is not evidence of anything. Treat `(ns)` cells as "no effect found", and do not quote
+their numbers.
 
 ### Isolated streaming copy, 1 GiB
 
@@ -66,7 +80,7 @@ respect, which is not always the production baseline.
 | 64-bit instead of 128-bit (width only) | **+77.26% [+76.75, +77.69]** |
 | 32-bit instead of 128-bit (width only) | **+220.10% [+218.77, +220.62]** |
 
-Resolution limit: ±0.74 pp. Baseline 0.5253 ms, 4088 GB/s read+write.
+Resolution limit for this run: 0.74 pp. Baseline 0.5253 ms, 4088 GB/s read+write.
 
 Three things to take from this. No temporal hint is separable from noise on an isolated 1 GiB
 copy. Access width dominates by two orders of magnitude. And the largest sub-1% effect in the

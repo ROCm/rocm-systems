@@ -75,8 +75,9 @@ int main(int argc, char** argv) {
   EventTimer timer;
 
   std::printf("\n  Each cell is the paired median difference against plain-128 at that size,\n");
-  std::printf("  with a 95%% bootstrap interval. '(ns)' means the effect does not exceed the\n");
-  std::printf("  rig's own resolution, measured from duplicate slots in the same run.\n\n");
+  std::printf("  with a 95%% bootstrap interval. '(ns)' = not separable: the effect does not\n");
+  std::printf("  exceed res_lim, this rig's own error measured from duplicate slots in the\n");
+  std::printf("  same run, so no effect was found at that size.\n\n");
   std::printf("  %10s %11s %9s", "size", "plain_ms", "GB/s");
   for (int a = 1; a < nArms; ++a) std::printf(" %26s", arms[a].c_str());
   std::printf("  %8s\n", "res_lim");

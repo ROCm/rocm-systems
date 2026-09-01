@@ -125,7 +125,8 @@ int main(int argc, char** argv) {
                   static_cast<int>(r.isSignificant(d)));
     emitRow("isolated_copy_controlled", kVariants[c.arm].name, "delta_pct", d.median, "pct", extra);
   }
-  std::printf("  negative is faster; '(ns)' means below the %.2f pp resolution limit\n",
+  std::printf("  negative is faster; '(ns)' = not separable from this run's %.2f pp\n"
+              "  resolution limit, so no effect was found\n",
               r.resolutionLimit());
 
   std::printf("\n");
