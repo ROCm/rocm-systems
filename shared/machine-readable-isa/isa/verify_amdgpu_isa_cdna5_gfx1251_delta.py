@@ -417,6 +417,14 @@ def _verify_mc_record(llvm_root: Path, record: dict[str, Any], context: str) -> 
     assembly_line = record["assembly_line"]
     check_line = record["check_line"]
     _require(
+        1 <= assembly_line <= len(lines),
+        f"{context}: assembly line {assembly_line} is out of range",
+    )
+    _require(
+        1 <= check_line <= len(lines),
+        f"{context}: check line {check_line} is out of range",
+    )
+    _require(
         lines[assembly_line - 1].strip() == record["assembly"],
         f'{context}: assembly at {record["path"]}:{assembly_line} does not match',
     )

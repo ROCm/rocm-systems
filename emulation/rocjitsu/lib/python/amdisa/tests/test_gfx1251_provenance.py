@@ -209,3 +209,37 @@ def test_provenance_rejects_mixed_container_text(tmp_path: Path) -> None:
 
     with pytest.raises(_verifier().ProvenanceError, match='mixed container text'):
         _verifier().validate(manifest_path, isa_dir=isa_dir)
+
+
+@pytest.mark.parametrize(
+    ('field', 'line_number'),
+    [
+        ('assembly_line', 0),
+        ('assembly_line', 3),
+        ('check_line', 0),
+        ('check_line', 3),
+    ],
+)
+def test_mc_provenance_rejects_out_of_range_line_numbers(
+    tmp_path: Path, field: str, line_number: int
+) -> None:
+    source = tmp_path / 'mc.s'
+    source.write_text(
+        'v_test_instruction\n// GFX1251: encoding: [0x01]\n', encoding='utf-8'
+    )
+    record = {
+        'path': source.name,
+        'assembly_line': 1,
+        'check_line': 2,
+        'assembly': 'v_test_instruction',
+        'test': 'GFX1251',
+        'bytes': ['0x01'],
+    }
+    record[field] = line_number
+
+    line_kind = 'assembly' if field == 'assembly_line' else 'check'
+    with pytest.raises(
+        _verifier().ProvenanceError,
+        match=rf'{line_kind} line {line_number} is out of range',
+    ):
+        _verifier()._verify_mc_record(tmp_path, record, 'test MC vector')
