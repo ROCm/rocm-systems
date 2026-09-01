@@ -5331,3 +5331,67 @@ whole-refactoring shrinkage. Remaining architecture locality, broader
 operating-point and mutable-transaction surfaces, larger legacy harvesting,
 material Section 14.8 evidence, and the independent Section 14 completion audit
 remain open. The goal therefore remains active.
+
+### 16.65 Convergence checkpoint 64: one Sampled causal-window validator
+
+The Sampled synchronization deep read compared the complete causal-window
+validation protocols used by barriers and atomics. Both routes loaded and
+compared the same generation, dispatch identity, workgroup tuple, epoch,
+selected entry, entry count, ready-publication state, and cluster identity.
+They also used the same field-load, compare, EXEC-intersection, and no-lanes
+branch mechanisms. The only intended route difference is the mismatch target:
+a barrier advances to its next candidate window, while an atomic leaves the
+selected-window path.
+
+The duplicated implementations had drifted semantically. Atomic validation
+consumed the typed `ConSanMoiWorkgroupSource` contract and therefore handled
+scalar, vector, or entry-captured private sources. Barrier validation still
+tested `scalar_src` directly and compared zero for every other representation.
+At an accumulator-register boundary, placement deliberately captures the
+workgroup tuple in private state, so the barrier could select a window without
+checking the real workgroup identity.
+
+One Sampled-local `consan_moi_sampled_window_emission` component now owns the
+complete causal-window identity policy and its emission protocol. Barrier and
+atomic lowering pass their separately chosen mismatch labels and register
+assignments through one typed request. All twelve identity comparisons are
+declared once, while iteration, watchpoint validation, atomic outcomes,
+metadata publication, and restore paths remain with their genuine route
+owners. The two old validator bodies are deleted.
+
+The existing accumulator-boundary barrier test now requires private loads for
+all three captured workgroup coordinates. This assertion failed against the
+pre-fix implementation on both gfx942/CDNA3 and gfx950/CDNA4 configurations and
+passes with the shared typed-source policy. The architecture gate requires
+exactly one shared-validator call from each synchronization route and rejects
+restoration of their local field-comparison mini-languages.
+
+| Signal | Checkpoint 64 | Cumulative change | Slice change from checkpoint 63 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | +2 Sampled-local owner files |
+| Physical production lines | 105,142 | +167 | **-6** |
+| Nonblank production lines | 98,806 | **-277** | **-19** |
+| Production implementation lines | 91,063 | **-387** | **-28** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **174 / 52** | **-102 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Sampled causal-window validation policy owners | **1** | n/a | **-1 duplicate owner** |
+| Synchronization consumers of the shared validator | **2** | n/a | barrier + atomic |
+| Test inventory | **5,388** | **+43** | 0 |
+
+Validation includes a final-tree `-j16` build; 80 focused Sampled barrier,
+atomic, causal-window, private-state, and architecture tests; all 4,753
+nonphysical tests over the five emulated targets at `-j16`; and all 635
+physical gfx1201 tests serialized at `-j1`. No test was removed, renamed,
+disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, 14.8, and
+14.9. Sampled window identity now has one mode-local authority, the two
+synchronization routes contain only their real control-flow differences, and a
+cross-component bug has permanent owning-boundary coverage. The cumulative
+reduction reaches 387 implementation lines, still short of material
+whole-refactoring shrinkage. Remaining architecture locality, broader
+operating-point and mutable-transaction surfaces, larger legacy harvesting,
+material Section 14.8 evidence, and the independent Section 14 completion audit
+remain open. The goal therefore remains active.

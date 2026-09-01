@@ -11,6 +11,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_sampled_window_emission.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
@@ -758,71 +759,20 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
           *target))
     return std::nullopt;
 
-  const auto narrow_equal_literal = [&](uint32_t offset, uint32_t literal) -> bool {
-    if (!append_load_u32_vgpr_at_offset(words, base, offset, value, arch))
-      return false;
-    const auto mov = instrumentation::build_v_mov_b32_literal(expected, literal, arch);
-    const auto compare =
-        instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
-    const auto narrow =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
-    if (!sequence.emit_all(mov, compare, narrow))
-      return false;
-    return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero);
-  };
-  const auto narrow_equal_vgpr = [&](uint32_t offset, uint16_t expected_vgpr) -> bool {
-    if (!append_load_u32_vgpr_at_offset(words, base, offset, value, arch))
-      return false;
-    const auto compare =
-        instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected_vgpr), value, arch);
-    const auto narrow =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
-    if (!sequence.emit_all(compare, narrow))
-      return false;
-    return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero);
-  };
-  const auto narrow_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
-    if (!append_load_u32_vgpr_at_offset(words, base, offset, value, arch) ||
-        !append_compare_moi_report_dispatch_id_word(
-            words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
-            value, expected, high_word, arch)) {
-      return false;
-    }
-    const auto narrow =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
-    if (!sequence.emit(narrow))
-      return false;
-    return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero);
-  };
-  const auto narrow_equal_workgroup = [&](uint32_t offset,
-                                          const ConSanMoiWorkgroupSource &source) -> bool {
-    if (!source.has_value())
-      return narrow_equal_literal(offset, 0u);
-    if (!consan_detail::append_workgroup_source_value(words, source, expected, arch))
-      return false;
-    return narrow_equal_vgpr(offset, expected);
-  };
-  if (!narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, generation),
-                            static_cast<uint32_t>(bound_resources.moi_report_generation)) ||
-      !narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, generation) + 4u,
-                            static_cast<uint32_t>(bound_resources.moi_report_generation >> 32u)) ||
-      !narrow_equal_dispatch_id(offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
-                                /*high_word=*/false) ||
-      !narrow_equal_dispatch_id(offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + 4u,
-                                /*high_word=*/true) ||
-      !narrow_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_x),
-                              workgroup_sources->x) ||
-      !narrow_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_y),
-                              workgroup_sources->y) ||
-      !narrow_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_z),
-                              workgroup_sources->z) ||
-      !narrow_equal_vgpr(offsetof(ConSanMoiSampledCausalWindow, epoch), *owner_epoch_vgprs.epoch) ||
-      !narrow_equal_vgpr(offsetof(ConSanMoiSampledCausalWindow, first_entry), bank) ||
-      !narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, entry_count), 1u) ||
-      !narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, publication_state),
-                            static_cast<uint32_t>(ConSanMoiSampledCausalPublicationState::Ready)) ||
-      !narrow_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, cluster_workgroup_id),
-                              workgroup_sources->cluster_workgroup_id))
+  if (!append_sampled_causal_window_validation(
+          words, sequence,
+          {.generation = bound_resources.moi_report_generation,
+           .dispatch_id =
+               consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
+           .workgroup_sources = *workgroup_sources,
+           .address_vgpr = base,
+           .value_vgpr = value,
+           .expected_vgpr = expected,
+           .epoch_vgpr = *owner_epoch_vgprs.epoch,
+           .first_entry_vgpr = bank,
+           .temporary_exec_sgpr = temporary_exec,
+           .mismatch_label = restore_label,
+           .arch = arch}))
     return std::nullopt;
 
   if (!consan_detail::append_moi_indexed_address(words,

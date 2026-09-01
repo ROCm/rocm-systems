@@ -310,92 +310,20 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
       return std::nullopt;
     }
 
-    const auto narrow_current = [&]() -> bool {
-      const auto narrow =
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
-      if (!sequence.emit(narrow))
-        return false;
-      return sequence.emit_branch(next_window_label, InstructionSequence::BranchKind::SccZero);
-    };
-    const auto narrow_equal_literal = [&](uint32_t offset, uint32_t literal) -> bool {
-      if (!record.load(offset, value))
-        return false;
-      const auto mov = instrumentation::build_v_mov_b32_literal(expected, literal, arch);
-      const auto compare =
-          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
-      if (!mov || !compare)
-        return false;
-      words.insert(words.end(), mov->begin(), mov->end());
-      words.push_back(*compare);
-      return narrow_current();
-    };
-    const auto narrow_equal_vgpr = [&](uint32_t offset, uint16_t expected_vgpr) -> bool {
-      if (!record.load(offset, value))
-        return false;
-      const auto compare =
-          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected_vgpr), value, arch);
-      if (!compare)
-        return false;
-      words.push_back(*compare);
-      return narrow_current();
-    };
-    const auto narrow_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
-      if (!record.load(offset, value) ||
-          !append_compare_moi_report_dispatch_id_word(
-              words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
-              value, expected, high_word, arch)) {
-        return false;
-      }
-      return narrow_current();
-    };
-    const auto narrow_equal_workgroup = [&](uint32_t offset,
-                                            const ConSanMoiWorkgroupSource &source) -> bool {
-      if (!source.scalar_src)
-        return narrow_equal_literal(offset, 0u);
-      words.push_back(build_v_mov_b32_e32(expected, *source.scalar_src, arch));
-      if (source.mask_low_16) {
-        const auto left = instrumentation::build_v_lshlrev_b32(
-            expected, scalar_positive_inline_u32(16), expected, arch);
-        const auto right = instrumentation::build_v_lshrrev_b32(
-            expected, scalar_positive_inline_u32(16), expected, arch);
-        if (!left || !right)
-          return false;
-        words.push_back(*left);
-        words.push_back(*right);
-      }
-      if (source.shift_right_16) {
-        const auto shift = instrumentation::build_v_lshrrev_b32(
-            expected, scalar_positive_inline_u32(16), expected, arch);
-        if (!shift)
-          return false;
-        words.push_back(*shift);
-      }
-      return narrow_equal_vgpr(offset, expected);
-    };
-    if (!narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, generation),
-                              static_cast<uint32_t>(bound_resources.moi_report_generation)) ||
-        !narrow_equal_literal(
-            offsetof(ConSanMoiSampledCausalWindow, generation) + 4u,
-            static_cast<uint32_t>(bound_resources.moi_report_generation >> 32u)) ||
-        !narrow_equal_dispatch_id(offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
-                                  /*high_word=*/false) ||
-        !narrow_equal_dispatch_id(offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + 4u,
-                                  /*high_word=*/true) ||
-        !narrow_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_x),
-                                workgroup_sources->x) ||
-        !narrow_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_y),
-                                workgroup_sources->y) ||
-        !narrow_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_z),
-                                workgroup_sources->z) ||
-        !narrow_equal_vgpr(offsetof(ConSanMoiSampledCausalWindow, epoch),
-                           *owner_epoch_vgprs.epoch) ||
-        !narrow_equal_vgpr(offsetof(ConSanMoiSampledCausalWindow, first_entry), bank_vgpr) ||
-        !narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, entry_count), 1u) ||
-        !narrow_equal_literal(
-            offsetof(ConSanMoiSampledCausalWindow, publication_state),
-            static_cast<uint32_t>(ConSanMoiSampledCausalPublicationState::Ready)) ||
-        !narrow_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, cluster_workgroup_id),
-                                workgroup_sources->cluster_workgroup_id)) {
+    if (!consan_moi_impl::append_sampled_causal_window_validation(
+            words, sequence,
+            {.generation = bound_resources.moi_report_generation,
+             .dispatch_id =
+                 consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
+             .workgroup_sources = *workgroup_sources,
+             .address_vgpr = base,
+             .value_vgpr = value,
+             .expected_vgpr = expected,
+             .epoch_vgpr = *owner_epoch_vgprs.epoch,
+             .first_entry_vgpr = bank_vgpr,
+             .temporary_exec_sgpr = temporary_exec,
+             .mismatch_label = next_window_label,
+             .arch = arch})) {
       errors.emplace_back("ConSan MOI sampled barrier failed at causal-window validation");
       return std::nullopt;
     }

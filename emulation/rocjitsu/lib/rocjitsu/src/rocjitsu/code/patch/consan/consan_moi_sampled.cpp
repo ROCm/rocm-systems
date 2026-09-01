@@ -36,6 +36,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_atomic_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_contracts.h"
+#include "rocjitsu/code/patch/consan/consan_moi_sampled_window_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
 #include "rocjitsu/code/patch/consan/consan_vgpr_bank_state.h"

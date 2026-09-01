@@ -4169,10 +4169,22 @@ TEST(ConSanMoi, CdnaSampledBarrierUsesPrivatePersistentStateAtAccvgprBoundary) {
 
       ASSERT_TRUE(barrier_patch->scratch_vgpr);
       ASSERT_TRUE(barrier_patch->persistent_owner_private_offset);
+      ASSERT_TRUE(barrier_patch->persistent_record_replay_workgroup_private_offsets.complete());
       AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
       ASSERT_TRUE(patched.is_valid());
       const std::vector<uint32_t> cave = text_words_at_offset(
           patched, barrier_patch->trampoline_offset, barrier_patch->trampoline_size);
+      const uint16_t workgroup_vgpr = static_cast<uint16_t>(*barrier_patch->scratch_vgpr + 3u);
+      for (const uint32_t offset : {
+               *barrier_patch->persistent_record_replay_workgroup_private_offsets.x(),
+               *barrier_patch->persistent_record_replay_workgroup_private_offsets.y(),
+               *barrier_patch->persistent_record_replay_workgroup_private_offsets.z(),
+           }) {
+        const auto workgroup_load =
+            instrumentation::build_private_load_b32(workgroup_vgpr, offset, target.arch);
+        ASSERT_TRUE(workgroup_load);
+        EXPECT_TRUE(contains_subsequence(cave, *workgroup_load));
+      }
       const uint16_t owner_vgpr = static_cast<uint16_t>(*barrier_patch->scratch_vgpr + 7u);
       const auto owner_load = instrumentation::build_private_load_b32(
           owner_vgpr, *barrier_patch->persistent_owner_private_offset, target.arch);

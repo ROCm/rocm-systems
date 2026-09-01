@@ -684,6 +684,28 @@ if(NOT _moi_indirect_target_recipe_count EQUAL 1)
         "ConSan SCC-preserving indirect jumps must share one target-preparation recipe"
     )
 endif()
+# Barrier and atomic synchronization consume the same Sampled causal-window
+# identity policy. Keep that policy in its mode-local emission owner instead of
+# allowing the two lowering routes to drift apart again.
+foreach(_sampled_window_client IN ITEMS
+    consan_moi_sampled_sync.inc
+    consan_moi_sampled_atomic_emission.cpp
+)
+    file(READ "${_consan_dir}/${_sampled_window_client}" _sampled_window_client_source)
+    string(REGEX MATCHALL "append_sampled_causal_window_validation"
+           _sampled_window_validation_calls "${_sampled_window_client_source}")
+    list(LENGTH _sampled_window_validation_calls _sampled_window_validation_call_count)
+    if(NOT _sampled_window_validation_call_count EQUAL 1)
+        message(FATAL_ERROR
+            "ConSan Sampled ${_sampled_window_client} must consume one shared causal-window validator"
+        )
+    endif()
+    _consan_assert_no_match(
+        "${_consan_dir}/${_sampled_window_client}"
+        "narrow_equal_(literal|vgpr|dispatch_id|workgroup)"
+        "Sampled synchronization routes must not redeclare causal-window validation policy"
+    )
+endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_sync_emission.cpp"
     "consan_uses_gfx9_cdna_encoding|ConSanMoiLiteralDispatchIdPolicy|moi_report_dispatch_id_source_permitted"
