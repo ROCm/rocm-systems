@@ -34,6 +34,7 @@ empty column is printed, which on a mixed-version fleet shows up as a key-set
 difference between GPUs rather than as a lost value.
 """
 
+from functools import lru_cache
 from typing import Any, Dict, FrozenSet, Optional, Tuple
 
 NA = "N/A"
@@ -281,8 +282,19 @@ for _row, _source in _THROTTLE_SOURCES.items():
 
 
 def known_versions() -> FrozenSet[VersionKey]:
-    """The ``(format_revision, content_revision)`` pairs the table maps explicitly."""
+    """The explicitly mapped ``(format_revision, content_revision)`` pairs.
+
+    No CLI caller: this is the seam the table's tests and the C++ drift guard
+    enumerate versions through.
+    """
     return frozenset(_VERSION_FIELDS)
+
+
+def _normalize_version(format_revision: Any, content_revision: Any) -> Optional[VersionKey]:
+    try:
+        return (int(format_revision), int(content_revision))
+    except (TypeError, ValueError):
+        return None
 
 
 def populatable_fields(format_revision: Any, content_revision: Any) -> Optional[FieldSet]:
@@ -293,9 +305,11 @@ def populatable_fields(format_revision: Any, content_revision: Any) -> Optional[
     ``amdgpu_metric_version_translation_table`` first and only falls back to the
     (1, >=9) dynamic reader on a miss.
     """
-    try:
-        version = (int(format_revision), int(content_revision))
-    except (TypeError, ValueError):
+    return _populatable_fields(_normalize_version(format_revision, content_revision))
+
+
+def _populatable_fields(version: Optional[VersionKey]) -> Optional[FieldSet]:
+    if version is None:
         return None
     fields = _VERSION_FIELDS.get(version)
     if fields is not None:
@@ -313,7 +327,16 @@ def build_suppression_set(header: Any) -> FrozenSet[CliPath]:
     """
     if not isinstance(header, dict):
         return frozenset()
-    fields = populatable_fields(header.get("format_revision"), header.get("content_revision"))
+    return _suppression_set(
+        _normalize_version(header.get("format_revision"), header.get("content_revision"))
+    )
+
+
+# Depends only on the version, so `metric --watch` across GPUs and iterations
+# walks the source map once per distinct version rather than once per call.
+@lru_cache(maxsize=128)
+def _suppression_set(version: Optional[VersionKey]) -> FrozenSet[CliPath]:
+    fields = _populatable_fields(version)
     if fields is None:
         return frozenset()
     return frozenset(

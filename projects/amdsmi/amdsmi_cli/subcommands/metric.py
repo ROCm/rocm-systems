@@ -285,28 +285,12 @@ class MetricCommands:
 
         gpu_metric_version_info = None
         if args.loglevel == "DEBUG" or filter_human_fields:
-            try:
-                # Get GPU Metrics table version
-                gpu_metric_version_info = amdsmi_interface.amdsmi_get_gpu_metrics_header_info(
-                    args.gpu
-                )
-                if args.loglevel == "DEBUG":
-                    logging.debug(
-                        "GPU Metrics table Version for GPU %s | %s",
-                        gpu_id,
-                        json.dumps(gpu_metric_version_info, indent=4),
-                    )
-            except amdsmi_exception.AmdSmiException as e:
-                # AmdSmiParameterException is a sibling of AmdSmiLibraryException, so it
-                # reaches here on a bad handle but carries no get_error_info().
+            gpu_metric_version_info = self._gpu_metrics_header(args.gpu, gpu_id)
+            if args.loglevel == "DEBUG" and gpu_metric_version_info is not None:
                 logging.debug(
-                    "#1 - Unable to load GPU Metrics table version for %s | %s",
+                    "GPU Metrics table Version for GPU %s | %s",
                     gpu_id,
-                    (
-                        e.get_error_info()
-                        if isinstance(e, amdsmi_exception.AmdSmiLibraryException)
-                        else e
-                    ),
+                    json.dumps(gpu_metric_version_info, indent=4),
                 )
 
         if args.loglevel == "DEBUG":
@@ -2404,6 +2388,40 @@ class MetricCommands:
 
         if watching_output:  # End of single gpu add to watch_output
             self.logger.store_watch_output(multiple_device_enabled=False)
+
+    def _gpu_metrics_header(self, device_handle, gpu_id):
+        """The gpu_metrics header for ``device_handle``, read at most once.
+
+        The header is fixed for the life of the handle while the read pulls a
+        whole metrics blob, so `metric --watch` must not pay for it once per GPU
+        per iteration. An unreadable header caches as None, which suppresses
+        nothing.
+        """
+        if not hasattr(self, "_gpu_metrics_header_cache"):
+            self._gpu_metrics_header_cache = {}
+        # Handles are unhashable ctypes pointers, so key on identity and keep the
+        # handle alive in the entry so its id cannot be recycled.
+        entry = self._gpu_metrics_header_cache.get(id(device_handle))
+        if entry is not None:
+            return entry[1]
+
+        header = None
+        try:
+            header = amdsmi_interface.amdsmi_get_gpu_metrics_header_info(device_handle)
+        except amdsmi_exception.AmdSmiException as e:
+            # AmdSmiParameterException is a sibling of AmdSmiLibraryException, so it
+            # reaches here on a bad handle but carries no get_error_info().
+            logging.debug(
+                "#1 - Unable to load GPU Metrics table version for %s | %s",
+                gpu_id,
+                (
+                    e.get_error_info()
+                    if isinstance(e, amdsmi_exception.AmdSmiLibraryException)
+                    else e
+                ),
+            )
+        self._gpu_metrics_header_cache[id(device_handle)] = (device_handle, header)
+        return header
 
     def metric_cpu(
         self,

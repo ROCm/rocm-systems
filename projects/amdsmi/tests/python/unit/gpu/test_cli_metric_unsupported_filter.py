@@ -37,7 +37,10 @@ import unittest
 
 try:
     from common.common import amdsmi_path
-except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
+# Import-time failures in the harness are not one exception type: a checkout with
+# no generated wrapper raises AttributeError out of common's enum tables. These
+# tests need no harness at all, so any failure to reach it is non-fatal.
+except Exception:  # pragma: no cover - harness/install unavailable
     amdsmi_path = None
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -753,6 +756,112 @@ class TestExplicitSectionIsNeverEmptied(_MetricGpuHarness):
         # Contrast: a real section flag protects the section it names.
         named = self.run_metric(version=(1, 3), output="human", sections=("throttle",))
         self.assertTrue(named.get("throttle"))
+
+
+class _WatchingLogger(_FakeLogger):
+    """Keeps every iteration's payload, not just the last one."""
+
+    def __init__(self, output_format="human"):
+        super().__init__(output_format)
+        self.iterations = []
+
+    def store_output(self, gpu, key, value):
+        super().store_output(gpu, key, value)
+        if key == "values":
+            self.iterations.append(value)
+
+
+class _WatchHelpers(_FakeHelpers):
+    """``AMDSMIHelpers.handle_watch`` without the sleeps.
+
+    Mirrors the real loop in the one respect that matters here: it clears the
+    watch args and then calls the subcommand repeatedly with the *same* args
+    object.
+    """
+
+    def __init__(self, iterations, gpu_ids=None):
+        super().__init__(gpu_ids)
+        self.iterations = iterations
+
+    def handle_watch(self, args, subcommand, logger):
+        args.watch = None
+        args.watch_time = None
+        args.iterations = None
+        for _ in range(self.iterations):
+            subcommand(args, watching_output=True)
+        return 1
+
+
+@unittest.skipUnless(_RUNNABLE, _SKIP_REASON)
+class TestWatchIterationsFilterIdentically(unittest.TestCase):
+    """``amd-smi metric --watch`` must filter the same way on every sample.
+
+    Watch reuses one args object, and metric_gpu turns every section arg on when
+    the user named none. Read back on the next iteration that is indistinguishable
+    from the user having named every section, which would protect them all and
+    silently stop collapsing sections after the first sample. The protected set is
+    therefore captured before that mutation and memoized on the args; these tests
+    are what drives the second iteration that the memo exists for.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.interface = _install_fake_amdsmi()
+        cls.metric_module = _load_metric_module()
+
+    def setUp(self):
+        # v1.3 can populate no throttle row, and with the violation API
+        # unavailable every row reads "N/A", so the section is a collapse
+        # candidate on both iterations.
+        self.interface.amdsmi_get_violation_status = _raise_lib_exc
+
+    def run_watch(self, *, version=(1, 3), sections=(), iterations=2):
+        handle = object()
+        header_calls = []
+
+        def reader(device_handle):
+            header_calls.append(device_handle)
+            return _header(version)
+
+        self.interface.amdsmi_get_gpu_metrics_header_info = reader
+
+        commands = object.__new__(self.metric_module.MetricCommands)
+        commands.logger = _WatchingLogger("human")
+        commands.helpers = _WatchHelpers(iterations)
+        commands.group_check_printed = True
+        commands.device_handles = []
+        commands.metric_gpu(
+            _build_args(sections=sections, gpu=handle, watch=1, iterations=iterations)
+        )
+
+        payloads = commands.logger.iterations
+        self.assertEqual(len(payloads), iterations, "watch did not run every iteration")
+        return payloads, header_calls
+
+    def test_plain_metric_collapses_the_section_on_every_iteration(self):
+        payloads, _ = self.run_watch(sections=())
+        for index, payload in enumerate(payloads):
+            with self.subTest(iteration=index):
+                self.assertNotIn("throttle", payload, "section collapse stopped after iteration 1")
+
+    def test_a_named_section_stays_protected_on_every_iteration(self):
+        payloads, _ = self.run_watch(sections=("throttle",))
+        for index, payload in enumerate(payloads):
+            with self.subTest(iteration=index):
+                self.assertTrue(payload.get("throttle"), "--throttle answered with nothing")
+
+    def test_every_iteration_produces_the_same_payload(self):
+        for sections in ((), ("throttle",), ("usage",)):
+            with self.subTest(sections=sections):
+                payloads, _ = self.run_watch(version=(1, 6), sections=sections, iterations=3)
+                for index, payload in enumerate(payloads[1:], start=1):
+                    self.assertEqual(payload, payloads[0], f"iteration {index} drifted")
+
+    def test_the_header_is_read_once_per_handle(self):
+        # The header cannot change under a handle, and the read pulls a metrics
+        # blob, so watching must not re-read it every sample.
+        _, header_calls = self.run_watch(iterations=4)
+        self.assertEqual(len(header_calls), 1)
 
 
 @unittest.skipUnless(_RUNNABLE, _SKIP_REASON)

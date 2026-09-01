@@ -24,7 +24,10 @@ import unittest
 
 try:
     from common.common import amdsmi_path
-except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
+# Import-time failures in the harness are not one exception type: a checkout with
+# no generated wrapper raises AttributeError out of common's enum tables. These
+# tests need no harness at all, so any failure to reach it is non-fatal.
+except Exception:  # pragma: no cover - harness/install unavailable
     amdsmi_path = None
 
 # The module lives in the amd-smi CLI, which exists in two layouts:
