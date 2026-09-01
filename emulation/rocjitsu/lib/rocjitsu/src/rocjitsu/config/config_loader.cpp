@@ -4,7 +4,6 @@
 #include "rocjitsu/config/config_loader.h"
 
 #include "rocjitsu/config/config_common.h"
-#include "rocjitsu/vm/emulation_fidelity.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "rocjitsu/vm/amdgpu/command_processor.h"
@@ -49,11 +48,6 @@ engine_config_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
 
 simdojo::ExecMode exec_mode_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
   return parse_exec_mode(fb_config->exec_mode() ? fb_config->exec_mode()->str() : "");
-}
-
-EmulationFidelity fidelity_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
-  return parse_emulation_fidelity(
-      fb_config->fidelity_mode() ? fb_config->fidelity_mode()->string_view() : std::string_view{});
 }
 
 uint32_t config_u32(const std::unordered_map<std::string, std::string> &cfg, const std::string &key,
@@ -567,7 +561,7 @@ void set_cu_l2(simdojo::CompositeComponent *root) {
 }
 
 TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode,
-                                   rj_code_arch_t arch, EmulationFidelity fidelity) {
+                                   rj_code_arch_t arch) {
   if (!topology_def || !topology_def->root())
     throw std::runtime_error("TopologyDef missing root ComponentDef");
 
@@ -612,10 +606,8 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
     std::vector<simdojo::Component *> all;
     root->collect_components(all);
     for (auto *c : all) {
-      if (auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(c)) {
+      if (auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(c))
         cu->set_memory(mem);
-        cu->set_emulation_fidelity(fidelity);
-      }
       if (auto *cp = dynamic_cast<amdgpu::CommandProcessor *>(c))
         cp->set_memory(mem);
     }
@@ -633,8 +625,6 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
     std::vector<simdojo::Component *> all;
     root->collect_components(all);
     auto *soc = dynamic_cast<SoC *>(root);
-    if (soc)
-      soc->set_emulation_fidelity(fidelity);
 
     for (auto *c : all) {
       if (auto *xcd = dynamic_cast<amdgpu::Xcd *>(c)) {
@@ -687,7 +677,6 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
   LoadedConfig result;
   result.engine_config = engine_config_from_fb(fb_config);
   result.exec_mode = exec_mode_from_fb(fb_config);
-  const EmulationFidelity fidelity = fidelity_from_fb(fb_config);
 
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
   if (fb_config->vm() && fb_config->vm()->arch())
@@ -699,7 +688,7 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
   if (!topo_def)
     throw std::runtime_error("Config missing 'topology' section");
 
-  result.build_result = build_topology(topo_def, result.exec_mode, arch, fidelity);
+  result.build_result = build_topology(topo_def, result.exec_mode, arch);
 
   // Extract KFD device identity from vm.gpu.device if present.
   if (fb_config->vm() && fb_config->vm()->gpu() && fb_config->vm()->gpu()->device()) {
@@ -727,7 +716,7 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
       result.devices[i].unique_id = result.device.unique_id + i;
     }
     for (uint32_t i = 1; i < result.num_gpus; ++i)
-      result.extra_gpu_builds.push_back(build_topology(topo_def, result.exec_mode, arch, fidelity));
+      result.extra_gpu_builds.push_back(build_topology(topo_def, result.exec_mode, arch));
   }
 
   return result;

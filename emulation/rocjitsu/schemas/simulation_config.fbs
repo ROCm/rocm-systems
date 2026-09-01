@@ -273,7 +273,6 @@ table SimulationConfig {
   vm: VirtualMachineConfig;      // Virtual machine hardware model. Omit for dbt_guest-only configs.
   topology: TopologyDef;         // Declarative topology. Omit for dbt_guest-only configs.
   dbt_guest: DbtGuestConfig;     // Optional guest-GPU DBT interposition mode.
-  fidelity_mode: string;         // "permissive" (default) or fail-closed "strict" checks.
 }
 
 root_type SimulationConfig;

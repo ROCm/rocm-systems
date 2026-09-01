@@ -105,6 +105,11 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
   wfs_.resize(config.num_wf_slots);
   sgpr_file_.init(config.num_wf_slots * config.sgprs_per_wf, config.sgprs_per_wf);
   sgpr_block_owners_.resize(config.num_wf_slots);
+  physical_registers_ = physical_register_properties(config.arch);
+  if (physical_registers_.simds_per_cu == 0 || physical_registers_.vgprs_per_simd == 0)
+    throw util::ConfigError("missing physical register properties for compute unit architecture");
+  simd_register_usage_.resize(physical_registers_.simds_per_cu);
+  wave_register_reservations_.resize(config.num_wf_slots);
   if (std::has_single_bit(config.sgprs_per_wf))
     sgpr_block_shift_ = std::countr_zero(config.sgprs_per_wf);
 
@@ -190,6 +195,9 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   if ((dispatched_wave_size != 32 && dispatched_wave_size != 64) ||
       dispatched_wave_size > wf->max_wf_size_)
     return nullptr;
+  if (num_sgprs == 0 || num_sgprs > config_.sgprs_per_wf || num_vgprs == 0 ||
+      num_vgprs > vgpr_allocation_block_size())
+    return nullptr;
 
   int32_t sgpr_base = sgpr_file_.allocate(num_sgprs);
   if (sgpr_base < 0)
@@ -197,6 +205,11 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
 
   int32_t vgpr_base = allocate_vgprs(num_vgprs);
   if (vgpr_base < 0) {
+    sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
+    return nullptr;
+  }
+  if (!reserve_physical_registers(wf_id, num_sgprs, num_vgprs, dispatched_wave_size)) {
+    free_vgprs(static_cast<uint32_t>(vgpr_base));
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
   }
@@ -254,6 +267,7 @@ void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
     sgpr_block_owners_[wf.sgpr_alloc().base / config_.sgprs_per_wf] = {};
     sgpr_file_.free(wf.sgpr_alloc().base);
     free_vgprs(wf.vgpr_alloc().base);
+    release_physical_registers(wf.wf_id());
   }
   wf.trace_inst_count_ = 0;
   wf.reset();
@@ -548,7 +562,76 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
   maybe_reset_lds_alloc();
 }
 
-bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes) const {
+bool ComputeUnitCore::place_physical_registers(std::vector<SimdRegisterUsage> &usage,
+                                               uint32_t num_sgprs, uint32_t num_vgprs,
+                                               uint32_t wave_size,
+                                               WaveRegisterReservation *reservation) const {
+  if (num_sgprs == 0 || num_sgprs > config_.sgprs_per_wf || num_vgprs == 0 ||
+      num_vgprs > vgpr_allocation_block_size())
+    return false;
+
+  const uint32_t effective_wave_size = wave_size == 0 ? wf_size_ : wave_size;
+  const uint32_t vgpr_units = physical_vgpr_units(arch(), num_vgprs, effective_wave_size);
+  const uint32_t sgpr_units = physical_sgpr_units(arch(), num_sgprs);
+  if (vgpr_units == 0 || vgpr_units > physical_registers_.vgprs_per_simd ||
+      (physical_registers_.sgpr_occupancy_limited &&
+       (sgpr_units == 0 || sgpr_units > physical_registers_.sgprs_per_simd)))
+    return false;
+
+  size_t selected = usage.size();
+  for (size_t simd = 0; simd < usage.size(); ++simd) {
+    const auto &candidate = usage[simd];
+    if (candidate.resident_waves >= physical_registers_.max_waves_per_simd ||
+        candidate.vgprs > physical_registers_.vgprs_per_simd - vgpr_units ||
+        (physical_registers_.sgpr_occupancy_limited &&
+         candidate.sgprs > physical_registers_.sgprs_per_simd - sgpr_units))
+      continue;
+
+    // Best-fit placement mirrors occupancy calculation per SIMD and avoids
+    // manufacturing capacity by spreading fragments across the whole CU.
+    if (selected == usage.size() || candidate.vgprs > usage[selected].vgprs ||
+        (candidate.vgprs == usage[selected].vgprs &&
+         candidate.resident_waves > usage[selected].resident_waves))
+      selected = simd;
+  }
+  if (selected == usage.size())
+    return false;
+
+  auto &selected_usage = usage[selected];
+  ++selected_usage.resident_waves;
+  selected_usage.vgprs += vgpr_units;
+  selected_usage.sgprs += sgpr_units;
+  if (reservation)
+    *reservation = {static_cast<uint32_t>(selected), sgpr_units, vgpr_units};
+  return true;
+}
+
+bool ComputeUnitCore::reserve_physical_registers(uint32_t wf_id, uint32_t num_sgprs,
+                                                 uint32_t num_vgprs, uint32_t wave_size) {
+  if (wf_id >= wave_register_reservations_.size() ||
+      wave_register_reservations_[wf_id].simd != UINT32_MAX)
+    return false;
+  return place_physical_registers(simd_register_usage_, num_sgprs, num_vgprs, wave_size,
+                                  &wave_register_reservations_[wf_id]);
+}
+
+void ComputeUnitCore::release_physical_registers(uint32_t wf_id) {
+  if (wf_id >= wave_register_reservations_.size())
+    return;
+  auto &reservation = wave_register_reservations_[wf_id];
+  if (reservation.simd == UINT32_MAX || reservation.simd >= simd_register_usage_.size())
+    return;
+  auto &usage = simd_register_usage_[reservation.simd];
+  assert(usage.resident_waves > 0 && usage.sgprs >= reservation.sgprs &&
+         usage.vgprs >= reservation.vgprs);
+  --usage.resident_waves;
+  usage.sgprs -= reservation.sgprs;
+  usage.vgprs -= reservation.vgprs;
+  reservation = {};
+}
+
+bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t num_sgprs, uint32_t num_vgprs,
+                                           uint32_t wave_size, uint32_t lds_bytes) const {
   // Count free wavefront slots.
   uint32_t free_slots = 0;
   for (const auto &w : wfs_)
@@ -558,6 +641,16 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes)
     util::Logger::vm("CU ", this->name(), " can_accept_wg: REJECT free_slots=", free_slots,
                      " < num_wfs=", num_wfs);
     return false;
+  }
+
+  auto prospective_usage = simd_register_usage_;
+  for (uint32_t wave = 0; wave < num_wfs; ++wave) {
+    if (!place_physical_registers(prospective_usage, num_sgprs, num_vgprs, wave_size, nullptr)) {
+      util::Logger::vm("CU ", this->name(),
+                       " can_accept_wg: REJECT physical register capacity for waves=", num_wfs,
+                       " sgprs/wave=", num_sgprs, " vgprs/wave=", num_vgprs);
+      return false;
+    }
   }
 
   // Check SGPR register blocks.

@@ -11,7 +11,6 @@
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
-#include "rocjitsu/vm/emulation_fidelity.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 #include "simdojo/sim/component.h"
@@ -43,7 +42,6 @@ public:
     uint32_t num_iods = 0;   ///< Number of I/O Dies (0 = no IOD modeling).
     amdgpu::Xcd::Config xcd; ///< Config applied to each XCD.
     simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL; ///< Execution mode.
-    EmulationFidelity fidelity = EmulationFidelity::Permissive;
   };
 
   /// @brief Construct a named SoC from configuration.
@@ -76,8 +74,6 @@ public:
   rj_code_arch_t arch() const { return arch_; }
   void set_exec_mode(simdojo::ExecMode mode) { exec_mode_ = mode; }
   simdojo::ExecMode exec_mode() const { return exec_mode_; }
-  void set_emulation_fidelity(EmulationFidelity fidelity) { fidelity_ = fidelity; }
-  EmulationFidelity emulation_fidelity() const { return fidelity_; }
 
   /// @brief Wire topology links between XCDs, IODs, and memory.
   void initialize() override;
@@ -201,7 +197,6 @@ private:
   uint32_t gpu_id_ = next_gpu_id_++;
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
-  EmulationFidelity fidelity_ = EmulationFidelity::Permissive;
   std::vector<amdgpu::Xcd *> xcds_;
   std::vector<amdgpu::Iod *> iods_;
   amdgpu::GpuMemory *memory_ = nullptr;

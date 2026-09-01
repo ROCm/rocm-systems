@@ -42,7 +42,6 @@ The remaining sections describe simulator topology configs.
   "max_ticks": 100000,
   "num_threads": 1,
   "exec_mode": "functional",
-  "fidelity_mode": "permissive",
   "vm": { "arch": "cdna4" },
   "topology": {
     "root": {
@@ -76,33 +75,26 @@ The example above is intentionally minimal and single-threaded.
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned) |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
-| `fidelity_mode` | string | Fidelity policy. `"permissive"` is the default; `"strict"` fails closed on modeled hardware-contract violations. |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
 
 `exec_mode` is matched literally: only the exact string `"clocked"` selects
 clocked mode. If the field is omitted, set to `"functional"`, or given any
 other value, the simulator runs in functional mode.
 
-### Strict fidelity mode
+### Hardware resource enforcement
 
-Set `"fidelity_mode": "strict"` to make modeled hardware-contract
-violations fail the simulation instead of continuing with RocJitsu's more
-forgiving functional backing state. This policy is independent of
-`exec_mode`: both functional and clocked execution can be strict.
+RocJitsu applies the target architecture's physical per-SIMD VGPR and SGPR
+capacities during workgroup admission. Register counts decoded from the kernel
+descriptor consume those resources with the architecture's allocation
+granularity, and the resources are returned when a wavefront halts. Dispatches
+that cannot reside on the modeled hardware are not admitted while capacity is
+unavailable.
 
-The initial strict check rejects an executed ordinary-VGPR access whose range
-extends beyond the allocation encoded by the kernel descriptor. Descriptor
-counts are decoded with the target architecture's Wave32/Wave64 allocation
-granularity before the check. AccVGPRs and special scalar registers have
-separate architecture-specific allocation rules and are intentionally not
-treated as ordinary VGPRs by this check.
-
-Strict means fail-closed for contracts the emulator explicitly enforces; it is
-not a claim that RocJitsu already models every way hardware can fail. In
-particular, clipped mapped-memory accesses, dispatch resource-limit rejection,
-and architecture-specific special-register allocation remain candidates for
-additional strict checks. A green strict run therefore establishes the modeled
-contracts, not universal one-to-one hardware parity.
+Executed ordinary-VGPR accesses must also stay within the prefix allocated by
+the kernel descriptor. An access beyond that prefix terminates the simulation;
+the larger simulator backing store does not make such a kernel valid. AccVGPRs
+occupy their separate architecture-defined bank and are not treated as an
+ordinary-VGPR overflow.
 
 ### Simulation threading
 

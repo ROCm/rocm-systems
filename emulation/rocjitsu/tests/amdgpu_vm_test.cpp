@@ -218,6 +218,49 @@ TEST(ComputeUnitConfigTest, RejectsVgprSpanAboveIsaMaximum) {
   EXPECT_THROW((void)VmFixture("cdna3", 1, 32, 64, 104, 513), util::ConfigError);
 }
 
+TEST(PhysicalRegisterResourceTest, Rdna4VgprPressureLimitsResidencyAndReclaimsCapacity) {
+  VmFixture f("rdna4", 1, /*num_wf_slots=*/32, /*lds_size_kb=*/64,
+              /*sgprs_per_wf=*/128, /*vgprs_per_wf=*/256);
+  auto *cu = f.cu();
+
+  // GFX12 has 1536 Wave32 VGPRs per SIMD, allocated in 24-VGPR
+  // granules. A 256-VGPR wave consumes 264 entries, so each of the two
+  // SIMDs admits five waves.
+  EXPECT_TRUE(cu->can_accept_workgroup(/*num_wfs=*/10, /*num_sgprs=*/128,
+                                       /*num_vgprs=*/256, /*wave_size=*/32));
+  EXPECT_FALSE(cu->can_accept_workgroup(/*num_wfs=*/11, /*num_sgprs=*/128,
+                                        /*num_vgprs=*/256, /*wave_size=*/32));
+
+  std::vector<amdgpu::Wavefront *> waves;
+  for (uint32_t wave = 0; wave < 10; ++wave) {
+    auto *dispatched = cu->dispatch_wf(/*wg_id=*/wave, /*pc=*/0x1040, /*num_sgprs=*/128,
+                                       /*num_vgprs=*/256, /*wave_size=*/32);
+    ASSERT_NE(dispatched, nullptr) << "wave " << wave;
+    waves.push_back(dispatched);
+  }
+  EXPECT_EQ(cu->dispatch_wf(/*wg_id=*/10, /*pc=*/0x1040, /*num_sgprs=*/128,
+                            /*num_vgprs=*/256, /*wave_size=*/32),
+            nullptr);
+
+  waves.front()->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+  EXPECT_NE(cu->dispatch_wf(/*wg_id=*/10, /*pc=*/0x1040, /*num_sgprs=*/128,
+                            /*num_vgprs=*/256, /*wave_size=*/32),
+            nullptr);
+}
+
+TEST(PhysicalRegisterResourceTest, Cdna3SgprPressureLimitsResidency) {
+  VmFixture f("cdna3", 1, /*num_wf_slots=*/32, /*lds_size_kb=*/64,
+              /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/512);
+  auto *cu = f.cu();
+
+  // GFX942 has 800 SGPRs per SIMD with 16-SGPR allocation granularity.
+  // 104 SGPRs round to 112, admitting seven waves on each of four SIMDs.
+  EXPECT_TRUE(cu->can_accept_workgroup(/*num_wfs=*/28, /*num_sgprs=*/104,
+                                       /*num_vgprs=*/8, /*wave_size=*/64));
+  EXPECT_FALSE(cu->can_accept_workgroup(/*num_wfs=*/29, /*num_sgprs=*/104,
+                                        /*num_vgprs=*/8, /*wave_size=*/64));
+}
+
 // Drive the engine until the listed CUs have no resident wavefronts. A wavefront
 // frees itself at s_endpgm (num_wfs()/has_active_wfs() drop as it halts), so the
 // kernel is complete once every listed CU reports idle. Waves that need their final
@@ -2955,6 +2998,24 @@ constexpr uint32_t S_WAITCNT_0 = sopp(12, 0);
 constexpr uint32_t S_ENDPGM = sopp(1, 0);
 
 } // namespace enc
+
+TEST(AqlDispatchTest, ExecutedVgprOutsideDescriptorAllocationFails) {
+  VmFixture f("rdna4", 1, /*num_wf_slots=*/4, /*lds_size_kb=*/64,
+              /*sgprs_per_wf=*/128, /*vgprs_per_wf=*/256);
+  const uint32_t code[] = {
+      enc::v_mov_b32(/*vdst=*/24, enc::INLINE_CONST(1)),
+      enc::S_ENDPGM,
+  };
+  const uint64_t kernel_object =
+      f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/128, /*vgprs=*/8);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel_object, /*workgroup_size=*/32, /*grid_size=*/32);
+
+  const simdojo::ExitStatus status = f.engine->run();
+  EXPECT_EQ(status.code, 1);
+  EXPECT_NE(status.message.find("VGPR access exceeds descriptor allocation"), std::string::npos);
+  EXPECT_EQ(f.cu()->register_allocation_violation_count(), 1u);
+}
 
 TEST(AqlDispatchTest, Fp16OvflDescriptorControlsFp8ConversionResult) {
   using namespace rocr::llvm::amdhsa;
