@@ -16,6 +16,7 @@ from pc_sampling.pc_sampling_analysis import (
     load_pc_sample_records,
 )
 from utils import schema
+from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import gen_counter_list
@@ -325,14 +326,9 @@ def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataF
                 "is called before applying kernel filters."
             )
 
-        # Validate kernel IDs
-        for kernel_id in workload.filter_kernel_ids:
-            if kernel_id >= len(kernel_top_dataframe["Kernel_Name"]):
-                console_error(
-                    f"{kernel_id} is an invalid kernel id. "
-                    "Please enter an id between 0-"
-                    f"{len(kernel_top_dataframe['Kernel_Name']) - 1}"
-                )
+        validate_kernel_filter_ids(
+            workload.filter_kernel_ids, len(kernel_top_dataframe["Kernel_Name"])
+        )
 
         # Extract kernel names and mark selected kernels with "*"
         # TODO: fix it for unaligned comparison
@@ -545,7 +541,7 @@ def load_pc_sampling_data(
 
         kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
         kernel_index = workload.filter_kernel_ids[0]
-        if kernel_index >= len(kernel_top_df):
+        if not 0 <= kernel_index < len(kernel_top_df):
             console_warning(
                 f"Kernel index {kernel_index} is out of bounds. "
                 f"kernel_top table has only {len(kernel_top_df)} rows."

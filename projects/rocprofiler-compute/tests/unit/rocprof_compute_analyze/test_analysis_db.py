@@ -21,9 +21,14 @@ import pytest
 from sqlalchemy import text
 
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
-from rocprof_compute_analyze.analysis_db import SourceFrameCollector, db_analysis
+from rocprof_compute_analyze.analysis_db import (
+    SourceFrameCollector,
+    db_analysis,
+    filter_dispatch_frame,
+)
 from utils import analysis_orm as orm
 from utils import schema
+from utils.file_io import create_df_kernel_top_stats
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -715,6 +720,65 @@ def test_calc_pmc_df_data_skips_workload_without_a_merge(tmp_path):
     analyzer._profiling_config = {}
 
     assert analyzer.calc_pmc_df_data() == {}
+
+
+# =============================================================================
+# filter_dispatch_frame tests
+# =============================================================================
+
+
+def test_filter_dispatch_frame_kernel_ids_match_the_cli_top_stats(
+    tmp_path, repeated_dispatch_frame
+):
+    """-k selects the same kernel here as it does in the cli top stats table."""
+    kernel_top_df, _ = create_df_kernel_top_stats(
+        df_in=repeated_dispatch_frame,
+        raw_data_dir=str(tmp_path),
+        filter_gpu_ids=None,
+        filter_dispatch_ids=None,
+        time_unit="ns",
+    )
+
+    filtered_df = filter_dispatch_frame(repeated_dispatch_frame, None, [0], None)
+
+    assert filtered_df["Kernel_Name"].unique().tolist() == [
+        kernel_top_df.loc[0, "Kernel_Name"]
+    ]
+
+
+@pytest.mark.parametrize("kernel_id", [99, -1])
+def test_filter_dispatch_frame_rejects_out_of_range_kernel_id(
+    monkeypatch, repeated_dispatch_frame, kernel_id
+):
+    """An out-of-range -k exits with a message instead of an IndexError."""
+    errors = common.patch_console(
+        monkeypatch,
+        "utils.file_io",
+        "error",
+        error=common.exiting_console_error(),
+    )
+
+    with pytest.raises(SystemExit):
+        filter_dispatch_frame(repeated_dispatch_frame, None, [kernel_id], None)
+
+    assert str(kernel_id) in str(errors["error"].call_args)
+
+
+def test_filter_dispatch_frame_rejects_kernel_id_filtered_out_of_range(
+    monkeypatch, repeated_dispatch_frame
+):
+    """Kernel ids are bounded by the frame left after the gpu and dispatch filters."""
+    errors = common.patch_console(
+        monkeypatch,
+        "utils.file_io",
+        "error",
+        error=common.exiting_console_error(),
+    )
+
+    with pytest.raises(SystemExit):
+        filter_dispatch_frame(repeated_dispatch_frame, None, [1], ["1"])
+
+    assert "0-0" in str(errors["error"].call_args)
 
 
 # =============================================================================

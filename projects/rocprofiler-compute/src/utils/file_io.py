@@ -67,6 +67,38 @@ def load_profiling_config(config_dir: str) -> dict[str, Any]:
     return {}
 
 
+def rank_kernels_by_total_duration(dispatch_frame: pd.DataFrame) -> list[str]:
+    """Return kernel names ordered by total dispatch duration, longest first.
+
+    A kernel's position in this list is the id that ``-k`` selects.
+    """
+    durations = dispatch_frame["End_Timestamp"] - dispatch_frame["Start_Timestamp"]
+    return (
+        durations
+        .groupby(dispatch_frame["Kernel_Name"])
+        .sum()
+        .sort_values(ascending=False)
+        .index.to_list()
+    )
+
+
+def validate_kernel_filter_ids(
+    filter_kernel_ids: list[int],
+    kernel_count: int,
+) -> None:
+    """Exit with a readable message when a ``-k`` id names no kernel."""
+    if kernel_count == 0:
+        console_error("analysis", "No kernels found in this workload.")
+
+    for kernel_id in filter_kernel_ids:
+        if not 0 <= kernel_id < kernel_count:
+            console_error(
+                "analysis",
+                f"{kernel_id} is an invalid kernel id. "
+                f"Please enter an id between 0-{kernel_count - 1}",
+            )
+
+
 @demarcate
 def create_df_kernel_top_stats(
     df_in: pd.DataFrame,
@@ -74,7 +106,6 @@ def create_df_kernel_top_stats(
     filter_gpu_ids: Optional[list[str]],
     filter_dispatch_ids: Optional[list[str]],
     time_unit: str,
-    sortby: str = "sum",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Create top stats info by grouping kernels with user's filters.
@@ -108,59 +139,27 @@ def create_df_kernel_top_stats(
             df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_strings)]
 
     # First, create a dispatches file used to populate global vars
-    dispatch_columns = ["Kernel_Name", "GPU_ID"]
+    dispatch_columns = ["Dispatch_ID", "Kernel_Name", "GPU_ID"]
     if "PID" in df.columns:
-        dispatch_columns.insert(0, "PID")
-    if "Dispatch_ID" in df.columns:
-        dispatch_columns.insert(0, "Dispatch_ID")
+        dispatch_columns.insert(1, "PID")
 
     dispatch_info = df[dispatch_columns]
     dispatch_output_path = Path(raw_data_dir) / "pmc_dispatch_info.csv"
     dispatch_info.to_csv(dispatch_output_path, index=False)
 
-    if "Dispatch_ID" in df.columns:
-        # Calculate execution times
-        execution_times = df["End_Timestamp"] - df["Start_Timestamp"]
-        time_stats = pd.DataFrame({
-            "Kernel_Name": df["Kernel_Name"],
-            "ExeTime": execution_times,
-        })
+    # Calculate execution times
+    execution_times = df["End_Timestamp"] - df["Start_Timestamp"]
+    time_stats = pd.DataFrame({
+        "Kernel_Name": df["Kernel_Name"],
+        "ExeTime": execution_times,
+    })
 
-        grouped = time_stats.groupby("Kernel_Name")["ExeTime"].agg([
-            "count",
-            "sum",
-            "mean",
-            "median",
-        ])
-    else:
-        time_stats = pd.DataFrame({
-            "Kernel_Name": df["Kernel_Name"],
-            "count": df["Count"],
-            "sum": df["Mean_Time"] * df["Count"],
-            "mean": df["Mean_Time"],
-            "median": df["Median_Time"],
-        })
-
-        result_data: list[dict[str, Any]] = []
-        for _, group in time_stats.groupby("Kernel_Name"):
-            row: dict[str, Any] = {}
-
-            row["Kernel_Name"] = group["Kernel_Name"].iloc[0]
-            row["count"] = group["count"].sum()
-            row["sum"] = group["sum"].sum()
-            row["mean"] = row["sum"] / row["count"]
-
-            sorted_data_by_mean = group.sort_values("mean")
-            sorted_data_by_mean["count_cumsum"] = sorted_data_by_mean["count"].cumsum()
-            median_threshold = row["count"] / 2
-            median_value = sorted_data_by_mean.loc[
-                sorted_data_by_mean["count_cumsum"] >= median_threshold, "median"
-            ].iloc[0]
-            row["median"] = median_value
-
-            result_data.append(row)
-
-        grouped = pd.DataFrame(result_data)
+    grouped = time_stats.groupby("Kernel_Name")["ExeTime"].agg([
+        "count",
+        "sum",
+        "mean",
+        "median",
+    ])
 
     # Rename columns with time unit
     time_unit_suffix = f"({time_unit})"
@@ -181,20 +180,15 @@ def create_df_kernel_top_stats(
     ]:
         grouped[col] = grouped[col] / time_divisor
 
-    if "Dispatch_ID" in df.columns:
-        grouped = grouped.reset_index()
+    grouped = grouped.reset_index()
 
     # Calculate percent
     sum_column = f"Sum{time_unit_suffix}"
     grouped["Percent"] = grouped[sum_column] / grouped[sum_column].sum() * 100
 
-    #   Sort by total time as default.
-    if sortby == "sum":
-        grouped = grouped.sort_values(sum_column, ascending=False)
-        grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
-    elif sortby == "kernel":
-        grouped = grouped.sort_values("Kernel_Name")
-        grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
+    kernel_order = rank_kernels_by_total_duration(df)
+    grouped = grouped.set_index("Kernel_Name").loc[kernel_order].reset_index()
+    grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
 
     return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
 
