@@ -564,9 +564,9 @@ static const RcclHwCounterDesc rcclHwcThor2[] = {
 };
 
 RCCL_TEL_HW_CONFIG(rcclHwConfigThor2, rcclHwcThor2, "thor2",
-  /* Broadcom bnxt_en per-priority pause frames via ethtool NIC stats. */
-  { "rx_prio%d_pause",  "tx_prio%d_pause",
-    NULL,               NULL },
+  /* Broadcom bnxt per-priority PFC frames + pause duration via ethtool NIC stats. */
+  { "rx_pfc_ena_frames_pri%d",  "tx_pfc_ena_frames_pri%d",
+    "pfc_pri%d_rx_duration_us",  "pfc_pri%d_tx_duration_us" },
   /* bnxt_re exposes rx/tx_bytes + rx/tx_pkts in IB sysfs hw_counters. */
   { HWC_IB_SYSFS, "tx_bytes", "rx_bytes", "tx_pkts", "rx_pkts" });
 
