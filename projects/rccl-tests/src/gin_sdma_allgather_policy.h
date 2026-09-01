@@ -174,7 +174,8 @@ inline size_t parseAllGatherCtasEnv() {
   if (!e || !e[0] || *e == '-') return kAllGatherCtasUnset;
   char* end = nullptr;
   unsigned long long v = strtoull(e, &end, 10);
-  if (end == e) return kAllGatherCtasUnset;
+  if (end == e || *end != '\0') return kAllGatherCtasUnset;
+  if ((size_t)v == kAllGatherCtasUnset) return kAllGatherCtasUnset;
   return (size_t)v;
 }
 
