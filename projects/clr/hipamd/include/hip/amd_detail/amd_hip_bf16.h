@@ -90,6 +90,29 @@
 #ifndef _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BF16_H_
 #define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BF16_H_
 
+#if !defined(__cplusplus)
+// Plain C consumers (FFI / binding generators) cannot use the C++-only bfloat16
+// classes defined below. Provide layout-compatible POD typedefs so C code can
+// still name these types in function signatures. Sizes/alignments match the C++
+// definitions exactly (unsigned short == uint16_t on all HIP targets, per the
+// static_assert on the C++ path).
+#include <stdint.h>
+typedef struct __attribute__((aligned(2))) {
+  uint16_t x;
+} __hip_bfloat16_raw;
+typedef struct __attribute__((aligned(4))) {
+  uint16_t x;
+  uint16_t y;
+} __hip_bfloat162_raw;
+typedef struct __attribute__((aligned(2))) {
+  uint16_t __x;
+} __hip_bfloat16;
+typedef struct __attribute__((aligned(4))) {
+  __hip_bfloat16 x;
+  __hip_bfloat16 y;
+} __hip_bfloat162;
+#else  // !defined(__cplusplus)
+
 #if !defined(__HIPCC_RTC__)
 #include <hip/amd_detail/amd_hip_common.h>
 #include "amd_hip_vector_types.h"  // float2 etc
@@ -1992,4 +2015,5 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 unsafeAtomicAdd(__hip_bfloat16* address,
 #endif
 #endif
 #pragma pop_macro("MAYBE_UNDEF")
+#endif  // !defined(__cplusplus)
 #endif
