@@ -41,7 +41,7 @@ struct rcclCollDecision {
   int protocol;         // NCCL_PROTO_*
   uint32_t nMaxChannels; // reporting: channels for the kernel path (0 = N/A)
   // Runtime bits computed once at the decision point and carried into
-  // taskAppend() so it never recomputes graph-capture state for AllReduce.
+  // taskAppend() so it never recomputes graph-capture state.
   bool ceCapturing;
   bool ceArGraphAllowed;
 };

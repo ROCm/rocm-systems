@@ -3849,7 +3849,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // DDA/symmetric/kernel paths.
       bool ceCapturing, ceArGraphAllowed;
       if (info->decisionValid) {
-        // Already computed by ncclAllReduce_impl() via rcclSelectAllReduce().
+        // Already computed by ncclAllReduce_impl() / ncclAllGather_impl() via the
+        // corresponding rcclSelect*().
         ceCapturing = info->decision.ceCapturing;
         ceArGraphAllowed = info->decision.ceArGraphAllowed;
       } else {
@@ -3924,6 +3925,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         !rcclNcclAlgoEnvIsSet() &&
         info->coll == ncclFuncAllGather && ceAvailable && !hasSysmemSegment &&
         rcclAllGatherCeRegisteredWindow(comm, recvBytes, winRegType, ceCapturing);
+      const bool allGatherDecided = (info->coll == ncclFuncAllGather && info->decisionValid);
       if (info->coll == ncclFuncAllReduce && info->decisionValid) {
         // AllReduce's backend was already chosen once by rcclSelectAllReduce();
         // honor it here instead of recomputing CE eligibility. rcclSelectAllReduce
@@ -3940,34 +3942,30 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         }
         // hierCeAvailable is AllGather/AlltoAll-only (ncclHierCeAvailable rejects
         // AllReduce), so it never affects this AllReduce branch.
-      } else if (info->coll == ncclFuncAllGather && info->decisionValid) {
-        // AllGather's backend was chosen once by rcclSelectAllGather(); honor it
-        // here so decision and dispatch agree (mirrors the AllReduce block above).
-        // rcclSelectAllGather Branch #3 gates CE on (CTAPolicy & ZERO) or the
-        // (symMaxR2, ceRegMax] window, matching the ceAgSymRegistered condition
-        // below, so RCCL_CE_REGISTERED <=> that path fires.
-        // RCCL_CE_SCRATCH maps to the FORCE_CE + DDA-scratch path.
+      } else if (allGatherDecided &&
+                 (info->decision.algo == RCCL_CE_REGISTERED || info->decision.algo == RCCL_CE_SCRATCH)) {
+        // AllGather CE was chosen once by rcclSelectAllGather(); honor it so
+        // decision and dispatch agree. Non-CE AllGather (Direct / symmetric /
+        // ring) falls through to the shared funnel below.
         if (info->decision.algo == RCCL_CE_REGISTERED) {
           INFO(NCCL_INIT, "Taking CE collective path for AllGather via registered windows");
           NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                      opDev));
-        } else if (info->decision.algo == RCCL_CE_SCRATCH) {
+        } else {
           INFO(NCCL_TUNING, "Taking CE collective path for AllGather via DDA scratch, count=%zu", info->count);
           NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr,
                                      comm->ddaScratch, comm->ddaPeerPtrsHost, opDev));
-        } else {
-          INFO(NCCL_INIT, "Taking kernel-based collective path for AllGather");
-          NCCLCHECK(collTaskAppend(comm, info, opDev));
         }
-      } else if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
-                   !(rcclNcclAlgoEnvIsSet() && (info->coll == ncclFuncAllGather || info->coll == ncclFuncReduceScatter)) &&
-                   (ceAvailable || hierCeAvailable) && !hasSysmemSegment) ||
-                 ceArSymRegistered || ceAgSymRegistered) {
+      } else if ((!allGatherDecided &&
+                  (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
+                  !(rcclNcclAlgoEnvIsSet() && (info->coll == ncclFuncAllGather || info->coll == ncclFuncReduceScatter)) &&
+                  (ceAvailable || hierCeAvailable) && !hasSysmemSegment) ||
+                 ceArSymRegistered || (!allGatherDecided && ceAgSymRegistered)) {
         INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                    opDev));
 
-      } else if (!rcclNcclAlgoEnvIsSet() &&
+      } else if (!rcclNcclAlgoEnvIsSet() && !allGatherDecided &&
                  rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg &&
                  winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr &&
                  recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
@@ -4056,7 +4054,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           }
           NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)info->recvbuff, info->count, info->datatype,
                                   info->root, allowUB));
-        } else if (ceAvailable && comm->symmetricSupport && info->coll == ncclFuncAllGather &&
+        } else if (!allGatherDecided && ceAvailable && comm->symmetricSupport && info->coll == ncclFuncAllGather &&
                    info->count > ncclParamSymCeThreshold() && comm->minCompCap >= 100 && comm->isAllDirectNvlink) {
           // Use CE for Allgather on Blackwell with size > 8MB
           NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
