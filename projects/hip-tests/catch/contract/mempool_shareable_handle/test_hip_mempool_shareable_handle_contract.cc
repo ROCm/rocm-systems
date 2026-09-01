@@ -157,6 +157,9 @@ HIP_TEST_CASE(Contract_MemPoolShareableHandle_HipMemPoolExportPointer_ExportImpo
 
   void* imported_ptr = nullptr;
   HIP_CHECK(hipMemPoolImportPointer(&imported_ptr, imported, &export_data));
+  // The import takes a reference on the imported pool, and it gets released only
+  // when the imported pointer is freed.
+  cleanup.Add([imported_ptr] { (void)hipFree(imported_ptr); });
   REQUIRE(imported_ptr != nullptr);
 }
 
