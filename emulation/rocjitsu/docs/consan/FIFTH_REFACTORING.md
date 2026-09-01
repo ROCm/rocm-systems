@@ -6346,3 +6346,52 @@ must be assessed together with their shadow-model consumers rather than moved
 by association. Material shrinkage, the larger placement and mutation buses,
 both extension exercises, and the independent completion audit remain open;
 the goal therefore remains active.
+
+### 16.81 Convergence checkpoint 80: test-owned InlineShadow import and token oracles
+
+The next InlineShadow deep read followed causal import and acquired-token
+ordering beyond their adjacent types to every caller. Release-snapshot
+classification and deferred-diagnostic filtering are production report-decoder
+mechanisms and remain in production. In contrast, the causal-import planner,
+token publication model, immediate acquired-order predicates, and stable-token
+ordering model had no production caller. They are host references used by
+focused tests to check examples of GPU transactions emitted separately.
+
+Those six oracle roots and their test-only plan/result types now join the other
+InlineShadow reference models in `consan_inline_model_test_support.h`. The
+first rebuild exposed that the epoch-to-token conversion is also consumed by
+the production deferred-diagnostic filter; it remains in the production shadow
+model and the test oracle consumes that one shared definition. Production also
+retains release and token snapshot classification, acquired-token lookup, and
+the actual deferred-diagnostic filter. The architecture gate rejects the moved
+causal-import roots from the report model and the moved publication/order roots
+from the production shadow model.
+
+| Signal | Checkpoint 80 | Cumulative change | Slice change from checkpoint 79 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 104,507 | **-469** | **-212** |
+| Nonblank production lines | 98,203 | **-881** | **-202** |
+| Production implementation lines | 90,494 | **-956** | **-175** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 168 / 52 | **-108 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 316 / 60 | +26 / +9 | 0 / 0 |
+| Host causal-import/token-order oracle roots in production | **0** | n/a | **-6** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild of the broad shadow-model header
+fan-out and all nine causal-import, acquired-token lookup/publication/order,
+stable-token, and architecture-boundary tests. Checkpoint 77's preceding
+periodic gate passed all 4,776 nonphysical tests over five emulated targets,
+including all 2,918 simulator tests. No test was removed, disabled, renamed, or
+replaced. No physical gfx1201 test was run.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.7, and 14.8. The production
+InlineShadow contracts retain only behavior used by construction or report
+processing, while independent executable specifications remain available to
+tests under explicit test ownership. Cumulative production shrinkage reaches
+956 implementation lines. Material shrinkage is improving but remains
+unproven at the whole-refactoring scale; broad placement and mutation buses,
+both extension exercises, and the independent completion audit remain open.
+The goal therefore remains active.

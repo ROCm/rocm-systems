@@ -268,8 +268,13 @@ foreach(_file IN LISTS _extension_mode_sources)
 endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_inline_model.h.inc"
-    "ConSanMoiInlineReleaseClaim|ConSanMoiInlineVersionedReleaseState|ConSanMoiInlineReleaseClaimResult|ConSanMoiInlineReleaseTransactionEvent|consan_moi_inline_plan_release_claim|consan_moi_inline_release_transaction_is_sound|ConSanMoiInlineCausalTokenView|consan_moi_inline_capture_causal_snapshot|ConSanMoiInlineStableReleaseEvidence|ConSanMoiInlineQualificationExpectation|ConSanMoiInlineQualificationResult|consan_moi_inline_qualify_token_evidence"
+    "ConSanMoiInlineReleaseClaim|ConSanMoiInlineVersionedReleaseState|ConSanMoiInlineReleaseClaimResult|ConSanMoiInlineReleaseTransactionEvent|consan_moi_inline_plan_release_claim|consan_moi_inline_release_transaction_is_sound|ConSanMoiInlineCausalTokenView|consan_moi_inline_capture_causal_snapshot|ConSanMoiInlineStableReleaseEvidence|ConSanMoiInlineQualificationExpectation|ConSanMoiInlineQualificationResult|consan_moi_inline_qualify_token_evidence|ConSanMoiInlineCausalImportPlan|consan_moi_inline_plan_causal_import"
     "host-only InlineShadow reference oracles must not return to the production report contract"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_shadow_models.h.inc"
+    "ConSanMoiInlineAcquiredEpochTokenPublishResult|consan_moi_inline_publish_acquired_epoch_token|consan_moi_inline_acquired_epoch_orders|consan_moi_inline_acquired_epoch_orders_pair|consan_moi_inline_stable_token_orders\\("
+    "host-only InlineShadow token reference oracles must not return to production shadow models"
 )
 file(READ "${ROCJITSU_SOURCE_DIR}/tests/patch/consan/analysis_test.cpp" _target_extension_test)
 file(
