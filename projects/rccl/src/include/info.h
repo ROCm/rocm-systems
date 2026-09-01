@@ -48,11 +48,11 @@ struct ncclInfo {
   // during synchronous host scheduling (never at launch/replay).
   ncclCollConfig_t collConfig;
   // Implementation decision precomputed by ncclAllReduce_impl() /
-  // ncclAllGather_impl() / ncclReduceScatter_impl() via the matching
-  // rcclSelect*() and consumed by taskAppend() so it does not recompute
-  // CE-vs-kernel, graph-capture, or symmetric-vs-ring. Valid only when
-  // decisionValid is true (false for collectives that have not been wired yet,
-  // and the AllReduce WithBias path).
+  // ncclAllGather_impl() / ncclReduceScatter_impl() / ncclAlltoAll_impl() via
+  // the matching rcclSelect*() and consumed by taskAppend() so it does not
+  // recompute CE-vs-kernel, graph-capture, or symmetric-vs-ring. Valid only
+  // when decisionValid is true (false for collectives that have not been wired
+  // yet, and the AllReduce WithBias path).
   struct rcclCollDecision decision;
   bool decisionValid;
 };
