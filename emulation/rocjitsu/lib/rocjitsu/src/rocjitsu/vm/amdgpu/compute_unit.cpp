@@ -18,8 +18,10 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/except.h"
 #include "util/log.h"
 
@@ -90,9 +92,13 @@ template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::C
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size)
     : simdojo::CompositeComponent(std::move(name)), config_(config), memory_(memory),
-      wf_size_(wf_size), decoder_(Decoder::create(config.arch)), l2_(l2), l1_scalar_(l2),
-      l1_vector_(l2), lds_(config.lds_size_kb), scalar_mem_pipeline_(&l1_scalar_),
-      global_mem_pipeline_(&l1_vector_, l2), local_mem_pipeline_() {
+      wf_size_(wf_size),
+      decoder_(config.target == ROCJITSU_CODE_TARGET_INVALID
+                   ? Decoder::create(config.arch)
+                   : Decoder::create(default_isa_target_registry(), config.target)),
+      l2_(l2), l1_scalar_(l2), l1_vector_(l2), lds_(config.lds_size_kb),
+      scalar_mem_pipeline_(&l1_scalar_), global_mem_pipeline_(&l1_vector_, l2),
+      local_mem_pipeline_() {
   if (!decoder_)
     throw std::runtime_error("Unsupported architecture for ComputeUnit decoder");
 
@@ -120,6 +126,19 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const Config &config,
                                                          GpuMemory *memory, L2Cache *l2,
                                                          simdojo::ExecMode exec_mode) {
+  if (config.target != ROCJITSU_CODE_TARGET_INVALID) {
+    const IsaTargetRegistry &registry = default_isa_target_registry();
+    const IsaTargetDescriptor *target_descriptor = registry.find(config.target);
+    const IsaGpuTargetDescription *target_binding = registry.find_gpu_target(config.target);
+    if (target_descriptor == nullptr || target_binding == nullptr)
+      throw util::ConfigError("unsupported concrete GPU target");
+    if (target_descriptor->architecture_id != config.arch)
+      throw util::ConfigError("concrete GPU target does not belong to the configured architecture");
+    if (!target_descriptor->supports_execution ||
+        !target_binding->capabilities.execution_implemented)
+      throw util::ConfigError("execution is not implemented for the concrete GPU target");
+  }
+
   // Helper: instantiate the ISA-specific CU for the given execution mode.
 #define ROCJITSU_CU_CASE(ARCH_ENUM, ISA_TYPE)                                                      \
   case ARCH_ENUM:                                                                                  \
@@ -226,7 +245,7 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   wf->trace_inst_count_ = 0;
 
   sgpr_block_owners_[static_cast<uint32_t>(sgpr_base) / config_.sgprs_per_wf] = {
-      wf, static_cast<uint32_t>(sgpr_base) + num_sgprs};
+      wf, static_cast<uint32_t>(sgpr_base) + config_.sgprs_per_wf};
   set_vgpr_block_owner(static_cast<uint32_t>(vgpr_base), wf);
 
   util::Logger::cp([&](auto &os) {
@@ -848,10 +867,9 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     auto mn = std::string_view(inst->mnemonic());
     if (mn.find("s_setpc") != std::string_view::npos ||
         mn.find("s_swappc") != std::string_view::npos) {
-      uint32_t ssrc0_idx = words[0] & 0x7F;
-      uint32_t sb = active->sgpr_alloc().base;
-      uint64_t target = static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx)) |
-                        (static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx + 1)) << 32);
+      const Operand *target_operand = inst->src_operand(0);
+      assert(target_operand && "indirect PC instruction must have a target operand");
+      uint64_t target = RegisterAccess(*active).read_scalar64(*target_operand);
       if (target == 0) {
         active->halt();
         delete inst;
@@ -1000,11 +1018,19 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     return;
   }
   if (inst->is_memory_op()) {
-    if (inst->data() && inst->data()->tag() == GLOBAL_MEM) {
-      auto *d = inst->data_as<VectorMemState>();
-      d->issue_pc = active->pc;
+    if (!inst->data()) {
+      // A memory execute path can intentionally reject an invalid complete
+      // register operand before constructing pipeline state. Treat that as a
+      // fully suppressed instruction: no route callback, wait-counter update,
+      // or memory transaction is permitted.
+      delete inst;
+    } else {
+      if (inst->data()->tag() == GLOBAL_MEM) {
+        auto *d = inst->data_as<VectorMemState>();
+        d->issue_pc = active->pc;
+      }
+      route_memory_inst(inst, *active);
     }
-    route_memory_inst(inst, *active);
   } else
     delete inst;
 
