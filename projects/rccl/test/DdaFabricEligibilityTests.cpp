@@ -124,6 +124,20 @@ TEST(DdaFabricScratchSizingTest, PayloadCapTakesMaxAcrossDdaAndCeScratchTables)
     EXPECT_EQ(rcclDdaScratchPayloadCap(mock.get()), 32ULL * 1024 * 1024);
 }
 
+TEST(DdaFabricScratchSizingTest, PayloadCapUsesPreTableDefaultsWhenNoArchTable)
+{
+    DdaFabricMockComm mock;
+    mock.comm.nRanks = 8;
+    mock.comm.archThresholds = nullptr;
+    mock.comm.archName = nullptr;
+    // Matches rcclDdaVmmThreshold() with a null table (128 MiB dominates
+    // the 32 KiB / 32 MiB LL defaults).
+    EXPECT_EQ(rcclDdaScratchPayloadCap(mock.get()), kDdaVmmBaseDefault);
+    EXPECT_EQ(rcclDdaVmmThreshold(mock.get(), ncclFuncAllReduce), kDdaVmmBaseDefault);
+    EXPECT_EQ(rcclDdaLLThreshold(mock.get(), ncclFuncAllReduce), kDdaLLBaseDefault);
+    EXPECT_EQ(rcclDdaLL128Threshold(mock.get(), ncclFuncAllReduce), kDdaLL128BaseDefault);
+}
+
 // ---------------------------------------------------------------------------
 // AllGather
 // ---------------------------------------------------------------------------

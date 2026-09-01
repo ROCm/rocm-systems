@@ -760,8 +760,9 @@ size_t rcclCeAr2ShotMax(const ncclComm* comm) {
   const int64_t param = rcclParamCeArMaxMsgBytes();
   if (param >= 0) return (size_t)param;
   const rcclArchThresholds* table = ddaArchTable(comm);
-  // No arch table: keep the historical 256 MiB 2-shot window (matches the
-  // default staging allocation). A present table with 0 means 2-shot is off.
+  // Null table (unknown arch or RCCL_IGNORE_ARCH_TABLE): restore the pre-table
+  // 256 MiB 2-shot window, which matches the default staging allocation. A
+  // present table with 0 means 2-shot is tuned off (gfx1250).
   if (table == nullptr) return NCCL_CE_AR_TMPBUF_DEFAULT_BYTES;
   return table->ceNonRegMax[ncclFuncAllReduce];
 }
@@ -853,7 +854,17 @@ size_t rcclDdaScratchPayloadCap(const ncclComm* comm) {
   if (ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &env)) bump(env);
 
   const rcclArchThresholds* table = ddaArchTable(comm);
-  if (table == nullptr) return cap;
+  if (table == nullptr) {
+    // Same pre-table defaults rcclDda{LL,LL128,Vmm}Threshold return when the
+    // table is ignored, so fabric scratch covers any DDA path the selector
+    // can still pick. Env, when set (including 0 to disable a tier), already
+    // won above and is not replaced.
+    size_t unused;
+    if (!ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &unused)) bump(kDdaLLBaseDefault);
+    if (!ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &unused)) bump(kDdaLL128BaseDefault);
+    if (!ddaThresholdFromEnv(rcclParamDdaThreshold(), &unused)) bump(kDdaVmmBaseDefault);
+    return cap;
+  }
 
   for (int i = 0; i < RCCL_DDA_FUNC_COUNT; ++i) {
     bump(scaleRs(table->ddaLLMax[i], i));
@@ -884,7 +895,7 @@ size_t rcclDdaVmmThresholdCtx(const ncclComm* comm, ncclFunc_t func,
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &threshold)) return threshold;
   const rcclArchThresholds* table = ddaArchTable(comm);
-  if (table == nullptr) return 0;
+  if (table == nullptr) return kDdaVmmBaseDefault;
   // Graph-mode override: CE AR is blocked during captures; let DDA extend further.
   if (graphMode) {
     size_t graphCap = ddaThresholdFromTable(table->ddaVmmMaxGraph, func);

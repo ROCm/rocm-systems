@@ -235,9 +235,10 @@ bool rcclForceCeAllReduceEnabled(const struct ncclComm* comm);
 RCCL_PARAM_DECLARE(CeArMaxMsgBytes);     // -1 = use ceNonRegMax[AR] (2-shot) from arch table
 RCCL_PARAM_DECLARE(CeArRegMaxMsgBytes);  // -1 = use ceRegMax[AR] (registered) from arch table
 // 2-shot AllReduce size cap: env RCCL_CE_AR_MAX_MSG_BYTES if set, else
-// ceNonRegMax[AR] from the arch table (0 = 2-shot disabled). Does not size
-// ceARTmpBuf; that stays at NCCL_CE_AR_TMPBUF_DEFAULT_BYTES unless this cap
-// is larger.
+// ceNonRegMax[AR] from the arch table (0 = 2-shot disabled). A null table
+// (RCCL_IGNORE_ARCH_TABLE or unknown arch) restores the pre-table 256 MiB
+// window. Does not size ceARTmpBuf; that stays at
+// NCCL_CE_AR_TMPBUF_DEFAULT_BYTES unless this cap is larger.
 size_t rcclCeAr2ShotMax(const ncclComm* comm);
 // True when NCCL_ALGO is set by the user. Used to skip CE/DDA/Symmetric in
 // both the selector (rccl_wrap.cc) and taskAppend (enqueue.cc).
@@ -293,9 +294,10 @@ constexpr size_t  kDdaLL128BaseDefault = 33554432;  // 32 MiB
 constexpr size_t  kDdaVmmBaseDefault  = 134217728;  // 128 MiB
 
 // Per-tier DDA size caps for this collective: env var (when set) else arch table.
-// Return 0 when the env var is unset and there is no table entry -- either the
-// arch has no table, or this collective is past AlltoAll. Nothing is invented
-// outside the table. A NULL `comm` resolves the same way.
+// RCCL_IGNORE_ARCH_TABLE or a NULL/unknown-arch table restores the pre-table
+// defaults (kDdaLLBaseDefault / kDdaLL128BaseDefault / kDdaVmmBaseDefault),
+// which apply to every collective the way the old global env vars did. A table
+// entry of 0 still disables that collective. A NULL `comm` uses the defaults.
 size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func);
 size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func);
 size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func);
@@ -311,7 +313,9 @@ bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes, nc
 // entry (LL / LL128 / VMM, including R2 and graph VMM variants) plus
 // ceNonRegMax for collectives that stage through ddaScratch (not AllReduce
 // 2-shot, which uses ceARTmpBuf). Env DDA_*_THRESHOLD, when set, is also
-// folded in. ReduceScatter table values are per-rank and scaled by nRanks.
+// folded in. With no table, the same pre-table DDA defaults the selectors
+// use are folded in so scratch is not smaller than the VMM/LL/LL128 window.
+// ReduceScatter table values are per-rank and scaled by nRanks.
 size_t rcclDdaScratchPayloadCap(const ncclComm* comm);
 
 // Returns true when the DDA fast path should be attempted for this arch/size.
