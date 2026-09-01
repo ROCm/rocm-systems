@@ -2191,7 +2191,7 @@ def run(app_args, args, **kwargs):
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
 
     if (
-        getattr(args, "kernel_replay_beta_enabled", None)
+        getattr(args, "kernel_replay", None)
         and not args.pmc
         and not args.pmc_groups
     ):
