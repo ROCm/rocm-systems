@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # Fetch full GitHub Actions logs + artifacts for a run or job.
 # The web UI truncates output and hides artifacts; this pulls the raw log,
 # the failing steps, and any uploaded artifacts into one directory.

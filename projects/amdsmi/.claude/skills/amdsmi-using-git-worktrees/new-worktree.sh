@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # Create an amd-smi worktree following the rocm-systems-<name> sibling convention.
 # Derives the parent and base from git; no hard-coded users or paths, so any
 # rocm-systems checkout can use it.

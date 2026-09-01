@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # Run all amd-smi test suites (C++ GTest, Python unit/integration/CLI) and tee
 # each to a timestamped log dir. Exits non-zero if any suite fails.
 # Derives the project root from git; no hard-coded users or paths.
