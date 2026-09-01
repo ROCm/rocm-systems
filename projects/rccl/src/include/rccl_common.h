@@ -173,11 +173,14 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
                                  ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream, bool query,
                                  bool graphCapturingHint, struct rcclCollDecision* decision);
 // Single source of truth for AllGather selection: DDA -> hierarchical -> CE ->
-// direct -> ring. query=true fills protocol/nMaxChannels for reporting. CE dispatch
-// lives in taskAppend(), so live returns RCCL_CE_REGISTERED but enqueues normally.
-// graphCapturingHint (query only) suppresses the graph-unsafe CE branch under capture.
+// direct -> symmetric -> ring. CE dispatch lives in taskAppend(); live returns
+// RCCL_CE_REGISTERED / RCCL_CE_SCRATCH and enqueues with that decision.
+//   query=false : live dispatch (ncclAllGather_impl). ceCapturing is probed from
+//                 `stream`; graphCapturingHint is ignored.
+//   query=true  : side-effect-free reporting. The stream is not probed;
+//                 graphCapturingHint supplies capture so CE is reported as skipped.
 ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
-                                 ncclDataType_t datatype, bool query, bool graphCapturingHint,
+                                 ncclDataType_t datatype, cudaStream_t stream, bool query, bool graphCapturingHint,
                                  struct rcclCollDecision* decision);
 // Single source of truth for ReduceScatter selection: symmetric -> DDA fabric
 // (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct -> native ring/pat kernel. RS has no CE.

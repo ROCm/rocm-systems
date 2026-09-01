@@ -314,13 +314,17 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 
   NCCLCHECK(Recorder::instance().record(rrAllGather, info));
 
-  // Select the implementation once, in one place (rccl_wrap.cc). The same function
-  // backs rcclGetCollImplInfo so rccl-tests attributes numbers to the backend that
-  // actually ran. Symmetric-registered buffers are extracted downstream, so DDA is
-  // gated on !symEligible inside the decision, exactly as before.
+  // Select the implementation once, in one place (rccl_wrap.cc). The returned
+  // decision drives dispatch here (DDA / Direct / Hier return early) and is
+  // carried into taskAppend() via info so the CE-vs-kernel choice and
+  // graph-capture state are never recomputed. The same function backs
+  // rcclGetCollImplInfo so rccl-tests attributes numbers to the backend that
+  // actually ran.
   struct rcclCollDecision decision;
-  NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, sendcount, datatype, /*query=*/false,
+  NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, sendcount, datatype, stream, /*query=*/false,
                                 /*graphCapturingHint=*/false, &decision));
+  info.decision = decision;
+  info.decisionValid = true;
 
   // Canonical selection line for addon backends (CE / DDA / Direct / Hier /
   // symmetric). Native kernels report via the enqueue.cc channel{Lo..Hi} tuning
@@ -366,10 +370,12 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     info.useDirect = true;
     return ncclEnqueueCheck(&info);
   case RCCL_CE_REGISTERED:
+  case RCCL_CE_SCRATCH:
     // CE dispatch happens in taskAppend(); just enqueue.
     return ncclEnqueueCheck(&info);
   default:
-    // RCCL_AG_RING / native kernel algorithms go through the standard enqueue path.
+    // RCCL_SYMMETRIC / native kernel algorithms go through the standard enqueue
+    // path; taskAppend() honors info->decision.
     return ncclEnqueueCheck(&info);
   }
 }

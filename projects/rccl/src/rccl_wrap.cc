@@ -538,8 +538,8 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
 
   if (coll == ncclFuncAllGather) {
     struct rcclCollDecision decision;
-    NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, (size_t)count, dataType, /*query=*/true,
-                                  /*graphCapturingHint=*/graphCapturing != 0, &decision));
+    NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, (size_t)count, dataType, /*stream=*/nullptr,
+                                  /*query=*/true, /*graphCapturingHint=*/graphCapturing != 0, &decision));
     *algo = decision.algo;
     *protocol = decision.protocol;
     *maxChannels = decision.nMaxChannels;
@@ -1336,7 +1336,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 // ncclAllGather_impl() (DDA) and rcclSelectAllGatherAlgo() (hierarchical / direct
 // / ring); the outcome for any given operands is identical.
 ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
-                                 ncclDataType_t datatype, bool query, bool graphCapturingHint,
+                                 ncclDataType_t datatype, cudaStream_t stream, bool query, bool graphCapturingHint,
                                  struct rcclCollDecision* decision) {
   memset(decision, 0, sizeof(*decision));
   decision->algo = NCCL_ALGO_RING;
@@ -1455,11 +1455,22 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     return ncclSuccess;
   }
 
-  // (3) CE AllGather. Mirrors taskAppend()'s live gates and outranks Direct, as
-  // taskAppend checks CE before the useDirect branch. Reporting only here; the
-  // live path re-decides and dispatches CE in taskAppend().
+  // CE is graph-unsafe. Probe only on the enqueue-bound path (after NCCL_ALGO /
+  // DDA / hierarchical returns). Live probes the stream; reporting uses
+  // graphCapturingHint. The CE AllReduce graph latch is not ticked here.
+  bool ceCapturing;
+  if (query) {
+    ceCapturing = graphCapturingHint;
+  } else {
+    struct ncclCudaGraph ceGraph;
+    NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+    ceCapturing = ncclCudaGraphValid(ceGraph);
+  }
+  decision->ceCapturing = ceCapturing;
+
+  // (3) CE AllGather. Outranks Direct, matching taskAppend's CE-before-useDirect
+  // order. Live and query share these gates; taskAppend honors the decision.
   {
-    const bool ceCapturing = query ? graphCapturingHint : false;
     struct ncclDevrWindow* sendWin = nullptr;
     struct ncclDevrWindow* recvWin = nullptr;
     ncclDevrFindWindow(comm, sendbuff, &sendWin);
@@ -1487,8 +1498,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     }
     // Branch #3: CE via registered symmetric windows. Taken either when the size
     // falls in the (symMaxR2, ceRegMax] window from the arch table, or when
-    // CTAPolicy=ZERO forces CE for every size. Mirrors the taskAppend gate
-    // (line ~3936) so the decision and the dispatch agree.
+    // CTAPolicy=ZERO forces CE for every size.
     const bool ceAvailable =
       !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
     if (ceAvailable && !hasSysmemSegment &&
@@ -1497,22 +1507,16 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
-  }
-
-  // (3.5) Symmetric-window kernel. Reported only after CE-registered so it loses
-  // to CE exactly as dispatch does; on the live path taskAppend recomputes and
-  // the symmetric extraction downstream dispatches symk. Mirrors rcclSelectAllReduce.
-  if (query && symEligible) {
-    int a, p, ch;
-    if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch)) {
-      decision->algo = a;
-      decision->protocol = p;
-      decision->nMaxChannels = ch;
+    // Hierarchical CE (multi-node). Same CTAPolicy=ZERO funnel as taskAppend.
+    if (!ceCapturing && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !hasSysmemSegment &&
+        ncclHierCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType)) {
+      decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
   }
 
-  // (4) Direct AllGather (per-peer Send/Recv).
+  // (4) Direct AllGather (per-peer Send/Recv). Beats symmetric extraction: live
+  // dispatch posts P2P tasks and never reaches ncclMakeSymmetricTaskList.
   if (rcclUseAllGatherDirect(comm, msgSize)) {
     decision->algo = RCCL_DIRECT_ALLGATHER;
     decision->protocol = NCCL_PROTO_SIMPLE;
@@ -1520,7 +1524,22 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     return ncclSuccess;
   }
 
-  // (5) Standard ring kernel. Fill algo/protocol/channels for reporting; the live
+  // (5) Symmetric-window kernel. After CE and Direct so those keep their
+  // previous live priority. Live must return RCCL_SYMMETRIC (not only query)
+  // so collTaskAppend can set symkExtract=1 once decisionValid is true.
+  if (symEligible) {
+    decision->algo = RCCL_SYMMETRIC;
+    if (query) {
+      int a, p, ch;
+      if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch)) {
+        decision->protocol = p;
+        decision->nMaxChannels = ch;
+      }
+    }
+    return ncclSuccess;
+  }
+
+  // (6) Standard ring kernel. Fill algo/protocol/channels for reporting; the live
   // path recomputes these in taskAppend(), so only the query needs them.
   decision->algo = NCCL_ALGO_RING;
   decision->protocol = NCCL_PROTO_SIMPLE;
