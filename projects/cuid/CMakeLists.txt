@@ -69,7 +69,7 @@ endif()
 include(GNUInstallDirs)
 
 # C++ standard for all targets
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # When cmake -DBUILD_TESTS off by default, it will not build the CUID test suite
@@ -104,27 +104,9 @@ if(WIN32)
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib) # Import libs
 endif()
 
-# Platform-specific dependencies; use native Windows bcrypt for HMAC, and OpenSSL on Linux/Unix
-if(WIN32)
-    # Use the native Windows bcrypt library and link it directly on Windows targets.
-else()
-    # Prefer a system-installed OpenSSL; fall back to building from source via
-    # FetchContent if the dev package is not present (e.g. in bare containers).
-    find_package(OpenSSL QUIET)
-    if(NOT OPENSSL_FOUND)
-        message(
-            STATUS
-            "OpenSSL not found on system; fetching and building from source"
-        )
-        include(FetchContent)
-        FetchContent_Declare(
-            openssl-cmake
-            GIT_REPOSITORY https://github.com/janbar/openssl-cmake.git
-            GIT_TAG 1.1.1w-20231130
-        )
-        FetchContent_MakeAvailable(openssl-cmake)
-    endif()
-endif()
+# No third-party dependencies. SHA-256 and HMAC-SHA-256 are built from
+# lib/src/sha256.cc; random key material comes from the platform CSPRNG
+# (bcrypt on Windows, getrandom(2)//dev/urandom elsewhere).
 
 message("Build Configuration:")
 message("-----------ROCM_DIR : " ${ROCM_DIR})
