@@ -1935,7 +1935,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     if (candidate.entry_island != nullptr) {
       if (!candidate.indirect_pc_sgpr || !candidate.indirect_scc_save_sgpr)
         return;
-      if (!tentative_planner.reserve_existing_range(candidate.entry_island->text_offset,
+      // Local NOP islands still need an exclusive reservation. Generated
+      // islands live in the appended prefix reserved as one bank below, so
+      // asking the existing-text allocator to reserve them rejects every
+      // otherwise-valid far relay. Derive the distinction from the island's
+      // actual location instead of carrying parallel candidate state.
+      const bool entry_island_is_in_reserved_append =
+          candidate.entry_island->text_offset >= appended_cave_offset;
+      if (!entry_island_is_in_reserved_append &&
+          !tentative_planner.reserve_existing_range(candidate.entry_island->text_offset,
                                                     kLdsCheckTrapIndirectJumpWords *
                                                         sizeof(uint32_t))) {
         ++indirect_candidate_placement_failure_count;
