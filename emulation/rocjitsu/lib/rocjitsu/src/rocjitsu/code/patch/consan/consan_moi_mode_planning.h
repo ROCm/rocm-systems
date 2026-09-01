@@ -179,6 +179,15 @@ struct MoiTransientScalarPlacementTraits {
   uint16_t compact_spill_scalar_count = 0u;
 };
 
+/// Semantic synchronization operations selected by one mode for common
+/// resource solving. A new mode may compose existing evidence operations
+/// without adding mode branches to the solver.
+struct MoiOperationalEvidenceKinds {
+  ConSanProbeIntentKind barrier = ConSanProbeIntentKind::Count;
+  ConSanProbeIntentKind atomic = ConSanProbeIntentKind::Count;
+  bool fence = false;
+};
+
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.
 [[nodiscard]] MoiPersistentStateDemand make_exact_workgroup_capture_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
@@ -245,6 +254,7 @@ struct MoiModeOperations {
   uint16_t (*access_scratch_vgpr_count)(const ConSanRequest &, const BoundRuntimeResources &,
                                         const ConSanMoiOperatingPoint &, const ConSanMoiCandidate &,
                                         rj_code_arch_t);
+  MoiOperationalEvidenceKinds operational_evidence;
   MoiPersistentStateDemand (*persistent_state_demand)(const ConSanRequest &,
                                                       const BoundRuntimeResources &,
                                                       const ConSanMoiOperatingPoint &,

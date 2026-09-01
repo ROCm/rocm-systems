@@ -33,6 +33,8 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   enum class HypotheticalModeKey : uint8_t { FifthMode };
   consan_moi_impl::MoiModeOperations operations{};
   operations.plan = plan_hypothetical_mode;
+  operations.operational_evidence = {ConSanProbeIntentKind::BarrierRecord,
+                                     ConSanProbeIntentKind::SampledAtomicOrdering, false};
   const std::array registrations{
       consan_moi_impl::MoiModeRegistrationFor<HypotheticalModeKey>{HypotheticalModeKey::FifthMode,
                                                                    &operations},
@@ -44,6 +46,8 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   const auto plan = selected->plan({}, {}, {.has_access_candidate = true}, {});
   EXPECT_TRUE(plan.inline_access_present);
   EXPECT_FALSE(plan.track_atomics);
+  EXPECT_EQ(selected->operational_evidence.barrier, ConSanProbeIntentKind::BarrierRecord);
+  EXPECT_EQ(selected->operational_evidence.atomic, ConSanProbeIntentKind::SampledAtomicOrdering);
 }
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsAutomaticOwnerDefault) {

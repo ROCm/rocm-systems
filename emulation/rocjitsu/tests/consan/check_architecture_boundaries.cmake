@@ -1352,7 +1352,7 @@ _consan_assert_reviewed_mode_switch_budget(
     consan_moi_barrier.inc 17 "named RecordReplay/Sampled/Inline barrier component"
 )
 _consan_assert_reviewed_mode_switch_budget(
-    consan_moi_pipeline.inc 11 "resource-plan orchestration"
+    consan_moi_pipeline.inc 0 "semantic-operation resource-plan orchestration"
 )
 _consan_assert_reviewed_mode_switch_budget(
     consan_moi_support.cpp 10 "shared mode contract validation"

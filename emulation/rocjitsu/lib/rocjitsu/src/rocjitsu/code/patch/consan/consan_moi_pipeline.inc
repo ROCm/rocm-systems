@@ -1,52 +1,74 @@
+[[nodiscard]] std::optional<uint16_t>
+operational_barrier_scratch_count(ConSanProbeIntentKind evidence, const ConSanRequest &request,
+                                  const BoundRuntimeResources &resources,
+                                  const ConSanMoiOperatingPoint &point) {
+  switch (evidence) {
+  case ConSanProbeIntentKind::BarrierRecord:
+    return 6u;
+  case ConSanProbeIntentKind::SampledBarrierEpoch:
+    return point.automatic_moi_private_epoch || point.moi_persistent_sgprs.complete() ? 9u : 7u;
+  case ConSanProbeIntentKind::ExactBarrierEpoch:
+    return inline_shadow_barrier_scratch_count(request, resources, point);
+  default:
+    return std::nullopt;
+  }
+}
+
+[[nodiscard]] std::optional<uint16_t>
+operational_atomic_scratch_count(ConSanProbeIntentKind evidence,
+                                 const ConSanAtomicLoweringForm &form, rj_code_arch_t arch) {
+  switch (evidence) {
+  case ConSanProbeIntentKind::AtomicRecord:
+    return atomic_record_scratch_count(form);
+  case ConSanProbeIntentKind::SampledAtomicOrdering:
+    return sampled_atomic_scratch_count();
+  case ConSanProbeIntentKind::ExactAtomicOrdering:
+    return inline_shadow_atomic_scratch_count(arch);
+  default:
+    return std::nullopt;
+  }
+}
+
 void append_moi_operational_resource_plans(
     MoiResourcePlanningState &state, const ConSanRequest &request,
     const BoundRuntimeResources &bound_resources, const ConSanDebugOverrides &debug,
     const ConSanMoiOperatingPoint &point, const ConSanTransformArtifacts &result,
     std::vector<std::string> &errors, std::vector<ConSanCandidateResourcePlan> &plans) {
+  const MoiOperationalEvidenceKinds &evidence =
+      moi_mode_operations(request.moi_engine).operational_evidence;
   if (request.moi_track_barriers) {
-    ConSanProbeIntentKind evidence_kind = ConSanProbeIntentKind::Count;
-    switch (request.moi_engine) {
-    case ConSanMoiEngine::RecordReplay:
-      evidence_kind = ConSanProbeIntentKind::BarrierRecord;
-      break;
-    case ConSanMoiEngine::Sampled:
-      evidence_kind = ConSanProbeIntentKind::SampledBarrierEpoch;
-      break;
-    case ConSanMoiEngine::InlineShadow:
-      evidence_kind = ConSanProbeIntentKind::ExactBarrierEpoch;
-      break;
-    }
     std::vector<MoiBarrierEvidenceSitePlan> candidates = build_moi_barrier_evidence_site_plans(
-        result.program_inventory, result.observation_plan(), evidence_kind, errors);
+        result.program_inventory, result.observation_plan(), evidence.barrier, errors);
     if (!errors.empty())
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
       const MoiBarrierEvidenceSitePlan &candidate = candidates[index];
       const auto scratch_count_for = [&](const ConSanMoiOperatingPoint &site_point) {
-        return static_cast<uint16_t>(
-            request.moi_engine == ConSanMoiEngine::Sampled
-                ? (site_point.automatic_moi_private_epoch ||
-                           site_point.moi_persistent_sgprs.complete()
-                       ? 9u
-                       : 7u)
-            : request.moi_engine == ConSanMoiEngine::InlineShadow
-                ? inline_shadow_barrier_scratch_count(request, bound_resources, site_point)
-                : 6u);
+        return operational_barrier_scratch_count(evidence.barrier, request, bound_resources,
+                                                 site_point);
       };
       ConSanMoiOperatingPoint site_point = point;
-      uint16_t scratch_count = scratch_count_for(site_point);
+      const std::optional<uint16_t> scratch_count = scratch_count_for(site_point);
+      if (!scratch_count) {
+        errors.emplace_back("ConSan MOI mode selected an invalid barrier evidence operation");
+        return;
+      }
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
           state, request, debug, site_point, ConSanResourceSiteKind::Barrier, index,
-          candidate.site.text_offset, candidate.kernel_descriptor_file_offset, scratch_count);
+          candidate.site.text_offset, candidate.kernel_descriptor_file_offset, *scratch_count);
       ConSanMoiOperatingPoint owner_point = site_point;
       if (apply_moi_persistent_vgpr_assignment(owner_point, point,
                                                plan.owner_descriptor_file_offsets)) {
-        const uint16_t owner_scratch_count = scratch_count_for(owner_point);
-        if (owner_scratch_count != scratch_count) {
+        const std::optional<uint16_t> owner_scratch_count = scratch_count_for(owner_point);
+        if (!owner_scratch_count) {
+          errors.emplace_back("ConSan MOI mode selected an invalid barrier evidence operation");
+          return;
+        }
+        if (*owner_scratch_count != *scratch_count) {
           plan = plan_moi_resource_site(
               state, request, debug, owner_point, ConSanResourceSiteKind::Barrier, index,
               candidate.site.text_offset, candidate.kernel_descriptor_file_offset,
-              owner_scratch_count);
+              *owner_scratch_count);
         }
       }
       plan.intent_ids = {candidate.evidence_intent};
@@ -54,38 +76,27 @@ void append_moi_operational_resource_plans(
     }
   }
   if (request.moi_track_atomics) {
-    ConSanProbeIntentKind evidence_kind = ConSanProbeIntentKind::Count;
-    switch (request.moi_engine) {
-    case ConSanMoiEngine::RecordReplay:
-      evidence_kind = ConSanProbeIntentKind::AtomicRecord;
-      break;
-    case ConSanMoiEngine::Sampled:
-      evidence_kind = ConSanProbeIntentKind::SampledAtomicOrdering;
-      break;
-    case ConSanMoiEngine::InlineShadow:
-      evidence_kind = ConSanProbeIntentKind::ExactAtomicOrdering;
-      break;
-    }
     std::vector<MoiAtomicEvidenceSitePlan> candidates = build_moi_atomic_evidence_site_plans(
-        result.program_inventory, result.observation_plan(), evidence_kind, errors);
+        result.program_inventory, result.observation_plan(), evidence.atomic, errors);
     if (!errors.empty())
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
       const MoiAtomicEvidenceSitePlan &candidate = candidates[index];
-      const uint16_t scratch_count =
-          request.moi_engine == ConSanMoiEngine::Sampled ? sampled_atomic_scratch_count()
-          : request.moi_engine == ConSanMoiEngine::InlineShadow
-              ? inline_shadow_atomic_scratch_count(moi_resource_arch(state))
-              : atomic_record_scratch_count(candidate.lowering_form);
+      const std::optional<uint16_t> scratch_count = operational_atomic_scratch_count(
+          evidence.atomic, candidate.lowering_form, moi_resource_arch(state));
+      if (!scratch_count) {
+        errors.emplace_back("ConSan MOI mode selected an invalid atomic evidence operation");
+        return;
+      }
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
           state, request, debug, point, ConSanResourceSiteKind::Atomic, index,
-          candidate.site.text_offset, candidate.kernel_descriptor_file_offset, scratch_count,
+          candidate.site.text_offset, candidate.kernel_descriptor_file_offset, *scratch_count,
           nullptr, &candidate.lowering_form);
       plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
       plans.push_back(std::move(plan));
     }
   }
-  if (request.moi_track_atomics && request.moi_engine == ConSanMoiEngine::RecordReplay) {
+  if (request.moi_track_atomics && evidence.fence) {
     std::vector<MoiFenceEvidenceSitePlan> candidates = build_moi_fence_evidence_site_plans(
         result.program_inventory, result.observation_plan(), errors);
     if (!errors.empty())

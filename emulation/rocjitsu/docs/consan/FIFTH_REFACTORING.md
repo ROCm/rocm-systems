@@ -3832,3 +3832,65 @@ inventory. The cumulative 73-line reduction is real but not yet material for a
 91-thousand-line implementation. The operating-point field audit, transform
 transaction audit, remaining target/mode interactions, and independent
 Section 14 completion audit therefore remain open, and the goal remains active.
+
+### 16.42 Convergence checkpoint 41: mode-owned operational evidence
+
+The mode-locality audit found one remaining `N`-way decision embedded in common
+MOI resource-plan orchestration. `consan_moi_pipeline.inc` selected the barrier
+intent, atomic intent, fence inclusion, and scratch-sizing path with eleven
+direct `ConSanMoiEngine` references. Those choices repeated facts already owned
+by the three mode packages and meant that a hypothetical mode composing an
+existing evidence operation would still require edits in the common solver.
+
+Each `MoiModeOperations` registration now publishes a narrow
+`MoiOperationalEvidenceKinds` value. Record/Replay selects barrier records,
+atomic records, and fence records; Sampled selects sampled barrier epochs and
+sampled atomic ordering; InlineShadow selects exact barrier epochs and exact
+atomic ordering. The common solver consumes those semantic operation kinds.
+Its only switches are now over the selected evidence operation in order to
+apply that operation's shared resource contract; it contains no mode
+enumerator. This distinction is important for `O(N+M)` growth: a new mode can
+compose the existing operations by registration, while a genuinely new
+operation adds one shared semantic resource rule rather than branches for
+every mode using it.
+
+The three production registrations were also converted from positional
+aggregates to designated fields. This makes the mode extension surface
+self-documenting and prevents a later contract-field insertion from silently
+rebinding unrelated callbacks. The existing hypothetical fifth-mode fixture
+now registers and observes its operational evidence selection without touching
+any target package or common resource-planning branch. The architecture gate
+replaces the pipeline's reviewed 11-occurrence mode budget with an exact zero
+rule.
+
+| Signal | Checkpoint 41 | Cumulative change | Slice change from checkpoint 40 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,395 | +420 | +28 |
+| Nonblank production lines | 99,112 | +29 | +25 |
+| Production implementation lines | 91,399 | **-51** | +22 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 206 / 56 | **-70 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 205 / 28 | +5 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 351 / 63 | +61 / +12 | +1 / 0 |
+| Direct mode references in common resource-plan orchestration | **0** | n/a | **-11** |
+| Mode-local operational-evidence registrations | 3 | n/a | +3 |
+| Resource-plan mode-switch gate | exact zero | n/a | strengthened from budget 11 |
+| Test inventory | 5,379 | +34 | 0 |
+
+Validation includes a clean final-tree `-j16` rebuild; all 875 `ConSanMoi*` and
+architecture-boundary focused tests, with the exact boundary gate separately
+confirmed in 1.64 seconds; all 4,744 nonphysical tests at `-j16`, including the
+unchanged 2,908 simulator rows over five targets; and all 635 physical gfx1201
+tests serialized at `-j1`. No test was removed, renamed, disabled, added, or
+replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.4, 14.6, 14.7, and 14.9.
+It deletes the superseded common mode switches and makes their absence an
+invariant, but the explicit operation contract costs 22 implementation lines.
+That is recorded temporary growth, not code-size progress; it reduces the
+cumulative shrink from 73 to 51 lines and must be repaid by subsequent
+convergence and harvesting. Other reviewed common mode budgets, the broad
+transform transaction, material whole-refactoring shrinkage, and the
+independent Section 14 completion audit remain open. The goal therefore
+remains active.
