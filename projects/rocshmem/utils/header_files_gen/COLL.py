@@ -39,9 +39,34 @@ types = [
     ("unsigned long", "ulong"),
     ("unsigned long long", "ulonglong"),
     ("__half", "half"),
-    ("__hip_bfloat16", "bfloat16")
+    ("__hip_bfloat16", "bfloat16"),
+    ("int8_t", "int8"),
+    ("int16_t", "int16"),
+    ("uint8_t", "uint8"),
+    ("uint16_t", "uint16")
 ]
 
+_int_types = [
+    0, # ("float", "float"),
+    0, # ("double", "double"),
+    1, # ("char", "char"),
+    1, # ("signed char", "schar"),
+    1, # ("short", "short"),
+    1, # ("int", "int"),
+    1, # ("long", "long"),
+    1, # ("long long", "longlong"),
+    1, # ("unsigned char", "uchar"),
+    1, # ("unsigned short", "ushort"),
+    1, # ("unsigned int", "uint"),
+    1, # ("unsigned long", "ulong"),
+    1, # ("unsigned long long", "ulonglong"),
+    0, # ("__half", "half"),
+    0, # ("__hip_bfloat16", "bfloat16"),
+    1, # ("int8_t", "int8"),
+    1, # ("int16_t", "int16"),
+    1, # ("uint8_t", "uint8"),
+    1  # ("uint16_t", "uint16")
+]
 
 def alltoall_ctx_wg_api(T, TNAME):
     return (
@@ -406,25 +431,27 @@ def generate_reduction_wave_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
+    # int_types = [
+    #     ("short", "short"),
+    #     ("int", "int"),
+    #     ("long", "long"),
+    #     ("long long", "longlong")
+    # ]
 
-    float_types = [
-        ("float", "float"),
-        ("double", "double"),
-        ("__half", "half"),
-        ("__hip_bfloat16", "bfloat16")
-    ]
+    # float_types = [
+    #     ("float", "float"),
+    #     ("double", "double"),
+    #     ("__half", "half"),
+    #     ("__hip_bfloat16", "bfloat16")
+    # ]
 
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reduction_wave_api(type_, tname_)
         expanded_code += bitwise_reduction_wave_api(type_, tname_)
 
-    for type_, tname_ in float_types:
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
         expanded_code += arith_reduction_wave_api(type_, tname_)
 
     return expanded_code
@@ -474,23 +501,25 @@ def generate_reducescatter_wg_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
+    # int_types = [
+    #     ("short", "short"),
+    #     ("int", "int"),
+    #     ("long", "long"),
+    #     ("long long", "longlong")
+    # ]
 
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
+    # float_types = [
+    #     ("float", "float"),
+    #     ("double", "double")
+    # ]
 
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reducescatter_api(type_, tname_)
         expanded_code += bitwise_reducescatter_api(type_, tname_)
 
-    for type_, tname_ in float_types:
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
         expanded_code += arith_reducescatter_api(type_, tname_)
 
     return expanded_code
@@ -534,11 +563,13 @@ def generate_reducescatter_wave_api():
         ("__hip_bfloat16", "bfloat16")
     ]
 
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reducescatter_wave_api(type_, tname_)
         expanded_code += bitwise_reducescatter_wave_api(type_, tname_)
 
-    for type_, tname_ in float_types:
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
         expanded_code += arith_reducescatter_wave_api(type_, tname_)
 
     return expanded_code
@@ -579,11 +610,13 @@ def generate_reducescatter_host_api():
         ("double", "double")
     ]
 
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reducescatter_host_api(type_, tname_)
         expanded_code += bitwise_reducescatter_host_api(type_, tname_)
 
-    for type_, tname_ in float_types:
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
         expanded_code += arith_reducescatter_host_api(type_, tname_)
 
     return expanded_code
@@ -639,11 +672,13 @@ def generate_reduction_api():
         ("__hip_bfloat16", "bfloat16")
     ]
 
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reduction_api(type_, tname_)
         expanded_code += bitwise_reduction_api(type_, tname_)
 
-    for type_, tname_ in float_types:
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
         expanded_code += arith_reduction_api(type_, tname_)
 
     return expanded_code
@@ -681,11 +716,13 @@ def generate_reduce_on_stream_api():
         ("__hip_bfloat16", "bfloat16")
     ]
 
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reduce_on_stream_api(type_, tname_)
         expanded_code += bitwise_reduce_on_stream_api(type_, tname_)
 
-    for type_, tname_ in float_types:
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
         expanded_code += arith_reduce_on_stream_api(type_, tname_)
 
     return expanded_code
