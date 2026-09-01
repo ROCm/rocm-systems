@@ -441,8 +441,13 @@ rocDecStatus D3D12Interop::CopyToStagingBuffer(int pic_idx) {
         // If SetEventOnCompletion fails, the event is never signaled and the wait below
         // would block forever -- fail here instead of hanging.
         CHECK_D3D12(d3d12_fence_->SetEventOnCompletion(d3d12_fence_value_, d3d12_fence_event_));
-        WaitForSingleObject(d3d12_fence_event_, INFINITE);
-    }
+        DWORD wait = WaitForSingleObject(d3d12_fence_event_, INFINITE);
+        if (wait != WAIT_OBJECT_0) {
+            CriticalLog(g_rocdec_logger, "WaitForSingleObject for D3D12 fence failed, result=" + ROCDEC_TOSTR(wait) +
+                        " GetLastError=" + ROCDEC_TOSTR(GetLastError()));
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_RUNTIME_ERROR;
+        }
 
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
