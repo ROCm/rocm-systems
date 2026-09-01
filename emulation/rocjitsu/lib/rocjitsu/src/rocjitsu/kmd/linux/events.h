@@ -27,6 +27,23 @@
 
 namespace rocjitsu {
 
+/// @brief A GPU memory violation, as the driver reports it to the runtime.
+///
+/// @details Mirrors the fields of kfd_hsa_memory_exception_data that this
+/// driver can populate, without pulling the KFD uapi into every consumer of
+/// this header. Hardware raises a VM fault; KFD turns it into an event of type
+/// KFD_IOC_EVENT_MEMORY carrying the offending address, and the runtime decides
+/// what to do about it. Modelling the report rather than inventing a policy is
+/// what lets an invalid GPU access surface the same way it would on silicon.
+struct MemoryFault {
+  uint64_t va = 0;         ///< Faulting GPU virtual address.
+  uint32_t gpu_id = 0;     ///< KFD gpu_id of the device that faulted.
+  bool not_present = true; ///< Address has no mapping, or none the GPU may use.
+  bool read_only = false;  ///< Write to a mapping that permits only reads.
+  /// Neither bit set reports a refusal whose cause could not be established.
+  /// `imprecise` stays clear regardless: the faulting address is exact.
+};
+
 /// @brief KFD event subsystem state.
 ///
 /// @details Owns all event-related state for the simulated driver: the event
@@ -86,6 +103,14 @@ public:
   ///          event_id is zero, broadcasts to all type-0 events — matching
   ///          real KFD's kfd_signal_event_interrupt(pasid, 0, 0) broadcast.
   void signal_interrupt(uint32_t event_id);
+
+  /// @brief Deliver a memory violation to this process's memory-exception event.
+  /// @details Finds the process's KFD_IOC_EVENT_MEMORY event -- the runtime
+  /// creates exactly one and parks a handler thread on it -- records @p fault as
+  /// its payload for the next WAIT_EVENTS to collect, and wakes its waiters.
+  /// @returns false when the process registered no such event, in which case the
+  ///          violation has nowhere to go and the caller should say so itself.
+  bool signal_memory_fault(const MemoryFault &fault);
 
   /// @brief Wake all event waiters for driver shutdown.
   /// @details Sets the closing flag and notifies every registered waiter
@@ -151,6 +176,8 @@ private:
     bool auto_reset = false; ///< If true, signaled clears after wakeup.
     bool signaled = false;   ///< True when the event has been signaled.
     uint64_t event_age = 1;  ///< Monotonic age counter (starts at 1, matching real KFD).
+    /// Payload for the most recent violation on a memory-exception event.
+    MemoryFault fault;
     std::vector<std::condition_variable *> waiters; ///< Per-event waiter list (kernel wait_queue).
   };
 

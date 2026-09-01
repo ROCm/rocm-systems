@@ -73,6 +73,14 @@ struct HwQueue {
   uint64_t last_doorbell = 0;
   bool host_accessible = false;
   bool is_sdma = false;
+  /// @brief Set when a packet faulted; the queue stops until it is torn down.
+  /// @details A faulted packet is retired rather than retried, because its
+  /// endpoint will never resolve. Continuing the scan would then run the FENCE
+  /// or signal packet behind it and publish completion for work that never
+  /// happened, which is the same lie the faulted copy was stopped from telling.
+  /// Hardware halts the engine on a VM fault and waits for the driver; this
+  /// models that, and the violation has already been reported to the process.
+  bool faulted = false;
   bool debug_suspended = false;
   bool runtime_suspended = false;
   /// A command-processor pass observed this queue while its debugger gate was closed.
@@ -673,7 +681,7 @@ private:
   void read_gpu_block(uint64_t va, void *dst, size_t size, uint32_t vmid) const;
 
   /// @brief Write a block of bytes to GPU virtual address space from a buffer.
-  void write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid);
+  amdgpu::AccessOutcome write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid);
 
   void stop_doorbell_monitor();
   /// @brief Stop and join the monitor only when no polled queue remains.

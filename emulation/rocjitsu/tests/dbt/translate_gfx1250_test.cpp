@@ -93,7 +93,10 @@ make_gfx1250_image_with_live_sgprs(const std::array<uint32_t, N> &instruction_wo
         cdna5::kSMovB32Sop1, {.ssrc0 = static_cast<uint8_t>(sgpr), .sdst = kGfx1250M0Operand})[0]);
   }
   words.push_back(kGfx1250SEndpgm);
-  return test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  auto image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  test_support::write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                               EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  return image;
 }
 
 void enable_kernarg_segment_ptr_sgpr(std::vector<uint8_t> &image, uint32_t kernarg_size = 16) {
@@ -14231,6 +14234,8 @@ translate_gfx1250_b0_to_a0_words(std::vector<uint32_t> words,
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   words.push_back(kGfx1250SEndpgm);
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::test_support::write_value_for_test<uint32_t>(
+      image, offsetof(rocjitsu::Elf64_Ehdr, e_flags), rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250);
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
 
   rocjitsu::BinaryTranslator translator(

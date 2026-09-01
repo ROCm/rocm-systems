@@ -315,6 +315,15 @@ class Instruction(InstBase):
         self.operands = operands
         self.available_encodings = available_encodings
         self.source_addition = source_addition
+        # Populated by an optional ISA-variant manifest after the base XML and
+        # additive deltas have been parsed.  The generator copies these masks
+        # into decoded instructions; the runtime decoder then fails closed when
+        # its concrete target lacks a required feature.
+        self.required_feature_mask = 0
+        self.encoding_feature_masks: dict[str, int] = {}
+        # A model-only instruction is decoded and represented, but deliberately
+        # omitted from generated execution callback tables.
+        self.model_only = False
 
     @cached_property
     def fmt_name(self) -> str:
@@ -448,6 +457,8 @@ class IsaSpec:
         )
         self.alt_encs_with_implied_literal: set[str] = set()
         self.applied_additions: tuple[IsaAdditionProvenance, ...] = ()
+        self.isa_features: tuple[str, ...] = ()
+        self.isa_variants: dict[str, int] = {}
         # Every fieldless operand type observed while parsing this spec.
         # Consumed by fieldless_policy.validate_fieldless_taxonomy.
         self.fieldless_operand_types: set[str] = set()

@@ -2132,16 +2132,18 @@ TEST(GpuMemoryTest, CopyBlockTransfersPageableClientMemoryAcrossPageBoundaries) 
   for (size_t i = 0; i < source.size(); ++i)
     source[i] = static_cast<uint8_t>((i * 37 + 11) & 0xff);
 
-  ASSERT_TRUE(
-      mem.copy_block(kGpuAddr, reinterpret_cast<uint64_t>(source.data()), source.size(), kVmid));
+  ASSERT_EQ(
+      mem.copy_block(kGpuAddr, reinterpret_cast<uint64_t>(source.data()), source.size(), kVmid),
+      amdgpu::CopyOutcome::Complete);
   std::vector<uint8_t> gpu_result(kSize);
   mem.read_block(kGpuAddr, std::span<uint8_t>(gpu_result), kVmid);
   EXPECT_TRUE(std::equal(source.begin(), source.end(), gpu_result.begin()));
 
   std::vector<uint8_t> host_destination(kSize + 23, 0);
   auto destination = std::span<uint8_t>(host_destination).subspan(13, kSize);
-  ASSERT_TRUE(mem.copy_block(reinterpret_cast<uint64_t>(destination.data()), kGpuAddr,
-                             destination.size(), kVmid));
+  ASSERT_EQ(mem.copy_block(reinterpret_cast<uint64_t>(destination.data()), kGpuAddr,
+                           destination.size(), kVmid),
+            amdgpu::CopyOutcome::Complete);
   EXPECT_TRUE(std::equal(source.begin(), source.end(), destination.begin()));
 }
 

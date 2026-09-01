@@ -79,6 +79,7 @@ struct LoadedConfig {
   DbtGuestConfig dbt_guest;             ///< Optional DBT guest-GPU discovery config.
   uint32_t num_gpus = 1;                ///< Number of simulated GPU instances.
   std::vector<KfdDeviceConfig> devices; ///< Per-GPU configs (populated when num_gpus > 1).
+  rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
 
   /// @brief Return the SoC from the topology root.
   SoC *soc();

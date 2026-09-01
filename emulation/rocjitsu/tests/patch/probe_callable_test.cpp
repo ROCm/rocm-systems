@@ -160,6 +160,7 @@ TEST(ProbeCallableTest, BuildsNopProbe) {
   ASSERT_TRUE(callable.has_value()) << err;
   EXPECT_EQ(callable->symbol, "rj_probe");
   EXPECT_EQ(callable->arch, ROCJITSU_CODE_ARCH_CDNA2);
+  EXPECT_EQ(callable->target, ROCJITSU_CODE_TARGET_GFX90A);
   EXPECT_EQ(callable->cc, ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
   EXPECT_EQ(callable->body_words, body);
   EXPECT_EQ(callable->output_text_offset, 0u); // assigned by a later layout step.

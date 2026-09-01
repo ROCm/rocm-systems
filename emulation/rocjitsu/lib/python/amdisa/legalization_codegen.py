@@ -79,13 +79,29 @@ def emit_all(
         # fields. The 9-bit encoding_id (raw[0]>>23) has don't-care low bits
         # for these formats. We emit one entry per alias so that binary search
         # works without encoding_id normalization.
+        #
+        # src_encoding_order is a decode-table slot, not a normalized encoding
+        # base: LegalizationGenerator._dt_index() returns the slot of the first
+        # opcode the encoding actually defines, so its don't-care bits are only
+        # zero when that encoding defines opcode 0. CDNA1-CDNA4 define VOP2
+        # opcode 0 (V_CNDMASK_B32) and so came out at base 0; CDNA5 and RDNA1-4
+        # start at opcode 1 and come out at base 4. OR-ing aliases onto a base
+        # whose don't-care bits are already set both loses half the alias range
+        # and emits the other half twice -- for VOP2 that made every EVEN-opcode
+        # instruction unreachable, because bit 2 of the slot (op << 2) is bit 0
+        # of the opcode. Mask the don't-care bits off first so the base is the
+        # encoding's, not one arbitrary opcode's. The mask is exact: an
+        # encoding's primary_dt_ptrs spans precisely its own 2**dont_care slots,
+        # so the first defined entry always lies within one range of the base
+        # and the low bits are the only thing that varies.
         expanded = []
         for e in entries:
             enc_id = e.src_encoding_order if e.src_encoding_order >= 0 else 0xFFFF
             dont_care = 9 - e.src_encoding_bits
             if dont_care > 0 and enc_id < 0xFFFF:
+                enc_base = enc_id & ~((1 << dont_care) - 1)
                 for i in range(1 << dont_care):
-                    alias_id = enc_id | i
+                    alias_id = enc_base | i
                     expanded.append(
                         LegalizationEntry(
                             src_mnemonic=e.src_mnemonic,
