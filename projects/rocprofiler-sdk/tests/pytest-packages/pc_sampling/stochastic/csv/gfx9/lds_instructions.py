@@ -43,7 +43,7 @@ def validate_lds_instructions_issued(samples_issued):
 
 def validate_lds_instructions_stalled(samples):
     lds_samples = samples[samples["Instruction"].apply(lambda x: x.startswith("ds_"))]
-    lds_stalled = lds_samples[lds_samples["Wave_Issued_Instruction"] == False]
+    lds_stalled = lds_samples[lds_samples["Wave_Issued_Instruction"] is False]
 
     # TODO: question - why we observed alu_dependency on matrix_multiply_tile kernel
     assert (

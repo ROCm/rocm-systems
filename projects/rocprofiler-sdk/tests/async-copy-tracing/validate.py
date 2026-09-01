@@ -396,7 +396,6 @@ def test_ancestor_ids(input_data):
     This test ensures that each memcpy can be traced back to
     a hipMemcpyAsync through ancestor IDs
     """
-    from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 
     data = input_data
     sdk_data = data["rocprofiler-sdk-json-tool"]
@@ -425,10 +424,9 @@ def test_ancestor_ids(input_data):
         accounted_for_hip_ids.append(parent_hip_call.correlation_id.internal)
 
     # Ensure we looked through all HIP entries
-    assert (
-        set(accounted_for_hip_ids) == set(hip_memcopies.keys()),
-        "Expected to account for all HIP memcpy calls through ancestor ID lookup",
-    )
+    assert set(accounted_for_hip_ids) == set(
+        hip_memcopies.keys()
+    ), "Expected to account for all HIP memcpy calls through ancestor ID lookup"
 
 
 def test_retired_correlation_ids(input_data):

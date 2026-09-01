@@ -13,12 +13,11 @@
 import argparse
 import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "perf-common"))
-
 from perf_cost_model import model_max_ms
 from perf_stats import check_ceiling
 from perf_stats import parse_marker as _parse_marker
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "perf-common"))
 
 
 def parse_marker(text: str) -> dict:

@@ -44,7 +44,7 @@ def validate_other_instructions_issued(all_samples, other_samples):
 
 def validate_other_instructions_stalled(other_samples):
     other_samples_stalled = other_samples[
-        other_samples["Wave_Issued_Instruction"] == False
+        other_samples["Wave_Issued_Instruction"] is False
     ]
 
     assert (

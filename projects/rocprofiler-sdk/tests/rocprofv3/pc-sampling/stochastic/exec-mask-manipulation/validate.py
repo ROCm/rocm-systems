@@ -24,7 +24,6 @@
 
 import sys
 import pytest
-import numpy as np
 import pandas as pd
 
 # =========================== Validating fields common for both host-trap and stochastic CSV output

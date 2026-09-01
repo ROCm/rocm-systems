@@ -24,9 +24,6 @@
 
 import sys
 import pytest
-import numpy as np
-import pandas as pd
-import re
 
 # the profiled kernel; internal rocclr helper kernels are ignored
 TARGET_KERNEL = "transpose"

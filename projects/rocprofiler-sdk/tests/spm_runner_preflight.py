@@ -28,7 +28,6 @@
 
 import sys
 from pathlib import Path
-from typing import Optional, Tuple
 
 # Single source of truth for SPM CI driver gating. CMake parses this assignment;
 # TheRock CI runs this script from the installed tests tree.

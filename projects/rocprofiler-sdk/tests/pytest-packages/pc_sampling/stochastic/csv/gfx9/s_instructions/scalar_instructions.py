@@ -47,7 +47,7 @@ def validate_scalar_instructions_issued(all_samples, scalar_samples):
 
 def validate_scalar_instructions_stalled(scalar_samples):
     scalar_samples_stalled = scalar_samples[
-        scalar_samples["Wave_Issued_Instruction"] == False
+        scalar_samples["Wave_Issued_Instruction"] is False
     ]
 
     assert (
