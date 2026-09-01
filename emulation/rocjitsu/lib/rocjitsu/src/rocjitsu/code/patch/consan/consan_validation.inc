@@ -151,7 +151,8 @@ void try_apply_unmatched_barrier_wait_abort_impl(std::span<const uint8_t> origin
     patches.push_back(std::move(patch));
   }
   if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                           "unmatched barrier abort", result)) {
+                           "unmatched barrier abort", result.program_inventory.code_object_id(),
+                           result.errors)) {
     return;
   }
   result.replacement = std::move(patcher).emit();

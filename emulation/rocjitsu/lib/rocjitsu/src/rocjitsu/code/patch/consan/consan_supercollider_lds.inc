@@ -52,7 +52,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         reinterpret_cast<const uint8_t *>(code_object.text_sections().front()->data()),
         code_object.text_sections().front()->size());
   }
-  std::vector<LocalNopCave> local_nop_caves = find_uncovered_nop_caves(code_object, result, arch);
+  std::vector<LocalNopCave> local_nop_caves =
+      find_uncovered_nop_caves(code_object, result.program_inventory, arch);
   std::erase_if(local_nop_caves, [&](const LocalNopCave &cave) {
     return overlaps_preapplied_reserved_range(
         result.program_inventory,
@@ -4214,7 +4215,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       std::memcpy(new_text.data() + relay_offset, &relay_word, sizeof(relay_word));
     }
     if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                             "LDS check/trap proof", result)) {
+                             "LDS check/trap proof", result.program_inventory.code_object_id(),
+                             result.errors)) {
       return;
     }
     const std::span<const uint8_t> patched_image = patcher.image_bytes();

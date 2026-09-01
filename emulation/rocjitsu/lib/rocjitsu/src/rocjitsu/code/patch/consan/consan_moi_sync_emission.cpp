@@ -142,7 +142,8 @@ make_moi_sync_lowering_commit(const ConSanObservationPlan &observation,
     const ConSanPatchedImageGrowthLimit &growth_limit, std::string_view replacement_name,
     std::string_view probe_name, std::vector<ConSanCommittedLowering> commits,
     std::vector<ConSanPatchInfo> patches) {
-  if (!replace_consan_text(patcher, new_text, growth_limit, replacement_name, result))
+  if (!replace_consan_text(patcher, new_text, growth_limit, replacement_name,
+                           result.program_inventory.code_object_id(), result.errors))
     return false;
   if (!result.coverage_ledger.publish_coalescing_instrumented_commits(std::move(commits))) {
     result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +

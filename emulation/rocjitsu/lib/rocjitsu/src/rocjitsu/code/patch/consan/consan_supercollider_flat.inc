@@ -220,7 +220,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   uint64_t appended_cave_offset = 0;
   if (code_object.text_sections().size() == 1)
     appended_cave_offset = code_object.text_sections().front()->size();
-  std::vector<LocalNopCave> local_nop_caves = find_uncovered_nop_caves(code_object, result, arch);
+  std::vector<LocalNopCave> local_nop_caves =
+      find_uncovered_nop_caves(code_object, result.program_inventory, arch);
   std::erase_if(local_nop_caves, [&](const LocalNopCave &cave) {
     return overlaps_preapplied_reserved_range(
         result.program_inventory,
@@ -1826,7 +1827,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
     }
     if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                             "flat check/trap proof", result)) {
+                             "flat check/trap proof", result.program_inventory.code_object_id(),
+                             result.errors)) {
       return;
     }
     replacement = std::move(patcher).emit();

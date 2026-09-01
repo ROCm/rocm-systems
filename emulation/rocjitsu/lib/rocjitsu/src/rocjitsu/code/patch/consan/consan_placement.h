@@ -67,8 +67,8 @@ reserved_ranges_for_existing_patches(const AmdGpuCodeObject &code_object,
                                      const ConSanTransformArtifacts &result);
 
 [[nodiscard]] std::vector<LocalNopCave>
-find_uncovered_nop_caves(const AmdGpuCodeObject &code_object,
-                         const ConSanTransformArtifacts &result, rj_code_arch_t arch);
+find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ProgramInventory &inventory,
+                         rj_code_arch_t arch);
 [[nodiscard]] std::optional<InPlaceNopSite>
 find_existing_nop_site(const AmdGpuCodeObject &code_object, rj_code_arch_t arch);
 [[nodiscard]] std::optional<InPlaceInstructionSite>

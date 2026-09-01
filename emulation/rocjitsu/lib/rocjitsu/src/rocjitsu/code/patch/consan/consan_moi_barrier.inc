@@ -2753,7 +2753,8 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     result.warnings.emplace_back("ConSan MOI barrier record patch found no patchable barriers");
     if (pruned_provisional_reservoirs) {
       if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                               "MOI barrier reservoir cleanup", result)) {
+                               "MOI barrier reservoir cleanup",
+                               result.program_inventory.code_object_id(), result.errors)) {
         return;
       }
       result.replacement = std::move(patcher).emit();

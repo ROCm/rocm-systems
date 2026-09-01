@@ -391,7 +391,8 @@ void clear_fault_mutation_kinds(MutationRequest &request) {
         has_perturbation ? pristine_mutation_plan : std::move(pristine_mutation_plan);
     AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
     const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
-    apply_consan_fault_mutations(code_object, arch, fault_options, fault_result.fault_plans,
+    apply_consan_fault_mutations(code_object, arch, fault_options.patched_image_growth_limit,
+                                 fault_options.fault_require_exactly_one, fault_result.fault_plans,
                                  fault_result);
     fault_result =
         finalize_consan_result(std::move(fault_result), code_object_bytes,

@@ -1515,7 +1515,8 @@ void try_apply_first_light_access_record_patch(
       return;
 
     if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                             "MOI first-light probe", result)) {
+                             "MOI first-light probe", result.program_inventory.code_object_id(),
+                             result.errors)) {
       return;
     }
     if (!result.publish_access_lowering(std::move(patcher).emit(), "ConSan MOI first-light probe",

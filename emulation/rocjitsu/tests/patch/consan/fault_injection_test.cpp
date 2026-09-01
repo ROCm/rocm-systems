@@ -334,6 +334,74 @@ TEST(ConSan, FaultApplicationRejectsMalformedForeignAndDuplicatePlans) {
   }));
 }
 
+TEST(ConSan, FaultApplicationRollsBackCandidateWhenLaterMechanismFails) {
+  const std::vector<uint8_t> bytes = make_rdna4_flat_atomic_release_acquire_code_object();
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.fault_atomic_wrong_address = true;
+  options.fault_atomic_address_delta = 4u;
+  options.fault_dry_run = true;
+  ConSanTransformArtifacts planned = test_lower_consan(bytes, options);
+  ASSERT_TRUE(planned.errors.empty()) << testing::PrintToString(planned.errors);
+  ASSERT_EQ(planned.fault_plans.size(), 1u);
+
+  // Atomic application succeeds first. This second, structurally valid plan
+  // then fails semantic owner resolution, after the first mechanism has built
+  // candidate bytes and proof inside the private fault transaction.
+  ConSanFaultMutationPlan stale_lds =
+      make_well_formed_fault_plan(ConSanFaultMutationKind::LdsWrongAddress);
+  stale_lds.source_code_object = planned.program_inventory.code_object_id();
+  stale_lds.primary_identity = "missing-lds-fault-site";
+  ASSERT_TRUE(stale_lds.well_formed());
+  planned.fault_plans.push_back(std::move(stale_lds));
+
+  options.fault_dry_run = false;
+  compose_consan_fault_mutation(bytes, options, planned.fault_plans, planned);
+  EXPECT_FALSE(planned.errors.empty());
+  EXPECT_TRUE(planned.replacement.empty());
+  EXPECT_TRUE(planned.patches.empty());
+  EXPECT_EQ(planned.mutation.fault.applied, 0u);
+  EXPECT_EQ(planned.outcome, ConSanTransformOutcome::Unchanged);
+  EXPECT_FALSE(std::ranges::any_of(planned.warnings, [](const std::string &warning) {
+    return warning.find("atomic fault rewrote") != std::string::npos;
+  }));
+}
+
+TEST(ConSan, FaultApplicationCommitsOneCandidateAcrossIndependentMechanisms) {
+  const auto lds_store = instrumentation::build_ds_store_b32(
+      /*vaddr=*/2u, /*vdata=*/3u, /*byte_offset=*/4u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(lds_store.has_value());
+  const auto atomic = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/6u, /*vsrc=*/8u, /*vdst=*/4u, /*return_old_value=*/true,
+      /*scope=*/2u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(atomic.has_value());
+  std::vector<uint32_t> words(lds_store->begin(), lds_store->end());
+  words.insert(words.end(), atomic->begin(), atomic->end());
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(words, "independent_fault_transaction");
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.fault_lds_wrong_address = true;
+  options.fault_lds_address_vgpr = 12u;
+  options.fault_atomic_wrong_address = true;
+  options.fault_atomic_address_delta = 4u;
+
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(result.errors);
+  EXPECT_EQ(result.mutation.fault.requested, 2u);
+  EXPECT_EQ(result.mutation.fault.planned, 2u);
+  EXPECT_EQ(result.mutation.fault.applied, 2u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineAtomicAddressRewrite,
+                               &ConSanPatchInfo::kind),
+            1u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineLdsAddressRewrite,
+                               &ConSanPatchInfo::kind),
+            1u);
+}
+
 TEST(ConSan, FaultInventoryProvesDirectSharedHelperOwnersAndFiltersExactDispatch) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.helper_has_ordered_atomic = true;

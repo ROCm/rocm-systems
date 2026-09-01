@@ -125,16 +125,15 @@ void add_covered_text_range(std::vector<TextRange> &ranges, uint64_t begin, uint
     ranges.push_back({begin, end});
 }
 
-[[nodiscard]] std::vector<TextRange> covered_text_ranges(const ConSanTransformArtifacts &result,
+[[nodiscard]] std::vector<TextRange> covered_text_ranges(const ProgramInventory &inventory,
                                                          uint64_t text_size) {
   std::vector<TextRange> ranges;
-  ranges.reserve(result.program_inventory.kernels().size() +
-                 result.program_inventory.functions().size());
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+  ranges.reserve(inventory.kernels().size() + inventory.functions().size());
+  for (const ConSanKernelInfo &kernel : inventory.kernels()) {
     if (kernel.has_text_range)
       add_covered_text_range(ranges, kernel.entry_text_offset, kernel.code_size, text_size);
   }
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
+  for (const ConSanFunctionInfo &function : inventory.functions())
     add_covered_text_range(ranges, function.entry_text_offset, function.code_size, text_size);
 
   std::ranges::sort(ranges, [](const TextRange &lhs, const TextRange &rhs) {
@@ -165,21 +164,20 @@ void add_covered_text_range(std::vector<TextRange> &ranges, uint64_t begin, uint
 }
 
 [[nodiscard]] std::vector<LocalCaveOwnerRange>
-local_cave_owner_ranges(const ConSanTransformArtifacts &result, uint64_t text_size) {
+local_cave_owner_ranges(const ProgramInventory &inventory, uint64_t text_size) {
   std::vector<LocalCaveOwnerRange> owners;
-  owners.reserve(result.program_inventory.kernels().size() +
-                 result.program_inventory.functions().size());
+  owners.reserve(inventory.kernels().size() + inventory.functions().size());
   auto add_owner = [&](uint64_t entry, uint64_t code_size) {
     if (code_size == 0 || entry >= text_size)
       return;
     const uint64_t code_end = entry + std::min(code_size, text_size - entry);
     owners.push_back({entry, code_end, text_size});
   };
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+  for (const ConSanKernelInfo &kernel : inventory.kernels()) {
     if (kernel.has_text_range)
       add_owner(kernel.entry_text_offset, kernel.code_size);
   }
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
+  for (const ConSanFunctionInfo &function : inventory.functions())
     add_owner(function.entry_text_offset, function.code_size);
 
   std::ranges::sort(owners, [](const LocalCaveOwnerRange &lhs, const LocalCaveOwnerRange &rhs) {
@@ -213,16 +211,16 @@ owner_of_uncovered_text_range(uint64_t begin, uint64_t end,
 }
 
 [[nodiscard]] std::vector<LocalNopCave>
-find_uncovered_nop_caves(const AmdGpuCodeObject &code_object,
-                         const ConSanTransformArtifacts &result, rj_code_arch_t arch) {
+find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ProgramInventory &inventory,
+                         rj_code_arch_t arch) {
   if (code_object.text_sections().size() != 1)
     return {};
 
   const Section *text = code_object.text_sections().front();
   const auto text_bytes =
       std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
-  const std::vector<TextRange> ranges = covered_text_ranges(result, text->size());
-  const std::vector<LocalCaveOwnerRange> owners = local_cave_owner_ranges(result, text->size());
+  const std::vector<TextRange> ranges = covered_text_ranges(inventory, text->size());
+  const std::vector<LocalCaveOwnerRange> owners = local_cave_owner_ranges(inventory, text->size());
   const uint32_t nop = build_s_nop(0, arch);
 
   std::vector<LocalNopCave> caves;

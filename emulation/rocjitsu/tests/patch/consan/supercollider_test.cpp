@@ -475,8 +475,9 @@ TEST(ConSan, StagedGrowthUsesOriginalInputBudgetInsteadOfCompounding) {
   ConSanOptions probe_options;
   ConSanTransformArtifacts probe_result;
   probe_result.program_inventory = ProgramInventoryBuilder(fixture.bytes).view();
-  ASSERT_TRUE(replace_consan_text(probe_patcher, second_stage_text,
-                                  probe_options.patched_image_growth_limit, "probe", probe_result));
+  ASSERT_TRUE(replace_consan_text(
+      probe_patcher, second_stage_text, probe_options.patched_image_growth_limit, "probe",
+      probe_result.program_inventory.code_object_id(), probe_result.errors));
   const size_t second_stage_growth =
       probe_patcher.image_bytes().size() - fixture.baseline.replacement.size();
   ASSERT_GT(second_stage_growth, 0u);
@@ -494,7 +495,8 @@ TEST(ConSan, StagedGrowthUsesOriginalInputBudgetInsteadOfCompounding) {
   ConSanTransformArtifacts result;
   result.program_inventory = ProgramInventoryBuilder(fixture.bytes).view();
   EXPECT_FALSE(replace_consan_text(patcher, second_stage_text, options.patched_image_growth_limit,
-                                   "second stage", result));
+                                   "second stage", result.program_inventory.code_object_id(),
+                                   result.errors));
   const std::string expected =
       "ConSan second stage rejected patched-image file growth: required total " +
       std::to_string(required_total_growth) + " bytes, limit " + std::to_string(rejecting_limit) +
@@ -515,7 +517,8 @@ TEST(ConSan, GrowthPolicyRequiresPristineImageIdentity) {
   ConSanTransformArtifacts result;
 
   EXPECT_FALSE(replace_consan_text(patcher, replacement, options.patched_image_growth_limit,
-                                   "missing identity", result));
+                                   "missing identity", result.program_inventory.code_object_id(),
+                                   result.errors));
   EXPECT_NE(std::ranges::find(result.errors,
                               "ConSan missing identity has no pristine image identity for "
                               "patched-image growth accounting"),
@@ -543,7 +546,8 @@ TEST(ConSan, InvalidGrowthPolicyAndNonPolicyReplacementFailureStayDistinct) {
   malformed.program_inventory = ProgramInventoryBuilder(fixture.bytes).view();
   EXPECT_FALSE(replace_consan_text(patcher, malformed_text,
                                    default_options.patched_image_growth_limit,
-                                   "test malformed replacement", malformed));
+                                   "test malformed replacement",
+                                   malformed.program_inventory.code_object_id(), malformed.errors));
   const std::string expected_malformed =
       "ConSan test malformed replacement could not replace executable text (outcome malformed "
       "input, patched-image remaining file growth limit " +
@@ -572,7 +576,8 @@ TEST(ConSan, ReplacementDiagnosticsReportAllocationAndExactResolvedGrowth) {
   result.program_inventory = ProgramInventoryBuilder(fixture.bytes).view();
 
   EXPECT_FALSE(replace_consan_text(patcher, replacement, options.patched_image_growth_limit,
-                                   "test allocation replacement", result));
+                                   "test allocation replacement",
+                                   result.program_inventory.code_object_id(), result.errors));
   const std::string expected =
       "ConSan test allocation replacement could not replace executable text (outcome allocation "
       "failure, patched-image remaining file growth limit " +
@@ -601,7 +606,8 @@ TEST(ConSan, ReplacementDiagnosticsReportLateMalformedInputAndExactResolvedGrowt
   result.program_inventory = ProgramInventoryBuilder(fixture.bytes).view();
 
   EXPECT_FALSE(replace_consan_text(patcher, replacement, options.patched_image_growth_limit,
-                                   "test late malformed replacement", result));
+                                   "test late malformed replacement",
+                                   result.program_inventory.code_object_id(), result.errors));
   const std::string expected =
       "ConSan test late malformed replacement could not replace executable text (outcome malformed "
       "input, patched-image remaining file growth limit " +

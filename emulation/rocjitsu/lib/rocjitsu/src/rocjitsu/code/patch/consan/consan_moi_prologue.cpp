@@ -2234,7 +2234,8 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
   }
 
   if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                           "MOI private-epoch prologue", result)) {
+                           "MOI private-epoch prologue", result.program_inventory.code_object_id(),
+                           result.errors)) {
     return;
   }
   result.replacement = std::move(patcher).emit();
@@ -3202,7 +3203,8 @@ void try_apply_owner_epoch_prologue_patch(
     return;
   }
   if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                           "MOI owner/epoch prologue", result)) {
+                           "MOI owner/epoch prologue", result.program_inventory.code_object_id(),
+                           result.errors)) {
     return;
   }
 

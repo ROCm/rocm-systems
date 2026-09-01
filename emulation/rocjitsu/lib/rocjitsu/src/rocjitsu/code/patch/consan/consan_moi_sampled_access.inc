@@ -1089,7 +1089,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       return;
 
     if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                             "MOI sampled probe", result)) {
+                             "MOI sampled probe", result.program_inventory.code_object_id(),
+                             result.errors)) {
       return;
     }
     if (!result.publish_access_lowering(std::move(patcher).emit(), "ConSan MOI sampled probe",

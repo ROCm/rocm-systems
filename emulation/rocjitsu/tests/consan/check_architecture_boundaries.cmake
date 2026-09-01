@@ -878,22 +878,32 @@ if(NOT _fault_planning_contract MATCHES "ConSanFaultPlanningInput" OR
 endif()
 file(READ "${_consan_dir}/consan_fault_injection.h" _fault_application_contract)
 if(NOT _fault_application_contract MATCHES
-   "apply_consan_fault_mutations[^;]*ConSanFaultMutationPlan")
+   "apply_consan_fault_mutations[^;]*ConSanPatchedImageGrowthLimit[^;]*ConSanFaultMutationPlan" OR
+   _fault_application_contract MATCHES "ConSanOptions")
     message(FATAL_ERROR
         "ConSan fault application lost its one complete typed-plan transaction"
     )
 endif()
-foreach(
-    _private_fault_mechanism
-    IN ITEMS
-       try_apply_barrier_drop_fault_patch
-       try_apply_barrier_move_fault_patch
-       try_apply_barrier_id_scope_fault_patch
-       try_apply_barrier_participant_fault_patch
-       try_apply_atomic_fault_patch
-       try_apply_lds_fault_patch
-       try_apply_ordinary_fault_patch
+file(READ "${_consan_dir}/consan_placement.h" _placement_contract)
+if(NOT _placement_contract MATCHES
+   "find_uncovered_nop_caves[^;]*ProgramInventory" OR
+   _placement_contract MATCHES
+   "find_uncovered_nop_caves[^;]*ConSanTransformArtifacts")
+    message(FATAL_ERROR
+        "ConSan local-cave discovery must consume immutable program inventory"
+    )
+endif()
+set(
+    _private_fault_mechanisms
+    try_apply_barrier_drop_fault_patch
+    try_apply_barrier_move_fault_patch
+    try_apply_barrier_id_scope_fault_patch
+    try_apply_barrier_participant_fault_patch
+    try_apply_atomic_fault_patch
+    try_apply_lds_fault_patch
+    try_apply_ordinary_fault_patch
 )
+foreach(_private_fault_mechanism IN LISTS _private_fault_mechanisms)
     if(_fault_application_contract MATCHES "${_private_fault_mechanism}")
         message(FATAL_ERROR
             "ConSan fault mechanism leaked through the component contract: ${_private_fault_mechanism}"
@@ -910,11 +920,34 @@ endif()
 
 file(READ "${_consan_dir}/consan_growth_policy.h" _growth_policy_contract)
 if(_growth_policy_contract MATCHES "ConSanOptions" OR
+   _growth_policy_contract MATCHES "ConSanTransformArtifacts" OR
    NOT _growth_policy_contract MATCHES "ConSanPatchedImageGrowthLimit")
     message(FATAL_ERROR
-        "ConSan image-growth policy must consume its narrow policy value, not the broad options bus"
+        "ConSan image-growth policy must consume narrow identity, policy, and diagnostic products"
     )
 endif()
+file(READ "${_consan_dir}/consan_fault_injection.inc" _fault_application_body)
+if(NOT _fault_application_body MATCHES "struct FaultApplicationState" OR
+   NOT _fault_application_body MATCHES "FaultApplicationState transaction")
+    message(FATAL_ERROR
+        "ConSan fault mechanisms lost their private complete-plan candidate transaction"
+    )
+endif()
+foreach(_private_fault_mechanism IN LISTS _private_fault_mechanisms)
+    if(NOT _fault_application_body MATCHES "static void ${_private_fault_mechanism}" OR
+       NOT _fault_application_body MATCHES
+       "${_private_fault_mechanism}\\([^\\{]*FaultApplicationState &result\\)")
+        message(FATAL_ERROR
+            "ConSan fault mechanism lost internal linkage or bypasses the candidate transaction: ${_private_fault_mechanism}"
+        )
+    endif()
+    if(_fault_application_body MATCHES
+       "${_private_fault_mechanism}\\([^\\{]*ConSanTransformArtifacts")
+        message(FATAL_ERROR
+            "ConSan private fault mechanism regained the broad transform bus: ${_private_fault_mechanism}"
+        )
+    endif()
+endforeach()
 
 # Native emission and target-operation components accept narrow operation
 # contracts, not the broad mutable MoiOptions bus.

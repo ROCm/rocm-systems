@@ -32,17 +32,14 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
 /// Apply the common ConSan patched-image growth policy and report an exact
 /// limit rejection. Other transactional patcher failures remain distinct so a
 /// malformed ELF or allocation failure is not mislabeled as a policy decision.
-[[nodiscard]] inline bool replace_consan_text(CodeObjectPatcher &patcher,
-                                              std::span<const uint8_t> new_text,
-                                              const ConSanPatchedImageGrowthLimit &growth_limit,
-                                              std::string_view operation,
-                                              ConSanTransformArtifacts &result) {
+[[nodiscard]] inline bool
+replace_consan_text(CodeObjectPatcher &patcher, std::span<const uint8_t> new_text,
+                    const ConSanPatchedImageGrowthLimit &growth_limit, std::string_view operation,
+                    const ConSanCodeObjectId &input_id, std::vector<std::string> &errors) {
   const size_t current_image_bytes = patcher.image_bytes().size();
-  const ConSanCodeObjectId &input_id = result.program_inventory.code_object_id();
   if (!input_id.valid()) {
-    result.errors.emplace_back("ConSan " + std::string(operation) +
-                               " has no pristine image identity for patched-image growth "
-                               "accounting");
+    errors.emplace_back("ConSan " + std::string(operation) +
+                        " has no pristine image identity for patched-image growth accounting");
     return false;
   }
   const size_t input_image_bytes = static_cast<size_t>(input_id.byte_size);
@@ -51,16 +48,16 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
   const std::string policy =
       consan_patched_image_growth_policy_description(growth_limit, input_image_bytes);
   if (!budget) {
-    result.errors.emplace_back("ConSan " + std::string(operation) +
-                               " has an invalid patched-image growth policy (" + policy + ")");
+    errors.emplace_back("ConSan " + std::string(operation) +
+                        " has an invalid patched-image growth policy (" + policy + ")");
     return false;
   }
   if (budget->already_exceeded) {
-    result.errors.emplace_back("ConSan " + std::string(operation) +
-                               " rejected patched-image file growth: required total " +
-                               std::to_string(budget->existing_growth_bytes) + " bytes, limit " +
-                               std::to_string(budget->total_limit_bytes) + " bytes (policy " +
-                               policy + ")");
+    errors.emplace_back("ConSan " + std::string(operation) +
+                        " rejected patched-image file growth: required total " +
+                        std::to_string(budget->existing_growth_bytes) + " bytes, limit " +
+                        std::to_string(budget->total_limit_bytes) + " bytes (policy " + policy +
+                        ")");
     return false;
   }
 
@@ -73,11 +70,11 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
     const size_t transaction_growth = *replacement.required_file_growth();
     const size_t required_total =
         util::saturating_add(budget->existing_growth_bytes, transaction_growth);
-    result.errors.emplace_back("ConSan " + std::string(operation) +
-                               " rejected patched-image file growth: required total " +
-                               std::to_string(required_total) + " bytes, limit " +
-                               std::to_string(budget->total_limit_bytes) + " bytes (policy " +
-                               policy + ")");
+    errors.emplace_back("ConSan " + std::string(operation) +
+                        " rejected patched-image file growth: required total " +
+                        std::to_string(required_total) + " bytes, limit " +
+                        std::to_string(budget->total_limit_bytes) + " bytes (policy " + policy +
+                        ")");
     return false;
   }
 
@@ -105,8 +102,8 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
   if (replacement.required_file_growth())
     detail +=
         ", required file growth " + std::to_string(*replacement.required_file_growth()) + " bytes";
-  result.errors.emplace_back("ConSan " + std::string(operation) +
-                             " could not replace executable text (" + detail + ")");
+  errors.emplace_back("ConSan " + std::string(operation) + " could not replace executable text (" +
+                      detail + ")");
   return false;
 }
 

@@ -245,7 +245,8 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
   }
   CodeObjectPatcher patcher(*emission_code_object);
   const std::span<const uint8_t> text = patcher.text_bytes();
-  const std::vector<LocalNopCave> caves = find_uncovered_nop_caves(code_object, result, arch);
+  const std::vector<LocalNopCave> caves =
+      find_uncovered_nop_caves(code_object, result.program_inventory, arch);
   DbiPatchPlacementPlanner placement_planner(arch, text.size());
   for (const ConSanCommittedPatchGeometry &existing : result.patches) {
     std::string reservation_error;
@@ -408,7 +409,7 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
     }
   }
   if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit, "SC perturbation",
-                           result)) {
+                           result.program_inventory.code_object_id(), result.errors)) {
     return;
   }
   result.replacement = std::move(patcher).emit();

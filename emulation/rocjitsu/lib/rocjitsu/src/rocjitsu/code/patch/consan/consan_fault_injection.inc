@@ -1,8 +1,42 @@
 [[nodiscard]] BarrierSite barrier_site_from_inventory(const ConSanFaultSite &site);
 
+/// Private candidate transaction for one complete set of typed fault plans.
+/// Mutation mechanisms can compose through this state, but incomplete bytes,
+/// proof, and tallies do not become visible through the transform artifact.
+struct FaultApplicationState {
+  explicit FaultApplicationState(const ConSanTransformArtifacts &result)
+      : program_inventory(result.program_inventory), fault_sites(result.fault_sites),
+        barrier_move_destinations(result.barrier_move_destinations),
+        replacement(result.replacement), patches(result.patches), mutation(result.mutation),
+        outcome(result.outcome), warnings(result.warnings), errors(result.errors) {}
+
+  const ProgramInventory &program_inventory;
+  std::span<const ConSanFaultSite> fault_sites;
+  std::span<const ConSanBarrierMoveDestination> barrier_move_destinations;
+  std::vector<uint8_t> replacement;
+  std::vector<ConSanPatchInfo> patches;
+  ConSanMutationOutcome mutation;
+  ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
+  std::vector<std::string> warnings;
+  std::vector<std::string> errors;
+
+  [[nodiscard]] bool modified() const {
+    return outcome == ConSanTransformOutcome::ModifiedValid || !patches.empty();
+  }
+  void mark_modified() {
+    if (outcome == ConSanTransformOutcome::Unchanged)
+      outcome = ConSanTransformOutcome::ModifiedValid;
+  }
+  [[nodiscard]] bool successful() const { return errors.empty(); }
+};
+
 [[nodiscard]] ConSanFaultSelectionView
 fault_selection_view(const ConSanTransformArtifacts &result) {
   return {.program_inventory = result.program_inventory, .fault_sites = result.fault_sites};
+}
+
+[[nodiscard]] ConSanFaultSelectionView fault_selection_view(const FaultApplicationState &state) {
+  return {.program_inventory = state.program_inventory, .fault_sites = state.fault_sites};
 }
 
 [[nodiscard]] bool owned_by_requested_kernel(std::span<const ConSanExecutionOwner> owners,
@@ -116,14 +150,13 @@ void mark_participant_mutation_unsupported(ConSanFaultPlanningResult &result,
                                std::string(reason));
 }
 
-void mark_participant_mutation_unsupported(ConSanTransformArtifacts &result,
-                                           std::string_view reason) {
+void mark_participant_mutation_unsupported(FaultApplicationState &result, std::string_view reason) {
   result.outcome = ConSanTransformOutcome::Unsupported;
   result.warnings.emplace_back("ConSan barrier participant mutation is unsupported: " +
                                std::string(reason));
 }
 
-[[nodiscard]] size_t applied_fault_mutation_count(const ConSanTransformArtifacts &result) {
+[[nodiscard]] size_t applied_fault_mutation_count(std::span<const ConSanPatchInfo> patches) {
   size_t count = 0;
   size_t move_targets = 0;
   size_t barrier_id_scope_members = 0;
@@ -170,7 +203,7 @@ void mark_participant_mutation_unsupported(ConSanTransformArtifacts &result,
       break;
     }
   };
-  for (const auto &patch : result.patches)
+  for (const auto &patch : patches)
     note_patch(patch, patch);
   // One whole-barrier movement currently has two target records.
   count += (move_targets + 1u) / 2u;
@@ -762,9 +795,10 @@ void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch
   }
 }
 
-void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                        const ConSanFaultMutationPlan &plan,
-                                        ConSanTransformArtifacts &result) {
+static void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object,
+                                               rj_code_arch_t arch,
+                                               const ConSanFaultMutationPlan &plan,
+                                               FaultApplicationState &result) {
   if (has_only_rocclr_runtime_kernels(result.program_inventory)) {
     result.warnings.emplace_back("ConSan barrier fault skipped ROCclr runtime helper code object");
     return;
@@ -904,9 +938,9 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
   return std::nullopt;
 }
 
-void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
-                                            const ConSanFaultMutationPlan &plan,
-                                            ConSanTransformArtifacts &result) {
+static void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
+                                                   const ConSanFaultMutationPlan &plan,
+                                                   FaultApplicationState &result) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   if (!plan.selection_sequence_identity || !plan.target_barrier_id) {
     result.errors.emplace_back(
@@ -1060,9 +1094,9 @@ void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
       std::to_string(*selected->barrier_id) + " to " + std::to_string(target_id));
 }
 
-void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_object,
-                                               const ConSanFaultMutationPlan &plan,
-                                               ConSanTransformArtifacts &result) {
+static void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_object,
+                                                      const ConSanFaultMutationPlan &plan,
+                                                      FaultApplicationState &result) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   const auto selected =
       plan.selection_sequence_identity
@@ -1126,10 +1160,11 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
                                std::to_string(*plan.target_participant_count));
 }
 
-void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                        const ConSanFaultMutationPlan &plan,
-                                        const ConSanPatchedImageGrowthLimit &growth_limit,
-                                        ConSanTransformArtifacts &result) {
+static void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object,
+                                               rj_code_arch_t arch,
+                                               const ConSanFaultMutationPlan &plan,
+                                               const ConSanPatchedImageGrowthLimit &growth_limit,
+                                               FaultApplicationState &result) {
   if (has_only_rocclr_runtime_kernels(result.program_inventory)) {
     result.warnings.emplace_back(
         "ConSan barrier move fault skipped ROCclr runtime helper code object");
@@ -1277,7 +1312,8 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
 
     const uint64_t trampoline_size = 2u * sizeof(uint32_t) + destination->size + sizeof(uint32_t);
     std::optional<DbiPatchLocalCave> local_cave;
-    for (const LocalNopCave &candidate : find_uncovered_nop_caves(code_object, result, arch)) {
+    for (const LocalNopCave &candidate :
+         find_uncovered_nop_caves(code_object, result.program_inventory, arch)) {
       if (static_cast<uint64_t>(candidate.word_count) * sizeof(uint32_t) < trampoline_size)
         continue;
       const uint64_t return_pc = candidate.text_offset + trampoline_size - sizeof(uint32_t);
@@ -1344,7 +1380,8 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
       std::memcpy(new_text.data() + placement->body_offset, cave_words.data(),
                   cave_words.size() * sizeof(uint32_t));
     }
-    if (!replace_consan_text(patcher, new_text, growth_limit, "markerless barrier move", result)) {
+    if (!replace_consan_text(patcher, new_text, growth_limit, "markerless barrier move",
+                             result.program_inventory.code_object_id(), result.errors)) {
       return;
     }
     result.replacement = std::move(patcher).emit();
@@ -1470,11 +1507,11 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
                                site->range_name);
 }
 
-void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                  const ConSanFaultMutationPlan *address_plan,
-                                  const ConSanFaultMutationPlan *order_plan,
-                                  const ConSanFaultMutationPlan *scope_plan,
-                                  ConSanTransformArtifacts &result) {
+static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
+                                         const ConSanFaultMutationPlan *address_plan,
+                                         const ConSanFaultMutationPlan *order_plan,
+                                         const ConSanFaultMutationPlan *scope_plan,
+                                         FaultApplicationState &result) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   const ConSanFaultMutationPlan *primary_plan =
       address_plan != nullptr ? address_plan : (order_plan != nullptr ? order_plan : scope_plan);
@@ -1732,9 +1769,9 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
   }
 }
 
-void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                               const ConSanFaultMutationPlan &plan,
-                               ConSanTransformArtifacts &result) {
+static void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
+                                      const ConSanFaultMutationPlan &plan,
+                                      FaultApplicationState &result) {
   if (!consan_lds_address_fault_arch_supported(arch)) {
     result.errors.emplace_back("ConSan LDS address fault is unsupported for the selected target");
     return;
@@ -1826,11 +1863,11 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
                                " to v" + std::to_string(target_address_vgpr));
 }
 
-void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
-                                    const ConSanFaultMutationPlan *address_plan,
-                                    const ConSanFaultMutationPlan *order_plan,
-                                    const ConSanFaultMutationPlan *scope_plan,
-                                    ConSanTransformArtifacts &result) {
+static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
+                                           const ConSanFaultMutationPlan *address_plan,
+                                           const ConSanFaultMutationPlan *order_plan,
+                                           const ConSanFaultMutationPlan *scope_plan,
+                                           FaultApplicationState &result) {
   const ConSanFaultMutationPlan *primary_plan =
       address_plan != nullptr ? address_plan : (order_plan != nullptr ? order_plan : scope_plan);
   const auto target = primary_plan != nullptr
@@ -1999,32 +2036,33 @@ find_fault_plan(std::span<const ConSanFaultMutationPlan> plans, ConSanFaultMutat
 } // namespace
 
 void apply_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                  const ConSanOptions &context,
+                                  const ConSanPatchedImageGrowthLimit &growth_limit,
+                                  bool require_exactly_one,
                                   std::span<const ConSanFaultMutationPlan> plans,
                                   ConSanTransformArtifacts &result) {
   if (!validate_fault_application_plans(plans, result.program_inventory, result))
     return;
+  FaultApplicationState transaction(result);
 
   if (const ConSanFaultMutationPlan *plan =
           find_fault_plan(plans, ConSanFaultMutationKind::DropBarrier)) {
-    try_apply_barrier_drop_fault_patch(code_object, arch, *plan, result);
+    try_apply_barrier_drop_fault_patch(code_object, arch, *plan, transaction);
   }
   if (const ConSanFaultMutationPlan *plan =
           find_fault_plan(plans, ConSanFaultMutationKind::MoveBarrierPair);
-      plan != nullptr && result.errors.empty()) {
-    try_apply_barrier_move_fault_patch(code_object, arch, *plan, context.patched_image_growth_limit,
-                                       result);
+      plan != nullptr && transaction.errors.empty()) {
+    try_apply_barrier_move_fault_patch(code_object, arch, *plan, growth_limit, transaction);
   }
   if (const ConSanFaultMutationPlan *plan =
           find_fault_plan(plans, ConSanFaultMutationKind::BarrierIdScope);
-      plan != nullptr && result.errors.empty()) {
-    try_apply_barrier_id_scope_fault_patch(code_object, *plan, result);
+      plan != nullptr && transaction.errors.empty()) {
+    try_apply_barrier_id_scope_fault_patch(code_object, *plan, transaction);
   }
   if (const ConSanFaultMutationPlan *plan =
           find_fault_plan(plans, ConSanFaultMutationKind::BarrierParticipantCount);
-      plan != nullptr && result.errors.empty() &&
-      result.outcome != ConSanTransformOutcome::Unsupported) {
-    try_apply_barrier_participant_fault_patch(code_object, *plan, result);
+      plan != nullptr && transaction.errors.empty() &&
+      transaction.outcome != ConSanTransformOutcome::Unsupported) {
+    try_apply_barrier_participant_fault_patch(code_object, *plan, transaction);
   }
 
   const ConSanFaultMutationPlan *atomic_address =
@@ -2033,23 +2071,23 @@ void apply_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code_a
       find_fault_plan(plans, ConSanFaultMutationKind::AtomicWeakenOrder);
   const ConSanFaultMutationPlan *atomic_scope =
       find_fault_plan(plans, ConSanFaultMutationKind::AtomicWeakenScope);
-  if ((atomic_address || atomic_order || atomic_scope) && result.errors.empty()) {
+  if ((atomic_address || atomic_order || atomic_scope) && transaction.errors.empty()) {
     const ConSanFaultMutationPlan &primary =
         atomic_address ? *atomic_address : (atomic_order ? *atomic_order : *atomic_scope);
     if ((atomic_address && atomic_address->primary_identity != primary.primary_identity) ||
         (atomic_order && atomic_order->primary_identity != primary.primary_identity) ||
         (atomic_scope && atomic_scope->primary_identity != primary.primary_identity)) {
-      result.errors.emplace_back(
+      transaction.errors.emplace_back(
           "ConSan atomic fault plans do not describe one composed semantic target");
     } else {
       try_apply_atomic_fault_patch(code_object, arch, atomic_address, atomic_order, atomic_scope,
-                                   result);
+                                   transaction);
     }
   }
   if (const ConSanFaultMutationPlan *plan =
           find_fault_plan(plans, ConSanFaultMutationKind::LdsWrongAddress);
-      plan != nullptr && result.errors.empty()) {
-    try_apply_lds_fault_patch(code_object, arch, *plan, result);
+      plan != nullptr && transaction.errors.empty()) {
+    try_apply_lds_fault_patch(code_object, arch, *plan, transaction);
   }
 
   const ConSanFaultMutationPlan *ordinary_address =
@@ -2058,7 +2096,7 @@ void apply_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code_a
       find_fault_plan(plans, ConSanFaultMutationKind::OrdinaryWeakenOrder);
   const ConSanFaultMutationPlan *ordinary_scope =
       find_fault_plan(plans, ConSanFaultMutationKind::OrdinaryWeakenScope);
-  if ((ordinary_address || ordinary_order || ordinary_scope) && result.errors.empty()) {
+  if ((ordinary_address || ordinary_order || ordinary_scope) && transaction.errors.empty()) {
     const ConSanFaultMutationPlan &primary =
         ordinary_address ? *ordinary_address : (ordinary_order ? *ordinary_order : *ordinary_scope);
     const auto same_target = [&](const ConSanFaultMutationPlan *plan) {
@@ -2069,20 +2107,35 @@ void apply_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code_a
     };
     if (!same_target(ordinary_address) || !same_target(ordinary_order) ||
         !same_target(ordinary_scope)) {
-      result.errors.emplace_back(
+      transaction.errors.emplace_back(
           "ConSan ordinary fault plans do not describe one composed semantic target");
     } else {
       try_apply_ordinary_fault_patch(code_object, ordinary_address, ordinary_order, ordinary_scope,
-                                     result);
+                                     transaction);
     }
   }
-  result.mutation.fault.applied = applied_fault_mutation_count(result);
-  if (context.fault_require_exactly_one && result.outcome != ConSanTransformOutcome::Unsupported &&
-      result.mutation.fault.applied != 1u) {
-    result.errors.emplace_back(
+  transaction.mutation.fault.applied = applied_fault_mutation_count(transaction.patches);
+  const bool mechanisms_succeeded = transaction.successful();
+  if (require_exactly_one && transaction.outcome != ConSanTransformOutcome::Unsupported &&
+      transaction.mutation.fault.applied != 1u) {
+    transaction.errors.emplace_back(
         "ConSan fault injection required exactly one applied mutation, got " +
-        std::to_string(result.mutation.fault.applied));
+        std::to_string(transaction.mutation.fault.applied));
   }
+
+  const bool accepted = transaction.successful();
+  result.errors = std::move(transaction.errors);
+  if (!accepted) {
+    result.mutation.fault.applied = mechanisms_succeeded
+                                        ? transaction.mutation.fault.applied
+                                        : applied_fault_mutation_count(result.patches);
+    return;
+  }
+  result.warnings = std::move(transaction.warnings);
+  result.outcome = transaction.outcome;
+  result.replacement = std::move(transaction.replacement);
+  result.patches = std::move(transaction.patches);
+  result.mutation = std::move(transaction.mutation);
 }
 
 void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,

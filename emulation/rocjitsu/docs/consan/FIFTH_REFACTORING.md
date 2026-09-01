@@ -2867,3 +2867,94 @@ across every remaining production facet, materially shrink the whole codebase,
 eliminate the other broad artifact and operating-point surfaces, or replace the
 required independent whole-codebase deep-read audit. Section 14.4 remains
 complete through the checkpoint-17 extension fixtures.
+
+### 16.28 Convergence checkpoint 27: transactional fault application
+
+A post-checkpoint-26 read followed the typed fault plans from planning through
+composition and every mutation mechanism. Planning and selection already had
+narrow products, but composition still validated plans, rediscovered seven
+mutation kinds, dispatched seven separately exported mechanism functions, and
+let each function mutate the shared transform artifact directly. The image-
+growth policy and uncovered-local-cave search also accepted that broad artifact
+despite consuming only the pristine image identity, an error sink, or immutable
+program inventory.
+
+The fault component now exports one operation,
+`apply_consan_fault_mutations`, for a complete typed-plan set. Validation,
+kind grouping, compatibility checks, dispatch order, cardinality accounting,
+and all seven concrete mechanisms are private to that owner. Composition no
+longer knows the mechanism names or reconstructs their ordering. The one
+public operation consumes only the patched-image growth limit and cardinality
+policy rather than the broad request object. The seven public mechanism
+declarations and the parallel composition dispatch are deleted rather than
+retained as compatibility adapters.
+
+All mechanisms build through one private `FaultApplicationState`. It contains
+only immutable selection inputs and the candidate image, patch proof, mutation
+tally, outcome, and diagnostics needed by this component; it is not another
+public transform bus. A complete successful plan set publishes those products
+together. A mechanism error publishes its diagnostics but rolls back candidate
+bytes, patch proof, applied tally, outcome, and success diagnostics. A distinct
+post-application cardinality rejection retains the completed application tally
+for audit compatibility while still withholding the rejected image. Two new
+owner-level regressions prove both boundaries: independent atomic and LDS
+mechanisms commit together, while a valid atomic candidate followed by a stale
+LDS plan leaks neither mutation products nor a false success diagnostic.
+
+That failure regression exposed a real preexisting bug. Before the private
+transaction, the first mechanism could publish replacement bytes, proof, and
+an applied tally before a later mechanism rejected a stale semantic owner.
+Finalization normally converted the result to invalid, but the component
+boundary itself exposed a partial candidate and a misleading success warning.
+The regression calls the production application boundary directly, after
+planning, so later coordinator cleanup cannot mask the ownership defect.
+
+Two adjacent mechanical contracts are narrower as part of the same slice.
+`replace_consan_text` consumes an explicit pristine code-object identity and
+error sink instead of the whole transform artifact. Uncovered NOP-cave
+discovery consumes immutable `ProgramInventory` rather than reaching through
+the mutable result. Every caller across all four modes now supplies those
+products explicitly. The structural gate forbids broad options or transform
+artifacts in the growth-policy contract, proves every private fault mechanism
+accepts the candidate state rather than the public bus, prevents mechanism
+names from escaping through the public fault contract, and prevents
+composition from regaining private dispatch.
+
+| Signal | Checkpoint 27 | Cumulative change | Slice change from checkpoint 26 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,434 | +459 | **+46** |
+| Nonblank production lines | 99,164 | +81 | **+40** |
+| Production implementation lines | 91,455 | **+5** | **+35** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 207 / 56 | **-69 / -1** | **-20 / -1** |
+| `ConSanPatchInfo` references / files | 206 / 28 | +6 / 0 | +2 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| Public concrete fault-application mechanisms | 0 | n/a | **-7** |
+| Complete typed-plan application owners | 1 | n/a | converged |
+| Test inventory | 5,376 | +31 | **+2** |
+
+The exact-tree recount also corrects checkpoint 26's printed
+`ConSanPatchInfo` value from 202 to 204; the baseline and current values above
+use exact-token counts. The local dispatch-convergence commit initially
+deleted 21 production implementation lines. Making rollback explicit and
+narrowing every fault, growth, and cave contract then added 56, for a net
+35-line slice increase. The cumulative implementation count is consequently
+five lines above the starting baseline. This is substantial broad-bus and
+public-surface reduction, but it is not acceptable evidence for Section 14.8:
+later slices must harvest enough superseded machinery to produce material
+whole-refactoring shrinkage.
+
+Validation includes a full `-j16` rebuild; all 104 fault/application and
+structural-boundary focused tests; the complete 4,741-test nonphysical matrix,
+including all 2,908 simulator rows over five targets, at `-j16` in 197.71
+seconds; and all 635 physical gfx1201 tests serialized at `-j1` in 108.79
+seconds. No test was removed, renamed, or disabled. The inventory grew by the
+two successful-commit and rollback regressions described above.
+
+This checkpoint strengthens Sections 14.1, 14.5, 14.6, 14.7, and 14.9. It
+does not complete architecture or mode locality across the remaining
+production surface, eliminate the broad operating-point and transform buses,
+achieve material code shrinkage, or replace the required independent deep-read
+completion audit. Section 14.4 remains complete through the checkpoint-17
+extension fixtures, and the goal remains active.
