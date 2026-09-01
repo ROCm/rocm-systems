@@ -189,7 +189,7 @@ jobs:
           PR_SHA: ${{ inputs.pr_sha }}
           SOFTWARE: ${{ inputs.software }}
           PR_STACKS: ${{ inputs.pr_stacks }}
-          COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
+          COCO_DATABASE_URL: ${{ secrets.RCCL_COCO_DB_URL }}
           COCO_VENV: ${{ env.COCO_DIR }}/venv
           COCO_OUTPUT: ${{ env.COCO_OUTPUT }}
         run: |
@@ -197,7 +197,7 @@ jobs:
           unset VIRTUAL_ENV PYTHONHOME pythonLocation Python_ROOT_DIR Python3_ROOT_DIR
           PATH="$(printf '%s' "${PATH}" | tr ':' '\n' | grep -vE '/_work/_tool/Python/' | paste -sd: -)"
           export PATH
-          if [[ -z "${COCO_DB_URL:-}" ]]; then
+          if [[ -z "${COCO_DATABASE_URL:-}" ]]; then
             echo "::warning::RCCL_COCO_DB_URL is empty; this run will not publish results to the coco database."
           fi
 
