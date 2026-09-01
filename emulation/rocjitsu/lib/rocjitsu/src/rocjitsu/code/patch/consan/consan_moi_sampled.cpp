@@ -122,15 +122,16 @@ namespace consan_moi_impl {
 /// gate's residue field with the guest SCC snapshot. Spill-backed layouts
 /// restore the complete transient window before returning, so their separately
 /// allocated indirect-jump SCC register remains the stable snapshot.
-std::optional<uint16_t> moi_sampled_access_return_scc_sgpr(const ConSanRequest &request,
-                                                           const ConSanMoiOperatingPoint &point) {
-  if (request.moi_engine != ConSanMoiEngine::Sampled || !point.moi_exec_save_sgpr)
+std::optional<uint16_t>
+moi_sampled_access_return_scc_sgpr(const MoiScalarRoutingState &routing_state) {
+  if (!routing_state.exec_save_sgpr)
     return std::nullopt;
-  if (point.has_compact_moi_scalar_spill()) {
-    const auto indirect = moi_indirect_jump_sgprs(request, point);
-    return indirect ? std::optional<uint16_t>(indirect->scc_save_sgpr) : std::nullopt;
+  if (routing_state.has_compact_spill()) {
+    return routing_state.router_jump
+               ? std::optional<uint16_t>(routing_state.router_jump->scc_save_sgpr)
+               : std::nullopt;
   }
-  const auto publication = moi_sampled_publication_state_sgprs(request, point);
+  const auto publication = moi_sampled_publication_state_sgprs(routing_state.exec_save_sgpr);
   return publication ? std::optional<uint16_t>(publication->guest_scc_snapshot_sgpr) : std::nullopt;
 }
 
@@ -263,27 +264,26 @@ MoiDispatchIdentityPlan plan_sampled_dispatch_identity(const ConSanRequest &requ
   };
 }
 
-MoiScalarAbiPlan plan_sampled_scalar_abi(const ConSanRequest &request,
-                                         const ConSanMoiOperatingPoint &point) {
-  const auto publication = moi_sampled_publication_state_sgprs(request, point);
+MoiScalarAbiPlan plan_sampled_scalar_abi(const MoiScalarRoutingState &routing_state) {
+  const auto publication = moi_sampled_publication_state_sgprs(routing_state.exec_save_sgpr);
   const std::optional<consan_detail::MoiSpecialStateSgprs> special_state =
       publication
           ? std::optional{consan_detail::MoiSpecialStateSgprs{
                 .vcc_save_sgpr = publication->selection_vcc_save_sgpr,
-                .scc_save_sgpr = point.has_compact_moi_scalar_spill() && point.moi_router_jump
-                                     ? point.moi_router_jump->scc_save_sgpr
+                .scc_save_sgpr = routing_state.has_compact_spill() && routing_state.router_jump
+                                     ? routing_state.router_jump->scc_save_sgpr
                                      : publication->publication_exec_save_sgpr,
             }}
           : std::nullopt;
-  return make_moi_scalar_abi_plan(point, special_state, 0u, false);
+  return make_moi_scalar_abi_plan(routing_state, special_state, 0u, false);
 }
 
-std::optional<MoiDenseRouterPlan> plan_sampled_dense_router(const ConSanRequest &request,
-                                                            const ConSanMoiOperatingPoint &point,
-                                                            const ConSanTargetProfile &target) {
-  auto plan =
-      make_recording_moi_dense_router_plan(plan_sampled_scalar_abi(request, point), point, target);
-  if (plan && point.has_compact_moi_scalar_spill() &&
+std::optional<MoiDenseRouterPlan>
+plan_sampled_dense_router(const MoiScalarAbiPlan &scalar_abi,
+                          const MoiScalarRoutingState &routing_state,
+                          const MoiScalarTargetFacts &target) {
+  auto plan = make_recording_moi_dense_router_plan(scalar_abi, routing_state, target);
+  if (plan && routing_state.has_compact_spill() &&
       plan->call_return_sgpr == plan->indirect_jump.pc_sgpr) {
     plan->collapse_spill_router = true;
   }
@@ -291,7 +291,7 @@ std::optional<MoiDenseRouterPlan> plan_sampled_dense_router(const ConSanRequest 
 }
 
 uint16_t sampled_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
-                                      const MoiExecSaveTargetFacts &target) {
+                                      const MoiScalarTargetFacts &target) {
   if (!requirement.has_report_buffer)
     return 0u;
   if (requirement.scalar_spill)

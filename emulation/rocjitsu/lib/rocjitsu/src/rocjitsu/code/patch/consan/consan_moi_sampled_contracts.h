@@ -19,8 +19,7 @@ struct MoiSampledPublicationStateSgprs {
 };
 
 [[nodiscard]] std::optional<MoiSampledPublicationStateSgprs>
-moi_sampled_publication_state_sgprs(const ConSanRequest &request,
-                                    const ConSanMoiOperatingPoint &point);
+moi_sampled_publication_state_sgprs(std::optional<uint16_t> exec_save_sgpr);
 
 [[nodiscard]] bool
 sampled_access_can_emit_spill_over_guest_operands(const MoiAccessResourceFacts &resource_facts,

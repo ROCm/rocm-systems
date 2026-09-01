@@ -93,21 +93,21 @@ MoiDispatchIdentityPlan plan_moi_dispatch_identity(const ConSanRequest &request,
 }
 
 MoiScalarAbiPlan
-make_moi_scalar_abi_plan(const ConSanMoiOperatingPoint &point,
+make_moi_scalar_abi_plan(const MoiScalarRoutingState &routing_state,
                          std::optional<consan_detail::MoiSpecialStateSgprs> special_state,
                          uint16_t fixed_indirect_pc_offset, bool access_router_uses_dense_abi) {
   MoiScalarAbiPlan plan{.special_state = special_state,
                         .indirect_jump = std::nullopt,
                         .access_router_uses_dense_abi = access_router_uses_dense_abi};
-  if (point.has_moi_scalar_spill()) {
-    if (point.moi_router_jump)
-      plan.indirect_jump = point.moi_router_jump;
+  if (routing_state.has_scalar_spill()) {
+    if (routing_state.router_jump)
+      plan.indirect_jump = routing_state.router_jump;
     return plan;
   }
-  if (!point.moi_exec_save_sgpr || !special_state)
+  if (!routing_state.exec_save_sgpr || !special_state)
     return plan;
   plan.indirect_jump = ConSanMoiIndirectJumpSgprs{
-      .pc_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + fixed_indirect_pc_offset),
+      .pc_sgpr = static_cast<uint16_t>(*routing_state.exec_save_sgpr + fixed_indirect_pc_offset),
       .scc_save_sgpr = special_state->scc_save_sgpr,
   };
   return plan;
@@ -115,26 +115,27 @@ make_moi_scalar_abi_plan(const ConSanMoiOperatingPoint &point,
 
 MoiScalarAbiPlan plan_moi_scalar_abi(const ConSanRequest &request,
                                      const ConSanMoiOperatingPoint &point) {
-  return moi_mode_operations(request.moi_engine).scalar_abi(request, point);
+  return moi_mode_operations(request.moi_engine)
+      .scalar_abi(project_moi_scalar_routing_state(point));
 }
 
 std::optional<MoiDenseRouterPlan>
 make_recording_moi_dense_router_plan(const MoiScalarAbiPlan &scalar_abi,
-                                     const ConSanMoiOperatingPoint &point,
-                                     const ConSanTargetProfile &target) {
-  if (!point.moi_exec_save_sgpr || !scalar_abi.special_state || !scalar_abi.indirect_jump ||
-      point.moi_branch_only_spill) {
+                                     const MoiScalarRoutingState &routing_state,
+                                     const MoiScalarTargetFacts &target) {
+  if (!routing_state.exec_save_sgpr || !scalar_abi.special_state || !scalar_abi.indirect_jump ||
+      routing_state.has_branch_only_spill) {
     return std::nullopt;
   }
-  const bool spill_backed = point.has_compact_moi_scalar_spill();
-  if (spill_backed && (!point.moi_router_jump || !point.moi_router_call))
+  const bool spill_backed = routing_state.has_compact_spill();
+  if (spill_backed && (!routing_state.router_jump || !routing_state.router_call))
     return std::nullopt;
 
-  const uint16_t base = *point.moi_exec_save_sgpr;
-  const uint16_t dispatch_key_sgpr =
-      spill_backed ? point.moi_router_call->dispatch_key_sgpr : static_cast<uint16_t>(base + 5u);
+  const uint16_t base = *routing_state.exec_save_sgpr;
+  const uint16_t dispatch_key_sgpr = spill_backed ? routing_state.router_call->dispatch_key_sgpr
+                                                  : static_cast<uint16_t>(base + 5u);
   const uint16_t call_return_sgpr =
-      spill_backed ? point.moi_router_call->call_return_sgpr : static_cast<uint16_t>(base + 6u);
+      spill_backed ? routing_state.router_call->call_return_sgpr : static_cast<uint16_t>(base + 6u);
   const bool explicit_key = target.direct_call_form != ConSanDirectCallForm::SCallI64;
   return MoiDenseRouterPlan{
       .indirect_jump = *scalar_abi.indirect_jump,
@@ -160,7 +161,9 @@ std::optional<MoiDenseRouterPlan> plan_moi_dense_router(const ConSanRequest &req
        !target->supports_moi_dense_s_call_b64)) {
     return std::nullopt;
   }
-  return operations.dense_router(request, point, *target);
+  const MoiScalarRoutingState routing_state = project_moi_scalar_routing_state(point);
+  const MoiScalarTargetFacts target_facts{.direct_call_form = target->direct_call_form};
+  return operations.dense_router(operations.scalar_abi(routing_state), routing_state, target_facts);
 }
 
 MoiDenseAccessRouteTraits moi_dense_access_route_traits(ConSanMoiEngine engine) {

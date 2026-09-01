@@ -19,6 +19,7 @@ using consan_moi_impl::plan_moi_object_mode;
 using consan_moi_impl::plan_moi_operand_overlap_spill;
 using consan_moi_impl::plan_moi_persistent_state_demand;
 using consan_moi_impl::plan_moi_scalar_abi;
+using consan_moi_impl::project_moi_scalar_routing_state;
 using consan_moi_impl::resolve_moi_access_resource_facts;
 
 consan_moi_impl::MoiObjectModePlan
@@ -33,7 +34,7 @@ plan_hypothetical_mode(const ConSanRequest &, const BoundRuntimeResources &,
 }
 
 uint16_t hypothetical_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
-                                           const consan_moi_impl::MoiExecSaveTargetFacts &target) {
+                                           const consan_moi_impl::MoiScalarTargetFacts &target) {
   return requirement.has_report_buffer
              ? (target.direct_call_form == ConSanDirectCallForm::SCallI64 ? 3u : 2u)
              : 0u;
@@ -333,6 +334,30 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsScalarAbiLayout) {
   ASSERT_TRUE(plan.indirect_jump);
   EXPECT_EQ(plan.indirect_jump->pc_sgpr, 40u);
   EXPECT_EQ(plan.indirect_jump->scc_save_sgpr, 42u);
+}
+
+TEST(ConSanMoiModePlanning, ScalarRoutingStateExcludesUnrelatedPlacement) {
+  ConSanMoiOperatingPoint point;
+  point.moi_exec_save_sgpr = 20u;
+  point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
+  point.moi_router_jump = ConSanMoiIndirectJumpSgprs{40u, 42u};
+  point.moi_router_call = ConSanMoiRouterCallSgprs{44u, 46u};
+  point.moi_branch_only_spill = ConSanMoiBranchOnlyScalarSpill{};
+
+  const auto routing_state = project_moi_scalar_routing_state(point);
+  EXPECT_EQ(routing_state.exec_save_sgpr, 20u);
+  EXPECT_TRUE(routing_state.has_scalar_spill());
+  EXPECT_TRUE(routing_state.has_compact_spill());
+  EXPECT_FALSE(routing_state.has_inline_spill());
+  EXPECT_EQ(routing_state.router_jump, point.moi_router_jump);
+  EXPECT_EQ(routing_state.router_call, point.moi_router_call);
+  EXPECT_TRUE(routing_state.has_branch_only_spill);
+
+  point.moi_initialize_owner_epoch = true;
+  point.set_moi_owner_epoch_vgprs(60u, 61u);
+  point.automatic_moi_private_epoch = true;
+  point.moi_persistent_sgprs.set_owner_epoch(62u, 63u);
+  EXPECT_EQ(project_moi_scalar_routing_state(point), routing_state);
 }
 
 TEST(ConSanMoiModePlanning, EachEnginePublishesItsDenseRouterTargetSupport) {

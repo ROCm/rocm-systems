@@ -196,30 +196,29 @@ MoiDispatchIdentityPlan plan_record_replay_dispatch_identity(const ConSanRequest
   };
 }
 
-MoiScalarAbiPlan plan_record_replay_scalar_abi(const ConSanRequest &,
-                                               const ConSanMoiOperatingPoint &point) {
+MoiScalarAbiPlan plan_record_replay_scalar_abi(const MoiScalarRoutingState &routing_state) {
   std::optional<consan_detail::MoiSpecialStateSgprs> special_state;
-  if (point.moi_exec_save_sgpr) {
-    const uint16_t base = *point.moi_exec_save_sgpr;
+  if (routing_state.exec_save_sgpr) {
+    const uint16_t base = *routing_state.exec_save_sgpr;
     special_state = consan_detail::MoiSpecialStateSgprs{
         .vcc_save_sgpr = static_cast<uint16_t>(base + 2u),
-        .scc_save_sgpr = point.has_compact_moi_scalar_spill() && point.moi_router_jump
-                             ? point.moi_router_jump->scc_save_sgpr
+        .scc_save_sgpr = routing_state.has_compact_spill() && routing_state.router_jump
+                             ? routing_state.router_jump->scc_save_sgpr
                              : static_cast<uint16_t>(base + 4u),
     };
   }
-  return make_moi_scalar_abi_plan(point, special_state, 0u, false);
+  return make_moi_scalar_abi_plan(routing_state, special_state, 0u, false);
 }
 
 std::optional<MoiDenseRouterPlan>
-plan_record_replay_dense_router(const ConSanRequest &request, const ConSanMoiOperatingPoint &point,
-                                const ConSanTargetProfile &target) {
-  return make_recording_moi_dense_router_plan(plan_record_replay_scalar_abi(request, point), point,
-                                              target);
+plan_record_replay_dense_router(const MoiScalarAbiPlan &scalar_abi,
+                                const MoiScalarRoutingState &routing_state,
+                                const MoiScalarTargetFacts &target) {
+  return make_recording_moi_dense_router_plan(scalar_abi, routing_state, target);
 }
 
 uint16_t record_replay_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
-                                            const MoiExecSaveTargetFacts &) {
+                                            const MoiScalarTargetFacts &) {
   if (requirement.automatic_banked_record_capture)
     return 14u;
 

@@ -6049,3 +6049,73 @@ does not satisfy Section 14.8. The broad operating point remains spread across
 transaction, remaining placement knots, both extension exercises, material
 legacy harvesting, and independent completion audit remain open. The goal
 therefore remains active.
+
+### 16.76 Convergence checkpoint 75: one projected scalar-routing transaction
+
+The scalar-routing deep read found that the mode registry still exposed the
+complete operating point through both its scalar-ABI and dense-router
+callbacks. Record/Replay, Sampled, and InlineShadow each derived a scalar ABI,
+then each dense-router planner independently derived the same ABI again from
+the broad point. The dense-router callbacks also received a complete
+`ConSanTargetProfile` although they used only its direct-call form. Sampled's
+publication-state helper additionally accepted a full request solely to prove
+that its already mode-local callers were Sampled.
+
+The boundary now projects one immutable `MoiScalarRoutingState` from the
+accepted operating point. It contains only the selected EXEC-save base,
+scalar-spill representation, shared router jump and call allocations, and the
+presence of branch-only preservation. Scalar-ABI mode callbacks consume that
+projection without a request or operating point. Common dense-router planning
+selects the scalar ABI exactly once and passes the resolved ABI to the selected
+mode's router callback; no mode router calls its scalar planner again.
+
+The pre-existing direct-call projection used for save-window sizing is now the
+shared `MoiScalarTargetFacts` product. Dense-router callbacks consume it rather
+than the full target profile. Common planning retains the target capability
+admission check, then passes only the direct-call semantic needed by the mode.
+Sampled publication-state planning now consumes only the optional EXEC-save
+base, and its access-return SCC resolver is translation-unit-local rather than
+declared from the common placement contract.
+
+One direct regression proves that scalar routing projects all five relevant
+fields while ignoring owner/epoch, private-state, and persistent-state
+placement. Existing mode-planning tests prove all three fixed and spill-backed
+scalar ABIs and their target-specific dense call mechanics. The architecture
+gate rejects a broad operating point or complete target profile in either mode
+callback, requires dense routing to consume the already-selected scalar ABI,
+and prevents Sampled publication layout from regaining request or operating-
+point buses.
+
+| Signal | Checkpoint 75 | Cumulative change | Slice change from checkpoint 74 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 105,280 | +304 | +32 |
+| Nonblank production lines | 98,927 | **-157** | +29 |
+| Production implementation lines | 91,160 | **-290** | +24 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 174 / 52 | **-102 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | **-15 / -2** |
+| Broad-point / complete-target fields in scalar mode callbacks | **0 / 0** | n/a | completed |
+| Mode-local scalar-ABI recomputation inside dense routers | **0** | n/a | **-3** |
+| Test inventory | **5,411** | **+66** | **+1** |
+
+Validation includes a final-tree `-j16` build; all 18 mode-planning and
+architecture-boundary tests; and 442 focused dense-router, scalar-state,
+SGPR-spill, EXEC-save, and branch-only tests at `-j16`. The focused gate
+includes 146 simulator cases spanning gfx942, gfx950, gfx1100, gfx1201, and
+gfx1250 and all four evidence engines. Checkpoint 74 immediately before this
+slice passed the full 4,775-test nonphysical inventory; the additional unit
+test raises the current nonphysical inventory to 4,776. No test was removed,
+renamed, disabled, or replaced. No physical gfx1201 test was run.
+
+This checkpoint strengthens Sections 14.2 through 14.7: scalar representation,
+mode choice, and target call semantics now meet at one explicit composition
+point instead of through a mode/target/broad-state knot. The new projection and
+its invariant test cost 24 production implementation lines even after deleting
+the duplicate derivations, so cumulative shrinkage retreats from 314 to 290
+lines and Section 14.8 remains materially unsatisfied. The next convergence
+slice must cash in a deletion or sharing opportunity rather than adding another
+contract layer. Remaining broad placement and mutation transactions, both
+extension exercises, larger legacy harvesting, and the independent completion
+audit remain open. The goal therefore remains active.

@@ -434,6 +434,48 @@ foreach(_file IN LISTS _consan_production_files)
         "retired Sampled access-resource adapters must not return"
     )
 endforeach()
+
+# Scalar ABI and dense-router selection share one projection of the accepted
+# operating point. Mode callbacks consume that projection, and dense routing
+# consumes the scalar ABI already selected by the same mode rather than
+# reconstructing it inside each router planner.
+file(READ "${_consan_dir}/consan_moi_placement_contracts.h" _moi_placement_contract)
+file(READ "${_consan_dir}/consan_moi_mode_planning.cpp" _moi_mode_planning_implementation)
+file(READ "${_consan_dir}/consan_moi_sampled_contracts.h" _moi_sampled_contract)
+if(NOT _moi_placement_contract MATCHES "struct MoiScalarRoutingState" OR
+   NOT _moi_placement_contract MATCHES "project_moi_scalar_routing_state")
+    message(FATAL_ERROR
+        "ConSan scalar routing lost its narrow operating-point projection"
+    )
+endif()
+foreach(_callback IN ITEMS scalar_abi dense_router)
+    if(_moi_mode_planning_contract MATCHES
+       "\\(\\*${_callback}\\)\\([^;]*ConSanMoiOperatingPoint")
+        message(FATAL_ERROR
+            "ConSan ${_callback} mode callback must not receive the broad operating point"
+        )
+    endif()
+endforeach()
+if(NOT _moi_mode_planning_contract MATCHES
+       "dense_router[^;]*MoiScalarAbiPlan[^;]*MoiScalarRoutingState[^;]*MoiScalarTargetFacts" OR
+   NOT _moi_mode_planning_implementation MATCHES
+       "dense_router\\(operations\\.scalar_abi\\(routing_state\\),[ \t\n]*routing_state")
+    message(FATAL_ERROR
+        "ConSan dense routing must consume the mode-selected scalar ABI exactly once"
+    )
+endif()
+if(_moi_mode_planning_contract MATCHES
+   "\\(\\*dense_router\\)\\([^;]*ConSanTargetProfile")
+    message(FATAL_ERROR
+        "ConSan dense-router mode callbacks must not receive the complete target profile"
+    )
+endif()
+if(_moi_sampled_contract MATCHES
+   "moi_sampled_publication_state_sgprs[^;]*(ConSanRequest|ConSanMoiOperatingPoint)")
+    message(FATAL_ERROR
+        "ConSan Sampled publication layout must not regain request or operating-point buses"
+    )
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_resource_types.h.inc"
     "bool[ \t]+changed"

@@ -125,6 +125,41 @@ struct MoiPlannedReplayAccessPatch : MoiPlannedAccessPatch {
   bool branch_only_scalar_spill = false;
 };
 
+/// Read-only scalar-routing state projected from one accepted operating point.
+/// Mode owners may select their scalar ABI and dense-router mechanics from this
+/// value without inspecting unrelated vector, dispatch, or private-state
+/// placement decisions.
+struct MoiScalarRoutingState {
+  std::optional<uint16_t> exec_save_sgpr;
+  ConSanMoiScalarSpillLayout spill_layout = ConSanMoiScalarSpillLayout::None;
+  std::optional<ConSanMoiIndirectJumpSgprs> router_jump;
+  std::optional<ConSanMoiRouterCallSgprs> router_call;
+  bool has_branch_only_spill = false;
+
+  [[nodiscard]] bool has_scalar_spill() const {
+    return spill_layout != ConSanMoiScalarSpillLayout::None;
+  }
+  [[nodiscard]] bool has_inline_spill() const {
+    return spill_layout == ConSanMoiScalarSpillLayout::Inline;
+  }
+  [[nodiscard]] bool has_compact_spill() const {
+    return spill_layout == ConSanMoiScalarSpillLayout::Compact;
+  }
+
+  bool operator==(const MoiScalarRoutingState &) const = default;
+};
+
+[[nodiscard]] inline MoiScalarRoutingState
+project_moi_scalar_routing_state(const ConSanMoiOperatingPoint &point) {
+  return {
+      .exec_save_sgpr = point.moi_exec_save_sgpr,
+      .spill_layout = point.automatic_moi_scalar_spill_layout,
+      .router_jump = point.moi_router_jump,
+      .router_call = point.moi_router_call,
+      .has_branch_only_spill = point.moi_branch_only_spill.has_value(),
+  };
+}
+
 /// Resolved scalar ABI and mechanics for one mode's dense access router.
 /// Common placement and emission consume this product without inspecting the
 /// engine that produced it.
@@ -486,10 +521,6 @@ moi_relocatable_host_scalar_ranges(const ConSanRequest &request,
     MoiResourcePlanningState &resource_state, std::span<const uint8_t> text,
     const MoiDenseRelayHostRequest &request,
     const std::function<bool(uint64_t, uint64_t)> &overlaps_reserved);
-
-[[nodiscard]] std::optional<uint16_t>
-moi_sampled_access_return_scc_sgpr(const ConSanRequest &request,
-                                   const ConSanMoiOperatingPoint &point);
 
 void note_moi_access_private_requirements(MoiDescriptorPrivateRequirements &requirements,
                                           const MoiPlannedAccessPatch &patch);

@@ -186,10 +186,11 @@ struct MoiOperationalEvidenceKinds {
   bool fence = false;
 };
 
-/// Narrow target facts that affect a mode's transient scalar ABI. Modes see
-/// the semantic facility, not an architecture identity or encoding-family
-/// predicate; adding a target therefore does not require editing a mode.
-struct MoiExecSaveTargetFacts {
+/// Narrow target facts that affect a mode's transient scalar ABI and dense
+/// routing. Modes see the semantic facility, not an architecture identity or
+/// complete capability profile; adding a target therefore does not require
+/// editing a mode.
+struct MoiScalarTargetFacts {
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
 };
 
@@ -244,7 +245,7 @@ plan_moi_operand_overlap_spill(const MoiOperandOverlapSpillContext &context);
 plan_moi_dispatch_identity(const ConSanRequest &request, const MoiDispatchIdentityFacts &facts);
 
 [[nodiscard]] MoiScalarAbiPlan
-make_moi_scalar_abi_plan(const ConSanMoiOperatingPoint &point,
+make_moi_scalar_abi_plan(const MoiScalarRoutingState &routing_state,
                          std::optional<consan_detail::MoiSpecialStateSgprs> special_state,
                          uint16_t fixed_indirect_pc_offset, bool access_router_uses_dense_abi);
 
@@ -255,8 +256,8 @@ make_moi_scalar_abi_plan(const ConSanMoiOperatingPoint &point,
 /// from a mode-owned scalar ABI and normalized target facts.
 [[nodiscard]] std::optional<MoiDenseRouterPlan>
 make_recording_moi_dense_router_plan(const MoiScalarAbiPlan &scalar_abi,
-                                     const ConSanMoiOperatingPoint &point,
-                                     const ConSanTargetProfile &target);
+                                     const MoiScalarRoutingState &routing_state,
+                                     const MoiScalarTargetFacts &target);
 
 /// Resolve the selected mode's dense-router mechanics at the narrow mode
 /// registry boundary. Consumers never branch on the engine themselves.
@@ -287,7 +288,7 @@ struct MoiModeOperations {
                                         const MoiAccessResourceFacts &, const ConSanMoiCandidate &);
   MoiOperationalEvidenceKinds operational_evidence;
   std::optional<uint16_t> dynamic_stack_frame_save_sgpr_offset;
-  uint16_t (*exec_save_sgpr_count)(const MoiExecSaveRequirement &, const MoiExecSaveTargetFacts &);
+  uint16_t (*exec_save_sgpr_count)(const MoiExecSaveRequirement &, const MoiScalarTargetFacts &);
   MoiPrologueModePolicy prologue;
   MoiPersistentStateDemand (*persistent_state_demand)(const ConSanRequest &,
                                                       const BoundRuntimeResources &,
@@ -300,11 +301,11 @@ struct MoiModeOperations {
   std::optional<uint16_t> (*access_spill_fallback)(const MoiAccessSpillFallbackContext &);
   MoiDispatchIdentityPlan (*dispatch_identity)(const ConSanRequest &,
                                                const MoiDispatchIdentityFacts &);
-  MoiScalarAbiPlan (*scalar_abi)(const ConSanRequest &, const ConSanMoiOperatingPoint &);
+  MoiScalarAbiPlan (*scalar_abi)(const MoiScalarRoutingState &);
   MoiDenseAccessRouteTraits dense_access_route;
-  std::optional<MoiDenseRouterPlan> (*dense_router)(const ConSanRequest &,
-                                                    const ConSanMoiOperatingPoint &,
-                                                    const ConSanTargetProfile &);
+  std::optional<MoiDenseRouterPlan> (*dense_router)(const MoiScalarAbiPlan &,
+                                                    const MoiScalarRoutingState &,
+                                                    const MoiScalarTargetFacts &);
   ConSanEvidenceRequirements (*plan_evidence)(const MoiEvidencePlanningContext &);
   bool (*plan_report_layout)(const ConSanMoiAutoReportInventory &, ConSanMoiAutoReportPlan &,
                              uint64_t &cursor);

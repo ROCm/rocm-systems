@@ -552,7 +552,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
           static_cast<uint8_t>(*candidate.incoming_vgpr_bank_mode), 0u, arch));
   }
 
-  const auto publication_state = moi_sampled_publication_state_sgprs(request, point);
+  const auto publication_state = moi_sampled_publication_state_sgprs(point.moi_exec_save_sgpr);
   if (!publication_state) {
     errors.emplace_back("ConSan MOI sampled probe has no scalar publication-state layout");
     return std::nullopt;

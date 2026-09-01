@@ -46,11 +46,10 @@ uint16_t direct_sampled_scratch_count(const ConSanRequest &request,
 }
 
 std::optional<MoiSampledPublicationStateSgprs>
-moi_sampled_publication_state_sgprs(const ConSanRequest &request,
-                                    const ConSanMoiOperatingPoint &point) {
-  if (request.moi_engine != ConSanMoiEngine::Sampled || !point.moi_exec_save_sgpr)
+moi_sampled_publication_state_sgprs(std::optional<uint16_t> exec_save_sgpr) {
+  if (!exec_save_sgpr)
     return std::nullopt;
-  const uint16_t base = *point.moi_exec_save_sgpr;
+  const uint16_t base = *exec_save_sgpr;
   return MoiSampledPublicationStateSgprs{
       .original_exec_save_sgpr = base,
       .selection_vcc_save_sgpr = static_cast<uint16_t>(base + 2u),

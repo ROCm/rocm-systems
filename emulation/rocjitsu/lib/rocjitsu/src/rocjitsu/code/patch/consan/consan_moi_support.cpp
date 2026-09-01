@@ -481,7 +481,7 @@ resolve_moi_exec_save_requirement(const ConSanRequest &request,
 }
 
 uint16_t moi_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement, rj_code_arch_t arch) {
-  consan_moi_impl::MoiExecSaveTargetFacts target_facts;
+  consan_moi_impl::MoiScalarTargetFacts target_facts;
   if (const ConSanTargetProfile *target = consan_target_profile(arch))
     target_facts.direct_call_form = target->direct_call_form;
   const auto &operations = consan_moi_impl::moi_mode_operations(requirement.engine);

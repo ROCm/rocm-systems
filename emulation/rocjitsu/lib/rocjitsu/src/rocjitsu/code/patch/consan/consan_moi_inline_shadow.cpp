@@ -205,40 +205,39 @@ plan_inline_shadow_dispatch_identity(const ConSanRequest &request,
   return plan;
 }
 
-MoiScalarAbiPlan plan_inline_shadow_scalar_abi(const ConSanRequest &,
-                                               const ConSanMoiOperatingPoint &point) {
+MoiScalarAbiPlan plan_inline_shadow_scalar_abi(const MoiScalarRoutingState &routing_state) {
   std::optional<consan_detail::MoiSpecialStateSgprs> special_state;
-  if (point.moi_exec_save_sgpr) {
-    const uint16_t base = *point.moi_exec_save_sgpr;
+  if (routing_state.exec_save_sgpr) {
+    const uint16_t base = *routing_state.exec_save_sgpr;
     special_state = consan_detail::MoiSpecialStateSgprs{
         .vcc_save_sgpr = static_cast<uint16_t>(base + 8u),
         .scc_save_sgpr = static_cast<uint16_t>(base + 10u),
     };
   }
-  return make_moi_scalar_abi_plan(point, special_state, 12u, true);
+  return make_moi_scalar_abi_plan(routing_state, special_state, 12u, true);
 }
 
 std::optional<MoiDenseRouterPlan>
-plan_inline_shadow_dense_router(const ConSanRequest &request, const ConSanMoiOperatingPoint &point,
-                                const ConSanTargetProfile &target) {
-  if (point.moi_branch_only_spill)
+plan_inline_shadow_dense_router(const MoiScalarAbiPlan &scalar_abi,
+                                const MoiScalarRoutingState &routing_state,
+                                const MoiScalarTargetFacts &target) {
+  if (routing_state.has_branch_only_spill)
     return std::nullopt;
-  const MoiScalarAbiPlan scalar_abi = plan_inline_shadow_scalar_abi(request, point);
   if (!scalar_abi.indirect_jump)
     return std::nullopt;
 
   uint16_t dispatch_key_sgpr = 0u;
   std::optional<uint16_t> call_return_sgpr;
-  if (point.has_inline_moi_scalar_spill()) {
-    if (!point.moi_router_call)
+  if (routing_state.has_inline_spill()) {
+    if (!routing_state.router_call)
       return std::nullopt;
-    dispatch_key_sgpr = point.moi_router_call->dispatch_key_sgpr;
+    dispatch_key_sgpr = routing_state.router_call->dispatch_key_sgpr;
     if (target.direct_call_form == ConSanDirectCallForm::SCallI64)
-      call_return_sgpr = point.moi_router_call->call_return_sgpr;
+      call_return_sgpr = routing_state.router_call->call_return_sgpr;
   } else {
-    if (!point.moi_exec_save_sgpr)
+    if (!routing_state.exec_save_sgpr)
       return std::nullopt;
-    const uint16_t base = *point.moi_exec_save_sgpr;
+    const uint16_t base = *routing_state.exec_save_sgpr;
     dispatch_key_sgpr = target.direct_call_form == ConSanDirectCallForm::SCallI64
                             ? scalar_abi.indirect_jump->pc_sgpr
                             : static_cast<uint16_t>(base + 28u);
@@ -260,7 +259,7 @@ plan_inline_shadow_dense_router(const ConSanRequest &request, const ConSanMoiOpe
 }
 
 uint16_t inline_shadow_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
-                                            const MoiExecSaveTargetFacts &) {
+                                            const MoiScalarTargetFacts &) {
   if (!requirement.has_report_buffer)
     return 0u;
   const uint16_t engine_count =
