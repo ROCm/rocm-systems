@@ -2728,12 +2728,12 @@ canonicalize(std::string _path)
     }
 
     auto leading_dash = _path.starts_with('/');
-    auto _pieces      = rocprofsys::delimit(_path, "/");
-    std::reverse(_pieces.begin(), _pieces.end());
+    auto pieces       = rocprofsys::delimit(_path, "/");
+    std::ranges::reverse(pieces);
     auto _tree = std::vector<std::string>{};
-    for(size_t i = 0; i < _pieces.size(); ++i)
+    for(size_t i = 0; i < pieces.size(); ++i)
     {
-        const auto& itr = _pieces.at(i);
+        const auto& itr = pieces.at(i);
         if(itr == ".")
         {
             continue;
@@ -2744,11 +2744,11 @@ canonicalize(std::string _path)
             _tree.emplace_back(itr);
     }
     std::reverse(_tree.begin(), _tree.end());
-    auto _cpath = std::string{ (leading_dash) ? "/" : "" };
+    auto cpath = std::string{ leading_dash ? "/" : "" };
     for(size_t i = 0; i < _tree.size() - 1; ++i)
-        _cpath += _tree.at(i) + "/";
-    _cpath += _tree.back();
-    return _cpath;
+        cpath += _tree.at(i) + "/";
+    cpath += _tree.back();
+    return cpath;
 }
 
 //======================================================================================//

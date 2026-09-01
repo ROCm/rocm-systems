@@ -37,7 +37,9 @@
 #include <SymtabReader.h>
 #include <dyntypes.h>
 
+#include <array>  // NOLINT(misc-include-cleaner): used by std::array in macros below
 #include <climits>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -58,8 +60,8 @@
 #include <unordered_map>
 #include <vector>
 
-#define MUTNAMELEN       1024
-#define FUNCNAMELEN      32 * 1024
+#define MUTNAMELEN 1024
+inline constexpr std::size_t k_funcnamelen = 32UL * 1024UL;
 #define NO_ERROR         -1
 #define TIMEMORY_BIN_DIR "bin"
 
@@ -247,16 +249,17 @@ extern std::unique_ptr<std::ofstream> log_ofs;
 // control debug printf statements
 #define errprintf(LEVEL, ...)                                                            \
     {                                                                                    \
-        char _logmsgbuff[FUNCNAMELEN];                                                   \
-        snprintf(_logmsgbuff, FUNCNAMELEN, __VA_ARGS__);                                 \
-        ROCPROFSYS_ADD_LOG_ENTRY(_logmsgbuff);                                           \
+        std::array<char, k_funcnamelen> _logmsgbuff;                                     \
+        snprintf(_logmsgbuff.data(), k_funcnamelen, __VA_ARGS__);                        \
+        ROCPROFSYS_ADD_LOG_ENTRY(_logmsgbuff.data());                                    \
         if(werror || LEVEL < 0)                                                          \
         {                                                                                \
             if(debug_print || verbose_level >= LEVEL)                                    \
                 fprintf(stderr, "[rocprof-sys][exe] Error! " __VA_ARGS__);               \
-            char _buff[FUNCNAMELEN];                                                     \
-            snprintf(_buff, FUNCNAMELEN, "[rocprof-sys][exe] Error! " __VA_ARGS__);      \
-            throw std::runtime_error(std::string{ _buff });                              \
+            std::array<char, k_funcnamelen> _buff;                                       \
+            snprintf(_buff.data(), k_funcnamelen,                                        \
+                     "[rocprof-sys][exe] Error! " __VA_ARGS__);                          \
+            throw std::runtime_error(std::string{ _buff.data() });                       \
         }                                                                                \
         else                                                                             \
         {                                                                                \
@@ -269,9 +272,9 @@ extern std::unique_ptr<std::ofstream> log_ofs;
 // control verbose printf statements
 #define verbprintf(LEVEL, ...)                                                           \
     {                                                                                    \
-        char _logmsgbuff[FUNCNAMELEN];                                                   \
-        snprintf(_logmsgbuff, FUNCNAMELEN, __VA_ARGS__);                                 \
-        ROCPROFSYS_ADD_LOG_ENTRY(_logmsgbuff);                                           \
+        std::array<char, k_funcnamelen> _logmsgbuff;                                     \
+        snprintf(_logmsgbuff.data(), k_funcnamelen, __VA_ARGS__);                        \
+        ROCPROFSYS_ADD_LOG_ENTRY(_logmsgbuff.data());                                    \
         if(debug_print || verbose_level >= LEVEL)                                        \
             fprintf(stdout, "[rocprof-sys][exe] " __VA_ARGS__);                          \
         fflush(stdout);                                                                  \
@@ -279,9 +282,9 @@ extern std::unique_ptr<std::ofstream> log_ofs;
 
 #define verbprintf_bare(LEVEL, ...)                                                      \
     {                                                                                    \
-        char _logmsgbuff[FUNCNAMELEN];                                                   \
-        snprintf(_logmsgbuff, FUNCNAMELEN, __VA_ARGS__);                                 \
-        ROCPROFSYS_ADD_LOG_ENTRY(_logmsgbuff);                                           \
+        std::array<char, k_funcnamelen> _logmsgbuff;                                     \
+        snprintf(_logmsgbuff.data(), k_funcnamelen, __VA_ARGS__);                        \
+        ROCPROFSYS_ADD_LOG_ENTRY(_logmsgbuff.data());                                    \
         if(debug_print || verbose_level >= LEVEL) fprintf(stdout, __VA_ARGS__);          \
         fflush(stdout);                                                                  \
     }
