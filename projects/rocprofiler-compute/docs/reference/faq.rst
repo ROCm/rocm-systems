@@ -112,11 +112,14 @@ occur during normal execution.
 Why does profiling a vLLM workload produce empty performance counter data?
 ==========================================================================
 
-vLLM V1 normally runs GPU kernels in a worker process separate from the vLLM
-entry process. ROCm Compute Profiler does not profile kernels in that worker,
-so a profiling run can finish without GPU kernel dispatch or performance
+vLLM V1 runs GPU kernels in a worker process separate from the vLLM entry
+process. ROCm Compute Profiler profiles that worker and records its kernel
+dispatches, but vLLM terminates the worker with a signal on shutdown, and
+counter data is only written when a process exits normally. The profiling run
+therefore reports success while leaving no GPU kernel dispatch or performance
 counter data.
 
-Set ``VLLM_ENABLE_V1_MULTIPROCESSING=0`` before launching ROCm Compute
-Profiler. For an example command and the performance caveat, see
-:ref:`profile-vllm-workloads`.
+For a single-GPU run, set ``VLLM_ENABLE_V1_MULTIPROCESSING=0`` before launching
+ROCm Compute Profiler. When the model is split across several GPUs, this
+setting does not recover the counter data. For an example command and the
+throughput caveat, see :ref:`profile-vllm-workloads`.
