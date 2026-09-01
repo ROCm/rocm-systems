@@ -124,6 +124,42 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_put_wave(
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_wave(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_put_wave(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_put_wave(
+    __half *dest, const __half *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_put_wave(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_put_wave(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_put_wave(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_put_wave(
+    int8_t *dest, const int8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_put_wave(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_put_wave(
+    int16_t *dest, const int16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_put_wave(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_put_wave(
+    uint8_t *dest, const uint8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_put_wave(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_put_wave(
+    uint16_t *dest, const uint16_t *source, size_t nelems, int pe);
+
 
 /**
  * @brief Writes contiguous data of \p nelems elements from \p source on the
@@ -221,6 +257,42 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_put_wg(
     size_t nelems, int pe);
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_wg(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_put_wg(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_put_wg(
+    __half *dest, const __half *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_put_wg(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_put_wg(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_put_wg(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_put_wg(
+    int8_t *dest, const int8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_put_wg(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_put_wg(
+    int16_t *dest, const int16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_put_wg(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_put_wg(
+    uint8_t *dest, const uint8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_put_wg(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_put_wg(
+    uint16_t *dest, const uint16_t *source, size_t nelems, int pe);
 
 
 /**
@@ -374,6 +446,42 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_get_wave(
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_get_wave(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_get_wave(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_get_wave(
+    __half *dest, const __half *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_get_wave(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_get_wave(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_get_wave(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_get_wave(
+    int8_t *dest, const int8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_get_wave(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_get_wave(
+    int16_t *dest, const int16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_get_wave(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_get_wave(
+    uint8_t *dest, const uint8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_get_wave(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_get_wave(
+    uint16_t *dest, const uint16_t *source, size_t nelems, int pe);
+
 
 /**
  * @brief Reads contiguous data of \p nelems elements from \p source on \p pe
@@ -470,6 +578,42 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_get_wg(
     size_t nelems, int pe);
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_get_wg(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_get_wg(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_get_wg(
+    __half *dest, const __half *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_get_wg(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_get_wg(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_get_wg(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_get_wg(
+    int8_t *dest, const int8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_get_wg(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_get_wg(
+    int16_t *dest, const int16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_get_wg(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_get_wg(
+    uint8_t *dest, const uint8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_get_wg(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_get_wg(
+    uint16_t *dest, const uint16_t *source, size_t nelems, int pe);
 
 
 /**
@@ -623,6 +767,42 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_put_nbi_wave(
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_nbi_wave(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_put_nbi_wave(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_put_nbi_wave(
+    __half *dest, const __half *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_put_nbi_wave(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_put_nbi_wave(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_put_nbi_wave(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_put_nbi_wave(
+    int8_t *dest, const int8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_put_nbi_wave(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_put_nbi_wave(
+    int16_t *dest, const int16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_put_nbi_wave(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_put_nbi_wave(
+    uint8_t *dest, const uint8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_put_nbi_wave(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_put_nbi_wave(
+    uint16_t *dest, const uint16_t *source, size_t nelems, int pe);
+
 
 /**
  * @brief Writes contiguous data of \p nelems elements from \p source on the
@@ -721,6 +901,42 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_put_nbi_wg(
     size_t nelems, int pe);
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_nbi_wg(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_put_nbi_wg(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_put_nbi_wg(
+    __half *dest, const __half *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_put_nbi_wg(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_put_nbi_wg(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_put_nbi_wg(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_put_nbi_wg(
+    int8_t *dest, const int8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_put_nbi_wg(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_put_nbi_wg(
+    int16_t *dest, const int16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_put_nbi_wg(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_put_nbi_wg(
+    uint8_t *dest, const uint8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_put_nbi_wg(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_put_nbi_wg(
+    uint16_t *dest, const uint16_t *source, size_t nelems, int pe);
 
 
 /**
@@ -877,6 +1093,42 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_get_nbi_wave(
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_get_nbi_wave(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_get_nbi_wave(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_get_nbi_wave(
+    __half *dest, const __half *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_get_nbi_wave(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_get_nbi_wave(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_get_nbi_wave(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_get_nbi_wave(
+    int8_t *dest, const int8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_get_nbi_wave(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_get_nbi_wave(
+    int16_t *dest, const int16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_get_nbi_wave(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_get_nbi_wave(
+    uint8_t *dest, const uint8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_get_nbi_wave(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_get_nbi_wave(
+    uint16_t *dest, const uint16_t *source, size_t nelems, int pe);
+
 
 /**
  * @brief Reads contiguous data of \p nelems elements from \p source on \p pe
@@ -975,6 +1227,42 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_get_nbi_wg(
     size_t nelems, int pe);
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_get_nbi_wg(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_get_nbi_wg(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_get_nbi_wg(
+    __half *dest, const __half *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_get_nbi_wg(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_get_nbi_wg(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_get_nbi_wg(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_get_nbi_wg(
+    int8_t *dest, const int8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_get_nbi_wg(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_get_nbi_wg(
+    int16_t *dest, const int16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_get_nbi_wg(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_get_nbi_wg(
+    uint8_t *dest, const uint8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_get_nbi_wg(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_get_nbi_wg(
+    uint16_t *dest, const uint16_t *source, size_t nelems, int pe);
 
 
 /**
