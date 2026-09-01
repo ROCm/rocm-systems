@@ -183,7 +183,9 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
                                  ncclDataType_t datatype, cudaStream_t stream, bool query, bool graphCapturingHint,
                                  struct rcclCollDecision* decision);
 // Single source of truth for ReduceScatter selection: symmetric -> DDA fabric
-// (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct -> native ring/pat kernel. RS has no CE.
+// (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct -> native ring/pat kernel.
+// RS has no CE. Live enqueue carries the decision so taskAppend honors
+// RCCL_SYMMETRIC vs ring (symkExtract) instead of re-deriving it.
 ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                      ncclDataType_t datatype, ncclRedOp_t op, bool query,
                                      struct rcclCollDecision* decision);

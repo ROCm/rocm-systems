@@ -900,8 +900,12 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   comm->enableDirectReduceScatter = 0;
 
   // Select once in rccl_wrap.cc; the same function backs rcclGetCollImplInfo.
+  // Carry the decision into taskAppend() so RCCL_SYMMETRIC vs ring is not
+  // re-derived (NCCL_ALGO=Ring must not still extract the symmetric kernel).
   struct rcclCollDecision decision;
   NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, /*query=*/false, &decision));
+  info.decision = decision;
+  info.decisionValid = true;
 
   // Canonical line for addon backends; native kernels report via the enqueue tuning line.
   if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
@@ -939,7 +943,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
          "sendbuff=%p recvbuff=%p",
          recvcount, msgSize, comm->rank, nRanks, comm->nNodes, comm, stream, sendbuff, recvbuff);
     return rcclDirectReduceScatter(sendbuff, recvbuff, recvcount, datatype, op, comm, stream, chunkSteps, sliceSteps);
-  default: // RCCL_SYMMETRIC / native go through the standard enqueue path.
+  default: // RCCL_SYMMETRIC / native: enqueue; taskAppend honors info->decision.
     return ncclEnqueueCheck(&info);
   }
 }
