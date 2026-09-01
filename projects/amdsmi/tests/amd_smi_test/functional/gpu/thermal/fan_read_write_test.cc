@@ -7,18 +7,16 @@
 #include <unistd.h>
 
 #include <cstdint>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
 
 #include "amd_smi/amdsmi.h"
+#include "rocm_smi/rocm_smi_utils.h"
 #include "test_common.h"
 
 namespace {
-
-constexpr uint32_t kMaxDrmCards = 64;
 
 // amdsmi_set_gpu_fan_speed validates against the gpu_od OD_RANGE on GPUs that
 // expose it. That range is a different unit space than pwm1/pwm1_max, so it
@@ -29,51 +27,14 @@ bool GetGpuOdFanSetRange(amdsmi_processor_handle handle, uint64_t* od_min, uint6
     return false;
   }
 
-  std::ostringstream bdf_ss;
-  bdf_ss << std::hex << std::setfill('0') << std::setw(4)
-         << static_cast<uint64_t>(bdf.bdf.domain_number) << ":" << std::setw(2)
-         << static_cast<uint64_t>(bdf.bdf.bus_number) << ":" << std::setw(2)
-         << static_cast<uint64_t>(bdf.bdf.device_number) << "."
-         << static_cast<uint64_t>(bdf.bdf.function_number);
-  const std::string bdf_str = bdf_ss.str();
+  std::ostringstream path;
+  path << "/sys/bus/pci/devices/" << std::hex << std::setfill('0') << std::setw(4)
+       << static_cast<uint64_t>(bdf.bdf.domain_number) << ":" << std::setw(2)
+       << static_cast<uint64_t>(bdf.bdf.bus_number) << ":" << std::setw(2)
+       << static_cast<uint64_t>(bdf.bdf.device_number) << "."
+       << static_cast<uint64_t>(bdf.bdf.function_number) << "/gpu_od/fan_ctrl/fan_minimum_pwm";
 
-  std::string pwm_path;
-  for (uint32_t card = 0; card < kMaxDrmCards; ++card) {
-    const std::string dev_link = "/sys/class/drm/card" + std::to_string(card) + "/device";
-    char target[4096] = {};
-    ssize_t len = readlink(dev_link.c_str(), target, sizeof(target) - 1);
-    if (len <= 0) {
-      continue;
-    }
-    if (std::string(target, static_cast<size_t>(len)).find(bdf_str) == std::string::npos) {
-      continue;
-    }
-    pwm_path = dev_link + "/gpu_od/fan_ctrl/fan_minimum_pwm";
-    break;
-  }
-  if (pwm_path.empty()) {
-    return false;
-  }
-
-  std::ifstream pwm_file(pwm_path);
-  if (!pwm_file.is_open()) {
-    return false;
-  }
-
-  // Parse "OD_RANGE:\nMINIMUM_PWM: <min> <max>"
-  std::string line;
-  while (std::getline(pwm_file, line)) {
-    std::istringstream iss(line);
-    std::string tag;
-    uint64_t lo = 0;
-    uint64_t hi = 0;
-    if ((iss >> tag >> lo >> hi) && tag == "MINIMUM_PWM:") {
-      *od_min = lo;
-      *od_max = hi;
-      return true;
-    }
-  }
-  return false;
+  return amd::smi::ParseGpuOdFanRange(path.str(), od_min, od_max) == 0;
 }
 
 }  // namespace
