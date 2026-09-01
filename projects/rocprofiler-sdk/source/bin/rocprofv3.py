@@ -1390,6 +1390,44 @@ def has_set_attr(obj, key):
         return False
 
 
+def multipass_source(cli_multipass, num_input_jobs, cli_has_pmc, input_has_pmc):
+    """Return why this run is multi-pass, or None if it is single-pass.
+
+    Every case here means the application is launched more than once: multiple
+    --pmc flags, more than one input-file job, or CLI --pmc groups concatenated
+    with input-file groups.
+    """
+    if cli_multipass:
+        return "multiple --pmc flags"
+    if num_input_jobs > 1:
+        return "multiple input-file jobs"
+    if cli_has_pmc and input_has_pmc:
+        return "--pmc combined with input-file pmc"
+    return None
+
+
+def multipass_incompatible_message(source, has_pid, has_collection_period):
+    """Rejection message when multi-pass is combined with --pid/--collection-period."""
+    if source is None:
+        return None
+    if has_pid:
+        return (
+            f"Multi-pass counter collection ({source}) is not compatible "
+            "with attach mode (--pid)"
+        )
+    if has_collection_period:
+        return (
+            f"Multi-pass counter collection ({source}) is not compatible "
+            "with --collection-period"
+        )
+    return None
+
+
+def any_set_attr(objs, key):
+    """Return whether `key` is explicitly set on any object in `objs`."""
+    return any(has_set_attr(itr, key) for itr in objs)
+
+
 def patch_args(data):
     """Used to handle certain fields which might be specified as a string instead of an array or vice-versa"""
 
@@ -2447,16 +2485,24 @@ def main(argv=None):
                     "Each --pmc must specify at least one counter."
                 )
 
-    # Validate incompatible options
-    if cli_multipass and cmd_args.pid:
-        fatal_error(
-            "Multi-pass counter collection (multiple --pmc flags) is not compatible with attach mode (--pid)"
-        )
+    cli_has_pmc = has_set_attr(cmd_args, "pmc")
+    input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
+    multipass_reason = multipass_source(
+        cli_multipass, len(inp_args), cli_has_pmc, input_has_pmc
+    )
+    use_multipass = multipass_reason is not None
 
-    if cli_multipass and cmd_args.collection_period:
-        fatal_error(
-            "Multi-pass counter collection (multiple --pmc flags) is not compatible with --collection-period"
-        )
+    # counters are compared across passes, so every pass has to profile the same
+    # dispatches: attach mode has no application to relaunch, and a collection
+    # period windows each pass independently. Reject both wherever they were set.
+    incompatible = multipass_incompatible_message(
+        multipass_reason,
+        has_set_attr(cmd_args, "pid") or any_set_attr(inp_args, "pid"),
+        has_set_attr(cmd_args, "collection_period")
+        or any_set_attr(inp_args, "collection_period"),
+    )
+    if incompatible is not None:
+        fatal_error(incompatible)
 
     def validate_selected_regions_conflicts(_args):
         if getattr(_args, "selected_regions", False) and getattr(
@@ -2479,14 +2525,6 @@ def main(argv=None):
             fatal_error(
                 "--selected-regions and --collection-period are mutually exclusive"
             )
-
-    # Check if we should use multi-pass mode:
-    # 1. Multiple --pmc flags on CLI (cli_multipass)
-    # 2. Multiple pmc lines in input file (len(inp_args) > 1)
-    # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
-    cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
-    input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
-    use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
 
     if not use_multipass:
         # Single-pass mode: only one source of PMC (either CLI or input file, but not both)

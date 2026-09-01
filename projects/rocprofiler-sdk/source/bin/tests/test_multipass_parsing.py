@@ -24,6 +24,7 @@
 
 """GPU-free unit tests for the rocprofv3 multi-pass helpers."""
 
+import json
 import os
 import sys
 
@@ -96,6 +97,95 @@ def test_parse_input_text_uses_pmc_subdir(rocprofv3, tmp_path):
     jobs = rocprofv3.parse_input(path)
     assert len(jobs) == 2
     assert [j["sub_directory"] for j in jobs] == ["pmc_", "pmc_"]
+
+
+@pytest.mark.parametrize(
+    "cli_multipass,num_jobs,cli_has_pmc,input_has_pmc,expected",
+    [
+        (True, 1, True, False, "multiple --pmc flags"),
+        (False, 2, False, True, "multiple input-file jobs"),
+        (False, 1, True, True, "--pmc combined with input-file pmc"),
+        (True, 3, True, True, "multiple --pmc flags"),
+        (False, 1, True, False, None),
+        (False, 1, False, True, None),
+        (False, 0, False, False, None),
+    ],
+)
+def test_multipass_source(
+    rocprofv3, cli_multipass, num_jobs, cli_has_pmc, input_has_pmc, expected
+):
+    assert (
+        rocprofv3.multipass_source(cli_multipass, num_jobs, cli_has_pmc, input_has_pmc)
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "source,has_pid,has_collection_period",
+    [
+        (None, True, False),
+        (None, False, True),
+        ("multiple input-file jobs", False, False),
+    ],
+)
+def test_multipass_guard_does_not_reject_compatible_cases(
+    rocprofv3, source, has_pid, has_collection_period
+):
+    assert (
+        rocprofv3.multipass_incompatible_message(source, has_pid, has_collection_period)
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "jobs,cli_args,expected",
+    [
+        (
+            [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}],
+            ["--pid", "12345"],
+            "multiple input-file jobs) is not compatible with attach mode",
+        ),
+        (
+            [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}],
+            ["--collection-period", "0:100:1"],
+            "multiple input-file jobs) is not compatible with --collection-period",
+        ),
+        (
+            [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"], "pid": 12345}],
+            [],
+            "multiple input-file jobs) is not compatible with attach mode",
+        ),
+        (
+            [
+                {"pmc": ["SQ_WAVES"]},
+                {"pmc": ["GRBM_COUNT"], "collection_period": ["0:100:1"]},
+            ],
+            [],
+            "multiple input-file jobs) is not compatible with --collection-period",
+        ),
+        (
+            [{"pmc": ["GRBM_COUNT"]}],
+            ["--pmc", "SQ_WAVES", "--pid", "12345"],
+            "--pmc combined with input-file pmc) is not compatible with attach mode",
+        ),
+    ],
+)
+def test_multipass_incompatible_options_fail_before_launch(
+    rocprofv3, tmp_path, capsys, jobs, cli_args, expected
+):
+    input_path = _write(
+        tmp_path, "input.json", json.dumps({"jobs": jobs}, separators=(",", ":"))
+    )
+    output_path = tmp_path / "output"
+
+    with pytest.raises(SystemExit) as exc_info:
+        rocprofv3.main(
+            ["-i", input_path, *cli_args, "-d", str(output_path), "--", "/bin/true"]
+        )
+
+    assert exc_info.value.code == 1
+    assert expected in capsys.readouterr().err
+    assert not output_path.exists()
 
 
 if __name__ == "__main__":
