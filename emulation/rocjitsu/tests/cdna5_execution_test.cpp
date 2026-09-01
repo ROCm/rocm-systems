@@ -1307,6 +1307,49 @@ TEST(Gfx1251PackedU64ExecutionTest, RejectsUnprovenShiftCountsBeforeAnyDestinati
   }
 }
 
+TEST(Gfx1251PackedU64ExecutionTest, RejectedCountTerminatesDispatchWithSimulatorFailure) {
+  constexpr uint32_t kLiteral = 101u;
+  // Public LLVM gfx1251_asm_vop3p.s encoding for
+  // v_pk_lshl_add_u64 v[4:7], v[8:11], 101, v[16:19]. The s_endpgm must never
+  // be needed to retire the rejected instruction's workgroup.
+  constexpr std::array<uint32_t, 4> kCode{0xCC7E4004u, 0x1C41FF08u, kLiteral, S_ENDPGM_GFX12};
+  constexpr uint64_t kSignalAddress = 0x20000;
+  constexpr uint32_t kSignalValueOffset = 8;
+
+  Gfx1250Sim sim;
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  sim.cu()->replace_decoder_for_test(std::move(decoder));
+
+  sim.memory->write64(kSignalAddress + kSignalValueOffset, 1u);
+  const uint64_t kernel_object = sim.write_kernel(0x10000, kCode.data(), kCode.size());
+  test::AqlQueue queue(sim.memory, sim.cp());
+  hsa_kernel_dispatch_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  packet.setup = 1;
+  packet.workgroup_size_x = 32;
+  packet.workgroup_size_y = 1;
+  packet.workgroup_size_z = 1;
+  packet.grid_size_x = 32;
+  packet.grid_size_y = 1;
+  packet.grid_size_z = 1;
+  packet.kernel_object = kernel_object;
+  packet.completion_signal.handle = kSignalAddress;
+  queue.submit(packet);
+
+  while (sim.engine->step()) {
+  }
+
+  const simdojo::ExitStatus &exit = sim.engine->last_exit();
+  EXPECT_EQ(exit.reason, simdojo::ExitReason::EXIT_REQUEST);
+  EXPECT_EQ(exit.code, 1);
+  EXPECT_NE(exit.message.find("v_pk_lshl_add_u64"), std::string::npos);
+  EXPECT_FALSE(sim.cu()->has_active_wfs());
+  EXPECT_EQ(sim.memory->read64(kSignalAddress + kSignalValueOffset), 0u)
+      << "the rejected dispatch must still publish its workgroup completion";
+}
+
 TEST(Gfx1251PackedU64ExecutionTest, ExecutesEveryPublicLlvmSourceForm) {
   struct SourceFormCase {
     std::string_view name;

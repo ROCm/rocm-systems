@@ -60,6 +60,16 @@ constexpr uint32_t kPrivilegedStatusBit = 1u << 5;
 
 bool is_privileged(const Wavefront &wf) { return (wf.status_raw() & kPrivilegedStatusBit) != 0; }
 
+std::string_view instruction_execution_error_name(InstructionExecutionError error) {
+  switch (error) {
+  case InstructionExecutionError::None:
+    return "none";
+  case InstructionExecutionError::UnsupportedOperandValue:
+    return "unsupported operand value";
+  }
+  return "unknown instruction execution error";
+}
+
 uint32_t pack_barrier_state(uint32_t member_count, uint32_t signal_count,
                             uint32_t allocation_blocks = 0) {
   return 1u | ((member_count & 0x7fu) << 4) | ((signal_count & 0x7fu) << 16) |
@@ -885,10 +895,14 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   execute_instruction(inst, *active);
 
   if (active->instruction_execution_failed()) {
-    util::Logger::warn("CU ", this->name(), ": wf", active->wf_id(),
-                       " halted after unsupported operand value in ", inst->mnemonic(), " at pc=0x",
-                       std::hex, active->pc);
-    active->halt(Wavefront::CpCompletionNotice::Suppress);
+    const InstructionExecutionError error = active->instruction_execution_error();
+    const std::string failure = std::format("CU {}: wf{} could not execute {} at pc={:#x}: {}",
+                                            this->name(), active->wf_id(), inst->mnemonic(),
+                                            active->pc, instruction_execution_error_name(error));
+    util::Logger::warn(failure);
+    if (auto *sim_engine = this->engine())
+      sim_engine->request_exit(failure, /*code=*/1);
+    active->halt();
     delete inst;
     return;
   }
