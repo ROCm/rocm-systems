@@ -80,6 +80,7 @@ on:
         options:
           - device-api
           - gin
+          - ext-plugins
       runs_on:
         description: 'Runner label(s) as a JSON array string.'
         type: string
