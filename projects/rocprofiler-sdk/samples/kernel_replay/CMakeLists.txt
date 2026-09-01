@@ -43,10 +43,15 @@ function(add_kernel_replay_sample NAME CLIENT_SRC)
 
     add_executable(${NAME})
     target_sources(${NAME} PRIVATE main.cpp)
-    target_link_libraries(${NAME} PRIVATE ${NAME}-client Threads::Threads
+    # Preload the tool; do not link it into the HIP executable. Linking the client
+    # (and thus the SDK) into the device binary can make HIP report
+    # hipErrorInvalidDeviceFunction on the first kernel launch.
+    target_link_libraries(${NAME} PRIVATE Threads::Threads
                                           rocprofiler-sdk::samples-build-flags)
+    add_dependencies(${NAME} ${NAME}-client)
 
     rocprofiler_samples_get_preload_env(PRELOAD_ENV ${NAME}-client)
+    rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV ${NAME}-client)
     set(_env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV} ${arg_ENVIRONMENT})
     if(arg_PC_SAMPLING)
         list(APPEND _env "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=ON")
@@ -56,7 +61,9 @@ function(add_kernel_replay_sample NAME CLIENT_SRC)
     endif()
 
     add_test(NAME ${NAME} COMMAND $<TARGET_FILE:${NAME}>)
-    set(_disabled "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
+    # These are the kernel-replay feature samples; do not hide them behind the
+    # repo-wide unstable gate. PC sampling / SPM still drop out when unavailable.
+    set(_disabled OFF)
     if(arg_PC_SAMPLING)
         set(_disabled "${IS_PC_SAMPLING_DISABLED}")
     endif()
