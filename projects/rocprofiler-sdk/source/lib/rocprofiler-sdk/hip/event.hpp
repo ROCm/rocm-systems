@@ -85,10 +85,19 @@ struct event_record_info_t
     rocprofiler_queue_id_t queue_id        = {.handle = 0};
     rocprofiler_agent_id_t agent_id        = {.handle = 0};
     uint64_t               original_signal = 0;
+    // Set when the record barrier for this generation completes on the GPU. Reset by
+    // record_event_info when the event is re-recorded.
+    bool completed = false;
 };
 
 void
 record_event_info(uint64_t hip_event_handle, event_record_info_t info);
+
+// Marks the current record generation of an event as completed. Waits registered after
+// this point would be short-circuited by the HIP runtime and never produce a GPU-side
+// dependency, so they are not tracked.
+void
+mark_event_completed(uint64_t hip_event_handle);
 
 event_record_info_t
 lookup_event_info(uint64_t hip_event_handle);
@@ -140,6 +149,9 @@ has_pending_waits();
 
 pending_wait_t
 consume_pending_wait(uint64_t signal_handle);
+
+pending_wait_t
+consume_pending_wait_for_handle(uint64_t signal_handle, uint64_t hip_event_handle);
 
 template <typename TableT>
 void

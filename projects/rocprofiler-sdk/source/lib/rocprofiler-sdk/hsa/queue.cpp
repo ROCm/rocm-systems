@@ -419,6 +419,11 @@ BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         auto  _internal_corr_id = (_corr_id) ? _corr_id->internal : 0;
         auto  _ancestor_corr_id = (_corr_id) ? _corr_id->ancestor : 0;
 
+        // Mark before emitting so the window in which a wait can be registered against an
+        // already-completed event is not widened by the duration of tool callbacks.
+        if(bdata.operation == ROCPROFILER_HIP_EVENT_RECORD)
+            hip::event::mark_event_completed(bdata.callback_record.hip_event_handle);
+
         hip::event::barrier_complete(bdata.tracing_data,
                                      _tid,
                                      _internal_corr_id,
@@ -895,7 +900,10 @@ WriteInterceptor(const void* packets,
                     transformed_packets.emplace_back(_packets[i]);
                 }
 
-                if(is_barrier)
+                // Scan dep_signals for deferred hipStreamWaitEvent dependencies. Skip
+                // barriers that were directly intercepted as event barriers (barrier_captured
+                // is true): those are handled by BarrierAsyncSignalHandler, not here.
+                if(is_barrier && !(event_ctx && event_ctx->barrier_captured))
                 {
                     auto consume_if_pending = [&](uint64_t handle) {
                         if(handle == 0) return;

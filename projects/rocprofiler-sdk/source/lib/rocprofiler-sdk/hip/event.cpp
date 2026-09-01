@@ -384,17 +384,39 @@ event_record_with_flags_impl(hipEvent_t event, hipStream_t stream, unsigned int 
 #endif
 
 void
-check_deferred_wait(uint64_t hip_event_handle)
+discard_pending_wait(uint64_t signal_handle, uint64_t hip_event_handle)
 {
-    if(g_active_event_ctx.barrier_captured) return;
+    // Consume and release the pre-registered pending wait without emitting a record.
+    // Called when we determine no GPU-side dependency was actually created (error,
+    // graph capture, or a direct standalone barrier was intercepted instead).
+    auto pw = consume_pending_wait_for_handle(signal_handle, hip_event_handle);
+    if(pw.corr_id_ref)
+    {
+        pw.corr_id_ref->sub_kern_count();
+        pw.corr_id_ref->sub_ref_count();
+    }
+}
 
+// Returns the signal handle of the registered entry, or 0 if nothing was registered.
+uint64_t
+register_deferred_wait(uint64_t hip_event_handle)
+{
     auto event_info = lookup_event_info(hip_event_handle);
-    if(event_info.original_signal == 0) return;
+    if(event_info.original_signal == 0) return 0;
+
+    // The record barrier for this generation already completed. The HIP runtime drops
+    // dependencies on completed signals when it builds a barrier's dependency list, so
+    // this wait cannot produce GPU-side work and must not be tracked. Erring here is
+    // one-sided: completion is monotonic within a generation, so a wait we refuse would
+    // also have been dropped by the runtime. The reverse case -- the event completing
+    // between this check and the runtime's -- leaves a stale entry that is released by
+    // record_event_info or erase_event_info.
+    if(event_info.completed) return 0;
 
     auto tracing_data = tracing::tracing_data{};
     tracing::populate_contexts(
         ROCPROFILER_CALLBACK_TRACING_HIP_EVENT, ROCPROFILER_BUFFER_TRACING_HIP_EVENT, tracing_data);
-    if(tracing_data.empty()) return;
+    if(tracing_data.empty()) return 0;
 
     auto*                    corr_id      = context::get_latest_correlation_id();
     context::correlation_id* corr_id_self = nullptr;
@@ -403,7 +425,7 @@ check_deferred_wait(uint64_t hip_event_handle)
         corr_id      = context::correlation_tracing_service::construct(1);
         corr_id_self = corr_id;
     }
-    if(!corr_id) return;
+    if(!corr_id) return 0;
 
     auto _corr_cleanup = common::scope_destructor{[corr_id_self]() {
         if(corr_id_self)
@@ -432,17 +454,36 @@ check_deferred_wait(uint64_t hip_event_handle)
     corr_id->add_kern_count();
 
     register_pending_wait(event_info.original_signal, std::move(pw));
+    return event_info.original_signal;
 }
 
 template <stream_wait_event_fn_t saved_table_t::*SavedField>
 hipError_t
 stream_wait_event_impl(hipStream_t stream, hipEvent_t event, unsigned int flags)
 {
-    g_active_event_ctx = {ROCPROFILER_HIP_EVENT_WAIT, reinterpret_cast<uint64_t>(event), false};
+    const auto hip_event_handle = reinterpret_cast<uint64_t>(event);
+
+    g_active_event_ctx = {ROCPROFILER_HIP_EVENT_WAIT, hip_event_handle, false};
     auto _cleanup      = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
-    auto ret           = (get_saved_table().*SavedField)(stream, event, flags);
-    if(ret == hipSuccess && !is_stream_capturing(stream))
-        check_deferred_wait(reinterpret_cast<uint64_t>(event));
+
+    // Pre-register the pending wait BEFORE calling CLR. This ensures the entry
+    // is in the map before CLR can enqueue any barrier carrying the dep_signal,
+    // even if another thread concurrently submits work to the waiting stream.
+    const auto registered_signal = register_deferred_wait(hip_event_handle);
+
+    auto ret = (get_saved_table().*SavedField)(stream, event, flags);
+
+    // Discard the pre-registered entry in cases where no GPU-side dependency was created:
+    // - Error return: CLR did nothing.
+    // - Graph capture: stream is being captured, no real barrier submitted.
+    // - barrier_captured: WriteInterceptor intercepted a standalone WAIT barrier and
+    //   already emitted (or will emit) a record via BarrierAsyncSignalHandler.
+    if(registered_signal != 0)
+    {
+        if(ret != hipSuccess || is_stream_capturing(stream) || g_active_event_ctx.barrier_captured)
+            discard_pending_wait(registered_signal, hip_event_handle);
+    }
+
     return ret;
 }
 
@@ -472,7 +513,12 @@ record_event_info(uint64_t hip_event_handle, event_record_info_t info)
         map[hip_event_handle] = info;
     });
 
-    if(old_signal != 0 && old_signal != info.original_signal)
+    // Drain unconditionally, even when the handle is unchanged. Completion signals come
+    // from a pool and the runtime can hand back the same handle for a new record, so a
+    // matching handle does not imply the outstanding waits belong to this generation.
+    // Any wait registered against the previous generation can no longer be attributed
+    // correctly, so it is released without emitting a record.
+    if(old_signal != 0)
     {
         for(;;)
         {
@@ -482,6 +528,15 @@ record_event_info(uint64_t hip_event_handle, event_record_info_t info)
             pw.corr_id_ref->sub_ref_count();
         }
     }
+}
+
+void
+mark_event_completed(uint64_t hip_event_handle)
+{
+    get_event_info_map()->wlock([&](auto& map) {
+        auto it = map.find(hip_event_handle);
+        if(it != map.end()) it->second.completed = true;
+    });
 }
 
 event_record_info_t
@@ -575,6 +630,26 @@ consume_pending_wait(uint64_t signal_handle)
             result = std::move(it->second);
             map.erase(it);
             g_pending_wait_count.fetch_sub(1, std::memory_order_release);
+        }
+    });
+    return result;
+}
+
+pending_wait_t
+consume_pending_wait_for_handle(uint64_t signal_handle, uint64_t hip_event_handle)
+{
+    auto result = pending_wait_t{};
+    get_pending_wait_map()->wlock([&](auto& map) {
+        auto [begin, end] = map.equal_range(signal_handle);
+        for(auto it = begin; it != end; ++it)
+        {
+            if(it->second.hip_event_handle == hip_event_handle)
+            {
+                result = std::move(it->second);
+                map.erase(it);
+                g_pending_wait_count.fetch_sub(1, std::memory_order_release);
+                break;
+            }
         }
     });
     return result;
