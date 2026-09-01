@@ -29,6 +29,15 @@ THE SOFTWARE.
 #include <va/va.h>  // for VA_FOURCC_* constants used in the fourcc->DXGI mapping
 #include "d3d12_interop.h"
 
+namespace {
+// Format an HRESULT/flag value as a lowercase hex string (no "0x" prefix) for log messages.
+std::string ToHex(uint32_t value) {
+    std::ostringstream oss;
+    oss << std::hex << value;
+    return oss.str();
+}
+}  // namespace
+
 D3D12Interop::~D3D12Interop() {
     // Release D3D12 resources (VA surfaces that referenced them are destroyed by the owner first).
     for (auto* res : d3d12_staging_buffers_) {
@@ -156,19 +165,14 @@ rocDecStatus D3D12Interop::CreateSharedResources(rocDecVideoSurfaceFormat format
         case VA_FOURCC_P012: dxgi_format = DXGI_FORMAT_P016; break; // D3D12 uses P016 for 12-bit
         default:
             CriticalLog(g_rocdec_logger, "Unsupported fourcc for D3D12 shared surface: 0x" +
-                        ([](int f) { std::ostringstream o; o << std::hex << f; return o.str(); })(va_fourcc));
+                        ToHex(static_cast<uint32_t>(va_fourcc)));
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_NOT_SUPPORTED;
     }
 
     if (d3d12_device_ == nullptr) {
         IDXGIFactory2* factory = nullptr;
-        HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory2), reinterpret_cast<void**>(&factory));
-        if (FAILED(hr)) {
-            CriticalLog(g_rocdec_logger, "CreateDXGIFactory1 failed");
-            FunctionExitLog(g_rocdec_logger);
-            return ROCDEC_RUNTIME_ERROR;
-        }
+        CHECK_D3D12(CreateDXGIFactory1(__uuidof(IDXGIFactory2), reinterpret_cast<void**>(&factory)));
         IDXGIAdapter1* adapter = nullptr;
         for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
             DXGI_ADAPTER_DESC1 desc;
@@ -233,7 +237,7 @@ rocDecStatus D3D12Interop::CreateSharedResources(rocDecVideoSurfaceFormat format
             __uuidof(ID3D12Resource), reinterpret_cast<void**>(&d3d12_shared_resources_[0]));
         if (FAILED(hr)) {
             InfoLog(g_rocdec_logger, "ROW_MAJOR layout not supported (HRESULT=0x" +
-                    ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(hr) +
+                    ToHex(hr) +
                     "), falling back to LAYOUT_UNKNOWN (tiled)");
             res_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
             res_desc.Flags = D3D12_RESOURCE_FLAG_NONE;
@@ -251,7 +255,7 @@ rocDecStatus D3D12Interop::CreateSharedResources(rocDecVideoSurfaceFormat format
             __uuidof(ID3D12Resource), reinterpret_cast<void**>(&d3d12_shared_resources_[i]));
         if (FAILED(hr) || d3d12_shared_resources_[i] == nullptr) {
             CriticalLog(g_rocdec_logger, "Failed to create shared D3D12 resource " + ROCDEC_TOSTR(i) +
-                        ", HRESULT=0x" + ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(hr));
+                        ", HRESULT=0x" + ToHex(hr));
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_RUNTIME_ERROR;
         }
@@ -279,7 +283,7 @@ rocDecStatus D3D12Interop::CreateStagingInfrastructure(uint32_t num_surfaces) {
                 " Format=" + ROCDEC_TOSTR(desc.Format) +
                 " " + ROCDEC_TOSTR(desc.Width) + "x" + ROCDEC_TOSTR(desc.Height) +
                 " Layout=" + ROCDEC_STR(layout_str) +
-                " Flags=0x" + ([](UINT f) { std::ostringstream o; o << std::hex << f; return o.str(); })(desc.Flags) +
+                " Flags=0x" + ToHex(static_cast<uint32_t>(desc.Flags)) +
                 " AllocSize=" + ROCDEC_TOSTR(alloc_info.SizeInBytes) +
                 " Alignment=" + ROCDEC_TOSTR(alloc_info.Alignment));
     }
@@ -317,7 +321,7 @@ rocDecStatus D3D12Interop::CreateStagingInfrastructure(uint32_t num_surfaces) {
                 __uuidof(ID3D12Resource), reinterpret_cast<void**>(&d3d12_staging_buffers_[i]));
             if (FAILED(hr)) {
                 CriticalLog(g_rocdec_logger, "Failed to create staging buffer " + ROCDEC_TOSTR(i) +
-                            ", HRESULT=0x" + ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(hr));
+                            ", HRESULT=0x" + ToHex(hr));
                 FunctionExitLog(g_rocdec_logger);
                 return ROCDEC_RUNTIME_ERROR;
             }
@@ -336,12 +340,17 @@ rocDecStatus D3D12Interop::CreateStagingInfrastructure(uint32_t num_surfaces) {
         if (d3d12_copy_queue_ == nullptr) {
             D3D12_COMMAND_QUEUE_DESC qd = {};
             qd.Type = D3D12_COMMAND_LIST_TYPE_COPY;
-            d3d12_device_->CreateCommandQueue(&qd, __uuidof(ID3D12CommandQueue), reinterpret_cast<void**>(&d3d12_copy_queue_));
-            d3d12_device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY, __uuidof(ID3D12CommandAllocator), reinterpret_cast<void**>(&d3d12_cmd_allocator_));
-            d3d12_device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COPY, d3d12_cmd_allocator_, nullptr, __uuidof(ID3D12GraphicsCommandList), reinterpret_cast<void**>(&d3d12_cmd_list_));
-            d3d12_cmd_list_->Close();
-            d3d12_device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), reinterpret_cast<void**>(&d3d12_fence_));
+            CHECK_D3D12(d3d12_device_->CreateCommandQueue(&qd, __uuidof(ID3D12CommandQueue), reinterpret_cast<void**>(&d3d12_copy_queue_)));
+            CHECK_D3D12(d3d12_device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY, __uuidof(ID3D12CommandAllocator), reinterpret_cast<void**>(&d3d12_cmd_allocator_)));
+            CHECK_D3D12(d3d12_device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COPY, d3d12_cmd_allocator_, nullptr, __uuidof(ID3D12GraphicsCommandList), reinterpret_cast<void**>(&d3d12_cmd_list_)));
+            CHECK_D3D12(d3d12_cmd_list_->Close());
+            CHECK_D3D12(d3d12_device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), reinterpret_cast<void**>(&d3d12_fence_)));
             d3d12_fence_event_ = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+            if (d3d12_fence_event_ == nullptr) {
+                CriticalLog(g_rocdec_logger, "CreateEvent for D3D12 fence failed, GetLastError=" + ROCDEC_TOSTR(GetLastError()));
+                FunctionExitLog(g_rocdec_logger);
+                return ROCDEC_RUNTIME_ERROR;
+            }
             d3d12_fence_value_ = 0;
         }
         InfoLog(g_rocdec_logger, "Created D3D12 staging buffers (" + ROCDEC_TOSTR(staging_size) + " bytes each) for tiled->linear copy");
@@ -411,13 +420,7 @@ rocDecStatus D3D12Interop::CopyToStagingBuffer(int pic_idx) {
 
     // Wait for copy to complete.
     d3d12_fence_value_++;
-    HRESULT signal_hr = d3d12_copy_queue_->Signal(d3d12_fence_, d3d12_fence_value_);
-    if (FAILED(signal_hr)) {
-        CriticalLog(g_rocdec_logger, "ID3D12CommandQueue::Signal failed, HRESULT=0x" +
-                    ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(signal_hr));
-        FunctionExitLog(g_rocdec_logger);
-        return ROCDEC_RUNTIME_ERROR;
-    }
+    CHECK_D3D12(d3d12_copy_queue_->Signal(d3d12_fence_, d3d12_fence_value_));
     uint64_t completed = d3d12_fence_->GetCompletedValue();
     // On device removal (TDR/hang), GetCompletedValue() returns UINT64_MAX, which would
     // otherwise satisfy the completion check and let the copy be treated as done -- returning
@@ -425,7 +428,7 @@ rocDecStatus D3D12Interop::CopyToStagingBuffer(int pic_idx) {
     // and a finite-timeout wait are deferred; see follow-up.)
     if (completed == UINT64_MAX) {
         CriticalLog(g_rocdec_logger, "D3D12 device removed during staging copy, reason HRESULT=0x" +
-                    ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(d3d12_device_->GetDeviceRemovedReason()));
+                    ToHex(d3d12_device_->GetDeviceRemovedReason()));
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_RUNTIME_ERROR;
     }
@@ -444,13 +447,7 @@ rocDecStatus D3D12Interop::ExportStagingBufferHandle(int pic_idx, HANDLE &nt_han
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
     }
-    HRESULT hr = d3d12_device_->CreateSharedHandle(d3d12_staging_buffers_[pic_idx], nullptr, GENERIC_ALL, nullptr, &nt_handle);
-    if (FAILED(hr)) {
-        CriticalLog(g_rocdec_logger, "CreateSharedHandle for staging buffer failed, HRESULT=0x" +
-                    ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(hr));
-        FunctionExitLog(g_rocdec_logger);
-        return ROCDEC_RUNTIME_ERROR;
-    }
+    CHECK_D3D12(d3d12_device_->CreateSharedHandle(d3d12_staging_buffers_[pic_idx], nullptr, GENERIC_ALL, nullptr, &nt_handle));
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
