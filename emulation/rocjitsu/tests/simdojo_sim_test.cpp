@@ -1690,3 +1690,339 @@ TEST(ClockedEdgeTest, AClockWithNoRepresentableEdgeLeftStops) {
   EXPECT_EQ(rig.recorder->edges.back(), TICK_MAX - 1000);
   EXPECT_FALSE(rig.recorder->running());
 }
+
+// ============================================================================
+// Bounded, resumable execution
+// ============================================================================
+
+namespace {
+
+/// @brief A component that records the ticks its event actually fired at.
+class TickRecorder : public Component {
+public:
+  TickRecorder() : Component("tick_recorder") {}
+
+  /// @brief Schedule this component's one event at @p tick.
+  void ask(Tick tick) { this->schedule_event(&event_, tick); }
+
+  Event event_{this, EventType::TIMER_CALLBACK,
+               [this](Tick now, Message *) { fired.push_back(now); }};
+  std::vector<Tick> fired;
+};
+
+/// @brief An engine with one TickRecorder under a bare root.
+class RecorderRig {
+public:
+  explicit RecorderRig(SimulationEngine::Config config = {}) : engine(config) {
+    auto root = std::make_unique<CompositeComponent>("root");
+    recorder = static_cast<TickRecorder *>(root->add_child(std::make_unique<TickRecorder>()));
+    engine.topology().set_root(std::move(root));
+    engine.create();
+  }
+
+  SimulationEngine engine;
+  TickRecorder *recorder = nullptr;
+};
+
+} // namespace
+
+TEST(BoundedRunTest, DrainsTheQueueAndReportsTheTickItReached) {
+  RecorderRig rig;
+  rig.recorder->ask(4000);
+
+  EXPECT_EQ(rig.engine.run_until_idle(), 4000u);
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{4000}));
+  EXPECT_EQ(rig.engine.events_processed(), 1u);
+}
+
+TEST(BoundedRunTest, AnEmptyQueueLeavesTheTickWhereItWas) {
+  RecorderRig rig;
+  rig.recorder->ask(4000);
+  EXPECT_EQ(rig.engine.run_until_idle(), 4000u);
+
+  // Quiescence is an empty queue, not an end of the simulation: a second call
+  // with nothing to do must be a no-op rather than a rewind.
+  EXPECT_EQ(rig.engine.run_until_idle(), 4000u);
+  EXPECT_EQ(rig.engine.events_processed(), 1u);
+}
+
+TEST(BoundedRunTest, StopsOnThePredicateAndResumes) {
+  RecorderRig rig;
+  bool stop = false;
+  rig.recorder->event_.set_handler([&](Tick now, Message *) {
+    rig.recorder->fired.push_back(now);
+    stop = true;
+  });
+
+  rig.recorder->ask(1000);
+  rig.recorder->ask(2000);
+  EXPECT_EQ(rig.engine.run_bounded(stop), 1000u);
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{1000}));
+
+  // Resumable: the engine was not shut down, and the event the predicate cut
+  // the loop short of is still queued.
+  stop = false;
+  EXPECT_EQ(rig.engine.run_bounded(stop), 2000u);
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{1000, 2000}));
+}
+
+TEST(BoundedRunTest, ASecondEngineRunsNestedInsideTheFirstsHandler) {
+  // The arrangement a timing model uses: a functional engine executing an
+  // instruction, and a second engine driven forward to answer what that
+  // instruction cost. Each keeps its own clock; neither can see the other's
+  // queue.
+  RecorderRig inner;
+  RecorderRig outer;
+
+  Tick inner_reached = 0;
+  outer.recorder->event_.set_handler([&](Tick, Message *) {
+    inner.recorder->ask(7000);
+    inner_reached = inner.engine.run_until_idle();
+  });
+
+  outer.recorder->ask(250'000);
+  EXPECT_EQ(outer.engine.run_until_idle(), 250'000u);
+
+  EXPECT_EQ(inner_reached, 7000u);
+  EXPECT_EQ(inner.engine.context(0).current_tick(), 7000u);
+  // The outer engine's clock is untouched by the nested run.
+  EXPECT_EQ(outer.engine.context(0).current_tick(), 250'000u);
+}
+
+TEST(BoundedRunTest, ReenteringTheSameEngineIsRefused) {
+  // Re-entry would have the inner loop popping from the very queue the outer
+  // process_event() frame is iterating. A throw, not an assert: a release
+  // build would otherwise corrupt the run in silence.
+  RecorderRig rig;
+  int refusals = 0;
+  ExitReason nested_run = ExitReason::COMPLETED;
+  rig.recorder->event_.set_handler([&](Tick, Message *) {
+    // Every entry point, not just the one that opened the loop: all three
+    // drive the same queue, so all three are the same defect.
+    for (int attempt = 0; attempt < 2; ++attempt) {
+      try {
+        if (attempt == 0)
+          rig.engine.run_until_idle();
+        else
+          rig.engine.step();
+      } catch (const std::logic_error &) {
+        ++refusals;
+      }
+    }
+    // run() reports the refusal rather than throwing: it may be on a
+    // background thread whose top-level lambda has no catch, where an escaping
+    // exception would call std::terminate.
+    nested_run = rig.engine.run().reason;
+  });
+
+  rig.recorder->ask(1000);
+  rig.engine.run_until_idle();
+  EXPECT_EQ(refusals, 2);
+  EXPECT_EQ(nested_run, ExitReason::INTERRUPTED);
+
+  // And the refusals left the engine usable.
+  rig.recorder->event_.set_handler(
+      [&](Tick now, Message *) { rig.recorder->fired.push_back(now); });
+  rig.recorder->ask(2000);
+  EXPECT_EQ(rig.engine.run_until_idle(), 2000u);
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{2000}));
+}
+
+TEST(BoundedRunTest, AMultiPartitionEngineIsRefused) {
+  // Popping partition 0's queue while its own worker thread owns it is a data
+  // race, so this is checked rather than asserted: the builds this ships as
+  // have asserts compiled out.
+  SimulationEngine engine({.num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<TickRecorder>());
+  root->add_child(std::make_unique<TickRecorder>());
+  engine.topology().set_root(std::move(root));
+  engine.topology().partition_balanced(2);
+  engine.create();
+
+  bool never = false;
+  EXPECT_THROW(engine.run_bounded(never), std::invalid_argument);
+}
+
+TEST(BoundedRunTest, AnAsyncEventPostedByAHandlerIsSeenBeforeIdle) {
+  // The queue emptying is not quiescence on its own: a handler can post an
+  // async event -- a doorbell, a compute unit's deferred work -- and returning
+  // "idle" with one pending would have the caller resume later and run it at a
+  // tick the engine has long passed.
+  RecorderRig rig;
+  Event follow_up{rig.recorder, EventType::TIMER_CALLBACK,
+                  [&](Tick now, Message *) { rig.recorder->fired.push_back(now); }};
+  bool posted = false;
+  rig.recorder->event_.set_handler([&](Tick now, Message *) {
+    rig.recorder->fired.push_back(now);
+    if (!posted) {
+      posted = true;
+      rig.engine.schedule_event_async(&follow_up, now + 1000);
+    }
+  });
+
+  rig.recorder->ask(4000);
+  const Tick reached = rig.engine.run_until_idle();
+
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{4000, 5000}));
+  EXPECT_EQ(reached, 5000u);
+  EXPECT_EQ(rig.engine.global_time(), 5000u);
+}
+
+TEST(BoundedRunTest, TheGlobalClockKeepsUpWithTheRun) {
+  // request_exit() stamps its tick from the global clock and
+  // schedule_event_now() timestamps events from it, so a bounded run that
+  // published only on exit would hand both a tick from before the run.
+  RecorderRig rig;
+  std::vector<Tick> observed;
+  rig.recorder->event_.set_handler(
+      [&](Tick, Message *) { observed.push_back(rig.engine.global_time()); });
+
+  rig.recorder->ask(1000);
+  rig.recorder->ask(2000);
+  rig.recorder->ask(3000);
+  rig.engine.run_until_idle();
+
+  // Each handler sees the tick of the event before it, which is as current as
+  // a value published after processing can be.
+  EXPECT_EQ(observed, (std::vector<Tick>{0, 1000, 2000}));
+  EXPECT_EQ(rig.engine.global_time(), 3000u);
+}
+
+TEST(BoundedRunTest, MaxTicksEndsABoundedRunAndIsVisible) {
+  // A drive loop that waits on its own predicate has to notice the engine
+  // ending underneath it, or it spins forever.
+  RecorderRig rig({.max_ticks = 1500});
+  rig.recorder->ask(1000);
+  rig.recorder->ask(2000);
+
+  bool never = false;
+  EXPECT_EQ(rig.engine.run_bounded(never), 1500u);
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{1000}));
+  EXPECT_TRUE(rig.engine.is_done());
+  EXPECT_EQ(rig.engine.last_exit().message, "max ticks reached");
+
+  // And it stays done: a second call runs nothing, which is why is_done() has
+  // to be checkable.
+  EXPECT_EQ(rig.engine.run_bounded(never), 1500u);
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{1000}));
+}
+
+TEST(BoundedRunTest, APredicateAlreadyTrueOnEntryRunsNothing) {
+  RecorderRig rig;
+  rig.recorder->ask(1000);
+
+  bool stop = true;
+  EXPECT_EQ(rig.engine.run_bounded(stop), 0u);
+  EXPECT_TRUE(rig.recorder->fired.empty());
+  EXPECT_EQ(rig.engine.events_processed(), 0u);
+}
+
+namespace {
+
+/// @brief A component that counts how many times it was started.
+class StartupCounter : public Component {
+public:
+  StartupCounter() : Component("startup_counter") {}
+  void startup() override { ++startups; }
+  uint32_t startups = 0;
+};
+
+/// @brief Count the startups a given drive order produces.
+uint32_t startups_for(const std::function<void(SimulationEngine &)> &drive) {
+  SimulationEngine engine({});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *counter =
+      static_cast<StartupCounter *>(root->add_child(std::make_unique<StartupCounter>()));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+  drive(engine);
+  return counter->startups;
+}
+
+} // namespace
+
+TEST(BoundedRunTest, StartupHappensOnceHoweverTheEngineIsDriven) {
+  // Three entry points start the engine lazily. Whichever gets there first
+  // must be the only one that does: starting a second time re-schedules every
+  // component's first event and re-registers every primary, on top of state
+  // the first attempt left live.
+  //
+  // run() clears its "executing" flag on return, so a lazy startup keyed on
+  // that flag rather than on a separate one starts everything twice for the
+  // second order below.
+  EXPECT_EQ(startups_for([](SimulationEngine &e) {
+              e.run_until_idle();
+              e.run();
+            }),
+            1u);
+  EXPECT_EQ(startups_for([](SimulationEngine &e) {
+              e.run();
+              e.run_until_idle();
+            }),
+            1u);
+  EXPECT_EQ(startups_for([](SimulationEngine &e) {
+              e.step();
+              e.run_until_idle();
+              e.run();
+            }),
+            1u);
+}
+
+TEST(BoundedRunTest, OnlyHandlersAreCounted) {
+  // The count is what a model uses to assert that an idle component costs
+  // nothing, so an entry with no handler must not inflate it.
+  RecorderRig rig;
+  Event silent{rig.recorder, EventType::TIMER_CALLBACK};
+  rig.engine.schedule_event(&silent, 500);
+  rig.recorder->ask(1000);
+
+  rig.engine.run_until_idle();
+
+  EXPECT_EQ(rig.engine.events_processed(), 1u);
+}
+
+TEST(BoundedRunTest, AThrowingHandlerLeavesTheEngineRunnable) {
+  RecorderRig rig;
+  rig.recorder->event_.set_handler([](Tick, Message *) { throw std::runtime_error("boom"); });
+
+  rig.recorder->ask(1000);
+  EXPECT_THROW(rig.engine.run_until_idle(), std::runtime_error);
+
+  rig.recorder->event_.set_handler(
+      [&](Tick now, Message *) { rig.recorder->fired.push_back(now); });
+  rig.recorder->ask(2000);
+  EXPECT_EQ(rig.engine.run_until_idle(), 2000u);
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{2000}));
+}
+
+TEST(BoundedRunTest, StopsWhenAComponentRequestsExit) {
+  RecorderRig rig;
+  rig.recorder->event_.set_handler([&](Tick now, Message *) {
+    rig.recorder->fired.push_back(now);
+    rig.engine.request_exit("done here");
+  });
+
+  rig.recorder->ask(1000);
+  rig.recorder->ask(2000);
+  EXPECT_EQ(rig.engine.run_until_idle(), 1000u);
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{1000}));
+}
+
+TEST(BoundedRunTest, StepAndBoundedRunShareOneLazyStartup) {
+  // Both start the engine on their first call. Mixing them must not start it
+  // twice, which would double-schedule every component's first event.
+  const ClockDomain domain("ghz", 1'000'000'000ULL);
+  SimulationEngine engine({});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *recorder =
+      static_cast<EdgeRecorder *>(root->add_child(std::make_unique<EdgeRecorder>(domain, 4)));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  engine.step();
+  EXPECT_EQ(recorder->edges, (std::vector<Tick>{1000}));
+  engine.run_until_idle();
+  EXPECT_EQ(recorder->edges, (std::vector<Tick>{1000, 2000, 3000, 4000}));
+  EXPECT_EQ(engine.events_processed(), 4u);
+}
