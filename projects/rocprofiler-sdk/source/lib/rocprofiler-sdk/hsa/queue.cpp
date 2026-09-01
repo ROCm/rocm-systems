@@ -49,6 +49,8 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/hash.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -118,7 +120,7 @@ agent_replay_mutex(rocprofiler_agent_id_t agent_id)
 
     return locks->wlock([](lock_map_t& _map, auto _id) -> std::shared_mutex& { return _map[_id]; },
                         agent_id);
-}```
+}
 
 template <typename TryDrainFn>
 void
@@ -461,10 +463,10 @@ WriteInterceptor(const void* packets,
         else if(pkt_count != 1)
         {
             LOG_FIRST_N(WARNING, 1) << fmt::format(
-                    "kernel replay: only single-packet dispatch submissions are replayed. A "
-                    "submission of {} packets ({} dispatches) ran once without replay",
-                    pkt_count,
-                    num_dispatch_packets);
+                "kernel replay: only single-packet dispatch submissions are replayed. A "
+                "submission of {} packets ({} dispatches) ran once without replay",
+                pkt_count,
+                num_dispatch_packets);
         }
     }
 
@@ -527,7 +529,7 @@ WriteInterceptor(const void* packets,
         }
     }};
 
-    using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
+    using packet_writer_fn_t = std::function<void(packet_vector_t&&)>;
 
     auto process_packet_batch = [&queue, &corr_id, tracing_data_v, has_kernel_replay](
                                     const rocprofiler_packet* _packets,
@@ -921,8 +923,9 @@ WriteInterceptor(const void* packets,
         const auto ancestor_corr_id = corr_id->ancestor;
         const auto dispatch_pkt     = packets_arr[0];
 
-        // Reserve the dispatch id before CONFIG so pass_count_cb and every CONFIG/PASS callback see
-        // the same id the replay's dispatch records will carry (make_dispatch_info leaves it 0).
+        // Reserve the dispatch id before CONFIG so replay_pass_count and every CONFIG/PASS
+        // callback see the same id the replay's dispatch records will carry (make_dispatch_info
+        // leaves it 0).
         // Every submit below passes it as reserved_dispatch_id, so the counter is bumped once.
         replay_dispatch_id     = ++sequence_counter;
         const auto replay_plan = kernel_replay::execute_config_phase_enter(
@@ -1077,7 +1080,8 @@ WriteInterceptor(const void* packets,
             }
 
             // Clean up our private signals (never the app's completion signal).
-            if(drain_signal != null_hsa_signal) get_core_table()->hsa_signal_destroy_fn(drain_signal);
+            if(drain_signal != null_hsa_signal)
+                get_core_table()->hsa_signal_destroy_fn(drain_signal);
             return;
         }
     }
