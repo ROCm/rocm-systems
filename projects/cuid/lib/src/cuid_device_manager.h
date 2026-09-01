@@ -66,6 +66,12 @@ class CuidDeviceManager {
 
   amdcuid_status_t add_device(DevicePtr device);
 
+  // Share an externally owned cuid_hmac so build_cuid_index() derives CUIDs
+  // with the same in-memory key amdcuid_set_hash_key() updates.
+  // Not owned; caller must outlive this manager. Pass nullptr to fall back to
+  // deriving without an HMAC.
+  void set_hmac(cuid_hmac* hmac) { hmac_ = hmac; }
+
   /**
    * @brief Discover all devices currently present on the system.
    *
@@ -172,8 +178,8 @@ class CuidDeviceManager {
   CuidFile unpriv_cuid_file_{CuidUtilities::cuid_file(), false};
   CuidFile priv_cuid_file_{CuidUtilities::priv_cuid_file(), true};
 
-  // cuid hmac for deriving cuids
-  cuid_hmac manager_hmac = cuid_hmac();
+  // Externally owned hmac shared via set_hmac(); see that method's comment.
+  cuid_hmac* hmac_ = nullptr;
 };
 
 #endif  // CUID_DEVICE_MANAGER_H

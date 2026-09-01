@@ -191,7 +191,7 @@ amdcuid_status_t CuidDeviceManager::get_devices_on_system() {
 namespace {
 
 // helper function to convert CuidFileEntry to appropriate CuidDevice
-void convert_entry_to_device(CuidFileEntry& entry, DevicePtr& device) {
+static void _convert_entry_to_device(CuidFileEntry& entry, DevicePtr& device) {
   switch (entry.device_type) {
     case AMDCUID_DEVICE_TYPE_PLATFORM: {
       amdcuid_platform_info platform_info = {};
@@ -268,7 +268,7 @@ amdcuid_status_t CuidDeviceManager::get_devices_from_file_entries(CuidFile& cuid
   devices_.clear();
   for (const auto& entry : cuid_file.get_entries()) {
     DevicePtr device = nullptr;
-    convert_entry_to_device(const_cast<CuidFileEntry&>(entry), device);
+    _convert_entry_to_device(const_cast<CuidFileEntry&>(entry), device);
     if (device) {
       devices_.push_back(device);
     }
@@ -322,7 +322,7 @@ amdcuid_status_t CuidDeviceManager::get_device_from_file_by_id(amdcuid_id_t& der
   }
 
   // Create device based on the found entry
-  convert_entry_to_device(entry, device);
+  _convert_entry_to_device(entry, device);
   if (device) {
     add_device(device);
   }
@@ -356,7 +356,7 @@ amdcuid_status_t CuidDeviceManager::get_device_from_file_by_dev_path(const std::
   }
 
   // Create device based on the found entry
-  convert_entry_to_device(entry, device);
+  _convert_entry_to_device(entry, device);
   if (device) {
     add_device(device);
   }
@@ -390,7 +390,7 @@ amdcuid_status_t CuidDeviceManager::get_device_from_file_by_bdf(const std::strin
   }
 
   // Create device based on the found entry
-  convert_entry_to_device(entry, device);
+  _convert_entry_to_device(entry, device);
   if (device) {
     add_device(device);
   }
@@ -438,7 +438,7 @@ amdcuid_status_t CuidDeviceManager::discover_devices() {
   if (geteuid() == 0) {
     status = get_devices_from_file_entries(priv_cuid_file_);
     // if there are no devices found, search the system for devices
-    if (devices_.empty() || status != AMDCUID_STATUS_SUCCESS) {
+    if (devices().empty() || status != AMDCUID_STATUS_SUCCESS) {
       status = get_devices_on_system();
       if (status != AMDCUID_STATUS_SUCCESS) {
         return status;
@@ -448,7 +448,7 @@ amdcuid_status_t CuidDeviceManager::discover_devices() {
     }
   } else {
     status = get_devices_from_file_entries(unpriv_cuid_file_);
-    if (status != AMDCUID_STATUS_SUCCESS || devices_.empty()) {
+    if (status != AMDCUID_STATUS_SUCCESS || devices().empty()) {
       // refresh to get devices from system using daemon or ioctl since none
       // found
       status = request_refresh();
@@ -466,7 +466,7 @@ amdcuid_status_t CuidDeviceManager::discover_devices() {
   }
 
   // if devices still empty, return error
-  if (devices_.empty()) {
+  if (devices().empty()) {
     return AMDCUID_STATUS_DEVICE_NOT_FOUND;
   }
 
@@ -491,7 +491,7 @@ CuidDeviceManager& CuidDeviceManager::instance() {
 void CuidDeviceManager::get_grouped_devices(
     std::map<amdcuid_device_type_t, std::vector<DevicePtr>>& grouped) {
   grouped.clear();
-  for (const auto& entry : devices_) {
+  for (const auto& entry : devices()) {
     grouped[entry->type()].push_back(entry);
   }
 }
@@ -502,8 +502,8 @@ void CuidDeviceManager::build_cuid_index() {
   cuid_index_.clear();
   for (const auto& device : devices_) {
     amdcuid_derived_id derived;
-    if (geteuid() == 0) {
-      if (device->get_derived_cuid(derived, &manager_hmac) == AMDCUID_STATUS_SUCCESS) {
+    if (geteuid() == 0 && hmac_ != nullptr) {
+      if (device->get_derived_cuid(derived, hmac_) == AMDCUID_STATUS_SUCCESS) {
         cuid_index_[derived.UUIDv8_representation] = device;
       }
     } else {

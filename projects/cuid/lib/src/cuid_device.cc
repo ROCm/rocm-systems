@@ -143,7 +143,8 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac*
   // if not found, generate derived CUID
   amdcuid_primary_id primary = {};
   if (get_primary_cuid(primary) != AMDCUID_STATUS_SUCCESS) {
-    primary = {};  // the temp bit below was read uninitialised
+    primary.raw_bits[14] =
+        0x20;  // ensure temporary bit is set so temp CUID is still generated on failure
   }
   // check the temporary bit in the primary CUID to determine whether to use the
   // real HMAC key or the temp key for derived CUID generation

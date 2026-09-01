@@ -29,8 +29,14 @@
 namespace {
 
 // Static instance for API
-CuidDeviceManager& mgr = CuidDeviceManager::instance();
 cuid_hmac global_hmac = cuid_hmac();
+CuidDeviceManager& mgr = CuidDeviceManager::instance();
+
+// Share global_hmac with mgr so build_cuid_index() derives CUIDs with the
+// same key amdcuid_set_hash_key() updates
+struct HmacWiring {
+  HmacWiring() { mgr.set_hmac(&global_hmac); }
+} hmac_wiring;
 
 }  // namespace
 

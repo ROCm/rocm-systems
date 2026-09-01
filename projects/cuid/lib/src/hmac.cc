@@ -194,6 +194,8 @@ amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t* data, size_t dat
     std::cerr << "HMAC context is not initialized" << std::endl;
     return AMDCUID_STATUS_HMAC_ERROR;
   }
+
+  std::lock_guard<std::mutex> lock(key_mutex_);
   if (!key) {
     std::cerr << "No HMAC key is set" << std::endl;
     return AMDCUID_STATUS_KEY_ERROR;
@@ -224,6 +226,7 @@ amdcuid_status_t cuid_hmac::set_hmac_algorithm(const char* digest_name) {
 amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t key_data[key_length]) {
   if (!key_data) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
+  std::lock_guard<std::mutex> lock(key_mutex_);
   if (key) {
     rocm::sha2::secure_zero(key, key_len);
     delete[] key;
@@ -247,9 +250,8 @@ amdcuid_status_t cuid_hmac::store_key(const uint8_t key_data[key_length]) {
     return AMDCUID_STATUS_KEY_ERROR;
   }
 
-  const std::string tmp_path = key_file_path + ".new";
-
 #if defined(_WIN32)
+  const std::string tmp_path = key_file_path + ".new";
   {
     std::ofstream tmp(tmp_path, std::ios::out | std::ios::binary | std::ios::trunc);
     if (!tmp) return AMDCUID_STATUS_KEY_ERROR;
@@ -268,16 +270,18 @@ amdcuid_status_t cuid_hmac::store_key(const uint8_t key_data[key_length]) {
   }
   return AMDCUID_STATUS_SUCCESS;
 #else
-  // O_EXCL so we never write into a pre-created file; 0600 from creation.
-  int fd = open(tmp_path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, S_IRUSR | S_IWUSR);
-  if (fd < 0 && errno == EEXIST) {
-    // Stale temporary from an interrupted run; it is ours to reclaim.
-    if (unlink(tmp_path.c_str()) != 0) return AMDCUID_STATUS_KEY_ERROR;
-    fd = open(tmp_path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, S_IRUSR | S_IWUSR);
-  }
+  // Unique per-call name (mkstemp) so concurrent callers can never collide on
+  // a shared ".new" path; fchmod enforces 0600 regardless of libc/umask.
+  std::string tmp_path = key_file_path + ".XXXXXX";
+  int fd = mkstemp(&tmp_path[0]);
   if (fd < 0) {
     return (errno == EACCES || errno == EPERM) ? AMDCUID_STATUS_PERMISSION_DENIED
                                                : AMDCUID_STATUS_KEY_ERROR;
+  }
+  if (fchmod(fd, S_IRUSR | S_IWUSR) != 0 || fcntl(fd, F_SETFD, FD_CLOEXEC) != 0) {
+    close(fd);
+    unlink(tmp_path.c_str());
+    return AMDCUID_STATUS_KEY_ERROR;
   }
 
   auto fail = [&]() {
