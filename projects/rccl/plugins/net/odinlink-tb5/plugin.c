@@ -43,10 +43,16 @@
 #define ODL_HANDLE_MAGIC       0x4F444C00u  /* 'O','D','L',0 */
 #define ODL_HANDLE_VERSION     1
 #define ODL_WAIT_PEER_MS       10000
-/* Bound unconsumed RX data without adding a round trip to small messages. */
+/*
+ * Windowed ACK on the reverse of the data stream. The 1-byte 0xA5 ACK used
+ * to be sent to recvComm->dst_id, but 2-node (one USB4 cable, nports==1)
+ * skipped the connect handshake and left dst_id=0, so the sender blocked
+ * in wait_rx forever. Handshake now always carries the sender stream id;
+ * ACK is a 4-byte magic on that stream so 2-node and 4-node share one path.
+ */
 #define ODL_ACK_MIN_MESSAGE    (64 * 1024)
 #define ODL_ACK_WINDOW_BYTES   (4 * 1024 * 1024)
-#define ODL_ACK_VALUE          0xA5
+#define ODL_ACK_HDR           0x4F444C41u  /* 'O','D','L','A' */
 /* Stay below both the vendored and protocol-v2 4096-frame message limits. */
 #define ODL_WIRE_CHUNK_BYTES   (8 * 1024 * 1024)
 #define ODL_FORCE_DEV_ENV      "ODL_TB5_FORCE_DEV_INDEX"
@@ -142,6 +148,8 @@ struct odl_handle {
 struct odl_connect_msg {
 	uint32_t magic;
 	uint32_t version;
+	uint8_t  src_stream; /* sender local stream; ACK reverse path */
+	uint8_t  pad[3];
 };
 
 struct odl_comm;
@@ -176,6 +184,7 @@ struct odl_comm {
 	uint8_t         dst_id;       /* peer stream id for data or ACKs */
 	bool            is_send;
 	bool            stream_owned; /* true => closeXxx must close stream */
+	uint8_t         peer_stream; /* last observed peer stream (ACK dest) */
 
 	pthread_t       worker;
 	pthread_mutex_t mu;
@@ -523,30 +532,42 @@ static int stream_send_payload(struct odl_comm *c, const void *data,
 	return 0;
 }
 
-static int stream_recv_payload(struct odl_comm *c, void *data, uint32_t len)
+static int stream_recv_exact(struct odl_comm *c, void *data, uint32_t len,
+			      uint8_t *src_id)
 {
 	uint32_t recvd = 0;
+	uint8_t last_src = 0;
 
 	while (recvd < len) {
-		uint32_t chunk = len - recvd;
+		uint32_t want = len - recvd;
 		uint32_t actual = 0;
+		uint8_t src = 0;
 		int ret;
 
-		if (chunk > ODL_WIRE_CHUNK_BYTES)
-			chunk = ODL_WIRE_CHUNK_BYTES;
-		ret = stream_recv_timed(c, (uint8_t *)data + recvd, chunk,
-					NULL, &actual);
+		if (want > ODL_WIRE_CHUNK_BYTES)
+			want = ODL_WIRE_CHUNK_BYTES;
+		ret = stream_recv_timed(c, (uint8_t *)data + recvd, want,
+					 &src, &actual);
 		if (ret != 0)
 			return ret;
-		if (actual != chunk) {
+		if (actual == 0 || actual > want) {
 			fprintf(stderr,
 				"[odl_tb5] payload boundary mismatch sid=%u expected=%u actual=%u\n",
-				c->stream_id, chunk, actual);
+				c->stream_id, want, actual);
 			return -EBADMSG;
 		}
 		recvd += actual;
+		if (src)
+			last_src = src;
 	}
+	if (src_id && last_src)
+		*src_id = last_src;
 	return 0;
+}
+
+static int stream_recv_payload(struct odl_comm *c, void *data, uint32_t len)
+{
+	return stream_recv_exact(c, data, len, NULL);
 }
 
 static int stream_drain_payload(struct odl_comm *c, uint32_t len)
@@ -555,20 +576,63 @@ static int stream_drain_payload(struct odl_comm *c, uint32_t len)
 	uint32_t drained = 0;
 
 	while (drained < len) {
-		uint32_t chunk = len - drained;
+		uint32_t remain = len - drained;
 		uint32_t copy_len, actual = 0;
 		int ret;
 
-		if (chunk > ODL_WIRE_CHUNK_BYTES)
-			chunk = ODL_WIRE_CHUNK_BYTES;
-		copy_len = chunk < sizeof(scratch) ? chunk : sizeof(scratch);
+		if (remain > ODL_WIRE_CHUNK_BYTES)
+			remain = ODL_WIRE_CHUNK_BYTES;
+		copy_len = remain < sizeof(scratch) ? remain : sizeof(scratch);
 		ret = stream_recv_timed(c, scratch, copy_len, NULL, &actual);
 		if (ret != 0)
 			return ret;
-		if (actual != copy_len)
+		if (actual == 0 || actual > copy_len)
 			return -EBADMSG;
-		drained += chunk;
+		drained += actual;
 	}
+	return 0;
+}
+
+static uint8_t ack_dst(struct odl_comm *c)
+{
+	if (c->peer_stream)
+		return c->peer_stream;
+	return c->dst_id;
+}
+
+static int stream_send_ack(struct odl_comm *c)
+{
+	uint32_t ack = ODL_ACK_HDR;
+	uint8_t dst = ack_dst(c);
+
+	if (dst == 0) {
+		fprintf(stderr,
+			"[odl_tb5] ACK skipped sid=%u: no peer stream\n",
+			c->stream_id);
+		return -EINVAL;
+	}
+	TRACE("TX ack sid=%u dst=%u", c->stream_id, dst);
+	return odl_tb5_stream_send(c->handle, c->stream_id, dst,
+				   &ack, sizeof(ack));
+}
+
+static int stream_recv_ack(struct odl_comm *c)
+{
+	uint32_t ack = 0;
+	uint32_t actual = 0;
+	int ret;
+
+	TRACE("RX ack_pre sid=%u", c->stream_id);
+	ret = stream_recv_timed(c, &ack, sizeof(ack), NULL, &actual);
+	if (ret != 0)
+		return ret;
+	if (actual != sizeof(ack) || ack != ODL_ACK_HDR) {
+		fprintf(stderr,
+			"[odl_tb5] invalid RX ack sid=%u actual=%u value=0x%x\n",
+			c->stream_id, actual, ack);
+		return -EBADMSG;
+	}
+	TRACE("RX ack_post sid=%u", c->stream_id);
 	return 0;
 }
 
@@ -628,20 +692,8 @@ static void *worker_fn(void *arg)
 				c->ack_bytes += (uint64_t)j.size;
 			if (ret == 0 &&
 			    c->ack_bytes >= ODL_ACK_WINDOW_BYTES) {
-				uint8_t ack = 0;
-				uint32_t actual = 0;
-
 				c->ack_bytes = 0;
-				ret = stream_recv_timed(c, &ack, sizeof(ack),
-							NULL, &actual);
-				if (ret == 0 &&
-				    (actual != sizeof(ack) ||
-				     ack != ODL_ACK_VALUE)) {
-					fprintf(stderr,
-						"[odl_tb5] invalid RX ack sid=%u actual=%u value=0x%02x\n",
-						c->stream_id, actual, ack);
-					ret = -EBADMSG;
-				}
+				ret = stream_recv_ack(c);
 			}
 			if (ret == 0) {
 				xferred = j.size;
@@ -656,13 +708,14 @@ static void *worker_fn(void *arg)
 				t0 = mono_ns();
 			TRACE("RX hdr_pre sid=%u jsize=%d",
 			      c->stream_id, j.size);
-			ret = stream_recv_timed(c, &hdr, sizeof(hdr), NULL,
-						&actual);
-			if (ret == 0 && actual != sizeof(hdr)) {
-				fprintf(stderr,
-					"[odl_tb5] header boundary mismatch sid=%u expected=%zu actual=%u\n",
-					c->stream_id, sizeof(hdr), actual);
-				ret = -EBADMSG;
+			{
+				uint8_t src = 0;
+
+				ret = stream_recv_exact(c, &hdr, sizeof(hdr),
+							 &src);
+				actual = ret == 0 ? (uint32_t)sizeof(hdr) : 0;
+				if (ret == 0 && src)
+					c->peer_stream = src;
 			}
 			if (g_profile) {
 				t1 = mono_ns();
@@ -709,14 +762,8 @@ static void *worker_fn(void *arg)
 				c->ack_bytes += hdr;
 			if (ret == 0 &&
 			    c->ack_bytes >= ODL_ACK_WINDOW_BYTES) {
-				uint8_t ack = ODL_ACK_VALUE;
-
 				c->ack_bytes = 0;
-				ret = odl_tb5_stream_send(c->handle,
-							  c->stream_id,
-							  c->dst_id,
-							  &ack,
-							  sizeof(ack));
+				ret = stream_send_ack(c);
 			}
 			if (ret == 0) {
 				xferred = (int)actual;
@@ -755,6 +802,7 @@ static struct odl_comm *comm_new(odl_tb5_t handle, int dev_id, uint8_t stream_id
 	c->dst_id = dst_id;
 	c->is_send = is_send;
 	c->stream_owned = stream_owned;
+	c->peer_stream = dst_id;
 	pthread_mutex_init(&c->mu, NULL);
 	pthread_cond_init(&c->cv, NULL);
 	if (pthread_create(&c->worker, NULL, worker_fn, c) != 0) {
@@ -912,7 +960,7 @@ static void *accept_probe_fn(void *arg)
 		if (!l->accepted) {
 			l->accepted = true;
 			l->accepted_port = idx;
-			l->accepted_src = src;
+			l->accepted_src = msg.src_stream ? msg.src_stream : src;
 			pthread_cond_broadcast(&l->cv);
 		}
 		pthread_mutex_unlock(&l->mu);
@@ -1069,32 +1117,29 @@ static ncclResult_t odl_accept(void *listenComm, void **recvComm)
 
 	if (l->nports <= 0)
 		return ncclInternalError;
-	if (l->nports == 1) {
-		l->accepted = true;
-		l->accepted_port = 0;
-	} else {
-		for (int i = 0; i < l->nports; i++) {
-			struct accept_probe_arg *arg = calloc(1, sizeof(*arg));
-			if (!arg)
-				return ncclSystemError;
-			arg->listen = l;
-			arg->idx = i;
-			if (pthread_create(&l->ports[i].probe_thread, NULL,
-					   accept_probe_fn, arg) != 0) {
-				free(arg);
-				return ncclSystemError;
-			}
-			l->ports[i].probe_started = true;
+	/* 2-node (nports==1) and 4-node mesh share the connect handshake so
+	 * recvComm->dst_id is the sender stream ACK must target. */
+	for (int i = 0; i < l->nports; i++) {
+		struct accept_probe_arg *arg = calloc(1, sizeof(*arg));
+		if (!arg)
+			return ncclSystemError;
+		arg->listen = l;
+		arg->idx = i;
+		if (pthread_create(&l->ports[i].probe_thread, NULL,
+				   accept_probe_fn, arg) != 0) {
+			free(arg);
+			return ncclSystemError;
 		}
-		pthread_mutex_lock(&l->mu);
-		while (!l->accepted && l->finished_probes < l->nports)
-			pthread_cond_wait(&l->cv, &l->mu);
-		pthread_mutex_unlock(&l->mu);
-		for (int i = 0; i < l->nports; i++) {
-			if (l->ports[i].probe_started) {
-				pthread_join(l->ports[i].probe_thread, NULL);
-				l->ports[i].probe_started = false;
-			}
+		l->ports[i].probe_started = true;
+	}
+	pthread_mutex_lock(&l->mu);
+	while (!l->accepted && l->finished_probes < l->nports)
+		pthread_cond_wait(&l->cv, &l->mu);
+	pthread_mutex_unlock(&l->mu);
+	for (int i = 0; i < l->nports; i++) {
+		if (l->ports[i].probe_started) {
+			pthread_join(l->ports[i].probe_thread, NULL);
+			l->ports[i].probe_started = false;
 		}
 	}
 
@@ -1178,10 +1223,13 @@ route_search_done:
 	TRACE("connect ok dev=%d local=%u dst=%u", selected_dev,
 	local_stream, dst_stream);
 
-	if (wire->nports > 1) {
+	/* Always handshake, including 2-node nports==1: accept() waits for
+	 * this so recvComm knows the sender stream for windowed ACKs. */
+	{
 		struct odl_connect_msg msg = {
 			.magic = ODL_CONNECT_MAGIC,
 			.version = ODL_HANDLE_VERSION,
+			.src_stream = local_stream,
 		};
 		int rc = odl_tb5_stream_send(handle, local_stream, dst_stream,
 					     &msg, sizeof(msg));
@@ -1191,6 +1239,8 @@ route_search_done:
 			device_release(selected_dev);
 			return ncclSystemError;
 		}
+		TRACE("connect handshake sent local=%u dst=%u",
+		      local_stream, dst_stream);
 	}
 
 	c = comm_new(handle, selected_dev, local_stream, dst_stream, true, true);

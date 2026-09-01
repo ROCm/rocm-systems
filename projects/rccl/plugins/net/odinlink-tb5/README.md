@@ -68,8 +68,8 @@ export NCCL_NET=OdinLink_TB5
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `ODL_TB5_VIRTUAL_SINGLE_DEV` | `1` | Present all TB5 ports as one virtual NIC and pick the route from the listen handle |
-| `ODL_TB5_FORCE_DEV_INDEX` | unset | Force a kernel device index (`/dev/odl_tb5_N`) |
+| `ODL_TB5_VIRTUAL_SINGLE_DEV` | `1` | Present all TB5 ports as one virtual NIC and pick the route from the listen handle. 2-node (one `/dev/odl_tb5_0`) and 4-node mesh share this path; connect always handshakes so windowed ACKs can reverse to the sender stream. |
+| `ODL_TB5_FORCE_DEV_INDEX` | unset | Force a kernel device index (`/dev/odl_tb5_N`). Optional; not required for 2-node. |
 | `ODL_TB5_RECV_TIMEOUT_MS` | `30000` | Receive wait timeout |
 | `ODL_TB5_TRACE` | off | Log plugin calls to stderr |
 | `ODL_TB5_PROFILE` | off | Print periodic TX/RX timing counters |
