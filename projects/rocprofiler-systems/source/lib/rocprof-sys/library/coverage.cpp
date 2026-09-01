@@ -10,7 +10,7 @@
 #include "library/thread_data.hpp"
 #include <cstdint>
 
-#include <spdlog/fmt/bundled/format.h>
+#include <spdlog/fmt/fmt.h>
 #include <timemory/backends/threading.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/utility/popen.hpp>
