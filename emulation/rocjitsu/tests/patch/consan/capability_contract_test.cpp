@@ -613,7 +613,6 @@ TEST(ConSanCapabilityContract, TargetProfileLookupIsTotalUniqueAndRejectsUnsuppo
     EXPECT_EQ(consan_target_profile(expected.target), &profile);
     EXPECT_EQ(consan_target_profile(expected.arch), &profile);
     EXPECT_EQ(consan_arch_for_target(expected.target), expected.arch);
-    EXPECT_TRUE(consan_is_capability_target(expected.target));
     EXPECT_TRUE(consan_is_capability_arch(expected.arch));
     EXPECT_EQ(consan_arch_is_cdna(expected.arch),
               expected.architecture_family == ConSanArchitectureFamily::Cdna);
@@ -635,7 +634,6 @@ TEST(ConSanCapabilityContract, TargetProfileLookupIsTotalUniqueAndRejectsUnsuppo
   for (rj_code_target_id_t target : unsupported_targets) {
     EXPECT_EQ(consan_target_profile(target), nullptr);
     EXPECT_EQ(consan_arch_for_target(target), ROCJITSU_CODE_ARCH_INVALID);
-    EXPECT_FALSE(consan_is_capability_target(target));
   }
   constexpr std::array unsupported_arches = {
       ROCJITSU_CODE_ARCH_INVALID,
@@ -650,43 +648,18 @@ TEST(ConSanCapabilityContract, TargetProfileLookupIsTotalUniqueAndRejectsUnsuppo
   }
 }
 
-TEST(ConSanCapabilityContract, KernelTargetProfileValidatesWaveSelectionAndAllocation) {
+TEST(ConSanCapabilityContract, TargetProfileOwnsWaveSupportAndAllocationFacts) {
   for (size_t index = 0; index < kExpectedTargetProfiles.size(); ++index) {
     const ExpectedTargetProfile &expected = kExpectedTargetProfiles[index];
     const ConSanTargetProfile &profile = kConSanTargetProfiles[index];
     SCOPED_TRACE(rj_code_target_name(expected.target));
 
-    EXPECT_EQ(consan_profile_supports_wave_size(profile, 32u), expected.supports_wave32);
-    EXPECT_TRUE(consan_profile_supports_wave_size(profile, 64u));
-    EXPECT_FALSE(consan_profile_supports_wave_size(profile, 0u));
-    EXPECT_FALSE(consan_profile_supports_wave_size(profile, 16u));
-    EXPECT_FALSE(consan_profile_supports_wave_size(profile, 128u));
-    EXPECT_EQ(consan_profile_vgpr_allocation_granularity(profile, 32u),
+    EXPECT_EQ(profile.supports_wave32, expected.supports_wave32);
+    EXPECT_TRUE(profile.supports_wave64);
+    EXPECT_EQ(profile.vgpr_allocation_granularity_wave32,
               expected.vgpr_allocation_granularity_wave32);
-    EXPECT_EQ(consan_profile_vgpr_allocation_granularity(profile, 64u),
+    EXPECT_EQ(profile.vgpr_allocation_granularity_wave64,
               expected.vgpr_allocation_granularity_wave64);
-    EXPECT_EQ(consan_profile_vgpr_allocation_granularity(profile, 16u), 0u);
-
-    const std::optional<ConSanKernelTargetProfile> wave64 =
-        consan_kernel_target_profile(profile, 64u);
-    ASSERT_TRUE(wave64);
-    EXPECT_EQ(wave64->target, &profile);
-    EXPECT_EQ(wave64->wave_size, 64u);
-    EXPECT_EQ(wave64->active_exec_mask_width_bits, 64u);
-    EXPECT_EQ(wave64->vgpr_allocation_granularity, expected.vgpr_allocation_granularity_wave64);
-
-    const std::optional<ConSanKernelTargetProfile> wave32 =
-        consan_kernel_target_profile(profile, 32u);
-    EXPECT_EQ(wave32.has_value(), expected.supports_wave32);
-    if (wave32) {
-      EXPECT_EQ(wave32->target, &profile);
-      EXPECT_EQ(wave32->wave_size, 32u);
-      EXPECT_EQ(wave32->active_exec_mask_width_bits, 32u);
-      EXPECT_EQ(wave32->vgpr_allocation_granularity, expected.vgpr_allocation_granularity_wave32);
-    }
-    EXPECT_FALSE(consan_kernel_target_profile(profile, 0u));
-    EXPECT_FALSE(consan_kernel_target_profile(profile, 16u));
-    EXPECT_FALSE(consan_kernel_target_profile(profile, 128u));
   }
 }
 
@@ -773,23 +746,16 @@ TEST(ConSanCapabilityContract, DerivedArchitecturePredicatesProjectOnlyTheirType
     EXPECT_EQ(consan_uses_gfx12_cdna_execution(expected.arch),
               expected.encoding_family == ConSanEncodingFamily::Gfx12 &&
                   expected.architecture_family == ConSanArchitectureFamily::Cdna);
-    EXPECT_EQ(consan_uses_gfx12_rdna_execution(expected.arch),
-              expected.encoding_family == ConSanEncodingFamily::Gfx12 &&
-                  expected.architecture_family == ConSanArchitectureFamily::Rdna);
     EXPECT_EQ(consan_uses_gfx11_or_gfx12_encoding(expected.arch),
               expected.encoding_family == ConSanEncodingFamily::Gfx11 ||
                   expected.encoding_family == ConSanEncodingFamily::Gfx12);
     EXPECT_EQ(consan_arch_has_s_call_i64(expected.arch),
               expected.direct_call_form == ConSanDirectCallForm::SCallI64);
-    EXPECT_EQ(consan_arch_has_s_call_b64(expected.arch),
-              expected.direct_call_form == ConSanDirectCallForm::SCallB64);
     EXPECT_EQ(consan_arch_uses_per_kernel_owner_translation(expected.arch),
               expected.code_transport == ConSanCodeTransportModel::PerKernelOwnerTranslation);
     EXPECT_EQ(consan_arch_has_cluster_facilities(expected.arch), expected.has_cluster_facilities);
     EXPECT_EQ(consan_arch_has_selectable_vgpr_bank(expected.arch),
               expected.has_selectable_vgpr_bank);
-    EXPECT_EQ(consan_arch_has_descriptor_partitioned_accumulators(expected.arch),
-              expected.accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned);
     EXPECT_EQ(consan_arch_uses_literal_dispatch_identity(expected.arch),
               expected.dispatch_identity == ConSanDispatchIdentitySource::CodeObjectLiteral);
   }
@@ -799,16 +765,13 @@ TEST(ConSanCapabilityContract, DerivedArchitecturePredicatesProjectOnlyTheirType
   EXPECT_FALSE(consan_uses_gfx11_encoding(unsupported));
   EXPECT_FALSE(consan_uses_gfx12_encoding(unsupported));
   EXPECT_FALSE(consan_uses_gfx12_cdna_execution(unsupported));
-  EXPECT_FALSE(consan_uses_gfx12_rdna_execution(unsupported));
   EXPECT_FALSE(consan_uses_gfx11_or_gfx12_encoding(unsupported));
   EXPECT_FALSE(consan_arch_is_cdna(unsupported));
   EXPECT_FALSE(consan_arch_is_rdna(unsupported));
   EXPECT_FALSE(consan_arch_has_s_call_i64(unsupported));
-  EXPECT_FALSE(consan_arch_has_s_call_b64(unsupported));
   EXPECT_FALSE(consan_arch_uses_per_kernel_owner_translation(unsupported));
   EXPECT_FALSE(consan_arch_has_cluster_facilities(unsupported));
   EXPECT_FALSE(consan_arch_has_selectable_vgpr_bank(unsupported));
-  EXPECT_FALSE(consan_arch_has_descriptor_partitioned_accumulators(unsupported));
   EXPECT_FALSE(consan_arch_uses_literal_dispatch_identity(unsupported));
 }
 

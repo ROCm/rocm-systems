@@ -1610,6 +1610,13 @@ _consan_assert_no_match(
     "common capability contract must aggregate gfx-named target profiles"
 )
 file(READ "${_capability_contract}" _capability_contract_contents)
+if(_capability_contract_contents MATCHES
+       "ConSanKernelTargetProfile|consan_kernel_target_profile|consan_profile_supports_wave_size|consan_profile_vgpr_allocation_granularity|consan_is_capability_target|consan_uses_gfx12_rdna_execution|consan_arch_has_s_call_b64|consan_arch_has_descriptor_partitioned_accumulators")
+    message(
+        FATAL_ERROR
+        "ConSan target contract regained an unused projection or test-only profile predicate"
+    )
+endif()
 foreach(_fragment IN LISTS _target_profile_fragments)
     if(NOT EXISTS "${_consan_dir}/${_fragment}")
         message(FATAL_ERROR "ConSan boundary check is missing ${_fragment}")

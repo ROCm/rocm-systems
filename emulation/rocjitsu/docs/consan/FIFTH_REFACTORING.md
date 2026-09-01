@@ -6190,3 +6190,58 @@ lines smaller than baseline, however, so Section 14.8 is still materially
 unsatisfied. Other broad placement and mutation transactions, both extension
 exercises, larger legacy harvesting, and the independent completion audit
 remain open. The goal therefore remains active.
+
+### 16.78 Convergence checkpoint 77: harvest the abandoned kernel-target facade
+
+The target-contract deep read found that `ConSanKernelTargetProfile` was not a
+production component. Its type and three wave-selection/allocation functions
+had no production consumer: the only caller was a unit test that exercised the
+projection itself. Descriptor-selected wave and allocation facts already flow
+through `ProgramInventory`, resource plans, descriptor helpers, and independent
+target validation. The advertised kernel-target view therefore duplicated an
+authority without participating in the transformation.
+
+Four other capability helpers had the same shape. The target-admission alias,
+GFX12-plus-RDNA predicate, S_CALL_B64 predicate, and descriptor-partitioned-
+accumulator predicate were referenced only by tests of those helpers. Their
+underlying facts already have one direct representation in
+`ConSanTargetProfile`, and no production component consumed the aliases.
+
+The unused kernel-target type, its constructor/projections, and all four test-
+only predicates are deleted. The existing capability-contract test inventory
+now checks the authoritative target-profile fields directly; its wave/allocation
+case is renamed to describe that actual owner. `DESIGN.md` and the completed
+reimplementation map no longer claim a nonexistent descriptor-profile layer.
+The architecture gate rejects all eight abandoned symbols so a second target-
+fact authority cannot return merely to satisfy a self-test.
+
+| Signal | Checkpoint 77 | Cumulative change | Slice change from checkpoint 76 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 105,190 | +214 | **-71** |
+| Nonblank production lines | 98,846 | **-238** | **-63** |
+| Production implementation lines | 91,098 | **-352** | **-47** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 168 / 52 | **-108 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 316 / 60 | +26 / +9 | 0 / 0 |
+| Abandoned kernel-target/test-only profile symbols | **0** | n/a | **-8** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild after changing the widely
+included capability header; all 16 capability-contract and architecture-
+boundary tests; and all 4,776 nonphysical tests over the five emulated targets
+at `-j16` in 202.48 seconds, including all 2,918 simulator tests. One test was
+renamed to match its unchanged authoritative subject; no test was removed,
+disabled, or replaced, and the inventory is unchanged. In accordance with the
+reduced physical-test cadence, no physical gfx1201 test was run for this slice.
+
+This checkpoint strengthens Sections 14.1, 14.2, 14.7, and 14.8. The target
+contract now describes only facts that production actually consumes, while
+descriptor-selected state stays with its real program/resource owners. The
+slice is purely deletion-driven and increases cumulative production shrinkage
+from 305 to 352 implementation lines. That is still not a material reduction
+for a 91,450-line baseline, so Section 14.8 remains open. The remaining broad
+placement and mutation transactions, the extension-exercise sufficiency audit,
+larger legacy harvesting, and the independent completion audit also remain
+open. The goal therefore remains active.

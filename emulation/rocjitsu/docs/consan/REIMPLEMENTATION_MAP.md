@@ -296,10 +296,11 @@ owner.
 1. `ConSanRequest`, `TransformPolicy`, `ConSanDebugOverrides`, and
    `MutationRequest` are immutable caller inputs. Production lowering accepts
    them separately; there is no inherited mutable options object.
-2. `ConSanTargetProfile` owns immutable code-object facts.
-   `ConSanKernelTargetProfile` grows into the validated descriptor/ABI view.
-   Target classifiers normalize raw instructions into inventory facts. Narrow
-   target operations lower semantic requests using RocJitsu builders.
+2. `ConSanTargetProfile` owns immutable target-wide facts. Descriptor-selected
+   facts remain in `ProgramInventory` and resource plans instead of being
+   copied into a parallel target-profile view. Target classifiers normalize raw
+   instructions into inventory facts. Narrow target operations lower semantic
+   requests using RocJitsu builders.
 3. `ProgramInventory` and one immutable synchronization graph own decoded
    program meaning and identity. Engine policy maps those facts to typed
    observation/evidence intents without liveness, registers, or encoders.

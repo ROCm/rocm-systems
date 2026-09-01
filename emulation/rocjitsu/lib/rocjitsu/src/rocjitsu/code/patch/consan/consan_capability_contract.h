@@ -315,8 +315,8 @@ enum class ConSanCapabilityDisposition : uint8_t {
 ///
 /// A profile is selected once from the code-object target and thereafter
 /// passed or queried as read-only data. Descriptor-selected facts such as wave
-/// size are validated and projected into `ConSanKernelTargetProfile`; they are
-/// never written back here. This separation makes architecture support a small
+/// size remain in the program inventory and resource plans; they are never
+/// written back here. This separation makes architecture support a small
 /// auditable table and prevents local lowerers from growing their own competing
 /// definitions of the same hardware facts.
 struct ConSanTargetProfile {
@@ -385,26 +385,6 @@ struct ConSanTargetProfile {
   ConSanScDenseRouteIdentity sc_dense_route_identity = ConSanScDenseRouteIdentity::None;
   /// Whether decoded atomic/fence ordering includes an explicit TH/SC field.
   bool requires_raw_memory_order_qualifier = false;
-};
-
-/// The validated, immutable target view for one kernel descriptor.
-///
-/// This record combines a pointer to the code object's `ConSanTargetProfile`
-/// with descriptor-selected wave size and the allocation consequences of that
-/// choice. Construction fails when the descriptor requests a wave size the
-/// target does not support, so downstream resource planning can consume this
-/// type without repeating wave-size admission logic. The `target` pointer
-/// refers to the static profile table and therefore outlives every derived
-/// kernel view.
-///
-/// The record remains intentionally narrow: decoded sites, liveness, selected
-/// scratch registers, and engine policy belong to later per-kernel stages and
-/// must not be added as mutable fields here.
-struct ConSanKernelTargetProfile {
-  const ConSanTargetProfile *target = nullptr;
-  uint8_t wave_size = 0;
-  uint8_t active_exec_mask_width_bits = 0;
-  uint8_t vgpr_allocation_granularity = 0;
 };
 
 [[nodiscard]] constexpr uint16_t consan_capability_form_bit(ConSanCapabilityForm form) {
@@ -612,10 +592,6 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
   return profile ? profile->arch : ROCJITSU_CODE_ARCH_INVALID;
 }
 
-[[nodiscard]] constexpr bool consan_is_capability_target(rj_code_target_id_t target) {
-  return consan_target_profile(target) != nullptr;
-}
-
 [[nodiscard]] constexpr bool consan_is_capability_arch(rj_code_arch_t arch) {
   return consan_target_profile(arch) != nullptr;
 }
@@ -644,33 +620,6 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
 consan_arch_supports_kernarg_preload_overflow_recovery(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile && profile->supports_kernarg_preload_overflow_recovery;
-}
-
-[[nodiscard]] constexpr bool consan_profile_supports_wave_size(const ConSanTargetProfile &profile,
-                                                               uint32_t wave_size) {
-  return (wave_size == 32u && profile.supports_wave32) ||
-         (wave_size == 64u && profile.supports_wave64);
-}
-
-[[nodiscard]] constexpr uint32_t
-consan_profile_vgpr_allocation_granularity(const ConSanTargetProfile &profile, uint32_t wave_size) {
-  if (!consan_profile_supports_wave_size(profile, wave_size))
-    return 0u;
-  return wave_size == 32u ? profile.vgpr_allocation_granularity_wave32
-                          : profile.vgpr_allocation_granularity_wave64;
-}
-
-[[nodiscard]] constexpr std::optional<ConSanKernelTargetProfile>
-consan_kernel_target_profile(const ConSanTargetProfile &profile, uint32_t wave_size) {
-  const uint32_t vgpr_granularity = consan_profile_vgpr_allocation_granularity(profile, wave_size);
-  if (vgpr_granularity == 0u)
-    return std::nullopt;
-  return ConSanKernelTargetProfile{
-      .target = &profile,
-      .wave_size = static_cast<uint8_t>(wave_size),
-      .active_exec_mask_width_bits = static_cast<uint8_t>(wave_size),
-      .vgpr_allocation_granularity = static_cast<uint8_t>(vgpr_granularity),
-  };
 }
 
 [[nodiscard]] constexpr bool
@@ -728,15 +677,6 @@ consan_normalize_address_free_private_size(rj_code_arch_t arch, uint32_t request
          profile->architecture_family == ConSanArchitectureFamily::Cdna;
 }
 
-/// Return whether a target combines GFX12 instruction encodings with RDNA
-/// execution facilities. This keeps encoding decisions distinct from CDNA's
-/// different preload, register-bank, and persistent-state contracts.
-[[nodiscard]] constexpr bool consan_uses_gfx12_rdna_execution(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && profile->encoding_family == ConSanEncodingFamily::Gfx12 &&
-         profile->architecture_family == ConSanArchitectureFamily::Rdna;
-}
-
 [[nodiscard]] constexpr bool consan_uses_gfx11_encoding(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile && profile->encoding_family == ConSanEncodingFamily::Gfx11;
@@ -751,11 +691,6 @@ consan_normalize_address_free_private_size(rj_code_arch_t arch, uint32_t request
 [[nodiscard]] constexpr bool consan_arch_has_s_call_i64(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile && profile->direct_call_form == ConSanDirectCallForm::SCallI64;
-}
-
-[[nodiscard]] constexpr bool consan_arch_has_s_call_b64(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && profile->direct_call_form == ConSanDirectCallForm::SCallB64;
 }
 
 /// Return whether post-instrumentation translation may independently relocate
@@ -781,12 +716,6 @@ consan_normalize_address_free_private_size(rj_code_arch_t arch, uint32_t request
 consan_arch_requires_aligned_flat_compare_swap_data_pair(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile && profile->flat_compare_swap_data_pair_alignment > 1u;
-}
-
-[[nodiscard]] constexpr bool
-consan_arch_has_descriptor_partitioned_accumulators(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && profile->accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned;
 }
 
 /// Some ConSan probes use the code-object dispatch identity literal instead of

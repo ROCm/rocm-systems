@@ -167,13 +167,13 @@ edge; transformation code receives typed values.
 facts for a supported target. It records product and encoding families, wave
 sizes, register and accumulator allocation rules, identity sources, wait and
 call forms, address and segment limits, branch reach, and available semantic
-forms. `ConSanKernelTargetProfile` adds descriptor-selected facts such as wave
-size without mutating the target-wide row.
+forms. Descriptor-selected facts remain in the program inventory and resource
+plans rather than being copied into a second target-profile type.
 
 The five rows live together in `kConSanTargetProfiles`. Lookup by target or
-architecture goes through `consan_target_profile`; per-kernel validation goes
-through `consan_kernel_target_profile`. Engine code must query the profile or a
-capability disposition rather than infer behavior from a `gfx*` name.
+architecture goes through `consan_target_profile`. Engine code must query the
+profile or a capability disposition rather than infer behavior from a `gfx*`
+name.
 
 ### Program inventory
 
