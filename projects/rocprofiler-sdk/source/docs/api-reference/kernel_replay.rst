@@ -154,7 +154,7 @@ There is no separate ``kernel_replay_service`` Doxygen group.
 See also
 --------
 
-* :ref:`using-kernel-replay` — configure, ``pass_count_cb``, local context
+* :ref:`using-kernel-replay` — configure, ``replay_pass_count``, local context
 * :ref:`using-kernel-replay-rocprofv3` — ``rocprofv3 --kernel-replay-beta-enabled``
 * :ref:`kernel-replay-callback-api` — API contract
 * :ref:`kernel-replay-concurrency` — isolation model
