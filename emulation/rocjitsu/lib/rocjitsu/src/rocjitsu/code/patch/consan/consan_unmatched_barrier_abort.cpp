@@ -28,30 +28,23 @@ struct UnmatchedBarrierWait {
 
 template <typename Container>
 void append_unmatched_barrier_waits(const Container &container, bool in_kernel,
-                                    const ConSanOptions &options,
-                                    const ConSanTransformArtifacts &result,
+                                    const ConSanOptions &options, const ProgramInventory &inventory,
                                     std::vector<UnmatchedBarrierWait> &waits) {
   if (!consan_container_selected(options, container.name))
     return;
+  const SynchronizationInventoryView synchronization = inventory.sync();
   for (const ConSanBarrierSite &site : container.barrier_sites) {
     if (site.operation != ConSanBarrierSite::Operation::Wait || site.size != sizeof(uint32_t) ||
         !site.barrier_id || site.operand_source != ConSanBarrierSite::OperandSource::Immediate)
       continue;
-    const ConSanSyncEvent *event = nullptr;
-    size_t event_count = 0;
-    for (const ConSanSyncEvent &candidate : result.program_inventory.sync().sync_events) {
-      if (candidate.kind != ConSanSyncEventKind::Barrier ||
-          candidate.operation != ConSanSyncOperation::BarrierWait ||
-          candidate.container_name != container.name || candidate.in_kernel != in_kernel ||
-          candidate.text_offset != site.text_offset || candidate.size != site.size)
-        continue;
-      event = &candidate;
-      ++event_count;
-    }
-    if (event_count != 1u || event == nullptr)
+    const ConSanSyncEvent *event = synchronization.find_unique_event(
+        ConSanSyncEventKind::Barrier, container.name, in_kernel, site.text_offset);
+    if (event == nullptr || event->operation != ConSanSyncOperation::BarrierWait ||
+        event->container_name != container.name || event->in_kernel != in_kernel ||
+        event->size != site.size)
       continue;
     const bool belongs_to_sequence = std::ranges::any_of(
-        result.program_inventory.sync().sync_sequences, [&](const ConSanSyncSequence &sequence) {
+        synchronization.sync_sequences, [&](const ConSanSyncSequence &sequence) {
           return sequence.kind == ConSanSyncSequenceKind::Barrier &&
                  sequence.member_event_identities.size() > 1u &&
                  std::ranges::find(sequence.member_event_identities, event->identity) !=
@@ -75,9 +68,9 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
     return;
   std::vector<UnmatchedBarrierWait> waits;
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    append_unmatched_barrier_waits(kernel, true, options, result, waits);
+    append_unmatched_barrier_waits(kernel, true, options, result.program_inventory, waits);
   for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    append_unmatched_barrier_waits(function, false, options, result, waits);
+    append_unmatched_barrier_waits(function, false, options, result.program_inventory, waits);
   if (waits.empty())
     return;
 

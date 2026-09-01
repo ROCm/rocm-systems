@@ -6,7 +6,6 @@
 // split, but it deliberately receives no definitions from another `.inc`.
 
 #include "rocjitsu/code/patch/consan/consan_final_validation.h"
-#include "rocjitsu/code/patch/consan/consan.h"
 
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/analysis/kernel_scope.h"
@@ -15,13 +14,11 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/major_image_ownership.h"
-#include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/consan_barrier_move_proof.h"
 #include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 #include "rocjitsu/code/patch/consan/consan_cfg.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
 #include "rocjitsu/code/patch/consan/consan_fault_selection.h"
-#include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_input_layout.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_lowering.h"

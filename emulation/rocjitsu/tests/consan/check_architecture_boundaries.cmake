@@ -285,11 +285,22 @@ foreach(_source IN ITEMS consan_final_validation.h consan_final_validation.cpp c
         "independent validation may not own lowering mutations"
     )
 endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_final_validation.cpp"
+    "code_object_patcher[.]h|consan_growth_policy[.]h"
+    "independent validation may not depend on candidate-byte mutation infrastructure"
+)
 file(READ "${_consan_dir}/consan_unmatched_barrier_abort.cpp" _unmatched_barrier_abort_owner)
 if(NOT _unmatched_barrier_abort_owner MATCHES "try_apply_unmatched_barrier_wait_abort" OR
    NOT _consan_build_graph MATCHES "consan_unmatched_barrier_abort[.]cpp")
     message(FATAL_ERROR "ConSan transform lost unmatched-barrier abort ownership")
 endif()
+_consan_assert_match_count_at_most(
+    "${_consan_dir}/consan_unmatched_barrier_abort.cpp"
+    "ConSanTransformArtifacts"
+    1
+    "unmatched-barrier discovery must consume narrow immutable inventory"
+)
 _consan_assert_no_match(
     "${_consan_dir}/consan_result.h.inc"
     "validate_consan_modified_elf"

@@ -7084,3 +7084,50 @@ boundary and does not strengthen Section 14.8. The next checkpoint must reap
 deletion or consolidation. Remaining broad lowering mutation surfaces, target
 and mode locality, material whole-refactoring shrinkage, and the independent
 completion audit remain open. The goal therefore remains active.
+
+### 16.95 Convergence checkpoint 94: reuse published synchronization lookup
+
+The first payoff from the unmatched-barrier component move deep-read its
+discovery loop against the immutable synchronization inventory contract. The
+mutation rescanned every synchronization event to reconstruct a unique
+container/kind/offset join already provided by
+`SynchronizationInventoryView::find_unique_event`. It also accepted the whole
+mutable transaction merely to inspect that inventory. Validation retained
+candidate-byte mutation headers after the operation itself had moved out.
+
+Unmatched-barrier discovery now accepts `ProgramInventory`, uses the published
+unique-event lookup, and retains explicit container, kernel/function, operation,
+and size checks so canonical alias fallback cannot broaden the selected site.
+Its paired-sequence check remains independent and unchanged. The validation
+translation unit drops its redundant `consan.h`, `CodeObjectPatcher`, and
+growth-policy includes. Boundary checks cap the mutation source at one broad
+transaction reference—the publication adapter—and forbid candidate-byte
+mutation infrastructure from returning to final validation.
+
+| Signal | Checkpoint 94 | Cumulative change | Slice change from checkpoint 93 |
+| --- | ---: | ---: | ---: |
+| Production files | 274 | +45 | 0 |
+| Physical production lines | 102,935 | **-2,041** | **-10** |
+| Nonblank production lines | 96,694 | **-2,390** | **-10** |
+| Production implementation lines | 89,001 | **-2,449** | **-10** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **136 / 49** | **-140 / -8** | **-1 / 0** |
+| `ConSanPatchInfo` references / files | 210 / 31 | +10 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Whole-transaction mentions in unmatched-barrier implementation | **1** | n/a | **-1** |
+| Candidate-mutation includes in final validation | **0** | n/a | **-3** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and the same 22
+unmatched-barrier, final-proof, transform-memory, and architecture-boundary
+tests as checkpoint 93. Checkpoint 92 passed all 1,295 host/component tests,
+and checkpoint 91 passed all 4,776 nonphysical tests across the five-target
+simulator matrix. No test was added, removed, renamed, disabled, or replaced,
+and no physical gfx1201 test was run.
+
+This deletion-bearing checkpoint strengthens Sections 14.1, 14.5, 14.7, and
+14.8 by consuming an existing semantic-inventory authority and removing the
+parallel scan and reverse-layer dependencies. The payoff is still small at the
+whole-project scale. Remaining broad lowering mutation surfaces, target and
+mode locality, material whole-refactoring shrinkage, and the independent
+completion audit remain open. The goal therefore remains active.
