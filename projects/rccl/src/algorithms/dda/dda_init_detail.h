@@ -33,7 +33,8 @@ constexpr int kDdaNranks = dda::common::NRANKS;
 // An explicit buffer-size override takes precedence over derived sizing.
 //
 // The derived size is: max(simpleCap, llFloor, ll128Floor) where:
-// - simpleCap: rcclDdaScratchPayloadCap() (max DDA/CE-scratch table/env cap)
+// - simpleCap: rcclDdaScratchPayloadCap() (max DDA/CE-scratch table/env cap,
+//   or the pre-table DDA defaults when the arch table is ignored)
 // - llFloor:   2 banks * nRanks * kDdaLLMaxBytes (when LL enabled)
 // - ll128Floor: whole slices per rank to carry DDA_LL128_THRESHOLD, 2 banks
 //
