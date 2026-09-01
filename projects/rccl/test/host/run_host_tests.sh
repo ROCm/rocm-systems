@@ -267,6 +267,7 @@ do_coverage() {
     # lcov diagnostics are legible.
     llvm-cov export "$exe" \
       -instr-profile="$dir/merged.profdata" \
+      --ignore-filename-regex='(/test/|nvtx)' \
       -format=lcov > "$dir/coverage.lcov"
 
     echo "    $name text report: $dir/coverage.txt"
