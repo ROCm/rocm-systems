@@ -47,7 +47,7 @@ _FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
 }
 
 # Architectures whose perfmon clock is gated at the AUTO performance level.
-_PMC_POWER_GATED_ARCHS: tuple[str, ...] = ("gfx115", "gfx120")
+_PMC_POWER_GATED_ARCHS: tuple[str, ...] = ("gfx115",)
 
 _PMC_POWER_GATING_DOC_URL = (
     "https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/"
@@ -58,7 +58,7 @@ _PMC_POWER_GATING_DOC_URL = (
 def _pmc_power_gating_warning(mspec: MachineSpecs) -> Optional[str]:
     """Return the STABLE_STD notice for architectures that gate the perfmon clock.
 
-    On gfx115x and gfx120x the AUTO performance level can gate the perfmon
+    On gfx115x the AUTO performance level can gate the perfmon clock, so PMC
     clock, so PMC counters such as TCP_REQ report zero even when the kernel
     issues global memory traffic.
     """
