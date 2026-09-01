@@ -32,7 +32,7 @@ service (same idea as `samples/counter_collection/`).
 | `kernel-replay-att` | 2 | Counters on pass 0, ATT on pass 1. |
 | `kernel-replay-spm` | 2 | Counters on pass 0, SPM on pass 1. |
 | `kernel-replay-opt-out` | 3 / 1 | Replays the `bump` kernel (`block.x == 67`); leaves `nudge` unreplayed. |
-| `kernel-replay-early-exit` | 4 / 2 | Sets `replay_continue_cb` to stop after pass 1 even though `pass_count_cb` returns 4. |
+| `kernel-replay-early-exit` | 4 / 2 | Sets `replay_continue` to stop after pass 1 even though `replay_pass_count` returns 4. |
 
 ### Advanced: multi-service pass ordering
 
