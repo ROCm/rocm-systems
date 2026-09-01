@@ -692,7 +692,13 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
 
   // Extract KFD device identity from vm.gpu.device if present.
   if (fb_config->vm() && fb_config->vm()->gpu() && fb_config->vm()->gpu()->device()) {
-    result.device = kfd_device_from_fb(fb_config->vm()->gpu()->device());
+    result.device = kfd_device_from_fb(fb_config->vm()->gpu()->device(), "vm.gpu.device");
+  }
+
+  // A config that describes no bus still yields usable defaults, so front ends
+  // that attach the GPU to a VMM work without every config being updated.
+  if (fb_config->vm() && fb_config->vm()->gpu()) {
+    result.pci = pci_device_from_fb(fb_config->vm()->gpu()->pci());
   }
 
   result.dbt_guest = dbt_guest_from_fb(fb_config->dbt_guest());
@@ -780,6 +786,21 @@ const char *arch_to_string(rj_code_arch_t arch) {
   default:
     return "invalid";
   }
+}
+
+DeviceIdentityConfig load_device_identity(const std::string &json_path,
+                                          const std::string &schema_text) {
+  const std::string json = read_config_file(json_path);
+  return with_parsed_simulation_config_json(
+      json, schema_text, [](const fb::SimulationConfig *config) {
+        DeviceIdentityConfig identity;
+        if (config->vm() == nullptr || config->vm()->gpu() == nullptr) {
+          return identity;
+        }
+        identity.device = kfd_device_from_fb(config->vm()->gpu()->device(), "vm.gpu.device");
+        identity.pci = pci_device_from_fb(config->vm()->gpu()->pci());
+        return identity;
+      });
 }
 
 LoadedConfig load_config(const std::string &json_path, const std::string &schema_text) {
