@@ -9,8 +9,6 @@
 #include "log.hpp"
 #include "rocprof-sys-instrument.hpp"
 
-#include <spdlog/fmt/fmt.h>
-
 #include <stdexcept>
 
 module_function::width_t&
