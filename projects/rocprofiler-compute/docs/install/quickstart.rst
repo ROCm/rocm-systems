@@ -82,7 +82,25 @@ Ensure ROCm is installed and follow the steps:
    Analyze mode aborts with a clear message if launched on Python older
    than 3.9.
 
-3. Check the installation dependencies. These are required for analyze mode
+.. _install-pytorch-with-rocm:
+
+3. If you profile a PyTorch or Triton workload installed with pip, install
+   the profiler from the same package index, in the same command as torch.
+   TheRock torch packages depend on ``rocm[libraries]`` and install matching
+   ROCm automatically. Do not install ROCm and then torch; that can downgrade
+   ROCm. Include ``rocm[profiler]`` so this tool is not a second stack from
+   ``/opt/rocm``. Replace ``device-gfx950`` with your GPU target:
+
+   .. code-block:: shell-session
+
+      python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ \
+          "rocm[profiler,libraries,device-gfx950]" "torch[device-gfx950]"
+
+   See :doc:`/install/core-install` for the ``rocm[profiler]`` pip option, and
+   `TheRock releases <https://github.com/ROCm/TheRock/blob/main/RELEASES.md>`__
+   for other targets and packages.
+
+4. Check the installation dependencies. These are required for analyze mode
    only; profile mode uses the standard library and needs no extra packages.
 
    .. code-block:: shell-session

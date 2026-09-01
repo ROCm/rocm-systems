@@ -900,7 +900,8 @@ which operators contribute to specific performance counter values.
 Requirements
 ------------
 
-* Valid PyTorch installation in the profiling environment.
+* Valid PyTorch installation in the profiling environment, using the same ROCm
+  as this tool (see :ref:`install-pytorch-with-rocm`).
 * PyTorch application must be run as a Python script or a Python command.
 * Workload’s Python version must match roctx’s Python version.
 
@@ -1137,7 +1138,8 @@ Requirements
 
 Triton trace has the same requirements and limitations as Torch trace (see
 :ref:`torch-trace-limitations`), with a valid Triton installation required in
-place of PyTorch.
+place of PyTorch. Install Triton with the same ROCm as this tool
+(see :ref:`install-pytorch-with-rocm`).
 
 Usage
 -----
