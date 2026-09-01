@@ -370,9 +370,10 @@ void pop_user_scope()
 
 std::int64_t install(bool capture_args, bool capture_values)
 {
-    g_args_capture.capture_args.store(capture_args);
-    g_args_capture.capture_values.store(capture_values);
-    return process_state().install.wlock(
+    ProcessState& process = process_state();
+    process.capture_args.store(capture_args);
+    process.capture_values.store(capture_values);
+    return process.install.wlock(
         [capture_args](InstallState& state)
         {
             if (state.handle != at::INVALID_CALLBACK_HANDLE)

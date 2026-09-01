@@ -73,6 +73,8 @@ void reset_state()
     thread_state().guards.clear();
     snapshots().clear();
     process_state().schema_arg_names_cache.clear();
+    process_state().capture_args.store(true);
+    process_state().capture_values.store(false);
     stats().pushes.store(0);
     stats().pops.store(0);
     stats().snapshots_saved.store(0);

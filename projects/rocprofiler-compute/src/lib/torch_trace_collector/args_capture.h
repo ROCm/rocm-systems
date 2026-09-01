@@ -3,13 +3,13 @@
 
 #pragma once
 
+#include "process_state.h"
 #include "schema_arg_names.h"
 
 #include <ATen/record_function.h>
 #include <c10/core/ScalarType.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cctype>
 #include <cstddef>
 #include <string>
@@ -24,15 +24,6 @@ inline constexpr std::size_t kMaxArgsLen = 512;
 
 // Maximum number of operator inputs rendered into an args blob.
 inline constexpr std::size_t kMaxArgItems = 32;
-
-// Operator-argument capture configuration.
-struct ArgsCaptureConfig
-{
-    std::atomic<bool> capture_args{true};
-    std::atomic<bool> capture_values{false};
-};
-
-inline ArgsCaptureConfig g_args_capture;
 
 // Truncate an args blob to kMaxArgsLen and append "...".
 inline std::string cap_args_blob(std::string blob)
@@ -49,13 +40,13 @@ inline std::string cap_args_blob(std::string blob)
 // Whether operator args are captured.
 inline bool args_capture_enabled()
 {
-    return g_args_capture.capture_args.load();
+    return process_state().capture_args.load();
 }
 
 // Whether scalar values are recorded. Requires args capture.
 inline bool args_values_enabled()
 {
-    return g_args_capture.capture_args.load() && g_args_capture.capture_values.load();
+    return process_state().capture_args.load() && process_state().capture_values.load();
 }
 
 // Percent-encode '%', '|', ';', and newlines in an args blob.
