@@ -69,8 +69,7 @@
 
 // Handshake block shared with the workload (resolved there via dlsym(RTLD_DEFAULT,
 // "kr_coord_get")).
-extern "C"
-{
+extern "C" {
 struct kr_coord_t
 {
     std::atomic<long> old_ready{0};      // victim -> tool/A: V=OLD ready for cycle k
@@ -102,11 +101,7 @@ std::atomic<long>        g_id_bad{0};     // records with a bad (zero or changed
 // (one at a time, synchronously in the WriteInterceptor), so a plain global is safe.
 rocprofiler_dispatch_id_t g_hog_dispatch_id{0};
 
-uint64_t
-hog_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
-{
-    return 5;
-}
+uint64_t hog_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t) { return 5; }
 
 // A replay dispatch_id must be nonzero (0 is the "unset" sentinel that make_dispatch_info leaves)
 // and identical across the CONFIG and every PASS of one dispatch. A violation prints a [repro] FAIL
