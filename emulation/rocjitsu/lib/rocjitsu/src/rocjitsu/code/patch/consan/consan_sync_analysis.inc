@@ -20,6 +20,7 @@
 #include "rocjitsu/code/patch/consan/consan_perturbation_policy.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_placement.h"
+#include "rocjitsu/code/patch/consan/consan_program_analysis.h"
 #include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
 #include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
@@ -193,7 +194,7 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
 }
 
 void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t arch,
-                                ConSanTransformArtifacts &result) {
+                                ConSanProgramAnalysisResult &result) {
   const std::string fingerprint = make_consan_code_object_id(bytes).fingerprint;
   result.fault_sites.clear();
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
@@ -505,7 +506,7 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
 
 [[nodiscard]] bool
 canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inventory,
-                                          ConSanTransformArtifacts &result) {
+                                          ConSanProgramAnalysisResult &result) {
   std::unordered_map<std::string_view, uint64_t> kernel_entries;
   std::unordered_map<std::string_view, uint64_t> function_entries;
   kernel_entries.reserve(result.program_inventory.kernels().size());
@@ -1056,7 +1057,7 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
 void build_barrier_move_destination_inventory(
     const AmdGpuCodeObject &code_object, const std::vector<std::unique_ptr<BasicBlock>> &blocks,
     const SyncEventSemanticIndex &events, rj_code_arch_t arch,
-    std::span<const ConSanSyncSequence> sync_sequences, ConSanTransformArtifacts &result) {
+    std::span<const ConSanSyncSequence> sync_sequences, ConSanProgramAnalysisResult &result) {
   result.barrier_move_destinations.clear();
   if (code_object.text_sections().size() != 1u)
     return;
@@ -2327,7 +2328,7 @@ void associate_ordinary_acquire_sync_sequences(
   }
 }
 
-void annotate_fault_sites_with_sync_sequences(ConSanTransformArtifacts &result) {
+void annotate_fault_sites_with_sync_sequences(ConSanProgramAnalysisResult &result) {
   struct EventKey {
     ConSanSyncEventKind kind;
     bool in_kernel;
@@ -2529,7 +2530,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
                                const std::vector<std::unique_ptr<BasicBlock>> *reusable_blocks,
                                std::span<ConSanAccessInventorySite> access_sites,
                                SynchronizationInventoryBuildView inventory,
-                               ConSanTransformArtifacts &result) {
+                               ConSanProgramAnalysisResult &result) {
   const std::span<const ConSanPreappliedCodeRange> preapplied_ranges =
       result.program_inventory.preapplied_mutation().code_ranges;
   const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
@@ -2625,7 +2626,7 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
                                        rj_code_arch_t arch, const ConSanOptions &options,
                                        ProgramInventoryBuilder &inventory_builder,
                                        ConSanPerturbationPlanningState &perturbation,
-                                       ConSanTransformArtifacts &result) {
+                                       ConSanProgramAnalysisResult &result) {
   SynchronizationInventoryBuildView synchronization_inventory = inventory_builder.synchronization();
   const bool needs_semantic_inventory = options.flavor == ConSanFlavor::Moi ||
                                         options.fault_dry_run || options.has_fault_mutation() ||

@@ -15,6 +15,7 @@ namespace rocjitsu {
 
 class AmdGpuCodeObject;
 class Decoder;
+struct ConSanProgramAnalysisResult;
 
 /// Build all synchronization semantics needed by the selected request and
 /// publish one immutable inventory view. Internal CFGs, indexes, association
@@ -25,6 +26,6 @@ class Decoder;
                                                      const ConSanOptions &options,
                                                      ProgramInventoryBuilder &inventory_builder,
                                                      ConSanPerturbationPlanningState &perturbation,
-                                                     ConSanTransformArtifacts &result);
+                                                     ConSanProgramAnalysisResult &result);
 
 } // namespace rocjitsu

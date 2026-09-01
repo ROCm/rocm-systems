@@ -6693,3 +6693,62 @@ three superseded production oracles are harvested. Broad placement and
 mutation buses, further target and mode locality, material whole-refactoring
 shrinkage, and the independent completion audit remain open. The goal
 therefore remains active.
+
+### 16.87 Convergence checkpoint 86: one program-analysis product
+
+A deep read of code-object and synchronization analysis traced its complete
+forward output through composition, fault planning, perturbation planning, and
+independent final validation. The analysis boundary accepted the entire mutable
+`ConSanTransformArtifacts` transaction even though this region touched only six
+outputs: the immutable program inventory, fault sites, barrier-move
+destinations, outcome, warnings, and errors. Independent validation consequently
+constructed a dummy whole transformation transaction merely to obtain pristine
+proof inventories.
+
+Those six outputs now form the explicit `ConSanProgramAnalysisResult`. Program
+analysis and synchronization analysis publish only that product, while the
+composition layer is the single adapter that moves it into the subsequent
+transformation transaction. Independent mutation and perturbation validation
+project their proof inventories directly from the analysis product and no
+longer manufacture a dummy transaction. The architecture gate prevents the
+broad transformation transaction from returning to either analysis component
+or the independent inventory rederiver, and pins the complete named output
+contract.
+
+The first focused gate caught an important failure-path detail in the boundary
+migration. Even unsuccessful parsing must publish the identity-bearing empty
+inventory view so pipeline accounting can distinguish an attempted invalid
+analysis from a stage that was never entered. The analysis owner now publishes
+that initial view before its first fallible operation. The three existing exact
+regressions for invalid code objects and malformed metadata notes caught the
+mistake and pass after the owner-local correction; no compatibility path was
+added.
+
+| Signal | Checkpoint 86 | Cumulative change | Slice change from checkpoint 85 |
+| --- | ---: | ---: | ---: |
+| Production files | 272 | +43 | 0 |
+| Physical production lines | 103,051 | **-1,925** | +27 |
+| Nonblank production lines | 96,809 | **-2,275** | +26 |
+| Production implementation lines | 89,121 | **-2,329** | +20 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **154 / 47** | **-122 / -10** | **-14 / -5** |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 326 / 60 | +36 / +9 | 0 / 0 |
+| Analysis/validation owners accepting the broad transaction | **0 / 5** | n/a | **-5 owners** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild; the 524-test program-analysis,
+inventory, pipeline, and architecture-boundary focused gate; and the complete
+4,776-test nonphysical matrix at `-j16` in 198.48 seconds, including all 2,918
+simulator rows over gfx942, gfx950, gfx1250, gfx1100, and gfx1201. No test was
+added, removed, renamed, disabled, or replaced. In accordance with the reduced
+physical-test cadence, no physical gfx1201 test was run for this slice.
+
+This checkpoint strengthens Sections 14.1, 14.5, 14.7, and 14.9. Its 20-line
+contract cost removes five whole component consumers from the broad mutable bus
+and eliminates the dummy validation transaction. The immediately preceding
+slice was deletion-bearing, so this one permitted contract investment; the
+next convergence slice must cash in deletion or sharing rather than compound
+local growth. Final validation, composition, and mutation still contain broad
+transaction surfaces, and material whole-refactoring shrinkage plus the
+independent completion audit remain open. The goal therefore remains active.

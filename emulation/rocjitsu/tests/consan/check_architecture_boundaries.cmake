@@ -161,6 +161,33 @@ foreach(_source IN ITEMS consan_fault_selection.cpp consan_program_analysis.cpp 
     )
 endforeach()
 
+foreach(_source IN ITEMS
+    consan_program_analysis.h
+    consan_program_analysis.cpp
+    consan_sync_analysis.h
+    consan_sync_analysis.inc
+    consan_validation_inventory.cpp
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_source}"
+        "ConSanTransformArtifacts"
+        "program and synchronization analysis must publish their narrow forward product"
+    )
+endforeach()
+file(READ "${_consan_dir}/consan_program_analysis.h" _program_analysis_contract)
+foreach(_field IN ITEMS
+    program_inventory
+    fault_sites
+    barrier_move_destinations
+    outcome
+    warnings
+    errors
+)
+    if(NOT _program_analysis_contract MATCHES "${_field}")
+        message(FATAL_ERROR "ConSan program-analysis product lost ${_field}")
+    endif()
+endforeach()
+
 file(
     GLOB _transform_component_sources
     "${_consan_dir}/consan_moi*.cpp"

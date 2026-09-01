@@ -74,7 +74,7 @@ void append_unique_sites(std::vector<Site> &source, std::vector<Site> &destinati
 void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_bytes,
                                         Decoder &decoder, rj_code_arch_t arch,
                                         ProgramInventoryBuilder &inventory,
-                                        ConSanTransformArtifacts &result) {
+                                        ConSanProgramAnalysisResult &result) {
   std::span<ConSanKernelInfo> kernels = inventory.kernels();
   std::span<ConSanFunctionInfo> functions = inventory.functions();
   for (const ConSanPreappliedCodeRange &range :
@@ -167,7 +167,11 @@ bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes
                                       std::unique_ptr<AmdGpuCodeObject> &code_object,
                                       ProgramInventoryBuilder &inventory_builder,
                                       ConSanPerturbationPlanningState &perturbation,
-                                      ConSanTransformArtifacts &result) {
+                                      ConSanProgramAnalysisResult &result) {
+  // Even a parse failure publishes the identity-bearing empty view. Pipeline
+  // stage accounting distinguishes a completed, invalid inventory attempt
+  // from an analysis stage that was never entered.
+  result.program_inventory = inventory_builder.view();
   if (code_object_bytes.empty()) {
     result.errors.emplace_back("ConSan received an empty code object");
     return false;

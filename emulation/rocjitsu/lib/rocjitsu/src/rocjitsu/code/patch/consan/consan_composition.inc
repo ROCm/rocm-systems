@@ -586,8 +586,18 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     execution->note_program_inventory();
 
   std::unique_ptr<AmdGpuCodeObject> code_object;
-  if (!analyze_consan_program_inventory(code_object_bytes, options, code_object, inventory_builder,
-                                        perturbation, result))
+  ConSanProgramAnalysisResult analysis;
+  const bool analysis_succeeded = analyze_consan_program_inventory(
+      code_object_bytes, options, code_object, inventory_builder, perturbation, analysis);
+  result.program_inventory = std::move(analysis.program_inventory);
+  result.fault_sites = std::move(analysis.fault_sites);
+  result.barrier_move_destinations = std::move(analysis.barrier_move_destinations);
+  result.outcome = analysis.outcome;
+  result.warnings.insert(result.warnings.end(), std::make_move_iterator(analysis.warnings.begin()),
+                         std::make_move_iterator(analysis.warnings.end()));
+  result.errors.insert(result.errors.end(), std::make_move_iterator(analysis.errors.begin()),
+                       std::make_move_iterator(analysis.errors.end()));
+  if (!analysis_succeeded)
     return result;
   const rj_code_arch_t arch = result.program_inventory.arch();
   const ConSanTargetProfile *target_profile =
