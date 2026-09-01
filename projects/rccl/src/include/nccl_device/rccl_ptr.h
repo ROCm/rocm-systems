@@ -50,8 +50,11 @@ using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 #endif
 
 typedef __attribute__((__vector_size__(4 * sizeof(unsigned int)))) unsigned int v4u;
+typedef __attribute__((__vector_size__(4 * sizeof(int)))) int v4i;
 typedef __attribute__((address_space(1))) v4u* v4u_gptr;
+typedef __attribute__((address_space(1))) v4i* v4i_gptr;
 
 // "" means system scope, "agent" means device.  Adding this here because I don't think it's obvious otherwise that
 // "" means system scope.
 #define RCCL_SYSTEM_SYNCSCOPE ""
+#define RCCL_DEVICE_SYNCSCOPE "agent"
