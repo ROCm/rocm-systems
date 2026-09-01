@@ -8,6 +8,21 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Exposed `BOOT_FIRMWARE` field in `amd-smi static --ifwi` output**.  
+  - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section (`--vbios` remains available as a legacy alias).
+
+  ```shell
+  $ amd-smi static --ifwi
+  GPU: 0
+    IFWI:
+        NAME: XXXXXXXXXXXXXXXXXX
+        BUILD_DATE: 2024/06/05 12:13
+        PART_NUMBER: 113-D7190300-104
+        VERSION: 00106507
+        BOOT_FIRMWARE: 022.002.001.027.000001
+  ...
+  ```
+
 - **Added `physical_acc_id` to `amdsmi_enumeration_info_t`**.  
   - Populated by `amdsmi_get_gpu_enumeration_info()`, UALoE-backed like the existing `physical_acc_id` field in `amdsmi_asic_info_t`.
   - CLI: `amd-smi list --enumeration` now includes `PHYSICAL_ACC_ID` next to `OAM_ID`.
