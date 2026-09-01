@@ -49,7 +49,7 @@ def validate_texture_instructions_stalled(samples):
     texture_samples = samples[
         samples["Instruction"].apply(lambda x: x.startswith("buffer"))
     ]
-    texture_stalled = texture_samples[texture_samples["Wave_Issued_Instruction"] == False]
+    texture_stalled = texture_samples[texture_samples["Wave_Issued_Instruction"] is False]
 
     assert (
         texture_stalled["Stall_Reason"]

@@ -44,7 +44,7 @@ def validate_jump_instructions_issued(all_samples, jump_samples):
 
 
 def validate_jump_instructions_stalled(jump_samples):
-    jump_samples_stalled = jump_samples[jump_samples["Wave_Issued_Instruction"] == False]
+    jump_samples_stalled = jump_samples[jump_samples["Wave_Issued_Instruction"] is False]
     assert (
         jump_samples_stalled["Stall_Reason"]
         .apply(
