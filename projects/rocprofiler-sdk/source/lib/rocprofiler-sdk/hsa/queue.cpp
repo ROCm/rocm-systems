@@ -462,9 +462,7 @@ WriteInterceptor(const void* packets,
         }
         else if(pkt_count != 1)
         {
-            static std::atomic<bool> _warned_multi_packet{false};
-            if(!_warned_multi_packet.exchange(true, std::memory_order_relaxed))
-                ROCP_WARNING << fmt::format(
+            LOG_FIRST_N(WARNING, 1) << fmt::format(
                     "kernel replay: only single-packet dispatch submissions are replayed. A "
                     "submission of {} packets ({} dispatches) ran once without replay",
                     pkt_count,
