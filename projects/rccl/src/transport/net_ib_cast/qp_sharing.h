@@ -5,9 +5,9 @@
  * QP Sharing infrastructure for IB CAST transport layer.
  * Allows multiple RCCL communicator channels to share physical IB QPs,
  * reducing QP count and improving scalability.
- * Controlled via NCCL_IB_QP_SHARING_ENABLE (0=disabled, 1=enabled).
- * When enabled, NCCL_IB_COMM_NGROUPS (default 4) and
- * NCCL_IB_QP_DEPTH_MULTIPLIER (default 8) tune sharing behavior.
+ * Controlled via RCCL_IB_QP_SHARING_ENABLE (0=disabled, 1=enabled).
+ * When enabled, RCCL_IB_COMM_NGROUPS (default 4) and
+ * RCCL_IB_QP_DEPTH_MULTIPLIER (default 8) tune sharing behavior.
  ************************************************************************/
 
 #ifndef NET_IB_CAST_QP_SHARING_H_
@@ -18,7 +18,7 @@
 #include <mutex>
 
 // QP sharing configuration parameters
-// Master switch: RCCL_IB_QP_SHARING_ENABLE / NCCL_IB_QP_SHARING_ENABLE
+// Master switch: RCCL_IB_QP_SHARING_ENABLE
 // 0 = disabled (default), 1 = enabled with sensible defaults
 extern int64_t rcclParamIbCastQpSharingEnable();
 // Number of sharing groups (default 4, effective only when master switch is on)
@@ -171,7 +171,7 @@ void IbCastCleanupGroupCqs(struct IbCastSharedQp* slot0Entry);
 
 // Validate that all shared QP pool entries and commIds are cleaned up.
 // Logs leaked entries and asserts on non-zero counts. Call at finalize time.
-// Gated by NCCL_IB_QP_SHARING_VALIDATE_POOL=1.
+// Gated by RCCL_IB_QP_SHARING_VALIDATE_POOL=1.
 extern int64_t rcclParamIbCastQpSharingValidatePool();
 void IbCastValidateSharedQpPool(void);
 
