@@ -544,6 +544,7 @@ add_executable(
     execution_plugin_test.cpp
     plugin_config_resolver_test.cpp
     plugin_loader_test.cpp
+    race-detector/race_detector_counter_capacity_tests.cpp
     race-detector/race_detector_event_registry_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp

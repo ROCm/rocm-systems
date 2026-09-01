@@ -36,7 +36,7 @@ __global__ void vgpr_no_race_kernel(const float *src, float *dst) {
   dst[tid] = val;
 }
 
-static constexpr RaceExpectation kVgprWaitcntRaceExpectation{
+static constexpr RaceExpectation kVgprRaceExpectation{
     .findings = FindingCount::OneOrMore,
     .type = "VGPR",
 };
@@ -51,7 +51,9 @@ __global__ void vgpr_race_kernel(const float *src, float *dst) {
   dst[tid] = val;
 }
 
-__global__ void standalone_vmcnt_kernel(const float *src, float *dst) {
+// --- Standalone split wait instructions ---
+
+__global__ void standalone_vmcnt_waits_for_vmem_kernel(const float *src, float *dst) {
   int tid = threadIdx.x;
   float val;
   asm volatile("global_load_dword %0, %1, off\n"
@@ -61,7 +63,7 @@ __global__ void standalone_vmcnt_kernel(const float *src, float *dst) {
   dst[tid] = val;
 }
 
-__global__ void standalone_vmcnt_does_not_wait_lgkm_kernel(int *dst) {
+__global__ void standalone_vmcnt_does_not_wait_for_lds_kernel(int *dst) {
   __shared__ int lds[32];
   int tid = threadIdx.x;
   lds[tid] = tid + 1;
@@ -76,7 +78,7 @@ __global__ void standalone_vmcnt_does_not_wait_lgkm_kernel(int *dst) {
   dst[tid] = val;
 }
 
-__global__ void standalone_lgkmcnt_kernel(int *dst) {
+__global__ void standalone_lgkmcnt_waits_for_lds_kernel(int *dst) {
   __shared__ int lds[32];
   int tid = threadIdx.x;
   lds[tid] = tid + 1;
@@ -91,7 +93,7 @@ __global__ void standalone_lgkmcnt_kernel(int *dst) {
   dst[tid] = val;
 }
 
-__global__ void standalone_lgkmcnt_does_not_wait_vmcnt_kernel(const float *src, float *dst) {
+__global__ void standalone_lgkmcnt_does_not_wait_for_vmem_kernel(const float *src, float *dst) {
   int tid = threadIdx.x;
   float val;
   asm volatile("global_load_dword %0, %1, off\n"
@@ -209,35 +211,35 @@ TEST_F(Gfx1151RaceTest, vgpr_waitcnt_race) {
   auto *dst = alloc<float>(32);
   vgpr_race_kernel<<<1, 32>>>(src, dst);
   sync();
-  ExpectRace(kVgprWaitcntRaceExpectation);
+  ExpectRace(kVgprRaceExpectation);
 }
 
-TEST_F(Gfx1151RaceTest, standalone_vmcnt) {
+TEST_F(Gfx1151RaceTest, standalone_vmcnt_waits_for_vmem) {
   auto *src = allocWithData<float>(32);
   auto *dst = alloc<float>(32);
-  standalone_vmcnt_kernel<<<1, 32>>>(src, dst);
+  standalone_vmcnt_waits_for_vmem_kernel<<<1, 32>>>(src, dst);
   sync();
   ExpectNoRace();
 }
 
-TEST_F(Gfx1151RaceTest, standalone_vmcnt_does_not_wait_lgkm) {
-  standalone_vmcnt_does_not_wait_lgkm_kernel<<<1, 32>>>(alloc<int>(32));
+TEST_F(Gfx1151RaceTest, standalone_vmcnt_does_not_wait_for_lds) {
+  standalone_vmcnt_does_not_wait_for_lds_kernel<<<1, 32>>>(alloc<int>(32));
   sync();
-  ExpectRace(kVgprWaitcntRaceExpectation);
+  ExpectRace(kVgprRaceExpectation);
 }
 
-TEST_F(Gfx1151RaceTest, standalone_lgkmcnt) {
-  standalone_lgkmcnt_kernel<<<1, 32>>>(alloc<int>(32));
+TEST_F(Gfx1151RaceTest, standalone_lgkmcnt_waits_for_lds) {
+  standalone_lgkmcnt_waits_for_lds_kernel<<<1, 32>>>(alloc<int>(32));
   sync();
   ExpectNoRace();
 }
 
-TEST_F(Gfx1151RaceTest, standalone_lgkmcnt_does_not_wait_vmcnt) {
+TEST_F(Gfx1151RaceTest, standalone_lgkmcnt_does_not_wait_for_vmem) {
   auto *src = allocWithData<float>(32);
   auto *dst = alloc<float>(32);
-  standalone_lgkmcnt_does_not_wait_vmcnt_kernel<<<1, 32>>>(src, dst);
+  standalone_lgkmcnt_does_not_wait_for_vmem_kernel<<<1, 32>>>(src, dst);
   sync();
-  ExpectRace(kVgprWaitcntRaceExpectation);
+  ExpectRace(kVgprRaceExpectation);
 }
 
 TEST_F(Gfx1151RaceTest, d16_global_load_merge_no_race) {
