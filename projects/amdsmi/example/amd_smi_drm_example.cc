@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include <pwd.h>
 #include <sys/stat.h>
@@ -1386,12 +1367,17 @@ int main() {
       printf("\tGPU PLX temp measurement: %ld\n\n", temp_measurements[AMDSMI_TEMPERATURE_TYPE_PLX]);
 
       // Get RAS features enabled
-      char block_names[14][10] = {"UMC",       "SDMA", "GFX", "MMHUB", "ATHUB", "PCIE_BIF", "HDP",
-                                  "XGMI_WAFL", "DF",   "SMN", "SEM",   "MP0",   "MP1",      "FUSE"};
+      const char* block_names[] = {
+          "UMC",        "SDMA",     "GFX",   "MMHUB",  "ATHUB", "PCIE_BIF", "HDP",     "XGMI_WAFL",
+          "DF",         "SMN",      "SEM",   "MP0",    "MP1",   "FUSE",     "MCA",     "VCN",
+          "JPEG",       "IH",       "MPIO",  "MMSCH",  "MP5",   "ATU",      "DACC_BE", "ECLR",
+          "KPX_SERDES", "LSDMA",    "MPART", "MPIFOE", "MPRAS", "NBIF",     "NBIO",    "OXRP",
+          "PCIE_PL",    "PCS_XGMI", "PIE",   "CS",     "SHUB",  "SSBDCI",   "UCIE_PCS"};
+      const size_t num_block_names = sizeof(block_names) / sizeof(block_names[0]);
       char status_names[7][10] = {"NONE",    "DISABLED", "PARITY", "SING_C",
                                   "MULT_UC", "POISON",   "ENABLED"};
       amdsmi_ras_err_state_t state = {};
-      int index = 0;
+      size_t index = 0;
       printf("    Output of amdsmi_get_gpu_ras_block_features_enabled:\n");
       for (auto block = AMDSMI_GPU_BLOCK_FIRST; block <= AMDSMI_GPU_BLOCK_LAST;
            block = (amdsmi_gpu_block_t)(block * 2)) {
@@ -1401,7 +1387,8 @@ int main() {
           CHK_AMDSMI_RET(ret)
         }
 
-        printf("\tBlock: %s\n", block_names[index]);
+        // Keeps the lookup in bounds if amdsmi_gpu_block_t gains blocks before this list does.
+        printf("\tBlock: %s\n", index < num_block_names ? block_names[index] : "UNKNOWN");
         printf("\tStatus: %s\n", status_names[state]);
         index++;
       }

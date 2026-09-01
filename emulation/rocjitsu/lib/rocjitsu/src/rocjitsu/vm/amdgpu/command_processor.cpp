@@ -1583,9 +1583,9 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
                         entry.num_named_barriers);
     register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
 
-    plugin_group_->onAmdgpuWorkgroupDispatched(entry.dispatch_id, global_wg_id,
-                                               cu->vgpr_allocation_block_size(), entry.sgprs_per_wf,
-                                               std::span<Wavefront *>(wg_wavefronts));
+    plugin_group_->onAmdgpuWorkgroupDispatched(
+        entry.dispatch_id, global_wg_id, cu->vgpr_allocation_block_size(),
+        cu->sgpr_allocation_block_size(), std::span<Wavefront *>(wg_wavefronts));
     for (auto *wf : wg_wavefronts)
       plugin_group_->onAmdgpuWavefrontDispatched(*wf);
 
@@ -1860,7 +1860,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
     throw std::runtime_error("unsupported kernel wave size for VGPR descriptor decoding");
   uint32_t vgprs = (vgpr_gran + 1) * *vgpr_granularity;
   uint32_t sgprs = sgpr_count_is_descriptor_encoded(arch, sgpr_gran) ? (sgpr_gran + 1) * 8 : 0;
-  uint32_t user_sgprs = AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
+  uint32_t user_sgprs = kernel_descriptor_user_sgpr_count(arch, kd);
   uint64_t entry_pc = pkt.kernel_object + static_cast<uint64_t>(kd.kernel_code_entry_byte_offset);
   uint64_t code_load_bias = 0;
 

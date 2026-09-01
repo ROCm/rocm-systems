@@ -9,6 +9,7 @@ exclude: |
     | shared/amdgpu-windows-interop
     # these projects have their own pre-commit-config.yaml
     | projects/amdsmi/
+    | projects/cuid/
     | projects/rdc/
     | projects/rocm-smi-lib/
     | projects/rocprofiler-compute/

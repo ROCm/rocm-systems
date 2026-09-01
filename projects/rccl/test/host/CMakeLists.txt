@@ -1,5 +1,21 @@
 cmake_minimum_required(VERSION 3.16)
 
+set(RCCL_MICRO_TEST_SOURCES
+  p2p-test.cc
+  rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
+  group-test.cc
+  devcomm-test.cc
+  fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
+  fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
+  fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
+  fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
+  fakes/collective_stubs.cc            # fail-loud collective launch + transport floor
+  fakes/devcomm_fakes.cc
+  fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
+  ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
+  ../common/ProcessIsolatedTestRunner.cpp
+)
+
 # =====================================================================
 # In-RCCL-build integration.
 #
@@ -22,19 +38,11 @@ if(BUILD_TESTS)
   # special hardware. Deliberately NOT linking librccl.so or the HIP runtime,
   # so any un-shimmed HIP call surfaces as a link error rather than binding
   # libamdhip64.so (HIP compile requirements are applied below without linking).
-  set(TEST_MICRO_SOURCE_FILES
-    p2p-test.cc
-    fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
-    fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
-    fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
-    ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
-    ../common/ProcessIsolatedTestRunner.cpp
-  )
-
-  add_executable(rccl-UnitTestsMicro ${TEST_MICRO_SOURCE_FILES})
+  add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
 
   target_include_directories(rccl-UnitTestsMicro PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_BINARY_DIR}/hipify/src/devcomm   # devcomm_v22902.h, included unqualified
     ${RCCL_COMMON_INCLUDE_DIRS})
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
 
@@ -60,6 +68,10 @@ if(BUILD_TESTS)
   # the build directory layout.
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE
     P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
+    RMA_PROXY_PROGRESS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma_proxy_progress.cc"
+    GROUP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/group.cc"
+    DEVCOMM_V22902_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22902.cc"
+    DEVCOMM_V22907_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22907.cc"
   )
 
   # Make sure the hipify step has run before trying to compile the test.
@@ -92,7 +104,7 @@ if(BUILD_TESTS)
 
   # Deliberately NOT linking librccl.so: this binary is for tests that compile
   # their unit-under-test source file(s) directly. Add files to
-  # TEST_MICRO_SOURCE_FILES above as new units come under test.
+  # RCCL_MICRO_TEST_SOURCES at the top of this file as new units come under test.
   rocm_install(TARGETS rccl-UnitTestsMicro COMPONENT tests)
 
   # Register with CTest exactly as rccl-UnitTests / rccl-UnitTestsFixtures do:
@@ -486,23 +498,19 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 # --- Standalone micro-test binary ---------------------------------------
 # rccl-UnitTestsMicro: same host-only model as rccl-HostUnitTests (hipcc
 # --offload-host-only, -no-hip-rt), built from the hipified snapshot. It
-# #includes the unit-under-test production .cc directly (via P2P_CC_PATH) and
+# #includes each unit-under-test production .cc directly (via P2P_CC_PATH,
+# RMA_PROXY_PROGRESS_CC_PATH, GROUP_CC_PATH, DEVCOMM_V22902_CC_PATH,
+# DEVCOMM_V22907_CC_PATH) and
 # satisfies every HIP/nccl symbol from fakes/ rather than librccl.so or the
 # HIP runtime.
-add_executable(rccl-UnitTestsMicro
-  p2p-test.cc
-  fakes/nccl_fakes.cc
-  fakes/p2p_fakes.cc
-  fakes/hip_fakes.cc
-  ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
-  ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
-)
+add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
 
 target_compile_options(rccl-UnitTestsMicro PRIVATE
   -Wno-unused-parameter -Wno-unused-variable)
 
 target_include_directories(rccl-UnitTestsMicro PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
+  ${RCCL_HIPIFY_DIR}/src/devcomm      # devcomm_v22902.h, included unqualified
   ${RCCL_INCLUDE_DIRS}
 )
 
@@ -511,6 +519,10 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
+  RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
+  GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
+  DEVCOMM_V22902_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
+  DEVCOMM_V22907_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
   # Same fallback-vs-runtime conflicts the host target guards against: without
   # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
   # enumerators on ROCm 7.14+, and the standalone build fails.
