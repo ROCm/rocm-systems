@@ -1162,11 +1162,10 @@ finalize()
         auto num_clients = get_num_clients();
         set_fini_status(-1);
 
-        // Signal-less teardown steps 1-6, in the one order that strands no
-        // EOP-proven completion. Must precede the sequence below:
-        // queue_controller_fini joins the task group, and correlation_id_finalize
-        // consults the loss ledger this populates. No-op unless signal-less is
-        // active.
+        // Signal-less teardown steps 1-6, in the one order that strands no EOP-proven
+        // completion. Must precede the sequence below: queue_controller_fini stops the
+        // completion monitor that runs these completions, and correlation_id_finalize
+        // consults the loss ledger this populates. No-op unless signal-less is active.
         kfd::signal_less_teardown();
 
         hsa::async_copy_fini();
