@@ -179,7 +179,9 @@ class SourceFrameCollector:
 
         # Parse once per distinct comment; instructions repeat them heavily.
         if source not in self._frames_by_comment:
-            self._frames_by_comment[source] = self._resolve_source_frames(source)
+            self._frames_by_comment[source] = parse_source_frames(
+                source, self._source_path_map
+            )
 
         for frame_index, frame in enumerate(self._frames_by_comment[source]):
             Database.get_session().add(
@@ -189,17 +191,6 @@ class SourceFrameCollector:
                     frame_index=frame_index,
                 )
             )
-
-    def _resolve_source_frames(self, source: str) -> list[SourceFrame]:
-        """Return one comment's frames with each raw DWARF path canonicalized.
-
-        Two raw DWARF paths for one file resolve to a single path and share
-        its rows.
-        """
-        return [
-            (self._source_path_map.get(raw_path, raw_path), line_number)
-            for raw_path, line_number in parse_source_frames(source)
-        ]
 
     def captured_source_paths(self) -> tuple[str, ...]:
         """Return the absolute paths whose snapshot copy this workload holds.

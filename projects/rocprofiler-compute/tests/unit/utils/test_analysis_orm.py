@@ -98,7 +98,9 @@ def add_source_frames(
     source: str | None,
 ) -> None:
     """Attach an instruction's inline stack, reusing rows already created."""
-    for frame_index, (file_path, line_number) in enumerate(parse_source_frames(source)):
+    for frame_index, (file_path, line_number) in enumerate(
+        parse_source_frames(source, {})
+    ):
         source_file = next(
             (
                 candidate

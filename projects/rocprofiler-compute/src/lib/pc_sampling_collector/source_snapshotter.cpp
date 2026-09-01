@@ -4,29 +4,23 @@
 
 #include "nlohmann/json.hpp"
 
-#include <fstream>
+#include <unistd.h>
+
 #include <iostream>
+#include <string>
 #include <utility>
 
 using namespace rocprofiler_compute_tool;
 
 namespace
 {
-constexpr auto kSourcePathsKey = "source_paths";
+constexpr auto kSourcePathsKey      = "source_paths";
+constexpr auto kSourceMapFileSuffix = "_source_map.json";
 }  // namespace
 
 source_snapshotter_t::ptr source_snapshotter_t::create()
 {
     return std::make_shared<source_snapshotter_impl_t>();
-}
-
-std::string rocprofiler_compute_tool::serialize_source_path_map(const source_path_map_t& source_path_map)
-{
-    auto source_paths = nlohmann::json::object();
-    for (const auto& [raw_path, canonical_path] : source_path_map)
-        source_paths[raw_path.string()] = canonical_path.string();
-
-    return nlohmann::json{{kSourcePathsKey, std::move(source_paths)}}.dump();
 }
 
 std::optional<std::filesystem::path> source_snapshotter_impl_t::get_canonical_source_path(
@@ -54,8 +48,8 @@ source_snapshotter_impl_t::source_snapshotter_impl_t(filesystem_wrapper_t::ptr f
 {
 }
 
-source_path_map_t source_snapshotter_impl_t::snapshot(const std::set<std::filesystem::path>& source_paths,
-                                                      const std::filesystem::path& destination_root)
+void source_snapshotter_impl_t::snapshot(const std::set<std::filesystem::path>& source_paths,
+                                         const std::filesystem::path&           destination_root)
 {
     source_path_map_t source_path_map;
     for (const auto& source_path : source_paths)
@@ -76,27 +70,35 @@ source_path_map_t source_snapshotter_impl_t::snapshot(const std::set<std::filesy
         source_path_map.emplace(source_path, *canonical_source_path);
     }
 
-    return source_path_map;
+    write_source_path_map(source_path_map, destination_root);
 }
 
+// Analysis looks each source file up by the path the disassembly spells, so it
+// needs the canonical path the copy was filed under. Every process of a run
+// writes its own map beside the files it captured.
 void source_snapshotter_impl_t::write_source_path_map(const source_path_map_t&     source_path_map,
-                                                      const std::filesystem::path& output_file_path)
+                                                      const std::filesystem::path& destination_root)
 {
     if (source_path_map.empty())
         return;
 
-    if (!create_destination_parent_directory(output_file_path))
-        return;
+    auto source_paths = nlohmann::json::object();
+    for (const auto& [raw_path, canonical_path] : source_path_map)
+        source_paths[raw_path.string()] = canonical_path.string();
 
-    std::ofstream output_file(output_file_path, std::ios::out);
-    if (!output_file.is_open())
+    // A non-empty map means a file was copied, so the root already exists.
+    const auto output_file_path =
+        destination_root / (std::to_string(getpid()) + kSourceMapFileSuffix);
+
+    std::error_code error;
+    m_filesystem->write_file(output_file_path,
+                             nlohmann::json{{kSourcePathsKey, std::move(source_paths)}}.dump(),
+                             error);
+    if (error)
     {
-        std::clog << "[rocprofiler-compute] [source_snapshotter] Failed to open source map file: "
-                  << output_file_path << '\n';
-        return;
+        std::clog << "[rocprofiler-compute] [source_snapshotter] Failed to write source map "
+                  << output_file_path << ": " << error.message() << '\n';
     }
-
-    output_file << serialize_source_path_map(source_path_map);
 }
 
 bool source_snapshotter_impl_t::is_copyable(const std::filesystem::path& source_path,

@@ -55,9 +55,6 @@ TEST_F(TestRocprofilerComputeTool, ProvidedPcSamplingMethod_EnablesPcSampling)
     EXPECT_EQ(tool_data->pc_sampling.code_object_info_path(),
               expected_output_path("out", "_code_obj_info.json"));
     EXPECT_EQ(tool_data->pc_sampling.source_snapshot_path(), expected_output_directory("out", "src"));
-    EXPECT_EQ(tool_data->pc_sampling.source_path_map_path(),
-              expected_output_path(expected_output_directory("out", "src").string(),
-                                   "_source_map.json"));
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedNoPcSamplingMethod_DoesNotEnablePcSampling)

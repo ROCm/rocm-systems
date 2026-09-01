@@ -131,6 +131,12 @@ public:
         std::filesystem::copy_options options = std::filesystem::copy_options::none;
     };
 
+    struct write_file_call_t
+    {
+        std::filesystem::path path;
+        std::string           contents;
+    };
+
     std::filesystem::path absolute(const std::filesystem::path& path, std::error_code& error) override;
     std::filesystem::file_status status(const std::filesystem::path& path, std::error_code& error) override;
     bool create_directories(const std::filesystem::path& path, std::error_code& error) override;
@@ -145,6 +151,9 @@ public:
     std::filesystem::path weakly_canonical(const std::filesystem::path& path,
                                            std::error_code&             error) override;
     std::filesystem::path relative_path(const std::filesystem::path& path) override;
+    void                  write_file(const std::filesystem::path& path,
+                                     const std::string&           contents,
+                                     std::error_code&             error) override;
 
     void set_absolute(const std::filesystem::path& path, const std::filesystem::path& result);
     void set_absolute_error(const std::filesystem::path& path, std::error_code error);
@@ -154,6 +163,7 @@ public:
     void set_weakly_canonical_error(const std::filesystem::path& path, std::error_code error);
     void set_create_directories_error(std::error_code error);
     void set_copy_file_error(std::error_code error);
+    void set_write_file_error(std::error_code error);
 
     const std::vector<std::filesystem::path>& get_absolute_calls() const;
     const std::vector<std::filesystem::path>& get_status_calls() const;
@@ -162,6 +172,7 @@ public:
     const std::vector<std::filesystem::path>& get_relative_path_calls() const;
     const std::vector<std::filesystem::path>& get_create_directories_calls() const;
     const std::vector<copy_file_call_t>&      get_copy_file_calls() const;
+    const std::vector<write_file_call_t>&     get_write_file_calls() const;
 
 private:
     std::map<std::filesystem::path, absolute_response_t>         m_absolute_responses;
@@ -169,6 +180,7 @@ private:
     std::map<std::filesystem::path, weakly_canonical_response_t> m_weakly_canonical_responses;
     std::error_code                                              m_create_directories_error;
     std::error_code                                              m_copy_file_error;
+    std::error_code                                              m_write_file_error;
     std::vector<std::filesystem::path>                           m_absolute_calls;
     std::vector<std::filesystem::path>                           m_status_calls;
     std::vector<std::filesystem::path>                           m_has_parent_path_calls;
@@ -176,4 +188,5 @@ private:
     std::vector<std::filesystem::path>                           m_relative_path_calls;
     std::vector<std::filesystem::path>                           m_create_directories_calls;
     std::vector<copy_file_call_t>                                m_copy_file_calls;
+    std::vector<write_file_call_t>                               m_write_file_calls;
 };

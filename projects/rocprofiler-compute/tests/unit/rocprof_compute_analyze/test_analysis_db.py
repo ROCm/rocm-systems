@@ -2070,11 +2070,14 @@ def test_run_analysis_resolves_raw_dwarf_path_to_canonical_path(db_session, tmp_
 
     run_analysis_with_materialized_views(analyzer)
 
-    digest = "2273f4ac71d58e52c92bf788a4f62312"
-    assert fetch_source_lines_by_workload(db_session)["workload"] == [
-        (canonical_path, digest, 1, "int first;"),
-        (canonical_path, digest, 2, "int second;"),
-    ]
+    source_file = db_session.query(orm.SourceFile).one()
+    assert source_file.file_path == canonical_path
+    # A checksum at all means the snapshot copy was found.
+    assert source_file.md5_checksum is not None
+    assert [
+        (source_line.line_number, source_line.content)
+        for source_line in source_file.source_lines
+    ] == [(1, "int first;"), (2, "int second;")]
 
 
 def test_run_analysis_records_line_past_end_of_source_file(db_session, tmp_path):

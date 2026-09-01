@@ -21,5 +21,4 @@ protected:
     std::shared_ptr<MockCodeObjectWriter>    m_writer;
     std::filesystem::path                    m_code_object_info_path;
     std::filesystem::path                    m_source_snapshot_path;
-    std::filesystem::path                    m_source_path_map_path;
 };

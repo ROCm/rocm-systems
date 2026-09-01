@@ -172,7 +172,6 @@ TEST_F(TestSdkCallbacks, ProvidedCodeObjectLoadWithPcSamplingEnabled_ForwardsToC
     m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
                                                      "unused.json",
                                                      "unused_sources",
-                                                     "unused_source_map.json",
                                                      collector,
                                                      snapshotter};
 
