@@ -34,27 +34,33 @@ pin() {  # rocm-systems commit pinned by a TheRock tag; origin/develop if the ta
 }
 ```
 
-A tagged release is **frozen at its pin**: `pin(therock-<V>)` is the exact state
-that shipped as ROCm `<V>`. A commit merged after the pin did not ship in `<V>`
-and belongs to the next release — even when `<V>` is still the top heading and no
-`<next>` section exists yet (create it and move the entry). `TOO NEW` (below)
-against a tagged section is always a real misfile.
+A tagged release is **frozen at its pin**: `pin(therock-<V>)` is the exact tree
+that shipped as ROCm `<V>`.
+
+**Pins are not on `develop`.** TheRock records a commit from a `release/therock-*`
+branch, so `git merge-base --is-ancestor <develop-commit> <pin>` is false for
+nearly every commit on `develop` and flags the whole section. Convert each pin to
+its develop-lineage bound first:
+
+```bash
+bound() { git merge-base "$(pin "$1")" origin/develop; }  # where the release branched off develop
+```
 
 ## Auditing a Section
 
-Bound the section by **its own version** — `HIGH=pin(therock-<V>)`, never
-`origin/develop` by default (`pin()` returns `origin/develop` itself if `<V>`
-isn't tagged yet). Flag any blamed commit outside `pin(<V-1>)..pin(<V>)`; checking
-only one bound misses entries merged after `V` shipped.
+Bound the section by **its own version**: `LOW=bound(V-1)`, `HIGH=bound(V)` (use
+`HEAD` when `V` is not tagged yet). Checking only one bound misses entries merged
+after `V` shipped.
 
 ```bash
 git fetch origin >/dev/null 2>&1
-LOW=$(pin therock-<MAJOR.MINOR of V-1>)
-HIGH=$(pin therock-<MAJOR.MINOR of V>)
+LOW=$(bound therock-<MAJOR.MINOR of V-1>)
+HIGH=$(bound therock-<MAJOR.MINOR of V>)   # HEAD if V is untagged
 read START END < <(awk '/^## amd_smi_lib for ROCm/{n++; if(n==1)s=NR; else if(n==2){print s, NR-1; exit}}' CHANGELOG.md)
 
-# placement — flag commits outside pin(V-1)..pin(V)
-git blame -L "$START,$END" -s CHANGELOG.md | awk '{print $1}' | sed 's/^\^//' | sort -u \
+# placement screen — flag commits outside bound(V-1)..bound(V)
+# grep drops blank lines: whoever last reflowed the section owns them and they name no entry
+git blame -L "$START,$END" -s CHANGELOG.md | grep -P '\)\s*\S' | awk '{print $1}' | sed 's/^\^//' | sort -u \
   | while read h; do
       git merge-base --is-ancestor "$h" "$LOW"  2>/dev/null && { echo "TOO OLD (earlier release): $h"; continue; }
       git merge-base --is-ancestor "$h" "$HIGH" 2>/dev/null || echo "TOO NEW (later release): $h"
@@ -69,9 +75,26 @@ sed -n "${START},${END}p" CHANGELOG.md | grep -nP '^- \*\*.*\*\*[^ ]*$'         
 sed -n "${START},${END}p" CHANGELOG.md | grep -nE 'ROCM-[0-9]+|SWDEV-[0-9]+'    # JIRA belongs only in the PR JIRA ID section
 ```
 
+**Blame is a screen, not a verdict.** Confirm every placement flag against the
+shipped tree before reporting it:
+
+```bash
+git grep -l "<symbol named in the entry>" "$(pin therock-<V>)" -- projects/amdsmi | grep -v CHANGELOG
+```
+
+Present at `pin(V)` → the entry belongs in `V`, whatever blame said. Absent → a
+real misfile; find the earliest pin where it is present. This settles the two
+cases blame gets wrong:
+
+| Blame artifact | Why it misleads |
+|----------------|-----------------|
+| Cherry-pick onto the release branch | Work shipped in `V` but reached `develop` after `bound(V)`, so blame reads TOO NEW |
+| Moved or reworded line | Blame names the commit that relocated the entry, not the one that wrote it — use `git log -S '<entry text>' -- CHANGELOG.md` for the original |
+
 - **TOO OLD** — commit shipped in an earlier release; the entry is a misfile/duplicate.
-- **TOO NEW** — commit merged after `V`'s pin; move the entry to the next
-  release's section (create a new top `## amd_smi_lib for ROCm <next>` block if none exists).
+- **TOO NEW** — commit merged after `bound(V)`; confirm by content presence, then
+  move the entry to the next release's section (create a new top
+  `## amd_smi_lib for ROCm <next>` block if none exists).
 - **Entry type vs heading** — no command catches this: read each entry's wording
   against the change-type table below. A valid heading can still hold a wrong-type
   entry (e.g. a deprecation filed under `### Changed` instead of Upcoming Changes).
