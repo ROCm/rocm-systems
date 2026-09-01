@@ -4,9 +4,11 @@
 """Unit tests for pc_sampling.source_snapshot_analysis."""
 
 import hashlib
+import json
 import os
 from pathlib import Path
 from typing import Optional
+from unittest.mock import patch
 
 import common
 import pytest
@@ -14,11 +16,24 @@ import pytest
 from pc_sampling import source_snapshot_analysis
 from pc_sampling.source_snapshot_analysis import (
     WorkloadSourceSnapshot,
+    load_source_path_map,
     parse_source_frames,
     read_source_file_digest_and_lines,
     resolve_export_path,
     resolve_snapshot_path,
 )
+
+
+def write_source_path_map(
+    workload_path: Path,
+    pid: int,
+    source_paths: dict[str, str],
+) -> Path:
+    """Write one process's raw DWARF to canonical path map."""
+    map_path = workload_path / "src" / f"{pid}_source_map.json"
+    map_path.parent.mkdir(parents=True, exist_ok=True)
+    map_path.write_text(json.dumps({"source_paths": source_paths}), encoding="utf-8")
+    return map_path
 
 
 def create_source_snapshot(
@@ -73,6 +88,36 @@ def create_source_snapshot(
 def test_parse_source_frames(source, expected_frames):
     """Split representative instruction comments into ordered frames."""
     assert parse_source_frames(source) == expected_frames
+
+
+def test_load_source_path_map_without_snapshot(tmp_path):
+    """A workload profiled without a snapshot names no paths."""
+    assert load_source_path_map(tmp_path) == {}
+
+
+def test_load_source_path_map_merges_every_process(tmp_path):
+    """Each process of a run records the files it captured."""
+    write_source_path_map(tmp_path, 101, {"/app/bin/../kernel.cpp": "/app/kernel.cpp"})
+    write_source_path_map(tmp_path, 202, {"/app/link/util.h": "/app/include/util.h"})
+
+    assert load_source_path_map(tmp_path) == {
+        "/app/bin/../kernel.cpp": "/app/kernel.cpp",
+        "/app/link/util.h": "/app/include/util.h",
+    }
+
+
+def test_load_source_path_map_with_unreadable_map(tmp_path):
+    """An unreadable map leaves its files to be looked up by raw DWARF path."""
+    map_path = tmp_path / "src" / "303_source_map.json"
+    map_path.parent.mkdir(parents=True)
+    map_path.write_text("{not json", encoding="utf-8")
+
+    with patch(
+        "pc_sampling.source_snapshot_analysis.console_warning"
+    ) as console_warning:
+        assert load_source_path_map(tmp_path) == {}
+
+    console_warning.assert_called_once()
 
 
 def test_resolve_snapshot_path_mirrors_absolute_path(tmp_path):

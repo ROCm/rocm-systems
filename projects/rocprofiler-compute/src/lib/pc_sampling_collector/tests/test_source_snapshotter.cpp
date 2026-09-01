@@ -111,7 +111,11 @@ TEST_F(test_source_snapshotter_t, ProvidedRegularSource_CreatesParentAndCopiesTo
     const auto                  destination = destination_path(source_path);
     set_regular_source(source_path);
 
-    EXPECT_NO_THROW(m_snapshotter->snapshot({source_path}, m_destination_root));
+    source_path_map_t source_path_map;
+    EXPECT_NO_THROW(source_path_map = m_snapshotter->snapshot({source_path}, m_destination_root));
+
+    const source_path_map_t expected_source_path_map = {{source_path, source_path}};
+    EXPECT_EQ(source_path_map, expected_source_path_map);
 
     EXPECT_EQ(m_filesystem->get_create_directories_calls(),
               std::vector<std::filesystem::path>{destination.parent_path()});
@@ -227,10 +231,56 @@ TEST_F(test_source_snapshotter_t, ProvidedCopyError_DoesNotThrow)
     set_regular_source(source_path);
     m_filesystem->set_copy_file_error(permission_denied_error());
 
-    EXPECT_NO_THROW(m_snapshotter->snapshot({source_path}, m_destination_root));
+    source_path_map_t source_path_map;
+    EXPECT_NO_THROW(source_path_map = m_snapshotter->snapshot({source_path}, m_destination_root));
 
     ASSERT_EQ(m_filesystem->get_copy_file_calls().size(), 1);
     EXPECT_EQ(m_filesystem->get_copy_file_calls()[0].source, source_path);
+    EXPECT_TRUE(source_path_map.empty());
+}
+
+TEST_F(test_source_snapshotter_t, ProvidedNonCanonicalSource_MapsSpelledPathToCanonicalPath)
+{
+    const std::filesystem::path source_path    = "/sources/app/bin/../include/kernel.h";
+    const std::filesystem::path canonical_path = "/sources/app/include/kernel.h";
+    set_regular_source(source_path);
+    m_filesystem->set_weakly_canonical(source_path, canonical_path);
+
+    const auto source_path_map = m_snapshotter->snapshot({source_path}, m_destination_root);
+
+    const source_path_map_t expected_source_path_map = {{source_path, canonical_path}};
+    EXPECT_EQ(source_path_map, expected_source_path_map);
+    ASSERT_EQ(m_filesystem->get_copy_file_calls().size(), 1);
+    EXPECT_EQ(m_filesystem->get_copy_file_calls()[0].destination, destination_path(canonical_path));
+}
+
+TEST_F(test_source_snapshotter_t, ProvidedMissingSource_LeavesItOutOfMap)
+{
+    const std::filesystem::path present_source_path = "/sources/present.cpp";
+    const std::filesystem::path missing_source_path = "/sources/missing.cpp";
+    set_regular_source(present_source_path);
+
+    const auto source_path_map =
+        m_snapshotter->snapshot({present_source_path, missing_source_path}, m_destination_root);
+
+    const source_path_map_t expected_source_path_map = {{present_source_path, present_source_path}};
+    EXPECT_EQ(source_path_map, expected_source_path_map);
+}
+
+TEST_F(test_source_snapshotter_t, ProvidedSourcePathMap_SerializesEntriesUnderSourcePathsKey)
+{
+    const source_path_map_t source_path_map = {
+        {"/sources/app/bin/../include/kernel.h", "/sources/app/include/kernel.h"},
+    };
+
+    EXPECT_EQ(serialize_source_path_map(source_path_map),
+              R"({"source_paths":{"/sources/app/bin/../include/kernel.h":)"
+              R"("/sources/app/include/kernel.h"}})");
+}
+
+TEST_F(test_source_snapshotter_t, ProvidedEmptySourcePathMap_SerializesEmptyObject)
+{
+    EXPECT_EQ(serialize_source_path_map({}), R"({"source_paths":{}})");
 }
 
 TEST_F(test_source_snapshotter_t, ProvidedSameBasenameDifferentDirectories_CopiesBoth)

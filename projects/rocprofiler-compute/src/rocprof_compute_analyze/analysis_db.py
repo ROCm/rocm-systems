@@ -30,6 +30,7 @@ from pc_sampling.source_snapshot_analysis import (
     SourceFrame,
     WorkloadSourceSnapshot,
     export_source_snapshot_files,
+    load_source_path_map,
     parse_source_frames,
     read_source_file_digest_and_lines,
     resolve_snapshot_path,
@@ -160,6 +161,7 @@ class SourceFrameCollector:
     def __init__(self, workload_path: Path, workload: orm.Workload) -> None:
         self._workload_path = workload_path
         self._workload = workload
+        self._source_path_map = load_source_path_map(workload_path)
         self._frames_by_comment: dict[str, list[SourceFrame]] = {}
         self._source_files: dict[str, orm.SourceFile] = {}
         self._source_lines: dict[SourceFrame, orm.SourceLine] = {}
@@ -177,7 +179,7 @@ class SourceFrameCollector:
 
         # Parse once per distinct comment; instructions repeat them heavily.
         if source not in self._frames_by_comment:
-            self._frames_by_comment[source] = parse_source_frames(source)
+            self._frames_by_comment[source] = self._resolve_source_frames(source)
 
         for frame_index, frame in enumerate(self._frames_by_comment[source]):
             Database.get_session().add(
@@ -187,6 +189,17 @@ class SourceFrameCollector:
                     frame_index=frame_index,
                 )
             )
+
+    def _resolve_source_frames(self, source: str) -> list[SourceFrame]:
+        """Return one comment's frames with each raw DWARF path canonicalized.
+
+        Two raw DWARF paths for one file resolve to a single path and share
+        its rows.
+        """
+        return [
+            (self._source_path_map.get(raw_path, raw_path), line_number)
+            for raw_path, line_number in parse_source_frames(source)
+        ]
 
     def captured_source_paths(self) -> tuple[str, ...]:
         """Return the absolute paths whose snapshot copy this workload holds.

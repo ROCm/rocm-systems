@@ -211,10 +211,13 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     if (!pc_sampling_method.empty())
     {
         const auto pc_mode = parse_pc_sampling_mode(std::string{pc_sampling_method});
+        const auto source_snapshot_path = generate_output_directory(output_path, "src");
         tool_data->pc_sampling =
             pc_sampling_feature_t{pc_mode,
                                   generate_output_filename(output_path, "_code_obj_info.json"),
-                                  generate_output_directory(output_path, "src")};
+                                  source_snapshot_path,
+                                  generate_output_filename(source_snapshot_path,
+                                                           "_source_map.json")};
     }
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
