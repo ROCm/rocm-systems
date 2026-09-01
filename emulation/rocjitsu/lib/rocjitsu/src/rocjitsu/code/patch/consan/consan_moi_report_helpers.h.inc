@@ -1,48 +1,13 @@
-[[nodiscard]] ConSanMoiRecordReplayTraceHeader consan_moi_compact_record_replay_trace(
-    uint64_t generation, uint64_t dispatch_id,
-    std::span<const ConSanMoiAccessRecord> access_records,
-    std::span<const ConSanMoiBarrierRecord> barrier_records,
-    std::span<const ConSanMoiRecordReplayAtomicEvent> atomic_events,
-    std::span<ConSanMoiRecordReplayPcEntry> dictionary,
-    std::span<ConSanMoiRecordReplayWorkgroupRun> workgroup_runs,
-    std::span<ConSanMoiRecordReplayCompactEvent> events);
+/// Resolve the wave-wide outcome represented by a Record/Replay atomic event.
+/// Mixed-lane compare-exchange outcomes cannot be represented by this ABI.
+[[nodiscard]] std::optional<ConSanMoiAtomicOutcome>
+consan_moi_record_replay_resolved_atomic_outcome(const ConSanMoiRecordReplayAtomicEvent &record);
 
-[[nodiscard]] ConSanMoiRecordReplayTraceHeader consan_moi_compact_record_replay_trace(
-    uint64_t generation, uint64_t dispatch_id,
-    std::span<const ConSanMoiAccessRecord> access_records,
-    std::span<const ConSanMoiBarrierRecord> barrier_records,
-    std::span<const ConSanMoiRecordReplayAtomicEvent> atomic_events,
-    std::span<const ConSanMoiRecordReplayFenceEvent> fence_events,
-    std::span<ConSanMoiRecordReplayPcEntry> dictionary,
-    std::span<ConSanMoiRecordReplayWorkgroupRun> workgroup_runs,
-    std::span<ConSanMoiRecordReplayCompactEvent> events);
-
-/// Plans a deterministic prefix of complete per-workgroup barrier epochs from
-/// an RR1 compact trace. Every selected event receives its output-window index;
-/// omitted events retain kConSanMoiRecordReplayUncapturedEvent. Invalid trace
-/// structure produces no selection.
-[[nodiscard]] ConSanMoiRecordReplayCaptureResult consan_moi_plan_record_replay_capture(
-    const ConSanMoiRecordReplayTraceHeader &header,
-    std::span<const ConSanMoiRecordReplayPcEntry> dictionary,
-    std::span<const ConSanMoiRecordReplayWorkgroupRun> workgroup_runs,
-    std::span<const ConSanMoiRecordReplayCompactEvent> events,
-    ConSanMoiRecordReplayCaptureLimits limits,
-    std::span<ConSanMoiRecordReplayCaptureWindow> windows,
-    std::span<uint32_t> event_window_indices);
-
-/// Reconstructs and replays exactly the selected complete RR2 windows in
-/// global event order. Static access/atomic semantics come from the RR1 PC
-/// dictionary; dynamic workgroup, owner, epoch, lane, range, and address data
-/// come from the compact events and run table.
-[[nodiscard]] ConSanMoiRecordReplayWindowResult consan_moi_replay_record_replay_capture(
-    const ConSanMoiRecordReplayTraceHeader &header,
-    std::span<const ConSanMoiRecordReplayPcEntry> dictionary,
-    std::span<const ConSanMoiRecordReplayWorkgroupRun> workgroup_runs,
-    std::span<const ConSanMoiRecordReplayCompactEvent> events,
-    std::span<const ConSanMoiRecordReplayCaptureWindow> windows,
-    std::span<const uint32_t> event_window_indices,
-    std::span<ConSanMoiDiagnosticRecord> diagnostic_records,
-    std::span<uint64_t> exact_shadow_entries);
+/// Recognize untouched fixed-capacity report slots before replay.
+[[nodiscard]] bool consan_moi_record_replay_atomic_event_is_unpublished(
+    const ConSanMoiRecordReplayAtomicEvent &record);
+[[nodiscard]] bool
+consan_moi_record_replay_fence_event_is_unpublished(const ConSanMoiRecordReplayFenceEvent &record);
 
 [[nodiscard]] constexpr ConSanMoiReportHeader make_consan_moi_report_header(
     uint64_t generation, uint64_t dispatch_id, uint32_t access_record_capacity,

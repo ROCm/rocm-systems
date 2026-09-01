@@ -35,15 +35,6 @@ struct ConSanMoiRecordReplayResult {
   bool conflict = false;
 };
 
-/// Result of replaying only the complete RR2 windows selected from a compact
-/// trace. Invalid capture metadata fails closed before any shadow or diagnostic
-/// output is modified.
-struct ConSanMoiRecordReplayWindowResult {
-  ConSanMoiRecordReplayResult replay;
-  uint32_t selected_event_count = 0;
-  bool invalid_capture = false;
-};
-
 struct ConSanMoiSampledPublishResult {
   uint32_t processed_access_count = 0;
   uint32_t eligible_window_count = 0;

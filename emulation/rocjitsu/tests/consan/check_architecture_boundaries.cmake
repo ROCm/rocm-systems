@@ -286,6 +286,28 @@ _consan_assert_no_match(
     "consan_moi_sampled_(publish_sync_metadata|publish_access_records|publish_causal_windows|replay_entries|replay_snapshots|replay_causal_windows|begin_causal_claim|commit_causal_claim|abort_causal_claim)"
     "host-only Sampled publication and replay oracle declarations must remain test-owned"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_model.cpp"
+    "consan_moi_(compact_record_replay_trace|plan_record_replay_capture|replay_record_replay_capture)"
+    "host-only Record/Replay capture oracles must remain test-owned"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_report_helpers.h.inc"
+    "consan_moi_(compact_record_replay_trace|plan_record_replay_capture|replay_record_replay_capture)"
+    "host-only Record/Replay capture oracle declarations must remain test-owned"
+)
+foreach(
+    _record_replay_capture_type_owner
+    IN ITEMS
+        consan_moi_record_replay_types.h.inc
+        consan_moi_engine_results.h.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_record_replay_capture_type_owner}"
+        "ConSanMoiRecordReplay(EventKind|TraceHeader|PcEntry|WorkgroupRun|CompactEvent|CaptureLimits|CaptureWindow|CaptureResult|WindowResult)"
+        "host-only Record/Replay capture types must remain test-owned"
+    )
+endforeach()
 file(READ "${ROCJITSU_SOURCE_DIR}/tests/patch/consan/analysis_test.cpp" _target_extension_test)
 file(
     READ

@@ -6047,9 +6047,8 @@ It also reverses checkpoint 73's local size growth, but cumulative production
 is only 314 implementation lines smaller than the baseline and therefore still
 does not satisfy Section 14.8. The broad operating point remains spread across
 63 production files despite the lower reference count, and the mutable
-transaction, remaining placement knots, both extension exercises, material
-legacy harvesting, and independent completion audit remain open. The goal
-therefore remains active.
+transaction, remaining placement knots, material legacy harvesting, and
+independent completion audit remain open. The goal therefore remains active.
 
 ### 16.76 Convergence checkpoint 75: one projected scalar-routing transaction
 
@@ -6117,9 +6116,9 @@ its invariant test cost 24 production implementation lines even after deleting
 the duplicate derivations, so cumulative shrinkage retreats from 314 to 290
 lines and Section 14.8 remains materially unsatisfied. The next convergence
 slice must cash in a deletion or sharing opportunity rather than adding another
-contract layer. Remaining broad placement and mutation transactions, both
-extension exercises, larger legacy harvesting, and the independent completion
-audit remain open. The goal therefore remains active.
+contract layer. Remaining broad placement and mutation transactions, larger
+legacy harvesting, and the independent completion audit remain open. The goal
+therefore remains active.
 
 ### 16.77 Convergence checkpoint 76: immutable automatic-resume inventory
 
@@ -6345,8 +6344,8 @@ production shrinkage increases from 492 to 781 implementation lines. The
 remaining snapshot validation/import helpers are production dependencies and
 must be assessed together with their shadow-model consumers rather than moved
 by association. Material shrinkage, the larger placement and mutation buses,
-both extension exercises, and the independent completion audit remain open;
-the goal therefore remains active.
+and the independent completion audit remain open; the goal therefore remains
+active.
 
 ### 16.81 Convergence checkpoint 80: test-owned InlineShadow import and token oracles
 
@@ -6393,9 +6392,9 @@ InlineShadow contracts retain only behavior used by construction or report
 processing, while independent executable specifications remain available to
 tests under explicit test ownership. Cumulative production shrinkage reaches
 956 implementation lines. Material shrinkage is improving but remains
-unproven at the whole-refactoring scale; broad placement and mutation buses,
-both extension exercises, and the independent completion audit remain open.
-The goal therefore remains active.
+unproven at the whole-refactoring scale; broad placement and mutation buses and
+the independent completion audit remain open. The goal therefore remains
+active.
 
 ### 16.82 Convergence checkpoint 81: Sampled publication/replay models are test components
 
@@ -6448,6 +6447,60 @@ decode authorities remain single implementations. Cumulative shrinkage reaches
 1,434 production implementation lines. The neighboring Record/Replay capture
 model has the same apparent ownership problem but shares internal replay
 helpers with the runtime analyzer and requires a separate dependency-closure
-migration. Broad placement and mutation buses, both extension exercises, and
-the independent completion audit remain open. The goal therefore remains
-active.
+migration. Broad placement and mutation buses and the independent completion
+audit remain open. The goal therefore remains active.
+
+### 16.83 Convergence checkpoint 82: Record/Replay capture is a test component
+
+The Record/Replay capture dependency-closure read separated the actual runtime
+analyzer from a second host specification model. Production report processing
+uses access/barrier/atomic/fence replay, untouched fixed-capacity-slot
+classification, and wave-wide atomic-outcome normalization. It does not use
+the compact trace builder, bounded complete-epoch selector, selected-window
+replay wrapper, or any of their compact-trace and capture types. The latter
+three roots were called only by focused tests; even their five ABI-size
+assertions lived in the common test convenience header rather than proving a
+production consumer.
+
+The three oracle roots, nine private types, and five size assertions now form
+the explicit test contract `consan_record_replay_model_test_support.h` and its
+single implementation translation unit. The two consuming test files include
+that contract directly. Production retains the real report replay analyzer
+and gives its three shared normalization predicates narrow Record/Replay names;
+the test oracle calls those definitions rather than copying their logic. The
+superseded declarations and types are deleted from the production report
+contract, and the architecture gate rejects their return.
+
+| Signal | Checkpoint 82 | Cumulative change | Slice change from checkpoint 81 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 103,067 | **-1,909** | **-921** |
+| Nonblank production lines | 96,839 | **-2,245** | **-879** |
+| Production implementation lines | 89,174 | **-2,276** | **-842** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 168 / 52 | **-108 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 326 / 60 | +36 / +9 | 0 / 0[^checkpoint-82-point-count] |
+| Record/Replay capture oracle roots/types in production | **0** | n/a | **-12** |
+| Test inventory | **5,412** | **+67** | 0 |
+
+[^checkpoint-82-point-count]: Recounting the checkpoint-81 tree finds 326
+    `ConSanMoiOperatingPoint` occurrences, not the 316 copied into its table.
+    This row corrects that stale ledger value; checkpoint 82 adds none.
+
+Validation includes a complete `-j16` rebuild of the production report
+contract and every ConSan test translation unit, all 97 Record/Replay capture,
+construction, runtime-replay, and hook tests, and the architecture-boundary
+test. Checkpoint 81's immediately preceding periodic gate passed all
+4,777 nonphysical tests, including all 2,918 simulator tests over five targets.
+The authoritative inventory remains 5,412 tests: 4,777 nonphysical and 635
+physical. No test was removed, disabled, renamed, or replaced, and no physical
+gfx1201 test was run.
+
+This checkpoint strengthens Sections 14.1, 14.3, and 14.7 through 14.9.
+Record/Replay's independent capture specification is physically skippable from
+production, while the real mode-specific runtime analyzer retains one shared
+normalization authority. Cumulative production shrinkage reaches 2,276
+implementation lines. Material whole-refactoring shrinkage, broad placement
+and mutation buses, remaining target/mode locality, and the independent
+completion audit remain open. The goal therefore remains active.

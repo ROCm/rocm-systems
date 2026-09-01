@@ -3200,12 +3200,6 @@ static_assert(sizeof(ConSanMoiAtomicRecord) == 80);
 static_assert(sizeof(ConSanMoiFenceRecord) == 56);
 static_assert(sizeof(ConSanMoiInlineAtomicReleaseSlot) == 32);
 static_assert(sizeof(ConSanMoiDiagnosticRecord) == 88);
-static_assert(sizeof(ConSanMoiRecordReplayTraceHeader) == 72);
-static_assert(sizeof(ConSanMoiRecordReplayPcEntry) == 16);
-static_assert(sizeof(ConSanMoiRecordReplayWorkgroupRun) == 24);
-static_assert(sizeof(ConSanMoiRecordReplayCompactEvent) == 32);
-static_assert(sizeof(ConSanMoiRecordReplayCaptureWindow) == 40);
-
 std::vector<uint32_t> make_padded_moi_first_light_text(uint32_t word0, uint32_t word1) {
   // Leave enough real padding for the complete dispatch/workgroup-qualified
   // publication protocol so tests that exercise in-place lowering do not

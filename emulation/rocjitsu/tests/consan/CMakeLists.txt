@@ -84,6 +84,7 @@ function(rj_add_consan_unit_sources target)
             patch/consan/moi_inline_atomic_test.cpp
             patch/consan/moi_inline_shadow_test.cpp
             patch/consan/moi_mode_planning_test.cpp
+            patch/consan/consan_record_replay_model_test_support.cpp
             patch/consan/moi_record_replay_model_test.cpp
             patch/consan/moi_record_replay_test.cpp
             patch/consan/consan_sampled_model_test_support.cpp
