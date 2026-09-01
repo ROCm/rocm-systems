@@ -124,10 +124,10 @@ Localized context control
 =========================
 
 During ``PASS`` ``PHASE_ENTER`` the payload carries ``replay_local_enable_context_cb`` /
-``replay_local_disable_context_cb``. Use them to enable or disable other contexts for that pass
-(for example counters every pass, PC sampling once) without calling global
-``rocprofiler_start_context`` / ``rocprofiler_stop_context``, which would leak into non-replayed
-dispatches.
+``replay_local_disable_context_cb``. Use them to enable or disable override-aware contexts for that
+pass (for example counters on selected passes and thread trace once) without calling global
+``rocprofiler_start_context`` / ``rocprofiler_stop_context``. PC sampling is agent-wide and does
+not currently honor these callbacks, so it cannot be isolated to one replay pass.
 
 Overrides are sticky across passes and scoped to the replay loop. See
 :ref:`kernel-replay-callback-api` for the contract.
