@@ -3718,6 +3718,33 @@ TEST(HsaHooksUnitTest, AutoReportDecoderUsesLayoutAsItsOnlyModeAuthority) {
   }
 }
 
+TEST(HsaHooksUnitTest, AutoReportPipelineCarriesOneStaticMetadataModeAlternative) {
+  rocjitsu::consan_hook::AutoMoiReportPipelineInput input;
+  EXPECT_EQ(input.static_metadata, nullptr);
+
+  rocjitsu::consan_hook::AutoMoiRuntimeStaticMetadata metadata =
+      rocjitsu::consan_hook::AutoMoiSampledStaticMetadata{.mappings = {}, .malformed = true};
+  input.static_metadata = &metadata;
+  EXPECT_TRUE(
+      std::holds_alternative<rocjitsu::consan_hook::AutoMoiSampledStaticMetadata>(metadata));
+  EXPECT_FALSE(
+      std::holds_alternative<rocjitsu::consan_hook::AutoMoiRecordReplayStaticMetadata>(metadata));
+  EXPECT_FALSE(
+      std::holds_alternative<rocjitsu::consan_hook::AutoMoiInlineCompactStaticMetadata>(metadata));
+
+  metadata = rocjitsu::consan_hook::AutoMoiInlineCompactStaticMetadata{
+      .mapping_count = 3u,
+      .malformed = false,
+  };
+  EXPECT_FALSE(
+      std::holds_alternative<rocjitsu::consan_hook::AutoMoiSampledStaticMetadata>(metadata));
+  ASSERT_TRUE(
+      std::holds_alternative<rocjitsu::consan_hook::AutoMoiInlineCompactStaticMetadata>(metadata));
+  EXPECT_EQ(
+      std::get<rocjitsu::consan_hook::AutoMoiInlineCompactStaticMetadata>(metadata).mapping_count,
+      3u);
+}
+
 TEST(HsaHooksUnitTest, AutoReportRendererConsumesOnlyTypedResultsAndPreservesDiagnostics) {
   rocjitsu::consan_hook::AutoMoiReportPipelineInput input;
   input.reader = 101;
@@ -5653,11 +5680,11 @@ rocjitsu::ConSanTransformArtifacts auto_report_replay_transform_result(
       owners.push_back(
           index == 1u && owner_scope == AutoReplayOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u);
     }
-    rocjitsu::ConSanRuntimeStaticMapping runtime_mapping;
-    runtime_mapping.record_replay_accesses.push_back({
-        .access = auto_report_static_access_attribution(result, index, std::move(owners),
-                                                        owner_provenance_complete),
-    });
+    rocjitsu::ConSanRuntimeStaticMapping runtime_mapping =
+        rocjitsu::ConSanRuntimeStaticMapping::record_replay({
+            .access = auto_report_static_access_attribution(result, index, std::move(owners),
+                                                            owner_provenance_complete),
+        });
     const rocjitsu::ConSanProbeIntent &intent = result.observation_plan().probe_intents[index];
     const std::array intent_ids = {intent.id};
     const std::array locations = {rocjitsu::ConSanCommittedLoweringLocation{
@@ -5701,18 +5728,18 @@ rocjitsu::ConSanTransformArtifacts auto_report_sampled_transform_result(
       owners.push_back(
           index == 1u && owner_scope == AutoSampledOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u);
     }
-    rocjitsu::ConSanRuntimeStaticMapping runtime_mapping;
-    runtime_mapping.sampled_accesses.push_back({
-        .access = auto_report_static_access_attribution(result, index, std::move(owners),
-                                                        owner_provenance_complete),
-        .first_slot = malformed_mapping && index == 0u ? std::numeric_limits<uint32_t>::max()
-                                                       : static_cast<uint32_t>(index),
-        .range_count = 1u,
-        .bank_count = 1u,
-        .emitted_probe_text_offset = 0x440u + index * 0x20u,
-        .relocated_guest_text_offset = 0x448u + index * 0x20u,
-        .scratch_vgpr = 12u,
-    });
+    rocjitsu::ConSanRuntimeStaticMapping runtime_mapping =
+        rocjitsu::ConSanRuntimeStaticMapping::sampled({
+            .access = auto_report_static_access_attribution(result, index, std::move(owners),
+                                                            owner_provenance_complete),
+            .first_slot = malformed_mapping && index == 0u ? std::numeric_limits<uint32_t>::max()
+                                                           : static_cast<uint32_t>(index),
+            .range_count = 1u,
+            .bank_count = 1u,
+            .emitted_probe_text_offset = 0x440u + index * 0x20u,
+            .relocated_guest_text_offset = 0x448u + index * 0x20u,
+            .scratch_vgpr = 12u,
+        });
     const rocjitsu::ConSanProbeIntent &intent = result.observation_plan().probe_intents[index];
     const std::array intent_ids = {intent.id};
     const std::array locations = {rocjitsu::ConSanCommittedLoweringLocation{

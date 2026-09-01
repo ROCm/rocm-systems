@@ -5911,3 +5911,74 @@ mode locality, broader operating-point and mutable-transaction surfaces,
 larger legacy harvesting, material whole-refactoring shrinkage, and the
 independent Section 14 completion audit remain open. The goal therefore
 remains active.
+
+### 16.74 Convergence checkpoint 73: one discriminated runtime metadata product
+
+The runtime-attribution deep read found that one transform retained three
+independently populated static-mapping vectors even though the observation
+plan selects exactly one evidence engine. The host registry repeated that
+union-shaped representation as two mapping vectors, one compact-mapping
+count, and three malformed flags. The report-pipeline input repeated those six
+fields again. Valid transforms populated only one family, but the public
+products represented mixed Record/Replay, Sampled, and InlineShadow metadata,
+and every aggregator and runtime consumer had to preserve that convention.
+
+Static lowering now publishes one `ConSanRuntimeStaticMapping` variant whose
+alternatives own the Record/Replay, Sampled, or InlineCompact mapping sequence.
+Same-mode commits append transactionally; a cross-mode append is rejected
+without mutating the accepted product. Commit validation and coverage-ledger
+aggregation consume the selected typed alternative rather than scanning three
+containers. This makes the observation plan's one-engine invariant structural
+at the transform/runtime boundary.
+
+The host registry and report pipeline share one owning
+`AutoMoiRuntimeStaticMetadata` variant. The registry stores that product and
+the synchronous pipeline borrows it directly; an earlier draft's second
+borrowed variant and manual registry-to-pipeline adapter were deleted before
+the checkpoint. Decoder and analyzer components use `std::get_if` for only
+their mode-local alternative. Sampled malformed attribution, InlineCompact
+token attribution, and Record/Replay provenance can no longer coexist as
+parallel input fields.
+
+One transform regression proves same-mode aggregation and cross-mode rejection
+without partial mutation. One host regression proves that the pipeline
+contract carries only one selected metadata alternative. Existing end-to-end
+registry tests continue to exercise Record/Replay provenance, Sampled mapping
+and malformed-state reporting, and InlineShadow compact-token registration.
+Structural gates reject the three retired transform containers and all twelve
+retired registry/pipeline fields, require both discriminated products, and
+require the registry to use the pipeline's shared owning type rather than a
+second representation.
+
+| Signal | Checkpoint 73 | Cumulative change | Slice change from checkpoint 72 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 105,256 | +280 | **+105** |
+| Nonblank production lines | 98,906 | **-178** | **+95** |
+| Production implementation lines | 91,147 | **-303** | **+91** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **173 / 52** | **-103 / -5** | **-1 / 0** |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 355 / 61 | +65 / +10 | **-3 / 0** |
+| Parallel runtime static-metadata fields | **0** | n/a | **-15 fields** |
+| Test inventory | **5,409** | **+64** | **+1** |
+
+Validation includes a final-tree `-j16` build; all 12 focused transform,
+registry, decoder, provenance, malformed-mapping, and architecture-boundary
+tests; and all 4,774 nonphysical tests over the five emulated targets at
+`-j16` in 203.10 seconds, including all 2,918 simulator tests. In accordance
+with the reduced physical-test cadence, no physical gfx1201 test was run for
+this slice. No test was removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, and 14.5 through 14.7 and
+14.9. Runtime attribution is now one typed mode product from lowering through
+host decoding, and the duplicate host representation discovered during the
+slice was harvested rather than retained as an adapter. The explicit variant
+factories, accessors, transactional aggregation, and owning runtime metadata
+cost 91 implementation lines relative to checkpoint 72, so this slice weakens
+the provisional Section 14.8 count and cumulative implementation shrinkage
+falls from 394 to 303 lines. That remains non-material. Remaining architecture
+and mode locality, broader operating-point and mutable-transaction surfaces,
+larger legacy harvesting, material whole-refactoring shrinkage, and the
+independent Section 14 completion audit remain open. The goal therefore
+remains active.

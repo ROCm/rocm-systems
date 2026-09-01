@@ -13,6 +13,19 @@ namespace rocjitsu::consan_hook {
 AutoMoiReportSummary summarize_auto_moi_report(const AutoMoiReportPipelineInput &input,
                                                const AutoMoiReportSnapshot &snapshot,
                                                AutoMoiReportSummary summary) {
+  if (const auto *sampled = input.static_metadata
+                                ? std::get_if<AutoMoiSampledStaticMetadata>(input.static_metadata)
+                                : nullptr;
+      sampled && sampled->malformed) {
+    ++summary.sampled_static_mapping_malformed_count;
+  }
+  if (const auto *inline_compact =
+          input.static_metadata
+              ? std::get_if<AutoMoiInlineCompactStaticMetadata>(input.static_metadata)
+              : nullptr;
+      inline_compact && inline_compact->malformed) {
+    ++summary.inline_malformed_count;
+  }
   const AutoMoiDecodedReport decoded = decode_auto_moi_report(input, snapshot, summary);
   summary = decoded.summary;
 
@@ -21,12 +34,18 @@ AutoMoiReportSummary summarize_auto_moi_report(const AutoMoiReportPipelineInput 
   const AutoMoiSampledConflictAnalysis *sampled_analysis_ptr = nullptr;
   const AutoMoiRecordReplayAnalysis *record_replay_analysis_ptr = nullptr;
   if (decoded.complete()) {
+    const auto *record_replay_metadata =
+        input.static_metadata
+            ? std::get_if<AutoMoiRecordReplayStaticMetadata>(input.static_metadata)
+            : nullptr;
     sampled_analysis = analyze_auto_moi_sampled_conflicts(
         decoded.sampled, decoded.sampled_synchronization_evidence_complete);
     record_replay_analysis = analyze_auto_moi_record_replay(
         decoded.header, decoded.engine, decoded.replay_access_records, decoded.barrier_records,
-        decoded.atomic_records, decoded.fence_records, input.record_replay_static_mappings,
-        input.record_replay_static_mapping_malformed,
+        decoded.atomic_records, decoded.fence_records,
+        record_replay_metadata ? record_replay_metadata->mappings
+                               : std::span<const AutoMoiRecordReplayStaticMapping>{},
+        record_replay_metadata && record_replay_metadata->malformed,
         input.layout.record_replay_logical_access_range_count,
         input.layout.record_replay_address_group_headroom);
     const RecordReplayPressureTelemetry &pressure = record_replay_analysis.pressure;

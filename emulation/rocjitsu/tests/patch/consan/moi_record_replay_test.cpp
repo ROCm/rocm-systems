@@ -387,9 +387,10 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   EXPECT_EQ(access_patch->owner_descriptor_file_offsets.size(), 2u);
   const ConSanRuntimeStaticMapping runtime_static_mapping =
       result.coverage_ledger.runtime_static_mapping();
-  ASSERT_EQ(runtime_static_mapping.record_replay_accesses.size(), 1u);
+  ASSERT_NE(runtime_static_mapping.record_replay(), nullptr);
+  ASSERT_EQ(runtime_static_mapping.record_replay()->size(), 1u);
   const ConSanRecordReplayStaticAccessMapping &runtime_mapping =
-      runtime_static_mapping.record_replay_accesses.front();
+      runtime_static_mapping.record_replay()->front();
   ASSERT_EQ(runtime_mapping.access.intent_ids.size(), 1u);
   EXPECT_EQ(runtime_mapping.access.original_site.original_text_offset, access_patch->anchor_offset);
   EXPECT_EQ(runtime_mapping.access.execution_owner_descriptor_file_offsets,

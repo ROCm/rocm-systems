@@ -11,6 +11,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 namespace rocjitsu::consan_hook {
@@ -33,6 +34,25 @@ struct AutoMoiSampledStaticMapping {
   bool owner_provenance_complete = false;
 };
 
+struct AutoMoiRecordReplayStaticMetadata {
+  std::vector<AutoMoiRecordReplayStaticMapping> mappings;
+  bool malformed = false;
+};
+
+struct AutoMoiSampledStaticMetadata {
+  std::vector<AutoMoiSampledStaticMapping> mappings;
+  bool malformed = false;
+};
+
+struct AutoMoiInlineCompactStaticMetadata {
+  uint32_t mapping_count = 0;
+  bool malformed = false;
+};
+
+using AutoMoiRuntimeStaticMetadata =
+    std::variant<std::monostate, AutoMoiRecordReplayStaticMetadata, AutoMoiSampledStaticMetadata,
+                 AutoMoiInlineCompactStaticMetadata>;
+
 /// Immutable runtime/static context paired with one captured report. It owns
 /// no HSA handles and borrows only registry metadata for the duration of the
 /// synchronous report pipeline.
@@ -43,12 +63,7 @@ struct AutoMoiReportPipelineInput {
   ConSanMoiReportBufferLayout layout;
   bool fine_grained = false;
   std::string_view input_fingerprint;
-  std::span<const AutoMoiRecordReplayStaticMapping> record_replay_static_mappings;
-  std::span<const AutoMoiSampledStaticMapping> sampled_static_mappings;
-  uint32_t compact_token_mapping_count = 0;
-  bool compact_token_mapping_malformed = false;
-  bool record_replay_static_mapping_malformed = false;
-  bool sampled_static_mapping_malformed = false;
+  const AutoMoiRuntimeStaticMetadata *static_metadata = nullptr;
 };
 
 [[nodiscard]] AutoMoiReportSummary

@@ -1066,34 +1066,109 @@ struct ConSanInlineCompactStaticAccessMapping {
   bool operator==(const ConSanInlineCompactStaticAccessMapping &) const = default;
 };
 
-/// Validated static transform product consumed by runtime evidence analysis.
+/// Validated single-mode static transform product consumed by runtime evidence
+/// analysis.
 ///
-/// Keeping the three evidence protocols in separate typed sequences prevents
-/// the runtime from switching on lowerer patch kinds. Every member is also
-/// retained by the intent-bound lowering commit that created it.
+/// A transform selects one evidence protocol, so retaining three independently
+/// populated vectors made an impossible mixed-mode state representable. The
+/// discriminated payload keeps the protocols separately typed without making
+/// every producer and consumer carry the other modes' empty containers. Every
+/// mapping is also retained by the intent-bound lowering commit that created
+/// it.
 struct ConSanRuntimeStaticMapping {
-  std::vector<ConSanRecordReplayStaticAccessMapping> record_replay_accesses;
-  std::vector<ConSanSampledStaticAccessMapping> sampled_accesses;
-  std::vector<ConSanInlineCompactStaticAccessMapping> inline_compact_accesses;
+  using RecordReplay = std::vector<ConSanRecordReplayStaticAccessMapping>;
+  using Sampled = std::vector<ConSanSampledStaticAccessMapping>;
+  using InlineCompact = std::vector<ConSanInlineCompactStaticAccessMapping>;
 
-  [[nodiscard]] bool empty() const {
-    return record_replay_accesses.empty() && sampled_accesses.empty() &&
-           inline_compact_accesses.empty();
+  enum class Kind : uint8_t {
+    None,
+    RecordReplay,
+    Sampled,
+    InlineCompact,
+  };
+
+  ConSanRuntimeStaticMapping() = default;
+
+  static ConSanRuntimeStaticMapping record_replay(ConSanRecordReplayStaticAccessMapping mapping) {
+    return ConSanRuntimeStaticMapping(RecordReplay{std::move(mapping)});
+  }
+  static ConSanRuntimeStaticMapping sampled(ConSanSampledStaticAccessMapping mapping) {
+    return ConSanRuntimeStaticMapping(Sampled{std::move(mapping)});
+  }
+  static ConSanRuntimeStaticMapping inline_compact(ConSanInlineCompactStaticAccessMapping mapping) {
+    return ConSanRuntimeStaticMapping(InlineCompact{std::move(mapping)});
   }
 
-  void append(ConSanRuntimeStaticMapping mapping) {
-    record_replay_accesses.insert(record_replay_accesses.end(),
-                                  std::make_move_iterator(mapping.record_replay_accesses.begin()),
-                                  std::make_move_iterator(mapping.record_replay_accesses.end()));
-    sampled_accesses.insert(sampled_accesses.end(),
-                            std::make_move_iterator(mapping.sampled_accesses.begin()),
-                            std::make_move_iterator(mapping.sampled_accesses.end()));
-    inline_compact_accesses.insert(inline_compact_accesses.end(),
-                                   std::make_move_iterator(mapping.inline_compact_accesses.begin()),
-                                   std::make_move_iterator(mapping.inline_compact_accesses.end()));
+  [[nodiscard]] Kind kind() const {
+    return std::visit(
+        [](const auto &payload) {
+          using Payload = std::decay_t<decltype(payload)>;
+          if constexpr (std::is_same_v<Payload, std::monostate>)
+            return Kind::None;
+          else if constexpr (std::is_same_v<Payload, RecordReplay>)
+            return Kind::RecordReplay;
+          else if constexpr (std::is_same_v<Payload, Sampled>)
+            return Kind::Sampled;
+          else
+            return Kind::InlineCompact;
+        },
+        payload_);
+  }
+  [[nodiscard]] RecordReplay *record_replay() { return std::get_if<RecordReplay>(&payload_); }
+  [[nodiscard]] const RecordReplay *record_replay() const {
+    return std::get_if<RecordReplay>(&payload_);
+  }
+  [[nodiscard]] Sampled *sampled() { return std::get_if<Sampled>(&payload_); }
+  [[nodiscard]] const Sampled *sampled() const { return std::get_if<Sampled>(&payload_); }
+  [[nodiscard]] InlineCompact *inline_compact() { return std::get_if<InlineCompact>(&payload_); }
+  [[nodiscard]] const InlineCompact *inline_compact() const {
+    return std::get_if<InlineCompact>(&payload_);
+  }
+
+  [[nodiscard]] bool empty() const {
+    return std::visit(
+        [](const auto &payload) {
+          using Payload = std::decay_t<decltype(payload)>;
+          if constexpr (std::is_same_v<Payload, std::monostate>)
+            return true;
+          else
+            return payload.empty();
+        },
+        payload_);
+  }
+
+  [[nodiscard]] bool append(ConSanRuntimeStaticMapping mapping) {
+    if (mapping.empty())
+      return true;
+    if (empty()) {
+      payload_ = std::move(mapping.payload_);
+      return true;
+    }
+    return std::visit(
+        [&](auto &destination) {
+          using Payload = std::decay_t<decltype(destination)>;
+          if constexpr (std::is_same_v<Payload, std::monostate>) {
+            return false;
+          } else {
+            auto *source = std::get_if<Payload>(&mapping.payload_);
+            if (source == nullptr)
+              return false;
+            destination.insert(destination.end(), std::make_move_iterator(source->begin()),
+                               std::make_move_iterator(source->end()));
+            return true;
+          }
+        },
+        payload_);
   }
 
   bool operator==(const ConSanRuntimeStaticMapping &) const = default;
+
+private:
+  using Payload = std::variant<std::monostate, RecordReplay, Sampled, InlineCompact>;
+
+  explicit ConSanRuntimeStaticMapping(Payload payload) : payload_(std::move(payload)) {}
+
+  Payload payload_;
 };
 
 /// One machine-code location emitted as part of an intent-bound lowering.

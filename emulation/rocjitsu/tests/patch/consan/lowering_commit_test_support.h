@@ -52,10 +52,11 @@ namespace rocjitsu {
     };
     switch (intent->kind) {
     case ConSanProbeIntentKind::AccessRecord:
-      runtime_mapping.record_replay_accesses.push_back({.access = std::move(attribution)});
+      runtime_mapping =
+          ConSanRuntimeStaticMapping::record_replay({.access = std::move(attribution)});
       break;
     case ConSanProbeIntentKind::SampledAccess:
-      runtime_mapping.sampled_accesses.push_back({
+      runtime_mapping = ConSanRuntimeStaticMapping::sampled({
           .access = std::move(attribution),
           .first_slot = 0u,
           .range_count = 1u,
@@ -68,7 +69,7 @@ namespace rocjitsu {
     case ConSanProbeIntentKind::ExactShadowAccess:
       attribution.execution_owner_descriptor_file_offsets = {0u};
       attribution.owner_provenance_complete = true;
-      runtime_mapping.inline_compact_accesses.push_back({
+      runtime_mapping = ConSanRuntimeStaticMapping::inline_compact({
           .access = std::move(attribution),
           .token = 1u,
       });

@@ -1657,6 +1657,42 @@ foreach(_result_bus IN ITEMS consan_result.h.inc consan_pipeline.h)
         "result buses must derive runtime attribution from committed lowering"
     )
 endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_observation_plan.h.inc"
+    "record_replay_accesses|sampled_accesses|inline_compact_accesses"
+    "runtime static attribution must not regain parallel mode containers"
+)
+file(READ "${_consan_dir}/consan_observation_plan.h.inc" _runtime_mapping_contract)
+if(NOT _runtime_mapping_contract MATCHES
+   "std::variant<std::monostate, RecordReplay, Sampled, InlineCompact>"
+)
+    message(FATAL_ERROR "ConSan runtime static attribution lost its discriminated mode product")
+endif()
+set(_report_pipeline_contract
+    "${_hook_dir}/rj_hsa_dbi_moi_report_pipeline.h"
+)
+_consan_assert_no_match(
+    "${_report_pipeline_contract}"
+    "record_replay_static_mappings|sampled_static_mappings|compact_token_mapping_count|compact_token_mapping_malformed|record_replay_static_mapping_malformed|sampled_static_mapping_malformed"
+    "runtime report input must not regain parallel mode metadata fields"
+)
+file(READ "${_report_pipeline_contract}" _report_pipeline_contract_contents)
+if(NOT _report_pipeline_contract_contents MATCHES
+   "const AutoMoiRuntimeStaticMetadata \\*static_metadata"
+)
+    message(FATAL_ERROR "ConSan runtime report input lost its discriminated mode metadata")
+endif()
+file(READ "${_hook_dir}/rj_hsa_dbi_hook_moi_report.cpp" _report_registry_contract_contents)
+if(NOT _report_registry_contract_contents MATCHES
+   "AutoMoiRuntimeStaticMetadata static_metadata;"
+)
+    message(FATAL_ERROR "ConSan runtime report registry lost its shared mode metadata product")
+endif()
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_hook_moi_report.cpp"
+    "entry->(record_replay_static_mappings|sampled_static_mappings|compact_token_mapping_count|compact_token_mapping_malformed|record_replay_static_mapping_malformed|sampled_static_mapping_malformed)"
+    "runtime report registry must not regain parallel mode metadata fields"
+)
 file(READ "${_consan_dir}/consan_observation_plan.h.inc" _coverage_ledger_contract)
 foreach(
     _owned_lowering_operation

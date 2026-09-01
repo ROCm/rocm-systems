@@ -383,9 +383,29 @@ record_replay_runtime_mapping_for(const ConSanObservationPlan &plan,
       }
     }
   }
-  ConSanRuntimeStaticMapping mapping;
-  mapping.record_replay_accesses.push_back({.access = std::move(access)});
-  return mapping;
+  return ConSanRuntimeStaticMapping::record_replay({.access = std::move(access)});
+}
+
+TEST(ConSanObservationPlan, RuntimeStaticMappingIsOneDiscriminatedModeProduct) {
+  auto record_replay = ConSanRuntimeStaticMapping::record_replay({});
+  EXPECT_EQ(record_replay.kind(), ConSanRuntimeStaticMapping::Kind::RecordReplay);
+  ASSERT_NE(record_replay.record_replay(), nullptr);
+  EXPECT_EQ(record_replay.record_replay()->size(), 1u);
+
+  EXPECT_TRUE(record_replay.append(ConSanRuntimeStaticMapping::record_replay({})));
+  ASSERT_NE(record_replay.record_replay(), nullptr);
+  EXPECT_EQ(record_replay.record_replay()->size(), 2u);
+
+  ConSanSampledStaticAccessMapping sampled_access;
+  sampled_access.range_count = 1u;
+  sampled_access.bank_count = 1u;
+  auto sampled = ConSanRuntimeStaticMapping::sampled(std::move(sampled_access));
+  EXPECT_FALSE(record_replay.append(std::move(sampled)));
+  EXPECT_EQ(record_replay.kind(), ConSanRuntimeStaticMapping::Kind::RecordReplay);
+  ASSERT_NE(record_replay.record_replay(), nullptr);
+  EXPECT_EQ(record_replay.record_replay()->size(), 2u);
+  EXPECT_EQ(record_replay.sampled(), nullptr);
+  EXPECT_EQ(record_replay.inline_compact(), nullptr);
 }
 
 TEST(ConSanObservationPlan, CommittedLoweringBindsSeveralIntentsToOneLocation) {
@@ -506,8 +526,7 @@ TEST(ConSanObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransac
       .emitted_size = 16,
       .relocated_guest_text_offset = 0x208,
   }};
-  ConSanRuntimeStaticMapping mapping;
-  mapping.record_replay_accesses.push_back({
+  ConSanRuntimeStaticMapping mapping = ConSanRuntimeStaticMapping::record_replay({
       .access =
           {
               .intent_ids = {intent.id},
@@ -528,7 +547,9 @@ TEST(ConSanObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransac
   ConSanTransformArtifacts result;
   result.coverage_ledger = ConSanCoverageLedger(policy.plan);
   ConSanCommittedLowering malformed_commit = *commit;
-  malformed_commit.runtime_mapping.record_replay_accesses.front()
+  ASSERT_NE(malformed_commit.runtime_mapping.record_replay(), nullptr);
+  malformed_commit.runtime_mapping.record_replay()
+      ->front()
       .access.original_site.original_text_offset += 4u;
   ConSanCoverageLedger malformed_ledger(policy.plan);
   EXPECT_FALSE(malformed_ledger.publish_lowering_commit(std::move(malformed_commit)))
@@ -541,7 +562,8 @@ TEST(ConSanObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransac
   EXPECT_EQ(result.coverage_ledger.observation_plan(), policy.plan);
 
   ConSanRuntimeStaticMapping malformed = expected_mapping;
-  malformed.record_replay_accesses.front().access.original_site.original_text_offset += 4u;
+  ASSERT_NE(malformed.record_replay(), nullptr);
+  malformed.record_replay()->front().access.original_site.original_text_offset += 4u;
   EXPECT_FALSE(make_consan_committed_lowering(policy.plan, intent_ids, locations,
                                               ConSanLoweringOutcomeKind::Instrumented, {},
                                               std::move(malformed)));

@@ -289,16 +289,22 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   const uint32_t deferred_token_qualified_diagnostics = deferred_filter.qualified_count;
   const uint32_t visible_diagnostics = static_cast<uint32_t>(visible_diagnostic_indices.size());
   const uint32_t effective_diagnostic_count = deferred_filter.effective_diagnostic_count;
+  const auto *sampled_metadata =
+      input.static_metadata ? std::get_if<AutoMoiSampledStaticMetadata>(input.static_metadata)
+                            : nullptr;
+  const std::span<const AutoMoiSampledStaticMapping> sampled_static_mappings =
+      sampled_metadata ? sampled_metadata->mappings
+                       : std::span<const AutoMoiSampledStaticMapping>{};
   std::vector<AutoMoiSampledEvidence> visible_sampled;
   const auto sampled_static_mapping_for_slot = [&](uint32_t slot) {
     const auto mapping = std::ranges::find_if(
-        input.sampled_static_mappings, [&](const AutoMoiSampledStaticMapping &candidate) {
+        sampled_static_mappings, [&](const AutoMoiSampledStaticMapping &candidate) {
           if (slot < candidate.first_slot)
             return false;
           const uint64_t relative = slot - candidate.first_slot;
           return relative < static_cast<uint64_t>(candidate.range_count) * candidate.bank_count;
         });
-    return mapping == input.sampled_static_mappings.end() ? nullptr : &*mapping;
+    return mapping == sampled_static_mappings.end() ? nullptr : &*mapping;
   };
   uint32_t visible_sampled_sync_metadata = 0;
   uint64_t sampled_watchpoint_slots_examined = 0;
@@ -646,7 +652,12 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   result.diagnostics.reserve(visible_diagnostics);
   for (uint32_t index : visible_diagnostic_indices)
     result.diagnostics.push_back(raw_diagnostics[index]);
-  if (!result.diagnostics.empty() && input.compact_token_mapping_count != 0u) {
+  const auto *inline_metadata =
+      input.static_metadata ? std::get_if<AutoMoiInlineCompactStaticMetadata>(input.static_metadata)
+                            : nullptr;
+  const uint32_t compact_token_mapping_count =
+      inline_metadata ? inline_metadata->mapping_count : 0u;
+  if (!result.diagnostics.empty() && compact_token_mapping_count != 0u) {
     const auto *mappings = reinterpret_cast<const ConSanMoiCompactDiagnosticTokenMapping *>(
         bytes + input.layout.inline_compact_token_mappings_offset);
     for (ConSanMoiDiagnosticRecord &diagnostic : result.diagnostics) {
@@ -663,7 +674,7 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
       bool current_ambiguous = false;
       bool prior_ambiguous = false;
       if (well_formed) {
-        for (uint32_t index = 0; index < input.compact_token_mapping_count; ++index) {
+        for (uint32_t index = 0; index < compact_token_mapping_count; ++index) {
           const auto &mapping = mappings[index];
           if (mapping.instruction_offset != diagnostic.second_instruction_offset)
             continue;
@@ -675,7 +686,7 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
           current = &mapping;
         }
         if (current != nullptr && !current_ambiguous) {
-          for (uint32_t index = 0; index < input.compact_token_mapping_count; ++index) {
+          for (uint32_t index = 0; index < compact_token_mapping_count; ++index) {
             const auto &mapping = mappings[index];
             if (mapping.owner_descriptor_file_offset != current->owner_descriptor_file_offset ||
                 mapping.token != token)

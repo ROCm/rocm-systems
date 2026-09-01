@@ -248,9 +248,10 @@ TEST(ConSanMoi, DirectSampledProbeWritesPackedWatchpointEntry) {
   EXPECT_EQ(result.coverage_ledger.lowering_commits().front().locations.size(), 1u);
   const ConSanRuntimeStaticMapping runtime_static_mapping =
       result.coverage_ledger.runtime_static_mapping();
-  ASSERT_EQ(runtime_static_mapping.sampled_accesses.size(), 1u);
+  ASSERT_NE(runtime_static_mapping.sampled(), nullptr);
+  ASSERT_EQ(runtime_static_mapping.sampled()->size(), 1u);
   const ConSanSampledStaticAccessMapping &runtime_mapping =
-      runtime_static_mapping.sampled_accesses.front();
+      runtime_static_mapping.sampled()->front();
   EXPECT_EQ(runtime_mapping.access.intent_ids,
             result.coverage_ledger.lowering_commits().front().intent_ids);
   EXPECT_EQ(runtime_mapping.access.original_site.original_text_offset, access_patch->anchor_offset);

@@ -491,23 +491,27 @@ bool runtime_static_mapping_matches_commit(const ConSanCommittedLowering &commit
     });
   };
 
-  for (const ConSanRecordReplayStaticAccessMapping &mapping :
-       commit.runtime_mapping.record_replay_accesses) {
-    if (!valid_attribution(mapping.access, ConSanProbeIntentKind::AccessRecord))
-      return false;
-  }
-  for (const ConSanSampledStaticAccessMapping &mapping : commit.runtime_mapping.sampled_accesses) {
-    if (!valid_attribution(mapping.access, ConSanProbeIntentKind::SampledAccess) ||
-        mapping.range_count == 0u || mapping.bank_count == 0u) {
-      return false;
+  if (const auto *mappings = commit.runtime_mapping.record_replay()) {
+    for (const ConSanRecordReplayStaticAccessMapping &mapping : *mappings) {
+      if (!valid_attribution(mapping.access, ConSanProbeIntentKind::AccessRecord))
+        return false;
     }
   }
-  for (const ConSanInlineCompactStaticAccessMapping &mapping :
-       commit.runtime_mapping.inline_compact_accesses) {
-    if (!valid_attribution(mapping.access, ConSanProbeIntentKind::ExactShadowAccess) ||
-        mapping.token == 0u || !mapping.access.owner_provenance_complete ||
-        mapping.access.execution_owner_descriptor_file_offsets.size() != 1u) {
-      return false;
+  if (const auto *mappings = commit.runtime_mapping.sampled()) {
+    for (const ConSanSampledStaticAccessMapping &mapping : *mappings) {
+      if (!valid_attribution(mapping.access, ConSanProbeIntentKind::SampledAccess) ||
+          mapping.range_count == 0u || mapping.bank_count == 0u) {
+        return false;
+      }
+    }
+  }
+  if (const auto *mappings = commit.runtime_mapping.inline_compact()) {
+    for (const ConSanInlineCompactStaticAccessMapping &mapping : *mappings) {
+      if (!valid_attribution(mapping.access, ConSanProbeIntentKind::ExactShadowAccess) ||
+          mapping.token == 0u || !mapping.access.owner_provenance_complete ||
+          mapping.access.execution_owner_descriptor_file_offsets.size() != 1u) {
+        return false;
+      }
     }
   }
   for (ConSanProbeIntentId id : commit.intent_ids) {
@@ -639,7 +643,8 @@ bool ConSanCoverageLedger::publish_coalescing_instrumented_commits(
       append_unique(incoming.original_physical_sites, accepted.original_physical_sites);
       append_unique(incoming.original_semantic_sites, accepted.original_semantic_sites);
       append_unique(incoming.locations, accepted.locations);
-      incoming.runtime_mapping.append(std::move(accepted.runtime_mapping));
+      if (!incoming.runtime_mapping.append(std::move(accepted.runtime_mapping)))
+        return false;
       if (incoming.detail.empty())
         incoming.detail = std::move(accepted.detail);
       for (ConSanProbeIntentId id : accepted.intent_ids) {
@@ -660,8 +665,10 @@ bool ConSanCoverageLedger::publish_coalescing_instrumented_commits(
 
 ConSanRuntimeStaticMapping ConSanCoverageLedger::runtime_static_mapping() const {
   ConSanRuntimeStaticMapping mapping;
-  for (const ConSanCommittedLowering &commit : lowering_commits_)
-    mapping.append(commit.runtime_mapping);
+  for (const ConSanCommittedLowering &commit : lowering_commits_) {
+    if (!mapping.append(commit.runtime_mapping))
+      return {};
+  }
   return mapping;
 }
 

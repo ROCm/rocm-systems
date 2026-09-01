@@ -23,6 +23,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "rocjitsu/code/patch/consan/consan_access_classifier.h"

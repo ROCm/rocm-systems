@@ -54,12 +54,12 @@ make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
   ConSanRuntimeStaticMapping runtime_mapping;
   switch (*intent_kind) {
   case ConSanProbeIntentKind::AccessRecord:
-    runtime_mapping.record_replay_accesses.push_back({.access = std::move(access)});
+    runtime_mapping = ConSanRuntimeStaticMapping::record_replay({.access = std::move(access)});
     break;
   case ConSanProbeIntentKind::SampledAccess:
     if (patch.sampled_access_range_count == 0u || patch.sampled_window_bank_count == 0u)
       return std::nullopt;
-    runtime_mapping.sampled_accesses.push_back({
+    runtime_mapping = ConSanRuntimeStaticMapping::sampled({
         .access = std::move(access),
         .first_slot = patch.sampled_first_slot,
         .range_count = patch.sampled_access_range_count,
@@ -71,7 +71,7 @@ make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
     break;
   case ConSanProbeIntentKind::ExactShadowAccess:
     if (patch.workgroup_shadow_compact) {
-      runtime_mapping.inline_compact_accesses.push_back({
+      runtime_mapping = ConSanRuntimeStaticMapping::inline_compact({
           .access = std::move(access),
           .token = patch.workgroup_shadow_compact_token,
       });
