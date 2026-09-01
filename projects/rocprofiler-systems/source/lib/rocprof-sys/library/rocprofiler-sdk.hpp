@@ -3,10 +3,11 @@
 
 #pragma once
 
-#include "core/timemory.hpp"
-#include "rocprofiler-sdk/trace_control.hpp"
-
 #include <memory>
+
+#include "core/control/session.hpp"
+#include "core/timemory.hpp"
+
 #include <vector>
 
 namespace rocprofsys
@@ -42,8 +43,11 @@ pause();
 void
 resume();
 
-std::shared_ptr<control::trace_control>
-get_trace_controller();
+void
+set_session(std::shared_ptr<control::session> sess);
+
+void
+create_roctx_client();
 
 void
 reset_sdk_session_guards();

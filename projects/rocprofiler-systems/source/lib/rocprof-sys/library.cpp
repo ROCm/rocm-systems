@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <array>
 #include <cstdint>
 #include <timemory/log/color.hpp>
 //
@@ -20,6 +21,7 @@
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/constraint.hpp"
+#include "core/control/session.hpp"
 #include "core/cpu.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
@@ -41,7 +43,9 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
+#include "library/components/shmem_gotcha.hpp"
 #include "library/components/shmem_gotcha_policy.hpp"
+#include "library/components/ucx_gotcha.hpp"
 #include "library/components/ucx_gotcha_policy.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
@@ -49,7 +53,6 @@
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk.hpp"
 #include "library/rocprofiler-sdk/roctx_client.hpp"
-#include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -83,6 +86,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <pthread.h>
 #include <sstream>
@@ -111,6 +115,13 @@ std::atomic<pid_t> rocprofsys_init_tooling_done{ 0 };
 std::atomic<bool>  rocprofsys_finalization_done{ false };
 auto               _timemory_manager  = tim::manager::instance();
 auto               _timemory_settings = tim::settings::shared_instance();
+
+std::shared_ptr<control::session>&
+get_control_session()
+{
+    static auto instance = std::make_shared<control::session>();
+    return instance;
+}
 
 void
 set_metadata_process_start_timestamp(std::int64_t _ts)
@@ -669,41 +680,36 @@ rocprofsys_init_tooling_hidden(void)
             trace_cache::get_buffer_storage().start(getpid());
         }
 
-        auto trace_controller = rocprofiler_sdk::get_trace_controller();
-        if(trace_controller)
-        {
-            auto pause_callback = [](void) {
-                LOG_DEBUG("Pause callback...");
-                rocprofiler_sdk::pause();
-                sampling::pause();
-                component::mpi_gotcha::pause();
-                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::pause();
-                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
-                component::vaapi_gotcha::pause();
-                ::rocprofsys::pthread_gotcha::pause();
-                component::numa_gotcha::pause();
-                rocprofsys::kokkosp::pause();
-                process_sampler::pause();
-                invoke_external_pause_callbacks();
-            };
-            auto resume_callback = [](void) {
-                LOG_DEBUG("Resume callback...");
-                rocprofiler_sdk::resume();
-                sampling::resume();
-                component::mpi_gotcha::resume();
-                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::resume();
-                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
-                component::vaapi_gotcha::resume();
-                ::rocprofsys::pthread_gotcha::resume();
-                component::numa_gotcha::resume();
-                rocprofsys::kokkosp::resume();
-                process_sampler::resume();
-                invoke_external_resume_callbacks();
-            };
-            trace_controller->register_region_pause_resume_callbacks(resume_callback,
-                                                                     pause_callback);
+        rocprofiler_sdk::set_session(get_control_session());
 
-            trace_controller->force_initial_pause();
+        {
+            using shmem_t = component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>;
+            using ucx_t   = component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>;
+
+            // clang-format off
+            auto subscribers = std::to_array<control::subscriber>({
+                { .on_pause = &rocprofiler_sdk::pause, .on_resume = &rocprofiler_sdk::resume, .name = "rocm" },
+                { .on_pause = &sampling::pause, .on_resume = &sampling::resume, .name = "sampling" },
+                { .on_pause = &component::mpi_gotcha::pause, .on_resume = &component::mpi_gotcha::resume, .name = "mpi" },
+                { .on_pause = &ucx_t::pause, .on_resume = &ucx_t::resume, .name = "ucx" },
+                { .on_pause = &shmem_t::pause, .on_resume = &shmem_t::resume, .name = "shmem" },
+                { .on_pause = &component::vaapi_gotcha::pause, .on_resume = &component::vaapi_gotcha::resume, .name = "vaapi" },
+                { .on_pause = &::rocprofsys::pthread_gotcha::pause, .on_resume = &::rocprofsys::pthread_gotcha::resume, .name = "pthread" },
+                { .on_pause = &component::numa_gotcha::pause, .on_resume = &component::numa_gotcha::resume, .name = "numa" },
+                { .on_pause = &rocprofsys::kokkosp::pause, .on_resume = &rocprofsys::kokkosp::resume, .name = "kokkos" },
+                { .on_pause = &process_sampler::pause, .on_resume = &process_sampler::resume, .name = "process_sampler" },
+                { .on_pause = &invoke_external_pause_callbacks, .on_resume = &invoke_external_resume_callbacks, .name = "external" },
+            });
+            // clang-format on
+            for(auto& sub : subscribers)
+            {
+                get_control_session()->subscribe(std::move(sub));
+            }
+
+            // Every subscriber above must be registered before this call: a
+            // trigger's registration broadcasts a pause/resume transition
+            // immediately, so any subscriber added afterward would miss it.
+            rocprofiler_sdk::create_roctx_client();
         }
 
         state::process::set(
@@ -935,6 +941,9 @@ rocprofsys_finalize_hidden(void)
 
         // Flush buffered traces in case of child process
 
+        LOG_DEBUG("Shutting down control session...");
+        get_control_session()->shutdown();
+
         LOG_DEBUG("Shutting down ROCm...");
         rocprofiler_sdk::shutdown();
 
@@ -1047,6 +1056,9 @@ rocprofsys_finalize_hidden(void)
         LOG_DEBUG("Shutting down background sampler...");
         process_sampler::shutdown();
     }
+
+    LOG_DEBUG("Shutting down control session...");
+    get_control_session()->shutdown();
 
     LOG_DEBUG("Shutting down ROCm...");
     rocprofiler_sdk::shutdown();
