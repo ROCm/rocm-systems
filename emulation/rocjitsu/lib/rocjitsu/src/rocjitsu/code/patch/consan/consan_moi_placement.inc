@@ -6278,6 +6278,10 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         }
       }
       const auto hole_unavailable = [&](uint16_t base) {
+        if (static_cast<uint32_t>(base) + scalar_count > moi_ordinary_sgpr_limit(arch) ||
+            persistent_sgpr_range_overlaps_reserved_ordinary_range(base, scalar_count, arch)) {
+          return true;
+        }
         for (uint16_t index = 0; index < scalar_count; ++index) {
           if (scalar_references.references.contains(
                   {RegClass::SGPR, static_cast<uint16_t>(base + index), 1u})) {
@@ -6302,7 +6306,8 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       // transfer or dynamic scalar index still makes the proof fail closed.
       if (every_owner_resolved && scalar_references.control_flow_closed &&
           !scalar_references.uses_indirect_sgprs) {
-        for (uint32_t base = 0u; base + scalar_count <= first; ++base) {
+        const uint32_t hole_limit = std::min<uint32_t>(first, moi_ordinary_sgpr_limit(arch));
+        for (uint32_t base = 0u; base + scalar_count <= hole_limit; ++base) {
           if (!hole_unavailable(static_cast<uint16_t>(base))) {
             persistent_hole = static_cast<uint16_t>(base);
             break;

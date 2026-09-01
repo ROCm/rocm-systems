@@ -126,7 +126,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
           result, active_resources, arch, result.warnings,
           /*include_owner=*/candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
           /*include_workgroup_key=*/false,
-          /*include_record_replay_workgroup=*/true,
+          /*include_record_replay_workgroup=*/
+          !record_replay_has_entry_workgroup_capture(candidate_options),
           /*include_dispatch_id=*/candidate_options.automatic_moi_private_dispatch_id);
       if (!private_layout)
         continue;

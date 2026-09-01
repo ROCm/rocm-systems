@@ -8626,6 +8626,84 @@ TEST(ConSanMoi, Cdna4RegisterSaturatedRecordReplayUsesPrivateDispatchIdentity) {
   }));
 }
 
+TEST(ConSanMoi, Cdna4PrivateDispatchSpillKeepsScalarTupleBelowOrdinaryLimit) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr std::string_view kKernelName = "gfx950_private_dispatch_spill_pressure";
+  const auto access =
+      build_cdna4_ds_store_b32(/*vaddr=*/2u, /*vdata=*/3u, /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(access);
+
+  std::vector<uint32_t> words(768u, build_s_nop(0u, kArch));
+  size_t cursor = 0u;
+  std::ranges::copy(*access, words.begin() + static_cast<ptrdiff_t>(cursor));
+  cursor += access->size();
+  for (uint16_t vgpr = 0u; vgpr < 8u; ++vgpr)
+    words[cursor++] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(vgpr), kArch);
+  for (uint16_t sgpr = 0u; sgpr < 100u; ++sgpr)
+    words[cursor++] = build_s_mov_b32(/*sdst=*/99u, sgpr, kArch);
+  words.back() = build_s_endpgm(kArch);
+
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(words, kKernelName, /*vgpr_granulated=*/0u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    // v8 is the first AccVGPR and s0:s99 are the compiler's complete ordinary
+    // scalar tail. The descriptor's 104-register scalar allocation leaves its
+    // reserved CDNA tail above that point, but does not make s102+ addressable.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
+  });
+  append_kernel_metadata_note(bytes, kKernelName, /*uses_dynamic_stack=*/false,
+                              /*sgpr_count=*/100u,
+                              /*private_segment_fixed_size=*/std::nullopt,
+                              /*required_workgroup_size=*/std::nullopt,
+                              /*has_dynamic_lds=*/false,
+                              /*additional_kernel_names=*/{}, /*agpr_count=*/1u,
+                              /*vgpr_count=*/8u);
+
+  const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
+      {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1u});
+  ASSERT_TRUE(report_plan.complete());
+  const auto layout = consan_moi_auto_report_layout_override(report_plan);
+  ASSERT_TRUE(layout);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.force_vgpr_spill = true;
+  options.max_patches = 1u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = report_plan.required_bytes;
+  options.moi_report_layout = *layout;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors)
+      << " plans=" << testing::PrintToString(result.resource_plans);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
+  EXPECT_FALSE(result.resolved_moi_persistent_owner_sgpr);
+  EXPECT_FALSE(result.resolved_moi_persistent_epoch_sgpr);
+  EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_sgprs.empty());
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_GT(result.resource_plan_summary.emitted_spill_patches, 0u);
+  EXPECT_GT(result.resource_plan_summary.emitted_spill_slot_bytes, 0u);
+
+  const auto access_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  ASSERT_NE(access_patch, result.patches.end());
+  EXPECT_TRUE(access_patch->persistent_dispatch_id_private_offset);
+  EXPECT_TRUE(access_patch->persistent_record_replay_workgroup_private_offsets.complete());
+  EXPECT_GT(access_patch->spilled_vgpr_count, 0u);
+}
+
 TEST(ConSanMoi, CdnaRecordReplayMovesOnlyEmptyAccumulatorBoundaryForDynamicStackState) {
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     for (const uint8_t agpr_count : {0u, 1u}) {

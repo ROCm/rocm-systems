@@ -461,6 +461,39 @@ function(rj_add_consan_device_conformance_cases)
         )
     endforeach()
 
+    if(_device_TARGET STREQUAL "gfx950" OR _device_TARGET STREQUAL "gfx1250")
+        rj_add_consan_hip_case(
+            NAME
+                "${_device_PREFIX}.RecordReplayDispatchIdSgprPressureForcedSpill.Correct"
+            TARGET
+                hip_consan_device_dispatch_id_sgpr_pressure_${_device_TARGET}_test
+            FILTER "ConSanDeviceDispatchIdSgprPressureTest.Correct"
+            ${_config_args}
+            ${_resource_lock_args}
+            TIMEOUT 60
+            PASS_REGEX
+                "spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_MODE=record-replay"
+                "RJ_CONSAN_POLICY=strict"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+                "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=dispatch_id_sgpr_pressure_for_consan"
+            LABELS
+                ${_labels}
+                correct
+                record-replay
+                regression-11019
+        )
+    endif()
+
     # Record/Replay samples whole workgroups. Offset zero must retain
     # workgroup zero even at the production default stride, and sparse
     # selection must preserve the exact identity of every selected
@@ -598,6 +631,7 @@ function(rj_add_consan_device_conformance_cases)
     if(_device_TARGET STREQUAL "gfx950")
         list(
             APPEND _device_workloads
+            "DispatchIdSgprPressure|dispatch_id_sgpr_pressure|ConSanDeviceDispatchIdSgprPressureTest|record-replay-only"
             "CdnaTransposePublication|cdna_transpose_publication|ConSanDeviceCdnaTransposePublicationTest"
             "Gfx950LargeLdsPipeline|gfx950_large_lds_pipeline|ConSanDeviceGfx950LargeLdsPipelineTest"
         )
@@ -621,6 +655,7 @@ function(rj_add_consan_device_conformance_cases)
     if(_device_TARGET STREQUAL "gfx1250")
         list(
             APPEND _device_workloads
+            "DispatchIdSgprPressure|dispatch_id_sgpr_pressure|ConSanDeviceDispatchIdSgprPressureTest|record-replay-only"
             "Gfx1250ClusterSync|gfx1250_cluster|ConSanDeviceGfx1250ClusterSyncTest"
             "Gfx1250MultiCluster|gfx1250_cluster|ConSanDeviceGfx1250MultiClusterTest"
             "Gfx1250WideCluster|gfx1250_cluster|ConSanDeviceGfx1250WideClusterTest"
@@ -1206,6 +1241,7 @@ function(rj_add_consan_device_fixture_targets target)
     if(target STREQUAL "gfx950")
         list(
             APPEND _device_workload_sources
+            "dispatch_id_sgpr_pressure|cdna_dispatch_id_sgpr_pressure_test.hip"
             "cdna_transpose_publication|cdna_transpose_publication_test.hip"
             "gfx950_large_lds_pipeline|gfx950_large_lds_pipeline_test.hip"
         )
@@ -1229,6 +1265,7 @@ function(rj_add_consan_device_fixture_targets target)
     if(target STREQUAL "gfx1250")
         list(
             APPEND _device_workload_sources
+            "dispatch_id_sgpr_pressure|cdna_dispatch_id_sgpr_pressure_test.hip"
             "gfx1250_high_bank_lds_address|gfx1250_high_bank_lds_address_test.hip"
             "gfx1250_sparse_fp8_pipeline|gfx1250_sparse_fp8_pipeline_test.hip"
             "gfx1250_scaled_wmma_pipeline|gfx1250_scaled_wmma_pipeline_test.hip"
