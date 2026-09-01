@@ -137,10 +137,16 @@ without manually allocating a barrier handle:
 
    ncclResult_t result = barrier.sync(
        ncclCoopCta(), cuda::memory_order_acq_rel,
-       ncclGinFenceLevel::Relaxed, timeoutCycles);
+       ncclGinFenceLevel::None, timeoutCycles);
 
 The timeout overload returns ``ncclTimeout`` if all team members don't arrive
-within ``timeoutCycles``. Barrier resources for ``ncclGinBarrierSession``,
+within ``timeoutCycles``. ``ncclGinFenceLevel`` is a bitmask: ``None`` is arrival
+only, ``Put`` makes inbound (and self) puts visible, ``Get`` drains local gets,
+and omitting the fence argument is ``Put | Get``. ``Relaxed`` is a deprecated
+alias for ``None``. Pass ``ncclGinAllContexts(devComm)`` instead of a single
+``ncclGin`` when puts or gets were issued on more than one GIN context.
+
+Barrier resources for ``ncclGinBarrierSession``,
 ``ncclLsaBarrierSession``, and ``ncclBarrierSession`` are separate. Reserve
 ``barrierCount`` for generic ``ncclBarrierSession`` objects; use
 ``lsaBarrierCount``, ``railGinBarrierCount``, or ``worldGinBarrierCount`` for
@@ -164,11 +170,12 @@ corresponding create or registration operation is collective.
 Version and backend notes
 =========================
 
-``ncclDevComm`` is versioned. The upstream NCCL 2.30.3 and 2.30.4 release notes
-require applications using GIN APIs to be rebuilt with the matching release.
-RCCL accepts compatible layouts within the 2.30 family, but applications using
-pre-2.30 GIN device code must be rebuilt with compatible RCCL headers. The
-runtime rejects pre-2.30 requirements that request indexed GIN resources.
+``ncclDevComm`` is versioned. The upstream NCCL 2.30.7 release notes add
+``ncclGinFenceLevel`` semantics for GIN barriers (``None``, ``Put``, ``Get``,
+default ``Put | Get``). RCCL accepts compatible layouts within the 2.30 family,
+but applications using pre-2.30 GIN device code must be rebuilt with compatible
+RCCL headers. The runtime rejects pre-2.30 requirements that request indexed GIN
+resources.
 
 The 128-byte, versioned GIN proxy descriptor and per-context proxy progress are
 internal implementation details and require no application configuration.

@@ -157,7 +157,8 @@ ncclGinBarrierSession
    .. cpp:function:: ncclGinBarrierSession(Coop coop, ncclGin gin, ncclTeamTagRail tag, uint32_t index)
 
       Initializes a new network barrier session.  *coop* represents a cooperative group (see :ref:`devapi_coops`).  *gin* is
-      a previously initialized :cpp:class:`ncclGin` object.  *ncclTeamTagRail* indicates that the barrier will apply to all
+      a previously initialized :cpp:class:`ncclGin` object (or pass :cpp:class:`ncclGinAllContexts` instead; see below).
+      *ncclTeamTagRail* indicates that the barrier will apply to all
       peers on the same rail as the local rank (see :ref:`devapi_teams`).  *index* identifies the underlying barrier to use
       (it should be different for each *coop*; typically set to ``blockIdx.x`` to ensure uniqueness between CTAs).
 
@@ -168,6 +169,12 @@ ncclGinBarrierSession
       This variant expects *team* to be passed as an argument, and also takes an extra *handle* argument indicating the
       location of the underlying barriers (typically set to the ``railGinBarrier`` field of the device communicator).
 
+   .. cpp:function:: ncclGinBarrierSession(Coop coop, ncclGinAllContexts allCtx, ncclTeamTagWorld tag, uint32_t index)
+
+      Same as the single-context constructors, but the fence iterates every GIN context on the comm. Arrival signaling
+      still uses context 0. Use this when puts or gets were sharded across ``ginContextCount`` contexts and a ``Put`` or
+      ``Get`` fence must drain all of them.
+
    .. cpp:function:: void sync(Coop coop, cuda::memory_order order, ncclGinFenceLevel fence = ncclGinFenceLevel::Put | ncclGinFenceLevel::Get)
 
       Synchronizes all threads of all team members that participate in the barrier session. The *fence* argument is a
@@ -175,12 +182,20 @@ ncclGinBarrierSession
       defaults to ``ncclGinFenceLevel::Put | ncclGinFenceLevel::Get`` so callers who do not opt in explicitly get the
       strongest guarantee:
 
-      * ``ncclGinFenceLevel::None`` — pure synchronization, no drain.
+      * ``ncclGinFenceLevel::None`` — arrival only. No put or get drain. Choose this when the kernel already waits on
+        signals and calls ``gin.flush`` (for example AlltoAll that uses ``waitSignal``).
       * ``ncclGinFenceLevel::Put`` — after the barrier returns, puts issued by other team members targeting the
-        calling rank prior to the barrier are visible in the calling rank's memory.
+        calling rank prior to the barrier are visible in the calling rank's memory. Self-puts (loopback to this rank)
+        issued before the barrier are included.
       * ``ncclGinFenceLevel::Get`` — after the barrier returns, gets issued by the calling rank prior to the barrier have
-        landed in the calling rank's local memory.
+        landed in the calling rank's local memory. Requires a backend that implements ``gin.get``.
 
       The fence values are bit flags and compose via bitwise OR. To request both ``Put`` and ``Get`` semantics, pass
-      ``ncclGinFenceLevel::Put | ncclGinFenceLevel::Get``. ``ncclGinFenceLevel::Relaxed`` is preserved as a deprecated alias
+      ``ncclGinFenceLevel::Put | ncclGinFenceLevel::Get``. That combination is the default if *fence* is omitted.
+      ``ncclGinFenceLevel::Relaxed`` is preserved as a deprecated alias
       for ``None`` for source-level backward compatibility; new code should use ``None``.
+
+   .. cpp:function:: ncclResult_t sync(Coop coop, cuda::memory_order order, ncclGinFenceLevel fence, uint64_t timeoutCycles)
+
+      Same fence contract as the overload without a timeout. Returns ``ncclTimeout`` if not every team member arrives
+      within *timeoutCycles*. The fence still applies when the call returns success.
