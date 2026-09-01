@@ -30,9 +30,6 @@ import yaml
 import importlib.util
 from importlib.machinery import SourceFileLoader
 
-from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
-
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -46,17 +43,15 @@ def pytest_addoption(parser):
         help="Path to counter collection CSV file.",
     )
     parser.addoption(
+        "--expected-dispatch-count",
+        action="store",
+        type=int,
+        help="Expected total number of profiled dispatches in the process.",
+    )
+    parser.addoption(
         "--multiplex-input",
         action="store",
         help="Path to the JSON/YAML multiplex layout input used for the run.",
-    )
-    parser.addoption(
-        "--skip-layout-check",
-        action="store_true",
-        default=False,
-        help="Opt out of the group-schedule check for runs that have no single valid "
-        "layout (the graceful-degradation run). Required to omit --multiplex-input, so "
-        "that forgetting it fails instead of silently skipping.",
     )
     parser.addoption(
         "--rocprofv3",
@@ -125,6 +120,16 @@ def counter_input_data(request):
 
 
 @pytest.fixture
+def expected_dispatch_count(request):
+    value = request.config.getoption("--expected-dispatch-count")
+    if value is None:
+        pytest.fail("--expected-dispatch-count argument is required but was not provided")
+    if value <= 0:
+        pytest.fail("--expected-dispatch-count must be positive")
+    return value
+
+
+@pytest.fixture
 def multiplex_layout(request):
     # Layout is read from the input file so the validator stays in sync with the
     # run. Returns None when --multiplex-input is absent so layout-specific tests
@@ -149,11 +154,6 @@ def multiplex_layout(request):
     ), "pmc_group_interval must be a positive integer"
 
     return pmc_groups, pmc_group_interval
-
-
-@pytest.fixture
-def skip_layout_check(request):
-    return request.config.getoption("--skip-layout-check")
 
 
 @pytest.fixture

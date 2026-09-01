@@ -61,16 +61,41 @@ def _matching_group_indices(seen_counters, group_counters):
     ]
 
 
-def test_counter_collection_multiplex(
-    counter_input_data, multiplex_layout, skip_layout_check, allow_zero_counter_values
-):
-    if multiplex_layout is None:
-        # Absent options otherwise turn a mis-plumbed test into a silent pass.
-        assert skip_layout_check, (
-            "--multiplex-input is required to validate the group schedule; pass "
-            "--skip-layout-check to opt out for a run with no single valid layout"
+def _collection_schedule(counter_input_data):
+    schedule = defaultdict(lambda: defaultdict(set))
+    for row in counter_input_data:
+        agent_id = row["Agent_Id"]
+        dispatch_id = int(row["Dispatch_Id"])
+        counter_name = row["Counter_Name"]
+        dispatch_counters = schedule[agent_id][dispatch_id]
+        assert counter_name not in dispatch_counters, (
+            f"duplicate counter row for agent {agent_id}, dispatch {dispatch_id}, "
+            f"counter {counter_name}"
         )
-        pytest.skip("--skip-layout-check set (no single valid layout for this run)")
+        dispatch_counters.add(counter_name)
+    return schedule
+
+
+def test_dispatch_accounting(counter_input_data, expected_dispatch_count):
+    per_agent = _collection_schedule(counter_input_data)
+    assert per_agent, "no counter collection data was produced"
+
+    all_dispatch_ids = sorted(
+        dispatch_id for dispatches in per_agent.values() for dispatch_id in dispatches
+    )
+    assert all_dispatch_ids == list(
+        range(1, expected_dispatch_count + 1)
+    ), f"expected dispatch ids 1..{expected_dispatch_count}, got {all_dispatch_ids}"
+
+
+def test_counter_collection_multiplex(
+    counter_input_data,
+    multiplex_layout,
+    allow_zero_counter_values,
+):
+    assert (
+        multiplex_layout is not None
+    ), "--multiplex-input is required to validate the group schedule"
 
     pmc_groups, pmc_group_interval = multiplex_layout
     num_groups = len(pmc_groups)
@@ -78,8 +103,6 @@ def test_counter_collection_multiplex(
     group_counters = [set(group) for group in pmc_groups]
     all_counters = set().union(*group_counters)
 
-    # grouped per Agent_Id then Dispatch_Id (the tool rotates groups per device)
-    per_agent = defaultdict(lambda: defaultdict(set))
     for row in counter_input_data:
         assert int(row["Queue_Id"]) > 0
         assert int(row["Process_Id"]) > 0
@@ -92,18 +115,7 @@ def test_counter_collection_multiplex(
         else:
             assert float(row["Counter_Value"]) > 0
 
-        per_agent[row["Agent_Id"]][int(row["Dispatch_Id"])].add(row["Counter_Name"])
-
-    assert per_agent, "no counter collection data was produced"
-
-    # every dispatch in the process is profiled exactly once, across all devices
-    all_dispatch_ids = sorted(
-        dispatch_id for dispatches in per_agent.values() for dispatch_id in dispatches
-    )
-    assert all_dispatch_ids == list(
-        range(1, len(all_dispatch_ids) + 1)
-    ), f"dispatch ids are not contiguous from 1: {all_dispatch_ids}"
-
+    per_agent = _collection_schedule(counter_input_data)
     observed_group_counters = [set() for _ in pmc_groups]
 
     for agent_id, dispatch_counters in per_agent.items():
@@ -180,14 +192,6 @@ def test_counter_value_stability(counter_input_data, stable_counters, max_value_
     assert checked > 0, "no counter had repeated dispatches to check stability"
 
 
-def _collection_schedule(counter_input_data):
-    # {Agent_Id: {Dispatch_Id: {counter names}}}
-    schedule = defaultdict(lambda: defaultdict(set))
-    for row in counter_input_data:
-        schedule[row["Agent_Id"]][int(row["Dispatch_Id"])].add(row["Counter_Name"])
-    return schedule
-
-
 def test_run_level_json_yaml_equivalence(counter_input_data, counter_input_b_data):
     """The same layout run from JSON and from YAML must collect the same counters
     per dispatch per device (schedule only; values are run-to-run noisy). Skipped
@@ -222,12 +226,11 @@ def test_graceful_degradation_drops_unresolved_groups(
     counter_input_data, present_counters, allow_zero_counter_values
 ):
     """An unresolvable (unknown counter) or empty group is dropped while the valid
-    group is still collected in full. Asserts the collected set is exactly
+    group is still collected in full. Asserts every dispatch contains exactly
     --present-counters. Skipped unless --present-counters is set."""
     if present_counters is None:
         pytest.skip("--present-counters not set (not a graceful-degradation run)")
 
-    seen = set()
     for row in counter_input_data:
         name = row["Counter_Name"]
         assert name in present_counters, (
@@ -238,11 +241,14 @@ def test_graceful_degradation_drops_unresolved_groups(
             assert float(row["Counter_Value"]) >= 0
         else:
             assert float(row["Counter_Value"]) > 0
-        seen.add(name)
 
-    assert (
-        seen == present_counters
-    ), f"valid group not fully collected: missing {sorted(present_counters - seen)}"
+    for agent_id, dispatches in _collection_schedule(counter_input_data).items():
+        for dispatch_id, counters in dispatches.items():
+            assert counters == present_counters, (
+                f"agent {agent_id} dispatch {dispatch_id} collected "
+                f"{sorted(counters)}, expected surviving group "
+                f"{sorted(present_counters)}"
+            )
 
 
 if __name__ == "__main__":
