@@ -71,8 +71,6 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     // [PASS] SDK-provided; the tool calls these during PASS PHASE_ENTER
     rocprofiler_kernel_replay_context_cb_t replay_start_context;
     rocprofiler_kernel_replay_context_cb_t replay_stop_context;
-
-    uint8_t reserved_padding[64];  // reserved for extensions w/o ABI break
 } rocprofiler_callback_tracing_kernel_replay_data_t;
 ```
 
