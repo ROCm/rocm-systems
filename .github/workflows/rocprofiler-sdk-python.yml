@@ -48,7 +48,6 @@ jobs:
       with:
         sparse-checkout: |
           projects/rocprofiler-sdk
-          shared/sha256
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
