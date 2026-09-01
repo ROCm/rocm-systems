@@ -70,7 +70,7 @@ shape replay produces.
 - **The native tool would need to implement the replay callbacks.** Compute's default path preloads
   its own `librocprofiler-compute-tool.so` with `ROCPROF_COUNTER_COLLECTION=0`, so the SDK's counter
   collection is not what is running. That tool would have to subscribe to the replay domain, supply
-  `pass_count_cb`, and select its counter configuration by `current_pass` — the shape in
+  `replay_pass_count`, and select its counter configuration by `current_pass` — the shape in
   `samples/kernel_replay/counters_client.cpp`. Alternatively compute falls back to SDK counter
   collection when replay is on.
 - **The per-pass output directories go away.** `run_prof()` currently writes each pass under its own

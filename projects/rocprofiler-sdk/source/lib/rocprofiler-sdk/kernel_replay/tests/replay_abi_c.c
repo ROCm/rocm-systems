@@ -67,13 +67,13 @@ rocprofiler_test_c_replay_offset_dispatch_info(void)
 size_t
 rocprofiler_test_c_replay_offset_pass_count_cb(void)
 {
-    return offsetof(replay_data_c_t, pass_count_cb);
+    return offsetof(replay_data_c_t, replay_pass_count);
 }
 
 size_t
 rocprofiler_test_c_replay_offset_replay_continue_cb(void)
 {
-    return offsetof(replay_data_c_t, replay_continue_cb);
+    return offsetof(replay_data_c_t, replay_continue);
 }
 
 size_t
@@ -91,13 +91,13 @@ rocprofiler_test_c_replay_offset_total_passes(void)
 size_t
 rocprofiler_test_c_replay_offset_local_enable_cb(void)
 {
-    return offsetof(replay_data_c_t, replay_local_enable_context_cb);
+    return offsetof(replay_data_c_t, replay_start_context);
 }
 
 size_t
 rocprofiler_test_c_replay_offset_local_disable_cb(void)
 {
-    return offsetof(replay_data_c_t, replay_local_disable_context_cb);
+    return offsetof(replay_data_c_t, replay_stop_context);
 }
 
 size_t

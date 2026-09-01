@@ -76,7 +76,7 @@ performance gate.**
 The scaling tests compare a baseline pass count against a higher one. The baseline is **P=2**, and
 that choice is load-bearing.
 
-A `pass_count_cb` returning `1` means the dispatch is **not replayed**: it takes the ordinary
+A `replay_pass_count` returning `1` means the dispatch is **not replayed**: it takes the ordinary
 single-dispatch path with no snapshot and no restore (see `experimental/kernel_replay.h`). Timing
 P=1 therefore times a bare dispatch, with no snapshot and no restore in it at all.
 

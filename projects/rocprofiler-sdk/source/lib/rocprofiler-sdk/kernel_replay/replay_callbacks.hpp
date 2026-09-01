@@ -49,12 +49,12 @@ struct replay_plan_t
     tracing::callback_context_data_vec_t              config_contexts{};
     tracing::external_correlation_id_map_t            external_correlation_ids{};
 
-    uint64_t (*pass_count_cb)(rocprofiler_kernel_dispatch_info_t dispatch_info,
-                              rocprofiler_user_data_t            user_data) = nullptr;
-    int (*replay_continue_cb)(rocprofiler_kernel_dispatch_info_t dispatch_info,
-                              uint64_t                           current_pass,
-                              uint64_t                           total_passes,
-                              rocprofiler_user_data_t            user_data) = nullptr;
+    uint64_t (*replay_pass_count)(rocprofiler_kernel_dispatch_info_t dispatch_info,
+                                  rocprofiler_user_data_t            user_data) = nullptr;
+    int (*replay_continue)(rocprofiler_kernel_dispatch_info_t dispatch_info,
+                           uint64_t                           current_pass,
+                           uint64_t                           total_passes,
+                           rocprofiler_user_data_t            user_data)        = nullptr;
 };
 
 // Per-pass callback context state. Populated during PASS PHASE_ENTER and reused for PASS

@@ -75,7 +75,8 @@ pass_sequence()
             service_kind::spm};
 }
 
-uint64_t pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t
+replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kPasses;
 }
@@ -86,8 +87,7 @@ set_context_for_pass(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
                      bool                                               enabled)
 {
     if(context.handle == 0) return;
-    auto callback = enabled ? payload->replay_local_enable_context_cb
-                            : payload->replay_local_disable_context_cb;
+    auto callback = enabled ? payload->replay_start_context : payload->replay_stop_context;
     KR_CHECK(callback(context));
 }
 
@@ -101,8 +101,8 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        payload->pass_count_cb = pass_count_cb;
-        g_target_kernel        = payload->dispatch_info.kernel_id;
+        payload->replay_pass_count = replay_pass_count;
+        g_target_kernel            = payload->dispatch_info.kernel_id;
         return;
     }
 
@@ -179,7 +179,8 @@ att_dispatch_cb(rocprofiler_agent_id_t,
                                           : ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }
 
-void att_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)
+void
+att_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)
 {
     g_att_records.fetch_add(1);
 }
