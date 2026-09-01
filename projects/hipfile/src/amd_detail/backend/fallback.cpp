@@ -183,6 +183,16 @@ Fallback::async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
                    hoff_t *file_offset_p, hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p,
                    std::shared_ptr<IStream> stream)
 {
+    enqueueAsyncIo(type, std::move(file), std::move(buffer), size_p, file_offset_p, buffer_offset_p,
+                   bytes_transferred_p, std::move(stream), nullptr);
+}
+
+void
+Fallback::enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
+                         size_t *size_p, hoff_t *file_offset_p, hoff_t *buffer_offset_p,
+                         ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream,
+                         std::shared_ptr<AsyncFailoverState> failover)
+{
     size_t limited_size = min(*size_p, hipFile::getMaxRwCount());
 
     if (!paramsValid(buffer, limited_size, *file_offset_p, *buffer_offset_p)) {
@@ -204,6 +214,15 @@ Fallback::async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
 
     auto op = std::shared_ptr<AsyncOpFallback>(new AsyncOpFallback(
         type, std::move(file), buffer, stream, size_p, file_offset_p, buffer_offset_p, bytes_transferred_p));
+    if (failover) {
+        // Seed the op as skipped: the gate arms it only if the primary failed in a
+        // fallback-eligible way. Otherwise every fallback callback and the memcpy
+        // kernel early out on the negative bytes_transferred_internal, and cleanup
+        // leaves the primary's result untouched.
+        op->failover                   = std::move(failover);
+        op->bytes_transferred_internal = -1;
+        op->write_result               = false;
+    }
     Context<AsyncMonitor>::get()->addOp(op);
     auto  op_dev_ptr     = op->devPtr();
     void *kernel_args[1] = {&op_dev_ptr};
@@ -212,6 +231,12 @@ Fallback::async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
         int max_threads_per_block = Context<Hip>::get()->hipDeviceGetAttribute(
             hipDeviceAttributeMaxThreadsPerBlock, buffer->getGpuId());
         auto stream_lock = stream->getLock();
+
+        // Arm-or-skip the fallback based on the primary's outcome before any of the
+        // fallback work runs.
+        if (op->failover) {
+            Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_failover_gate, op.get());
+        }
 
         // Launch a host function to bind parameters if anything not fixed
         if (!op->stream->fixedBufferOffset() || !op->stream->fixedFileOffset() ||
@@ -340,6 +365,16 @@ async_io_advance(void *userargs)
     }
     if (op->chunk_bytes_copied > 0) {
         op->bytes_transferred_internal += op->chunk_bytes_copied;
+    }
+}
+
+void
+async_failover_gate(void *userargs)
+{
+    auto op = static_cast<AsyncOpFallback *>(userargs);
+    if (op->failover && op->failover->fallback_needed) {
+        op->bytes_transferred_internal = 0;
+        op->write_result               = true;
     }
 }
 }
