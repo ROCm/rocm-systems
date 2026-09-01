@@ -195,6 +195,16 @@ struct MoiExecSaveTargetFacts {
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
 };
 
+/// Mode semantics consumed by the one shared owner/epoch prologue builder.
+/// The builder owns descriptor inspection, resource preservation, placement,
+/// and emission; modes own only the meaning that changes those mechanics.
+struct MoiPrologueModePolicy {
+  bool skip_unobserved_barrier_only_initialization = false;
+  bool backup_compact_spill_for_runtime_sampling = false;
+  bool one_based_owner_ids = false;
+  bool persistent_state_requires_in_place_entry = false;
+};
+
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.
 [[nodiscard]] MoiPersistentStateDemand make_exact_workgroup_capture_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
@@ -264,6 +274,7 @@ struct MoiModeOperations {
   MoiOperationalEvidenceKinds operational_evidence;
   std::optional<uint16_t> dynamic_stack_frame_save_sgpr_offset;
   uint16_t (*exec_save_sgpr_count)(const MoiExecSaveRequirement &, const MoiExecSaveTargetFacts &);
+  MoiPrologueModePolicy prologue;
   MoiPersistentStateDemand (*persistent_state_demand)(const ConSanRequest &,
                                                       const BoundRuntimeResources &,
                                                       const ConSanMoiOperatingPoint &,

@@ -3983,3 +3983,63 @@ or satisfy material shrinkage. Other reviewed common mode budgets, the broad
 operating point and transform transaction, remaining target locality, and the
 independent Section 14 completion audit remain open. The goal therefore
 remains active.
+
+### 16.44 Convergence checkpoint 43: mode-owned shared-prologue policy
+
+A definition-to-runtime audit of the shared owner/epoch prologue found four
+remaining mode-enumerator decisions. They did not select different prologue
+implementations: they selected whether an otherwise common prologue skips an
+unobserved barrier-only owner, protects a compact spill before runtime sampling,
+uses one-based owner identifiers, and requires an in-place entry when persistent
+state is present. Leaving those semantics in `consan_moi_prologue.cpp` made the
+common mechanism an implicit mode registry and required that file to change for
+every mode with a different combination.
+
+`MoiModeOperations` now carries one narrow `MoiPrologueModePolicy`. Record/Replay
+owns the early compact-spill backup requirement, Sampled explicitly selects the
+all-default policy, and InlineShadow owns the barrier-only elision, one-based
+owner, and persistent-entry requirements. The common prologue reads that policy
+once and still exclusively owns descriptor inspection, resource preservation,
+placement, entry rewriting, and emission. No mechanism was copied into a mode
+package, and the four old mode guards and their mode-specific explanation in
+common code were deleted.
+
+The hypothetical fifth-mode fixture now composes a non-default prologue policy
+without naming a production mode or changing a target package. The existing
+all-engine planning fixture asserts every production policy field, while the
+focused behavioral set exercises the actual entry, owner, persistent-state,
+runtime-gate, and scalar-backup consequences across the supported targets. The
+architecture gate replaces the prologue's reviewed four-reference budget with
+an exact zero rule.
+
+| Signal | Checkpoint 43 | Cumulative change | Slice change from checkpoint 42 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,428 | +453 | +20 |
+| Nonblank production lines | 99,140 | +57 | +19 |
+| Production implementation lines | 91,417 | **-33** | +17 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 206 / 56 | **-70 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 205 / 28 | +5 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 361 / 63 | +71 / +12 | 0 / 0 |
+| Direct mode references in shared prologue construction | **0** | n/a | **-4** |
+| Mode-local shared-prologue policy registrations | 3 | n/a | +3 |
+| Shared-prologue mode-switch gate | exact zero | n/a | strengthened from budget 4 |
+| Test inventory | 5,379 | +34 | 0 |
+
+Validation includes a final-tree `-j16` build; all 227 focused mode-planning,
+prologue, entry, owner, persistent-state, runtime-gate, scalar, and architecture-
+boundary tests; all 4,744 nonphysical tests at `-j16`, including the unchanged
+2,908 simulator rows over five targets; and all 635 physical gfx1201 tests
+serialized at `-j1`. Existing mode-planning tests gained policy assertions, but
+no test was removed, renamed, disabled, added, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.4, 14.5, 14.6, 14.7, and
+14.9. The shared prologue is now mode-neutral and a new mode can compose its
+semantics through its own package, while the exact common mechanism remains one
+implementation. The explicit contract costs 17 implementation lines, reducing
+the cumulative shrink to 33 lines; this is locality progress but emphatically
+not the material code-size evidence required by Section 14.8. Other reviewed
+common mode budgets, broad mutable products, remaining target locality, legacy
+harvesting, both complete extension exercises, and the independent completion
+audit remain open. The goal therefore remains active.

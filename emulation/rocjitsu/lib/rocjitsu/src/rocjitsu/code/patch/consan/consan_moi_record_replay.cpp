@@ -237,6 +237,7 @@ const MoiModeOperations kRecordReplayModeOperations = {
                              ConSanProbeIntentKind::AtomicRecord, true},
     .dynamic_stack_frame_save_sgpr_offset = 5u,
     .exec_save_sgpr_count = record_replay_exec_save_sgpr_count,
+    .prologue = {.backup_compact_spill_for_runtime_sampling = true},
     .persistent_state_demand = plan_record_replay_persistent_state_demand,
     .transient_scalar_placement = {ConSanMoiScalarSpillLayout::Compact, false, true, 0u},
     .dynamic_stack_spill_without_target_backend = false,

@@ -14,6 +14,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
@@ -2333,6 +2334,7 @@ void try_apply_owner_epoch_prologue_patch(
     result.errors.emplace_back("ConSan MOI owner/epoch prologue has no admitted target profile");
     return;
   }
+  const MoiPrologueModePolicy &mode_policy = moi_mode_operations(options.moi_engine).prologue;
   if (operating_point.automatic_moi_private_epoch) {
     try_apply_private_epoch_prologue_patch(options, operating_point, arch, result);
     if (!result.errors.empty() || result.moi_operating_point.owner_persistent_vgprs.empty())
@@ -2562,7 +2564,7 @@ void try_apply_owner_epoch_prologue_patch(
                  patch.kind != ConSanPatchKind::TrampolineMoiInlineEpochBarrier &&
                  patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
         });
-    if (options.moi_engine == ConSanMoiEngine::InlineShadow &&
+    if (mode_policy.skip_unobserved_barrier_only_initialization &&
         kernel_point.automatic_moi_persistent_vgprs && owns_inline_barrier &&
         !owns_non_barrier_instrumentation) {
       result.warnings.emplace_back(
@@ -2596,17 +2598,16 @@ void try_apply_owner_epoch_prologue_patch(
     const bool needs_dynamic_stack_scalar_backup =
         kernel_point.moi_branch_only_spill &&
         kernel_point.moi_branch_only_spill->dynamic_stack_borrowed_sgpr.has_value();
-    // A spill-backed Record/Replay probe protects its borrowed scalar window
-    // at each access body. Sparse workgroup selection uses that same window
-    // earlier, in the owner/epoch entry prologue, so it needs an independent
-    // entry save before any site-local spill exists. This is equally true for
-    // compact and branch-only routers and for every admitted architecture.
-    const bool needs_record_replay_runtime_scalar_backup =
-        options.moi_engine == ConSanMoiEngine::RecordReplay &&
+    // A mode whose compact probe protects its borrowed scalar window only at
+    // the access body can use that window earlier for runtime workgroup
+    // selection. Its policy therefore requests an independent entry save
+    // before any site-local spill exists.
+    const bool needs_mode_runtime_scalar_backup =
+        mode_policy.backup_compact_spill_for_runtime_sampling &&
         kernel_point.has_compact_moi_scalar_spill() && options.moi_runtime_sample_stride > 1u;
     const bool needs_full_entry_scalar_backup = needs_branch_only_scalar_backup ||
                                                 needs_dynamic_stack_scalar_backup ||
-                                                needs_record_replay_runtime_scalar_backup;
+                                                needs_mode_runtime_scalar_backup;
     const bool needs_automatic_owner_scalar_backup =
         kernel_point.moi_owner_sgpr.automatic() &&
         options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
@@ -2723,7 +2724,7 @@ void try_apply_owner_epoch_prologue_patch(
         .owner_shift_bits = owner_shift_bits,
         .owner_source = options.moi_owner_source,
         .owner_sgpr = kernel_point.moi_owner_sgpr.base(),
-        .one_based_owner_ids = options.moi_engine == ConSanMoiEngine::InlineShadow,
+        .one_based_owner_ids = mode_policy.one_based_owner_ids,
         .persistent_sgprs = kernel_point.moi_persistent_sgprs,
         .record_replay_workgroup_vgprs = kernel_point.moi_record_replay_workgroup_vgprs,
         .dispatch_plan = dispatch_plan,
@@ -2775,7 +2776,7 @@ void try_apply_owner_epoch_prologue_patch(
         .emission = std::move(emission),
         .has_kernarg_preload = has_kernarg_preload,
         .instrument_entry_in_place = kernel.uses_dynamic_stack.value_or(false) ||
-                                     (options.moi_engine == ConSanMoiEngine::InlineShadow &&
+                                     (mode_policy.persistent_state_requires_in_place_entry &&
                                       (kernel_point.automatic_moi_persistent_vgprs ||
                                        kernel_point.moi_persistent_sgprs.complete())),
         .required_vgpr_count = required_vgpr_count,

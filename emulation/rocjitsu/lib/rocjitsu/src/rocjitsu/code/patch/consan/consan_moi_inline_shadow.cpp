@@ -232,6 +232,12 @@ const MoiModeOperations kInlineShadowModeOperations = {
                              ConSanProbeIntentKind::ExactAtomicOrdering, false},
     .dynamic_stack_frame_save_sgpr_offset = 24u,
     .exec_save_sgpr_count = inline_shadow_exec_save_sgpr_count,
+    .prologue =
+        {
+            .skip_unobserved_barrier_only_initialization = true,
+            .one_based_owner_ids = true,
+            .persistent_state_requires_in_place_entry = true,
+        },
     .persistent_state_demand = plan_inline_shadow_persistent_state_demand,
     .transient_scalar_placement = {ConSanMoiScalarSpillLayout::Inline, false, false, 0u},
     .dynamic_stack_spill_without_target_backend = true,

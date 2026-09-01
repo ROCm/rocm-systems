@@ -285,6 +285,7 @@ const MoiModeOperations kSampledModeOperations = {
                              ConSanProbeIntentKind::SampledAtomicOrdering, false},
     .dynamic_stack_frame_save_sgpr_offset = 8u,
     .exec_save_sgpr_count = sampled_exec_save_sgpr_count,
+    .prologue = {},
     .persistent_state_demand = plan_sampled_persistent_state_demand,
     .transient_scalar_placement = {ConSanMoiScalarSpillLayout::Compact, true, false, 8u},
     .dynamic_stack_spill_without_target_backend = false,

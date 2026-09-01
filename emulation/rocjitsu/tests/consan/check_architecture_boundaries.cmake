@@ -1361,7 +1361,7 @@ _consan_assert_reviewed_mode_switch_budget(
     consan_types.cpp 6 "mode parsing naming and request validation"
 )
 _consan_assert_reviewed_mode_switch_budget(
-    consan_moi_prologue.cpp 4 "shared MOI entry-state initialization"
+    consan_moi_prologue.cpp 0 "mode-neutral MOI entry-state construction"
 )
 _consan_assert_reviewed_mode_switch_budget(
     consan_moi_model.cpp 4 "host model dispatch"

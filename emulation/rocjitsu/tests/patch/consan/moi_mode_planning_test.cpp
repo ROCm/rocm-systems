@@ -44,6 +44,7 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
                                      ConSanProbeIntentKind::SampledAtomicOrdering, false};
   operations.dynamic_stack_frame_save_sgpr_offset = 1u;
   operations.exec_save_sgpr_count = hypothetical_exec_save_sgpr_count;
+  operations.prologue.one_based_owner_ids = true;
   const std::array registrations{
       consan_moi_impl::MoiModeRegistrationFor<HypotheticalModeKey>{HypotheticalModeKey::FifthMode,
                                                                    &operations},
@@ -60,6 +61,7 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   EXPECT_EQ(selected->exec_save_sgpr_count({.has_report_buffer = true},
                                            {.direct_call_form = ConSanDirectCallForm::SCallI64}),
             3u);
+  EXPECT_TRUE(selected->prologue.one_based_owner_ids);
 }
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsAutomaticOwnerDefault) {
@@ -324,16 +326,31 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
   buffered_facts.has_report_buffer = true;
   EXPECT_FALSE(
       plan_moi_object_mode(request, point, buffered_facts, observation).prologue_requires_consumer);
+  const auto &record_policy = moi_mode_operations(request.moi_engine).prologue;
+  EXPECT_FALSE(record_policy.skip_unobserved_barrier_only_initialization);
+  EXPECT_TRUE(record_policy.backup_compact_spill_for_runtime_sampling);
+  EXPECT_FALSE(record_policy.one_based_owner_ids);
+  EXPECT_FALSE(record_policy.persistent_state_requires_in_place_entry);
 
   request.moi_engine = ConSanMoiEngine::Sampled;
   plan = plan_moi_object_mode(request, point, facts, observation);
   EXPECT_TRUE(plan.reserve_dynamic_stack_prologue_entry);
   EXPECT_TRUE(plan.prologue_requires_consumer);
+  const auto &sampled_policy = moi_mode_operations(request.moi_engine).prologue;
+  EXPECT_FALSE(sampled_policy.skip_unobserved_barrier_only_initialization);
+  EXPECT_FALSE(sampled_policy.backup_compact_spill_for_runtime_sampling);
+  EXPECT_FALSE(sampled_policy.one_based_owner_ids);
+  EXPECT_FALSE(sampled_policy.persistent_state_requires_in_place_entry);
 
   request.moi_engine = ConSanMoiEngine::InlineShadow;
   plan = plan_moi_object_mode(request, point, facts, observation);
   EXPECT_FALSE(plan.reserve_dynamic_stack_prologue_entry);
   EXPECT_TRUE(plan.prologue_requires_consumer);
+  const auto &inline_policy = moi_mode_operations(request.moi_engine).prologue;
+  EXPECT_TRUE(inline_policy.skip_unobserved_barrier_only_initialization);
+  EXPECT_FALSE(inline_policy.backup_compact_spill_for_runtime_sampling);
+  EXPECT_TRUE(inline_policy.one_based_owner_ids);
+  EXPECT_TRUE(inline_policy.persistent_state_requires_in_place_entry);
 }
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsPersistentStateDemand) {
