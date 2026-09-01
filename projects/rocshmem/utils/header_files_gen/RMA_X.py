@@ -38,6 +38,12 @@ types = [
     ("unsigned int", "uint"),
     ("unsigned long", "ulong"),
     ("unsigned long long", "ulonglong"),
+    ("__half", "half"),
+    ("__hip_bfloat16", "bfloat16"),
+    ("int8_t", "int8"),
+    ("int16_t", "int16"),
+    ("uint8_t", "uint8"),
+    ("uint16_t", "uint16")
 ]
 
 
