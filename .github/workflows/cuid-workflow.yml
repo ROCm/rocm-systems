@@ -153,3 +153,63 @@ jobs:
         with:
           name: cuid-test-results-${{ matrix.os }}
           path: /tmp/test-results-${{ matrix.os }}
+
+  clang-tidy:
+    name: clang-tidy
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    container:
+      # this runs once rather than across full build-and-test matrix
+      image: ${{ vars.Ubuntu22_DOCKER_IMAGE }}
+      options: --rm -u root
+
+    steps:
+      - name: Clean workspace
+        run: find "$GITHUB_WORKSPACE" -mindepth 1 -delete
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set Project Directory
+        run: |
+          # Find the directory containing the main CMakeLists.txt for CUID
+          # Prioritize finding it in projects/cuid
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/cuid/CMakeLists.txt" -exec dirname {} \;)
+
+          if [ -z "$TARGET_DIR" ]; then
+            echo "Could not find CMakeLists.txt in projects/cuid. Searching workspace..."
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -name "CMakeLists.txt" | grep "projects/cuid" | head -n 1 | xargs dirname)
+          fi
+
+          if [ -z "$TARGET_DIR" ]; then
+             echo "Could not find CMakeLists.txt for CUID."
+             exit 1
+          fi
+
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
+
+      - name: Configure CUID
+        run: |
+          set -e
+
+          # Build daemon so its sources land in compile_commands.json
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          rm -rf $BUILD_FOLDER
+          mkdir -p $BUILD_FOLDER
+          cd $BUILD_FOLDER
+
+          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DBUILD_DAEMON=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          make -j $(nproc)
+
+      - name: Run clang-tidy
+        run: |
+          set -e
+
+          if ! command -v clang-tidy &> /dev/null; then
+            apt-get update && apt-get install -y clang-tidy
+          fi
+
+          cd ${{ env.PROJECT_DIR }}
+          # .clang-tidy at the project root is picked up per-file automatically.
+          clang-tidy -p build $(find lib/src cli daemon -name '*.cc')

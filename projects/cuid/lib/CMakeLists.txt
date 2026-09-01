@@ -66,19 +66,12 @@ add_library(amdcuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})
 
 set_property(TARGET amdcuid_static PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-target_include_directories(
-    amdcuid_static
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
+target_include_directories(amdcuid_static PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 # Pass the version-independent shared config directory to the library at compile
 # time. All installed versions of the library must agree on this path so that
 # the HMAC key is shared and CUIDs remain stable across version upgrades.
-target_compile_definitions(
-    amdcuid_static
-    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
-)
+target_compile_definitions(amdcuid_static PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}")
 
 # SHA-256/HMAC comes from src/sha256.cc, so the only external dependency left
 # is the platform CSPRNG: bcrypt on Windows, getrandom(2)//dev/urandom on POSIX.
@@ -100,11 +93,7 @@ install(
 
 # Install public headers
 set(PUBLIC_HEADERS ${INC_DIR}/amd_cuid.h)
-install(
-    FILES ${PUBLIC_HEADERS}
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${AMDCUID}
-    COMPONENT ${LIB_COMPONENT}
-)
+install(FILES ${PUBLIC_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${AMDCUID} COMPONENT ${LIB_COMPONENT})
 
 if(UNIX AND NOT APPLE)
     configure_file(
