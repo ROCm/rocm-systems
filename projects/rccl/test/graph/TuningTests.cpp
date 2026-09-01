@@ -6,8 +6,8 @@
 
 // Regression tests for NCCL_PROTO / NCCL_ALGO prefix parsing in graph/tuning.cc.
 //
-// ncclFuncStr[] must stay aligned with ncclFunc_t enum order: parseList() resolves
-// a prefix like "broadcast" to an index p and writes protoEnable[p * nelems + e].
+// The first NCCL_NUM_FUNCTIONS entries of ncclFuncStr[] must stay aligned with the
+// core ncclFunc_t enum order (Broadcast..AllReduce): parseList() resolves
 // When ncclFuncStr[ncclFuncBroadcast] was not "Broadcast" (pre-fix ordering placed
 // Broadcast at index 5 while NCCL_NUM_FUNCTIONS is 5), NCCL_PROTO=broadcast:simple
 // could not match any prefix and init failed or misconfigured protocol enablement.
