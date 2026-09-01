@@ -1071,12 +1071,10 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatch(hsa_agent_t agent,
 
   /* The operation must only run after every dep signal has reached 0, so 
   the completion signal should still be pending */
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
   ASSERT_EQ(hsa_signal_load_scacquire(completion), 1);
 
   // resolve all dep signals one by one
   for (uint32_t i = 0; i < kNumDepSignals; i++) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
     hsa_signal_store_screlease(dep_signals[i], 0);
   }
 
