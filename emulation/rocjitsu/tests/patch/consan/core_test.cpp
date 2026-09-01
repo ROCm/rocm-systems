@@ -121,6 +121,42 @@ TEST(ConSan, MoiOperatingPointEqualityCoversOwnerAssignments) {
   EXPECT_NE(changed, allocation);
 }
 
+TEST(ConSan, MoiPersistentVgprStateHasOneProjectionForEveryAllocationScope) {
+  ConSanMoiOperatingPoint point;
+  point.set_moi_owner_epoch_vgprs(3u, 4u);
+  point.moi_workgroup_key_vgpr = 5u;
+  point.moi_dispatch_identity.set_vgpr(6u);
+  point.moi_record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters(8u, 9u, 10u, 11u);
+
+  ConSanMoiPersistentVgprAssignment assignment{
+      .descriptor_file_offset = 64u,
+      .owner_epoch_vgprs = {3u, 4u},
+      .workgroup_key_vgpr = 5u,
+      .record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters(8u, 9u, 10u, 11u),
+      .dispatch_id_vgpr = 6u,
+  };
+  const auto point_state = consan_moi_impl::moi_persistent_vgpr_state_view(point);
+  EXPECT_EQ(point_state, consan_moi_impl::moi_persistent_vgpr_state_view(assignment));
+
+  std::vector<std::pair<uint16_t, uint16_t>> ranges;
+  point_state.for_each_range([&](std::optional<uint16_t> base, uint16_t width) {
+    if (base)
+      ranges.emplace_back(*base, width);
+  });
+  EXPECT_EQ(ranges,
+            (std::vector<std::pair<uint16_t, uint16_t>>{
+                {3u, 1u}, {4u, 1u}, {5u, 1u}, {6u, 2u}, {8u, 1u}, {9u, 1u}, {10u, 1u}, {11u, 1u}}));
+  ranges.clear();
+  point_state.for_each_range(
+      [&](std::optional<uint16_t> base, uint16_t width) {
+        if (base)
+          ranges.emplace_back(*base, width);
+      },
+      false);
+  EXPECT_EQ(ranges, (std::vector<std::pair<uint16_t, uint16_t>>{
+                        {3u, 1u}, {4u, 1u}, {5u, 1u}, {8u, 1u}, {9u, 1u}, {10u, 1u}, {11u, 1u}}));
+}
+
 TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   ConSanMoiOperatingPoint state{
       .moi_initialize_owner_epoch = true,

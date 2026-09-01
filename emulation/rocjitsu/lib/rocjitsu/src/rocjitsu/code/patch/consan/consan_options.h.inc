@@ -306,6 +306,8 @@ private:
 struct ConSanMoiOwnerEpochVgprSources {
   std::optional<uint16_t> owner;
   std::optional<uint16_t> epoch;
+
+  bool operator==(const ConSanMoiOwnerEpochVgprSources &) const = default;
 };
 
 [[nodiscard]] inline ConSanMoiOwnerEpochVgprSources

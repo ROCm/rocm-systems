@@ -2507,11 +2507,11 @@ void try_apply_record_replay_barrier_record_patch(
         }
       }
       const auto jump_sgprs = moi_indirect_jump_sgprs(emission);
-      const auto backup_vgpr = find_moi_borrowed_entry_backup_vgpr_for_state(
+      const auto backup_vgpr = find_moi_borrowed_entry_backup_vgpr(
           *standalone_resource_state, planned.resources.owner_descriptor_file_offsets,
           site.text_offset, planned.resources.required_vgpr_count,
           {
-              .moi_owner_epoch_vgprs = emission.moi_owner_epoch_vgprs,
+              .owner_epoch = moi_owner_epoch_vgpr_sources(emission.moi_owner_epoch_vgprs),
               .workgroup_key = emission.moi_workgroup_key_vgpr,
               .dispatch_id = emission.moi_dispatch_id_vgpr,
               .record_replay_workgroup = emission.moi_record_replay_workgroup_vgprs,

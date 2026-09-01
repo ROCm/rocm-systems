@@ -194,11 +194,45 @@ struct MoiDenseRelayHostRequest {
 /// Persistent VGPRs that cannot be borrowed by an entry relay before the
 /// probe's ordinary spill transaction has run.
 struct MoiPersistentVgprStateView {
-  ConSanMoiOwnerEpochRegisterState moi_owner_epoch_vgprs;
+  ConSanMoiOwnerEpochVgprSources owner_epoch;
   std::optional<uint16_t> workgroup_key;
   std::optional<uint16_t> dispatch_id;
   ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup;
+
+  template <typename Visitor>
+  void for_each_range(Visitor &&visit, bool include_dispatch = true) const {
+    visit(owner_epoch.owner, 1u);
+    visit(owner_epoch.epoch, 1u);
+    visit(workgroup_key, 1u);
+    if (include_dispatch)
+      visit(dispatch_id, 2u);
+    for (std::optional<uint16_t> reg : record_replay_workgroup.values())
+      visit(reg, 1u);
+  }
+
+  bool operator==(const MoiPersistentVgprStateView &) const = default;
 };
+
+[[nodiscard]] inline MoiPersistentVgprStateView
+moi_persistent_vgpr_state_view(const ConSanMoiOperatingPoint &point) {
+  return {
+      .owner_epoch = moi_owner_epoch_vgpr_sources(point.moi_owner_epoch_vgprs),
+      .workgroup_key = point.moi_workgroup_key_vgpr,
+      .dispatch_id = point.moi_dispatch_identity.vgpr(),
+      .record_replay_workgroup = point.moi_record_replay_workgroup_vgprs,
+  };
+}
+
+[[nodiscard]] inline MoiPersistentVgprStateView
+moi_persistent_vgpr_state_view(const ConSanMoiPersistentVgprAssignment &assignment) {
+  return {
+      .owner_epoch = {.owner = assignment.owner_epoch_vgprs.owner,
+                      .epoch = assignment.owner_epoch_vgprs.epoch},
+      .workgroup_key = assignment.workgroup_key_vgpr,
+      .dispatch_id = assignment.dispatch_id_vgpr,
+      .record_replay_workgroup = assignment.record_replay_workgroup_vgprs,
+  };
+}
 
 struct MoiCfgDistance {
   uint32_t block_edges = 0;
@@ -424,11 +458,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                     const ConSanMoiCandidate &candidate,
                     const ConSanMoiOperatingPoint &operating_point, uint16_t expected_count);
 
-[[nodiscard]] std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr_for_point(
-    MoiResourcePlanningState &state, std::span<const uint64_t> owners, uint64_t text_offset,
-    uint16_t allocated_vgpr_count, const ConSanMoiOperatingPoint &point);
-
-[[nodiscard]] std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr_for_state(
+[[nodiscard]] std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr(
     MoiResourcePlanningState &state, std::span<const uint64_t> owners, uint64_t text_offset,
     uint16_t allocated_vgpr_count, const MoiPersistentVgprStateView &persistent_state);
 

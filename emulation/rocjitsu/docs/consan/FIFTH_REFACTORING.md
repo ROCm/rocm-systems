@@ -4496,3 +4496,64 @@ fixtures remain complete and enforced since checkpoint 17. Remaining target
 locality, operating-point and mutable-transaction breadth, larger legacy
 harvesting, material whole-refactoring shrinkage, and the independent Section
 14 completion audit remain open. The goal therefore remains active.
+
+### 16.52 Convergence checkpoint 51: one persistent-VGPR state projection
+
+The operating-point deep read followed persistent vector state through
+resource exclusion, scratch-extent calculation, dispatch-layout validation,
+and borrowed-entry planning. The same semantic tuple was represented in two
+allocation scopes: one code-object-wide operating point and per-owner
+`ConSanMoiPersistentVgprAssignment` records. Four consumers independently
+enumerated owner/epoch, InlineShadow's compact workgroup key, the hardware
+dispatch pair, and Record/Replay/Sampled's exact workgroup coordinates. Two
+borrowed-entry adapters then distinguished the source representation even
+though the algorithm consumed the same state.
+
+`MoiPersistentVgprStateView` is now the one target-neutral projection for both
+allocation scopes. It retains the semantic distinction between the partial
+site-local owner/epoch sources, the one-register workgroup key, the two-register
+dispatch identity, and the exact workgroup tuple, while exposing one width-
+aware traversal. Register exclusion, owner-assignment exclusion, required-VGPR
+extent, dispatch-overlap validation, and both Record/Replay and shared-barrier
+borrowed-entry planning consume that projection. The two source-specific
+borrowed-entry adapters and all four hand-written field traversals are deleted.
+Mode-local state is not duplicated: InlineShadow and Record/Replay/Sampled
+contribute their distinct fields to one common persistent-register mechanism.
+
+The architecture gate rejects the retired source-specific adapters and
+requires both allocation-scope projections and their common traversal. A new
+direct regression proves that code-object-wide and per-owner allocations
+produce exactly the same register/width sequence and that self-validation can
+exclude the dispatch pair without losing any other persistent range. No
+behavior defect was established in this slice.
+
+| Signal | Checkpoint 51 | Cumulative change | Slice change from checkpoint 50 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,354 | +379 | **-41** |
+| Nonblank production lines | 99,069 | **-14** | **-43** |
+| Production implementation lines | 91,348 | **-102** | **-43** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **175 / 52** | **-101 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 30 | +10 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | **-1 / 0** |
+| Hand-written persistent-VGPR field traversals in placement | **0** | n/a | **-4** |
+| Source-specific borrowed-entry adapters | **0** | n/a | **-2** |
+| Test inventory | **5,383** | **+38** | **+1** |
+
+Validation includes a final-tree `-j16` build; five direct projection,
+allocation, dispatch, and architecture-boundary tests; all 909 focused MOI and
+pipeline tests; all 4,748 nonphysical tests over the five emulated targets at
+`-j16`; and all 635 physical gfx1201 tests serialized at `-j1`. No test was
+removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, 14.8, and
+14.9. One resource fact now has one representation-independent consumer
+contract, the broad operating-point type loses a consumer, and the slice
+harvests 43 implementation lines. The cumulative 102-line reduction is real
+but is only about one tenth of one percent of the starting implementation, so
+it is not yet material Section 14.8 evidence. Section 14.4's extension fixtures
+remain complete and enforced. Remaining target locality, other operating-point
+and mutable-transaction breadth, larger legacy harvesting, material whole-
+refactoring shrinkage, and the independent Section 14 completion audit remain
+open. The goal therefore remains active.

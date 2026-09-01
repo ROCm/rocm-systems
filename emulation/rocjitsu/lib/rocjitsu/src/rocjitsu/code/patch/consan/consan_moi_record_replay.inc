@@ -733,9 +733,9 @@ void try_apply_first_light_access_record_patch(
               borrowed_entry_words_for_candidate(candidate_ptr).value_or(std::vector<uint32_t>{});
           const size_t candidate_words = candidate.size() / sizeof(uint32_t);
           const auto jump_sgprs = moi_indirect_jump_sgprs(options, candidate_point);
-          const auto backup_vgpr = find_moi_borrowed_entry_backup_vgpr_for_point(
+          const auto backup_vgpr = find_moi_borrowed_entry_backup_vgpr(
               resource_state, resources->owner_descriptor_file_offsets, candidate.anchor(),
-              resources->required_vgpr_count, candidate_point);
+              resources->required_vgpr_count, moi_persistent_vgpr_state_view(candidate_point));
           if (jump_sgprs && backup_vgpr && candidate_words <= displaced_words.size() &&
               displaced_words.size() * sizeof(uint32_t) <= std::numeric_limits<uint32_t>::max()) {
             borrowed_entry_prototype = build_moi_borrowed_record_replay_entry(

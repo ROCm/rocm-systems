@@ -455,6 +455,23 @@ foreach(_file IN LISTS _consan_production_files)
         )
     endif()
 endforeach()
+foreach(_file IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_file}"
+        "find_moi_borrowed_entry_backup_vgpr_for_(point|state)"
+        "borrowed-entry planning must consume the one persistent-VGPR state view"
+    )
+endforeach()
+file(READ "${_consan_dir}/consan_moi_placement_contracts.h" _persistent_vgpr_view_contract)
+if(NOT _persistent_vgpr_view_contract MATCHES
+       "moi_persistent_vgpr_state_view[^}]*ConSanMoiOperatingPoint" OR
+   NOT _persistent_vgpr_view_contract MATCHES
+       "moi_persistent_vgpr_state_view[^}]*ConSanMoiPersistentVgprAssignment" OR
+   NOT _persistent_vgpr_view_contract MATCHES "for_each_range")
+    message(FATAL_ERROR
+        "ConSan placement lost its shared persistent-VGPR state projection"
+    )
+endif()
 
 # Semantic policy owns meaning, never an ISA recipe or product identity.
 set(
