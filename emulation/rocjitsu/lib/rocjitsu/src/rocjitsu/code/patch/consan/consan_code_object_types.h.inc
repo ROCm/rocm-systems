@@ -194,7 +194,11 @@ struct ConSanOrdinaryMemorySite {
   std::optional<uint32_t> raw_vsrc;
   std::optional<uint32_t> raw_vdst;
   std::optional<int32_t> raw_ioffset;
+  /// Target-facing diagnostic scope code. This is the encoded operand when
+  /// one exists and retains the legacy numeric spelling for implicit forms.
+  /// Semantic consumers must use `scope`.
   std::optional<uint32_t> raw_scope;
+  std::optional<ConSanMemoryScope> scope;
   std::optional<uint32_t> raw_th;
   /// Target-normalized exact ordering qualifier for a compiler-generated
   /// workgroup group-FLAT acquire. The raw fields remain available for
@@ -283,10 +287,14 @@ struct ConSanAtomicSite {
   std::optional<bool> raw_offen;
   std::optional<bool> raw_idxen;
   std::optional<int32_t> raw_ioffset;
-  /// Common scope code. This preserves an encoded field when one exists; for
-  /// target forms whose scope is implicit, analysis records the qualified
-  /// semantic scope so downstream engines do not invent target-specific rules.
+  /// Target-facing diagnostic scope code. This is the encoded operand when
+  /// one exists and retains the legacy numeric spelling for implicit forms.
+  /// Semantic consumers must use `scope`; diagnostics and mutation proof may
+  /// retain this target-owned presentation value.
   std::optional<uint32_t> raw_scope;
+  /// Target-normalized scope. Target forms with an implicit scope publish the
+  /// same semantic value as forms carrying an encoded scope field.
+  std::optional<ConSanMemoryScope> scope;
   std::optional<uint32_t> raw_th;
   std::optional<bool> returns_old_value;
   std::string mnemonic;

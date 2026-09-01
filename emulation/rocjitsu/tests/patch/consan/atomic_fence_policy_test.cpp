@@ -40,7 +40,7 @@ make_global_atomic_site(const AtomicPolicyTarget &target = {}, uint64_t offset =
   site.raw_vaddr = 0;
   site.raw_vdata = 2;
   site.raw_ioffset = 0;
-  site.raw_scope = 2;
+  site.scope = ConSanMemoryScope::Agent;
   site.raw_th = 0;
   site.returns_old_value = outcome != ConSanSyncRmwOutcome::NoReturn;
   site.mnemonic = std::move(mnemonic);
@@ -57,7 +57,7 @@ ConSanAtomicSite make_lds_atomic_site(uint64_t offset = 32) {
   site.dst_vgpr = 1;
   site.addr_vgpr = 0;
   site.data_vgpr = 2;
-  site.raw_scope = 1;
+  site.scope = ConSanMemoryScope::Workgroup;
   site.raw_addr = 0;
   site.raw_data0 = 2;
   site.raw_ioffset = 0;
@@ -84,7 +84,7 @@ ConSanOrdinaryMemorySite make_global_store_site(const AtomicPolicyTarget &target
   site.raw_vaddr = 0;
   site.raw_vsrc = 2;
   site.raw_ioffset = 0;
-  site.raw_scope = 2;
+  site.scope = ConSanMemoryScope::Agent;
   site.raw_th = 0;
   site.mnemonic = "global_store_b32";
   return site;
@@ -106,7 +106,7 @@ ConSanOrdinaryMemorySite make_cdna5_buffer_load_site(uint64_t offset = 32) {
   site.raw_vaddr = 5;
   site.raw_vdst = 4;
   site.raw_ioffset = 0;
-  site.raw_scope = 2;
+  site.scope = ConSanMemoryScope::Agent;
   site.raw_offen = true;
   site.raw_idxen = false;
   site.mnemonic = "buffer_load_b32";
@@ -144,7 +144,8 @@ ConSanSyncEvent make_atomic_event(
   event.size = 12;
   event.width_bits = 32;
   event.mnemonic = std::move(mnemonic);
-  event.raw_scope = address_source == ConSanSyncAddressSource::LdsVector ? 1u : 2u;
+  event.scope = address_source == ConSanSyncAddressSource::LdsVector ? ConSanMemoryScope::Workgroup
+                                                                     : ConSanMemoryScope::Agent;
   event.execution_owners.push_back({});
   return event;
 }
@@ -168,7 +169,7 @@ ConSanSyncEvent make_fence_event(uint64_t offset = 48) {
   event.memory_role = ConSanSyncMemoryRole::Release;
   event.identity = "atomic_kernel|fence=" + std::to_string(offset);
   event.width_bits = 0;
-  event.raw_scope.reset();
+  event.scope.reset();
   return event;
 }
 
@@ -195,7 +196,7 @@ ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
   sequence.member_semantic_ids.push_back(member);
   sequence.member_event_identities.push_back(event.identity);
   sequence.width_bits = event.width_bits;
-  sequence.raw_scope = event.raw_scope;
+  sequence.scope = event.scope;
   sequence.execution_owners = event.execution_owners;
   return sequence;
 }
@@ -432,10 +433,10 @@ TEST(ConSanAtomicFencePolicy, Gfx1250OrderedLdsRequiresGraphNormalizedWorkgroupS
   std::vector events{make_atomic_event(32, ConSanSyncRmwOutcome::ReturnsOldValue,
                                        ConSanSyncAddressSource::LdsVector, "ds_add_u32")};
   std::vector sequences{make_atomic_sequence(events.front())};
-  events.front().raw_scope.reset();
-  sequences.front().raw_scope.reset();
+  events.front().scope.reset();
+  sequences.front().scope.reset();
   ConSanAtomicSite site = make_lds_atomic_site();
-  site.raw_scope.reset();
+  site.scope.reset();
   const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
       build_atomic_inventory(std::move(events), std::move(sequences), {std::move(site)}, {}, {},
                              gfx1250),
@@ -453,10 +454,10 @@ TEST(ConSanAtomicFencePolicy, Gfx1250OrdinaryAcquireUsesItsDerivedWorkgroupScope
   event.operation = ConSanSyncOperation::OrdinaryLoad;
   event.memory_role = ConSanSyncMemoryRole::Acquire;
   event.mnemonic = "flat_load_b32";
-  event.raw_scope = 0u;
+  event.scope = ConSanMemoryScope::Wavefront;
   ConSanSyncSequence sequence = make_atomic_sequence(event);
   sequence.memory_role = ConSanSyncMemoryRole::Acquire;
-  sequence.raw_scope = 1u;
+  sequence.scope = ConSanMemoryScope::Workgroup;
   ConSanOrdinaryMemorySite site = make_global_store_site(gfx1250);
   site.operation = ConSanOrdinaryMemoryOperation::Load;
   site.destination_vgpr = 2;
@@ -464,7 +465,7 @@ TEST(ConSanAtomicFencePolicy, Gfx1250OrdinaryAcquireUsesItsDerivedWorkgroupScope
   site.raw_vsrc.reset();
   site.raw_vdst = 2;
   site.raw_saddr = 0x7cu;
-  site.raw_scope = 0u;
+  site.scope = ConSanMemoryScope::Wavefront;
   site.mnemonic = "flat_load_b32";
 
   const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
@@ -531,9 +532,9 @@ TEST(ConSanAtomicFencePolicy, EverySemanticQualificationFailureHasADistinctTyped
          sequence.memory_role = ConSanSyncMemoryRole::SequentiallyConsistent;
        },
        ConSanAtomicPolicyReason::UnsupportedMemoryRole},
-      {"missing-scope", [](auto &, auto &sequence) { sequence.raw_scope.reset(); },
+      {"missing-scope", [](auto &, auto &sequence) { sequence.scope.reset(); },
        ConSanAtomicPolicyReason::MissingScope},
-      {"scope", [](auto &, auto &sequence) { sequence.raw_scope = 0; },
+      {"scope", [](auto &, auto &sequence) { sequence.scope = ConSanMemoryScope::Wavefront; },
        ConSanAtomicPolicyReason::UnsupportedScope},
       {"width-zero", [](auto &, auto &sequence) { sequence.width_bits = 0; },
        ConSanAtomicPolicyReason::InvalidAccessWidth},
@@ -593,15 +594,15 @@ TEST(ConSanAtomicFencePolicy, EncodingAndOperandFailuresRemainPolicyNotLoweringF
        ConSanAtomicPolicyReason::UnsupportedEncoding},
       {"address", [](auto &site) { site.addr_vgpr.reset(); },
        ConSanAtomicPolicyReason::MissingOperands},
-      {"scope", [](auto &site) { site.raw_scope.reset(); }, ConSanAtomicPolicyReason::MissingScope},
+      {"scope", [](auto &site) { site.scope.reset(); }, ConSanAtomicPolicyReason::MissingScope},
   };
   for (const auto &[name, mutate, expected] : cases) {
     SCOPED_TRACE(name);
     std::vector events{make_atomic_event()};
     std::vector sequences{make_atomic_sequence(events.front())};
     if (expected == ConSanAtomicPolicyReason::MissingScope) {
-      events.front().raw_scope.reset();
-      sequences.front().raw_scope.reset();
+      events.front().scope.reset();
+      sequences.front().scope.reset();
     }
     ConSanAtomicSite site = make_global_atomic_site();
     mutate(site);

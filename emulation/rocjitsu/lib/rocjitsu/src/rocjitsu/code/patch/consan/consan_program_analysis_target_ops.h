@@ -89,6 +89,35 @@ enum class ConSanEncodedFlatSegment : uint8_t {
   Global,
 };
 
+/// Target-normalized causal visibility scope carried by memory operations.
+///
+/// This is ConSan's conservative synchronization vocabulary, not an ISA cache-
+/// scope encoding. In particular, target decoders may map a CU/SE or implicit
+/// target scope to the corresponding ConSan wavefront/workgroup abstraction.
+/// Exact encoded fields remain target-owned. Common analysis, policy, modes,
+/// and validation consume only this semantic enum.
+enum class ConSanMemoryScope : uint8_t {
+  Wavefront,
+  Workgroup,
+  Agent,
+  System,
+};
+
+[[nodiscard]] constexpr bool consan_memory_scope_is_supported(ConSanMemoryScope scope) {
+  switch (scope) {
+  case ConSanMemoryScope::Wavefront:
+  case ConSanMemoryScope::Workgroup:
+  case ConSanMemoryScope::Agent:
+  case ConSanMemoryScope::System:
+    return true;
+  }
+  return false;
+}
+
+[[nodiscard]] constexpr bool consan_memory_scope_is_agent_or_system(ConSanMemoryScope scope) {
+  return scope == ConSanMemoryScope::Agent || scope == ConSanMemoryScope::System;
+}
+
 /// Target-normalized FLAT fields shared by access and ordinary-memory
 /// inventory. The target owner validates raw padding and form bits once;
 /// semantic inventory owners decide how the decoded operation is used.
@@ -105,6 +134,7 @@ struct ConSanVectorMemoryEncoding {
   uint32_t raw_segment = 0;
   uint32_t raw_scope = 0;
   uint32_t raw_th = 0;
+  std::optional<ConSanMemoryScope> scope;
   ConSanEncodedFlatSegment encoded_segment = ConSanEncodedFlatSegment::Unspecified;
   std::optional<uint16_t> scalar_provenance_sgpr;
   bool scope_follows_address_space = false;
@@ -128,6 +158,7 @@ struct ConSanBufferMemoryEncoding {
   int32_t raw_ioffset = 0;
   uint32_t raw_scope = 0;
   uint32_t raw_th = 0;
+  std::optional<ConSanMemoryScope> scope;
   uint32_t raw_rsrc = 0;
   uint32_t raw_soffset = 0;
   bool raw_offen = false;

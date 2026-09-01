@@ -131,8 +131,8 @@ select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventor
     if (load == nullptr || sequence_it == sync.sync_sequences.end())
       return std::nullopt;
     const ConSanSyncSequence *sequence = &*sequence_it;
-    if (load->operation != ConSanSyncOperation::OrdinaryLoad || !load->raw_scope ||
-        (*load->raw_scope != 2u && *load->raw_scope != 3u) ||
+    if (load->operation != ConSanSyncOperation::OrdinaryLoad || !load->scope ||
+        !consan_memory_scope_is_agent_or_system(*load->scope) ||
         sequence->kind != ConSanSyncSequenceKind::OrdinaryMemory ||
         sequence->operation != ConSanSyncOperation::OrdinaryLoad ||
         sequence->memory_role != ConSanSyncMemoryRole::Acquire ||

@@ -150,6 +150,24 @@ enum class ConSanMoiSampledSyncScope : uint8_t {
   Cluster = 5,
 };
 
+/// Translate the common synchronization scope into Sampled's stable report
+/// ABI. This is the sole mode-owned mapping; emitters do not reinterpret
+/// target-native scope codes.
+[[nodiscard]] constexpr std::optional<ConSanMoiSampledSyncScope>
+consan_moi_sampled_sync_scope(ConSanMemoryScope scope) {
+  switch (scope) {
+  case ConSanMemoryScope::Wavefront:
+    return ConSanMoiSampledSyncScope::Wavefront;
+  case ConSanMemoryScope::Workgroup:
+    return ConSanMoiSampledSyncScope::Workgroup;
+  case ConSanMemoryScope::Agent:
+    return ConSanMoiSampledSyncScope::Agent;
+  case ConSanMemoryScope::System:
+    return ConSanMoiSampledSyncScope::System;
+  }
+  return std::nullopt;
+}
+
 enum class ConSanMoiSampledSyncOutcome : uint8_t {
   NotApplicable = 0,
   RmwNoReturn = 1,

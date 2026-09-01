@@ -596,18 +596,18 @@ TEST(ConSanProgramInventory, Gfx1250OrderedLdsGraphOwnsImplicitWorkgroupScope) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
-  EXPECT_FALSE(result.program_inventory.kernels().front().atomic_sites.front().raw_scope);
+  EXPECT_FALSE(result.program_inventory.kernels().front().atomic_sites.front().scope);
 
   const SynchronizationInventoryView graph = result.program_inventory.sync();
   const auto event =
       std::ranges::find(graph.sync_events, ConSanSyncEventKind::Atomic, &ConSanSyncEvent::kind);
   ASSERT_NE(event, graph.sync_events.end());
-  ASSERT_TRUE(event->raw_scope);
-  EXPECT_EQ(*event->raw_scope, 1u);
+  ASSERT_TRUE(event->scope);
+  EXPECT_EQ(*event->scope, ConSanMemoryScope::Workgroup);
   const ConSanSyncSequence *sequence = graph.find_unique_sequence_containing(event->semantic_id);
   ASSERT_NE(sequence, nullptr);
-  ASSERT_TRUE(sequence->raw_scope);
-  EXPECT_EQ(*sequence->raw_scope, 1u);
+  ASSERT_TRUE(sequence->scope);
+  EXPECT_EQ(*sequence->scope, ConSanMemoryScope::Workgroup);
 }
 
 TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutPolicy) {

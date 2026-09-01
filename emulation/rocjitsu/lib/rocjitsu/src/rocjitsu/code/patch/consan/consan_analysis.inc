@@ -1286,10 +1286,12 @@ void apply_vector_memory_encoding(ConSanOrdinaryMemorySite &site,
   site.raw_vsrc = encoding.raw_vsrc;
   site.raw_vdst = encoding.raw_vdst;
   site.raw_ioffset = encoding.raw_ioffset;
-  site.raw_scope =
-      encoding.scope_follows_address_space
-          ? (site.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group ? 1u : 2u)
-          : encoding.raw_scope;
+  site.raw_scope = encoding.raw_scope;
+  site.scope = encoding.scope_follows_address_space
+                   ? (site.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group
+                          ? ConSanMemoryScope::Workgroup
+                          : ConSanMemoryScope::Agent)
+                   : encoding.scope;
   site.raw_th = encoding.raw_th;
   site.workgroup_acquire_ordering = encoding.workgroup_acquire_ordering;
   site.address_vgpr = static_cast<uint16_t>(encoding.raw_vaddr);
@@ -1359,6 +1361,7 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
     } else {
       site.raw_ioffset = raw.encoding.raw_ioffset;
       site.raw_scope = raw.encoding.raw_scope;
+      site.scope = raw.encoding.scope;
       site.raw_th = raw.encoding.raw_th;
       site.raw_rsrc = raw.encoding.raw_rsrc;
       site.raw_soffset = raw.encoding.raw_soffset;

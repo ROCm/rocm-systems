@@ -41,7 +41,6 @@ struct ConSanAtomicLoweringForm {
   std::optional<uint16_t> scalar_base_sgpr;
   std::optional<uint16_t> scalar_offset_sgpr;
   int32_t signed_byte_offset = 0;
-  uint32_t scope = 0;
   bool scale_vector_offset = false;
   bool sign_extend_vector_offset = false;
   bool is_rmw = true;

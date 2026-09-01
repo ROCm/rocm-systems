@@ -271,6 +271,12 @@ using consan_moi_detail::kFenceRecordLayout;
     errors.emplace_back("ConSan MOI atomic record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
   }
+  const auto report_scope =
+      candidate.site.scope ? consan_moi_record_replay_scope(*candidate.site.scope) : std::nullopt;
+  if (!report_scope) {
+    errors.emplace_back("ConSan MOI atomic record patch requires a recordable causal scope");
+    return std::nullopt;
+  }
   if (!options.moi_exec_save_sgpr) {
     errors.emplace_back("ConSan MOI atomic record patch requires scalar EXEC state");
     return std::nullopt;
@@ -632,8 +638,8 @@ using consan_moi_detail::kFenceRecordLayout;
           static_cast<uint32_t>(candidate.event_kind), slot_vgpr, *options.scratch_vgpr, arch) ||
       !append_dynamic_record_store_u32_literal(
           record_words, kAtomicRecordLayout,
-          atomic_record_base + offsetof(ConSanMoiAtomicRecord, scope), *candidate.site.raw_scope,
-          slot_vgpr, *options.scratch_vgpr, arch) ||
+          atomic_record_base + offsetof(ConSanMoiAtomicRecord, scope), *report_scope, slot_vgpr,
+          *options.scratch_vgpr, arch) ||
       !append_dynamic_record_store_u32_literal(
           record_words, kAtomicRecordLayout,
           atomic_record_base + offsetof(ConSanMoiAtomicRecord, semantics),
@@ -732,10 +738,15 @@ using consan_moi_detail::kFenceRecordLayout;
     errors.emplace_back("ConSan MOI fence record patch has no supported target profile");
     return std::nullopt;
   }
-  if (!address_plan.supported() || !candidate.communication_site.raw_scope ||
+  if (!address_plan.supported() || !candidate.communication_site.scope ||
       (target->requires_raw_memory_order_qualifier && !candidate.communication_site.raw_th) ||
       !candidate.is_well_formed()) {
     errors.emplace_back("ConSan MOI fence record patch requires qualified address semantics");
+    return std::nullopt;
+  }
+  const auto report_scope = consan_moi_record_replay_scope(*candidate.communication_site.scope);
+  if (!report_scope) {
+    errors.emplace_back("ConSan MOI fence record patch requires a recordable causal scope");
     return std::nullopt;
   }
   if (static_cast<uint32_t>(*options.scratch_vgpr) + address_plan.scratch_vgpr_count > 256u ||
@@ -967,7 +978,7 @@ using consan_moi_detail::kFenceRecordLayout;
             static_cast<uint32_t>(kind), slot_vgpr, *options.scratch_vgpr, arch) ||
         !append_dynamic_record_store_u32_literal(
             record_words, kFenceRecordLayout, record_base + offsetof(ConSanMoiFenceRecord, scope),
-            *candidate.communication_site.raw_scope, slot_vgpr, *options.scratch_vgpr, arch) ||
+            *report_scope, slot_vgpr, *options.scratch_vgpr, arch) ||
         !append_dynamic_record_store_u32_literal(record_words, kFenceRecordLayout,
                                                  record_base +
                                                      offsetof(ConSanMoiFenceRecord, semantics),

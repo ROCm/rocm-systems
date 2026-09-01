@@ -1120,8 +1120,8 @@ The starting measurements are:
 | Signal | Starting value |
 | --- | ---: |
 | Production files | 229 |
-| Physical production lines | 104,975 |
-| Nonblank production lines | 99,083 |
+| Physical production lines | 104,976 |
+| Nonblank production lines | 99,084 |
 | Comment/blank-excluded production implementation lines | 91,450 |
 | `MoiOptions` references / files | 87 / 25 |
 | `ConSanTransformArtifacts` references / files | 276 / 57 |
@@ -5561,4 +5561,99 @@ are harvested. Cumulative shrinkage reaches 575 lines. Remaining architecture
 locality, mode locality, broader operating-point and mutable-transaction
 surfaces, larger legacy harvesting, material whole-refactoring shrinkage, and
 the independent Section 14 completion audit remain open. The goal therefore
+remains active.
+
+### 16.69 Convergence checkpoint 68: one target-normalized causal scope
+
+The synchronization deep read found that `raw_scope` was doing three different
+jobs. It retained an instruction operand for diagnostics and stale-byte
+mutation proof, acted as the common causal visibility scope in policy and
+association, and was serialized directly into two mode report ABIs. Most
+supported instructions happened to use values in the range zero through
+three, but that numeric agreement was not one semantic contract. In
+particular, gfx12-family CU and SE cache domains are not literally HSA
+wavefront and workgroup scopes, and gfx1201 and gfx1250 use different raw
+values for the separately normalized compiler workgroup-acquire qualifier.
+Common analysis and modes were therefore interpreting a target representation
+even when the numeric result looked architecture-independent.
+
+Program-analysis target operations now publish a typed `ConSanMemoryScope`
+alongside the retained raw operand. The shared gfx12-family target owner has an
+explicit exhaustive raw-to-semantic mapping with the conservative CU/SE
+rationale; pre-gfx12 target decoding publishes its implicit agent scope or
+declares that scope follows the resolved address space. Common program
+analysis only copies or derives these typed target products. Events and
+sequences carry raw and semantic values independently: raw values may flow
+unchanged to diagnostics and exact mutation proof, while association may
+strengthen only the semantic sequence scope. Policy, fault selection,
+perturbation, and mode planning consume the semantic value and never compare
+raw numeric codes.
+
+The mode boundary is explicit in the other direction. Sampled owns one typed
+conversion from the common scope to its sampled synchronization ABI, replacing
+two numeric conversion implementations. Record/Replay owns its own conversion
+to the compact-trace ABI and rejects wavefront-local communication rather than
+depending on the common enum's declaration order. The atomic address-lowering
+form's unused duplicate scope field was deleted instead of being converted
+into a third authority. Where an encoded scope exists, diagnostics retain its
+exact numeric output; older implicit forms keep any compatibility presentation
+separate from the typed semantic authority. Ordinary scope mutation compares
+current encoded bits with the retained raw operand rather than casting the
+semantic enum back into a target encoding.
+
+A direct target-boundary matrix drives raw values zero through three through
+gfx1201 and gfx1250 vector-memory and atomic decoders and the gfx1250 buffer
+decoder, checking the raw operand and normalized product independently. Direct
+mode tests pin the Record/Replay and Sampled ABI mappings. The architecture
+gate requires the target-owned mapping and both mode-owned mappings, rejects
+numeric scope reinterpretation in common semantic consumers, rejects raw
+scope use by semantic-only consumers, and prevents the dead lowering-form
+copy and the retired Sampled conversion from returning.
+
+The exact lexical recount also found that the historical absolute ledger had
+become stale after checkpoint 54. The three latest checkpoint commits were
+each underreported by 68 physical, 70 nonblank, and 68 implementation lines;
+checkpoint 67's exact implementation count was 90,943, not 90,875. The
+starting physical and nonblank values were each low by one while the starting
+implementation count of 91,450 was exact. The baseline table above is
+corrected and this checkpoint resets the live ledger from the exact tree.
+Between checkpoint 67 and the resumed refactoring, urgent issue-fix commit
+`e50b89339fb` added 99 implementation lines and two tests. This scope slice
+then adds 70 implementation lines and four tests; its explicit raw/semantic
+separation is a locality and correctness investment, not a size payoff.
+
+| Signal | Checkpoint 68 | Cumulative change | Change since checkpoint 67 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 105,223 | +247 | +210 |
+| Nonblank production lines | 98,886 | **-198** | +201 |
+| Production implementation lines | 91,112 | **-338** | +169 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **174 / 52** | **-102 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Numeric raw-scope interpretations in semantic consumers | **0** | n/a | converged |
+| Explicit mode scope-to-report ABI owners | **2** | n/a | Record/Replay + Sampled |
+| Atomic lowering-form scope copies | **0** | n/a | **-1 dead field** |
+| Test inventory | **5,395** | **+50** | **+6** |
+
+Validation includes a final-tree `-j16` build; 63 focused target-scope,
+atomic/fence-policy, fault, perturbation, mode-ABI, and architecture-boundary
+tests; all 4,760 nonphysical tests over the five emulated targets at `-j16` in
+196.37 seconds; and all 635 physical gfx1201 tests serialized at `-j1` in
+107.09 seconds. The first full nonphysical gate exposed one gfx1250 simulator
+case that is sub-second alone but exhausted its 60-second allowance under the
+full `-j16` load; its baseline workload allowance is now 120 seconds, and the
+complete repeated gate passed without a retry. No test was removed, renamed,
+disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1 through 14.7 and 14.9. Target scope
+encoding, common causal meaning, and mode report representation now meet at
+explicit typed boundaries, and a future target cannot silently inherit an
+ordinal coincidence. It does not strengthen Section 14.8: the urgent fixes
+and this correctness boundary reduce cumulative implementation shrinkage from
+the corrected 507 lines at checkpoint 67 to 338 lines. Remaining architecture
+and mode locality, broader operating-point and mutable-transaction surfaces,
+larger legacy harvesting, material whole-refactoring shrinkage, and the
+independent Section 14 completion audit remain open. The goal therefore
 remains active.

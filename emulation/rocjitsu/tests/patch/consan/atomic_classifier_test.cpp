@@ -32,7 +32,7 @@ ConSanAtomicSite exact_flat_atomic(const AtomicTargetCase &target) {
     site.raw_scale_offset = false;
   site.raw_vaddr = 3u;
   site.raw_ioffset = 0;
-  site.raw_scope = 1u;
+  site.scope = ConSanMemoryScope::Workgroup;
   site.raw_th = 0u;
   site.returns_old_value = true;
   site.mnemonic = "flat_atomic_add";
@@ -56,7 +56,6 @@ TEST(ConSanAtomicClassifier, ExactFlatOrderingNormalizesOnAllFiveTargets) {
     EXPECT_EQ(classification.form->data_register_count, 1u);
     EXPECT_EQ(classification.form->destination_vgpr, 9u);
     EXPECT_EQ(classification.form->destination_register_count, 1u);
-    EXPECT_EQ(classification.form->scope, 1u);
   }
 }
 
@@ -116,7 +115,7 @@ TEST(ConSanAtomicClassifier, ExactOperationRejectionsRemainTypedAfterNormalizati
             ConSanAtomicClassifierReason::CompareExchangeOutcomeUnavailable);
 
   site = exact_flat_atomic(target);
-  site.raw_scope = 0u;
+  site.scope = ConSanMemoryScope::Wavefront;
   const ConSanAtomicLoweringClassification wave_scope =
       classify_consan_atomic_lowering(site, target.arch);
   ASSERT_TRUE(wave_scope.normalized());
@@ -150,7 +149,7 @@ TEST(ConSanAtomicClassifier, CausalTargetFormsNormalizeLdsBufferAndSignedGlobalA
   lds.raw_addr = 3u;
   lds.raw_data0 = 7u;
   lds.raw_ioffset = 12;
-  lds.raw_scope = 1u;
+  lds.scope = ConSanMemoryScope::Workgroup;
   lds.returns_old_value = true;
   lds.mnemonic = "ds_add_u32";
   const ConSanAtomicLoweringClassification lds_form =
@@ -175,7 +174,7 @@ TEST(ConSanAtomicClassifier, CausalTargetFormsNormalizeLdsBufferAndSignedGlobalA
   buffer.raw_ioffset = -16;
   buffer.raw_offen = true;
   buffer.raw_idxen = false;
-  buffer.raw_scope = 2u;
+  buffer.scope = ConSanMemoryScope::Agent;
   buffer.returns_old_value = true;
   buffer.mnemonic = "buffer_atomic_add_u32";
   const ConSanAtomicLoweringClassification buffer_form =

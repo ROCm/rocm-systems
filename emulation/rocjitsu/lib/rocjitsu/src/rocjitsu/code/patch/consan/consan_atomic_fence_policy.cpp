@@ -74,12 +74,12 @@ build_event_index(std::span<const ConSanSyncEvent> events) {
                   lhs.confidence, lhs.memory_role_confidence, lhs.text_offset, lhs.file_offset,
                   lhs.size, lhs.width_bits, lhs.cache_operation,
                   lhs.ordinary_acquire_mutation_supported, lhs.mnemonic, lhs.static_byte_offset,
-                  lhs.raw_scope) ==
+                  lhs.raw_scope, lhs.scope) ==
              std::tie(rhs.kind, rhs.operation, rhs.address_source, rhs.memory_role, rhs.rmw_outcome,
                       rhs.confidence, rhs.memory_role_confidence, rhs.text_offset, rhs.file_offset,
                       rhs.size, rhs.width_bits, rhs.cache_operation,
                       rhs.ordinary_acquire_mutation_supported, rhs.mnemonic, rhs.static_byte_offset,
-                      rhs.raw_scope) &&
+                      rhs.raw_scope, rhs.scope) &&
          owner_semantics_equal(lhs.execution_owners, rhs.execution_owners);
 }
 
@@ -210,6 +210,7 @@ template <typename Container>
   result.raw_idxen = site.raw_idxen;
   result.raw_ioffset = site.raw_ioffset;
   result.raw_scope = site.raw_scope;
+  result.scope = site.scope;
   result.raw_th = site.raw_th;
   result.returns_old_value = false;
   result.mnemonic = site.mnemonic;
@@ -301,6 +302,7 @@ struct AtomicEncodingDecision {
   // an encoded value or derive a stronger fact from address-space provenance
   // and sequence association; policy always classifies that single contract.
   site.raw_scope = sequence.raw_scope;
+  site.scope = sequence.scope;
 
   const ConSanAtomicLoweringClassification classification =
       classify_consan_atomic_lowering(site, inventory.arch(), !ordinary);
@@ -347,10 +349,11 @@ classify_atomic_semantics(const ConSanSyncEvent &event, const SequenceMembership
   case ConSanSyncMemoryRole::SequentiallyConsistent:
     return ConSanAtomicPolicyReason::UnsupportedMemoryRole;
   }
-  const std::optional<uint32_t> semantic_scope = sequence->raw_scope;
+  const std::optional<ConSanMemoryScope> semantic_scope = sequence->scope;
   if (!semantic_scope)
     return ConSanAtomicPolicyReason::MissingScope;
-  if (*semantic_scope < 1u || *semantic_scope > 3u)
+  if (!consan_memory_scope_is_supported(*semantic_scope) ||
+      *semantic_scope == ConSanMemoryScope::Wavefront)
     return ConSanAtomicPolicyReason::UnsupportedScope;
   if (sequence->width_bits == 0u || sequence->width_bits % 8u != 0u)
     return ConSanAtomicPolicyReason::InvalidAccessWidth;
@@ -508,7 +511,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
            (membership.sequence->memory_role == ConSanSyncMemoryRole::Unknown ||
             membership.sequence->memory_role == ConSanSyncMemoryRole::None)) ||
           (reason == ConSanAtomicPolicyReason::UnsupportedScope && membership.sequence &&
-           membership.sequence->raw_scope == 0u);
+           membership.sequence->scope == ConSanMemoryScope::Wavefront);
       kind = reason == ConSanAtomicPolicyReason::None ? ConSanSiteDecisionKind::Admitted
              : semantic_not_applicable                ? ConSanSiteDecisionKind::NotApplicable
                                                       : ConSanSiteDecisionKind::Unsupported;

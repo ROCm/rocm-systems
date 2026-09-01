@@ -22,13 +22,13 @@ namespace {
 [[nodiscard]] bool event_semantics_equal(const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
   return std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
                   lhs.confidence, lhs.memory_role_confidence, lhs.file_offset, lhs.size,
-                  lhs.width_bits, lhs.mnemonic, lhs.static_byte_offset, lhs.raw_scope,
+                  lhs.width_bits, lhs.mnemonic, lhs.static_byte_offset, lhs.raw_scope, lhs.scope,
                   lhs.barrier_id, lhs.barrier_operand_source, lhs.barrier_raw_operand_selector,
                   lhs.barrier_literal_width_bits, lhs.barrier_literal_value, lhs.barrier_raw_simm16,
                   lhs.barrier_scope, lhs.participant_count, lhs.participant_mask) ==
          std::tie(rhs.kind, rhs.operation, rhs.address_source, rhs.memory_role, rhs.rmw_outcome,
                   rhs.confidence, rhs.memory_role_confidence, rhs.file_offset, rhs.size,
-                  rhs.width_bits, rhs.mnemonic, rhs.static_byte_offset, rhs.raw_scope,
+                  rhs.width_bits, rhs.mnemonic, rhs.static_byte_offset, rhs.raw_scope, rhs.scope,
                   rhs.barrier_id, rhs.barrier_operand_source, rhs.barrier_raw_operand_selector,
                   rhs.barrier_literal_width_bits, rhs.barrier_literal_value, rhs.barrier_raw_simm16,
                   rhs.barrier_scope, rhs.participant_count, rhs.participant_mask);
@@ -49,14 +49,15 @@ namespace {
                   lhs.confidence, lhs.memory_role_confidence, lhs.begin_text_offset,
                   lhs.end_text_offset, lhs.basic_block_index, lhs.in_cyclic_cfg_component,
                   lhs.inside_scalar_clause, lhs.width_bits, lhs.static_byte_offset, lhs.raw_scope,
-                  lhs.barrier_id, lhs.barrier_operand_source, lhs.barrier_raw_operand_selector,
-                  lhs.barrier_literal_width_bits, lhs.barrier_literal_value, lhs.barrier_raw_simm16,
-                  lhs.barrier_scope, lhs.participant_count, lhs.participant_mask) ==
+                  lhs.scope, lhs.barrier_id, lhs.barrier_operand_source,
+                  lhs.barrier_raw_operand_selector, lhs.barrier_literal_width_bits,
+                  lhs.barrier_literal_value, lhs.barrier_raw_simm16, lhs.barrier_scope,
+                  lhs.participant_count, lhs.participant_mask) ==
              std::tie(rhs.kind, rhs.operation, rhs.address_source, rhs.memory_role, rhs.rmw_outcome,
                       rhs.confidence, rhs.memory_role_confidence, rhs.begin_text_offset,
                       rhs.end_text_offset, rhs.basic_block_index, rhs.in_cyclic_cfg_component,
                       rhs.inside_scalar_clause, rhs.width_bits, rhs.static_byte_offset,
-                      rhs.raw_scope, rhs.barrier_id, rhs.barrier_operand_source,
+                      rhs.raw_scope, rhs.scope, rhs.barrier_id, rhs.barrier_operand_source,
                       rhs.barrier_raw_operand_selector, rhs.barrier_literal_width_bits,
                       rhs.barrier_literal_value, rhs.barrier_raw_simm16, rhs.barrier_scope,
                       rhs.participant_count, rhs.participant_mask);

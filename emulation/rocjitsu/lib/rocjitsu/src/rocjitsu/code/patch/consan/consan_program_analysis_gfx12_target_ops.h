@@ -14,6 +14,30 @@
 
 namespace rocjitsu::consan_program_analysis_target_detail {
 
+/// Map the gfx12-family cache-scope field into ConSan's causal vocabulary.
+///
+/// CU and SE are hardware cache domains, not HSA memory scopes. ConSan treats
+/// them conservatively as wavefront- and workgroup-local visibility for its
+/// detector model; device and system map to agent and system. The exact raw
+/// field remains alongside this product. A target's compiler-qualified
+/// workgroup acquire is a separate decoded fact because gfx1201 spells it with
+/// raw SE while gfx1250 spells it with raw CU.
+[[nodiscard]] inline constexpr std::optional<ConSanMemoryScope>
+normalize_gfx12_memory_scope(uint32_t raw_scope) {
+  switch (raw_scope) {
+  case 0:
+    return ConSanMemoryScope::Wavefront;
+  case 1:
+    return ConSanMemoryScope::Workgroup;
+  case 2:
+    return ConSanMemoryScope::Agent;
+  case 3:
+    return ConSanMemoryScope::System;
+  default:
+    return std::nullopt;
+  }
+}
+
 inline ConSanCacheOperationEncoding
 classify_gfx12_cache_operation(std::string_view mnemonic,
                                bool ordinary_acquire_mutation_supported) {
@@ -92,6 +116,7 @@ make_gfx12_vector_memory_encoding(const Raw &raw, uint32_t null_saddr, bool exac
       .raw_segment = 0u,
       .raw_scope = static_cast<uint32_t>(raw.scope),
       .raw_th = static_cast<uint32_t>(raw.th),
+      .scope = normalize_gfx12_memory_scope(static_cast<uint32_t>(raw.scope)),
       .encoded_segment = ConSanEncodedFlatSegment::Unspecified,
       .scalar_provenance_sgpr = raw.saddr == null_saddr
                                     ? std::nullopt
@@ -140,6 +165,7 @@ template <typename Raw> void fill_gfx12_flat_atomic_site(ConSanAtomicSite &site,
   site.raw_vdst = static_cast<uint32_t>(raw.vdst);
   site.raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset));
   site.raw_scope = static_cast<uint32_t>(raw.scope);
+  site.scope = normalize_gfx12_memory_scope(static_cast<uint32_t>(raw.scope));
   site.raw_th = static_cast<uint32_t>(raw.th);
   site.returns_old_value = amdgpu::gfx12_atomic_returns(static_cast<uint8_t>(raw.th));
 }
@@ -152,6 +178,7 @@ template <typename Raw> void fill_gfx12_buffer_atomic_site(ConSanAtomicSite &sit
   site.raw_vaddr = static_cast<uint32_t>(raw.vaddr);
   site.raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset));
   site.raw_scope = static_cast<uint32_t>(raw.scope);
+  site.scope = normalize_gfx12_memory_scope(static_cast<uint32_t>(raw.scope));
   site.raw_th = static_cast<uint32_t>(raw.th);
   site.returns_old_value = amdgpu::gfx12_atomic_returns(static_cast<uint8_t>(raw.th));
 }

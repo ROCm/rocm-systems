@@ -65,6 +65,7 @@ ConSanVectorMemoryDecode decode_pregfx12_vector_memory(std::span<const uint8_t> 
               .raw_segment = static_cast<uint32_t>(raw.seg),
               .raw_scope = global ? 2u : 0u,
               .raw_th = th,
+              .scope = global ? std::optional{ConSanMemoryScope::Agent} : std::nullopt,
               .encoded_segment = segment,
               .scalar_provenance_sgpr =
                   global && raw.saddr != null_saddr
@@ -99,7 +100,9 @@ void fill_pregfx12_atomic_site(ConSanAtomicSite &site, const Raw &raw, bool glob
     site.raw_th = static_cast<uint32_t>(raw.sc0) | (static_cast<uint32_t>(raw.sc1) << 1u);
     site.returns_old_value = raw.sc0 != 0u;
   }
+  // Preserve the legacy diagnostic spelling of this implicit device scope.
   site.raw_scope = 2u;
+  site.scope = ConSanMemoryScope::Agent;
   if (global) {
     site.saddr_sgpr = raw.saddr == null_saddr
                           ? std::nullopt

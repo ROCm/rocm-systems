@@ -35,7 +35,6 @@ struct SampledAtomicScratchLayout {
 
 [[nodiscard]] std::optional<ConSanMoiSampledSyncRole>
 sampled_atomic_role(ConSanMoiAtomicEventKind kind, bool is_rmw);
-[[nodiscard]] std::optional<ConSanMoiSampledSyncScope> sampled_atomic_scope(uint32_t raw_scope);
 [[nodiscard]] bool sampled_atomic_guest_preserves_address(const ConSanAtomicLoweringForm &form);
 [[nodiscard]] bool
 sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,

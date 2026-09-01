@@ -571,10 +571,10 @@ TEST(ConSan, FaultAtomicWeakenOrderPreservesReturningCasDataOperation) {
   EXPECT_EQ(atomic.mnemonic, "flat_atomic_cmpswap_b32");
   ASSERT_TRUE(atomic.returns_old_value);
   ASSERT_TRUE(atomic.raw_th);
-  ASSERT_TRUE(atomic.raw_scope);
+  ASSERT_TRUE(atomic.scope);
   EXPECT_TRUE(*atomic.returns_old_value);
   EXPECT_EQ(*atomic.raw_th, 1u);
-  EXPECT_EQ(*atomic.raw_scope, 2u);
+  EXPECT_EQ(*atomic.scope, ConSanMemoryScope::Agent);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("removed associated global_wb") != std::string::npos;
   }));
@@ -604,11 +604,11 @@ TEST(ConSan, FaultAtomicWeakenScopeLeavesThReturnAndAddressUntouched) {
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 2u);
   const ConSanAtomicSite atomic = result.program_inventory.kernels()[0].atomic_sites[1];
-  ASSERT_TRUE(atomic.raw_scope);
+  ASSERT_TRUE(atomic.scope);
   ASSERT_TRUE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
   ASSERT_TRUE(atomic.raw_ioffset);
-  EXPECT_EQ(*atomic.raw_scope, 0u);
+  EXPECT_EQ(*atomic.scope, ConSanMemoryScope::Wavefront);
   EXPECT_EQ(*atomic.raw_th, 1u);
   EXPECT_TRUE(*atomic.returns_old_value);
   EXPECT_EQ(*atomic.raw_ioffset, 0);
@@ -628,11 +628,11 @@ TEST(ConSan, FaultGlobalAtomicWrongAddressIsVisibleToSubsequentInventory) {
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 1u);
   ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[0].raw_ioffset);
-  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[0].raw_scope);
+  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[0].scope);
   ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[0].raw_th);
   ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[0].returns_old_value);
   EXPECT_EQ(*result.program_inventory.kernels()[0].atomic_sites[0].raw_ioffset, 4);
-  EXPECT_EQ(*result.program_inventory.kernels()[0].atomic_sites[0].raw_scope, 2u);
+  EXPECT_EQ(*result.program_inventory.kernels()[0].atomic_sites[0].scope, ConSanMemoryScope::Agent);
   EXPECT_EQ(*result.program_inventory.kernels()[0].atomic_sites[0].raw_th, 1u);
   EXPECT_TRUE(*result.program_inventory.kernels()[0].atomic_sites[0].returns_old_value);
 }
@@ -653,11 +653,11 @@ TEST(ConSan, FaultGlobalAtomicWeakenScopePreservesReturnedValueAndAddress) {
   const ConSanAtomicSite atomic = result.program_inventory.kernels()[0].atomic_sites.front();
   EXPECT_EQ(atomic.mnemonic, "global_atomic_add_f32");
   ASSERT_TRUE(atomic.raw_ioffset);
-  ASSERT_TRUE(atomic.raw_scope);
+  ASSERT_TRUE(atomic.scope);
   ASSERT_TRUE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
   EXPECT_EQ(*atomic.raw_ioffset, 0);
-  EXPECT_EQ(*atomic.raw_scope, 0u);
+  EXPECT_EQ(*atomic.scope, ConSanMemoryScope::Wavefront);
   EXPECT_EQ(*atomic.raw_th, 1u);
   EXPECT_TRUE(*atomic.returns_old_value);
 }
@@ -677,10 +677,10 @@ TEST(ConSan, FaultGlobalAtomicWeakenOrderPreservesReturnedValue) {
   ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 1u);
   const ConSanAtomicSite atomic = result.program_inventory.kernels()[0].atomic_sites.front();
   EXPECT_EQ(atomic.mnemonic, "global_atomic_add_f32");
-  ASSERT_TRUE(atomic.raw_scope);
+  ASSERT_TRUE(atomic.scope);
   ASSERT_TRUE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
-  EXPECT_EQ(*atomic.raw_scope, 2u);
+  EXPECT_EQ(*atomic.scope, ConSanMemoryScope::Agent);
   EXPECT_EQ(*atomic.raw_th, 1u);
   EXPECT_TRUE(*atomic.returns_old_value);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
@@ -816,11 +816,11 @@ TEST(ConSan, FaultBufferAtomicWrongAddressPreservesScopeAndReturnedValue) {
   const ConSanAtomicSite atomic = result.program_inventory.kernels().front().atomic_sites.front();
   EXPECT_EQ(atomic.mnemonic, "buffer_atomic_add_u32");
   ASSERT_TRUE(atomic.raw_ioffset);
-  ASSERT_TRUE(atomic.raw_scope);
+  ASSERT_TRUE(atomic.scope);
   ASSERT_TRUE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
   EXPECT_EQ(*atomic.raw_ioffset, 8);
-  EXPECT_EQ(*atomic.raw_scope, 2u);
+  EXPECT_EQ(*atomic.scope, ConSanMemoryScope::Agent);
   EXPECT_EQ(*atomic.raw_th, 1u);
   EXPECT_TRUE(*atomic.returns_old_value);
 }
@@ -841,11 +841,11 @@ TEST(ConSan, FaultBufferAtomicWeakenScopePreservesAddressAndReturnedValue) {
   ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
   const ConSanAtomicSite atomic = result.program_inventory.kernels().front().atomic_sites.front();
   ASSERT_TRUE(atomic.raw_ioffset);
-  ASSERT_TRUE(atomic.raw_scope);
+  ASSERT_TRUE(atomic.scope);
   ASSERT_TRUE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
   EXPECT_EQ(*atomic.raw_ioffset, 0);
-  EXPECT_EQ(*atomic.raw_scope, 0u);
+  EXPECT_EQ(*atomic.scope, ConSanMemoryScope::Wavefront);
   EXPECT_EQ(*atomic.raw_th, 1u);
   EXPECT_TRUE(*atomic.returns_old_value);
 }
@@ -869,10 +869,10 @@ TEST(ConSan, FaultBufferAtomicWeakenOrderPreservesDataOperationAndReturnedValue)
   ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
   const ConSanAtomicSite atomic = result.program_inventory.kernels().front().atomic_sites.front();
   EXPECT_EQ(atomic.mnemonic, "buffer_atomic_add_u32");
-  ASSERT_TRUE(atomic.raw_scope);
+  ASSERT_TRUE(atomic.scope);
   ASSERT_TRUE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
-  EXPECT_EQ(*atomic.raw_scope, 2u);
+  EXPECT_EQ(*atomic.scope, ConSanMemoryScope::Agent);
   EXPECT_EQ(*atomic.raw_th, 1u);
   EXPECT_TRUE(*atomic.returns_old_value);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {

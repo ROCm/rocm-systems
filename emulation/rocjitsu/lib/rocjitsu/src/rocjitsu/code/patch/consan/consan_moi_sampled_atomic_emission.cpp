@@ -45,18 +45,6 @@ std::optional<ConSanMoiSampledSyncRole> sampled_atomic_role(ConSanMoiAtomicEvent
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<ConSanMoiSampledSyncScope> sampled_atomic_scope(uint32_t raw_scope) {
-  if (raw_scope == 0u)
-    return ConSanMoiSampledSyncScope::Wavefront;
-  if (raw_scope == 1u)
-    return ConSanMoiSampledSyncScope::Workgroup;
-  if (raw_scope == 2u)
-    return ConSanMoiSampledSyncScope::Agent;
-  if (raw_scope == 3u)
-    return ConSanMoiSampledSyncScope::System;
-  return std::nullopt;
-}
-
 [[nodiscard]] bool sampled_atomic_guest_preserves_address(const ConSanAtomicLoweringForm &form) {
   if (!form.destination_vgpr || form.destination_register_count == 0u)
     return true;
@@ -320,14 +308,14 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       bank_count == 0u || !std::has_single_bit(bank_count) || pending_owner_bank_count == 0u ||
       selected_slot > layout.sampled_causal_window_capacity ||
       bank_count > layout.sampled_causal_window_capacity - selected_slot ||
-      !address_plan.supported() || !candidate.site.raw_scope || candidate.site.width_bits != 32u ||
+      !address_plan.supported() || !candidate.site.scope || candidate.site.width_bits != 32u ||
       !candidate.kernel_descriptor_file_offset)
     return std::nullopt;
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr)
     return std::nullopt;
   const auto role = sampled_atomic_role(candidate.event_kind, candidate.is_rmw);
-  const auto scope = sampled_atomic_scope(*candidate.site.raw_scope);
+  const auto scope = consan_moi_sampled_sync_scope(*candidate.site.scope);
   if (!role || !scope ||
       (static_cast<uint32_t>(*role) & static_cast<uint32_t>(ConSanMoiSampledSyncRole::Acquire)) ==
           0u)
@@ -632,10 +620,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr)
     return std::nullopt;
-  if (!address_plan.supported() || !candidate.site.raw_scope || candidate.site.width_bits != 32u)
+  if (!address_plan.supported() || !candidate.site.scope || candidate.site.width_bits != 32u)
     return std::nullopt;
   const auto role = sampled_atomic_role(candidate.event_kind, candidate.is_rmw);
-  const auto scope = sampled_atomic_scope(*candidate.site.raw_scope);
+  const auto scope = consan_moi_sampled_sync_scope(*candidate.site.scope);
   if (!role || !scope)
     return std::nullopt;
   if (!candidate.kernel_descriptor_file_offset) {

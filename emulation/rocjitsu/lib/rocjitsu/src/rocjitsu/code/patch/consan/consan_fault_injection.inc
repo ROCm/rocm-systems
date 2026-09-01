@@ -1915,9 +1915,9 @@ static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
   }
   if (scope_plan != nullptr) {
     const auto current_encoding = decode_consan_ordinary_global_fault_encoding(target_instruction);
-    if (!current_encoding || !target->load->raw_scope ||
+    if (!current_encoding || !target->load->raw_scope || !target->load->scope ||
         current_encoding->scope != *target->load->raw_scope ||
-        (current_encoding->scope != 2u && current_encoding->scope != 3u)) {
+        !consan_memory_scope_is_agent_or_system(*target->load->scope)) {
       result.errors.emplace_back(
           "ConSan ordinary scope fault found stale or already-wave decoded scope bits");
       return;

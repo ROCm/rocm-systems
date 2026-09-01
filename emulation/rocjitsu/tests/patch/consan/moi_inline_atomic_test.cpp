@@ -253,7 +253,7 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence) {
       << "mnemonic=" << site.mnemonic << " size=" << site.size
       << " raw_saddr=" << testing::PrintToString(site.raw_saddr)
       << " raw_ioffset=" << testing::PrintToString(site.raw_ioffset)
-      << " raw_scope=" << testing::PrintToString(site.raw_scope)
+      << " scope=" << testing::PrintToString(site.scope)
       << " raw_th=" << testing::PrintToString(site.raw_th)
       << " returns=" << testing::PrintToString(site.returns_old_value);
   ASSERT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
@@ -2749,7 +2749,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
   site.raw_saddr = rdna4::OPR_SREG_NULL;
   site.raw_vaddr = 2;
   site.raw_ioffset = 0;
-  site.raw_scope = 2;
+  site.scope = ConSanMemoryScope::Agent;
   site.raw_th = 0;
   site.returns_old_value = false;
 
@@ -2850,19 +2850,19 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
                                                       ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::NonzeroOffset);
   changed = site;
-  changed.raw_scope = 0;
+  changed.scope = ConSanMemoryScope::Wavefront;
   EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
                                                       ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::UnsupportedScope);
-  changed.raw_scope = 1;
+  changed.scope = ConSanMemoryScope::Workgroup;
   EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
                                                       ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::Supported);
-  changed.raw_scope = 3;
+  changed.scope = ConSanMemoryScope::System;
   EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
                                                       ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::Supported);
-  changed.raw_scope = 4;
+  changed.scope = static_cast<ConSanMemoryScope>(4);
   EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
                                                       ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::UnsupportedScope);
@@ -2877,7 +2877,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
                                                       ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::MissingOperands);
   changed = site;
-  changed.raw_scope.reset();
+  changed.scope.reset();
   EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
                                                       ROCJITSU_CODE_ARCH_RDNA4),
             ConSanMoiInlineAtomicSupport::MissingOrderingMetadata);
@@ -3053,7 +3053,7 @@ TEST(ConSanMoi, SharedAddressPlanMaterializesGfx1250BufferResourceAddress) {
   site.raw_offen = true;
   site.raw_idxen = false;
   site.raw_ioffset = 16;
-  site.raw_scope = 2u;
+  site.scope = ConSanMemoryScope::Agent;
   site.raw_th = 0u;
   site.returns_old_value = false;
   site.mnemonic = "buffer_store_b128";
@@ -3096,7 +3096,7 @@ TEST(ConSanMoi, SharedAddressPlanMaterializesGfx1250LdsTokenWithByteOffset) {
   site.raw_addr = 4u;
   site.raw_data0 = 6u;
   site.raw_ioffset = 12;
-  site.raw_scope = 1u;
+  site.scope = ConSanMemoryScope::Workgroup;
   site.returns_old_value = false;
   site.mnemonic = "ds_add_u32";
 
@@ -3293,11 +3293,11 @@ TEST(ConSanMoi, AtomicAddressPlanFailsClosedForUnsupportedShapesAndAliases) {
   };
 
   ConSanAtomicSite changed = base;
-  changed.raw_scope = 0u;
+  changed.scope = ConSanMemoryScope::Wavefront;
   EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::UnsupportedScope);
-  changed.raw_scope = 1u;
+  changed.scope = ConSanMemoryScope::Workgroup;
   EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::Supported);
-  changed.raw_scope = 3u;
+  changed.scope = ConSanMemoryScope::System;
   EXPECT_EQ(classify(changed), ConSanMoiAtomicAddressSupport::Supported);
   changed = base;
   changed.width_bits = 64u;
@@ -4971,7 +4971,7 @@ TEST(ConSanMoi, Gfx1250InlineAtomicOrdersReleaseAndAcquire) {
   EXPECT_TRUE(std::ranges::all_of(
       result.program_inventory.kernels().front().atomic_sites, [](const ConSanAtomicSite &site) {
         return site.raw_saddr == static_cast<uint32_t>(cdna5::OPR_SREG_NULL) &&
-               site.raw_scope == 2u && site.raw_ioffset == 0;
+               site.scope == ConSanMemoryScope::Agent && site.raw_ioffset == 0;
       }));
   EXPECT_TRUE(std::ranges::any_of(result.resource_plans, [](const auto &plan) {
     return plan.site_kind == ConSanResourceSiteKind::Atomic && plan.scratch_vgpr_count == 26u;

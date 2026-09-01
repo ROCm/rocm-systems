@@ -312,6 +312,7 @@ struct ConSanSyncEvent {
   std::string mnemonic;
   std::optional<int64_t> static_byte_offset;
   std::optional<uint32_t> raw_scope;
+  std::optional<ConSanMemoryScope> scope;
   std::optional<int32_t> barrier_id;
   ConSanBarrierSite::OperandSource barrier_operand_source =
       ConSanBarrierSite::OperandSource::Unknown;
@@ -372,6 +373,7 @@ struct ConSanSyncSequence {
   uint32_t width_bits = 0;
   std::optional<int64_t> static_byte_offset;
   std::optional<uint32_t> raw_scope;
+  std::optional<ConSanMemoryScope> scope;
   std::optional<int32_t> barrier_id;
   ConSanBarrierSite::OperandSource barrier_operand_source =
       ConSanBarrierSite::OperandSource::Unknown;

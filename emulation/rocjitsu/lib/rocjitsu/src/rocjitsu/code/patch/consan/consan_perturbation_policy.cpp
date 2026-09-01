@@ -17,8 +17,8 @@ namespace {
          role == ConSanSyncMemoryRole::SequentiallyConsistent;
 }
 
-[[nodiscard]] bool sequence_atomic_has_device_or_system_scope(const SyncEventSemanticIndex &events,
-                                                              const ConSanSyncSequence &sequence) {
+[[nodiscard]] bool sequence_atomic_has_agent_or_system_scope(const SyncEventSemanticIndex &events,
+                                                             const ConSanSyncSequence &sequence) {
   const ConSanSyncEvent *atomic = nullptr;
   for (const SemanticSiteId &identity : sequence.member_semantic_ids) {
     const ConSanSyncEvent *event = find_sequence_member_event(events, identity);
@@ -28,11 +28,10 @@ namespace {
       return false;
     atomic = event;
   }
-  // RDNA4 encodes device and system scope as 2 and 3 respectively. Read this
-  // from the exact atomic member rather than trusting aggregate sequence
-  // metadata inherited while cache/fence members are associated.
-  return atomic != nullptr && atomic->raw_scope &&
-         (*atomic->raw_scope == 2u || *atomic->raw_scope == 3u);
+  // Read this from the exact atomic member rather than trusting aggregate
+  // sequence metadata inherited while cache/fence members are associated.
+  return atomic != nullptr && atomic->scope &&
+         consan_memory_scope_is_agent_or_system(*atomic->scope);
 }
 
 } // namespace
@@ -73,7 +72,7 @@ perturbation_rejection_reason(const SyncEventSemanticIndex &events,
                                       ConSanSemanticConfidence::Conservative) ||
         !sync_role_has_edge(sequence.memory_role, edge))
       return Reason::UnknownOrInapplicableMemoryRole;
-    if (!sequence_atomic_has_device_or_system_scope(events, sequence))
+    if (!sequence_atomic_has_agent_or_system_scope(events, sequence))
       return Reason::UnsupportedAtomicScope;
     if (sequence.address_source == ConSanSyncAddressSource::Unknown)
       return Reason::AmbiguousAddressProvenance;

@@ -396,7 +396,7 @@ TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {
   load.code_object_fingerprint = "fingerprint";
   load.container_name = "kernel";
   load.width_bits = 32u;
-  load.raw_scope = 2u;
+  load.scope = ConSanMemoryScope::Agent;
   load.execution_owners.push_back(
       {.descriptor_file_offset = 64u, .proof = ConSanOwnerProofKind::KernelLocal});
   ConSanSyncEvent cache = load;
@@ -603,7 +603,7 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
   store.operation = ConSanSyncOperation::OrdinaryStore;
   store.mnemonic = "global_store_b32";
   store.width_bits = 32u;
-  store.raw_scope = 2u;
+  store.scope = ConSanMemoryScope::Agent;
   ConSanSyncSequence cache_sequence;
   cache_sequence.kind = ConSanSyncSequenceKind::Fence;
   cache_sequence.operation = ConSanSyncOperation::Fence;
@@ -621,10 +621,10 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
   EXPECT_FALSE(
       consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));
   store.code_object_fingerprint = cache.code_object_fingerprint;
-  store.raw_scope = 0u;
+  store.scope = ConSanMemoryScope::Wavefront;
   EXPECT_FALSE(
       consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));
-  store.raw_scope = 2u;
+  store.scope = ConSanMemoryScope::Agent;
   cache.mnemonic = "target-native-release";
   EXPECT_TRUE(
       consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));

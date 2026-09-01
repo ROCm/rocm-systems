@@ -13,6 +13,14 @@
 namespace rocjitsu {
 namespace {
 
+TEST(ConSan, RecordReplayOwnsOneNormalizedScopeToReportAbiMapping) {
+  EXPECT_FALSE(consan_moi_record_replay_scope(ConSanMemoryScope::Wavefront));
+  EXPECT_EQ(consan_moi_record_replay_scope(ConSanMemoryScope::Workgroup), 1u);
+  EXPECT_EQ(consan_moi_record_replay_scope(ConSanMemoryScope::Agent), 2u);
+  EXPECT_EQ(consan_moi_record_replay_scope(ConSanMemoryScope::System), 3u);
+  EXPECT_FALSE(consan_moi_record_replay_scope(static_cast<ConSanMemoryScope>(4u)));
+}
+
 std::vector<uint8_t> load_consan_fixture_hsaco(std::string_view name) {
   std::ifstream file(test::kernel_hsaco_path(std::string(name).c_str()), std::ios::binary);
   if (!file)
@@ -10470,7 +10478,7 @@ TEST(ConSanMoi, Gfx1250AtomicRecordPatchesOrderedFlatAtomic) {
   ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
   const ConSanAtomicSite site = result.program_inventory.kernels().front().atomic_sites.front();
   EXPECT_EQ(site.raw_saddr, kGfx1250FlatNoSaddrEncoding);
-  EXPECT_EQ(site.raw_scope, 2u);
+  EXPECT_EQ(site.scope, ConSanMemoryScope::Agent);
   EXPECT_EQ(site.raw_ioffset, 0);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
                                &ConSanPatchInfo::kind),
@@ -10578,7 +10586,7 @@ TEST(ConSanMoi, Gfx1250IsolatedLdsReleaseIsRetainedWithAccessReplay) {
   const ConSanAtomicSite site = result.program_inventory.kernels().front().atomic_sites.front();
   EXPECT_EQ(site.mnemonic, "ds_add_u32");
   EXPECT_EQ(site.raw_ioffset, 12);
-  EXPECT_FALSE(site.raw_scope);
+  EXPECT_FALSE(site.scope);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
                                &ConSanPatchInfo::kind),
             1u);

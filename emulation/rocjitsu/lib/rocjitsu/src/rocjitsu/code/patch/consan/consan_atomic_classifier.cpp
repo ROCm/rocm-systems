@@ -47,11 +47,12 @@ using Reason = ConSanAtomicClassifierReason;
 
 [[nodiscard]] Reason causal_reason(const ConSanAtomicSite &site,
                                    const ConSanAtomicLoweringForm &form) {
-  if (!site.raw_scope)
+  if (!site.scope)
     return Reason::MissingOrderingMetadata;
-  if (*site.raw_scope < 1u || *site.raw_scope > 3u)
+  if (!consan_memory_scope_is_supported(*site.scope) || *site.scope == ConSanMemoryScope::Wavefront)
     return Reason::UnsupportedScope;
-  if (form.kind == ConSanAtomicLoweringFormKind::LdsVectorOffset && *site.raw_scope != 1u)
+  if (form.kind == ConSanAtomicLoweringFormKind::LdsVectorOffset &&
+      *site.scope != ConSanMemoryScope::Workgroup)
     return Reason::UnsupportedScope;
   if (form.compare_exchange && (!site.returns_old_value.value_or(false) || !site.dst_vgpr))
     return Reason::CompareExchangeOutcomeUnavailable;
@@ -75,9 +76,9 @@ using Reason = ConSanAtomicClassifierReason;
     return Reason::CompareExchangeOutcomeUnavailable;
   if (form.compare_exchange && !site.dst_vgpr)
     return Reason::MissingOperands;
-  if (!site.raw_scope || !site.raw_th || !site.returns_old_value)
+  if (!site.scope || !site.raw_th || !site.returns_old_value)
     return Reason::MissingOrderingMetadata;
-  if (*site.raw_scope < 1u || *site.raw_scope > 3u)
+  if (!consan_memory_scope_is_supported(*site.scope) || *site.scope == ConSanMemoryScope::Wavefront)
     return Reason::UnsupportedScope;
   return Reason::None;
 }
@@ -140,7 +141,6 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
         .scalar_base_sgpr = std::nullopt,
         .scalar_offset_sgpr = std::nullopt,
         .signed_byte_offset = *site.raw_ioffset,
-        .scope = site.raw_scope.value_or(0u),
         .is_rmw = is_rmw,
         .compare_exchange = compare_exchange,
         .returns_old_value = site.returns_old_value.value_or(false),
@@ -184,7 +184,6 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
                                   ? std::nullopt
                                   : std::optional<uint16_t>(*site.raw_soffset),
         .signed_byte_offset = *site.raw_ioffset,
-        .scope = site.raw_scope.value_or(0u),
         .is_rmw = is_rmw,
         .compare_exchange = compare_exchange,
         .returns_old_value = site.returns_old_value.value_or(false),
@@ -263,7 +262,6 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
       .scalar_base_sgpr = scalar_base,
       .scalar_offset_sgpr = std::nullopt,
       .signed_byte_offset = *site.raw_ioffset,
-      .scope = site.raw_scope.value_or(0u),
       .scale_vector_offset = site.raw_scale_offset.value_or(false),
       .sign_extend_vector_offset = gfx9_cdna_encoding,
       .is_rmw = is_rmw,

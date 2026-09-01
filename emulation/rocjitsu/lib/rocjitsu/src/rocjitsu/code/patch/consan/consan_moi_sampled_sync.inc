@@ -1534,7 +1534,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
     const auto role = sampled_atomic_role(atomic.event_kind, /*is_rmw=*/false);
     const auto scope =
-        atomic.site.raw_scope ? sampled_atomic_scope(*atomic.site.raw_scope) : std::nullopt;
+        atomic.site.scope ? consan_moi_sampled_sync_scope(*atomic.site.scope) : std::nullopt;
     if (!role || !scope || atomic.site.width_bits == 0u || atomic.site.width_bits % 8u != 0u) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync skipped an unqualified ordinary atomic sequence in " +

@@ -164,26 +164,14 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
   case ConSanSyncMemoryRole::SequentiallyConsistent:
     return reject(Reason::UnsupportedQualifiedMemoryRole);
   }
-  const std::optional<uint32_t> semantic_scope = sequence->raw_scope;
+  const std::optional<ConSanMemoryScope> semantic_scope = sequence->scope;
   if (!semantic_scope) {
     return reject(Reason::MissingQualifiedScope);
   }
-  switch (*semantic_scope) {
-  case 0:
-    semantics.scope = ConSanMoiSampledSyncScope::Wavefront;
-    break;
-  case 1:
-    semantics.scope = ConSanMoiSampledSyncScope::Workgroup;
-    break;
-  case 2:
-    semantics.scope = ConSanMoiSampledSyncScope::Agent;
-    break;
-  case 3:
-    semantics.scope = ConSanMoiSampledSyncScope::System;
-    break;
-  default:
+  const auto sampled_scope = consan_moi_sampled_sync_scope(*semantic_scope);
+  if (!sampled_scope)
     return reject(Reason::UnsupportedQualifiedScope);
-  }
+  semantics.scope = *sampled_scope;
   if (sequence->width_bits == 0 || sequence->width_bits % 8u != 0 ||
       sequence->width_bits / 8u > std::numeric_limits<uint32_t>::max()) {
     return reject(Reason::UnsupportedQualifiedByteRange);
@@ -294,6 +282,7 @@ normalize_ordinary_fence_communication(const ConSanOrdinaryMemorySite &site) {
   normalized.raw_scale_offset = site.raw_scale_offset;
   normalized.raw_ioffset = site.raw_ioffset;
   normalized.raw_scope = site.raw_scope;
+  normalized.scope = site.scope;
   normalized.raw_th = site.raw_th;
   normalized.returns_old_value = false;
   normalized.mnemonic = site.mnemonic;
@@ -430,8 +419,8 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
         plan.scalar_clause_text_offset = sequence->scalar_clause_text_offset;
       }
     }
-    if (sequence->raw_scope)
-      plan.communication_site.raw_scope = sequence->raw_scope;
+    if (sequence->scope)
+      plan.communication_site.scope = sequence->scope;
     plan.communication_lowering_form = *decision.communication_lowering_form;
     plan.kernel_descriptor_file_offset = container->kernel_descriptor_file_offset;
     plan.container_name = std::move(container->qualified_name);
@@ -593,8 +582,8 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
       }
       plan.site = normalize_ordinary_fence_communication(*site);
     }
-    if (sequence->raw_scope)
-      plan.site.raw_scope = sequence->raw_scope;
+    if (sequence->scope)
+      plan.site.scope = sequence->scope;
     plan.lowering_form = *decision.lowering_form;
     plan.kernel_descriptor_file_offset = container->kernel_descriptor_file_offset;
     plan.container_name = std::move(container->qualified_name);

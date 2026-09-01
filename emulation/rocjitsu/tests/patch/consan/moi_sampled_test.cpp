@@ -10,6 +10,18 @@
 namespace rocjitsu {
 namespace {
 
+TEST(ConSan, SampledOwnsOneNormalizedScopeToReportAbiMapping) {
+  EXPECT_EQ(consan_moi_sampled_sync_scope(ConSanMemoryScope::Wavefront),
+            ConSanMoiSampledSyncScope::Wavefront);
+  EXPECT_EQ(consan_moi_sampled_sync_scope(ConSanMemoryScope::Workgroup),
+            ConSanMoiSampledSyncScope::Workgroup);
+  EXPECT_EQ(consan_moi_sampled_sync_scope(ConSanMemoryScope::Agent),
+            ConSanMoiSampledSyncScope::Agent);
+  EXPECT_EQ(consan_moi_sampled_sync_scope(ConSanMemoryScope::System),
+            ConSanMoiSampledSyncScope::System);
+  EXPECT_FALSE(consan_moi_sampled_sync_scope(static_cast<ConSanMemoryScope>(4u)));
+}
+
 TEST(ConSan, SampledAtomicSemanticReasonsAreTypedAndRenderStableTokens) {
   using Reason = consan_moi_impl::SampledAtomicSemanticsReason;
   const std::array expected = {
@@ -2069,7 +2081,7 @@ TEST(ConSanMoi, CdnaSampledVglobalMaterializesVectorAndScalarAddressesInScratchT
           [](const ConSanAtomicSite &item) { return item.mnemonic.starts_with("global_atomic_"); });
       ASSERT_NE(site, result.program_inventory.kernels().front().atomic_sites.end())
           << testing::PrintToString(result.program_inventory.kernels().front().atomic_sites);
-      ASSERT_TRUE(site->raw_scope) << testing::PrintToString(*site);
+      ASSERT_TRUE(site->scope) << testing::PrintToString(*site);
       EXPECT_EQ(site->width_bits, 32u);
       EXPECT_EQ(site->saddr_sgpr, test_case.scalar_base_sgpr);
       const auto patch =

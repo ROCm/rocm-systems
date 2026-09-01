@@ -690,6 +690,74 @@ if(NOT _program_analysis_normalized_contract MATCHES "classify_wait_instruction"
         "ConSan program-analysis target operations lost normalized wait-effect classification"
     )
 endif()
+if(NOT _program_analysis_normalized_contract MATCHES "enum class ConSanMemoryScope")
+    message(FATAL_ERROR
+        "ConSan program-analysis target operations lost normalized memory scope"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_atomic_classifier.h"
+    "(ConSanMemoryScope|uint32_t)[ \t]+scope"
+    "atomic address lowering must not duplicate the semantic scope authority"
+)
+foreach(_scope_semantic_consumer IN ITEMS
+    consan_analysis.inc
+    consan_atomic_classifier.cpp
+    consan_atomic_fence_policy.cpp
+    consan_fault_selection.cpp
+    consan_moi_record_event_emission.cpp
+    consan_moi_sampled_atomic_emission.cpp
+    consan_moi_sampled_sync.inc
+    consan_moi_sync_emission.cpp
+    consan_perturbation_policy.cpp
+    consan_sync_analysis.inc
+    consan_sync_metadata.cpp
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_scope_semantic_consumer}"
+        "static_cast<ConSanMemoryScope>|scope[ \t]*([!=<>]=?|value_or)[ \t]*[({]?[0-3]u?"
+        "semantic consumers must not reinterpret numeric memory-scope codes"
+    )
+endforeach()
+foreach(_scope_semantic_only_consumer IN ITEMS
+    consan_atomic_classifier.cpp
+    consan_fault_selection.cpp
+    consan_moi_record_event_emission.cpp
+    consan_moi_sampled_atomic_emission.cpp
+    consan_moi_sampled_sync.inc
+    consan_perturbation_policy.cpp
+    consan_sync_metadata.cpp
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_scope_semantic_only_consumer}"
+        "raw_scope"
+        "semantic scope consumers must not depend on retained raw target scope"
+    )
+endforeach()
+file(READ "${_consan_dir}/consan_program_analysis_gfx12_target_ops.h"
+     _gfx12_program_analysis_contract)
+if(NOT _gfx12_program_analysis_contract MATCHES "normalize_gfx12_memory_scope")
+    message(FATAL_ERROR
+        "gfx12 program analysis lost its explicit raw-to-semantic scope mapping"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sampled_atomic_emission.cpp"
+    "sampled_atomic_scope"
+    "Sampled emitters must share the mode-owned normalized scope-to-report mapping"
+)
+file(READ "${_consan_dir}/consan_moi_record_replay_types.h.inc"
+     _record_replay_scope_contract)
+if(NOT _record_replay_scope_contract MATCHES "consan_moi_record_replay_scope")
+    message(FATAL_ERROR
+        "Record/Replay lost its explicit normalized scope-to-report mapping"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_record_event_emission.cpp"
+    "static_cast<uint32_t>\\([^\\)]*scope"
+    "Record/Replay emission must use its mode-owned scope-to-report mapping"
+)
 _consan_assert_no_match(
     "${_consan_dir}/consan_capability_contract.h"
     "ConSanWaitCounterFamily|wait_counter_family"

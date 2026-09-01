@@ -50,6 +50,7 @@ ConSanBufferMemoryDecode decode_gfx1250_buffer_memory(std::span<const uint8_t> i
               .raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset)),
               .raw_scope = static_cast<uint32_t>(raw.scope),
               .raw_th = static_cast<uint32_t>(raw.th),
+              .scope = normalize_gfx12_memory_scope(static_cast<uint32_t>(raw.scope)),
               .raw_rsrc = static_cast<uint32_t>(raw.rsrc),
               .raw_soffset = static_cast<uint32_t>(raw.soffset),
               .raw_offen = raw.offen != 0u,

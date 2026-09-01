@@ -1141,11 +1141,12 @@ TEST(ConSan, PerturbationRejectsClausesUnknownRolesAndWaveScope) {
   const auto atomic = std::ranges::find(wave_scope.program_inventory.sync().sync_events,
                                         ConSanSyncEventKind::Atomic, &ConSanSyncEvent::kind);
   ASSERT_NE(atomic, wave_scope.program_inventory.sync().sync_events.end());
-  ASSERT_TRUE(atomic->raw_scope);
-  EXPECT_EQ(*atomic->raw_scope, 0u);
+  ASSERT_TRUE(atomic->scope);
+  EXPECT_EQ(*atomic->scope, ConSanMemoryScope::Wavefront);
   ASSERT_EQ(wave_scope.program_inventory.sync().sync_sequences.size(), 1u);
-  ASSERT_TRUE(wave_scope.program_inventory.sync().sync_sequences.front().raw_scope);
-  EXPECT_EQ(*wave_scope.program_inventory.sync().sync_sequences.front().raw_scope, 0u);
+  ASSERT_TRUE(wave_scope.program_inventory.sync().sync_sequences.front().scope);
+  EXPECT_EQ(*wave_scope.program_inventory.sync().sync_sequences.front().scope,
+            ConSanMemoryScope::Wavefront);
   ASSERT_FALSE(wave_scope_perturbation.candidates.empty());
   EXPECT_TRUE(std::ranges::none_of(wave_scope_perturbation.candidates,
                                    &ConSanPerturbationCandidate::eligible));

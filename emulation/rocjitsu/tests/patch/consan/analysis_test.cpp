@@ -26,6 +26,77 @@ ConSanVectorMemoryDecode decode_flat_words(const std::array<uint32_t, N> &words,
       {reinterpret_cast<const uint8_t *>(words.data()), words.size() * sizeof(uint32_t)}, arch);
 }
 
+TEST(ConSan, MemoryScopeIsOneNormalizedCrossTargetContract) {
+  EXPECT_TRUE(consan_memory_scope_is_supported(ConSanMemoryScope::Wavefront));
+  EXPECT_TRUE(consan_memory_scope_is_supported(ConSanMemoryScope::Workgroup));
+  EXPECT_TRUE(consan_memory_scope_is_supported(ConSanMemoryScope::Agent));
+  EXPECT_TRUE(consan_memory_scope_is_supported(ConSanMemoryScope::System));
+  EXPECT_FALSE(consan_memory_scope_is_supported(static_cast<ConSanMemoryScope>(4u)));
+  EXPECT_FALSE(consan_memory_scope_is_agent_or_system(ConSanMemoryScope::Workgroup));
+  EXPECT_TRUE(consan_memory_scope_is_agent_or_system(ConSanMemoryScope::Agent));
+  EXPECT_TRUE(consan_memory_scope_is_agent_or_system(ConSanMemoryScope::System));
+}
+
+TEST(ConSan, Gfx12TargetsPublishRawAndNormalizedScopeIndependently) {
+  constexpr std::array expected = {
+      ConSanMemoryScope::Wavefront,
+      ConSanMemoryScope::Workgroup,
+      ConSanMemoryScope::Agent,
+      ConSanMemoryScope::System,
+  };
+  for (uint8_t raw_scope = 0; raw_scope < expected.size(); ++raw_scope) {
+    SCOPED_TRACE(raw_scope);
+    const auto rdna4_load = rdna4::build_vflat(
+        rdna4::kFlatLoadB32Vflat,
+        {.saddr = rdna4::OPR_SREG_NULL, .vdst = 2u, .scope = raw_scope, .vaddr = 0u});
+    const auto cdna5_load = cdna5::build_vflat(
+        cdna5::kFlatLoadB32Vflat,
+        {.saddr = cdna5::OPR_SREG_NULL, .vdst = 2u, .scope = raw_scope, .vaddr = 0u});
+    for (const auto &[arch, decoded] :
+         {std::pair{ROCJITSU_CODE_ARCH_RDNA4,
+                    decode_flat_words(rdna4_load, ROCJITSU_CODE_ARCH_RDNA4)},
+          std::pair{ROCJITSU_CODE_ARCH_CDNA5,
+                    decode_flat_words(cdna5_load, ROCJITSU_CODE_ARCH_CDNA5)}}) {
+      ASSERT_EQ(decoded.status, ConSanTargetDecodeStatus::Decoded) << arch;
+      EXPECT_EQ(decoded.encoding.raw_scope, raw_scope) << arch;
+      EXPECT_EQ(decoded.encoding.scope, expected[raw_scope]) << arch;
+    }
+
+    const auto buffer = cdna5::build_vbuffer(
+        cdna5::kBufferLoadB32Vbuffer,
+        {.soffset = 4u, .vdata = 2u, .rsrc = 8u, .scope = raw_scope, .vaddr = 1u});
+    const ConSanBufferMemoryDecode buffer_decoded = decode_consan_buffer_memory_encoding(
+        {reinterpret_cast<const uint8_t *>(buffer.data()), sizeof(buffer)},
+        ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_EQ(buffer_decoded.status, ConSanTargetDecodeStatus::Decoded);
+    EXPECT_EQ(buffer_decoded.encoding.raw_scope, raw_scope);
+    EXPECT_EQ(buffer_decoded.encoding.scope, expected[raw_scope]);
+
+    const auto check_atomic = [&](const auto &words, rj_code_arch_t arch) {
+      ConSanAtomicSite site;
+      ASSERT_TRUE(decode_consan_atomic_site_encoding(
+          site, "flat_atomic_add_u32",
+          {reinterpret_cast<const uint8_t *>(words.data()), sizeof(words)}, arch));
+      EXPECT_EQ(site.raw_scope, raw_scope) << arch;
+      EXPECT_EQ(site.scope, expected[raw_scope]) << arch;
+    };
+    check_atomic(rdna4::build_vflat(rdna4::kFlatAtomicAddU32Vflat, {.saddr = rdna4::OPR_SREG_NULL,
+                                                                    .vdst = 2u,
+                                                                    .scope = raw_scope,
+                                                                    .th = 1u,
+                                                                    .vsrc = 1u,
+                                                                    .vaddr = 0u}),
+                 ROCJITSU_CODE_ARCH_RDNA4);
+    check_atomic(cdna5::build_vflat(cdna5::kFlatAtomicAddU32Vflat, {.saddr = cdna5::OPR_SREG_NULL,
+                                                                    .vdst = 2u,
+                                                                    .scope = raw_scope,
+                                                                    .th = 1u,
+                                                                    .vsrc = 1u,
+                                                                    .vaddr = 0u}),
+                 ROCJITSU_CODE_ARCH_CDNA5);
+  }
+}
+
 TEST(ConSan, HypotheticalTargetRegistersNormalizedAnalysisWithoutModeChanges) {
   enum class HypotheticalTargetKey : uint8_t { GfxFuture };
   const ConSanProgramAnalysisTargetOperations operations{
@@ -1543,7 +1614,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(*atomic.raw_data1, 0u);
   EXPECT_EQ(*atomic.raw_vdst, 0u);
   EXPECT_EQ(atomic.raw_ioffset, 0);
-  EXPECT_FALSE(atomic.raw_scope);
+  EXPECT_FALSE(atomic.scope);
   EXPECT_FALSE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
   EXPECT_FALSE(*atomic.returns_old_value);
@@ -1565,7 +1636,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(atomic_event.text_offset, 16u);
   EXPECT_EQ(atomic_event.width_bits, 32u);
   EXPECT_EQ(atomic_event.static_byte_offset, 0);
-  EXPECT_FALSE(atomic_event.raw_scope);
+  EXPECT_FALSE(atomic_event.scope);
 
   const ConSanSyncEvent &barrier_event = result.program_inventory.sync().sync_events[1];
   EXPECT_EQ(barrier_event.kind, ConSanSyncEventKind::Barrier);
@@ -3007,13 +3078,13 @@ TEST(ConSan, InventoriesCdna4FlatAtomicAddressShape) {
   EXPECT_EQ(*site.data_vgpr, 4u);
   EXPECT_EQ(*site.dst_vgpr, 5u);
   ASSERT_TRUE(site.raw_saddr && site.raw_vaddr && site.raw_vsrc && site.raw_vdst &&
-              site.raw_ioffset && site.raw_scope && site.returns_old_value);
+              site.raw_ioffset && site.scope && site.returns_old_value);
   EXPECT_EQ(*site.raw_saddr, 0u);
   EXPECT_EQ(*site.raw_vaddr, 2u);
   EXPECT_EQ(*site.raw_vsrc, 4u);
   EXPECT_EQ(*site.raw_vdst, 5u);
   EXPECT_EQ(*site.raw_ioffset, 0);
-  EXPECT_EQ(*site.raw_scope, 2u);
+  EXPECT_EQ(*site.scope, ConSanMemoryScope::Agent);
   EXPECT_TRUE(*site.returns_old_value);
 
   const ConSanMoiAtomicAddressPlan plan = plan_consan_moi_atomic_address(
@@ -3107,7 +3178,7 @@ TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
   ASSERT_TRUE(atomic.raw_vsrc);
   ASSERT_TRUE(atomic.raw_vdst);
   ASSERT_TRUE(atomic.raw_ioffset);
-  ASSERT_TRUE(atomic.raw_scope);
+  ASSERT_TRUE(atomic.scope);
   ASSERT_TRUE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
   EXPECT_EQ(*atomic.raw_saddr, 4u);
@@ -3115,7 +3186,7 @@ TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
   EXPECT_EQ(*atomic.raw_vsrc, 1u);
   EXPECT_EQ(*atomic.raw_vdst, 0u);
   EXPECT_EQ(*atomic.raw_ioffset, 0);
-  EXPECT_EQ(*atomic.raw_scope, 2u);
+  EXPECT_EQ(*atomic.scope, ConSanMemoryScope::Agent);
   EXPECT_EQ(*atomic.raw_th, 1u);
   EXPECT_TRUE(*atomic.returns_old_value);
 
@@ -3129,8 +3200,8 @@ TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
   EXPECT_EQ(event.confidence, ConSanSemanticConfidence::Conservative);
   ASSERT_TRUE(event.static_byte_offset);
   EXPECT_EQ(*event.static_byte_offset, 0);
-  ASSERT_TRUE(event.raw_scope);
-  EXPECT_EQ(*event.raw_scope, 2u);
+  ASSERT_TRUE(event.scope);
+  EXPECT_EQ(*event.scope, ConSanMemoryScope::Agent);
   EXPECT_NE(event.identity.find("|kernel=lds_probe|event=atomic|"), std::string::npos);
 }
 
@@ -3187,8 +3258,8 @@ TEST(ConSan, SyncSequencesAssociatePinnedGlobalAtomicCachePattern) {
             result.program_inventory.sync().sync_events[1].identity);
   EXPECT_EQ(sequence.member_event_identities[2],
             result.program_inventory.sync().sync_events[2].identity);
-  ASSERT_TRUE(sequence.raw_scope);
-  EXPECT_EQ(*sequence.raw_scope, 2u);
+  ASSERT_TRUE(sequence.scope);
+  EXPECT_EQ(*sequence.scope, ConSanMemoryScope::Agent);
 
   const std::array<uint32_t, 7> release_words = {
       0xEE0B0000u, 0x00000000u, 0x00000000u, // global_wb
@@ -3494,8 +3565,8 @@ TEST(ConSan, MoiFenceSelectionCarriesUniqueAtomicCommunicationEvent) {
   EXPECT_EQ(release.communication_event, communication.semantic_id);
   EXPECT_EQ(acquire.communication_event, communication.semantic_id);
   EXPECT_EQ(communication.address_source, ConSanSyncAddressSource::GlobalScalarVector);
-  ASSERT_TRUE(communication.raw_scope);
-  EXPECT_EQ(*communication.raw_scope, 2u);
+  ASSERT_TRUE(communication.scope);
+  EXPECT_EQ(*communication.scope, ConSanMemoryScope::Agent);
   EXPECT_TRUE(release.fence_event.valid());
   EXPECT_TRUE(acquire.fence_event.valid());
 }
@@ -3588,8 +3659,8 @@ TEST(ConSan, AssociatesCdna4BufferWbl2WithOrdinaryReleaseStore) {
       result.program_inventory.sync().find_event(*candidate.communication_event);
   ASSERT_NE(communication, nullptr);
   EXPECT_EQ(communication->static_byte_offset, 4u);
-  ASSERT_TRUE(communication->raw_scope);
-  EXPECT_EQ(*communication->raw_scope, 2u);
+  ASSERT_TRUE(communication->scope);
+  EXPECT_EQ(*communication->scope, ConSanMemoryScope::Agent);
 }
 
 TEST(ConSan, AssociatesCompilerReleaseWaitsWithOrdinaryStoresAcrossTargets) {
@@ -3684,8 +3755,8 @@ TEST(ConSan, AssociatesGfx1250GlobalWritebackOrdinaryReleaseLowering) {
       << testing::PrintToString(result.program_inventory.sync().sync_events);
   EXPECT_EQ(store_event->confidence, ConSanSemanticConfidence::Conservative);
   EXPECT_EQ(store_event->width_bits, 32u);
-  ASSERT_TRUE(store_event->raw_scope);
-  EXPECT_EQ(*store_event->raw_scope, 2u);
+  ASSERT_TRUE(store_event->scope);
+  EXPECT_EQ(*store_event->scope, ConSanMemoryScope::Agent);
   EXPECT_FALSE(store_event->execution_owners.empty());
   const auto release =
       std::ranges::find(result.program_inventory.sync().sync_sequences,
@@ -4001,7 +4072,7 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   EXPECT_EQ(site.raw_vsrc, 4u);
   EXPECT_EQ(site.raw_vdst, 2u);
   EXPECT_EQ(site.raw_ioffset, 0);
-  EXPECT_EQ(site.raw_scope, 2u);
+  EXPECT_EQ(site.scope, ConSanMemoryScope::Agent);
   EXPECT_EQ(site.raw_th, 1u);
   EXPECT_EQ(site.returns_old_value, true);
 }

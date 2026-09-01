@@ -46,12 +46,12 @@ bool consan_ordinary_acquire_metadata_compatible(const ConSanSyncEvent &load,
       policy == ConSanOrdinaryAcquireMetadataPolicy::BoundedPathCachePairMember;
   return load.kind == ConSanSyncEventKind::OrdinaryMemory &&
          load.operation == ConSanSyncOperation::OrdinaryLoad && load.width_bits == 32u &&
-         load.confidence == ConSanSemanticConfidence::Conservative && load.raw_scope &&
-         (*load.raw_scope >= 1u && *load.raw_scope <= 3u) &&
-         cache.kind == ConSanSyncEventKind::Fence &&
+         load.confidence == ConSanSemanticConfidence::Conservative && load.scope &&
+         consan_memory_scope_is_supported(*load.scope) &&
+         *load.scope != ConSanMemoryScope::Wavefront && cache.kind == ConSanSyncEventKind::Fence &&
          cache.operation == ConSanSyncOperation::Fence &&
          (cache.cache_operation == ConSanCacheOperation::Acquire ||
-          (*load.raw_scope == 1u &&
+          (*load.scope == ConSanMemoryScope::Workgroup &&
            cache.cache_operation == ConSanCacheOperation::AcquirePairCompletion) ||
           (allow_cache_pair_member &&
            (cache.cache_operation == ConSanCacheOperation::AcquirePairPrefix ||
@@ -91,7 +91,7 @@ bool consan_ordinary_release_metadata_compatible(const ConSanSyncEvent &cache,
          store.kind == ConSanSyncEventKind::OrdinaryMemory &&
          store.operation == ConSanSyncOperation::OrdinaryStore && store.width_bits != 0u &&
          store.width_bits <= 128u && store.confidence == ConSanSemanticConfidence::Conservative &&
-         store.raw_scope && (*store.raw_scope == 2u || *store.raw_scope == 3u) &&
+         store.scope && consan_memory_scope_is_agent_or_system(*store.scope) &&
          cache.code_object_fingerprint == store.code_object_fingerprint &&
          cache.container_name == store.container_name && cache.in_kernel == store.in_kernel &&
          cache_sequence.kind == ConSanSyncSequenceKind::Fence &&

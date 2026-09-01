@@ -418,6 +418,7 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     if (site.raw_ioffset)
       event.static_byte_offset = *site.raw_ioffset;
     event.raw_scope = site.raw_scope;
+    event.scope = site.scope;
     finish_event(event, "ordinary-memory");
   }
 
@@ -455,7 +456,9 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
         site.address_space_hint == ConSanAtomicAddressSpaceHint::FlatGroup ||
         (site.mnemonic.starts_with("ds_") &&
          consan_arch_supports_capability_form(arch, ConSanCapabilityForm::OrderedLdsAtomic));
-    event.raw_scope = implicit_workgroup_scope ? std::optional<uint32_t>(1u) : site.raw_scope;
+    event.raw_scope = site.raw_scope;
+    event.scope =
+        implicit_workgroup_scope ? std::optional{ConSanMemoryScope::Workgroup} : site.scope;
     finish_event(event, "atomic");
   }
 
@@ -485,7 +488,7 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
                   lhs.code_object_fingerprint, lhs.in_kernel, lhs.occurrence, lhs.text_offset,
                   lhs.file_offset, lhs.size, lhs.width_bits, lhs.cache_operation,
                   lhs.ordinary_acquire_mutation_supported, lhs.mnemonic, lhs.static_byte_offset,
-                  lhs.raw_scope, lhs.barrier_id, lhs.barrier_operand_source,
+                  lhs.raw_scope, lhs.scope, lhs.barrier_id, lhs.barrier_operand_source,
                   lhs.barrier_raw_operand_selector, lhs.barrier_literal_width_bits,
                   lhs.barrier_literal_value, lhs.barrier_raw_simm16, lhs.barrier_scope,
                   lhs.participant_count, lhs.participant_mask) ==
@@ -494,7 +497,7 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
                   rhs.code_object_fingerprint, rhs.in_kernel, rhs.occurrence, rhs.text_offset,
                   rhs.file_offset, rhs.size, rhs.width_bits, rhs.cache_operation,
                   rhs.ordinary_acquire_mutation_supported, rhs.mnemonic, rhs.static_byte_offset,
-                  rhs.raw_scope, rhs.barrier_id, rhs.barrier_operand_source,
+                  rhs.raw_scope, rhs.scope, rhs.barrier_id, rhs.barrier_operand_source,
                   rhs.barrier_raw_operand_selector, rhs.barrier_literal_width_bits,
                   rhs.barrier_literal_value, rhs.barrier_raw_simm16, rhs.barrier_scope,
                   rhs.participant_count, rhs.participant_mask);
@@ -627,6 +630,7 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
     sequence.width_bits = event.width_bits;
     sequence.static_byte_offset = event.static_byte_offset;
     sequence.raw_scope = event.raw_scope;
+    sequence.scope = event.scope;
     sequence.barrier_id = event.barrier_id;
     sequence.barrier_operand_source = event.barrier_operand_source;
     sequence.barrier_raw_operand_selector = event.barrier_raw_operand_selector;
@@ -1212,7 +1216,7 @@ template <typename Container>
   // gfx12 RDNA carries workgroup scope explicitly even when pointer tracking
   // cannot reconstruct a complete generic address. Other targets spell the
   // same semantic through an exact src_shared_base provenance proof.
-  if (event.raw_scope == 1u)
+  if (event.scope == ConSanMemoryScope::Workgroup)
     return true;
   if (event.in_kernel) {
     return std::ranges::any_of(program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
@@ -1698,7 +1702,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
     if (communication == nullptr ||
         !is_workgroup_flat_communication(program_inventory, *communication))
       continue;
-    sequence.raw_scope = 1u;
+    sequence.scope = ConSanMemoryScope::Workgroup;
     if (sequence.memory_role != ConSanSyncMemoryRole::Unknown &&
         sequence.memory_role != ConSanSyncMemoryRole::Acquire)
       continue;
@@ -1868,8 +1872,8 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
       candidates.push_back(std::move(candidate));
       continue;
     }
-    if (!communication->raw_scope || *communication->raw_scope == 0u ||
-        *communication->raw_scope > 3u) {
+    if (!communication->scope || !consan_memory_scope_is_supported(*communication->scope) ||
+        *communication->scope == ConSanMemoryScope::Wavefront) {
       candidate.association = ConSanFenceAssociation::UnsupportedScope;
       candidates.push_back(std::move(candidate));
       continue;
@@ -2075,8 +2079,8 @@ void associate_ordinary_release_sync_sequences(
       continue;
     }
     const ConSanSyncEvent *store = first_sequence_event(events, sequence);
-    if (store == nullptr || store->width_bits != 32u || !store->raw_scope ||
-        (*store->raw_scope != 2u && *store->raw_scope != 3u) ||
+    if (store == nullptr || store->width_bits != 32u || !store->scope ||
+        !consan_memory_scope_is_agent_or_system(*store->scope) ||
         store->confidence != ConSanSemanticConfidence::Conservative ||
         store->execution_owners.empty() ||
         !std::ranges::equal(
@@ -2317,7 +2321,7 @@ void associate_ordinary_acquire_sync_sequences(
     sequence.confidence = ConSanSemanticConfidence::Conservative;
     sequence.confidence_reason =
         "exact same-block workgroup group-FLAT load/acquire-zero-wait sequence";
-    sequence.raw_scope = 1u;
+    sequence.scope = ConSanMemoryScope::Workgroup;
     sequence.identity += "|workgroup-acquire-wait-end=pc=0x" + consan_fixed_hex(*wait_end, 16);
     sequence.end_text_offset = *wait_end;
   }
