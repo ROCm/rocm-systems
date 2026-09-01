@@ -5454,3 +5454,58 @@ Remaining architecture locality, broader operating-point and mutable-
 transaction surfaces, larger legacy harvesting, material Section 14.8
 evidence, and the independent Section 14 completion audit remain open. The goal
 therefore remains active.
+
+### 16.67 Convergence checkpoint 66: one diagnostic presentation facet
+
+The transform-publication deep read found three parallel data-model owners.
+Fault sites, selected fault mutations, and barrier-move destinations each had
+one complete analysis product and a second diagnostic struct repeating every
+externally meaningful field. The pipeline then copied those duplicate schemas
+field by field. The diagnostic variants deliberately omitted code-object
+bindings, decoded operand locations, selection provenance, and exact
+application proofs, but that useful authority boundary was expressed only by
+three manually synchronized field lists and three projection maps.
+
+Each analysis contract now owns one presentation value facet. The completed
+analysis product derives from that facet and adds only its private identity,
+operand, selection, and application-proof fields. The diagnostic API aliases
+the facet itself, so presentation consumers cannot acquire the added mutation
+authority and there is no second schema to drift. Pipeline publication copies
+the facet directly; all three hand-written field maps and all three duplicate
+diagnostic definitions are deleted.
+
+The pipeline regression populates every kind of presentation fact, gives the
+analysis products non-presentation proof data, and compares the published
+facets as complete values. This proves both that future presentation fields
+flow automatically and that the private proof fields remain outside the
+diagnostic type. The architecture gate requires the three product/facet
+relationships, the three diagnostic aliases, and direct facet publication; it
+rejects reintroduction of parallel diagnostic schemas or manual projection.
+
+| Signal | Checkpoint 66 | Cumulative change | Slice change from checkpoint 65 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 105,063 | +88 | **-94** |
+| Nonblank production lines | 98,723 | **-360** | **-97** |
+| Production implementation lines | 90,983 | **-467** | **-96** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **174 / 52** | **-102 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Parallel diagnostic field schemas | **0** | n/a | **-3** |
+| Hand-written diagnostic projection maps | **0** | n/a | **-3** |
+| Test inventory | **5,388** | **+43** | 0 |
+
+Validation includes a final-tree `-j16` build; all 33 pipeline tests plus the
+architecture-boundary test; all 4,753 nonphysical tests over the five emulated
+targets at `-j16`; and all 635 physical gfx1201 tests serialized at `-j1`. No
+test was removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.5, 14.7, 14.8, and 14.9. A
+single analysis-owned value now defines what each product may disclose, while
+the derived product alone retains authority needed to apply a transformation.
+The change removes 96 implementation lines and raises cumulative shrinkage to
+467 lines. Remaining architecture locality, mode locality, broader operating-
+point and mutable-transaction surfaces, larger legacy harvesting, material
+whole-refactoring shrinkage, and the independent Section 14 completion audit
+remain open. The goal therefore remains active.

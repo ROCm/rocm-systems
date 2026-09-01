@@ -398,72 +398,19 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
   report.resource_summary = resource_summary;
 
   report.fault_sites.reserve(result.private_lowering_.fault_sites.size());
-  for (const ConSanFaultSite &site : result.private_lowering_.fault_sites) {
-    report.fault_sites.push_back({
-        .kind = site.kind,
-        .identity = site.identity,
-        .container_name = site.container_name,
-        .in_kernel = site.in_kernel,
-        .occurrence = site.occurrence,
-        .text_offset = site.text_offset,
-        .file_offset = site.file_offset,
-        .size = site.size,
-        .width_bits = site.width_bits,
-        .mnemonic = site.mnemonic,
-        .semantic_role = site.semantic_role,
-        .decoded_operands = site.decoded_operands,
-        .ordinary_memory_support_reason = site.ordinary_memory_support_reason,
-        .sync_event_identity = site.sync_event_identity,
-        .sync_sequence_identity = site.sync_sequence_identity,
-        .sync_confidence = site.sync_confidence,
-        .sync_memory_role = site.sync_memory_role,
-        .execution_owners = site.execution_owners,
-    });
-  }
+  for (const ConSanFaultSite &site : result.private_lowering_.fault_sites)
+    report.fault_sites.emplace_back(static_cast<const ConSanFaultSitePresentation &>(site));
 
   report.barrier_move_destinations.reserve(
       result.private_lowering_.barrier_move_destinations.size());
   for (const ConSanBarrierMoveDestination &destination :
-       result.private_lowering_.barrier_move_destinations) {
-    report.barrier_move_destinations.push_back({
-        .identity = destination.identity,
-        .container_name = destination.container_name,
-        .in_kernel = destination.in_kernel,
-        .basic_block_index = destination.basic_block_index,
-        .text_offset = destination.text_offset,
-        .file_offset = destination.file_offset,
-        .size = destination.size,
-        .mnemonic = destination.mnemonic,
-        .memory_operation = destination.memory_operation,
-        .issue = destination.issue,
-        .issue_detail = destination.issue_detail,
-        .cfg_contract = destination.cfg_contract,
-        .structured_guard_block_index = destination.structured_guard_block_index,
-        .structured_source_block_index = destination.structured_source_block_index,
-        .structured_guard_offset = destination.structured_guard_offset,
-        .structured_source_offset = destination.structured_source_offset,
-        .execution_owners = destination.execution_owners,
-    });
-  }
+       result.private_lowering_.barrier_move_destinations)
+    report.barrier_move_destinations.emplace_back(
+        static_cast<const ConSanBarrierMoveDestinationPresentation &>(destination));
 
   report.fault_mutations.reserve(result.private_lowering_.fault_plans.size());
-  for (const ConSanFaultMutationPlan &plan : result.private_lowering_.fault_plans) {
-    report.fault_mutations.push_back({
-        .kind = plan.kind,
-        .primary_identity = plan.primary_identity,
-        .companion_identity = plan.companion_identity,
-        .logical_sequence_identity = plan.logical_sequence_identity,
-        .ordered_member_identities = plan.ordered_member_identities,
-        .destination_identity = plan.destination_identity,
-        .barrier_move_direction = plan.barrier_move_direction,
-        .barrier_move_cfg_contract = plan.barrier_move_cfg_contract,
-        .original_barrier_id = plan.original_barrier_id,
-        .target_barrier_id = plan.target_barrier_id,
-        .original_barrier_scope = plan.original_barrier_scope,
-        .target_barrier_scope = plan.target_barrier_scope,
-        .target_address_vgpr = plan.target_address_vgpr,
-    });
-  }
+  for (const ConSanFaultMutationPlan &plan : result.private_lowering_.fault_plans)
+    report.fault_mutations.emplace_back(static_cast<const ConSanFaultMutationPresentation &>(plan));
 
   for (const ConSanCandidateResourcePlan &plan : result.private_lowering_.resource_plans) {
     if (plan.source == ConSanRegisterAllocationSource::Unsupported) {

@@ -62,13 +62,18 @@ enum class ConSanOwnerProofKind : uint8_t {
 struct ConSanExecutionOwner {
   uint64_t descriptor_file_offset = 0;
   ConSanOwnerProofKind proof = ConSanOwnerProofKind::KernelLocal;
+
+  bool operator==(const ConSanExecutionOwner &) const = default;
 };
 
-/// A currently injectable instruction with a load-order-independent identity.
-struct ConSanFaultSite {
+/// Stable presentation facts for one currently injectable instruction.
+///
+/// Completed analysis products inherit this value and add only application-
+/// private identity and operands. Runtime diagnostics copy this facet without
+/// maintaining a second field-by-field schema.
+struct ConSanFaultSitePresentation {
   ConSanFaultSiteKind kind = ConSanFaultSiteKind::Barrier;
   std::string identity;
-  std::string code_object_fingerprint;
   std::string container_name;
   bool in_kernel = true;
   uint32_t occurrence = 0;
@@ -76,9 +81,6 @@ struct ConSanFaultSite {
   uint64_t file_offset = 0;
   uint32_t size = 0;
   uint32_t width_bits = 0;
-  std::optional<uint16_t> address_vgpr;
-  /// Target-defined selectable-bank state at this instruction.
-  std::optional<uint16_t> selectable_vgpr_bank_mode;
   std::string mnemonic;
   std::string semantic_role;
   std::string decoded_operands;
@@ -89,6 +91,40 @@ struct ConSanFaultSite {
   ConSanSemanticConfidence sync_confidence = ConSanSemanticConfidence::Unsupported;
   ConSanSyncMemoryRole sync_memory_role = ConSanSyncMemoryRole::Unknown;
   std::vector<ConSanExecutionOwner> execution_owners;
+
+  bool operator==(const ConSanFaultSitePresentation &) const = default;
+};
+
+/// A currently injectable instruction with its application-private proof
+/// identity and target operand state.
+struct ConSanFaultSite : ConSanFaultSitePresentation {
+  std::string code_object_fingerprint;
+  std::optional<uint16_t> address_vgpr;
+  /// Target-defined selectable-bank state at this instruction.
+  std::optional<uint16_t> selectable_vgpr_bank_mode;
+};
+
+/// Stable presentation facts for one selected validation-only corruption.
+///
+/// These fields describe the externally meaningful choice. Planning refines
+/// them with source binding and exact application proof below, while runtime
+/// diagnostics copy this facet without acquiring those mutation authorities.
+struct ConSanFaultMutationPresentation {
+  ConSanFaultMutationKind kind = ConSanFaultMutationKind::DropBarrier;
+  std::string primary_identity;
+  std::optional<std::string> companion_identity;
+  std::optional<std::string> logical_sequence_identity;
+  std::vector<std::string> ordered_member_identities;
+  std::optional<std::string> destination_identity;
+  ConSanBarrierMoveDirection barrier_move_direction = ConSanBarrierMoveDirection::LegacyMarker;
+  ConSanBarrierMoveCfgContract barrier_move_cfg_contract = ConSanBarrierMoveCfgContract::SameBlock;
+  std::optional<int32_t> original_barrier_id;
+  std::optional<int32_t> target_barrier_id;
+  ConSanBarrierSite::Scope original_barrier_scope = ConSanBarrierSite::Scope::Unknown;
+  ConSanBarrierSite::Scope target_barrier_scope = ConSanBarrierSite::Scope::Unknown;
+  std::optional<uint16_t> target_address_vgpr;
+
+  bool operator==(const ConSanFaultMutationPresentation &) const = default;
 };
 
 /// Immutable planner-to-emitter contract for one validation-only corruption.
@@ -101,39 +137,17 @@ struct ConSanFaultSite {
 /// barrier, atomic, and ordinary-memory fault all refer to the same semantic
 /// inventory vocabulary; kind-specific payloads remain optional and are
 /// admitted only in the combinations checked by `well_formed()`.
-struct ConSanFaultMutationPlan {
+struct ConSanFaultMutationPlan : ConSanFaultMutationPresentation {
   /// Content identity of the pristine image whose inventory produced this
   /// plan. Applying the plan to any other image is a stale-plan error even if
   /// a diagnostic identity string happens to collide.
   ConSanCodeObjectId source_code_object;
-  /// Behavioral corruption to perform.
-  ConSanFaultMutationKind kind = ConSanFaultMutationKind::DropBarrier;
-  /// Stable diagnostic identity of the instruction selected as the principal
-  /// mutation site.
-  std::string primary_identity;
-  /// Second instruction or ordering-boundary identity when the behavioral
-  /// fault is defined by a pair.
-  std::optional<std::string> companion_identity;
-  /// Stable logical sequence or lifecycle identity whose semantics the
-  /// mutation changes.
-  std::optional<std::string> logical_sequence_identity;
   /// Exact inventory sequence through which the primary site was selected.
   /// This differs from `logical_sequence_identity` for a lifecycle or grouped
   /// mutation whose externally meaningful identity spans multiple sequences.
   std::optional<std::string> selection_sequence_identity;
   /// Second exact inventory sequence selected by a grouped barrier drop.
   std::optional<std::string> companion_selection_sequence_identity;
-  /// Original-program member identities in semantic order. This lets
-  /// validation prove that a pair or lifecycle still has the shape selected
-  /// by planning without selecting it again.
-  std::vector<std::string> ordered_member_identities;
-  /// Exact real-instruction destination for a markerless barrier move.
-  std::optional<std::string> destination_identity;
-  /// Direction of a whole-barrier move. `LegacyMarker` identifies the older
-  /// marker-based form, which has no real-instruction destination.
-  ConSanBarrierMoveDirection barrier_move_direction = ConSanBarrierMoveDirection::LegacyMarker;
-  /// Control-flow proof under which a markerless destination was admitted.
-  ConSanBarrierMoveCfgContract barrier_move_cfg_contract = ConSanBarrierMoveCfgContract::SameBlock;
   /// Structured-CFG coordinates retained only for a cross-block barrier move;
   /// together they bind lowering to the exact proof established by analysis.
   std::optional<uint32_t> structured_guard_block_index;
@@ -142,13 +156,6 @@ struct ConSanFaultMutationPlan {
   std::optional<uint64_t> structured_guard_offset;
   std::optional<uint64_t> structured_destination_offset;
   std::optional<uint64_t> structured_source_offset;
-  /// Barrier ID and scope before and after an ID/scope or participant-count
-  /// mutation. Participant mutation retains equal values to prove that it
-  /// changes cardinality only.
-  std::optional<int32_t> original_barrier_id;
-  std::optional<int32_t> target_barrier_id;
-  ConSanBarrierSite::Scope original_barrier_scope = ConSanBarrierSite::Scope::Unknown;
-  ConSanBarrierSite::Scope target_barrier_scope = ConSanBarrierSite::Scope::Unknown;
   /// Participant cardinality before and after a lifecycle-count mutation.
   std::optional<uint32_t> original_participant_count;
   std::optional<uint32_t> target_participant_count;
@@ -159,7 +166,6 @@ struct ConSanFaultMutationPlan {
   /// makes the selected corruption independently inspectable and lets lowering
   /// reject a stale decoded source operand.
   std::optional<uint16_t> original_address_vgpr;
-  std::optional<uint16_t> target_address_vgpr;
   /// Exact ordering edge selected for an atomic weaken-order mutation.
   std::optional<ConSanAtomicOrderEdge> atomic_order_edge;
   /// Whether a single-instruction barrier drop was deliberately admitted even
@@ -189,10 +195,12 @@ enum class ConSanBarrierMoveDestinationIssue : uint8_t {
 consan_barrier_move_destination_issue_message(ConSanBarrierMoveDestinationIssue issue,
                                               std::string_view detail = {});
 
-/// A stable real-instruction destination considered by whole-barrier movement.
-struct ConSanBarrierMoveDestination {
+/// Stable presentation facts for a real-instruction barrier-move destination.
+///
+/// Synchronization analysis adds the private code-object binding below;
+/// runtime diagnostics copy this facet directly and cannot apply a move.
+struct ConSanBarrierMoveDestinationPresentation {
   std::string identity;
-  std::string code_object_fingerprint;
   std::string container_name;
   bool in_kernel = true;
   uint32_t basic_block_index = 0;
@@ -214,6 +222,13 @@ struct ConSanBarrierMoveDestination {
   std::vector<ConSanExecutionOwner> execution_owners;
 
   [[nodiscard]] bool suitable() const { return issue == ConSanBarrierMoveDestinationIssue::None; }
+  bool operator==(const ConSanBarrierMoveDestinationPresentation &) const = default;
+};
+
+/// A real-instruction destination bound to the code object in which analysis
+/// proved it suitable for whole-barrier movement.
+struct ConSanBarrierMoveDestination : ConSanBarrierMoveDestinationPresentation {
+  std::string code_object_fingerprint;
 };
 
 enum class ConSanSyncEventKind : uint8_t {

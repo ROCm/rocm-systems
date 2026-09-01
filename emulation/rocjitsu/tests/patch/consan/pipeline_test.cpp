@@ -496,12 +496,52 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   mechanism.coverage_ledger = coverage;
   mechanism.outcome = ConSanTransformOutcome::ModifiedValid;
   mechanism.replacement = {0x7f, 'E', 'L', 'F'};
-  mechanism.fault_sites.emplace_back().identity = "published-fault-site";
-  mechanism.barrier_move_destinations.emplace_back().identity = "published-destination";
+  ConSanFaultSite published_fault_site;
+  published_fault_site.kind = ConSanFaultSiteKind::Atomic;
+  published_fault_site.identity = "published-fault-site";
+  published_fault_site.container_name = "shared_access";
+  published_fault_site.in_kernel = false;
+  published_fault_site.occurrence = 3u;
+  published_fault_site.text_offset = 24u;
+  published_fault_site.file_offset = 40u;
+  published_fault_site.size = 8u;
+  published_fault_site.width_bits = 64u;
+  published_fault_site.mnemonic = "flat_atomic_add_u64";
+  published_fault_site.semantic_role = "release";
+  published_fault_site.decoded_operands = "v[0:1], v[2:3]";
+  published_fault_site.ordinary_memory_support_reason =
+      ConSanOrdinaryMemorySupportReason::Supported;
+  published_fault_site.sync_event_identity = "event:24";
+  published_fault_site.sync_sequence_identity = "sequence:24";
+  published_fault_site.sync_confidence = ConSanSemanticConfidence::Exact;
+  published_fault_site.sync_memory_role = ConSanSyncMemoryRole::Release;
+  published_fault_site.execution_owners = {
+      {.descriptor_file_offset = 64u, .proof = ConSanOwnerProofKind::DirectCall}};
+  published_fault_site.code_object_fingerprint = inventory.code_object_id().fingerprint;
+  published_fault_site.address_vgpr = 2u;
+  published_fault_site.selectable_vgpr_bank_mode = 1u;
+  const ConSanFaultSitePresentation expected_fault_site = published_fault_site;
+  mechanism.fault_sites.push_back(std::move(published_fault_site));
+
+  ConSanBarrierMoveDestination published_destination;
+  published_destination.identity = "published-destination";
+  published_destination.container_name = "kernel_c";
+  published_destination.basic_block_index = 2u;
+  published_destination.text_offset = 32u;
+  published_destination.file_offset = 48u;
+  published_destination.size = 4u;
+  published_destination.mnemonic = "v_add_f32";
+  published_destination.code_object_fingerprint = inventory.code_object_id().fingerprint;
+  published_destination.execution_owners = {
+      {.descriptor_file_offset = 128u, .proof = ConSanOwnerProofKind::RecoveredIndirectCall}};
+  const ConSanBarrierMoveDestinationPresentation expected_destination = published_destination;
+  mechanism.barrier_move_destinations.push_back(std::move(published_destination));
+
   ConSanFaultMutationPlan published_fault_plan;
   published_fault_plan.source_code_object = inventory.code_object_id();
   published_fault_plan.kind = ConSanFaultMutationKind::DropBarrier;
   published_fault_plan.primary_identity = "published-fault-plan";
+  const ConSanFaultMutationPresentation expected_fault_plan = published_fault_plan;
   mechanism.fault_plans.push_back(std::move(published_fault_plan));
   mechanism.mutation.fault = {.requested = 1u, .planned = 1u, .applied = 1u};
   mechanism.resource_plans.emplace_back().candidate_index = 7u;
@@ -537,12 +577,11 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   const ConSanTransformDiagnosticReport published_diagnostics =
       TransformResultTestAccess::diagnostic_report(published);
   ASSERT_EQ(published_diagnostics.fault_sites.size(), 1u);
-  EXPECT_EQ(published_diagnostics.fault_sites.front().identity, "published-fault-site");
+  EXPECT_EQ(published_diagnostics.fault_sites.front(), expected_fault_site);
   ASSERT_EQ(published_diagnostics.barrier_move_destinations.size(), 1u);
-  EXPECT_EQ(published_diagnostics.barrier_move_destinations.front().identity,
-            "published-destination");
+  EXPECT_EQ(published_diagnostics.barrier_move_destinations.front(), expected_destination);
   ASSERT_EQ(published_diagnostics.fault_mutations.size(), 1u);
-  EXPECT_EQ(published_diagnostics.fault_mutations.front().primary_identity, "published-fault-plan");
+  EXPECT_EQ(published_diagnostics.fault_mutations.front(), expected_fault_plan);
   TransformResult malformed_fault_plan = published;
   TransformResultTestAccess::corrupt_first_fault_plan_code_object(malformed_fault_plan);
   EXPECT_FALSE(malformed_fault_plan.well_formed());

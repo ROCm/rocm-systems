@@ -78,6 +78,36 @@ if(_consan_build_graph MATCHES "target_sources[(][ \n]*rocjitsu_code")
     )
 endif()
 
+# Completed analysis products expose one immutable presentation facet. Runtime
+# diagnostics copy that facet and may not maintain parallel schemas or
+# field-by-field projection maps that can drift from the producing contract.
+file(READ "${_consan_dir}/consan_fault_sync_types.h.inc" _fault_presentation_contract)
+file(READ "${_consan_dir}/consan_transform_diagnostics.h" _transform_diagnostics_contract)
+file(READ "${_consan_dir}/consan_pipeline.cpp" _consan_pipeline)
+foreach(_product IN ITEMS FaultSite FaultMutationPlan BarrierMoveDestination)
+    string(REPLACE "Plan" "" _presentation "${_product}")
+    if(NOT _fault_presentation_contract MATCHES
+       "struct ConSan${_product} : ConSan${_presentation}Presentation")
+        message(FATAL_ERROR
+            "ConSan ${_product} lost its immutable presentation facet"
+        )
+    endif()
+endforeach()
+foreach(_diagnostic IN ITEMS FaultSite FaultMutation BarrierMoveDestination)
+    if(NOT _transform_diagnostics_contract MATCHES
+       "using ConSan${_diagnostic}Diagnostic = ConSan${_diagnostic}Presentation")
+        message(FATAL_ERROR
+            "ConSan ${_diagnostic} diagnostics regained a parallel schema"
+        )
+    endif()
+    if(NOT _consan_pipeline MATCHES
+       "static_cast<const ConSan${_diagnostic}Presentation &>")
+        message(FATAL_ERROR
+            "ConSan ${_diagnostic} diagnostics lost direct facet publication"
+        )
+    endif()
+endforeach()
+
 set(
     _contract_sources
     consan_access_classifier.cpp

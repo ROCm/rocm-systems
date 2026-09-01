@@ -16,68 +16,12 @@
 
 namespace rocjitsu {
 
-/// Presentation-only snapshot of an injectable instruction.
-struct ConSanFaultSiteDiagnostic {
-  ConSanFaultSiteKind kind = ConSanFaultSiteKind::Barrier;
-  std::string identity;
-  std::string container_name;
-  bool in_kernel = true;
-  uint32_t occurrence = 0;
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
-  uint32_t width_bits = 0;
-  std::string mnemonic;
-  std::string semantic_role;
-  std::string decoded_operands;
-  ConSanOrdinaryMemorySupportReason ordinary_memory_support_reason =
-      ConSanOrdinaryMemorySupportReason::NotApplicable;
-  std::optional<std::string> sync_event_identity;
-  std::optional<std::string> sync_sequence_identity;
-  ConSanSemanticConfidence sync_confidence = ConSanSemanticConfidence::Unsupported;
-  ConSanSyncMemoryRole sync_memory_role = ConSanSyncMemoryRole::Unknown;
-  std::vector<ConSanExecutionOwner> execution_owners;
-};
-
-/// Presentation-only snapshot of a barrier-movement destination decision.
-struct ConSanBarrierMoveDestinationDiagnostic {
-  std::string identity;
-  std::string container_name;
-  bool in_kernel = true;
-  uint32_t basic_block_index = 0;
-  uint64_t text_offset = 0;
-  uint64_t file_offset = 0;
-  uint32_t size = 0;
-  std::string mnemonic;
-  bool memory_operation = false;
-  ConSanBarrierMoveDestinationIssue issue = ConSanBarrierMoveDestinationIssue::None;
-  std::string issue_detail;
-  ConSanBarrierMoveCfgContract cfg_contract = ConSanBarrierMoveCfgContract::SameBlock;
-  std::optional<uint32_t> structured_guard_block_index;
-  std::optional<uint32_t> structured_source_block_index;
-  std::optional<uint64_t> structured_guard_offset;
-  std::optional<uint64_t> structured_source_offset;
-  std::vector<ConSanExecutionOwner> execution_owners;
-
-  [[nodiscard]] bool suitable() const { return issue == ConSanBarrierMoveDestinationIssue::None; }
-};
-
-/// Presentation-only snapshot of a selected validation mutation.
-struct ConSanFaultMutationDiagnostic {
-  ConSanFaultMutationKind kind = ConSanFaultMutationKind::DropBarrier;
-  std::string primary_identity;
-  std::optional<std::string> companion_identity;
-  std::optional<std::string> logical_sequence_identity;
-  std::vector<std::string> ordered_member_identities;
-  std::optional<std::string> destination_identity;
-  ConSanBarrierMoveDirection barrier_move_direction = ConSanBarrierMoveDirection::LegacyMarker;
-  ConSanBarrierMoveCfgContract barrier_move_cfg_contract = ConSanBarrierMoveCfgContract::SameBlock;
-  std::optional<int32_t> original_barrier_id;
-  std::optional<int32_t> target_barrier_id;
-  ConSanBarrierSite::Scope original_barrier_scope = ConSanBarrierSite::Scope::Unknown;
-  ConSanBarrierSite::Scope target_barrier_scope = ConSanBarrierSite::Scope::Unknown;
-  std::optional<uint16_t> target_address_vgpr;
-};
+/// Presentation-only snapshots copied from the immutable facets of completed
+/// analysis products. These aliases cannot expose the private source binding,
+/// target operands, or application proof carried by the derived products.
+using ConSanFaultSiteDiagnostic = ConSanFaultSitePresentation;
+using ConSanBarrierMoveDestinationDiagnostic = ConSanBarrierMoveDestinationPresentation;
+using ConSanFaultMutationDiagnostic = ConSanFaultMutationPresentation;
 
 /// Aggregated presentation facts for one resource-rejection class.
 struct ConSanResourceFailureDiagnostic {
