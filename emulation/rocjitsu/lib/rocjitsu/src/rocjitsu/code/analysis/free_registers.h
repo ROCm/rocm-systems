@@ -29,10 +29,12 @@ namespace rocjitsu {
 /// @param unavailable Registers that must not be selected. Its meaning is the
 ///        caller's: live-at-a-point, used-anywhere, or reserved-by-the-caller.
 /// @param cls Register class to search. Must be one RegisterSet models --
-///        SGPR, VGPR, or ACC_VGPR. RegisterSet::contains() answers false for
+///        SGPR, VGPR, or ACC_VGPR. RegisterSet::intersects() answers false for
 ///        every other class, so searching one would report the whole space free.
-/// @param count Number of consecutive registers required; must be non-zero and
-///        must fit RegisterRef::width, which the tuple is tested through.
+/// @param count Number of consecutive registers required; must be non-zero. The
+///        type is RegisterRef::width's, since the candidate run is tested as one
+///        RegisterRef -- a wider run cannot be named and so cannot be searched
+///        for.
 /// @param search_start Lowest candidate base. Rounded up to @p base_alignment.
 /// @param base_alignment Required tuple-base alignment; must be a non-zero power
 ///        of two. Host operands that name a register pair need an even base.
@@ -40,7 +42,7 @@ namespace rocjitsu {
 ///        `base + count <= bound`.
 /// @returns The lowest qualifying base, or nullopt when the bound leaves none.
 [[nodiscard]] std::optional<uint16_t> find_free_run(const RegisterSet &unavailable, RegClass cls,
-                                                    uint16_t count, uint16_t search_start,
+                                                    uint8_t count, uint16_t search_start,
                                                     uint16_t base_alignment, uint32_t bound);
 
 /// @brief Lowest single SGPR absent from @p unavailable, below @p bound.

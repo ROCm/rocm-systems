@@ -5339,6 +5339,29 @@ TEST(LivenessAnalysis, FreeVgprAllocationHonorsDestinationLimit) {
   EXPECT_EQ(gfx1250.find_free_run(&use, 1), 256);
 }
 
+TEST(LivenessAnalysis, FreeVgprAllocationRejectsUnnameableRunWidth) {
+  // A candidate run is tested as one RegisterRef, whose width is a uint8_t.
+  // These queries take the width as a uint16_t, so a wider run is expressible
+  // and must fail closed: truncating 256 to 0 would test only the run's first
+  // lane and hand back a base whose other 255 lanes were never checked.
+  auto blocks = build_test_blocks({TestOpcode::UseVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  const Instruction &use = *blocks[0]->instructions().begin();
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+
+  LivenessAnalysisOptions options;
+  options.max_free_vgpr = 1024;
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  // v0 is live and globally used, so the widest nameable run starts at v1. The
+  // 255/256 pair is what separates the width gate from an ordinary no-fit.
+  EXPECT_EQ(liveness.find_free_run(&use, 255), 1);
+  EXPECT_EQ(liveness.find_free_run(&use, 256), std::nullopt);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 255, 0, 1, 1024), 1);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 256, 0, 1, 1024), std::nullopt);
+}
+
 TEST(LivenessAnalysis, FindFreeRunHonorsBaseAlignment) {
   auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
   auto scope = block_scope(blocks);
