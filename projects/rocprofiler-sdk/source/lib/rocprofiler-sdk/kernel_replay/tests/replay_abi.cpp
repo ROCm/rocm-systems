@@ -54,17 +54,17 @@ rocprofiler_test_c_replay_offset_size(void);
 size_t
 rocprofiler_test_c_replay_offset_dispatch_info(void);
 size_t
-rocprofiler_test_c_replay_offset_pass_count_cb(void);
+rocprofiler_test_c_replay_offset_replay_pass_count(void);
 size_t
-rocprofiler_test_c_replay_offset_replay_continue_cb(void);
+rocprofiler_test_c_replay_offset_replay_continue(void);
 size_t
 rocprofiler_test_c_replay_offset_current_pass(void);
 size_t
 rocprofiler_test_c_replay_offset_total_passes(void);
 size_t
-rocprofiler_test_c_replay_offset_local_enable_cb(void);
+rocprofiler_test_c_replay_offset_replay_start_context(void);
 size_t
-rocprofiler_test_c_replay_offset_local_disable_cb(void);
+rocprofiler_test_c_replay_offset_replay_stop_context(void);
 int
 rocprofiler_test_c_replay_operation_last(void);
 int
@@ -354,17 +354,17 @@ TEST(kernel_replay_abi, c_and_cxx_agree_on_every_field_offset)
     EXPECT_EQ(rocprofiler_test_c_replay_offset_size(), offsetof(replay_data_t, size));
     EXPECT_EQ(rocprofiler_test_c_replay_offset_dispatch_info(),
               offsetof(replay_data_t, dispatch_info));
-    EXPECT_EQ(rocprofiler_test_c_replay_offset_pass_count_cb(),
+    EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_pass_count(),
               offsetof(replay_data_t, replay_pass_count));
-    EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_continue_cb(),
+    EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_continue(),
               offsetof(replay_data_t, replay_continue));
     EXPECT_EQ(rocprofiler_test_c_replay_offset_current_pass(),
               offsetof(replay_data_t, current_pass));
     EXPECT_EQ(rocprofiler_test_c_replay_offset_total_passes(),
               offsetof(replay_data_t, total_passes));
-    EXPECT_EQ(rocprofiler_test_c_replay_offset_local_enable_cb(),
+    EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_start_context(),
               offsetof(replay_data_t, replay_start_context));
-    EXPECT_EQ(rocprofiler_test_c_replay_offset_local_disable_cb(),
+    EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_stop_context(),
               offsetof(replay_data_t, replay_stop_context));
 }
 
