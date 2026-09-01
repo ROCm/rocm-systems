@@ -44,12 +44,12 @@ decode_gfx1201_lane_transfer(std::span<const uint8_t> instruction) {
 
 ConSanVectorMemoryDecode decode_gfx1201_flat_memory(std::span<const uint8_t> instruction) {
   return decode_gfx12_vector_memory<rdna4::VflatMachineInst>(instruction, rdna4::OPR_SREG_NULL,
-                                                             0xecu, true);
+                                                             0xecu, true, 1u);
 }
 
 ConSanVectorMemoryDecode decode_gfx1201_global_memory(std::span<const uint8_t> instruction) {
   return decode_gfx12_vector_memory<rdna4::VglobalMachineInst>(instruction, rdna4::OPR_SREG_NULL,
-                                                               0xeeu, true);
+                                                               0xeeu, true, 1u);
 }
 
 bool decode_gfx1201_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,

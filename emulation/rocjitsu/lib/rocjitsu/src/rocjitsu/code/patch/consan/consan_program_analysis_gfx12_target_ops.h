@@ -48,7 +48,8 @@ decode_gfx12_lane_transfer(std::span<const uint8_t> instruction, int value_sourc
 template <typename Raw>
 ConSanVectorMemoryEncoding
 make_gfx12_vector_memory_encoding(const Raw &raw, uint32_t null_saddr, bool exact_size,
-                                  bool ordinary_well_formed, bool ordinary_mutation_supported) {
+                                  bool ordinary_well_formed, bool ordinary_mutation_supported,
+                                  uint32_t workgroup_acquire_scope) {
   return ConSanVectorMemoryEncoding{
       .raw_op = static_cast<uint32_t>(raw.op),
       .raw_saddr = static_cast<uint32_t>(raw.saddr),
@@ -72,6 +73,7 @@ make_gfx12_vector_memory_encoding(const Raw &raw, uint32_t null_saddr, bool exac
                                     ? std::nullopt
                                     : std::optional<uint16_t>(static_cast<uint16_t>(raw.saddr)),
       .scope_follows_address_space = false,
+      .workgroup_acquire_ordering = static_cast<uint32_t>(raw.scope) == workgroup_acquire_scope,
       .exact_size = exact_size,
       .ordinary_well_formed = ordinary_well_formed,
       .ordinary_requires_complete_registers = true,
@@ -82,7 +84,8 @@ make_gfx12_vector_memory_encoding(const Raw &raw, uint32_t null_saddr, bool exac
 template <typename Raw>
 ConSanVectorMemoryDecode decode_gfx12_vector_memory(std::span<const uint8_t> instruction,
                                                     uint32_t null_saddr, uint32_t expected_encoding,
-                                                    bool mutation_supported) {
+                                                    bool mutation_supported,
+                                                    uint32_t workgroup_acquire_scope) {
   if (instruction.size() < sizeof(Raw))
     return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
   Raw raw{};
@@ -99,7 +102,7 @@ ConSanVectorMemoryDecode decode_gfx12_vector_memory(std::span<const uint8_t> ins
   return {
       .status = ConSanTargetDecodeStatus::Decoded,
       .encoding = make_gfx12_vector_memory_encoding(raw, null_saddr, exact_size, well_formed,
-                                                    mutation_supported),
+                                                    mutation_supported, workgroup_acquire_scope),
   };
 }
 

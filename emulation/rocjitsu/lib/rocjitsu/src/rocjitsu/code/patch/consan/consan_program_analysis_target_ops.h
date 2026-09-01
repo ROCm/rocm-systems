@@ -73,6 +73,11 @@ struct ConSanVectorMemoryEncoding {
   ConSanEncodedFlatSegment encoded_segment = ConSanEncodedFlatSegment::Unspecified;
   std::optional<uint16_t> scalar_provenance_sgpr;
   bool scope_follows_address_space = false;
+  /// The target-native ordering/scope fields spell the compiler's
+  /// workgroup-acquire qualifier for a group-FLAT load. Program analysis
+  /// carries this normalized fact so synchronization analysis never
+  /// interprets raw TH/SCOPE values by architecture family.
+  bool workgroup_acquire_ordering = false;
   bool exact_size = false;
   bool ordinary_well_formed = false;
   bool ordinary_requires_complete_registers = false;

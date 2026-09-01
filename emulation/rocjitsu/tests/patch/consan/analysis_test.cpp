@@ -19,6 +19,13 @@ ConSanVectorMemoryDecode decode_hypothetical_target_flat(std::span<const uint8_t
   return decoded;
 }
 
+template <size_t N>
+ConSanVectorMemoryDecode decode_flat_words(const std::array<uint32_t, N> &words,
+                                           rj_code_arch_t arch) {
+  return decode_consan_flat_memory_encoding(
+      {reinterpret_cast<const uint8_t *>(words.data()), words.size() * sizeof(uint32_t)}, arch);
+}
+
 TEST(ConSan, HypotheticalTargetRegistersNormalizedAnalysisWithoutModeChanges) {
   enum class HypotheticalTargetKey : uint8_t { GfxFuture };
   const ConSanProgramAnalysisTargetOperations operations{
@@ -37,6 +44,44 @@ TEST(ConSan, HypotheticalTargetRegistersNormalizedAnalysisWithoutModeChanges) {
   const ConSanVectorMemoryDecode decoded = selected->decode_flat_memory({});
   EXPECT_EQ(decoded.status, ConSanTargetDecodeStatus::Decoded);
   EXPECT_EQ(decoded.encoding.raw_op, 0x5aU);
+}
+
+TEST(ConSan, EveryTargetNormalizesItsWorkgroupAcquireOrdering) {
+  constexpr auto gfx942 =
+      cdna3::build_flat(cdna3::kFlatLoadDwordFlat, {.sc0 = 1u, .addr = 0u, .vdst = 2u});
+  constexpr auto gfx950 =
+      cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.sc0 = 1u, .addr = 0u, .vdst = 2u});
+  constexpr auto gfx1100 = rdna3::build_flat(
+      rdna3::kFlatLoadB32Flat, {.glc = 1u, .addr = 0u, .saddr = kRdna3FlatNoSaddr, .vdst = 2u});
+  constexpr auto gfx1201 =
+      rdna4::build_vflat(rdna4::kFlatLoadB32Vflat,
+                         {.saddr = rdna4::OPR_SREG_NULL, .vdst = 2u, .scope = 1u, .vaddr = 0u});
+  constexpr auto gfx1250 =
+      cdna5::build_vflat(cdna5::kFlatLoadB32Vflat,
+                         {.saddr = cdna5::OPR_SREG_NULL, .vdst = 2u, .scope = 0u, .vaddr = 0u});
+
+  const std::array cases = {
+      std::pair{ROCJITSU_CODE_ARCH_CDNA3, decode_flat_words(gfx942, ROCJITSU_CODE_ARCH_CDNA3)},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA4, decode_flat_words(gfx950, ROCJITSU_CODE_ARCH_CDNA4)},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA3, decode_flat_words(gfx1100, ROCJITSU_CODE_ARCH_RDNA3)},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA4, decode_flat_words(gfx1201, ROCJITSU_CODE_ARCH_RDNA4)},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA5, decode_flat_words(gfx1250, ROCJITSU_CODE_ARCH_CDNA5)},
+  };
+  for (const auto &[arch, decoded] : cases) {
+    EXPECT_EQ(decoded.status, ConSanTargetDecodeStatus::Decoded) << arch;
+    EXPECT_TRUE(decoded.encoding.workgroup_acquire_ordering) << arch;
+  }
+
+  constexpr auto rdna4_cdna_scope =
+      rdna4::build_vflat(rdna4::kFlatLoadB32Vflat,
+                         {.saddr = rdna4::OPR_SREG_NULL, .vdst = 2u, .scope = 0u, .vaddr = 0u});
+  constexpr auto cdna5_rdna_scope =
+      cdna5::build_vflat(cdna5::kFlatLoadB32Vflat,
+                         {.saddr = cdna5::OPR_SREG_NULL, .vdst = 2u, .scope = 1u, .vaddr = 0u});
+  EXPECT_FALSE(decode_flat_words(rdna4_cdna_scope, ROCJITSU_CODE_ARCH_RDNA4)
+                   .encoding.workgroup_acquire_ordering);
+  EXPECT_FALSE(decode_flat_words(cdna5_rdna_scope, ROCJITSU_CODE_ARCH_CDNA5)
+                   .encoding.workgroup_acquire_ordering);
 }
 
 TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite) {

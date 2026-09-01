@@ -196,6 +196,11 @@ struct ConSanOrdinaryMemorySite {
   std::optional<int32_t> raw_ioffset;
   std::optional<uint32_t> raw_scope;
   std::optional<uint32_t> raw_th;
+  /// Target-normalized exact ordering qualifier for a compiler-generated
+  /// workgroup group-FLAT acquire. The raw fields remain available for
+  /// diagnostics and mutation proof, but common synchronization analysis does
+  /// not reinterpret them by target family.
+  bool workgroup_acquire_ordering = false;
   std::string mnemonic;
 };
 

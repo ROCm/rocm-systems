@@ -1222,8 +1222,7 @@ template <typename Container>
 
 template <typename Container>
 [[nodiscard]] bool container_has_exact_group_flat_acquire_encoding(const Container &container,
-                                                                   const ConSanSyncEvent &event,
-                                                                   rj_code_arch_t arch) {
+                                                                   const ConSanSyncEvent &event) {
   if (container.name != event.container_name || event.kind != ConSanSyncEventKind::OrdinaryMemory)
     return false;
   const auto matches = std::ranges::count(container.ordinary_memory_sites, event.text_offset,
@@ -1234,30 +1233,19 @@ template <typename Container>
       site->operation != ConSanOrdinaryMemoryOperation::Load ||
       site->flat_address_space_hint != ConSanFlatAddressSpaceHint::Group)
     return false;
-  if (consan_uses_gfx9_cdna_encoding(arch) || consan_uses_gfx11_encoding(arch)) {
-    // Language acquire is SC0/GLC without SC1/SLC. The latter bit appears on
-    // volatile observations but does not create a language happens-before.
-    return site->raw_th && *site->raw_th == 1u;
-  }
-  if (consan_uses_gfx12_cdna_execution(arch)) {
-    // The GFX12 CDNA implicit VFLAT scope is the group-aperture workgroup form.
-    // Explicit system scope is used by the final volatile observation.
-    return site->raw_scope && *site->raw_scope == 0u;
-  }
-  return consan_uses_gfx12_rdna_execution(arch) && site->raw_scope && *site->raw_scope == 1u;
+  return site->workgroup_acquire_ordering;
 }
 
 [[nodiscard]] bool exact_workgroup_flat_acquire_encoding(const ProgramInventory &program_inventory,
-                                                         const ConSanSyncEvent &event,
-                                                         rj_code_arch_t arch) {
+                                                         const ConSanSyncEvent &event) {
   if (event.in_kernel) {
     return std::ranges::any_of(program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
-      return container_has_exact_group_flat_acquire_encoding(kernel, event, arch);
+      return container_has_exact_group_flat_acquire_encoding(kernel, event);
     });
   }
   return std::ranges::any_of(
       program_inventory.functions(), [&](const ConSanFunctionInfo &function) {
-        return container_has_exact_group_flat_acquire_encoding(function, event, arch);
+        return container_has_exact_group_flat_acquire_encoding(function, event);
       });
 }
 
@@ -2183,7 +2171,7 @@ void associate_ordinary_acquire_sync_sequences(
     if (load == nullptr)
       continue;
     if (is_workgroup_flat_communication(program_inventory, *load) &&
-        !exact_workgroup_flat_acquire_encoding(program_inventory, *load, arch))
+        !exact_workgroup_flat_acquire_encoding(program_inventory, *load))
       continue;
     std::vector<size_t> cache_matches;
     std::vector<size_t> bounded_metadata_matches;
@@ -2357,7 +2345,7 @@ void associate_ordinary_acquire_sync_sequences(
           site->operation != ConSanOrdinaryMemoryOperation::Load ||
           site->flat_address_space_hint != ConSanFlatAddressSpaceHint::Group)
         return;
-      ordered_encoding = exact_workgroup_flat_acquire_encoding(program_inventory, *load, arch);
+      ordered_encoding = exact_workgroup_flat_acquire_encoding(program_inventory, *load);
     };
     if (load->in_kernel) {
       for (const ConSanKernelInfo &kernel : program_inventory.kernels())

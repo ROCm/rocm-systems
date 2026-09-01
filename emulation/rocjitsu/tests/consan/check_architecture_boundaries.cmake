@@ -520,6 +520,18 @@ _consan_assert_no_match(
     "synchronization analysis must consume the typed target profile"
 )
 _consan_assert_no_match(
+    "${_consan_dir}/consan_sync_analysis.inc"
+    "site->raw_(scope|th)|consan_uses_gfx9_cdna_encoding|consan_uses_gfx12_(cdna|rdna)_execution"
+    "synchronization analysis must consume target-normalized workgroup-acquire ordering"
+)
+file(READ "${_consan_dir}/consan_program_analysis_target_ops.h"
+     _program_analysis_normalized_contract)
+if(NOT _program_analysis_normalized_contract MATCHES "workgroup_acquire_ordering")
+    message(FATAL_ERROR
+        "ConSan program-analysis target operations lost normalized workgroup-acquire ordering"
+    )
+endif()
+_consan_assert_no_match(
     "${_consan_dir}/consan_access_classifier.cpp"
     "isa/arch/amdgpu/generated/|ROCJITSU_CODE_ARCH_"
     "access classification must consume normalized inventory and the typed target profile"

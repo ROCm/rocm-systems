@@ -26,12 +26,12 @@ decode_gfx1250_lane_transfer(std::span<const uint8_t> instruction) {
 
 ConSanVectorMemoryDecode decode_gfx1250_flat_memory(std::span<const uint8_t> instruction) {
   return decode_gfx12_vector_memory<cdna5::VflatMachineInst>(instruction, cdna5::OPR_SREG_NULL,
-                                                             0xecu, false);
+                                                             0xecu, false, 0u);
 }
 
 ConSanVectorMemoryDecode decode_gfx1250_global_memory(std::span<const uint8_t> instruction) {
   return decode_gfx12_vector_memory<cdna5::VglobalMachineInst>(instruction, cdna5::OPR_SREG_NULL,
-                                                               0xeeu, false);
+                                                               0xeeu, false, 0u);
 }
 
 ConSanBufferMemoryDecode decode_gfx1250_buffer_memory(std::span<const uint8_t> instruction) {

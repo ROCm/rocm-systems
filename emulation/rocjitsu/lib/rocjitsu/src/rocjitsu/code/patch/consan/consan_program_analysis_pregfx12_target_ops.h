@@ -71,6 +71,7 @@ ConSanVectorMemoryDecode decode_pregfx12_vector_memory(std::span<const uint8_t> 
                       ? std::optional<uint16_t>(static_cast<uint16_t>(raw.saddr))
                       : std::nullopt,
               .scope_follows_address_space = !global,
+              .workgroup_acquire_ordering = th == 1u,
               .exact_size = exact_size,
               .ordinary_well_formed = exact_size && raw.encoding == 0x37u &&
                                       raw.seg == (global ? 2u : 0u) && padding_is_zero,

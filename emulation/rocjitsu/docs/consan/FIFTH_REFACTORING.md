@@ -4621,3 +4621,68 @@ extension fixtures remain complete and enforced. Remaining target locality,
 other operating-point and mutable-transaction breadth, larger legacy
 harvesting, material Section 14.8 evidence, and the independent Section 14
 completion audit remain open. The goal therefore remains active.
+
+### 16.54 Convergence checkpoint 53: target-normalized acquire ordering
+
+The synchronization-analysis deep read followed compiler-generated
+workgroup-acquire loads from raw target decoding through ordinary-memory
+inventory and sequence association. Program analysis already normalized most
+VFLAT fields, but common synchronization analysis still interpreted the raw
+ordering representation itself: gfx942/gfx950 used `SC0`, gfx1100 used `GLC`,
+gfx1201 used explicit workgroup `SCOPE`, and gfx1250 used its implicit
+group-aperture scope. This was one four-family target switch in a supposedly
+target-neutral semantic stage. Adding a sixth target with a different spelling
+would have required editing that common stage even if its decoder already
+understood the instruction.
+
+The program-analysis target contract now publishes
+`workgroup_acquire_ordering`. The shared pre-gfx12 family decoder supplies the
+common exact `TH == 1` rule for gfx942, gfx950, and gfx1100; the gfx1201 and
+gfx1250 packages supply their distinct explicit-scope values to the shared
+gfx12 raw decoder. Ordinary-memory inventory carries that normalized fact.
+Synchronization analysis still owns the semantic requirements that the event
+is one exact group-FLAT load in the correct container, but it no longer knows
+how any target encodes the acquire qualifier. The raw `TH` and `SCOPE` fields
+remain available for diagnostics and mutation proof rather than serving as a
+second semantic authority.
+
+A direct regression constructs the exact acquire spelling for all five
+targets, proves that each target decoder publishes the normalized fact, and
+proves that gfx1201's and gfx1250's superficially opposite scope values are not
+interchangeable. Existing end-to-end ordinary-acquire tests then prove that the
+fact survives inventory and drives Record/Replay, fault, cache-association,
+and dense-router behavior. The architecture gate rejects raw site-level
+`TH`/`SCOPE` interpretation and the retired gfx9/gfx12 family predicates from
+common synchronization analysis, and requires the normalized target contract.
+
+| Signal | Checkpoint 53 | Cumulative change | Slice change from checkpoint 52 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,300 | +325 | +3 |
+| Nonblank production lines | 99,014 | **-69** | +3 |
+| Production implementation lines | 91,289 | **-161** | **-1** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **175 / 52** | **-101 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 30 | +10 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Target-family acquire-encoding alternatives in synchronization analysis | **0** | n/a | **-4** |
+| Target-normalized acquire-ordering authorities | **1 contract** | n/a | converged |
+| Test inventory | **5,385** | **+40** | **+1** |
+
+Validation includes a final-tree `-j16` build; 19 focused five-target decode,
+ordinary-acquire, fault, Record/Replay, policy, and architecture-boundary
+tests; and all 4,750 nonphysical tests over the five emulated targets at
+`-j16`. No test was removed, renamed, disabled, or replaced. The transformation
+for gfx1201 is byte-for-byte governed by the same scope predicate now supplied
+by its target decoder; checkpoint 52's immediately preceding complete 635-test
+serialized gfx1201 run remains the periodic physical baseline.
+
+This checkpoint strengthens Sections 14.1, 14.2, 14.4, 14.5, 14.6, 14.7,
+14.8, and 14.9. One concrete target distinction is now physically owned by
+target/family decoder files and common semantic code consumes one forward
+fact. The slice deletes the legacy common interpretations but is only a
+one-line implementation reduction after paying for the explicit contract, so
+material shrinkage remains unproved. Remaining synchronization target
+peepholes, other target locality, operating-point and mutable-transaction
+breadth, larger legacy harvesting, material Section 14.8 evidence, and the
+independent completion audit remain open. The goal therefore remains active.

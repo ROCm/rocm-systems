@@ -1288,6 +1288,7 @@ void apply_vector_memory_encoding(ConSanOrdinaryMemorySite &site,
           ? (site.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group ? 1u : 2u)
           : encoding.raw_scope;
   site.raw_th = encoding.raw_th;
+  site.workgroup_acquire_ordering = encoding.workgroup_acquire_ordering;
   site.address_vgpr = static_cast<uint16_t>(encoding.raw_vaddr);
   if (encoding.scalar_provenance_sgpr)
     site.address_sgpr = encoding.scalar_provenance_sgpr;
