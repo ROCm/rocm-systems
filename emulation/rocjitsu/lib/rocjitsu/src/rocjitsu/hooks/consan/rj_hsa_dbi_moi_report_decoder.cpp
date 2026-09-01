@@ -35,9 +35,7 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
     result.failure = AutoMoiReportDecodeFailure::SnapshotTooSmall;
     return result;
   }
-  const ConSanMoiEngine expected_engine = input.inline_shadow    ? ConSanMoiEngine::InlineShadow
-                                          : input.direct_sampled ? ConSanMoiEngine::Sampled
-                                                                 : ConSanMoiEngine::RecordReplay;
+  const ConSanMoiEngine expected_engine = input.layout.engine;
   const void *report_ptr = snapshot.bytes.data();
 
   const auto *header = static_cast<const rocjitsu::ConSanMoiReportHeader *>(report_ptr);
@@ -61,7 +59,8 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   const uint32_t visible_records = std::min(access_record_count, header->access_record_capacity);
   const uint32_t visible_barriers = std::min(barrier_record_count, header->barrier_record_capacity);
   const uint32_t visible_atomics = std::min(atomic_record_count, header->atomic_record_capacity);
-  const uint32_t visible_fences = std::min(header->fence_record_count, input.fence_record_capacity);
+  const uint32_t visible_fences =
+      std::min(header->fence_record_count, expected_layout.fence_record_capacity);
   const uint32_t raw_visible_diagnostics =
       std::min(header->diagnostic_count, header->diagnostic_capacity);
   const uint32_t dropped_records =
@@ -71,7 +70,7 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   const uint32_t dropped_atomics =
       atomic_record_count > visible_atomics ? atomic_record_count - visible_atomics : 0;
   const uint32_t dropped_fences =
-      input.fence_record_capacity != 0 && header->fence_record_count > visible_fences
+      expected_layout.fence_record_capacity != 0 && header->fence_record_count > visible_fences
           ? header->fence_record_count - visible_fences
           : 0;
   const uint32_t dropped_diagnostics = header->diagnostic_count > raw_visible_diagnostics
@@ -83,34 +82,30 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   const auto *inline_atomic_releases =
       reinterpret_cast<const rocjitsu::ConSanMoiInlineAtomicReleaseSlot *>(
           bytes + expected_layout.inline_atomic_release_slots_offset);
-  const uint32_t inline_atomic_release_capacity =
-      input.inline_shadow ? header->inline_atomic_release_capacity : 0;
+  const uint32_t inline_atomic_release_capacity = expected_layout.inline_atomic_release_capacity;
   const auto *inline_acquired_tokens =
       reinterpret_cast<const volatile rocjitsu::ConSanMoiInlineAcquiredEpochTokenSlot *>(
           bytes + expected_layout.inline_acquired_epoch_token_slots_offset);
   const uint32_t inline_acquired_token_capacity =
-      input.inline_shadow ? header->inline_acquired_epoch_token_capacity : 0;
+      expected_layout.inline_acquired_epoch_token_capacity;
   const auto *inline_causal_snapshots =
       reinterpret_cast<const rocjitsu::ConSanMoiInlineCausalSnapshot *>(
           bytes + expected_layout.inline_causal_snapshots_offset);
   const auto *sampled_causal_windows =
       reinterpret_cast<const rocjitsu::ConSanMoiSampledCausalWindow *>(
           bytes + expected_layout.sampled_causal_windows_offset);
-  const uint32_t sampled_watchpoint_capacity =
-      input.direct_sampled ? header->sampled_watchpoint_capacity : 0;
-  const uint32_t sampled_causal_window_capacity =
-      input.direct_sampled ? header->sampled_causal_window_capacity : 0;
+  const uint32_t sampled_watchpoint_capacity = expected_layout.sampled_watchpoint_capacity;
+  const uint32_t sampled_causal_window_capacity = expected_layout.sampled_causal_window_capacity;
   const auto *sampled =
       reinterpret_cast<const uint64_t *>(bytes + expected_layout.sampled_watchpoints_offset);
   const auto *sampled_sync_words = reinterpret_cast<const volatile uint32_t *>(
       bytes + expected_layout.sampled_sync_metadata_offset);
-  const uint32_t sampled_sync_metadata_capacity =
-      input.direct_sampled ? header->sampled_sync_metadata_capacity : 0;
+  const uint32_t sampled_sync_metadata_capacity = expected_layout.sampled_sync_metadata_capacity;
   const auto *sampled_pending_acquires =
       reinterpret_cast<const volatile rocjitsu::ConSanMoiSampledPendingAcquireSlot *>(
           bytes + expected_layout.sampled_pending_acquires_offset);
   const uint32_t sampled_pending_acquire_capacity =
-      input.direct_sampled ? header->sampled_pending_acquire_capacity : 0;
+      expected_layout.sampled_pending_acquire_capacity;
   const uint32_t sampled_pending_acquire_owner_bank_count =
       rocjitsu::consan_moi_sampled_pending_acquire_owner_bank_count(
           sampled_pending_acquire_capacity, sampled_causal_window_capacity);
@@ -282,9 +277,10 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   const auto *raw_diagnostics = reinterpret_cast<const rocjitsu::ConSanMoiDiagnosticRecord *>(
       bytes + expected_layout.diagnostic_records_offset);
   const bool deferred_token_evidence_complete =
-      input.inline_shadow && summary.token_incomplete_snapshot_count == 0 &&
-      summary.token_changed_snapshot_count == 0 && summary.token_malformed_snapshot_count == 0 &&
-      header->inline_overflow_count == 0 && header->inline_malformed_count == 0;
+      expected_engine == ConSanMoiEngine::InlineShadow &&
+      summary.token_incomplete_snapshot_count == 0 && summary.token_changed_snapshot_count == 0 &&
+      summary.token_malformed_snapshot_count == 0 && header->inline_overflow_count == 0 &&
+      header->inline_malformed_count == 0;
   const auto deferred_filter = rocjitsu::consan_moi_filter_deferred_inline_diagnostics(
       std::span<const rocjitsu::ConSanMoiDiagnosticRecord>(raw_diagnostics,
                                                            raw_visible_diagnostics),
@@ -710,7 +706,8 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   summary.visible_atomic_record_count = visible_atomics;
   summary.visible_fence_record_count = visible_fences;
   summary.visible_diagnostic_record_count = visible_diagnostics;
-  summary.visible_inline_publication_count = input.inline_shadow ? header->event_counter : 0;
+  summary.visible_inline_publication_count =
+      expected_engine == ConSanMoiEngine::InlineShadow ? header->event_counter : 0;
   summary.visible_exact_shadow_entry_count = visible_exact_shadow.size();
   summary.visible_inline_atomic_release_count = visible_inline_atomic_releases.size();
   summary.visible_inline_acquired_token_count = visible_inline_acquired_tokens.size();
@@ -733,10 +730,12 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
       sampled_watchpoint_capacity != 0 ? header->sampled_unsupported_sync_count : 0;
   summary.sampled_malformed_sync_count +=
       sampled_watchpoint_capacity != 0 ? header->sampled_malformed_sync_count : 0;
-  summary.inline_undercoverage_count = input.inline_shadow ? header->inline_undercoverage_count : 0;
-  summary.inline_overflow_count = input.inline_shadow ? header->inline_overflow_count : 0;
-  summary.inline_unsupported_count = input.inline_shadow ? header->inline_unsupported_count : 0;
-  summary.inline_malformed_count += input.inline_shadow ? header->inline_malformed_count : 0;
+  if (expected_engine == ConSanMoiEngine::InlineShadow) {
+    summary.inline_undercoverage_count = header->inline_undercoverage_count;
+    summary.inline_overflow_count = header->inline_overflow_count;
+    summary.inline_unsupported_count = header->inline_unsupported_count;
+    summary.inline_malformed_count += header->inline_malformed_count;
+  }
 
   result.failure = AutoMoiReportDecodeFailure::None;
   result.engine = expected_engine;

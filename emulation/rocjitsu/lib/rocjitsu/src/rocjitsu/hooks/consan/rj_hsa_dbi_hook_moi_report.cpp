@@ -202,28 +202,24 @@ public:
       if (reserved_entry_count_ != 0)
         --reserved_entry_count_;
       successful_allocated_bytes_ += requested_size;
-      entries_[entry_count_++] = Entry{reader,
-                                       ptr,
-                                       requested,
-                                       static_cast<size_t>(required_size),
-                                       generation,
-                                       layout,
-                                       layout.access_record_capacity,
-                                       layout.barrier_record_capacity,
-                                       layout.atomic_record_capacity,
-                                       layout.fence_record_capacity,
-                                       layout.diagnostic_capacity,
-                                       layout.exact_shadow_entry_capacity,
-                                       layout.inline_atomic_release_capacity,
-                                       layout.inline_acquired_epoch_token_capacity,
-                                       layout.inline_causal_snapshot_capacity,
-                                       layout.sampled_watchpoint_capacity,
-                                       direct_sampled,
-                                       inline_shadow,
-                                       search.fine_grained,
-                                       {},
-                                       {},
-                                       {}};
+      entries_[entry_count_++] = Entry{
+          .reader = reader,
+          .ptr = ptr,
+          .size = requested,
+          .required_size = static_cast<size_t>(required_size),
+          .generation = generation,
+          .layout = layout,
+          .fine_grained = search.fine_grained,
+          .input_fingerprint = {},
+          .record_replay_static_mappings = {},
+          .sampled_static_mappings = {},
+          .compact_token_mapping_count = 0,
+          .compact_token_mapping_malformed = false,
+          .record_replay_static_mapping_malformed = false,
+          .sampled_static_mapping_malformed = false,
+          .executable = 0,
+          .executable_bound = false,
+      };
     }
     *address = reinterpret_cast<uint64_t>(ptr);
     *registered_size = requested;
@@ -462,18 +458,6 @@ private:
     size_t required_size = 0;
     uint64_t generation = 0;
     rocjitsu::ConSanMoiReportBufferLayout layout;
-    uint32_t access_record_capacity = 0;
-    uint32_t barrier_record_capacity = 0;
-    uint32_t atomic_record_capacity = 0;
-    uint32_t fence_record_capacity = 0;
-    uint32_t diagnostic_capacity = 0;
-    uint32_t exact_shadow_entry_capacity = 0;
-    uint32_t inline_atomic_release_capacity = 0;
-    uint32_t inline_acquired_epoch_token_capacity = 0;
-    uint32_t inline_causal_snapshot_capacity = 0;
-    uint32_t sampled_watchpoint_capacity = 0;
-    bool direct_sampled = false;
-    bool inline_shadow = false;
     bool fine_grained = false;
     std::string input_fingerprint;
     std::vector<RecordReplayStaticMapping> record_replay_static_mappings;
@@ -637,15 +621,11 @@ private:
     if (entry.sampled_static_mapping_malformed)
       ++summary.sampled_static_mapping_malformed_count;
 
-    const rocjitsu::ConSanMoiEngine expected_engine =
-        entry.inline_shadow    ? rocjitsu::ConSanMoiEngine::InlineShadow
-        : entry.direct_sampled ? rocjitsu::ConSanMoiEngine::Sampled
-                               : rocjitsu::ConSanMoiEngine::RecordReplay;
     const AutoMoiReportSnapshot snapshot = capture_auto_moi_report_snapshot(
         {.source = entry.ptr,
          .size = entry.size,
          .expected_layout = entry.layout,
-         .expected_engine = expected_engine,
+         .expected_engine = entry.layout.engine,
          .fine_grained = entry.fine_grained},
         core != nullptr && core->hsa_memory_copy_fn != nullptr ? copy_coarse_report_snapshot
                                                                : nullptr,
@@ -675,9 +655,6 @@ private:
          .source_address = reinterpret_cast<uint64_t>(entry.ptr),
          .size = entry.size,
          .layout = entry.layout,
-         .fence_record_capacity = entry.fence_record_capacity,
-         .direct_sampled = entry.direct_sampled,
-         .inline_shadow = entry.inline_shadow,
          .fine_grained = entry.fine_grained,
          .input_fingerprint = entry.input_fingerprint,
          .record_replay_static_mappings = entry.record_replay_static_mappings,

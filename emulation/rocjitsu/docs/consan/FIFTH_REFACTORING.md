@@ -5854,3 +5854,60 @@ lines and remains non-material. Remaining architecture and mode locality,
 broader operating-point and mutable-transaction surfaces, larger legacy
 harvesting, material whole-refactoring shrinkage, and the independent Section
 14 completion audit remain open. The goal therefore remains active.
+
+### 16.73 Convergence checkpoint 72: one runtime report-layout authority
+
+The runtime-report deep read found that the allocation registry retained a
+complete `ConSanMoiReportBufferLayout` and then copied ten of its capacities
+plus two mode Booleans into parallel fields. The report-pipeline input copied
+the fence capacity and the two Booleans again. The decoder reconstructed the
+engine from those Booleans, used them to gate mode-local capacities, and used
+the separate fence-capacity copy. This made one validated layout coexist with
+several partial authorities whose consistency depended on positional aggregate
+initialization and manual forwarding.
+
+The registry entry and report-pipeline input now carry only the complete typed
+layout. Registry construction uses named initialization, snapshot validation
+gets its expected engine from `layout.engine`, and the decoder consumes the
+validated layout's engine, fence capacity, and mode-local capacities directly.
+The renderer uses the same layout for fence-capacity diagnostics. Twelve
+redundant registry fields and three redundant pipeline-input fields are
+deleted; there is no mode reconstruction or capacity projection between report
+allocation and decoding.
+
+A decoder regression constructs valid report layouts for Record/Replay,
+Sampled, and InlineShadow and proves that the decoded mode comes solely from
+the layout. Structural gates forbid the retired mode and capacity fields in
+the public pipeline input, the registry entry's consumers, and decoder input
+accesses, preventing a second authority from being threaded back into the
+pipeline.
+
+| Signal | Checkpoint 72 | Cumulative change | Slice change from checkpoint 71 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 105,151 | +175 | **-26** |
+| Nonblank production lines | 98,811 | **-273** | **-26** |
+| Production implementation lines | 91,056 | **-394** | **-26** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **174 / 52** | **-102 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 358 / 61 | +68 / +10 | 0 / 0 |
+| Parallel runtime report-layout fields | **0** | n/a | **-15 fields** |
+| Test inventory | **5,408** | **+63** | 0; one in-target regression added |
+
+Validation includes a final-tree `-j16` build; all 20 focused report-planning,
+snapshot, decoder, renderer, registry, and architecture-boundary tests; and all
+4,773 nonphysical tests over the five emulated targets at `-j16` in 208.77
+seconds, including all 2,918 simulator tests. In accordance with the reduced
+physical-test cadence, no physical gfx1201 test was run for this slice. No test
+was removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5 through 14.9. Runtime
+mode and capacity semantics cross the allocation/decoding boundary as one
+typed product, the parallel union-shaped projections are gone, and the slice
+harvests 26 implementation lines. Cumulative implementation shrinkage reaches
+394 lines, which is still not material completion. Remaining architecture and
+mode locality, broader operating-point and mutable-transaction surfaces,
+larger legacy harvesting, material whole-refactoring shrinkage, and the
+independent Section 14 completion audit remain open. The goal therefore
+remains active.

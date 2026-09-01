@@ -3679,6 +3679,45 @@ TEST(HsaHooksUnitTest, AutoReportDecoderProducesTypedEventsFailuresAndLoss) {
   EXPECT_EQ(malformed.failure, rocjitsu::consan_hook::AutoMoiReportDecodeFailure::InvalidHeader);
 }
 
+TEST(HsaHooksUnitTest, AutoReportDecoderUsesLayoutAsItsOnlyModeAuthority) {
+  constexpr std::array engines{
+      rocjitsu::ConSanMoiEngine::RecordReplay,
+      rocjitsu::ConSanMoiEngine::Sampled,
+      rocjitsu::ConSanMoiEngine::InlineShadow,
+  };
+  for (const rocjitsu::ConSanMoiEngine engine : engines) {
+    SCOPED_TRACE(rocjitsu::consan_moi_engine_name(engine));
+    rocjitsu::ConSanMoiAutoReportInventory inventory;
+    inventory.engine = engine;
+    if (engine == rocjitsu::ConSanMoiEngine::RecordReplay) {
+      inventory.access_range_count = 1u;
+      inventory.record_replay_dispatch_token_capacity = 1u;
+      inventory.record_replay_access_dispatch_bank_count = 1u;
+      inventory.record_replay_access_owner_bank_count = 1u;
+      inventory.record_replay_address_group_headroom = 1u;
+    } else if (engine == rocjitsu::ConSanMoiEngine::Sampled) {
+      inventory.sampled_range_bank_count = 1u;
+      inventory.sampled_watchpoint_count = 1u;
+    } else {
+      inventory.inline_lds_bytes = 4u;
+    }
+    const auto report = rocjitsu::plan_consan_moi_auto_report(inventory);
+    ASSERT_TRUE(report.complete());
+
+    rocjitsu::consan_hook::AutoMoiReportSnapshot snapshot;
+    snapshot.bytes.resize(report.required_bytes);
+    const auto header = rocjitsu::make_consan_moi_report_header_for_layout(7u, 11u, report.layout);
+    std::memcpy(snapshot.bytes.data(), &header, sizeof(header));
+    rocjitsu::consan_hook::AutoMoiReportPipelineInput input;
+    input.size = snapshot.bytes.size();
+    input.layout = report.layout;
+
+    const auto decoded = rocjitsu::consan_hook::decode_auto_moi_report(input, snapshot, {});
+    ASSERT_TRUE(decoded.complete());
+    EXPECT_EQ(decoded.engine, engine);
+  }
+}
+
 TEST(HsaHooksUnitTest, AutoReportRendererConsumesOnlyTypedResultsAndPreservesDiagnostics) {
   rocjitsu::consan_hook::AutoMoiReportPipelineInput input;
   input.reader = 101;

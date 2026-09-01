@@ -1836,6 +1836,21 @@ file(READ "${_hook_dir}/rj_hsa_dbi_moi_report_pipeline.h" _runtime_contract)
 if(NOT _runtime_contract MATCHES "AutoMoiRecordReplayStaticMapping")
     message(FATAL_ERROR "ConSan runtime analysis lost its typed static mapping contract")
 endif()
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_moi_report_pipeline.h"
+    "fence_record_capacity|direct_sampled|inline_shadow"
+    "runtime report input must carry one complete typed layout"
+)
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_moi_report_decoder.cpp"
+    "input[.](fence_record_capacity|direct_sampled|inline_shadow)"
+    "runtime report decoding must derive mode and capacities from the layout"
+)
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_hook_moi_report.cpp"
+    "entry[.](access_record_capacity|barrier_record_capacity|atomic_record_capacity|fence_record_capacity|diagnostic_capacity|exact_shadow_entry_capacity|inline_atomic_release_capacity|inline_acquired_epoch_token_capacity|inline_causal_snapshot_capacity|sampled_watchpoint_capacity|direct_sampled|inline_shadow)"
+    "runtime report registry entries must retain one layout authority"
+)
 
 # Every active implementation fragment has one reviewed textual owner. No
 # implementation fragment may include another except the three coherent

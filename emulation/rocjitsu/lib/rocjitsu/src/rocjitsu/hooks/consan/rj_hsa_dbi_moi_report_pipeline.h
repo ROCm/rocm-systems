@@ -41,9 +41,6 @@ struct AutoMoiReportPipelineInput {
   uint64_t source_address = 0;
   size_t size = 0;
   ConSanMoiReportBufferLayout layout;
-  uint32_t fence_record_capacity = 0;
-  bool direct_sampled = false;
-  bool inline_shadow = false;
   bool fine_grained = false;
   std::string_view input_fingerprint;
   std::span<const AutoMoiRecordReplayStaticMapping> record_replay_static_mappings;
