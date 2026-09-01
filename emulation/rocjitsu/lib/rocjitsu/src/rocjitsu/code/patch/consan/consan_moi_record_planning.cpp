@@ -135,7 +135,8 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
     private_layout = build_moi_private_epoch_layout(
         inventory, resources, arch, warnings,
         {.owner = request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
-         .record_replay_workgroup = true,
+         .record_replay_workgroup =
+             !consan_moi_detail::record_replay_has_entry_workgroup_capture(event_point),
          .dispatch_id = event_point.moi_dispatch_identity.private_fallback()});
     if (!private_layout)
       return std::nullopt;

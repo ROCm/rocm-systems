@@ -2272,7 +2272,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
       !plan.owner_descriptor_file_offsets.empty() &&
       std::ranges::all_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
         const ConSanMoiTransientSgprAssignment *assignment =
-            moi_transient_sgpr_assignment(state.register_allocation, descriptor_offset);
+            moi_transient_sgpr_assignment(point, descriptor_offset);
         return assignment != nullptr && assignment->spill_backed;
       });
   const bool fixed_lane_scalar_reservoir =
@@ -5129,6 +5129,10 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
         }
       }
       const auto hole_unavailable = [&](uint16_t base) {
+        if (static_cast<uint32_t>(base) + scalar_count > moi_ordinary_sgpr_limit(arch) ||
+            persistent_sgpr_range_overlaps_reserved_ordinary_range(base, scalar_count, arch)) {
+          return true;
+        }
         for (uint16_t index = 0; index < scalar_count; ++index) {
           if (scalar_references.references.contains(
                   {RegClass::SGPR, static_cast<uint16_t>(base + index), 1u})) {
@@ -5155,8 +5159,10 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       // transfer or dynamic scalar index still makes the proof fail closed.
       if (every_owner_resolved && scalar_references.control_flow_closed &&
           !scalar_references.uses_indirect_sgprs) {
+        const uint16_t hole_limit =
+            static_cast<uint16_t>(std::min<uint32_t>(first, moi_ordinary_sgpr_limit(arch)));
         persistent_hole = first_admitted_moi_register_range(
-            0u, scalar_count, static_cast<uint16_t>(first), 1u,
+            0u, scalar_count, hole_limit, 1u,
             [&](uint16_t candidate) { return !hole_unavailable(candidate); });
       }
       if (persistent_hole) {

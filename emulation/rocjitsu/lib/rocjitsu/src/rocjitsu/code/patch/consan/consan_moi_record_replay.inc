@@ -556,7 +556,8 @@ void try_apply_first_light_access_record_patch(
       private_layout = private_layout_cache.resolve(
           cache_descriptor, result.program_inventory, *resources, arch, result.warnings,
           {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
-           .record_replay_workgroup = true,
+           .record_replay_workgroup =
+               !consan_moi_detail::record_replay_has_entry_workgroup_capture(candidate_point),
            .dispatch_id = candidate_point.moi_dispatch_identity.private_fallback()});
       if (!private_layout) {
         result.warnings.emplace_back(
