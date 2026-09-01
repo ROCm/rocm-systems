@@ -71,6 +71,23 @@ if ($bad) {
 }
 Write-Host "encoding check passed (UTF-8, LF, no BOM)"
 
+# One experiment per name. Duplicate stems under a second extension have appeared
+# here once already - nine byte-identical .cc copies of the .hip files, which
+# build.sh does not build and so would have rotted silently while looking
+# authoritative to anyone reading the tree. Surface it rather than ignore it,
+# because a .gitignore would hide a real file just as effectively as a stray one.
+$dupes = Get-ChildItem src\experiments -File |
+    Group-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) } |
+    Where-Object { $_.Count -gt 1 }
+if ($dupes) {
+    Write-Host "DUPLICATE EXPERIMENT SOURCES - not pushing:" -ForegroundColor Red
+    $dupes | ForEach-Object {
+        Write-Host "  $($_.Name): $(($_.Group.Name) -join ', ')" -ForegroundColor Red
+    }
+    Write-Host "  build.sh compiles only .hip; delete the others or rename them." -ForegroundColor Red
+    exit 1
+}
+
 if ($NoPush) { return }
 
 # --- push -------------------------------------------------------------------
