@@ -1467,8 +1467,8 @@ configure_settings(bool _init)
     {
         constexpr std::string_view k_papi_net_component_prefix = "net:::";
         const auto papi_events = rocprofsys::delimit(_config->get_papi_events(), " ,\t;");
-        const bool all_events_network_related =
-            std::ranges::all_of(papi_events, [k_papi_net_component_prefix](const std::string& event) {
+        const bool all_events_network_related = std::ranges::all_of(
+            papi_events, [k_papi_net_component_prefix](const std::string& event) {
                 return event.starts_with(k_papi_net_component_prefix);
             });
         if(!all_events_network_related)
