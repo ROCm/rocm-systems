@@ -1137,6 +1137,11 @@ def test_gfx1250_generated_inventory_omits_legacy_s_waitcnt(
 
 def _fake_sopp_parser(arch_name: str, *, sub_decode_funcs: list[str | None] | None):
     parser = object.__new__(Parser)
+    parser.profile = {
+        'cdna5': Cdna5Profile(),
+        'rdna3': Rdna3Profile(),
+        'rdna4': Rdna4Profile(),
+    }[arch_name]
     sopp = SimpleNamespace(
         insts=[
             Instruction('S_WAIT_ALU', 'ENC_SOPP', 8, []),
@@ -1192,6 +1197,21 @@ def test_rdna4_parser_injects_s_waitcnt_compat_once_in_opcode_order():
     assert dte.sub_decode_funcs[9] == 'decodeSWaitcntSopp'
 
 
+def test_rdna4_parser_selects_its_compatibility_slot_by_instruction_name():
+    parser, sopp, dte = _fake_sopp_parser('rdna4', sub_decode_funcs=[None] * 16)
+    parser.profile = SimpleNamespace(
+        compatibility_instruction_slots={
+            ('ENC_OTHER', 4): 'OTHER_COMPAT',
+            ('ENC_SOPP', 9): 'S_WAITCNT',
+        }
+    )
+
+    parser._inject_s_waitcnt_compat()
+
+    assert any(inst.name == 'S_WAITCNT' and inst.opcode == 9 for inst in sopp.insts)
+    assert dte.sub_decode_funcs[9] == 'decodeSWaitcntSopp'
+
+
 def test_gfx1250_parser_does_not_inject_legacy_s_waitcnt():
     parser, sopp, dte = _fake_sopp_parser('cdna5', sub_decode_funcs=[None] * 16)
 
@@ -1206,6 +1226,7 @@ def test_gfx1250_parser_does_not_inject_legacy_s_waitcnt():
 
 def test_gfx1250_parser_injects_permlane64_compat_once():
     parser = object.__new__(Parser)
+    parser.profile = Cdna5Profile()
     vop1 = SimpleNamespace(
         insts=[
             Instruction('V_SWAP_B16', 'ENC_VOP1', 102, []),
@@ -1242,6 +1263,7 @@ def test_gfx1250_parser_injects_permlane64_compat_once():
 
 def test_gfx1250_parser_permlane64_requires_an_unambiguous_adjacent_route():
     parser = object.__new__(Parser)
+    parser.profile = Cdna5Profile()
     vop1 = SimpleNamespace(
         insts=[Instruction('V_SWAP_B16', 'ENC_VOP1', 102, [])],
         primary_dt_ptrs=[-1] * 128,
@@ -1268,6 +1290,7 @@ def test_gfx1250_parser_permlane64_requires_an_unambiguous_adjacent_route():
 
 def test_gfx1250_parser_permlane64_rejects_opcode_collision_before_mutation():
     parser = object.__new__(Parser)
+    parser.profile = Cdna5Profile()
     collision = Instruction('V_OTHER_B32', 'ENC_VOP1', 103, [])
     vop1 = SimpleNamespace(
         insts=[collision],
@@ -1292,6 +1315,7 @@ def test_gfx1250_parser_permlane64_rejects_opcode_collision_before_mutation():
 
 def test_gfx1250_parser_permlane64_rejects_invalid_decode_table_index_before_mutation():
     parser = object.__new__(Parser)
+    parser.profile = Cdna5Profile()
     vop1 = SimpleNamespace(
         insts=[Instruction('V_SWAP_B16', 'ENC_VOP1', 102, [])],
         primary_dt_ptrs=[-1] * 128,
@@ -1346,6 +1370,7 @@ def test_gfx1250_parser_permlane64_rejects_terminal_conflicts_before_mutation(
     decode_entry, message
 ):
     parser = object.__new__(Parser)
+    parser.profile = Cdna5Profile()
     neighbor = Instruction('V_SWAP_B16', 'ENC_VOP1', 102, [])
     vop1 = SimpleNamespace(
         insts=[neighbor],
@@ -1383,6 +1408,7 @@ def test_gfx1250_parser_permlane64_rejects_missing_route_invariants(
     encoding_map, message
 ):
     parser = object.__new__(Parser)
+    parser.profile = Cdna5Profile()
     parser.isa_spec = SimpleNamespace(
         arch_name='cdna5',
         encoding_map=encoding_map,
@@ -1430,6 +1456,7 @@ def test_rdna4_s_waitcnt_rejects_opcode_collision_before_mutation():
 )
 def test_rdna4_s_waitcnt_rejects_missing_route_invariants(encoding_map, message):
     parser = object.__new__(Parser)
+    parser.profile = Rdna4Profile()
     parser.isa_spec = SimpleNamespace(
         arch_name='rdna4',
         encoding_map=encoding_map,
