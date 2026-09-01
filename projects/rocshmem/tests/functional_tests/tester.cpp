@@ -393,6 +393,32 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
                                                    ", Expect " +
                                                    std::to_string(n_pes));
           }));
+      testers.push_back(new TeamReduceScatterTester<__half, ROCSHMEM_SUM>(
+          args,
+          [](__half& f1, __half& f2) {
+            f1 = static_cast<__half>(1);
+            f2 = static_cast<__half>(0);
+          },
+          [](__half v, __half n_pes) {
+            return (static_cast<float>(v) == static_cast<float>(n_pes))
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false,
+                             "Got " + std::to_string(static_cast<float>(v)) +
+                             ", Expect " + std::to_string(static_cast<float>(n_pes)));
+          }));
+      testers.push_back(new TeamReduceScatterTester<__hip_bfloat16, ROCSHMEM_SUM>(
+          args,
+          [](__hip_bfloat16& f1, __hip_bfloat16& f2) {
+            f1 = static_cast<__hip_bfloat16>(1);
+            f2 = static_cast<__hip_bfloat16>(0);
+          },
+          [](__hip_bfloat16 v, __hip_bfloat16 n_pes) {
+            return (static_cast<float>(v) == static_cast<float>(n_pes))
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false,
+                             "Got " + std::to_string(static_cast<float>(v)) +
+                             ", Expect " + std::to_string(static_cast<float>(n_pes)));
+          }));
       break;
     case ReduceWaveTestType:
       test_name = "Wave-level Reduction";
