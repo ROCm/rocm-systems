@@ -5,7 +5,7 @@
 
 #include "common/defines.h"
 #include "common/delimit.hpp"
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <cstdint>
 #include <cstdlib>

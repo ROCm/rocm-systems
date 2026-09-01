@@ -71,7 +71,9 @@ struct CommandLineArguments {
     /* Time in units of seconds */
     unsigned int SleepTime;
     std::string ConcurrentNodes;
-    unsigned int TestNodeNum; 
+    unsigned int TestNodeNum;
+    unsigned int AisThreads;
+    unsigned int AisSizeMB;
 };
 
 // It is either MEM_NONE or the bitwise OR of one or more of the following flags
