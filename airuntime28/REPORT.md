@@ -39,30 +39,10 @@ up — which matters, because width turns out to dominate everything else measur
 System: `heliosr-1b114-a07-4`, gfx1250 (MI450 A0 engineering sample, `REV_ID 0x00`), 256 CU,
 432 GiB HBM, SPX / NPS1. Negative is faster throughout.
 
-### How to read `(ns)`
-
-It stands for **not separable**: not separable from the rig's own noise. It is a stronger
-statement than "not statistically significant", and it is worth understanding, because most
-cells in this report carry it.
-
-Every run measures at least one variant **twice**, in two slots running identical code. The
-true difference between those two slots is zero — they are the same kernel. So whatever
-difference the rig reports between them is pure measurement error, and the largest such error
-in a run is that run's **resolution limit**, printed next to every table.
-
-A result has to clear two bars to count as an effect:
-
-1. its 95% confidence interval must exclude zero, and
-2. its size must exceed that run's resolution limit.
-
-`(ns)` means it failed at least one of them.
-
-The second bar is why a result can have a tight interval and still be marked `(ns)`. A narrow
-interval says a measurement is *repeatable*; it does not say the measurement is of the thing
-you meant. If comparing a variant against a copy of *itself* also yields a confident-looking
-0.7%, then confident-looking 0.7% differences are simply what this rig produces, and a 0.5%
-result is not evidence of anything. Treat `(ns)` cells as "no effect found", and do not quote
-their numbers.
+Each run also measures one variant against an identical copy of itself, where the true answer
+is zero. Whatever gap it reports there is the rig's own jitter, and it is quoted next to every
+table as the **resolution limit**. `(ns)` marks a result smaller than that: no effect found,
+don't quote the number. [METHOD.md](METHOD.md) has the exact test.
 
 ### Isolated streaming copy, 1 GiB
 
