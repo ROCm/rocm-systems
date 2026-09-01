@@ -343,7 +343,6 @@ class TestCliRasCperJson(unittest.TestCase):
         self.assertEqual(json.loads(captured), [])
 
     def test_fabric_cper_with_gpu_cper_unified_output(self):
-        # Test that fabric and GPU CPER entries are combined into a single JSON document.
         counts_gpu = {}
         counts_fabric = {}
 
@@ -379,13 +378,11 @@ class TestCliRasCperJson(unittest.TestCase):
         # Expect 2 GPUs × 2 entries (1 GPU + 1 fabric) = 4 total rows
         self.assertEqual(len(parsed), 4, f"expected 2 GPU + 2 fabric entries, got: {parsed!r}")
 
-        # Verify we have both GPU (FATAL) and fabric (FABRIC-LINKDOWN) entries
         severities = [row["severity"] for row in parsed]
         self.assertIn("FATAL", severities, "Should have GPU CPER entry")
         self.assertIn("FABRIC-LINKDOWN", severities, "Should have fabric CPER entry")
 
     def test_fabric_cper_only_no_gpu_cper(self):
-        # Test fabric CPER when no GPU CPER entries exist
         counts_fabric = {}
 
         def _fabric_entries(handle, _mask, _size, cursor):
@@ -405,12 +402,10 @@ class TestCliRasCperJson(unittest.TestCase):
         self.assertIsInstance(parsed, list)
         self.assertEqual(len(parsed), 2, f"expected 2 fabric entries (1 per GPU), got: {parsed!r}")
 
-        # All entries should be fabric-fatal
         for row in parsed:
             self.assertEqual(row["severity"], "FABRIC-FATAL")
 
     def test_fabric_cper_not_supported_graceful_fallback(self):
-        # Test that NOT_SUPPORTED for fabric CPER doesn't break the output
         def _gpu_entries(handle, _mask, _size, cursor):
             if cursor == 0:
                 entry = {
@@ -430,7 +425,7 @@ class TestCliRasCperJson(unittest.TestCase):
         parsed = json.loads(captured)
         self.assertIsInstance(parsed, list)
 
-        # Should only have GPU entries (no fabric), 2 GPUs
+        # GPU entries only: one per GPU, with the fabric call raising NOT_SUPPORTED.
         self.assertEqual(len(parsed), 2)
         for row in parsed:
             self.assertEqual(row["severity"], "FATAL")

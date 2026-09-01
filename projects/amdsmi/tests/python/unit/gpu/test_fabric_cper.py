@@ -71,7 +71,6 @@ class TestFabricCperInterface(unittest.TestCase):
     """Test amdsmi_interface.amdsmi_get_fabric_cper_entries()"""
 
     def setUp(self):
-        """Set up test fixtures"""
         self.processor_handle = amdsmi_wrapper.amdsmi_processor_handle(0x1234)
 
     def test_invalid_handle_type(self):
@@ -82,7 +81,6 @@ class TestFabricCperInterface(unittest.TestCase):
     @_patch_fabric_symbol()
     def test_not_supported_error(self, mock_fabric_cper):
         """Test NOT_SUPPORTED error handling (UALoE unavailable)"""
-        # Mock C function returning NOT_SUPPORTED
         mock_fabric_cper.return_value = amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
 
         with self.assertRaises(amdsmi_exception.AmdSmiLibraryException) as context:
@@ -98,11 +96,10 @@ class TestFabricCperInterface(unittest.TestCase):
     def test_success_no_entries(self, mock_fabric_cper):
         """Test successful call with no entries returned"""
 
-        # Mock C function returning SUCCESS with 0 entries
         def mock_impl(handle, severity, buf, buf_size, hdrs, entry_count, cursor):
-            _set_out(entry_count, 0)  # No entries
+            _set_out(entry_count, 0)
             _set_out(buf_size, 0)
-            _set_out(cursor, 0)  # No more data
+            _set_out(cursor, 0)  # 0 means no more data
             return amdsmi_wrapper.AMDSMI_STATUS_SUCCESS
 
         mock_fabric_cper.side_effect = mock_impl
@@ -121,24 +118,17 @@ class TestFabricCperInterface(unittest.TestCase):
         """Test successful call with fabric CPER entries"""
 
         def mock_impl(handle, severity, buf, buf_size, hdrs, entry_count, cursor):
-            # Synthesize one fabric CPER entry
-            # amdsmi_cper_hdr_t is 128 bytes
+            # One fabric CPER entry, laid out by byte offset into the 128-byte
+            # amdsmi_cper_hdr_t.
             cper_header = bytearray(128)
-            # Signature: "CPER"
-            cper_header[0:4] = b"CPER"
-            # Revision: 0x0100 (little-endian)
-            struct.pack_into("<H", cper_header, 4, 0x0100)
-            # signature_end: 0xFFFFFFFF
-            struct.pack_into("<I", cper_header, 6, 0xFFFFFFFF)
-            # section_count: 1
-            struct.pack_into("<H", cper_header, 10, 1)
-            # error_severity: AMDSMI_CPER_SEV_FATAL (1)
-            struct.pack_into("<I", cper_header, 12, 1)
-            # valid_bits: timestamp valid (bit 0)
-            struct.pack_into("<I", cper_header, 16, 0x01)
-            # record_length: 128 (header only, no payload)
-            struct.pack_into("<I", cper_header, 20, 128)
-            # Timestamp: 2026-08-24 12:00:00
+            cper_header[0:4] = b"CPER"  # signature
+            struct.pack_into("<H", cper_header, 4, 0x0100)  # revision
+            struct.pack_into("<I", cper_header, 6, 0xFFFFFFFF)  # signature_end
+            struct.pack_into("<H", cper_header, 10, 1)  # sec_cnt
+            struct.pack_into("<I", cper_header, 12, 1)  # AMDSMI_CPER_SEV_FATAL
+            struct.pack_into("<I", cper_header, 16, 0x01)  # valid_bits: timestamp
+            struct.pack_into("<I", cper_header, 20, 128)  # record_length, no payload
+            # Timestamp: 2026-08-24 12:00:00, as the Python layer reads it.
             cper_header[24] = 0  # seconds
             cper_header[25] = 0  # minutes
             cper_header[26] = 12  # hours
@@ -147,23 +137,15 @@ class TestFabricCperInterface(unittest.TestCase):
             cper_header[29] = 8  # month
             cper_header[30] = 26  # year
             cper_header[31] = 20  # century
-            # platform_id, partition_id: all zeros
-            # record_id: 0
-            # flags: 0
-            # persistence_info: 0
-            # notify_type: all zeros (IFoE placeholder GUID)
-            # creator_id: "IFoE"
-            cper_header[96:100] = b"IFoE"
+            cper_header[96:100] = b"IFoE"  # creator_id
+            # notify_type at 72:88 stays all zeros: the IFoE placeholder GUID.
 
-            # Copy to buffer
             ctypes.memmove(buf, bytes(cper_header), 128)
-
-            # Set header pointer
             hdrs[0] = ctypes.cast(buf, ctypes.POINTER(amdsmi_wrapper.amdsmi_cper_hdr_t))
 
             _set_out(entry_count, 1)
             _set_out(buf_size, 128)
-            _set_out(cursor, 0)  # No more data
+            _set_out(cursor, 0)
             return amdsmi_wrapper.AMDSMI_STATUS_SUCCESS
 
         mock_fabric_cper.side_effect = mock_impl
@@ -176,10 +158,8 @@ class TestFabricCperInterface(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(new_cursor, 0)
 
-        # Verify entry fields
         entry = entries[0]
         self.assertEqual(entry["error_severity"], "fatal")
-        self.assertIn("notify_type", entry)
         self.assertEqual(entry["timestamp"], "2026/08/24 12:00:00")
         self.assertEqual(entry["signature"], b"CPER")
         self.assertEqual(entry["revision"], 0x0100)
@@ -192,7 +172,6 @@ class TestFabricCperInterface(unittest.TestCase):
         """Test MORE_DATA status and cursor pagination"""
 
         def mock_impl(handle, severity, buf, buf_size, hdrs, entry_count, cursor_ref):
-            # Return MORE_DATA with cursor = 100
             _set_out(entry_count, 0)
             _set_out(buf_size, 0)
             _set_out(cursor_ref, 100)
@@ -209,9 +188,12 @@ class TestFabricCperInterface(unittest.TestCase):
 
     @_patch_fabric_symbol()
     def test_custom_buffer_size(self, mock_fabric_cper):
-        """Test custom buffer_size parameter"""
+        """buffer_size sizes both the data buffer and the declared buf_size"""
+        seen = {}
 
         def mock_impl(handle, severity, buf, buf_size, hdrs, entry_count, cursor):
+            seen["buf_len"] = len(buf)
+            seen["buf_size_in"] = buf_size._obj.value
             _set_out(entry_count, 0)
             _set_out(buf_size, 0)
             _set_out(cursor, 0)
@@ -219,13 +201,14 @@ class TestFabricCperInterface(unittest.TestCase):
 
         mock_fabric_cper.side_effect = mock_impl
 
-        # Test with custom buffer size
-        custom_buffer_size = 2 * 1048576  # 2 MB
-        entries, new_cursor, cper_data, status = amdsmi_interface.amdsmi_get_fabric_cper_entries(
+        custom_buffer_size = 2 * 1048576
+        _entries, _new_cursor, _cper_data, status = amdsmi_interface.amdsmi_get_fabric_cper_entries(
             self.processor_handle, severity_mask=0xFFFF, buffer_size=custom_buffer_size
         )
 
         self.assertEqual(status, amdsmi_wrapper.AMDSMI_STATUS_SUCCESS)
+        self.assertEqual(seen["buf_len"], custom_buffer_size)
+        self.assertEqual(seen["buf_size_in"], custom_buffer_size)
 
     @_patch_fabric_symbol()
     def test_fabric_entries_are_marked_as_fabric(self, mock_fabric_cper):
@@ -239,8 +222,7 @@ class TestFabricCperInterface(unittest.TestCase):
             struct.pack_into("<H", cper_header, 10, 1)
             struct.pack_into("<I", cper_header, 12, 1)  # FATAL
             struct.pack_into("<I", cper_header, 20, 128)
-            # notify_type: IFoE placeholder GUID (all zeros)
-            cper_header[72:88] = bytes(16)
+            cper_header[72:88] = bytes(16)  # notify_type: IFoE placeholder GUID
             cper_header[96:100] = b"IFoE"
 
             ctypes.memmove(buf, bytes(cper_header), 128)

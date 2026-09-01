@@ -6241,9 +6241,9 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_ha
  *  @param[in,out] cper_hdrs Array of pointers into cper_data, one per
  *                 returned entry. Caller allocates the array.
  *
- *  @param[out] entry_count [in] maximum number of entries the cper_hdrs array can hold,
- *              must be in [1, 4096].
- *              [out] number of CPER entries returned.
+ *  @param[in,out] entry_count [in] maximum number of entries the cper_hdrs array can hold,
+ *                 must be in [1, 4096].
+ *                 [out] number of CPER entries returned.
  *
  *  @param[in,out] cursor [in] cursor from previous call (0 = start).
  *                 [out] cursor for next call (0 = no more data).
