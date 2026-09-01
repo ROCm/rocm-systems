@@ -468,6 +468,26 @@ __device__ ATTR_NO_INLINE void rocshmem_bfloat16_alltoallv_wg(rocshmem_team_t te
                                                              const size_t dest_displs[],
                                                              __hip_bfloat16 *source, const size_t source_nelems[],
                                                              const size_t source_displs[]);
+__device__ ATTR_NO_INLINE void rocshmem_int8_alltoallv_wg(rocshmem_team_t team,
+                                                             int8_t *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             int8_t *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
+__device__ ATTR_NO_INLINE void rocshmem_int16_alltoallv_wg(rocshmem_team_t team,
+                                                             int16_t *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             int16_t *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_alltoallv_wg(rocshmem_team_t team,
+                                                             uint8_t *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             uint8_t *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_alltoallv_wg(rocshmem_team_t team,
+                                                             uint16_t *dest, const size_t dest_nelems[],
+                                                             const size_t dest_displs[],
+                                                             uint16_t *source, const size_t source_nelems[],
+                                                             const size_t source_displs[]);
 
 __device__ ATTR_NO_INLINE void rocshmem_half_alltoallv_wg(rocshmem_team_t team,
                                                           __half *dest, const size_t dest_nelems[],
