@@ -323,6 +323,38 @@ foreach(_operand IN ITEMS ExecLo ExecHi VccLo VccHi WorkitemIdX ScopeDevice)
         )
     endif()
 endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_native_abi.h"
+    "kTtmp"
+    "concrete command-processor TTMP indices belong to gfx-named target profiles"
+)
+foreach(_target_profile IN ITEMS gfx1201 gfx1250)
+    file(
+        READ
+        "${_consan_dir}/consan_${_target_profile}_target_profile.h.inc"
+        _workgroup_identity_profile
+    )
+    if(NOT _workgroup_identity_profile MATCHES
+       "command_processor_workgroup_identity")
+        message(FATAL_ERROR
+            "ConSan ${_target_profile} profile lost its target-owned workgroup ABI"
+        )
+    endif()
+endforeach()
+string(FIND "${_moi_placement}" "moi_descriptor_workgroup_sources" _workgroup_source_begin)
+string(FIND "${_moi_placement}" "record_replay_persistent_workgroup_sources"
+       _workgroup_source_end)
+if(_workgroup_source_begin LESS 0 OR _workgroup_source_end LESS_EQUAL _workgroup_source_begin)
+    message(FATAL_ERROR "ConSan workgroup-source boundary could not be located")
+endif()
+math(EXPR _workgroup_source_length "${_workgroup_source_end} - ${_workgroup_source_begin}")
+string(SUBSTRING "${_moi_placement}" ${_workgroup_source_begin}
+       ${_workgroup_source_length} _workgroup_source_placement)
+if(_workgroup_source_placement MATCHES "kTtmp|ConSanWorkgroupIdentitySource")
+    message(FATAL_ERROR
+        "ConSan common workgroup placement must consume the target-owned exact ABI"
+    )
+endif()
 file(READ "${_consan_dir}/consan_moi_shared_lowering.h" _moi_private_layout_contract)
 if(NOT _moi_private_layout_contract MATCHES "struct MoiPrivateStateDemand" OR
    NOT _moi_private_layout_contract MATCHES "class MoiPrivateEpochLayoutCache")

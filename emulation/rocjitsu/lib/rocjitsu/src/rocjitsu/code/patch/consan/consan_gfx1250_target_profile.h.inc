@@ -13,7 +13,11 @@ inline constexpr ConSanTargetProfile kConSanGfx1250TargetProfile = [] {
   profile.encoding_family = ConSanEncodingFamily::Gfx12;
   profile.accumulator_model = ConSanAccumulatorModel::SelectableVgprBank;
   profile.dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral;
-  profile.workgroup_identity = ConSanWorkgroupIdentitySource::CommandProcessorTtmps;
+  profile.command_processor_workgroup_identity = {
+      .grid_x_ttmp = 9u,
+      .grid_yz_ttmp = 7u,
+      .cluster_workgroup_id_ttmp = 6u,
+  };
   profile.direct_call_form = ConSanDirectCallForm::SCallI64;
   profile.code_transport = ConSanCodeTransportModel::PerKernelOwnerTranslation;
   profile.resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10};

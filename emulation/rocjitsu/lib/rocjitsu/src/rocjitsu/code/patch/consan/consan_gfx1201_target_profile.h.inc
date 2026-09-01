@@ -7,7 +7,11 @@ inline constexpr ConSanTargetProfile kConSanGfx1201TargetProfile = [] {
   profile.target = ROCJITSU_CODE_TARGET_GFX1201;
   profile.arch = ROCJITSU_CODE_ARCH_RDNA4;
   profile.encoding_family = ConSanEncodingFamily::Gfx12;
-  profile.workgroup_identity = ConSanWorkgroupIdentitySource::CommandProcessorTtmps;
+  profile.command_processor_workgroup_identity = {
+      .grid_x_ttmp = 9u,
+      .grid_yz_ttmp = 7u,
+      .cluster_workgroup_id_ttmp = std::nullopt,
+  };
   profile.address_free_private_limit_bytes = 0x800000u;
   profile.atomic_address_materialization.flat_and_global = true;
   profile.atomic_address_materialization.buffer_resource = true;

@@ -286,32 +286,31 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
   }
 
   const ConSanTargetProfile *profile = consan_target_profile(arch);
-  if (profile &&
-      profile->workgroup_identity == ConSanWorkgroupIdentitySource::CommandProcessorTtmps) {
-    // These are the translated RDNA command-processor ABI TTMPs, not the
+  if (profile && profile->command_processor_workgroup_identity) {
+    const auto &identity = *profile->command_processor_workgroup_identity;
+    // These are translated command-processor ABI TTMPs, not the
     // descriptor-selected entry SGPRs copied from them by the kernel prologue.
     // MOI finalization enables the complete command-processor grid payload on
     // every patched owner descriptor. Preserve that full identity: an x-only
     // guest kernel can still be dispatched over a multidimensional grid, and
     // each workgroup owns a distinct LDS instance.
     return ConSanMoiWorkgroupSources{
-        .x = ConSanMoiWorkgroupSource::scalar(ttmp_scalar_operand(kTtmpRdna4GridX)),
-        .y = ConSanMoiWorkgroupSource::scalar(ttmp_scalar_operand(kTtmpRdna4GridYz),
+        .x = ConSanMoiWorkgroupSource::scalar(ttmp_scalar_operand(identity.grid_x_ttmp)),
+        .y = ConSanMoiWorkgroupSource::scalar(ttmp_scalar_operand(identity.grid_yz_ttmp),
                                               /*shift_right_16=*/false,
                                               /*mask_low_16=*/true),
-        .z = ConSanMoiWorkgroupSource::scalar(ttmp_scalar_operand(kTtmpRdna4GridYz),
+        .z = ConSanMoiWorkgroupSource::scalar(ttmp_scalar_operand(identity.grid_yz_ttmp),
                                               /*shift_right_16=*/true),
-        .cluster_workgroup_id = profile->has_cluster_facilities && uses_cluster_workgroup_id
+        .cluster_workgroup_id = uses_cluster_workgroup_id && identity.cluster_workgroup_id_ttmp
                                     ? ConSanMoiWorkgroupSource::scalar(
-                                          ttmp_scalar_operand(kTtmpGfx1250ClusterWorkgroupId))
+                                          ttmp_scalar_operand(*identity.cluster_workgroup_id_ttmp))
                                     : ConSanMoiWorkgroupSource{},
         .cdna_full_payload_base = std::nullopt,
         .cdna_guest_payload_base = std::nullopt,
         .cdna_guest_payload_mask = 0u,
     };
   }
-  if (cdna_full_payload_user_sgpr_count && profile &&
-      profile->workgroup_identity == ConSanWorkgroupIdentitySource::DescriptorSystemSgprs) {
+  if (cdna_full_payload_user_sgpr_count && profile) {
     const uint16_t full_base = *cdna_full_payload_user_sgpr_count;
     if (static_cast<uint32_t>(full_base) + 3u > kMaxSgprs) {
       errors.emplace_back("ConSan MOI full CDNA workgroup-ID payload exceeds scalar registers");

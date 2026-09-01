@@ -143,17 +143,18 @@ enum class ConSanDispatchIdentitySource : uint8_t {
   CodeObjectLiteral,
 };
 
-/// Identifies the architectural source of the workgroup coordinates consumed
-/// by ConSan probes.
+/// Exact command-processor ABI registers carrying workgroup coordinates.
 ///
-/// Some targets expose coordinates through descriptor-enabled system SGPRs;
-/// others make them available through command-processor temporary registers.
-/// The distinction controls prologue and resource planning and must not be
-/// inferred from CDNA/RDNA product lineage. This type describes the source
-/// facility only, not the higher-level owner key assembled from it.
-enum class ConSanWorkgroupIdentitySource : uint8_t {
-  DescriptorSystemSgprs,
-  CommandProcessorTtmps,
+/// Absence from a target profile means that workgroup coordinates use the
+/// descriptor-enabled system-SGPR path. Presence makes every concrete TTMP
+/// index a target-owned fact while leaving common placement responsible only
+/// for interpreting the uniform packed-coordinate representation.
+struct ConSanCommandProcessorWorkgroupIdentity {
+  uint8_t grid_x_ttmp = 0;
+  uint8_t grid_yz_ttmp = 0;
+  std::optional<uint8_t> cluster_workgroup_id_ttmp;
+
+  bool operator==(const ConSanCommandProcessorWorkgroupIdentity &) const = default;
 };
 
 /// Names the direct scalar call form available to injected ConSan code.
@@ -325,8 +326,7 @@ struct ConSanTargetProfile {
   ConSanEncodingFamily encoding_family = ConSanEncodingFamily::Gfx9Cdna3;
   ConSanAccumulatorModel accumulator_model = ConSanAccumulatorModel::None;
   ConSanDispatchIdentitySource dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair;
-  ConSanWorkgroupIdentitySource workgroup_identity =
-      ConSanWorkgroupIdentitySource::DescriptorSystemSgprs;
+  std::optional<ConSanCommandProcessorWorkgroupIdentity> command_processor_workgroup_identity;
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
   ConSanCodeTransportModel code_transport = ConSanCodeTransportModel::DirectCodeObject;
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
@@ -508,6 +508,7 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
     return false;
   for (std::size_t lhs = 0; lhs < profiles.size(); ++lhs) {
     const ConSanTargetProfile &profile = profiles[lhs];
+    const auto &workgroup_identity = profile.command_processor_workgroup_identity;
     if (profile.target == ROCJITSU_CODE_TARGET_INVALID ||
         profile.arch == ROCJITSU_CODE_ARCH_INVALID || !profile.supports_wave64 ||
         (profile.flat_compare_swap_data_pair_alignment != 1u &&
@@ -575,7 +576,17 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
           profile.encoding_family == ConSanEncodingFamily::Gfx12)) ||
         (profile.has_cluster_facilities &&
          (profile.semantic_form_mask &
-          consan_capability_form_bit(ConSanCapabilityForm::ClusterBarrier)) == 0u)) {
+          consan_capability_form_bit(ConSanCapabilityForm::ClusterBarrier)) == 0u) ||
+        (workgroup_identity &&
+         (workgroup_identity->grid_x_ttmp > 15u || workgroup_identity->grid_yz_ttmp > 15u ||
+          workgroup_identity->grid_x_ttmp == workgroup_identity->grid_yz_ttmp ||
+          (workgroup_identity->cluster_workgroup_id_ttmp &&
+           (*workgroup_identity->cluster_workgroup_id_ttmp > 15u ||
+            *workgroup_identity->cluster_workgroup_id_ttmp == workgroup_identity->grid_x_ttmp ||
+            *workgroup_identity->cluster_workgroup_id_ttmp ==
+                workgroup_identity->grid_yz_ttmp)))) ||
+        (workgroup_identity && workgroup_identity->cluster_workgroup_id_ttmp.has_value()) !=
+            profile.has_cluster_facilities) {
       return false;
     }
     if ((profile.reserved_ordinary_sgpr_count == 0u) != (profile.reserved_ordinary_sgpr_base == 0u))

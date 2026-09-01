@@ -5395,3 +5395,62 @@ whole-refactoring shrinkage. Remaining architecture locality, broader
 operating-point and mutable-transaction surfaces, larger legacy harvesting,
 material Section 14.8 evidence, and the independent Section 14 completion audit
 remain open. The goal therefore remains active.
+
+### 16.66 Convergence checkpoint 65: target-owned workgroup TTMP ABI
+
+The workgroup-source deep read found an architecture-locality contradiction in
+the target capability contract. The contract distinguished descriptor system
+SGPRs from command-processor TTMPs, but it exposed only that coarse choice.
+Common MOI placement therefore still declared the concrete gfx1201 grid-x and
+packed grid-yz TTMP indices and the gfx1250 cluster-workgroup TTMP index. A new
+target could select the TTMP facility only by silently inheriting those old
+targets' register numbers, and readers could not understand either target's
+complete workgroup ABI from its gfx-named profile.
+
+The coarse source enum is deleted. `ConSanTargetProfile` now carries an
+optional exact command-processor workgroup-identity tuple. Absence selects the
+existing descriptor system-SGPR path; gfx1201 declares its two grid TTMPs in
+`consan_gfx1201_target_profile.h.inc`, and gfx1250 declares those plus its
+cluster-workgroup TTMP in `consan_gfx1250_target_profile.h.inc`. Common
+placement consumes the tuple generically and retains only the shared packed-yz
+decoding policy. The three target-named constants have been deleted from the
+common native-ABI header.
+
+The target-profile validator rejects out-of-range or overlapping TTMPs and
+requires cluster-facility support and a cluster-workgroup source to agree. Its
+independent five-target fixture asserts the exact values and all malformed
+invariants. The architecture gate prevents target-named TTMP constants from
+returning to the common native-ABI owner, requires both affected gfx profiles
+to declare their ABI, and requires the common workgroup-source region to
+consume the exact profile rather than rebuilding the retired source enum.
+
+| Signal | Checkpoint 65 | Cumulative change | Slice change from checkpoint 64 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 105,157 | +182 | +15 |
+| Nonblank production lines | 98,820 | **-263** | +14 |
+| Production implementation lines | 91,079 | **-371** | +16 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **174 / 52** | **-102 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Common target-named workgroup TTMP constants | **0** | n/a | **-3** |
+| Exact command-processor workgroup ABI owners | **2 gfx-named profiles** | n/a | **+2** |
+| Test inventory | **5,388** | **+43** | 0 |
+
+Validation includes a final-tree `-j16` build; 124 focused target-profile,
+workgroup-identity, all-engine independent-workgroup, and
+architecture-boundary tests; all 4,753 nonphysical tests over the five
+emulated targets at `-j16`; and all 635 physical gfx1201 tests serialized at
+`-j1`. No test was removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.2, 14.4, 14.5, 14.7, and 14.9.
+Adding or reviewing a command-processor workgroup ABI now begins and ends in a
+gfx-named profile, while common placement sees only the normalized product.
+The exact-contract validation costs sixteen implementation lines, so this is a
+target-locality and extension-safety investment rather than Section 14.8
+progress; cumulative shrinkage moves from 387 to 371 implementation lines.
+Remaining architecture locality, broader operating-point and mutable-
+transaction surfaces, larger legacy harvesting, material Section 14.8
+evidence, and the independent Section 14 completion audit remain open. The goal
+therefore remains active.

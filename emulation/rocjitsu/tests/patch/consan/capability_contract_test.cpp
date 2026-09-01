@@ -30,7 +30,7 @@ struct ExpectedTargetProfile {
   ConSanEncodingFamily encoding_family;
   ConSanAccumulatorModel accumulator_model;
   ConSanDispatchIdentitySource dispatch_identity;
-  ConSanWorkgroupIdentitySource workgroup_identity;
+  std::optional<ConSanCommandProcessorWorkgroupIdentity> command_processor_workgroup_identity;
   ConSanDirectCallForm direct_call_form;
   ConSanCodeTransportModel code_transport;
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
@@ -82,7 +82,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .encoding_family = ConSanEncodingFamily::Gfx9Cdna3,
         .accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned,
         .dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair,
-        .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
+        .command_processor_workgroup_identity = std::nullopt,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
@@ -136,7 +136,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .encoding_family = ConSanEncodingFamily::Gfx9Cdna4,
         .accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned,
         .dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair,
-        .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
+        .command_processor_workgroup_identity = std::nullopt,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
@@ -190,7 +190,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .encoding_family = ConSanEncodingFamily::Gfx11,
         .accumulator_model = ConSanAccumulatorModel::None,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
-        .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
+        .command_processor_workgroup_identity = std::nullopt,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
@@ -245,7 +245,12 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .encoding_family = ConSanEncodingFamily::Gfx12,
         .accumulator_model = ConSanAccumulatorModel::None,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
-        .workgroup_identity = ConSanWorkgroupIdentitySource::CommandProcessorTtmps,
+        .command_processor_workgroup_identity =
+            ConSanCommandProcessorWorkgroupIdentity{
+                .grid_x_ttmp = 9u,
+                .grid_yz_ttmp = 7u,
+                .cluster_workgroup_id_ttmp = std::nullopt,
+            },
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
@@ -303,7 +308,12 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .encoding_family = ConSanEncodingFamily::Gfx12,
         .accumulator_model = ConSanAccumulatorModel::SelectableVgprBank,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
-        .workgroup_identity = ConSanWorkgroupIdentitySource::CommandProcessorTtmps,
+        .command_processor_workgroup_identity =
+            ConSanCommandProcessorWorkgroupIdentity{
+                .grid_x_ttmp = 9u,
+                .grid_yz_ttmp = 7u,
+                .cluster_workgroup_id_ttmp = 6u,
+            },
         .direct_call_form = ConSanDirectCallForm::SCallI64,
         .code_transport = ConSanCodeTransportModel::PerKernelOwnerTranslation,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
@@ -367,7 +377,8 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.encoding_family, expected.encoding_family);
   EXPECT_EQ(actual.accumulator_model, expected.accumulator_model);
   EXPECT_EQ(actual.dispatch_identity, expected.dispatch_identity);
-  EXPECT_EQ(actual.workgroup_identity, expected.workgroup_identity);
+  EXPECT_EQ(actual.command_processor_workgroup_identity,
+            expected.command_processor_workgroup_identity);
   EXPECT_EQ(actual.direct_call_form, expected.direct_call_form);
   EXPECT_EQ(actual.code_transport, expected.code_transport);
   EXPECT_EQ(actual.resident_wave_identity, expected.resident_wave_identity);
@@ -555,6 +566,32 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
     profiles[4].semantic_form_mask =
         static_cast<uint16_t>(profiles[4].semantic_form_mask &
                               ~consan_capability_form_bit(ConSanCapabilityForm::ClusterBarrier));
+  });
+  expect_invalid("workgroup grid-x TTMP outside the scalar temporary range", [](auto &profiles) {
+    profiles[3].command_processor_workgroup_identity->grid_x_ttmp = 16u;
+  });
+  expect_invalid("workgroup grid-yz TTMP outside the scalar temporary range", [](auto &profiles) {
+    profiles[3].command_processor_workgroup_identity->grid_yz_ttmp = 16u;
+  });
+  expect_invalid("workgroup coordinate TTMPs overlap", [](auto &profiles) {
+    profiles[3].command_processor_workgroup_identity->grid_x_ttmp =
+        profiles[3].command_processor_workgroup_identity->grid_yz_ttmp;
+  });
+  expect_invalid("cluster workgroup TTMP outside the scalar temporary range", [](auto &profiles) {
+    profiles[4].command_processor_workgroup_identity->cluster_workgroup_id_ttmp = 16u;
+  });
+  expect_invalid("cluster workgroup TTMP overlaps grid x", [](auto &profiles) {
+    profiles[4].command_processor_workgroup_identity->cluster_workgroup_id_ttmp =
+        profiles[4].command_processor_workgroup_identity->grid_x_ttmp;
+  });
+  expect_invalid("cluster workgroup TTMP overlaps packed grid yz", [](auto &profiles) {
+    profiles[4].command_processor_workgroup_identity->cluster_workgroup_id_ttmp =
+        profiles[4].command_processor_workgroup_identity->grid_yz_ttmp;
+  });
+  expect_invalid("cluster workgroup TTMP without cluster facilities",
+                 [](auto &profiles) { profiles[4].has_cluster_facilities = false; });
+  expect_invalid("cluster facilities without a cluster workgroup TTMP", [](auto &profiles) {
+    profiles[4].command_processor_workgroup_identity->cluster_workgroup_id_ttmp.reset();
   });
   expect_invalid("reserved SGPR base without count",
                  [](auto &profiles) { profiles[0].reserved_ordinary_sgpr_base = 1u; });

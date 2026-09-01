@@ -23,9 +23,6 @@ namespace rocjitsu::consan_moi_impl {
 inline constexpr uint16_t kScalarInlineNegativeOneOperand = 193u;
 inline constexpr uint16_t kScalarOperandTtmpBase = 108u;
 inline constexpr uint16_t kScalarOperandSharedBase = 235u;
-inline constexpr uint16_t kTtmpRdna4GridYz = 7u;
-inline constexpr uint16_t kTtmpRdna4GridX = 9u;
-inline constexpr uint16_t kTtmpGfx1250ClusterWorkgroupId = 6u;
 inline constexpr uint32_t kMaxVgprs = kConSanOrdinaryVgprLimit;
 inline constexpr uint32_t kMaxSgprs = 106u;
 inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256u;
