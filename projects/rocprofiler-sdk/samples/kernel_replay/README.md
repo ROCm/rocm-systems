@@ -16,8 +16,8 @@ Build with `-DROCPROFILER_BUILD_SAMPLES=ON`.
 | Run | `ctest -R '^kernel-replay-'` in the samples build dir | `ctest -R kernel-replay-local-context` in main build |
 
 For JSON output validation with the shared test harness, see `tests/counter-collection/`
-(`rocprofiler-sdk-json-tool`). Kernel replay JSON/tool wiring is planned for the stacked
-`rocprofv3` PR (#10439), not these SDK samples.
+(`rocprofiler-sdk-json-tool`). Kernel replay JSON/tool wiring belongs to `rocprofv3`, not to
+these SDK samples.
 
 ## What each sample shows
 

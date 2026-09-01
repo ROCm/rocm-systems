@@ -15,9 +15,19 @@ device memory between those executions so each pass observes identical inputs. I
 
    This API is experimental. The public header is
    ``<rocprofiler-sdk/experimental/kernel_replay.h>``. The domain and payload are expected
-   to change before a stable release. A failed device-memory restore aborts the process. Replay is
-   limited to single-packet, single-dispatch submissions; see :ref:`kernel-replay-limitations`
-   and :ref:`kernel-replay-memory-snapshot`.
+   to change before a stable release. See :ref:`kernel-replay-limitations` and
+   :ref:`kernel-replay-memory-snapshot`.
+
+   Known failure behavior:
+
+   * A dispatch that cannot be replayed runs **once**, unreplayed, and warns. This covers a
+     multi-packet submission, a HIP graph launch, and a snapshot that could not be completed
+     because of host memory pressure or because HSA would not enumerate a loaded executable's
+     module-scope variables.
+   * A failed device-memory **restore** aborts the process. Once part of the snapshot has been
+     written back, continuing would leave the application's memory in a mixed state.
+   * A drain that does not complete within roughly 60 seconds aborts the process rather than
+     hanging.
 
 For the configure / ``replay_pass_count`` / local-context how-to, see :ref:`using-kernel-replay`. For
 pass-count semantics, localized context control, and source maps, see
