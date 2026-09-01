@@ -51,10 +51,9 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
        record.phase != ROCPROFILER_CALLBACK_PHASE_ENTER)
         return;
 
-    // Counters on 0..N-2; PC sampling on the last pass only. Locally stop counters on the
-    // PCS pass and locally stop PC sampling on counter passes, so the two are never enabled
-    // together. Exclusivity is only as strong as the PC sampling service's handling of the
-    // local override.
+    // Illustrates the intended per-pass toggle pattern, but PC sampling ignores localized
+    // overrides today, so this sample must not run under ctest while counters are also enabled.
+    // See kernel_replay_callback_api.md (service combination limits).
     if(p->current_pass == kPcsPass)
     {
         if(g_counters_ctx.handle != 0 && p->replay_stop_context)
