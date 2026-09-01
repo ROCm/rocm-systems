@@ -259,10 +259,10 @@ private:
     {
         std::string filtered;
         filtered.reserve(input.size());
-        std::ranges::for_each(input, [&filtered](char ch) {
-            if(ch != '\t' && ch != ' ')
+        std::ranges::for_each(input, [&filtered](char chr) {
+            if(chr != '\t' && chr != ' ')
             {
-                filtered.push_back(ch);
+                filtered.push_back(chr);
             }
         });
         auto trimmed = rocprofsys::utility::string::to_lower(filtered);
@@ -323,10 +323,10 @@ private:
     {
         std::string settings_filtered;
         settings_filtered.reserve(input.size());
-        std::ranges::for_each(input, [&settings_filtered](char ch) {
-            if(ch != '\t' && ch != ' ')
+        std::ranges::for_each(input, [&settings_filtered](char chr) {
+            if(chr != '\t' && chr != ' ')
             {
-                settings_filtered.push_back(ch);
+                settings_filtered.push_back(chr);
             }
         });
         auto settings_trimmed = rocprofsys::utility::string::to_lower(settings_filtered);

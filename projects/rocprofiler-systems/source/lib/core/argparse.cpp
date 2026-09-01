@@ -31,8 +31,8 @@ get_clock_id_choices()
     auto clock_name = [](std::string _v) {
         constexpr auto _clock_prefix = std::string_view{ "clock_" };
         _v                           = utility::string::to_lower(_v);
-        auto _pos                    = _v.find(_clock_prefix);
-        if(_pos == 0) _v = _v.substr(_pos + _clock_prefix.length());
+        auto pos                     = _v.find(_clock_prefix);
+        if(pos == 0) _v = _v.substr(pos + _clock_prefix.length());
         if(_v == "process_cputime_id") _v = "cputime";
         return _v;
     };

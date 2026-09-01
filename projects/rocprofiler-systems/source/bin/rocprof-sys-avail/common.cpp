@@ -311,7 +311,7 @@ process_categories(parser_t& p, const str_set_t& _category_options)
     }
 
     // Helper to find case-insensitive match in category options
-    auto _find_category = [&_category_map](std::string_view input) -> std::string_view {
+    auto find_category = [&_category_map](std::string_view input) -> std::string_view {
         auto input_lower = rocprofsys::utility::string::to_lower(input);
         auto it          = _category_map.find(input_lower);
         if(it != _category_map.end()) return it->second;
@@ -322,7 +322,7 @@ process_categories(parser_t& p, const str_set_t& _category_options)
     // map
     for(const auto& itr : category_view)
     {
-        auto _matched = _find_category(itr);
+        auto _matched = find_category(itr);
         if(!_matched.empty())
         {
             // Only create patch if the matched form differs from input (normalization
@@ -412,14 +412,16 @@ rocm_domain_from_setting_name(std::string_view _env_var_name)
     if(_env_var_name.size() <= _rocm_op_prefix.size() + _rocm_op_suffix.size() ||
        !_env_var_name.starts_with(_rocm_op_prefix) ||
        !_env_var_name.ends_with(_rocm_op_suffix))
+    {
         return std::nullopt;
+    }
 
     // Extract the domain name from the environment variable name, then convert it to
     // lowercase.
-    auto _domain = rocprofsys::utility::string::to_lower(_env_var_name.substr(
+    auto domain = rocprofsys::utility::string::to_lower(_env_var_name.substr(
         _rocm_op_prefix.size(),
         _env_var_name.size() - _rocm_op_prefix.size() - _rocm_op_suffix.size()));
-    return _domain;
+    return domain;
 }
 
 std::string

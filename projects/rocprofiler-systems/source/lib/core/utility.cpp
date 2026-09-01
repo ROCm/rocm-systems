@@ -48,7 +48,7 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
     };
 
     _input_string = utility::string::to_lower(_input_string);
-    auto _result  = ContainerT{};
+    auto result   = ContainerT{};
     for(auto _v : rocprofsys::delimit(_input_string, ",; \t\n\r"))
     {
         if(_v.find_first_not_of("0123456789-:") != std::string::npos)
@@ -107,16 +107,16 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
             }
             do
             {
-                emplace(_result, _vn);
+                emplace(result, _vn);
                 _vn += _incr_v;
             } while(_vn <= _vN);
         }
         else
         {
-            emplace(_result, std::stoll(_v));
+            emplace(result, std::stoll(_v));
         }
     }
-    return _result;
+    return result;
 }
 
 template std::set<std::int64_t>

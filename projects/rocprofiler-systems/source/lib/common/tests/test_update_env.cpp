@@ -19,7 +19,10 @@ find_env_var(const std::vector<std::string>& env, std::string_view var_name)
     const std::string prefix = std::string(var_name) + "=";
     for(const auto& entry : env)
     {
-        if(std::string_view{ entry }.starts_with(prefix)) return entry;
+        if(std::string_view{ entry }.starts_with(prefix))
+        {
+            return entry;
+        }
     }
     return "";
 }
