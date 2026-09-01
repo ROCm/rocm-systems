@@ -453,8 +453,8 @@ Changing partition settings has strict requirements:
 - **The GPU must be idle** -- no active workloads may be running on any partition of the
   physical GPU when performing a set operation.
 - **Memory partition changes require a driver reload** to take effect. After successfully
-  calling `amdsmi_set_gpu_memory_partition()` or `amdsmi_set_gpu_memory_partition_mode()`, all GPU processes must be stopped,
-  then run:
+  calling `amdsmi_set_gpu_memory_partition()` or `amdsmi_set_gpu_memory_partition_mode()`,
+  all GPU processes must be stopped, then run:
 
   ```shell
   sudo modprobe -r amdgpu && sudo modprobe amdgpu

@@ -70,10 +70,6 @@
 	path = projects/rocprofiler-systems/external/perfetto
 	url = https://github.com/google/perfetto.git
 	shallow = true
-[submodule "projects/rocprofiler-systems/external/elfio"]
-	path = projects/rocprofiler-systems/external/elfio
-	url = https://github.com/jrmadsen/ELFIO.git
-	shallow = true
 [submodule "projects/rocprofiler-systems/external/dyninst"]
 	path = projects/rocprofiler-systems/external/dyninst
 	url = https://github.com/ROCm/dyninst.git
