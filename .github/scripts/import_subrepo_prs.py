@@ -8,6 +8,10 @@ from github import Github
 from git import Repo
 
 
+class InputValidationError(ValueError):
+    """Raised when workflow input is unsafe or malformed."""
+
+
 def run(cmd, **kwargs):
     # Require argv lists so fork-controlled values (branch names, URLs) are never
     # interpolated into a shell string. Reject str commands to prevent regressions
@@ -27,22 +31,40 @@ def run_allow_failure(cmd, **kwargs):
     except subprocess.CalledProcessError:
         pass
 
+
+# Validate Git branch syntax and reject option-like names starting with "-" so
+# untrusted branch names cannot be interpreted as command-line options.
+def validate_branch_name(branch):
+    result = subprocess.run(
+        ["git", "check-ref-format", "--branch", branch],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or result.stdout.strip() != branch:
+        error = result.stderr.strip() or "branch name does not resolve literally"
+        raise InputValidationError(f"Invalid branch name {branch!r}: {error}")
+
+    ret = branch
+    return ret
+
+
 # clone_url from the GitHub API is always HTTPS; reject other schemes (e.g. git@)
 # before passing the URL to git subtree pull.
 def validate_clone_url(url):
     parsed = urlparse(url)
     if parsed.scheme != "https" or not parsed.netloc:
-        raise ValueError(f"Unsupported clone URL: {url!r}")
+        raise InputValidationError(f"Unsupported clone URL: {url!r}")
 
     repo_path = parsed.path.removeprefix("/")
     if not repo_path.endswith(".git"):
-        raise ValueError(f"Unexpected clone URL path: {url!r}")
+        raise InputValidationError(f"Unexpected clone URL path: {url!r}")
 
     owner, repo = repo_path[:-4].split("/", 1)
     if not owner or not repo or "/" in repo:
-        raise ValueError(f"Unexpected clone URL path: {url!r}")
+        raise InputValidationError(f"Unexpected clone URL path: {url!r}")
 
-    return url
+    ret = url
+    return ret
 
 
 def main():
@@ -59,6 +81,7 @@ def main():
         print("ERROR: Missing one or more required environment variables.")
         sys.exit(1)
 
+    target = validate_branch_name(target)
     pr_numbers = [p.strip() for p in pr_list.split(",") if p.strip()]
     conflicted_prs = []  # Track PRs with merge conflicts
 
@@ -86,7 +109,7 @@ def main():
 
         title = pr.title
         body = pr.body or ""
-        head_ref = pr.head.ref
+        head_ref = validate_branch_name(pr.head.ref)
         # GitHub API clone_url is always HTTPS (e.g. https://github.com/o/r.git).
         # SSH remotes are in pr.head.repo.ssh_url (git@host:o/r.git); we use
         # clone_url here, so git@ URLs are never passed to git subtree pull.
@@ -145,4 +168,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except InputValidationError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(1)
