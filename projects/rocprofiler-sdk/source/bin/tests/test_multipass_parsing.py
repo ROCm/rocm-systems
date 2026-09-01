@@ -24,6 +24,7 @@
 
 """GPU-free unit tests for the rocprofv3 multi-pass helpers."""
 
+import json
 import os
 import sys
 
@@ -119,65 +120,72 @@ def test_multipass_source(
     )
 
 
-def test_no_guard_for_single_pass(rocprofv3):
-    assert rocprofv3.multipass_incompatible_message(None, 12345, ["0:100:1"]) is None
-
-
-def test_no_guard_without_incompatible_option(rocprofv3):
+@pytest.mark.parametrize(
+    "source,has_pid,has_collection_period",
+    [
+        (None, True, False),
+        (None, False, True),
+        ("multiple input-file jobs", False, False),
+    ],
+)
+def test_multipass_guard_does_not_reject_compatible_cases(
+    rocprofv3, source, has_pid, has_collection_period
+):
     assert (
-        rocprofv3.multipass_incompatible_message("multiple --pmc flags", None, None)
+        rocprofv3.multipass_incompatible_message(source, has_pid, has_collection_period)
         is None
     )
 
 
 @pytest.mark.parametrize(
-    "source",
+    "jobs,cli_args,expected",
     [
-        "multiple --pmc flags",
-        "multiple input-file jobs",
-        "--pmc combined with input-file pmc",
+        (
+            [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}],
+            ["--pid", "12345"],
+            "multiple input-file jobs) is not compatible with attach mode",
+        ),
+        (
+            [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}],
+            ["--collection-period", "0:100:1"],
+            "multiple input-file jobs) is not compatible with --collection-period",
+        ),
+        (
+            [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"], "pid": 12345}],
+            [],
+            "multiple input-file jobs) is not compatible with attach mode",
+        ),
+        (
+            [
+                {"pmc": ["SQ_WAVES"]},
+                {"pmc": ["GRBM_COUNT"], "collection_period": ["0:100:1"]},
+            ],
+            [],
+            "multiple input-file jobs) is not compatible with --collection-period",
+        ),
+        (
+            [{"pmc": ["GRBM_COUNT"]}],
+            ["--pmc", "SQ_WAVES", "--pid", "12345"],
+            "--pmc combined with input-file pmc) is not compatible with attach mode",
+        ),
     ],
 )
-def test_guard_reports_the_actual_source(rocprofv3, source):
-    assert rocprofv3.multipass_incompatible_message(source, 12345, None) == (
-        f"Multi-pass counter collection ({source}) is not compatible "
-        "with attach mode (--pid)"
+def test_multipass_incompatible_options_fail_before_launch(
+    rocprofv3, tmp_path, capsys, jobs, cli_args, expected
+):
+    input_path = _write(
+        tmp_path, "input.json", json.dumps({"jobs": jobs}, separators=(",", ":"))
     )
-    assert rocprofv3.multipass_incompatible_message(source, None, ["0:100:1"]) == (
-        f"Multi-pass counter collection ({source}) is not compatible "
-        "with --collection-period"
-    )
+    output_path = tmp_path / "output"
 
+    with pytest.raises(SystemExit) as exc_info:
+        rocprofv3.main(
+            ["-i", input_path, *cli_args, "-d", str(output_path), "--", "/bin/true"]
+        )
 
-def test_guard_reports_pid_before_collection_period(rocprofv3):
-    assert "attach mode (--pid)" in rocprofv3.multipass_incompatible_message(
-        "multiple --pmc flags", 12345, ["0:100:1"]
-    )
-
-
-def test_first_set_attr_finds_value_in_later_job(rocprofv3):
-    jobs = [
-        rocprofv3.dotdict({"pmc": ["SQ_WAVES"]}),
-        rocprofv3.dotdict({"pmc": ["GRBM_COUNT"], "pid": 12345}),
-    ]
-    assert rocprofv3.first_set_attr(jobs, "pid") == 12345
-
-
-def test_first_set_attr_prefers_the_earliest_job(rocprofv3):
-    jobs = [
-        rocprofv3.dotdict({"collection_period": ["0:100:1"]}),
-        rocprofv3.dotdict({"collection_period": ["1:200:2"]}),
-    ]
-    assert rocprofv3.first_set_attr(jobs, "collection_period") == ["0:100:1"]
-
-
-def test_first_set_attr_returns_none_when_unset(rocprofv3):
-    jobs = [rocprofv3.dotdict({"pmc": ["SQ_WAVES"]})]
-    assert rocprofv3.first_set_attr(jobs, "pid") is None
-
-
-def test_first_set_attr_handles_no_input_file(rocprofv3):
-    assert rocprofv3.first_set_attr([rocprofv3.dotdict({})], "pid") is None
+    assert exc_info.value.code == 1
+    assert expected in capsys.readouterr().err
+    assert not output_path.exists()
 
 
 if __name__ == "__main__":
