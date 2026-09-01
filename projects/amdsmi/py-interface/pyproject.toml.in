@@ -28,7 +28,9 @@ zip-safe = false
 include-package-data = true
 
 [tool.setuptools.package-data]
-amdsmi = ["*.so"]
+# Notices ship as package data, not PEP 639 `license-files`, which would need
+# setuptools >= 77. Same glob the bundled .so already relies on.
+amdsmi = ["*.so", "THIRD_PARTY_LICENSES/*"]
 
 [tool.pytest.ini_options]
 addopts = [
