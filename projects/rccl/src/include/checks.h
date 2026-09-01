@@ -8,7 +8,18 @@
 #ifndef NCCL_CHECKS_H_
 #define NCCL_CHECKS_H_
 
+#include <stdint.h>
+#include <hip/hip_version.h>
 #include "debug.h"
+
+// osHandle argument for cuMemImportFromShareableHandle with a POSIX file
+// descriptor. CUDA and HIP 7.1+ take the fd value itself cast to void*; the
+// ROCm 7.0.x cuMem backport instead dereferences osHandle to read the fd.
+#if HIP_VERSION < 70100000
+#define NCCL_CUMEM_IMPORT_FD(fd) ((void*)&(fd))
+#else
+#define NCCL_CUMEM_IMPORT_FD(fd) ((void*)(uintptr_t)(fd))
+#endif
 
 // Check CUDA RT calls
 #define CUDACHECK(cmd) \

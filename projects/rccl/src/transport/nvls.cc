@@ -86,7 +86,7 @@ ncclResult_t ncclNvlsGroupConnect(struct ncclComm* comm, char* shareableHandle, 
           *(uint64_t*)shareableHandle, rank);
     NCCLCHECKGOTO(ncclProxyClientGetFdBlocking(comm, rank, shareableHandle, &fd), ret, fail);
     TRACE(NCCL_NVLS, "NVLS rank %d received converted fd %d from rank %d", comm->localRank, fd, rank);
-    CUCHECKGOTO(cuMemImportFromShareableHandle(mcHandle, (void*)(uintptr_t)fd, type), ret, fail);
+    CUCHECKGOTO(cuMemImportFromShareableHandle(mcHandle, NCCL_CUMEM_IMPORT_FD(fd), type), ret, fail);
     SYSCHECK(close(fd), "close");
   } else {
     if (type == CU_MEM_HANDLE_TYPE_FABRIC) {

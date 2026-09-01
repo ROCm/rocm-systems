@@ -331,8 +331,7 @@ ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm* comm, int peer, size_
       // Send cuMem handle to remote for conversion to an fd
       NCCLCHECK(ncclProxyClientGetFdBlocking(comm, peer, &cuDesc->data, &fd));
       INFO(NCCL_P2P, "UDS converted handle 0x%lx to fd %d on remote peer %d", *(uint64_t*)&cuDesc->data, fd, peer);
-      // For POSIX_FD, pass the fd value (not a pointer to fd) cast as void*
-      CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)fd, type));
+      CUCHECK(cuMemImportFromShareableHandle(&handle, NCCL_CUMEM_IMPORT_FD(fd), type));
       SYSCHECK(close(fd), "close");
     } else {
 #ifdef ENABLE_TRACE
@@ -1480,7 +1479,7 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
       } else {
         if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
           CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment],
-                                                     (void*)(uintptr_t)ipcExpInfo[segment].impFd, ncclCuMemHandleType),
+                                                     NCCL_CUMEM_IMPORT_FD(ipcExpInfo[segment].impFd), ncclCuMemHandleType),
                       ret, fail);
           SYSCHECKGOTO(close(ipcExpInfo[segment].impFd), "close", ret, fail);
         } else {

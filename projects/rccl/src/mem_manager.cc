@@ -919,8 +919,8 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
           continue;
         }
 
-        curet = CUPFN(cuMemImportFromShareableHandle(&newHandle, (void*)(uintptr_t)fd,
-                                                     CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
+        curet = CUPFN(cuMemImportFromShareableHandle(
+          &newHandle, NCCL_CUMEM_IMPORT_FD(fd), CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
         close(fd);
       } else if (matchedInfo->handleType == CU_MEM_HANDLE_TYPE_FABRIC) {
         // For FABRIC: Import directly using the fabric handle

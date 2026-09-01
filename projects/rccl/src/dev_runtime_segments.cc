@@ -28,9 +28,12 @@ ncclResult_t ncclDevrPopulateSegmentSizes(struct ncclDevrMemory* mem, int numSeg
 
   size_t offset = 0;
   for (int segment = 0; segment < numSegments; segment++) {
+    // hipMemGetAddressRange writes both outputs unconditionally, so pbase must
+    // be a real pointer even though only the size is used here.
+    CUdeviceptr baseSend = 0;
     size_t baseSendSize = 0;
     CUdeviceptr segmentStart = reinterpret_cast<CUdeviceptr>(reinterpret_cast<char*>(mem->primaryAddr) + offset);
-    CUCHECKGOTO(cuMemGetAddressRange(NULL, &baseSendSize, segmentStart), ret, exit);
+    CUCHECKGOTO(cuMemGetAddressRange(&baseSend, &baseSendSize, segmentStart), ret, exit);
     mem->segmentSizes[segment] = baseSendSize;
     offset += baseSendSize;
   }

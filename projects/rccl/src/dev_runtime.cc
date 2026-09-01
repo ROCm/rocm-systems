@@ -347,8 +347,7 @@ static ncclResult_t symMemoryImportAndMapSegmentHandle(struct ncclComm* comm, in
     if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
       int fd = -1;
       NCCLCHECKGOTO(ncclProxyClientGetFdBlocking(comm, devr->lsaRankList[r], msg, &fd), ret, fail);
-      CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, reinterpret_cast<void*>((uintptr_t)fd),
-                                                 ncclCuMemHandleType),
+      CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, NCCL_CUMEM_IMPORT_FD(fd), ncclCuMemHandleType),
                   ret, fail);
       SYSCHECKGOTO(close(fd), "close", ret, fail);
     } else {
@@ -1330,8 +1329,11 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
 
   // Retain all handles and validate segment location types
   for (int segment = 0; segment < numSegments; segment++) {
+    // hipMemGetAddressRange writes both outputs unconditionally, so pbase must
+    // be a real pointer even though only the size is used here.
+    CUdeviceptr baseSend = 0;
     size_t baseSendSize;
-    CUCHECK(cuMemGetAddressRange(nullptr, &baseSendSize,
+    CUCHECK(cuMemGetAddressRange(&baseSend, &baseSendSize,
                                  reinterpret_cast<CUdeviceptr>(reinterpret_cast<char*>(memAddr) + offset)));
     CUCHECKGOTO(cuMemRetainAllocationHandle(&memHandles[segment], (void*)(reinterpret_cast<char*>(memAddr) + offset)),
                 ret, fail_locReg);

@@ -626,7 +626,7 @@ ncclResult_t ncclShmImportShareableBuffer(struct ncclComm* comm, int proxyRank, 
       int fd = -1;
       // Send cuMem handle to remote for conversion to an fd
       NCCLCHECK(ncclProxyClientGetFdBlocking(comm, proxyRank, &desc->shmci.data, &fd));
-      CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)fd, type));
+      CUCHECK(cuMemImportFromShareableHandle(&handle, NCCL_CUMEM_IMPORT_FD(fd), type));
       (void)close(fd);
     } else {
       CUCHECK(cuMemImportFromShareableHandle(&handle, &desc->shmci.handle, type));
