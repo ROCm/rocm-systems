@@ -15,9 +15,6 @@ typedef __hip_fp8x2_storage_t __hip_fp4x4_storage_t;
 typedef enum __hip_fp4_interpretation_t {
   __HIP_E2M1 = 0,
 } __hip_fp4_interpretation_t;
-typedef struct { __hip_fp4_storage_t __x; } __hip_fp4_e2m1;
-typedef struct { __hip_fp4x2_storage_t __x; } __hip_fp4x2_e2m1;
-typedef struct { __hip_fp4x4_storage_t __x; } __hip_fp4x4_e2m1;
 #else  // !defined(__cplusplus)
 
 #if defined(__HIPCC_RTC__)
