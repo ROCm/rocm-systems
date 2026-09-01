@@ -30,8 +30,8 @@ subscribe, what the payload contains, and how replay interacts with dispatch cou
 Configure the domain
 --------------------
 
-There is no ``rocprofiler_configure_kernel_replay_counting_service()``. That entry point belonged to
-an earlier prototype and is not in this API.
+Replay has no dedicated counting-service entry point. It is configured as a callback tracing domain,
+like any other, and dispatch counting supplies the counter records.
 
 .. code-block:: cpp
 
