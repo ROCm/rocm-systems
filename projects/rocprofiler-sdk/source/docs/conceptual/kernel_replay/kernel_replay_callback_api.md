@@ -90,9 +90,12 @@ submit reuses it: all replay passes, and the single fall-through run if replay i
 same `dispatch_info.dispatch_id`, and the dispatch counter is bumped exactly once for the logical
 dispatch. Passes are distinguished by `current_pass`.
 
-The application observes **exactly one** kernel completion regardless of the pass count, an early
-exit, or an indefinite loop. The application's completion signal is suppressed on every pass and
-fired once after the loop ends (including after an indefinite loop breaks out), not at pass `N-1`.
+The application observes **exactly one** kernel completion for every loop that ends. The
+application's completion signal is suppressed on every pass and fired once after the loop ends
+(including after an indefinite loop breaks out), not at pass `N-1`, so a fixed pass count, an early
+exit, and an indefinite loop that terminates are indistinguishable from the application's side. An
+indefinite loop that never terminates is the one case where this does not hold; see *Terminating an
+indefinite loop* below.
 
 Each pass produces its own kernel start/end timestamps in dispatch tracing and counter records.
 Those timestamps differ per pass even though `dispatch_info.dispatch_id` is the same for all of
@@ -132,6 +135,20 @@ features only.
 
 There is no environment variable that overrides this. A tool returns whatever count it needs —
 for example the number of counter groups collectable on the dispatch's agent.
+
+### Terminating an indefinite loop
+
+An indefinite plan hands the termination decision entirely to the tool. The pass loop is unbounded:
+there is no pass cap, no wall-clock budget, and no diagnostic for a loop that runs long. A
+`replay_continue` that never returns zero therefore replays the dispatch forever, and because the
+application's completion signal is deferred until after the loop, it is never fired -- the
+application blocks on that dispatch for the life of the process.
+
+A tool returning `0` from `replay_pass_count` must therefore guarantee that `replay_continue`
+eventually returns zero on every path, including its own error paths. A condition derived from the
+collected data -- a target sample count, a convergence check -- needs a fallback for the case where
+the data never satisfies it. A tool that cannot make that guarantee should return a fixed `N > 1`
+and stop early with `replay_continue` instead, which is bounded by construction.
 
 ## Localized context control
 

@@ -99,7 +99,10 @@ After CONFIG ``PHASE_ENTER`` returns, the SDK calls ``replay_pass_count`` if it 
 * returns ``1`` — ordinary single execution (no snapshot).
 * returns ``N > 1`` — ``N`` passes; ``replay_continue`` may still stop early (custom tools only;
   ``rocprofv3`` never sets this callback).
-* returns ``0`` — indefinite loop; ``replay_continue`` is required (custom tools only).
+* returns ``0`` — indefinite loop; ``replay_continue`` is required (custom tools only). The loop is
+  unbounded and the SDK applies no pass cap, so ``replay_continue`` must eventually return zero on
+  every path; otherwise the dispatch replays for the life of the process and its completion signal,
+  which is deferred until after the loop, is never fired.
 
 ``rocprofv3`` returns the number of ``--pmc`` groups collectable on
 ``dispatch_info.agent_id``. A custom tool can return any of the cases above and may set
