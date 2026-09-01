@@ -319,16 +319,16 @@ main(int argc, char** argv)
                 return;
             }
 
-            auto _domain = rocprofsys::utility::string::to_lower(
+            auto domain = rocprofsys::utility::string::to_lower(
                 p.get<std::string>("list-operations"));
 
             auto _settings     = tim::settings::shared_instance();
-            auto _setting_name = rocm_setting_name_for_domain(_domain);
+            auto _setting_name = rocm_setting_name_for_domain(domain);
             auto _sitr         = _settings->find(_setting_name);
 
             if(_sitr == _settings->end())
             {
-                std::cerr << "Error: Domain '" << _domain << "' not found.\n"
+                std::cerr << "Error: Domain '" << domain << "' not found.\n"
                           << "Use 'rocprof-sys-avail --list-domains' "
                              "to see available domains.\n";
                 return;
@@ -339,11 +339,11 @@ main(int argc, char** argv)
 
             if(_choices.empty())
             {
-                std::cerr << "Domain '" << _domain << "' has no operations.\n";
+                std::cerr << "Domain '" << domain << "' has no operations.\n";
                 return;
             }
 
-            std::cout << "Operations for " << _domain << ":\n";
+            std::cout << "Operations for " << domain << ":\n";
             for(const auto& itr : _choices)
                 std::cout << "    " << itr << "\n";
         });

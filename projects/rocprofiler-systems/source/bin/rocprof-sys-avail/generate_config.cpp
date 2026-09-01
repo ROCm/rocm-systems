@@ -11,6 +11,7 @@
 #include "common/environment.hpp"
 #include "common/json_config.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 
 #include <nlohmann/json.hpp>
 #include <spdlog/fmt/fmt.h>
@@ -372,20 +373,28 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                 {
                     if(_lhs->get_env_name().starts_with(itr) &&
                        !_rhs->get_env_name().starts_with(itr))
+                    {
                         return true;
+                    }
                     if(_rhs->get_env_name().starts_with(itr) &&
                        !_lhs->get_env_name().starts_with(itr))
+                    {
                         return false;
+                    }
                 }
                 for(const auto* itr :
                     { env_vars::SUPPRESS_PARSING, env_vars::SUPPRESS_CONFIG })
                 {
                     if(_lhs->get_env_name().starts_with(itr) &&
                        !_rhs->get_env_name().starts_with(itr))
+                    {
                         return false;
+                    }
                     if(_rhs->get_env_name().starts_with(itr) &&
                        !_lhs->get_env_name().starts_with(itr))
+                    {
                         return true;
+                    }
                 }
                 return _lhs->get_name() < _rhs->get_name();
             });

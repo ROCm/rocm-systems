@@ -894,7 +894,9 @@ rocprofsys_reset_preload_hidden(void)
             _modified_preload += fmt::format(":{}", itr);
         }
         if(!_modified_preload.empty() && _modified_preload.starts_with(':'))
+        {
             _modified_preload = _modified_preload.substr(1);
+        }
 
         rocprofsys::set_env("LD_PRELOAD", _modified_preload, 1);
     }

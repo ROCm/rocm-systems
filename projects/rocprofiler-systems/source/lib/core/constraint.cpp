@@ -39,8 +39,8 @@ clock_name(std::string _v)
 {
     constexpr auto _clock_prefix = std::string_view{ "clock_" };
     _v                           = utility::string::to_lower(_v);
-    auto _pos                    = _v.find(_clock_prefix);
-    if(_pos == 0) _v = _v.substr(_pos + _clock_prefix.length());
+    auto pos                     = _v.find(_clock_prefix);
+    if(pos == 0) _v = _v.substr(pos + _clock_prefix.length());
     if(_v == "process_cputime_id") _v = "cputime";
     return _v;
 }
@@ -180,9 +180,9 @@ std::string
 clock_identifier::as_string() const
 {
     auto _name = utility::string::to_lower(name);
-    auto _ss   = std::stringstream{};
-    _ss << _name << "(id=" << raw_name << ", value=" << value << ")";
-    return _ss.str();
+    auto ss    = std::stringstream{};
+    ss << _name << "(id=" << raw_name << ", value=" << value << ")";
+    return ss.str();
 }
 
 //--------------------------------------------------------------------------------------//

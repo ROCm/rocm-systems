@@ -367,7 +367,10 @@ remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
     // Restore from original_envs if previously existed
     for(const auto& orig : original_envs)
     {
-        if(std::string_view{ orig }.starts_with(key)) env_list.emplace_back(orig);
+        if(std::string_view{ orig }.starts_with(key))
+        {
+            env_list.emplace_back(orig);
+        }
     }
 }
 
