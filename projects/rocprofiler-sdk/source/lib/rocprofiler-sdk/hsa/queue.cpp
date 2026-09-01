@@ -1075,7 +1075,7 @@ WriteInterceptor(const void* packets,
             // the next kernel on this GPU can dispatch. Deferred out of the per-pass path so
             // early-exit and indefinite loops signal on the actual last pass rather than at pass
             // N-1.
-            if(app_completion_signal.handle != 0)
+            if(app_completion_signal != null_hsa_signal)
             {
                 auto completion_pkts = packet_vector_t{};
                 CreateBarrierPacket(nullptr, &app_completion_signal, completion_pkts);
