@@ -178,7 +178,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   //   [slot 0: nRanks chunks][slot 1: nRanks chunks].
   // Always allocated when CE AllReduce is enabled: registered CE pipelines
   // through this buffer even when 2-shot is table-disabled (twoShotMax == 0).
-  if (rcclParamCeAllReduce()) {
+  if (rcclCeAllReduceEnabled(comm)) {
     NCCLCHECKGOTO(ncclMemAlloc((void**)&ceARTmpBuf, ceARTmpBufSize), ret, fail_ar);
     NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceARTmpBuf, ceARTmpBufSize, NCCL_WIN_COLL_SYMMETRIC, &arWinDev),
                   ret, fail_ar);
