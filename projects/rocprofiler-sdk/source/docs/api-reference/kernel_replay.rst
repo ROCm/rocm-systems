@@ -15,10 +15,9 @@ device memory between those executions so each pass observes identical inputs. I
 
    This API is experimental. The public header is
    ``<rocprofiler-sdk/experimental/kernel_replay.h>``. The domain and payload are expected
-   to change before a stable release. Command-line ``rocprofv3`` wiring is the stacked tool
-   integration PR. A failed device-memory restore aborts the process. Replay is limited to
-   single-packet, single-dispatch submissions; see :ref:`kernel-replay-limitations` and
-   :ref:`kernel-replay-memory-snapshot`.
+   to change before a stable release. A failed device-memory restore aborts the process. Replay is
+   limited to single-packet, single-dispatch submissions; see :ref:`kernel-replay-limitations`
+   and :ref:`kernel-replay-memory-snapshot`.
 
 For the configure / ``replay_pass_count`` / local-context how-to, see :ref:`using-kernel-replay`. For
 pass-count semantics, localized context control, and source maps, see
@@ -92,7 +91,7 @@ After CONFIG ``PHASE_ENTER`` returns, the SDK calls ``replay_pass_count`` if it 
   ``rocprofv3`` never sets this callback).
 * returns ``0`` — indefinite loop; ``replay_continue`` is required (custom tools only).
 
-``rocprofv3`` (in the stacked tool PR) returns the number of ``--pmc`` groups collectable on
+``rocprofv3`` returns the number of ``--pmc`` groups collectable on
 ``dispatch_info.agent_id``. A custom tool can return any of the cases above and may set
 ``replay_continue`` for early exit or an indefinite loop.
 
@@ -108,11 +107,22 @@ Replay does **not** replace dispatch counting. Typical pattern:
 4. In the dispatch-counting callback, select the counter config for that pass.
 5. Clear the thread-local pass index on PASS ``PHASE_EXIT``.
 
-To run PC sampling, SPM, or thread trace on only some passes, put those services on their own
-contexts and stop or start them with the localized toggles during PASS ``PHASE_ENTER``. Counter
-collection and PC sampling cannot safely run on the same replay pass; use separate passes.
-``rocprofv3`` does not expose SPM or PC sampling together with kernel replay — that requires a
-custom tool. Do not call the global
+To run SPM or thread trace on only some passes, put those services on their own contexts and stop or
+start them with the localized toggles during PASS ``PHASE_ENTER``. Which services honor a toggle
+varies:
+
+* Dispatch counter collection and SPM consult the override on every dispatch, so they can be placed
+  on specific passes.
+* Kernel dispatch tracing and dispatch thread trace observe a local *stop* only: they skip a
+  dispatch whose context is forced off, but cannot be added to a context that is not already
+  collecting.
+* PC sampling is agent-wide and device counting is not dispatch-scoped, so neither consults the
+  override. A toggle naming such a context reports success and has no effect.
+
+Because PC sampling ignores the override, it cannot be isolated from dispatch counters by putting
+them on separate passes, and the two must not be combined under replay: on MI2xx and MI3xx,
+collecting them together hits the documented clock-gating conflict. ``rocprofv3`` does not expose
+SPM or PC sampling together with kernel replay — that requires a custom tool. Do not call the global
 ``rocprofiler_start_context`` / ``rocprofiler_stop_context`` from inside the replay loop: that would
 leak into non-replayed dispatches.
 
