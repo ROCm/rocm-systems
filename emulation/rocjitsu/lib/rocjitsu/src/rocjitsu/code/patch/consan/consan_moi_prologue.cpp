@@ -603,11 +603,11 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   }
   std::vector<uint32_t> words;
   const uint64_t getpc_text_offset = island_text_offset;
-  words.push_back(build_s_getpc_b64(kRdna4VccLo, arch));
+  words.push_back(build_s_getpc_b64(kAmdGpuVccLo, arch));
   const uint64_t pc_after_getpc = getpc_text_offset + sizeof(uint32_t);
   if (cave_text_offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
       pc_after_getpc > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
-      !append_pc_delta_builder(words, arch, kRdna4VccLo,
+      !append_pc_delta_builder(words, arch, kAmdGpuVccLo,
                                static_cast<int64_t>(cave_text_offset) -
                                    static_cast<int64_t>(pc_after_getpc),
                                /*minimum_words=*/3u,
@@ -621,7 +621,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     return false;
   words.push_back(*dependency_delay);
   words.push_back(build_s_nop(0, arch));
-  words.push_back(build_s_setpc_b64(kRdna4VccLo, arch));
+  words.push_back(build_s_setpc_b64(kAmdGpuVccLo, arch));
   if (island_text_offset > text.size() || words.size() != 7u ||
       words.size() * sizeof(uint32_t) > text.size() - island_text_offset) {
     errors.emplace_back(std::string(context) + " has an invalid indirect entry island");
@@ -652,14 +652,14 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     const auto shift = instrumentation::build_v_lshrrev_b32(
         destination_vgpr,
         scalar_positive_inline_u32(static_cast<uint16_t>(dimension * kPackedCoordinateBits)),
-        kRdna4WorkitemIdX, arch);
+        kAmdGpuWorkitemIdX, arch);
     if (!shift)
       return false;
     words.push_back(*shift);
   }
   const auto mask = instrumentation::build_v_and_b32_literal(
       destination_vgpr, kPackedCoordinateMask,
-      dimension == 0u ? kRdna4WorkitemIdX : destination_vgpr, arch);
+      dimension == 0u ? kAmdGpuWorkitemIdX : destination_vgpr, arch);
   if (!mask)
     return false;
   words.insert(words.end(), mask->begin(), mask->end());
@@ -708,8 +708,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
 
   const auto save_scc = instrumentation::build_s_cselect_b32(
       saved_scc, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
-  const auto save_vcc = instrumentation::build_s_mov_b64(vcc_save, kRdna4VccLo, arch);
-  const auto save_exec = instrumentation::build_s_mov_b64(exec_save, kRdna4ExecLo, arch);
+  const auto save_vcc = instrumentation::build_s_mov_b64(vcc_save, kAmdGpuVccLo, arch);
+  const auto save_exec = instrumentation::build_s_mov_b64(exec_save, kAmdGpuExecLo, arch);
   std::vector<uint32_t> extract_initialization_x;
   const bool valid_initialization_x =
       append_moi_entry_workitem_coordinate(extract_initialization_x, end_vgpr,
@@ -717,7 +717,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   const auto select_initialization_x_lanes = instrumentation::build_v_cmp_gt_u32_vcc(
       scalar_positive_inline_u32(layout.initialization_lanes), end_vgpr, arch);
   const auto narrow_initialization_x_lanes =
-      instrumentation::build_s_and_saveexec_b64(selected_exec, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(selected_exec, kAmdGpuVccLo, arch);
   std::array<std::vector<uint32_t>, 2> extract_outer_coordinate;
   std::array<std::optional<uint32_t>, 2> select_zero_outer_coordinate;
   std::array<std::optional<uint32_t>, 2> narrow_zero_outer_coordinate;
@@ -728,12 +728,12 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     select_zero_outer_coordinate[dimension - 1u] =
         instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0u), address_vgpr, arch);
     narrow_zero_outer_coordinate[dimension - 1u] =
-        instrumentation::build_s_and_saveexec_b64(selected_exec, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(selected_exec, kAmdGpuVccLo, arch);
   }
   const auto skip_empty_wave = instrumentation::build_s_cbranch_execz(0, arch);
   const auto save_selected_exec =
-      instrumentation::build_s_mov_b64(selected_exec, kRdna4ExecLo, arch);
-  const auto count_selected = instrumentation::build_s_bcnt1_i32_b64(stride, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(selected_exec, kAmdGpuExecLo, arch);
+  const auto count_selected = instrumentation::build_s_bcnt1_i32_b64(stride, kAmdGpuExecLo, arch);
   const uint16_t store_shift = use_quad_store ? 4u : 3u;
   const uint32_t scale_stride =
       build_s_lshl_b32(stride, stride, scalar_positive_inline_u32(store_shift), arch);
@@ -753,11 +753,11 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   const auto more_literal = instrumentation::build_v_cmp_gt_u32_literal_vcc(
       initialization_base + initialization_size, address_vgpr, arch);
   const auto retain_in_bounds =
-      instrumentation::build_s_and_b64(kRdna4ExecLo, selected_exec, kRdna4VccLo, arch);
+      instrumentation::build_s_and_b64(kAmdGpuExecLo, selected_exec, kAmdGpuVccLo, arch);
   const auto loop = instrumentation::build_s_cbranch_execnz(0, arch);
   const auto wait_ds = instrumentation::build_s_wait_flat_load0(arch);
-  const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, exec_save, arch);
-  const auto restore_vcc = instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save, arch);
+  const auto restore_exec = instrumentation::build_s_mov_b64(kAmdGpuExecLo, exec_save, arch);
+  const auto restore_vcc = instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save, arch);
   const auto barrier = instrumentation::build_workgroup_barrier_only(arch);
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch);
@@ -1103,7 +1103,7 @@ build_owner_epoch_prologue_words(uint64_t prologue_text_offset, uint64_t origina
       return std::nullopt;
     case ConSanMoiOwnerSource::WorkitemId: {
       const auto read_owner = instrumentation::build_v_readfirstlane_b32(*persistent_owner_sgpr,
-                                                                         kRdna4WorkitemIdX, arch);
+                                                                         kAmdGpuWorkitemIdX, arch);
       if (!read_owner) {
         errors.emplace_back("ConSan MOI scalar owner prologue could not read its wave ID");
         return std::nullopt;
@@ -1304,7 +1304,7 @@ build_owner_epoch_prologue_words(uint64_t prologue_text_offset, uint64_t origina
       return std::nullopt;
     }
     const auto restore_exec = instrumentation::build_s_mov_b64(
-        kRdna4ExecLo, static_cast<uint16_t>(*return_pc_sgpr + 20u), arch);
+        kAmdGpuExecLo, static_cast<uint16_t>(*return_pc_sgpr + 20u), arch);
     if (!restore_exec)
       return std::nullopt;
     words.push_back(*restore_exec);
@@ -1326,7 +1326,7 @@ build_owner_epoch_prologue_words(uint64_t prologue_text_offset, uint64_t origina
       return std::nullopt;
     case ConSanMoiOwnerSource::WorkitemId: {
       auto owner_init = instrumentation::build_v_lshrrev_b32(
-          owner_vgpr, scalar_positive_inline_u32(owner_shift_bits), kRdna4WorkitemIdX, arch);
+          owner_vgpr, scalar_positive_inline_u32(owner_shift_bits), kAmdGpuWorkitemIdX, arch);
       if (!owner_init) {
         errors.emplace_back("ConSan MOI owner/epoch prologue could not encode owner VGPR init");
         return std::nullopt;
@@ -1495,7 +1495,8 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
     // The entry scalar-spill sequence below uses scratch_vgpr to transfer
     // guest SGPRs into private memory. Capture the raw entry workitem ID first;
     // after that sequence scratch_vgpr no longer contains the ABI v0 value.
-    words.push_back(build_v_mov_b32_e32(scratch_vgpr, vector_source_vgpr(kRdna4WorkitemIdX), arch));
+    words.push_back(
+        build_v_mov_b32_e32(scratch_vgpr, vector_source_vgpr(kAmdGpuWorkitemIdX), arch));
     words.insert(words.end(), owner_store->begin(), owner_store->end());
   }
   if (entry_scalar_spill) {
@@ -1545,7 +1546,7 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
     }
     words.insert(words.end(), workgroup_key_store->begin(), workgroup_key_store->end());
     const auto restore_exec = instrumentation::build_s_mov_b64(
-        kRdna4ExecLo, static_cast<uint16_t>(*return_pc_sgpr + 20u), arch);
+        kAmdGpuExecLo, static_cast<uint16_t>(*return_pc_sgpr + 20u), arch);
     if (!restore_exec)
       return std::nullopt;
     words.push_back(*restore_exec);

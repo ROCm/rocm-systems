@@ -975,15 +975,15 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
   const uint16_t address_key = static_cast<uint16_t>(exec_save + 10u);
   const uint16_t address_group_exec = static_cast<uint16_t>(exec_save + 12u);
   const auto save_original_exec =
-      instrumentation::build_s_mov_b64(original_exec, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+      instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto read_address = instrumentation::build_v_readfirstlane_b32(
       address_key, /*address_vgpr=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
   const auto select_address = instrumentation::build_v_cmp_eq_u32_vcc(
       address_key, /*address_vgpr=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_address =
-      instrumentation::build_s_and_saveexec_b64(exec_save, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      instrumentation::build_s_and_saveexec_b64(exec_save, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_address_group =
-      instrumentation::build_s_mov_b64(address_group_exec, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+      instrumentation::build_s_mov_b64(address_group_exec, kAmdGpuExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto rank_address_group_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
       static_cast<uint16_t>(scratch + 2u), address_group_exec, scalar_positive_inline_u32(0),
       ROCJITSU_CODE_ARCH_RDNA4);
@@ -991,13 +991,13 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
       static_cast<uint16_t>(scratch + 2u), static_cast<uint16_t>(address_group_exec + 1u),
       vector_source_vgpr(static_cast<uint16_t>(scratch + 2u)), ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_representative = instrumentation::build_s_and_saveexec_b64(
-      address_group_exec, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      address_group_exec, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto remove_address_group = instrumentation::build_s_xor_b64(
       exec_save, exec_save, address_group_exec, ROCJITSU_CODE_ARCH_RDNA4);
   const auto select_remaining =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, exec_save, ROCJITSU_CODE_ARCH_RDNA4);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, exec_save, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_original =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, ROCJITSU_CODE_ARCH_RDNA4);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, ROCJITSU_CODE_ARCH_RDNA4);
   const auto combine_address_identity = instrumentation::build_v_xor_b32(
       static_cast<uint16_t>(scratch + 7u), address_key, static_cast<uint16_t>(scratch + 7u),
       ROCJITSU_CODE_ARCH_RDNA4);
@@ -3084,15 +3084,15 @@ TEST(ConSanMoi, FirstLightProbeWritesOneNativeLdsAccessRecord) {
   ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   const uint16_t exec_save = *test_moi_exec_save_sgpr(result);
   const auto save_incoming_exec =
-      build_s_mov_b64(exec_save, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_mov_b64(exec_save, kAmdGpuExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto lane_rank_lo = build_v_mbcnt_lo_u32_b32(10, exec_save, scalar_positive_inline_u32(0),
                                                      ROCJITSU_CODE_ARCH_RDNA4);
   const auto lane_rank_hi = build_v_mbcnt_hi_u32_b32(
       10, static_cast<uint16_t>(exec_save + 1u), vector_source_vgpr(10), ROCJITSU_CODE_ARCH_RDNA4);
   const auto first_active =
       build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0), 10, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto narrow = build_s_and_saveexec_b64(exec_save, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto restore = build_s_mov_b64(kRdna4ExecLo, exec_save, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto narrow = build_s_and_saveexec_b64(exec_save, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore = build_s_mov_b64(kAmdGpuExecLo, exec_save, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(save_incoming_exec);
   ASSERT_TRUE(lane_rank_lo);
   ASSERT_TRUE(lane_rank_hi);
@@ -3174,7 +3174,7 @@ TEST(ConSanMoi, Cdna4FirstLightProbeEmitsNativeVariableLengthRecipes) {
   ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   const uint16_t exec_save = *test_moi_exec_save_sgpr(result);
   const auto save_incoming_exec =
-      instrumentation::build_s_mov_b64(exec_save, kRdna4ExecLo, ROCJITSU_CODE_ARCH_CDNA4);
+      instrumentation::build_s_mov_b64(exec_save, kAmdGpuExecLo, ROCJITSU_CODE_ARCH_CDNA4);
   const auto lane_rank_lo = build_cdna4_v_mbcnt_lo_u32_b32(
       10, exec_save, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4);
   const auto lane_rank_hi = build_cdna4_v_mbcnt_hi_u32_b32(
@@ -4426,13 +4426,13 @@ TEST(ConSanMoi, DynamicAccessRecordProbeAppendsPerLaneRecords) {
   const auto compare_capacity =
       build_v_cmp_gt_u32_e32_vcc(vector_source_vgpr(21), /*vsrc1=*/18, ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_exec =
-      build_s_and_saveexec_b64(/*sdst=*/30, /*ssrc0=*/kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_saveexec_b64(/*sdst=*/30, /*ssrc0=*/kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_exec = build_s_mov_b64(/*sdst=*/126, /*ssrc0=*/30, ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_scc = build_rdna4_s_cselect_b32(
       /*sdst=*/34, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
       ROCJITSU_CODE_ARCH_RDNA4);
-  const auto save_vcc = build_s_mov_b64(/*sdst=*/32, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, /*ssrc0=*/32, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto save_vcc = build_s_mov_b64(/*sdst=*/32, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_vcc = build_s_mov_b64(kAmdGpuVccLo, /*ssrc0=*/32, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_scc = build_rdna4_s_cmp_lg_u32(
       /*ssrc0=*/34, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(compare_capacity);
@@ -4642,9 +4642,9 @@ TEST(ConSanMoi, DynamicAccessRecordPreservesWave32AndWave64SpecialState) {
                                 sizeof(uint32_t));
     std::memcpy(words.data(), result.replacement.data() + 0x100, words.size() * sizeof(uint32_t));
     const uint16_t base = *test_moi_exec_save_sgpr(result);
-    const auto save_exec = build_s_and_saveexec_b64(base, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+    const auto save_exec = build_s_and_saveexec_b64(base, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
     const auto save_vcc =
-        build_s_mov_b64(static_cast<uint16_t>(base + 2u), kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+        build_s_mov_b64(static_cast<uint16_t>(base + 2u), kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
     const auto save_scc =
         build_rdna4_s_cselect_b32(static_cast<uint16_t>(base + 4u), scalar_positive_inline_u32(1),
                                   scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
@@ -5987,16 +5987,16 @@ TEST(ConSanMoi, RecordReplayDynamicStackKernelEntryRelayUsesSpecialStateOnly) {
     ASSERT_EQ(prologue->original_size, 7u * sizeof(uint32_t));
   }
 
-  std::vector<uint32_t> expected = {build_s_getpc_b64(kRdna4VccLo, kArch)};
+  std::vector<uint32_t> expected = {build_s_getpc_b64(kAmdGpuVccLo, kArch)};
   const uint64_t pc_after_getpc = relay_offset + sizeof(uint32_t);
-  ASSERT_TRUE(append_pc_delta_builder(expected, kArch, kRdna4VccLo,
+  ASSERT_TRUE(append_pc_delta_builder(expected, kArch, kAmdGpuVccLo,
                                       static_cast<int64_t>(prologue->trampoline_offset) -
                                           static_cast<int64_t>(pc_after_getpc)));
   const auto dependency_delay = instrumentation::build_salu_dependency_delay(kArch);
   ASSERT_TRUE(dependency_delay);
   expected.push_back(*dependency_delay);
   expected.push_back(build_s_nop(0, kArch));
-  expected.push_back(build_s_setpc_b64(kRdna4VccLo, kArch));
+  expected.push_back(build_s_setpc_b64(kAmdGpuVccLo, kArch));
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -7167,13 +7167,13 @@ TEST(ConSanMoi, BarrierRecordPatchTrampolinesBarrierAndWritesRecord) {
   const auto first_active_lane = build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0),
                                                             /*vsrc1=*/13, ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_exec =
-      build_s_and_saveexec_b64(/*sdst=*/30, /*ssrc0=*/kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_saveexec_b64(/*sdst=*/30, /*ssrc0=*/kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_exec = build_s_mov_b64(/*sdst=*/126, /*ssrc0=*/30, ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_scc = build_rdna4_s_cselect_b32(
       /*sdst=*/34, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
       ROCJITSU_CODE_ARCH_RDNA4);
-  const auto save_vcc = build_s_mov_b64(/*sdst=*/32, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, /*ssrc0=*/32, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto save_vcc = build_s_mov_b64(/*sdst=*/32, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_vcc = build_s_mov_b64(kAmdGpuVccLo, /*ssrc0=*/32, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_scc = build_rdna4_s_cmp_lg_u32(
       /*ssrc0=*/34, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
   const auto skip_overflow = build_s_cbranch_vccz(/*offset_dwords=*/0, ROCJITSU_CODE_ARCH_RDNA4);
@@ -10285,17 +10285,17 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
   EXPECT_TRUE(contains_subsequence(trampoline_words, *mov_capacity));
   EXPECT_NE(std::find(trampoline_words.begin(), trampoline_words.end(), *compare_capacity),
             trampoline_words.end());
-  const auto narrow_exec = build_s_and_saveexec_b64(*test_moi_exec_save_sgpr(result), kRdna4VccLo,
+  const auto narrow_exec = build_s_and_saveexec_b64(*test_moi_exec_save_sgpr(result), kAmdGpuVccLo,
                                                     ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_exec =
-      build_s_mov_b64(kRdna4ExecLo, *test_moi_exec_save_sgpr(result), ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_mov_b64(kAmdGpuExecLo, *test_moi_exec_save_sgpr(result), ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(narrow_exec && restore_exec);
   EXPECT_NE(std::find(trampoline_words.begin(), trampoline_words.end(), *narrow_exec),
             trampoline_words.end());
   EXPECT_NE(std::find(trampoline_words.begin(), trampoline_words.end(), *restore_exec),
             trampoline_words.end());
   const auto save_active_exec =
-      build_s_mov_b64(*test_moi_exec_save_sgpr(result), kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_mov_b64(*test_moi_exec_save_sgpr(result), kAmdGpuExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto lane_rank_lo =
       build_v_mbcnt_lo_u32_b32(*options.scratch_vgpr, *test_moi_exec_save_sgpr(result),
                                scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
@@ -12396,17 +12396,17 @@ TEST(ConSanMoi, AtomicRecordMarksCompareExchangeOutcomeUnavailableUntilCaptured)
   EXPECT_LT(event_reservation + reserve_event.size(), guest);
   EXPECT_LT(guest + original_cas->size(), outcome_compare);
   const uint32_t capture_success_lo = build_v_mov_b32_e32(
-      static_cast<uint16_t>(*options.scratch_vgpr + 3u), kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      static_cast<uint16_t>(*options.scratch_vgpr + 3u), kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const uint32_t capture_success_hi =
-      build_v_mov_b32_e32(static_cast<uint16_t>(*options.scratch_vgpr + 4u), kRdna4VccLo + 1u,
+      build_v_mov_b32_e32(static_cast<uint16_t>(*options.scratch_vgpr + 4u), kAmdGpuVccLo + 1u,
                           ROCJITSU_CODE_ARCH_RDNA4);
   const auto captured_lo = std::find(outcome_compare, words.end(), capture_success_lo);
   const auto captured_hi = std::find(outcome_compare, words.end(), capture_success_hi);
   const auto mask_success_lo = instrumentation::build_v_and_b32(
-      static_cast<uint16_t>(*options.scratch_vgpr + 3u), kRdna4ExecLo,
+      static_cast<uint16_t>(*options.scratch_vgpr + 3u), kAmdGpuExecLo,
       static_cast<uint16_t>(*options.scratch_vgpr + 3u), ROCJITSU_CODE_ARCH_RDNA4);
   const auto mask_success_hi = instrumentation::build_v_and_b32(
-      static_cast<uint16_t>(*options.scratch_vgpr + 4u), kRdna4ExecLo + 1u,
+      static_cast<uint16_t>(*options.scratch_vgpr + 4u), kAmdGpuExecLo + 1u,
       static_cast<uint16_t>(*options.scratch_vgpr + 4u), ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(captured_lo, words.end());
   ASSERT_NE(captured_hi, words.end());

@@ -267,7 +267,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
     return std::nullopt;
   }
-  const auto save_exec = instrumentation::build_s_mov_b64(original_exec, kRdna4ExecLo, arch);
+  const auto save_exec = instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch);
   if (!save_exec) {
     errors.emplace_back("ConSan MOI sampled barrier failed at EXEC snapshot");
     return std::nullopt;
@@ -276,7 +276,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   for (const SampledBarrierWindow &window : candidate.windows) {
     const auto next_window_label = sequence.make_label();
     const auto restore_scan_exec =
-        instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, arch);
+        instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch);
     if (!restore_scan_exec) {
       errors.emplace_back("ConSan MOI sampled barrier failed at window-scan EXEC restoration");
       return std::nullopt;
@@ -312,7 +312,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
 
     const auto narrow_current = [&]() -> bool {
       const auto narrow =
-          instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
       if (!sequence.emit(narrow))
         return false;
       return sequence.emit_branch(next_window_label, InstructionSequence::BranchKind::SccZero);
@@ -410,7 +410,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
 
   const auto narrow_current = [&]() -> bool {
     const auto narrow =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
     if (!sequence.emit(narrow))
       return false;
     return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero);
@@ -445,7 +445,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     return std::nullopt;
   }
 
-  const auto matching_exec = instrumentation::build_s_mov_b64(temporary_exec, kRdna4ExecLo, arch);
+  const auto matching_exec = instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch);
   const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
       lane_rank, temporary_exec, scalar_positive_inline_u32(0), arch);
   const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
@@ -453,7 +453,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   const auto first =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank, arch);
   const auto narrow_first =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
   if (!matching_exec || !mbcnt_lo || !mbcnt_hi || !first || !narrow_first) {
     errors.emplace_back("ConSan MOI sampled barrier failed at lane election");
     return std::nullopt;
@@ -468,7 +468,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
       value, kConSanMoiSampledSyncPublishingDescriptor, arch);
   const auto zero = instrumentation::build_v_mov_b32_literal(expected, 0u, arch);
   const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
-                                                                    kRdna4ScopeDevice, arch);
+                                                                    kAmdGpuScopeDevice, arch);
   if (!sentinel || !zero || !claim ||
       !consan_detail::append_moi_indexed_address(
           words,
@@ -489,7 +489,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   const auto claimed =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch);
   const auto narrow_claimed =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
   if (!claimed || !narrow_claimed) {
     errors.emplace_back("ConSan MOI sampled barrier failed at metadata claim result");
     return std::nullopt;
@@ -532,7 +532,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   const auto final_expected = instrumentation::build_v_mov_b32_literal(
       expected, kConSanMoiSampledSyncPublishingDescriptor, arch);
   const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
-                                                                     kRdna4ScopeDevice, arch);
+                                                                     kAmdGpuScopeDevice, arch);
   if (!wait_store || !final_value || !final_expected || !commit) {
     errors.emplace_back("ConSan MOI sampled barrier failed at metadata commit setup");
     return std::nullopt;
@@ -557,7 +557,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   const auto committed =
       instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
   const auto narrow_committed =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
   if (!committed || !narrow_committed) {
     errors.emplace_back("ConSan MOI sampled barrier failed at metadata commit result");
     return std::nullopt;
@@ -586,7 +586,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     return std::nullopt;
   }
   const auto restore_existing_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, temporary_exec, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, temporary_exec, arch);
   const auto existing_descriptor =
       instrumentation::build_v_mov_b32_literal(expected, encoded.packed.descriptor, arch);
   const auto descriptor_equal =
@@ -638,7 +638,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   if (!sequence.bind(collision_label))
     return std::nullopt;
   const auto restore_collision_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch);
   const auto collision_mask = instrumentation::build_s_mov_b64(temporary_exec, original_exec, arch);
   const auto collision_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
       lane_rank, temporary_exec, scalar_positive_inline_u32(0), arch);
@@ -647,7 +647,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   const auto collision_first =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank, arch);
   const auto narrow_collision =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
   if (!restore_collision_exec || !collision_mask || !collision_lo || !collision_hi ||
       !collision_first || !narrow_collision) {
     errors.emplace_back("ConSan MOI sampled barrier failed at collision lane election");
@@ -668,9 +668,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
 
   if (!sequence.bind(restore_label))
     return std::nullopt;
-  const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, arch);
+  const auto restore_exec = instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch);
   const auto restore_after_advance =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch);
   if (!restore_exec || !restore_after_advance) {
     errors.emplace_back("ConSan MOI sampled barrier failed at EXEC restoration");
     return std::nullopt;
@@ -679,7 +679,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   words.insert(words.end(), max_epoch->begin(), max_epoch->end());
   words.push_back(*epoch_has_successor);
   const auto narrow_advance =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
   if (!narrow_advance) {
     errors.emplace_back("ConSan MOI sampled barrier failed at epoch-advance narrowing");
     return std::nullopt;

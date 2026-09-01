@@ -734,7 +734,7 @@ TEST(ConSanMoi, Cdna4InlineShadowPreservesDsWorkgroupKeyFromKernelEntry) {
   bool selects_invalid_lanes = false;
   for (uint16_t scalar_base = 0u; scalar_base + 21u < 128u; ++scalar_base) {
     const auto select_invalid = instrumentation::build_s_andn2_b64(
-        kRdna4ExecLo, static_cast<uint16_t>(scalar_base + 20u),
+        kAmdGpuExecLo, static_cast<uint16_t>(scalar_base + 20u),
         static_cast<uint16_t>(scalar_base + 2u), ROCJITSU_CODE_ARCH_CDNA4);
     selects_invalid_lanes |= select_invalid && std::ranges::find(prologue_words, *select_invalid) !=
                                                    prologue_words.end();
@@ -4040,9 +4040,9 @@ TEST(ConSanMoi, Gfx1250FullExactShadowValidatesAtomicTokenWithWorkgroupKey) {
   const uint16_t original_exec =
       static_cast<uint16_t>(exec_base + kConSanMoiInlineOriginalExecSaveOffset);
   const auto save_original =
-      ib::build_s_mov_b64(original_exec, kRdna4ExecLo, ROCJITSU_CODE_ARCH_CDNA5);
+      ib::build_s_mov_b64(original_exec, kAmdGpuExecLo, ROCJITSU_CODE_ARCH_CDNA5);
   const auto restore_original =
-      ib::build_s_mov_b64(kRdna4ExecLo, original_exec, ROCJITSU_CODE_ARCH_CDNA5);
+      ib::build_s_mov_b64(kAmdGpuExecLo, original_exec, ROCJITSU_CODE_ARCH_CDNA5);
   const auto authorize_stable_access_token = ib::build_v_cmp_gt_u32_vcc(
       scalar_positive_inline_u32(
           static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence)),
@@ -5492,10 +5492,11 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   // access, and exact-byte mask. Metadata-distinct lanes remain pending and
   // revisit this one transaction body.
   const auto save_incoming_exec =
-      build_s_mov_b64(/*sdst=*/42, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_mov_b64(/*sdst=*/42, kAmdGpuExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto initialize_pending =
-      build_s_mov_b64(/*sdst=*/44, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto select_pending = build_s_mov_b64(kRdna4ExecLo, /*ssrc0=*/44, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_mov_b64(/*sdst=*/44, kAmdGpuExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto select_pending =
+      build_s_mov_b64(kAmdGpuExecLo, /*ssrc0=*/44, ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_address_lo =
       build_v_mov_b32_e32(/*vdst=*/15, vector_source_vgpr(8), ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_address_hi =
@@ -5519,18 +5520,18 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   const auto address_uniform =
       build_v_cmp_eq_u32_e32_vcc(/*src0=*/48, /*vsrc1=*/8, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_address =
-      build_s_and_saveexec_b64(/*sdst=*/32, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto save_group = build_s_mov_b64(/*sdst=*/46, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_saveexec_b64(/*sdst=*/32, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto save_group = build_s_mov_b64(/*sdst=*/46, kAmdGpuExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto metadata_uniform =
       build_v_cmp_eq_u32_e32_vcc(/*src0=*/49, /*vsrc1=*/10, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_metadata =
-      build_s_and_saveexec_b64(/*sdst=*/32, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_saveexec_b64(/*sdst=*/32, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto read_byte_mask =
       build_v_readfirstlane_b32(/*sdst=*/49, /*vsrc=*/14, ROCJITSU_CODE_ARCH_RDNA4);
   const auto byte_mask_uniform =
       build_v_cmp_eq_u32_e32_vcc(/*src0=*/49, /*vsrc1=*/14, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_byte_mask =
-      build_s_and_saveexec_b64(/*sdst=*/32, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_saveexec_b64(/*sdst=*/32, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(save_incoming_exec);
   ASSERT_TRUE(initialize_pending);
   ASSERT_TRUE(select_pending);
@@ -5587,7 +5588,7 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   const auto remove_group = build_s_xor_b64(
       /*sdst=*/44, /*ssrc0=*/44, /*ssrc1=*/46, ROCJITSU_CODE_ARCH_RDNA4);
   const auto select_remaining =
-      build_s_mov_b64(kRdna4ExecLo, /*ssrc0=*/44, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_mov_b64(kAmdGpuExecLo, /*ssrc0=*/44, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(remove_group);
   ASSERT_TRUE(select_remaining);
   const std::array<uint32_t, 1> expected_group_removal = {*remove_group};
@@ -5663,8 +5664,9 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   const auto first_group_lane = build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0),
                                                            /*vsrc1=*/14, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_partition_representative =
-      build_s_and_saveexec_b64(/*sdst=*/32, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto save_publishers = build_s_mov_b64(/*sdst=*/34, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_saveexec_b64(/*sdst=*/32, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto save_publishers =
+      build_s_mov_b64(/*sdst=*/34, kAmdGpuExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(partition_rank_lo);
   ASSERT_TRUE(partition_rank_hi);
   ASSERT_TRUE(first_group_lane);
@@ -5718,7 +5720,7 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   const auto save_scc = build_rdna4_s_cselect_b32(
       /*sdst=*/40, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
       ROCJITSU_CODE_ARCH_RDNA4);
-  const auto save_vcc = build_s_mov_b64(/*sdst=*/38, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto save_vcc = build_s_mov_b64(/*sdst=*/38, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(save_scc);
   ASSERT_TRUE(save_vcc);
   EXPECT_TRUE(contains_subsequence(text_words, std::array<uint32_t, 2>{*save_scc, *save_vcc}));
@@ -5727,7 +5729,7 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   const auto nonempty =
       build_v_cmp_gt_u32_e32_vcc(vector_source_vgpr(13), /*vsrc1=*/12, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_nonempty =
-      build_s_and_saveexec_b64(/*sdst=*/30, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_saveexec_b64(/*sdst=*/30, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto prior_owner = build_v_lshrrev_b32_e32(
       /*vdst=*/12, scalar_positive_inline_u32(consan_moi_exact_shadow::owner_shift), /*vsrc1=*/13,
       ROCJITSU_CODE_ARCH_RDNA4);
@@ -5741,13 +5743,13 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   const auto owner_ne =
       build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(11), /*vsrc1=*/12, ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_conflict_candidates =
-      build_s_mov_b64(/*sdst=*/32, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_mov_b64(/*sdst=*/32, kAmdGpuExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_different_owner =
-      build_s_and_saveexec_b64(/*sdst=*/36, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_saveexec_b64(/*sdst=*/36, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_different_owner =
-      build_s_mov_b64(/*sdst=*/34, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_mov_b64(/*sdst=*/34, kAmdGpuExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto union_owner_conflicts =
-      ib::build_s_xor_b64(kRdna4ExecLo, /*ssrc0=*/34, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+      ib::build_s_xor_b64(kAmdGpuExecLo, /*ssrc0=*/34, kAmdGpuExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto prior_epoch = build_v_lshrrev_b32_e32(
       /*vdst=*/12, scalar_positive_inline_u32(consan_moi_exact_shadow::epoch_shift),
       /*vsrc1=*/13, ROCJITSU_CODE_ARCH_RDNA4);
@@ -5761,7 +5763,7 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   const auto epoch_eq =
       build_v_cmp_eq_u32_e32_vcc(vector_source_vgpr(11), /*vsrc1=*/12, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_same_epoch =
-      build_s_and_saveexec_b64(/*sdst=*/32, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_saveexec_b64(/*sdst=*/32, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(nonempty);
   ASSERT_TRUE(narrow_nonempty);
   ASSERT_TRUE(prior_owner);
@@ -5853,7 +5855,7 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   // zero reserve and populate a diagnostic slot. Shadow publication remains a
   // separate IS3 stage because it must partition lanes by shadow address.
   const auto save_conflict_exec =
-      build_s_mov_b64(/*sdst=*/32, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_mov_b64(/*sdst=*/32, kAmdGpuExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto lane_rank_lo = build_v_mbcnt_lo_u32_b32(
       /*vdst=*/12, /*src0=*/32, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
   const auto lane_rank_hi = build_v_mbcnt_hi_u32_b32(
@@ -5861,7 +5863,7 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   const auto first_active_lane = build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0),
                                                             /*vsrc1=*/12, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_representative =
-      build_s_and_saveexec_b64(/*sdst=*/34, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_saveexec_b64(/*sdst=*/34, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto saved_exec_wait =
       instrumentation::build_salu_to_valu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(save_conflict_exec);
@@ -5883,7 +5885,7 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
                                              expected_slot_reservation.end());
   EXPECT_TRUE(contains_subsequence(text_words, expected_wave_coalesced_reservation));
 
-  const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, /*ssrc0=*/38, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_vcc = build_s_mov_b64(kAmdGpuVccLo, /*ssrc0=*/38, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_scc = build_rdna4_s_cmp_lg_u32(
       /*ssrc0=*/40, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(restore_vcc);
@@ -5895,7 +5897,7 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   EXPECT_TRUE(contains_subsequence(text_words, expected_restore));
 
   const auto restore_original_exec =
-      build_s_mov_b64(kRdna4ExecLo, /*ssrc0=*/42, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_mov_b64(kAmdGpuExecLo, /*ssrc0=*/42, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(restore_original_exec);
   const std::array<uint32_t, 5> expected_partition_restore = {
       *restore_original_exec, restore_current_low, restore_current_high, *restore_vcc, *restore_scc,
@@ -8048,7 +8050,7 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsLoadAndSuppressesReadRead) {
       scalar_positive_inline_u32(static_cast<uint32_t>(ConSanMoiShadowAccessKind::Read)),
       /*vsrc1=*/12, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_kind_conflict =
-      build_s_and_saveexec_b64(/*sdst=*/32, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_saveexec_b64(/*sdst=*/32, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(prior_kind);
   ASSERT_TRUE(kind_ne);
   ASSERT_TRUE(narrow_kind_conflict);
@@ -8093,7 +8095,7 @@ TEST(ConSanMoi, InlineShadowLoadPreservesConditionStateBeforeMetadataSetup) {
   const auto save_scc =
       build_rdna4_s_cselect_b32(/*sdst=*/70, scalar_positive_inline_u32(1),
                                 scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto save_vcc = build_s_mov_b64(/*sdst=*/68, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto save_vcc = build_s_mov_b64(/*sdst=*/68, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const uint32_t save_address =
       build_v_mov_b32_e32(/*vdst=*/40, vector_source_vgpr(/*vsrc=*/0), ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(save_scc);

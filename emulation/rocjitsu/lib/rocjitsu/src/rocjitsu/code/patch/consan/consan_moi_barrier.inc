@@ -240,7 +240,7 @@ void note_relocated_barrier_instruction(ConSanPatchInfo &patch,
     const uint16_t active_exec_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 12u);
     const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 14u);
     const auto save_active_exec =
-        instrumentation::build_s_mov_b64(active_exec_sgpr, kRdna4ExecLo, arch);
+        instrumentation::build_s_mov_b64(active_exec_sgpr, kAmdGpuExecLo, arch);
     const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
         rank_vgpr, active_exec_sgpr, scalar_positive_inline_u32(0), arch);
     const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
@@ -249,9 +249,9 @@ void note_relocated_barrier_instruction(ConSanPatchInfo &patch,
     const auto first_active =
         instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), rank_vgpr, arch);
     const auto narrow_first =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
     const auto restore_exec =
-        instrumentation::build_s_mov_b64(kRdna4ExecLo, active_exec_sgpr, arch);
+        instrumentation::build_s_mov_b64(kAmdGpuExecLo, active_exec_sgpr, arch);
     const auto saved_exec_wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
     if (!save_active_exec || !saved_exec_wait || !mbcnt_lo || !mbcnt_hi || !first_active ||
         !narrow_first || !restore_exec)

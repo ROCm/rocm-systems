@@ -5047,3 +5047,60 @@ is still not material whole-refactoring shrinkage. Remaining target locality,
 broader operating-point and mutable-transaction surfaces, larger legacy
 harvesting, material Section 14.8 evidence, and the independent Section 14
 completion audit remain open. The goal therefore remains active.
+
+### 16.60 Convergence checkpoint 59: target-neutral universal operand ABI
+
+The architecture-locality deep read returned to an inconsistency identified in
+the initial audit. Common MOI construction, all three MOI mode emitters,
+SuperCollider construction, resource placement, and independent validation
+used constants named for RDNA4 to refer to EXEC, VCC, workitem-x, and device
+scope encodings. These values are deliberately shared by every supported
+target profile; their old names made common mechanisms appear target-specific
+and propagated concrete-architecture vocabulary into otherwise normalized
+mode code. The relay component and the Inline dynamic-record component also
+declared private copies of subsets of the same constants.
+
+The six universal operands now have target-neutral `kAmdGpu*` names and one
+definition in `consan_capability_contract.h`, beside the normalized target
+facts that establish their applicability. MOI native ABI and relay contracts
+consume that authority, and the dynamic-record emitter no longer redeclares
+raw numeric values. This is not a claim that all future targets must share
+these encodings: a target introducing a real exception must extend the target
+contract or publish a target-owned operation. It does ensure that common and
+mode code no longer pretends one currently universal ABI fact belongs to
+RDNA4.
+
+All production and affected test consumers were converged in the same slice.
+The architecture gate rejects the retired RDNA4 spellings throughout
+production and requires all six target-neutral operands in the capability
+contract. There is therefore one definition authority, 17 production consumer
+files, no compatibility aliases, and no surviving duplicate declaration.
+
+| Signal | Checkpoint 59 | Cumulative change | Slice change from checkpoint 58 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,258 | +283 | **-27** |
+| Nonblank production lines | 98,949 | **-134** | **-31** |
+| Production implementation lines | 91,218 | **-232** | **-33** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **175 / 52** | **-101 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 30 | +10 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Universal ABI definition authorities | **1 target-neutral contract** | n/a | **-2 duplicates** |
+| RDNA4-named universal ABI operands in production | **0** | n/a | converged |
+| Test inventory | **5,388** | **+43** | 0 |
+
+Validation includes a final-tree `-j16` build; 18 focused target-capability,
+five-architecture ABI, and architecture-boundary tests; all 4,753 nonphysical
+tests over the five emulated targets at `-j16`; and all 635 physical gfx1201
+tests serialized at `-j1`. The physical HIP fixtures were rebuilt after their
+consumer migration. No test was removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.2, 14.4, 14.6, 14.7, 14.8, and
+14.9. It removes a concrete-architecture peephole from all common and mode
+consumers and deletes the duplicate authorities rather than retaining aliases.
+The cumulative 232-line reduction is nevertheless still not material
+whole-refactoring shrinkage. Remaining architecture locality, broader
+operating-point and mutable-transaction surfaces, larger legacy harvesting,
+material Section 14.8 evidence, and the independent Section 14 completion
+audit remain open. The goal therefore remains active.

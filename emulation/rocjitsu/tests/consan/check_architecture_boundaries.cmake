@@ -262,6 +262,11 @@ file(GLOB _consan_production_files "${_consan_dir}/*.cpp" "${_consan_dir}/*.h" "
 foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_file}"
+        "kRdna4(Exec|Vcc|WorkitemIdX|ScopeDevice)"
+        "universal AMDGPU ABI operands must use the target-neutral capability contract"
+    )
+    _consan_assert_no_match(
+        "${_file}"
         "MoiOptions"
         "production must carry immutable input and MOI operating-point state separately"
     )
@@ -295,6 +300,14 @@ foreach(_file IN LISTS _consan_production_files)
         "moi_(record_replay_dense_barrier_router|inline_access_present)"
         "mode semantics must not return to the mutable operating point"
     )
+endforeach()
+file(READ "${_consan_dir}/consan_capability_contract.h" _target_neutral_abi_contract)
+foreach(_operand IN ITEMS ExecLo ExecHi VccLo VccHi WorkitemIdX ScopeDevice)
+    if(NOT _target_neutral_abi_contract MATCHES "kAmdGpu${_operand}")
+        message(FATAL_ERROR
+            "ConSan target-neutral AMDGPU ABI contract lost ${_operand}"
+        )
+    endif()
 endforeach()
 file(READ "${_consan_dir}/consan_moi_shared_lowering.h" _moi_private_layout_contract)
 if(NOT _moi_private_layout_contract MATCHES "struct MoiPrivateStateDemand" OR

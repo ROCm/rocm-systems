@@ -74,10 +74,10 @@ TEST(ConSanInstructionBuilder, EncodesSignedAddressDisplacementWithCarry) {
   EXPECT_EQ((*positive)[3], pack_sopp(rdna4::kSWaitAlu, 0xff9du));
   EXPECT_EQ((*positive)[0] & 0xffu, 10u);
   EXPECT_EQ((*positive)[4] & 0xffu, 11u);
-  EXPECT_EQ(((*positive)[0] >> 8u) & 0x7fu, kRdna4VccLo);
+  EXPECT_EQ(((*positive)[0] >> 8u) & 0x7fu, kAmdGpuVccLo);
   EXPECT_EQ(((*positive)[1] >> 18u) & 0x1ffu, scalar_positive_inline_u32(0));
-  EXPECT_EQ(((*positive)[4] >> 8u) & 0x7fu, kRdna4VccLo);
-  EXPECT_EQ(((*positive)[5] >> 18u) & 0x1ffu, kRdna4VccLo);
+  EXPECT_EQ(((*positive)[4] >> 8u) & 0x7fu, kAmdGpuVccLo);
+  EXPECT_EQ(((*positive)[5] >> 18u) & 0x1ffu, kAmdGpuVccLo);
   EXPECT_EQ((*positive)[5] & 0x1ffu, scalar_positive_inline_u32(0));
 
   const auto negative =

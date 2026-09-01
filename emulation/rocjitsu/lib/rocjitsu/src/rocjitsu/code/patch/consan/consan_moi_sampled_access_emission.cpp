@@ -74,7 +74,7 @@ using consan_moi_detail::ConSanMoiRecordEmitter;
   const auto zero_high = instrumentation::build_v_mov_b32_literal(prior_high_vgpr, 0u, arch);
   const auto atomic_snapshot = instrumentation::build_flat_atomic_add_u64(
       address_lo_vgpr, prior_low_vgpr, prior_low_vgpr,
-      /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+      /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
   if (!zero_low || !zero_high || !atomic_snapshot ||
       !append_sampled_banked_address(words, prior_address, sizeof(uint64_t), window_bank_count,
                                      bank_vgpr, address_lo_vgpr, arch)) {
@@ -426,7 +426,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 4u);
     const auto owner_init = instrumentation::build_v_lshrrev_b32(
-        value_vgpr, scalar_positive_inline_u32(*owner_shift), kRdna4WorkitemIdX, arch);
+        value_vgpr, scalar_positive_inline_u32(*owner_shift), kAmdGpuWorkitemIdX, arch);
     if (!owner_init) {
       errors.emplace_back("ConSan MOI sampled probe could not encode owner derivation");
       return std::nullopt;
@@ -575,9 +575,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
       instrumentation::build_s_cselect_b32(publication_scc_save_sgpr, scalar_positive_inline_u32(1),
                                            scalar_positive_inline_u32(0), arch);
   const auto save_vcc =
-      instrumentation::build_s_mov_b64(selection_vcc_save_sgpr, kRdna4VccLo, arch);
+      instrumentation::build_s_mov_b64(selection_vcc_save_sgpr, kAmdGpuVccLo, arch);
   const auto save_exec =
-      instrumentation::build_s_mov_b64(original_exec_save_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(original_exec_save_sgpr, kAmdGpuExecLo, arch);
   if (!save_scc || !save_vcc || !save_exec) {
     errors.emplace_back("ConSan MOI sampled probe could not save guest EXEC/VCC/SCC");
     return std::nullopt;
@@ -614,7 +614,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
       const auto selected =
           instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(high_vgpr), bank_vgpr, arch);
       const auto narrow_selected =
-          instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kRdna4VccLo, arch);
+          instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kAmdGpuVccLo, arch);
       if (!selected_value || !selected || !narrow_selected) {
         errors.emplace_back(
             "ConSan MOI runtime sampled probe could not encode its body workgroup gate");
@@ -657,7 +657,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     const auto selected =
         instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(high_vgpr), low_vgpr, arch);
     const auto narrow_selected =
-        instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kAmdGpuVccLo, arch);
     if (!cell || !residue || !selected_value || !selected || !narrow_selected) {
       errors.emplace_back("ConSan MOI runtime sampled probe could not encode LDS-cell selector");
       return std::nullopt;
@@ -747,7 +747,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     const auto owner_equal =
         instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(owner_vgpr), high_vgpr, arch);
     const auto narrow_owner =
-        instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kAmdGpuVccLo, arch);
     if (!owner_equal || !narrow_owner)
       return std::nullopt;
     words.push_back(*owner_equal);
@@ -766,13 +766,13 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
   const auto claim_compare = instrumentation::build_v_mov_b32_literal(
       high_vgpr, static_cast<uint32_t>(ConSanMoiSampledCausalPublicationState::Empty), arch);
   const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
-      scratch_vgpr, low_vgpr, low_vgpr, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+      scratch_vgpr, low_vgpr, low_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
   const auto claimed =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(static_cast<uint32_t>(
                                                   ConSanMoiSampledCausalPublicationState::Empty)),
                                               low_vgpr, arch);
   const auto narrow_winner =
-      instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kAmdGpuVccLo, arch);
   if (!claim_new || !claim_compare || !claim || !claimed || !narrow_winner ||
       !append_sampled_banked_address(
           words, causal_window_address + offsetof(ConSanMoiSampledCausalWindow, publication_state),
@@ -899,7 +899,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
   // with one device-scope atomic exchange so concurrent writers cannot leave a
   // low word from one wave paired with a high word from another.
   const auto atomic_publish = instrumentation::build_flat_atomic_swap_b64(
-      scratch_vgpr, low_vgpr, low_vgpr, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+      scratch_vgpr, low_vgpr, low_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
   if (!atomic_publish ||
       !append_sampled_banked_address(words, sampled_entry_address, sizeof(uint64_t),
                                      window_bank_count, bank_vgpr, scratch_vgpr, arch)) {
@@ -927,7 +927,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     return std::nullopt;
   }
   const auto restore_winner_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, publication_exec_save_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, publication_exec_save_sgpr, arch);
   if (!restore_winner_exec)
     return std::nullopt;
   words.push_back(*restore_winner_exec);
@@ -935,7 +935,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     return std::nullopt;
 
   const auto save_collision_exec =
-      instrumentation::build_s_mov_b64(publication_exec_save_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(publication_exec_save_sgpr, kAmdGpuExecLo, arch);
   if (!save_collision_exec || !sequence.bind(collision_label))
     return std::nullopt;
   words.push_back(*save_collision_exec);
@@ -1023,7 +1023,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     return std::nullopt;
   }
   const auto restore_duplicate_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, publication_exec_save_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, publication_exec_save_sgpr, arch);
   if (!restore_duplicate_exec)
     return std::nullopt;
   words.push_back(*restore_duplicate_exec);
@@ -1040,7 +1040,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
   const auto first_active_lane =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
   const auto narrow_collision =
-      instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kAmdGpuVccLo, arch);
   if (!mbcnt_lo || !mbcnt_hi || !first_active_lane || !narrow_collision) {
     errors.emplace_back("ConSan MOI sampled probe could not select a collision representative");
     return std::nullopt;
@@ -1058,7 +1058,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     return std::nullopt;
   }
   const auto restore_collision_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, publication_exec_save_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, publication_exec_save_sgpr, arch);
   if (!restore_collision_exec)
     return std::nullopt;
   words.push_back(*restore_collision_exec);
@@ -1066,9 +1066,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
   if (!sequence.bind(restore_label))
     return std::nullopt;
   const auto restore_vcc =
-      instrumentation::build_s_mov_b64(kRdna4VccLo, selection_vcc_save_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuVccLo, selection_vcc_save_sgpr, arch);
   const auto restore_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec_save_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec_save_sgpr, arch);
   const auto restore_scc = instrumentation::build_s_cmp_lg_u32(publication_scc_save_sgpr,
                                                                scalar_positive_inline_u32(0), arch);
   if (!restore_exec || !restore_vcc || !restore_scc) {

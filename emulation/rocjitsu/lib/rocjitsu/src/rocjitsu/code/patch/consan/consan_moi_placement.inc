@@ -2405,7 +2405,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
   if (!point.moi_owner_epoch_vgprs.owner() &&
       state.register_allocation.owner_persistent_vgprs.empty() &&
       semantic_request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId)
-    request.forbidden.expand({RegClass::VGPR, kRdna4WorkitemIdX, 1});
+    request.forbidden.expand({RegClass::VGPR, kAmdGpuWorkitemIdX, 1});
   forbid_moi_persistent_vgprs(request.forbidden, point, state.register_allocation,
                               plan.owner_descriptor_file_offsets);
 

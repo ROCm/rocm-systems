@@ -540,17 +540,17 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
   }
   auto skip_action =
       instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(mismatch_action->size()), arch);
-  constexpr uint16_t kRdna4VccLo = 106;
+  constexpr uint16_t kAmdGpuVccLo = 106;
   const bool uses_gfx9_cdna_encoding = target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
                                        target.encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
   const std::optional<uint32_t> save_vcc =
       uses_gfx9_cdna_encoding
-          ? instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo, arch)
-          : std::optional<uint32_t>(build_s_mov_b32(vcc_save_sgpr, kRdna4VccLo, arch));
+          ? instrumentation::build_s_mov_b64(vcc_save_sgpr, kAmdGpuVccLo, arch)
+          : std::optional<uint32_t>(build_s_mov_b32(vcc_save_sgpr, kAmdGpuVccLo, arch));
   const std::optional<uint32_t> restore_vcc =
       uses_gfx9_cdna_encoding
-          ? instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr, arch)
-          : std::optional<uint32_t>(build_s_mov_b32(kRdna4VccLo, vcc_save_sgpr, arch));
+          ? instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save_sgpr, arch)
+          : std::optional<uint32_t>(build_s_mov_b32(kAmdGpuVccLo, vcc_save_sgpr, arch));
   if (!wait_dscnt || !skip_action || !save_vcc || !restore_vcc) {
     errors.emplace_back("ConSan LDS check/trap proof could not encode sequence");
     return std::nullopt;

@@ -610,14 +610,14 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     const bool every_owner_is_wave32 =
         std::ranges::all_of(owners, [](const auto *owner) { return owner->wavefront_size == 32u; });
     if (every_owner_is_wave32) {
-      const auto entry_saved_vcc = find_dead_sgpr(true, kRdna4VccLo, 2u);
-      const auto return_saved_vcc = find_dead_sgpr(false, kRdna4VccLo, 2u);
+      const auto entry_saved_vcc = find_dead_sgpr(true, kAmdGpuVccLo, 2u);
+      const auto return_saved_vcc = find_dead_sgpr(false, kAmdGpuVccLo, 2u);
       if (!entry_saved_vcc || !return_saved_vcc)
         return true;
       candidate.scratch_kind = ScRelayReservoirScratchKind::Wave32Vcc;
-      candidate.pc_sgpr_pair = kRdna4VccLo;
+      candidate.pc_sgpr_pair = kAmdGpuVccLo;
       candidate.saved_vcc_sgpr = *entry_saved_vcc;
-      candidate.return_pc_sgpr_pair = kRdna4VccLo;
+      candidate.return_pc_sgpr_pair = kAmdGpuVccLo;
       candidate.return_saved_vcc_sgpr = *return_saved_vcc;
       candidate.required_sgpr_count =
           std::max<uint16_t>(static_cast<uint16_t>(*entry_saved_vcc + 1u),
@@ -3872,11 +3872,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         std::vector<uint32_t> entry_words;
         const bool wave32_vcc = reservoir.scratch_kind == ScRelayReservoirScratchKind::Wave32Vcc;
         entry_words.push_back(wave32_vcc
-                                  ? build_s_mov_b32(reservoir.saved_vcc_sgpr, kRdna4VccLo, arch)
+                                  ? build_s_mov_b32(reservoir.saved_vcc_sgpr, kAmdGpuVccLo, arch)
                                   : build_s_nop(0, arch));
         if (!append_lds_check_trap_indirect_jump(
                 entry_words, reservoir.anchor_offset, reservoir.placement.body_offset,
-                reservoir.pc_sgpr_pair, wave32_vcc ? kRdna4ExecHi : reservoir.saved_scc_sgpr,
+                reservoir.pc_sgpr_pair, wave32_vcc ? kAmdGpuExecHi : reservoir.saved_scc_sgpr,
                 target) ||
             entry_words.size() != kScRelayEntryWords ||
             reservoir.original_size < entry_words.size() * sizeof(uint32_t) ||
@@ -3892,25 +3892,25 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
              offset < reservoir.placement.return_target; offset += sizeof(uint32_t))
           std::memcpy(new_text.data() + offset, &padding_nop, sizeof(padding_nop));
         const uint32_t tail_word =
-            wave32_vcc ? build_s_mov_b32(kRdna4VccLo, reservoir.return_saved_vcc_sgpr, arch)
+            wave32_vcc ? build_s_mov_b32(kAmdGpuVccLo, reservoir.return_saved_vcc_sgpr, arch)
                        : build_s_nop(0, arch);
         std::memcpy(new_text.data() + reservoir.placement.return_target, &tail_word,
                     sizeof(uint32_t));
         const uint32_t body_prefix =
-            wave32_vcc ? build_s_mov_b32(kRdna4VccLo, reservoir.saved_vcc_sgpr, arch)
+            wave32_vcc ? build_s_mov_b32(kAmdGpuVccLo, reservoir.saved_vcc_sgpr, arch)
                        : build_s_nop(0, arch);
         append_consan_patch_words(new_text, std::span<const uint32_t>(&body_prefix, 1u));
         new_text.insert(new_text.end(), pristine_text.begin() + reservoir.anchor_offset,
                         pristine_text.begin() + reservoir.anchor_offset + reservoir.original_size);
         std::vector<uint32_t> return_words;
         return_words.push_back(
-            wave32_vcc ? build_s_mov_b32(reservoir.return_saved_vcc_sgpr, kRdna4VccLo, arch)
+            wave32_vcc ? build_s_mov_b32(reservoir.return_saved_vcc_sgpr, kAmdGpuVccLo, arch)
                        : build_s_nop(0, arch));
         if (!append_lds_check_trap_indirect_jump(
                 return_words,
                 reservoir.placement.body_offset + sizeof(uint32_t) + reservoir.original_size,
                 reservoir.placement.return_target, reservoir.return_pc_sgpr_pair,
-                wave32_vcc ? kRdna4ExecHi : reservoir.return_saved_scc_sgpr, target) ||
+                wave32_vcc ? kAmdGpuExecHi : reservoir.return_saved_scc_sgpr, target) ||
             return_words.size() + 1u != kScRelayAppendedOverheadWords) {
           result.errors.emplace_back(
               "ConSan LDS check/trap could not encode its relay-reservoir return");

@@ -204,8 +204,8 @@ namespace {
 
 inline constexpr uint8_t kElfSymbolBindLocal = 0;
 inline constexpr uint8_t kElfSymbolTypeNotype = 0;
-inline constexpr uint16_t kRdna4VccLo = 106;
-inline constexpr uint16_t kRdna4ExecLo = 126;
+inline constexpr uint16_t kAmdGpuVccLo = 106;
+inline constexpr uint16_t kAmdGpuExecLo = 126;
 inline constexpr uint16_t kScalarOperandTtmpBase = 108;
 inline constexpr uint16_t kTtmpRdna4GridYz = 7;
 inline constexpr uint16_t kTtmpRdna4GridX = 9;

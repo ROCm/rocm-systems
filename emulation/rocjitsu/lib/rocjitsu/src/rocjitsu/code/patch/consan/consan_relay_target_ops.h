@@ -4,6 +4,8 @@
 #ifndef ROCJITSU_CODE_PATCH_CONSAN_RELAY_TARGET_OPS_H
 #define ROCJITSU_CODE_PATCH_CONSAN_RELAY_TARGET_OPS_H
 
+#include "rocjitsu/code/patch/consan/consan_capability_contract.h"
+
 #include <cstdint>
 #include <vector>
 
@@ -17,9 +19,6 @@ inline constexpr uint32_t kScRelayTailRestoreWords = 1u;
 inline constexpr uint32_t kScRelayAppendedOverheadWords = 9u;
 inline constexpr uint32_t kScRelayReservoirSlotStrideWords = 16u;
 inline constexpr uint32_t kScRelayReservoirDenseEdgeWords = 16u;
-inline constexpr uint16_t kRdna4VccLo = 106u;
-inline constexpr uint16_t kRdna4ExecHi = 127u;
-
 [[nodiscard]] std::vector<uint64_t> sc_relay_reservoir_slot_offsets(uint64_t anchor_offset,
                                                                     uint32_t original_size);
 

@@ -208,7 +208,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const auto prior_nonempty =
       instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(old_value_vgpr), tmp_vgpr, arch);
   const auto narrow_nonempty =
-      instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kAmdGpuVccLo, arch);
   if (!prior_nonempty || !narrow_nonempty)
     return false;
   words.push_back(mov_zero);
@@ -233,7 +233,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     const auto same_workgroup = instrumentation::build_v_cmp_eq_u32_vcc(
         vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
     const auto narrow_same_workgroup =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo, arch);
     if (!same_workgroup || !narrow_same_workgroup)
       return false;
     words.push_back(*same_workgroup);
@@ -253,7 +253,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     const auto overlap_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
         scalar_positive_inline_u32(0u), current_field_vgpr, arch);
     const auto narrow_overlap =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo, arch);
     if (!prior_byte_mask || !current_byte_mask || !overlapping_bytes || !overlap_nonzero ||
         !narrow_overlap) {
       return false;
@@ -279,7 +279,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     const auto kind_ne = instrumentation::build_v_cmp_ne_u32_vcc(
         scalar_positive_inline_u32(static_cast<uint32_t>(current_kind)), tmp_vgpr, arch);
     const auto narrow_kind_conflict =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo, arch);
     if (!prior_kind || !kind_ne || !narrow_kind_conflict)
       return false;
     words.insert(words.end(), prior_kind->begin(), prior_kind->end());
@@ -306,17 +306,17 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     const uint16_t different_owner_exec = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 4u);
     const uint16_t predicate_exec = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 6u);
     const auto save_candidates =
-        instrumentation::build_s_mov_b64(candidate_exec, kRdna4ExecLo, arch);
+        instrumentation::build_s_mov_b64(candidate_exec, kAmdGpuExecLo, arch);
     const auto narrow_different_owner =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch);
     const auto save_different_owner =
-        instrumentation::build_s_mov_b64(different_owner_exec, kRdna4ExecLo, arch);
+        instrumentation::build_s_mov_b64(different_owner_exec, kAmdGpuExecLo, arch);
     const auto restore_candidates =
-        instrumentation::build_s_mov_b64(kRdna4ExecLo, candidate_exec, arch);
+        instrumentation::build_s_mov_b64(kAmdGpuExecLo, candidate_exec, arch);
     const auto owner_eq = instrumentation::build_v_cmp_eq_u32_vcc(
         vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
     const auto narrow_same_owner =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch);
     const auto prior_instruction = instrumentation::build_v_lshrrev_b32(
         tmp_vgpr,
         scalar_positive_inline_u32(consan_moi_exact_shadow::instruction_offset_shift - 32u),
@@ -326,7 +326,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     const auto same_instruction = instrumentation::build_v_cmp_eq_u32_vcc(
         vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
     const auto narrow_same_instruction =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch);
     const auto prior_lane = instrumentation::build_v_lshrrev_b32(
         tmp_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
         *prior_byte_provenance_vgpr, arch);
@@ -337,9 +337,9 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     const auto different_lane = instrumentation::build_v_cmp_ne_u32_vcc(
         vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
     const auto narrow_different_lane =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch);
     const auto union_conflicts =
-        instrumentation::build_s_xor_b64(kRdna4ExecLo, different_owner_exec, kRdna4ExecLo, arch);
+        instrumentation::build_s_xor_b64(kAmdGpuExecLo, different_owner_exec, kAmdGpuExecLo, arch);
     if (!save_candidates || !narrow_different_owner || !save_different_owner ||
         !restore_candidates || !owner_eq || !narrow_same_owner || !prior_instruction ||
         !current_instruction || !same_instruction || !narrow_same_instruction || !prior_lane ||
@@ -364,7 +364,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     words.push_back(*union_conflicts);
   } else {
     const auto narrow_conflict =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo, arch);
     if (!narrow_conflict)
       return false;
     words.push_back(*owner_ne);
@@ -387,7 +387,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     const auto epoch_eq = instrumentation::build_v_cmp_eq_u32_vcc(
         vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
     const auto narrow_same_epoch =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo, arch);
     if (!epoch_eq || !narrow_same_epoch)
       return false;
     words.push_back(*epoch_eq);
@@ -431,7 +431,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
                                          uint16_t consumer_packed_value,
                                          uint16_t producer_packed_value) {
       const auto save_conflict =
-          instrumentation::build_s_mov_b64(conflict_exec, kRdna4ExecLo, arch);
+          instrumentation::build_s_mov_b64(conflict_exec, kAmdGpuExecLo, arch);
       if (!save_conflict)
         return false;
       words.push_back(*save_conflict);
@@ -455,7 +455,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
 
       const auto narrow = [&]() {
         const auto instruction =
-            instrumentation::build_s_and_saveexec_b64(predicate_exec, kRdna4VccLo, arch);
+            instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch);
         if (!instruction)
           return false;
         words.push_back(*instruction);
@@ -607,7 +607,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
         return false;
       words.push_back(*token_too_new);
       const auto remove_token_too_new =
-          instrumentation::build_s_andn2_b64(kRdna4ExecLo, kRdna4ExecLo, kRdna4VccLo, arch);
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch);
       if (!remove_token_too_new)
         return false;
       words.push_back(*remove_token_too_new);
@@ -636,7 +636,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
         return false;
       words.push_back(*token_insufficient);
       const auto remove_insufficient =
-          instrumentation::build_s_andn2_b64(kRdna4ExecLo, kRdna4ExecLo, kRdna4VccLo, arch);
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch);
       if (!remove_insufficient)
         return false;
       words.push_back(*remove_insufficient);
@@ -650,7 +650,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
               static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence)),
           token_kind, arch);
       const auto remove_ordered =
-          instrumentation::build_s_andn2_b64(kRdna4ExecLo, conflict_exec, kRdna4VccLo, arch);
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, conflict_exec, kAmdGpuVccLo, arch);
       if (!access_authorized || !remove_ordered)
         return false;
       words.push_back(*access_authorized);
@@ -691,7 +691,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const uint16_t slot_vgpr =
       consan_uses_gfx9_cdna_encoding(arch) ? cdna_slot_vgpr : diagnostic_tuple_candidate;
   const auto save_conflict_exec = instrumentation::build_s_mov_b64(
-      static_cast<uint16_t>(*point.moi_exec_save_sgpr + 2u), kRdna4ExecLo, arch);
+      static_cast<uint16_t>(*point.moi_exec_save_sgpr + 2u), kAmdGpuExecLo, arch);
   const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
       tmp_vgpr, static_cast<uint16_t>(*point.moi_exec_save_sgpr + 2u),
       scalar_positive_inline_u32(0), arch);
@@ -701,7 +701,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const auto first_active_lane =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
   const auto narrow_representative = instrumentation::build_s_and_saveexec_b64(
-      static_cast<uint16_t>(*point.moi_exec_save_sgpr + 4u), kRdna4VccLo, arch);
+      static_cast<uint16_t>(*point.moi_exec_save_sgpr + 4u), kAmdGpuVccLo, arch);
   const auto saved_exec_wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
   if (!save_conflict_exec || !saved_exec_wait || !mbcnt_lo || !mbcnt_hi || !first_active_lane ||
       !narrow_representative)
@@ -730,11 +730,11 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     const uint32_t mov_unclaimed = build_v_mov_b32_e32(static_cast<uint16_t>(slot_vgpr + 1u),
                                                        scalar_positive_inline_u32(0), arch);
     const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
-        scratch_vgpr, slot_vgpr, slot_vgpr, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+        scratch_vgpr, slot_vgpr, slot_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
     const auto claim_won =
         instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), slot_vgpr, arch);
     const auto narrow_winner = instrumentation::build_s_and_saveexec_b64(
-        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 4u), kRdna4VccLo, arch);
+        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 4u), kAmdGpuVccLo, arch);
     if (!mov_address_lo || !mov_address_hi || !claim || !claim_won || !narrow_winner)
       return false;
     words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
@@ -756,7 +756,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     const auto slot_in_capacity =
         instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(tmp_vgpr), slot_vgpr, arch);
     const auto narrow_capacity = instrumentation::build_s_and_saveexec_b64(
-        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 4u), kRdna4VccLo, arch);
+        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 4u), kAmdGpuVccLo, arch);
     if (!mov_capacity || !slot_in_capacity || !narrow_capacity)
       return false;
     words.insert(words.end(), mov_capacity->begin(), mov_capacity->end());
@@ -1088,7 +1088,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   }
 
   const auto restore_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, *point.moi_exec_save_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, *point.moi_exec_save_sgpr, arch);
   if (!restore_exec)
     return false;
   words.push_back(*restore_exec);
@@ -1152,7 +1152,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
 
   const auto narrow_vcc = [&]() -> bool {
     const auto narrow =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
     if (!narrow)
       return false;
     words.push_back(*narrow);
@@ -1247,7 +1247,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   if (!narrow_vcc())
     return false;
   const auto save_stable_exec =
-      instrumentation::build_s_mov_b64(committed_exec_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch);
   if (!save_stable_exec)
     return false;
   words.push_back(*save_stable_exec);
@@ -1260,9 +1260,9 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     return false;
   }
   const auto save_empty_exec =
-      instrumentation::build_s_mov_b64(empty_exec_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(empty_exec_sgpr, kAmdGpuExecLo, arch);
   const auto restore_stable_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, committed_exec_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch);
   if (!save_empty_exec || !restore_stable_exec)
     return false;
   words.push_back(*save_empty_exec);
@@ -1376,7 +1376,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     return false;
   }
   const auto save_ready_fields_exec =
-      instrumentation::build_s_mov_b64(committed_exec_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch);
   if (!save_ready_fields_exec)
     return false;
   words.push_back(*save_ready_fields_exec);
@@ -1386,9 +1386,9 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   if (!require_not_equal_literal(prior_dispatch_low_vgpr, 0))
     return false;
   const auto save_low_dispatch_exec =
-      instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kAmdGpuExecLo, arch);
   const auto restore_ready_fields_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, committed_exec_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch);
   if (!save_low_dispatch_exec || !restore_ready_fields_exec)
     return false;
   words.push_back(*save_low_dispatch_exec);
@@ -1398,11 +1398,11 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     return false;
   }
   const auto save_high_dispatch_exec =
-      instrumentation::build_s_mov_b64(committed_exec_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch);
   const auto union_ready_dispatch = instrumentation::build_s_xor_b64(
       ready_exec_sgpr, low_dispatch_exec_sgpr, committed_exec_sgpr, arch);
   const auto union_valid =
-      instrumentation::build_s_xor_b64(kRdna4ExecLo, empty_exec_sgpr, ready_exec_sgpr, arch);
+      instrumentation::build_s_xor_b64(kAmdGpuExecLo, empty_exec_sgpr, ready_exec_sgpr, arch);
   if (!save_high_dispatch_exec || !union_ready_dispatch || !union_valid)
     return false;
   words.push_back(*save_high_dispatch_exec);
@@ -1422,7 +1422,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   words.insert(words.end(), claim_new->begin(), claim_new->end());
   words.push_back(claim_expected);
   const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
-      address_lo_vgpr, cas_new_vgpr, cas_new_vgpr, /*return_old_value=*/true, kRdna4ScopeDevice,
+      address_lo_vgpr, cas_new_vgpr, cas_new_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice,
       arch);
   if (!claim)
     return false;
@@ -1439,15 +1439,15 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   if (retry_contention) {
     failure.stage = "contention retry";
     const auto save_claimed =
-        instrumentation::build_s_mov_b64(committed_exec_sgpr, kRdna4ExecLo, arch);
-    const auto select_failed = instrumentation::build_s_andn2_b64(kRdna4ExecLo, publisher_exec_sgpr,
-                                                                  committed_exec_sgpr, arch);
+        instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch);
+    const auto select_failed = instrumentation::build_s_andn2_b64(
+        kAmdGpuExecLo, publisher_exec_sgpr, committed_exec_sgpr, arch);
     const auto decrement = instrumentation::build_s_sub_u32(retry_count_sgpr, retry_count_sgpr,
                                                             scalar_positive_inline_u32(1), arch);
     const auto retries_remain =
         instrumentation::build_s_cmp_lg_u32(retry_count_sgpr, scalar_positive_inline_u32(0), arch);
     const auto restore_claimed =
-        instrumentation::build_s_mov_b64(kRdna4ExecLo, committed_exec_sgpr, arch);
+        instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch);
     if (!save_claimed || !select_failed || !decrement || !retries_remain || !restore_claimed) {
       return false;
     }
@@ -1497,7 +1497,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   // diagnostic path without growing the scratch window.
   failure.stage = "dispatch qualification";
   const auto save_claimed_publishers =
-      instrumentation::build_s_mov_b64(committed_exec_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch);
   if (!save_claimed_publishers)
     return false;
   words.push_back(*save_claimed_publishers);
@@ -1509,9 +1509,9 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   if (!narrow_vcc())
     return false;
   const auto save_same_dispatch =
-      instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kAmdGpuExecLo, arch);
   const auto restore_claimed_publishers =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, committed_exec_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch);
   if (!append_compare_moi_report_dispatch_id_word(
           words, consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
           prior_dispatch_high_vgpr, tmp_vgpr, /*high_word=*/true, arch) ||
@@ -1579,7 +1579,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   words.insert(words.end(), commit_new->begin(), commit_new->end());
   words.insert(words.end(), commit_expected->begin(), commit_expected->end());
   const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(
-      address_lo_vgpr, cas_new_vgpr, cas_new_vgpr, /*return_old_value=*/true, kRdna4ScopeDevice,
+      address_lo_vgpr, cas_new_vgpr, cas_new_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice,
       arch);
   if (!commit)
     return false;
@@ -1594,7 +1594,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   if (!narrow_vcc())
     return false;
   const auto save_committed =
-      instrumentation::build_s_mov_b64(committed_exec_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch);
   if (!save_committed)
     return false;
   words.push_back(*save_committed);
@@ -1611,11 +1611,11 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   restore_slot_address();
 
   const auto restore_publishers =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, publisher_exec_sgpr, arch);
-  const auto select_failed = instrumentation::build_s_andn2_b64(kRdna4ExecLo, publisher_exec_sgpr,
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, publisher_exec_sgpr, arch);
+  const auto select_failed = instrumentation::build_s_andn2_b64(kAmdGpuExecLo, publisher_exec_sgpr,
                                                                 committed_exec_sgpr, arch);
   const auto restore_committed =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, committed_exec_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch);
   if (!restore_publishers || !select_failed || !restore_committed)
     return false;
   words.push_back(*restore_publishers);
@@ -1634,7 +1634,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(current_low_vgpr + 1u),
                                       vector_source_vgpr(saved_current_high_vgpr), arch));
   const auto select_same_dispatch = instrumentation::build_s_and_b64(
-      kRdna4ExecLo, committed_exec_sgpr, low_dispatch_exec_sgpr, arch);
+      kAmdGpuExecLo, committed_exec_sgpr, low_dispatch_exec_sgpr, arch);
   if (!select_same_dispatch)
     return false;
   words.push_back(*select_same_dispatch);
@@ -1895,11 +1895,11 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
 
   failure.stage = "partition setup";
   const auto save_incoming_exec =
-      instrumentation::build_s_mov_b64(incoming_exec_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(incoming_exec_sgpr, kAmdGpuExecLo, arch);
   const auto initialize_pending =
-      instrumentation::build_s_mov_b64(pending_exec_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(pending_exec_sgpr, kAmdGpuExecLo, arch);
   const auto select_pending =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, pending_exec_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, pending_exec_sgpr, arch);
   const uint32_t save_address_lo =
       build_v_mov_b32_e32(saved_address_lo_vgpr, vector_source_vgpr(address_lo_vgpr), arch);
   const uint32_t save_address_hi = build_v_mov_b32_e32(
@@ -1925,18 +1925,18 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const auto address_equal =
       instrumentation::build_v_cmp_eq_u32_vcc(address_key_sgpr, address_lo_vgpr, arch);
   const auto narrow_address =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
-  const auto save_group = instrumentation::build_s_mov_b64(group_exec_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
+  const auto save_group = instrumentation::build_s_mov_b64(group_exec_sgpr, kAmdGpuExecLo, arch);
   const auto value_equal =
       instrumentation::build_v_cmp_eq_u32_vcc(value_key_sgpr, current_low_vgpr, arch);
   const auto narrow_value =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
   const auto read_mask =
       instrumentation::build_v_readfirstlane_b32(value_key_sgpr, lane_rank_vgpr, arch);
   const auto mask_equal =
       instrumentation::build_v_cmp_eq_u32_vcc(value_key_sgpr, lane_rank_vgpr, arch);
   const auto narrow_mask =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
   if (!save_incoming_exec || !initialize_pending || !select_pending || !read_address ||
       !read_address_high || !read_value || !address_equal || !narrow_address || !save_group ||
       !value_equal || !narrow_value || !read_mask || !mask_equal || !narrow_mask)
@@ -2014,7 +2014,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const auto mask_nonzero =
       instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u), lane_rank_vgpr, arch);
   const auto narrow_nonzero =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
   if (!mask_nonzero || !narrow_nonzero)
     return false;
   words.push_back(*mask_nonzero);
@@ -2028,9 +2028,9 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const auto first_lane =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr, arch);
   const auto narrow_first =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
   const auto save_publishers =
-      instrumentation::build_s_mov_b64(publisher_exec_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(publisher_exec_sgpr, kAmdGpuExecLo, arch);
   const auto use_group_diagnostic_mask =
       instrumentation::build_s_mov_b64(publisher_exec_sgpr, group_exec_sgpr, arch);
   if (!mbcnt_lo || !mbcnt_hi || !first_lane || !narrow_first || !save_publishers ||
@@ -2124,9 +2124,9 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const auto remove_group =
       instrumentation::build_s_xor_b64(pending_exec_sgpr, pending_exec_sgpr, group_exec_sgpr, arch);
   const auto select_remaining =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, pending_exec_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, pending_exec_sgpr, arch);
   const auto restore_incoming_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, incoming_exec_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, incoming_exec_sgpr, arch);
   if (!remove_group || !select_remaining || !restore_incoming_exec)
     return false;
   words.push_back(*remove_group);
@@ -2217,7 +2217,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const auto won_claim =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0u), temporary_vgpr, arch);
   const auto narrow_winners =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
   const auto shadow_byte_offset = instrumentation::build_v_lshlrev_b32(
       temporary_vgpr, scalar_positive_inline_u32(workgroup_shadow.compact ? 2u : 3u),
       saved_cell_vgpr, arch);
@@ -2230,7 +2230,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const auto publish_ready = instrumentation::build_ds_or_rtn_b32(state_vgpr, validity_address_vgpr,
                                                                   ready_mask_vgpr, 0u, arch);
   const auto restore_participants =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, temporary_exec_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, temporary_exec_sgpr, arch);
   const auto observe_ready =
       instrumentation::build_ds_load_b32(state_vgpr, validity_address_vgpr, 0u, arch);
   const auto observed_ready = instrumentation::build_v_and_b32(
@@ -2238,11 +2238,11 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const auto is_ready = instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(ready_mask_vgpr),
                                                                 temporary_vgpr, arch);
   const auto remove_ready =
-      instrumentation::build_s_andn2_b64(kRdna4ExecLo, kRdna4ExecLo, kRdna4VccLo, arch);
+      instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch);
   const auto skip_initialization = instrumentation::build_s_cbranch_execz(0, arch);
   const auto continue_poll = instrumentation::build_s_cbranch_execnz(0, arch);
   const auto restore_bounded =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, bounded_exec_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, bounded_exec_sgpr, arch);
   if (!state_word || !scale_state_word || !validity_address || !state_index || !scale_state_index ||
       !initializing_mask || !ready_mask || !claim || !prior_claim || !won_claim ||
       !narrow_winners || !shadow_byte_offset || !shadow_address || !clear_slot || !publish_ready ||
@@ -2359,7 +2359,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const uint16_t valid_workgroup_exec_sgpr = static_cast<uint16_t>(exec_base + 22u);
   const uint16_t provenance_temporary_vgpr = static_cast<uint16_t>(old_value_vgpr + 3u);
   const auto restore_valid_workgroup =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, valid_workgroup_exec_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, valid_workgroup_exec_sgpr, arch);
   if (!restore_valid_workgroup) {
     errors.emplace_back(
         "ConSan MOI inline-shadow local publish could not restore its workgroup lanes");
@@ -2383,7 +2383,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const auto mask_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u),
                                                                     current_high_vgpr, arch);
   const auto narrow_nonzero =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
   if (!mask_nonzero || !narrow_nonzero)
     return false;
   words.push_back(*mask_nonzero);
@@ -2408,15 +2408,15 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const auto in_bounds = instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(address_vgpr),
                                                                  temporary_vgpr, arch);
   const auto save_incoming_exec =
-      instrumentation::build_s_mov_b64(incoming_exec_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(incoming_exec_sgpr, kAmdGpuExecLo, arch);
   const auto narrow_bounded =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
   const auto save_bounded_exec =
-      instrumentation::build_s_mov_b64(bounded_exec_sgpr, kRdna4ExecLo, arch);
-  const auto select_out_of_bounds =
-      instrumentation::build_s_andn2_b64(kRdna4ExecLo, incoming_exec_sgpr, bounded_exec_sgpr, arch);
+      instrumentation::build_s_mov_b64(bounded_exec_sgpr, kAmdGpuExecLo, arch);
+  const auto select_out_of_bounds = instrumentation::build_s_andn2_b64(
+      kAmdGpuExecLo, incoming_exec_sgpr, bounded_exec_sgpr, arch);
   const auto restore_bounded_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, bounded_exec_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, bounded_exec_sgpr, arch);
   const auto shadow_byte_offset = instrumentation::build_v_lshlrev_b32(
       temporary_vgpr, scalar_positive_inline_u32(3u), temporary_vgpr, arch);
   const uint32_t local_base = workgroup_shadow.base + cell_index * sizeof(uint64_t);
@@ -2812,7 +2812,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   // that field so reused, uncleared LDS is distinguishable from current state.
   if (workgroup_shadow) {
     const auto save_original_exec = instrumentation::build_s_mov_b64(
-        static_cast<uint16_t>(*point.moi_exec_save_sgpr + original_exec_save_offset), kRdna4ExecLo,
+        static_cast<uint16_t>(*point.moi_exec_save_sgpr + original_exec_save_offset), kAmdGpuExecLo,
         arch);
     if (!save_original_exec) {
       errors.emplace_back(
@@ -2880,11 +2880,12 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     // encounter observable in the Inline-only header flags/count field so a
     // clean acceptance run cannot silently pass with detector undercoverage.
     const uint16_t exec_base = *point.moi_exec_save_sgpr;
-    const auto save_valid_exec = instrumentation::build_s_mov_b64(exec_base, kRdna4ExecLo, arch);
+    const auto save_valid_exec = instrumentation::build_s_mov_b64(exec_base, kAmdGpuExecLo, arch);
     const auto select_invalid_exec = instrumentation::build_s_andn2_b64(
-        kRdna4ExecLo, static_cast<uint16_t>(exec_base + original_exec_save_offset), exec_base,
+        kAmdGpuExecLo, static_cast<uint16_t>(exec_base + original_exec_save_offset), exec_base,
         arch);
-    const auto restore_valid_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, exec_base, arch);
+    const auto restore_valid_exec =
+        instrumentation::build_s_mov_b64(kAmdGpuExecLo, exec_base, arch);
     std::vector<uint32_t> accounting_words;
     if (!save_valid_exec || !select_invalid_exec || !restore_valid_exec ||
         !append_atomic_fetch_add_one_u32(
@@ -2928,7 +2929,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     const auto in_shared_aperture =
         instrumentation::build_v_cmp_eq_u32_vcc(kScalarOperandSharedBase, address_hi_source, arch);
     const auto retain_shared_lanes = instrumentation::build_s_and_saveexec_b64(
-        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 2u), kRdna4VccLo, arch);
+        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 2u), kAmdGpuVccLo, arch);
     if (!in_shared_aperture || !retain_shared_lanes) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not resolve a maybe-group flat aperture");
@@ -2939,7 +2940,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   }
   if (workgroup_shadow) {
     const auto retain_valid_workgroup = instrumentation::build_s_mov_b64(
-        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 22u), kRdna4ExecLo, arch);
+        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 22u), kAmdGpuExecLo, arch);
     if (!retain_valid_workgroup) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not retain validated workgroup lanes");
@@ -3053,9 +3054,9 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
           const uint16_t valid_workgroup_exec_sgpr =
               static_cast<uint16_t>(*point.moi_exec_save_sgpr + 22u);
           const auto narrow_more_cells =
-              instrumentation::build_s_and_saveexec_b64(loop_exec_save_sgpr, kRdna4VccLo, arch);
+              instrumentation::build_s_and_saveexec_b64(loop_exec_save_sgpr, kAmdGpuVccLo, arch);
           const auto restore_valid_workgroup =
-              instrumentation::build_s_mov_b64(kRdna4ExecLo, valid_workgroup_exec_sgpr, arch);
+              instrumentation::build_s_mov_b64(kAmdGpuExecLo, valid_workgroup_exec_sgpr, arch);
           if (!advance_offset || !advance_counter || !more_cells || !narrow_more_cells ||
               !restore_valid_workgroup) {
             errors.emplace_back(
@@ -3277,9 +3278,9 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
         const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 14u);
         const uint16_t incoming_exec_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 12u);
         const auto narrow_more_cells =
-            instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+            instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
         const auto restore_incoming_exec =
-            instrumentation::build_s_mov_b64(kRdna4ExecLo, incoming_exec_sgpr, arch);
+            instrumentation::build_s_mov_b64(kAmdGpuExecLo, incoming_exec_sgpr, arch);
         if (!advance_counter || !more_cells || !narrow_more_cells || !restore_incoming_exec) {
           errors.emplace_back(
               "ConSan MOI inline-shadow probe could not encode its external cell loop");
@@ -3329,7 +3330,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     const uint16_t active_exec_sgpr = static_cast<uint16_t>(exec_base + 12u);
     const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(exec_base + 14u);
     const auto save_active_exec =
-        instrumentation::build_s_mov_b64(active_exec_sgpr, kRdna4ExecLo, arch);
+        instrumentation::build_s_mov_b64(active_exec_sgpr, kAmdGpuExecLo, arch);
     const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
         tmp_vgpr, active_exec_sgpr, scalar_positive_inline_u32(0), arch);
     const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
@@ -3337,7 +3338,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     const auto first_active =
         instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
     const auto narrow_first =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
     const auto saved_exec_wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
     if (!save_active_exec || !saved_exec_wait || !mbcnt_lo || !mbcnt_hi || !first_active ||
         !narrow_first) {
@@ -3373,7 +3374,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   }
   if (point.moi_exec_save_sgpr) {
     const auto restore_original_exec = instrumentation::build_s_mov_b64(
-        kRdna4ExecLo, static_cast<uint16_t>(*point.moi_exec_save_sgpr + original_exec_save_offset),
+        kAmdGpuExecLo, static_cast<uint16_t>(*point.moi_exec_save_sgpr + original_exec_save_offset),
         arch);
     if (!restore_original_exec) {
       errors.emplace_back(

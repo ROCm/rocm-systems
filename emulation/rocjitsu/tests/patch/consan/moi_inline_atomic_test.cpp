@@ -480,20 +480,20 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquirePersistsEpochBeforeGuestRetur
         target.token_transaction_vsrc,
         static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Direct), target.arch);
     const auto save_kind_exec = instrumentation::build_s_mov_b64(
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u), kRdna4ExecLo, target.arch);
+        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u), kAmdGpuExecLo, target.arch);
     const auto select_inherited = instrumentation::build_s_and_b64(
-        kRdna4ExecLo, kRdna4ExecLo, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u),
+        kAmdGpuExecLo, kAmdGpuExecLo, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u),
         target.arch);
     const auto inherited_kind = instrumentation::build_v_mov_b32_literal(
         target.token_transaction_vsrc,
         static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Inherited), target.arch);
     const auto restore_kind_exec = instrumentation::build_s_mov_b64(
-        kRdna4ExecLo, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u), target.arch);
+        kAmdGpuExecLo, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u), target.arch);
     const auto overwrite_inherited = instrumentation::build_s_mov_b64(
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kRdna4ExecLo, target.arch);
+        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kAmdGpuExecLo, target.arch);
     const auto establish_same_owner = instrumentation::build_s_andn2_b64(
         static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u),
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 14u), kRdna4ExecLo, target.arch);
+        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 14u), kAmdGpuExecLo, target.arch);
     ASSERT_TRUE(direct_kind && save_kind_exec && select_inherited && inherited_kind &&
                 restore_kind_exec && overwrite_inherited && establish_same_owner);
     std::vector<uint32_t> kind_selection(direct_kind->begin(), direct_kind->end());
@@ -517,13 +517,13 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquirePersistsEpochBeforeGuestRetur
         << "phase-one token classification must not destroy same-owner provenance";
     const auto clobber_guest_vcc = instrumentation::build_s_andn2_b64(
         static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u),
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 14u), kRdna4ExecLo, target.arch);
+        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 14u), kAmdGpuExecLo, target.arch);
     const auto clobber_guest_scc = instrumentation::build_s_mov_b64(
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u), kRdna4ExecLo, target.arch);
+        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u), kAmdGpuExecLo, target.arch);
     const auto clobber_guest_vcc_during_workgroup_key = instrumentation::build_s_mov_b64(
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u), kRdna4ExecLo, target.arch);
+        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u), kAmdGpuExecLo, target.arch);
     const auto save_guest_vcc = instrumentation::build_s_mov_b64(
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u), kRdna4VccLo, target.arch);
+        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u), kAmdGpuVccLo, target.arch);
     const auto save_guest_scc = instrumentation::build_s_cselect_b32(
         static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u), scalar_positive_inline_u32(1),
         scalar_positive_inline_u32(0), target.arch);
@@ -1159,7 +1159,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
     const auto duplicate_epoch_is_newer = instrumentation::build_v_cmp_gt_u32_vcc(
         /*src0=*/vector_source_vgpr(27u), /*vsrc1=*/21u, target.arch);
     const auto narrow_duplicate_epoch = instrumentation::build_s_and_saveexec_b64(
-        /*sdst=*/80u, kRdna4VccLo, target.arch);
+        /*sdst=*/80u, kAmdGpuVccLo, target.arch);
     ASSERT_TRUE(duplicate_epoch_is_newer && narrow_duplicate_epoch);
     const std::array<uint32_t, 3> merge_duplicate_epoch = {
         *duplicate_epoch_is_newer, *narrow_duplicate_epoch,
@@ -2990,14 +2990,14 @@ TEST(ConSanMoi, Gfx1250ScaledVglobalAddressPlanMatchesIsaEffectiveAddress) {
   const auto save_scc =
       build_rdna4_s_cselect_b32(kSccSave, scalar_positive_inline_u32(1),
                                 scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA5);
-  const auto save_vcc = build_s_mov_b64(kVccSave, kRdna4VccLo, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto save_vcc = build_s_mov_b64(kVccSave, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_CDNA5);
   const auto scale = instrumentation::build_v_lshlrev_b32(kScratch, scalar_positive_inline_u32(2),
                                                           /*vsrc1=*/2, ROCJITSU_CODE_ARCH_CDNA5);
   const auto add_vaddr =
       build_v_add_u64_vgpr_offset(plan.result_address_vgpr, kScratch, ROCJITSU_CODE_ARCH_CDNA5);
   const auto add_displacement =
       build_v_add_u64_signed_i24(plan.result_address_vgpr, 4, ROCJITSU_CODE_ARCH_CDNA5);
-  const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, kVccSave, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto restore_vcc = build_s_mov_b64(kAmdGpuVccLo, kVccSave, ROCJITSU_CODE_ARCH_CDNA5);
   const auto restore_scc =
       build_rdna4_s_cmp_lg_u32(kSccSave, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(materialization);
@@ -3161,11 +3161,11 @@ TEST(ConSanMoi, VglobalAddressMaterializationPreservesSpecialStateAndSignedOffse
         build_consan_moi_atomic_address_materialization(plan, kVccSave, kSccSave, target.arch);
     const auto save_scc = build_rdna4_s_cselect_b32(kSccSave, scalar_positive_inline_u32(1),
                                                     scalar_positive_inline_u32(0), target.arch);
-    const auto save_vcc = build_s_mov_b64(kVccSave, kRdna4VccLo, target.arch);
+    const auto save_vcc = build_s_mov_b64(kVccSave, kAmdGpuVccLo, target.arch);
     const auto add_vaddr =
         build_v_add_u64_vgpr_offset(plan.result_address_vgpr, plan.input_address_vgpr, target.arch);
     const auto add_negative = build_v_add_u64_signed_i24(plan.result_address_vgpr, -4, target.arch);
-    const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, kVccSave, target.arch);
+    const auto restore_vcc = build_s_mov_b64(kAmdGpuVccLo, kVccSave, target.arch);
     const auto restore_scc =
         build_rdna4_s_cmp_lg_u32(kSccSave, scalar_positive_inline_u32(0), target.arch);
     ASSERT_TRUE(words);
@@ -3991,16 +3991,16 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
       build_v_add_nc_u32_e32(options.moi_owner_epoch_vgprs->epoch, scalar_positive_inline_u32(1),
                              /*vsrc1=*/10, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_original_exec =
-      build_s_mov_b64(kRdna4ExecLo, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u),
+      build_s_mov_b64(kAmdGpuExecLo, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u),
                       ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_scc = build_rdna4_s_cselect_b32(
       /*sdst=*/static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u),
       scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_vcc = build_s_mov_b64(
-      /*sdst=*/static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u), kRdna4VccLo,
+      /*sdst=*/static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u), kAmdGpuVccLo,
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_vcc = build_s_mov_b64(
-      kRdna4VccLo, /*ssrc0=*/static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u),
+      kAmdGpuVccLo, /*ssrc0=*/static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u),
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_scc = build_rdna4_s_cmp_lg_u32(
       /*ssrc0=*/static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u),
@@ -4067,7 +4067,7 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
               acquire_patch->trampoline_size);
   constexpr uint16_t kScalarInlineNegativeOneOperand = 193u;
   const auto widen_consumer_segment = instrumentation::build_s_mov_b64(
-      kRdna4ExecLo, kScalarInlineNegativeOneOperand, ROCJITSU_CODE_ARCH_RDNA4);
+      kAmdGpuExecLo, kScalarInlineNegativeOneOperand, ROCJITSU_CODE_ARCH_RDNA4);
   const auto advance_consumer_segment = instrumentation::build_v_add_u32(
       options.moi_owner_epoch_vgprs->epoch, scalar_positive_inline_u32(1),
       options.moi_owner_epoch_vgprs->epoch, ROCJITSU_CODE_ARCH_RDNA4);
@@ -4076,9 +4076,9 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
       options.moi_owner_epoch_vgprs->epoch, ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_validated_acquire_exec =
       instrumentation::build_s_mov_b64(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 16u),
-                                       kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+                                       kAmdGpuExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_validated_acquire_exec = instrumentation::build_s_mov_b64(
-      kRdna4ExecLo, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 16u),
+      kAmdGpuExecLo, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 16u),
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(widen_consumer_segment && advance_consumer_segment && saturate_consumer_segment &&
               save_validated_acquire_exec && restore_validated_acquire_exec);
@@ -4111,7 +4111,7 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   const auto same_workgroup = build_v_cmp_eq_u32_e32_vcc(vector_source_vgpr(current_field),
                                                          temporary, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_same_workgroup =
-      build_s_and_saveexec_b64(exec + 2u, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_saveexec_b64(exec + 2u, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(same_workgroup);
   ASSERT_TRUE(narrow_same_workgroup);
   EXPECT_TRUE(contains_subsequence(
@@ -4150,9 +4150,9 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   EXPECT_LT(retained_key_position, same_workgroup_position)
       << "token lookup must retain the workgroup key after packed metadata is reused";
 
-  const auto save_valid_exec = build_s_mov_b64(exec, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto save_valid_exec = build_s_mov_b64(exec, kAmdGpuExecLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto select_unsupported = build_s_and_not1_b64(
-      kRdna4ExecLo, exec + kConSanMoiInlineOriginalExecSaveOffset, exec, ROCJITSU_CODE_ARCH_RDNA4);
+      kAmdGpuExecLo, exec + kConSanMoiInlineOriginalExecSaveOffset, exec, ROCJITSU_CODE_ARCH_RDNA4);
   const uint64_t unsupported_count_address =
       *options.moi_report_buffer_address +
       offsetof(ConSanMoiReportHeader, inline_unsupported_count);
@@ -4169,7 +4169,7 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
       instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4);
   const auto unsupported_store_wait =
       instrumentation::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA4);
-  const auto restore_valid_exec = build_s_mov_b64(kRdna4ExecLo, exec, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_valid_exec = build_s_mov_b64(kAmdGpuExecLo, exec, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(save_valid_exec);
   ASSERT_TRUE(select_unsupported);
   ASSERT_TRUE(unsupported_address_lo);
@@ -4196,7 +4196,7 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   EXPECT_TRUE(contains_subsequence(words, expected_unsupported_accounting));
 
   const auto disable_legacy_token_authority =
-      build_s_mov_b64(kRdna4ExecLo, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_mov_b64(kAmdGpuExecLo, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(disable_legacy_token_authority);
   EXPECT_EQ(std::find(words.begin(), words.end(), *disable_legacy_token_authority), words.end())
       << "the stable full-token reader replaces unconditional legacy suppression disablement";
@@ -4265,14 +4265,14 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
       << "stable direct and inherited tokens must authorize ordinary accesses";
 
   const auto remove_insufficient =
-      build_s_and_not1_b64(kRdna4ExecLo, kRdna4ExecLo, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_not1_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto remove_ordered =
-      build_s_and_not1_b64(kRdna4ExecLo, exec + 2u, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_not1_b64(kAmdGpuExecLo, exec + 2u, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_original_exec = build_s_mov_b64(
-      kRdna4ExecLo, exec + kConSanMoiInlineOriginalExecSaveOffset, ROCJITSU_CODE_ARCH_RDNA4);
+      kAmdGpuExecLo, exec + kConSanMoiInlineOriginalExecSaveOffset, ROCJITSU_CODE_ARCH_RDNA4);
   const auto forbidden_vcc_clobber =
-      build_s_and_saveexec_b64(exec + 8u, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, exec + 8u, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_and_saveexec_b64(exec + 8u, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_vcc = build_s_mov_b64(kAmdGpuVccLo, exec + 8u, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_scc =
       build_rdna4_s_cmp_lg_u32(exec + 10u, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(remove_insufficient);
@@ -4557,7 +4557,7 @@ TEST(ConSanMoi, InlineAtomicReturningCasClaimsBeforeGuestAndRollsBackFailedLanes
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
   const auto success = build_v_cmp_eq_u32_e32_vcc(vector_source_vgpr(/*compare_vgpr=*/2),
                                                   /*old_value_vgpr=*/0, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto narrow = build_s_and_saveexec_b64(/*sdst=*/80, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto narrow = build_s_and_saveexec_b64(/*sdst=*/80, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(success);
   ASSERT_TRUE(narrow);
   const std::array<uint32_t, 2> success_sequence = {*success, *narrow};
@@ -4672,11 +4672,11 @@ TEST(ConSanMoi, InlineVglobalReturningCasImportsOnlyInsideClaimedSuccessfulTrans
         offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id),
         /*value_vgpr=*/13, /*address_vgpr=*/8);
     const auto restore_acquire_exec =
-        build_s_mov_b64(kRdna4ExecLo, /*ssrc0=*/92, ROCJITSU_CODE_ARCH_RDNA4);
+        build_s_mov_b64(kAmdGpuExecLo, /*ssrc0=*/92, ROCJITSU_CODE_ARCH_RDNA4);
     const auto success = build_v_cmp_eq_u32_e32_vcc(vector_source_vgpr(/*compare_vgpr=*/5),
                                                     /*old_value_vgpr=*/0, ROCJITSU_CODE_ARCH_RDNA4);
     const auto narrow_release =
-        build_s_and_saveexec_b64(/*sdst=*/80, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+        build_s_and_saveexec_b64(/*sdst=*/80, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
     ASSERT_TRUE(restore_acquire_exec);
     ASSERT_TRUE(success);
     ASSERT_TRUE(narrow_release);

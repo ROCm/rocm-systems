@@ -137,7 +137,7 @@ using consan_moi_detail::kFenceRecordLayout;
   const auto first_active_lane =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr, arch);
   const auto save_exec =
-      instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kAmdGpuVccLo, arch);
   if (!mbcnt_lo || !mbcnt_hi || !first_active_lane || !save_exec) {
     errors.emplace_back("ConSan MOI barrier record patch could not encode EXEC narrowing");
     return std::nullopt;
@@ -228,7 +228,7 @@ using consan_moi_detail::kFenceRecordLayout;
   const auto skip_record =
       instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(record_words.size()), arch);
   const auto restore_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, *options.moi_exec_save_sgpr, arch);
   if (!skip_record || !restore_exec) {
     errors.emplace_back("ConSan MOI barrier record patch could not encode EXEC restore");
     return std::nullopt;
@@ -386,7 +386,7 @@ using consan_moi_detail::kFenceRecordLayout;
     }
     const uint16_t lane_rank_vgpr = *options.scratch_vgpr;
     const auto save_active_exec =
-        instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kRdna4ExecLo, arch);
+        instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kAmdGpuExecLo, arch);
     const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
         lane_rank_vgpr, *options.moi_exec_save_sgpr, scalar_positive_inline_u32(0), arch);
     const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
@@ -395,10 +395,10 @@ using consan_moi_detail::kFenceRecordLayout;
     const auto first_active_lane = instrumentation::build_v_cmp_eq_u32_vcc(
         scalar_positive_inline_u32(0), lane_rank_vgpr, arch);
     const auto narrow_exec =
-        instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kAmdGpuVccLo, arch);
     const auto saved_exec_wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
     const auto restore_exec =
-        instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+        instrumentation::build_s_mov_b64(kAmdGpuExecLo, *options.moi_exec_save_sgpr, arch);
     if (!save_active_exec || !mbcnt_lo || !mbcnt_hi || !first_active_lane || !narrow_exec ||
         !saved_exec_wait || !restore_exec) {
       errors.emplace_back("ConSan MOI release CAS could not select its event publisher");
@@ -458,16 +458,16 @@ using consan_moi_detail::kFenceRecordLayout;
     const uint16_t success_lo = static_cast<uint16_t>(*options.scratch_vgpr + 3u);
     const uint16_t success_hi = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
     words.push_back(*compare_low);
-    words.push_back(build_v_mov_b32_e32(success_lo, kRdna4VccLo, arch));
-    words.push_back(build_v_mov_b32_e32(success_hi, kRdna4VccHi, arch));
+    words.push_back(build_v_mov_b32_e32(success_lo, kAmdGpuVccLo, arch));
+    words.push_back(build_v_mov_b32_e32(success_hi, kAmdGpuVccHi, arch));
     if (candidate.site.width_bits == 64u) {
       const auto compare_high = instrumentation::build_v_cmp_eq_u32_vcc(
           vector_source_vgpr(static_cast<uint16_t>(compare_vgpr + 1u)),
           static_cast<uint16_t>(*candidate.site.dst_vgpr + 1u), arch);
       const auto intersect_lo =
-          instrumentation::build_v_and_b32(success_lo, kRdna4VccLo, success_lo, arch);
+          instrumentation::build_v_and_b32(success_lo, kAmdGpuVccLo, success_lo, arch);
       const auto intersect_hi =
-          instrumentation::build_v_and_b32(success_hi, kRdna4VccHi, success_hi, arch);
+          instrumentation::build_v_and_b32(success_hi, kAmdGpuVccHi, success_hi, arch);
       if (!compare_high || !intersect_lo || !intersect_hi) {
         errors.emplace_back(
             "ConSan MOI atomic record 64-bit CAS could not combine its outcome masks");
@@ -482,9 +482,9 @@ using consan_moi_detail::kFenceRecordLayout;
     // retain arbitrary values there. Only lanes that executed the guest CAS
     // have an outcome, so canonicalize both halves before publishing them.
     const auto active_success_lo =
-        instrumentation::build_v_and_b32(success_lo, kRdna4ExecLo, success_lo, arch);
+        instrumentation::build_v_and_b32(success_lo, kAmdGpuExecLo, success_lo, arch);
     const auto active_success_hi =
-        instrumentation::build_v_and_b32(success_hi, kRdna4ExecHi, success_hi, arch);
+        instrumentation::build_v_and_b32(success_hi, kAmdGpuExecHi, success_hi, arch);
     if (!active_success_lo || !active_success_hi) {
       errors.emplace_back("ConSan MOI atomic record CAS could not mask inactive outcome lanes");
       return std::nullopt;
@@ -493,7 +493,7 @@ using consan_moi_detail::kFenceRecordLayout;
     words.push_back(*active_success_hi);
   }
   const auto save_active_exec =
-      instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kAmdGpuExecLo, arch);
   const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
       lane_rank_vgpr, *options.moi_exec_save_sgpr, scalar_positive_inline_u32(0), arch);
   const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
@@ -502,7 +502,7 @@ using consan_moi_detail::kFenceRecordLayout;
   const auto first_active_lane =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr, arch);
   const auto save_exec =
-      instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kAmdGpuVccLo, arch);
   const auto saved_exec_wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
   if (!save_active_exec || !saved_exec_wait || !mbcnt_lo || !mbcnt_hi || !first_active_lane ||
       !save_exec) {
@@ -664,7 +664,7 @@ using consan_moi_detail::kFenceRecordLayout;
 
   const auto wait_store = instrumentation::build_s_wait_global_store0(arch);
   const auto restore_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, *options.moi_exec_save_sgpr, arch);
   if (!wait_store || !restore_exec) {
     errors.emplace_back("ConSan MOI atomic record patch could not complete dynamic publication");
     return std::nullopt;
@@ -875,7 +875,7 @@ using consan_moi_detail::kFenceRecordLayout;
     const uint16_t slot_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
     const auto save_active_exec =
-        instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kRdna4ExecLo, arch);
+        instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kAmdGpuExecLo, arch);
     const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
         lane_rank_vgpr, *options.moi_exec_save_sgpr, scalar_positive_inline_u32(0), arch);
     const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
@@ -884,7 +884,7 @@ using consan_moi_detail::kFenceRecordLayout;
     const auto first_active_lane = instrumentation::build_v_cmp_eq_u32_vcc(
         scalar_positive_inline_u32(0), lane_rank_vgpr, arch);
     const auto narrow_exec =
-        instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kAmdGpuVccLo, arch);
     const auto saved_exec_wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
     if (!save_active_exec || !saved_exec_wait || !mbcnt_lo || !mbcnt_hi || !first_active_lane ||
         !narrow_exec) {
@@ -987,7 +987,7 @@ using consan_moi_detail::kFenceRecordLayout;
     }
     const auto wait_store = instrumentation::build_s_wait_global_store0(arch);
     const auto restore_exec =
-        instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+        instrumentation::build_s_mov_b64(kAmdGpuExecLo, *options.moi_exec_save_sgpr, arch);
     if (!wait_store || !restore_exec ||
         record_words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max()))
       return std::nullopt;

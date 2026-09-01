@@ -1234,9 +1234,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
     planned.words.reserve(static_cast<size_t>(candidate.requested_words));
     const auto save_vcc =
-        instrumentation::build_s_mov_b64(candidate.vcc_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_mov_b64(candidate.vcc_save_sgpr, kAmdGpuVccLo, arch);
     const auto restore_vcc =
-        instrumentation::build_s_mov_b64(kRdna4VccLo, candidate.vcc_save_sgpr, arch);
+        instrumentation::build_s_mov_b64(kAmdGpuVccLo, candidate.vcc_save_sgpr, arch);
     if (!save_vcc || !restore_vcc) {
       result.errors.emplace_back("ConSan flat check/trap proof could not preserve VCC");
       return;

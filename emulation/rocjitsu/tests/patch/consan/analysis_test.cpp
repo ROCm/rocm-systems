@@ -2139,7 +2139,7 @@ void execute_emitted_flat_mismatch_sequence(const FlatSubwordTarget &target,
 
   const auto vcc_save = flat_check_trap_vcc_save_sgpr(patch);
   ASSERT_TRUE(vcc_save);
-  const auto restore_vcc = instrumentation::build_s_mov_b64(kRdna4VccLo, *vcc_save, target.arch);
+  const auto restore_vcc = instrumentation::build_s_mov_b64(kAmdGpuVccLo, *vcc_save, target.arch);
   ASSERT_TRUE(restore_vcc);
   auto sequence_end = std::next(branch_word);
   for (; sequence_end != patched_words.end(); ++sequence_end) {
@@ -2365,9 +2365,9 @@ TEST(ConSan, SuperColliderSupportsEveryD16GroupFlatLoadOnEveryTarget) {
                                                    text->size() / sizeof(uint32_t));
       const auto vcc_save = flat_check_trap_vcc_save_sgpr(*patch);
       ASSERT_TRUE(vcc_save);
-      const auto save_vcc = instrumentation::build_s_mov_b64(*vcc_save, kRdna4VccLo, target.arch);
+      const auto save_vcc = instrumentation::build_s_mov_b64(*vcc_save, kAmdGpuVccLo, target.arch);
       const auto restore_vcc =
-          instrumentation::build_s_mov_b64(kRdna4VccLo, *vcc_save, target.arch);
+          instrumentation::build_s_mov_b64(kAmdGpuVccLo, *vcc_save, target.arch);
       ASSERT_TRUE(save_vcc);
       ASSERT_TRUE(restore_vcc);
       EXPECT_NE(std::ranges::find(words, *save_vcc), words.end());
@@ -2491,9 +2491,9 @@ TEST(ConSan, SuperColliderSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
                                                    text->size() / sizeof(uint32_t));
       const auto vcc_save = flat_check_trap_vcc_save_sgpr(*patch);
       ASSERT_TRUE(vcc_save);
-      const auto save_vcc = instrumentation::build_s_mov_b64(*vcc_save, kRdna4VccLo, target.arch);
+      const auto save_vcc = instrumentation::build_s_mov_b64(*vcc_save, kAmdGpuVccLo, target.arch);
       const auto restore_vcc =
-          instrumentation::build_s_mov_b64(kRdna4VccLo, *vcc_save, target.arch);
+          instrumentation::build_s_mov_b64(kAmdGpuVccLo, *vcc_save, target.arch);
       ASSERT_TRUE(save_vcc);
       ASSERT_TRUE(restore_vcc);
       EXPECT_NE(std::ranges::find(words, *save_vcc), words.end());
@@ -2650,9 +2650,9 @@ TEST(ConSan, Cdna4SuperColliderEmitsGroupFlatCheckAndReport) {
   const auto vcc_save = flat_check_trap_vcc_save_sgpr(result.patches.front());
   ASSERT_TRUE(vcc_save);
   const auto save_vcc =
-      instrumentation::build_s_mov_b64(*vcc_save, kRdna4VccLo, ROCJITSU_CODE_ARCH_CDNA4);
+      instrumentation::build_s_mov_b64(*vcc_save, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_CDNA4);
   const auto restore_vcc =
-      instrumentation::build_s_mov_b64(kRdna4VccLo, *vcc_save, ROCJITSU_CODE_ARCH_CDNA4);
+      instrumentation::build_s_mov_b64(kAmdGpuVccLo, *vcc_save, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(save_vcc);
   ASSERT_TRUE(restore_vcc);
   EXPECT_NE(std::ranges::find(words, *save_vcc), words.end());

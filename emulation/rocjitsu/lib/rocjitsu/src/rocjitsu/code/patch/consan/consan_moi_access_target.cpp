@@ -74,9 +74,9 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
                                                                        : 0u;
   if (lane_stride_shift == 0u)
     return false;
-  const auto save_exec = instrumentation::build_s_mov_b64(exec_save_sgpr, kRdna4ExecLo, arch);
+  const auto save_exec = instrumentation::build_s_mov_b64(exec_save_sgpr, kAmdGpuExecLo, arch);
   const auto activate_all_lanes =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, kScalarInlineNegativeOneOperand, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, kScalarInlineNegativeOneOperand, arch);
   const auto lane_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
       result_vgpr, kScalarInlineNegativeOneOperand, scalar_positive_inline_u32(0u), arch);
   const auto lane_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
@@ -85,7 +85,7 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
       result_vgpr, scalar_positive_inline_u32(lane_stride_shift), result_vgpr, arch);
   const auto add =
       instrumentation::build_v_add_u32(result_vgpr, scalar_operand_m0(arch), result_vgpr, arch);
-  const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, exec_save_sgpr, arch);
+  const auto restore_exec = instrumentation::build_s_mov_b64(kAmdGpuExecLo, exec_save_sgpr, arch);
   if (!save_exec || !activate_all_lanes || !lane_lo || !lane_hi || !scale || !add ||
       !restore_exec) {
     return false;

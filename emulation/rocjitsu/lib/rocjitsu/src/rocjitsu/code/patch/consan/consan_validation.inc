@@ -1596,26 +1596,26 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
     std::vector<uint32_t> expected_return;
     const bool wave32_vcc = patch->indirect_saved_vcc_sgpr.has_value();
     expected_entry.push_back(
-        wave32_vcc ? build_s_mov_b32(*patch->indirect_saved_vcc_sgpr, kRdna4VccLo, arch)
+        wave32_vcc ? build_s_mov_b32(*patch->indirect_saved_vcc_sgpr, kAmdGpuVccLo, arch)
                    : build_s_nop(0, arch));
     expected_return.push_back(
-        wave32_vcc ? build_s_mov_b32(*patch->indirect_return_saved_vcc_sgpr, kRdna4VccLo, arch)
+        wave32_vcc ? build_s_mov_b32(*patch->indirect_return_saved_vcc_sgpr, kAmdGpuVccLo, arch)
                    : build_s_nop(0, arch));
     if (!append_lds_check_trap_indirect_jump(
             expected_entry, patch->anchor_offset, patch->trampoline_offset,
-            *patch->indirect_pc_sgpr, wave32_vcc ? kRdna4ExecHi : *patch->indirect_saved_scc_sgpr,
+            *patch->indirect_pc_sgpr, wave32_vcc ? kAmdGpuExecHi : *patch->indirect_saved_scc_sgpr,
             *environment.target_profile) ||
         !append_lds_check_trap_indirect_jump(
             expected_return, patch->trampoline_offset + sizeof(uint32_t) + patch->original_size,
             patch->anchor_offset + patch->original_size -
                 kScRelayTailRestoreWords * sizeof(uint32_t),
             *patch->indirect_return_pc_sgpr,
-            wave32_vcc ? kRdna4ExecHi : *patch->indirect_return_saved_scc_sgpr,
+            wave32_vcc ? kAmdGpuExecHi : *patch->indirect_return_saved_scc_sgpr,
             *environment.target_profile) ||
         std::memcmp(expected_entry.data(), replacement_text.data() + patch->anchor_offset,
                     expected_entry.size() * sizeof(uint32_t)) != 0 ||
         environment.replacement_text.word(patch->trampoline_offset) !=
-            (wave32_vcc ? build_s_mov_b32(kRdna4VccLo, *patch->indirect_saved_vcc_sgpr, arch)
+            (wave32_vcc ? build_s_mov_b32(kAmdGpuVccLo, *patch->indirect_saved_vcc_sgpr, arch)
                         : build_s_nop(0, arch)) ||
         std::memcmp(expected_return.data(),
                     replacement_text.data() + patch->trampoline_offset + sizeof(uint32_t) +
@@ -1623,8 +1623,9 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
                     expected_return.size() * sizeof(uint32_t)) != 0 ||
         environment.replacement_text.word(patch->anchor_offset + patch->original_size -
                                           sizeof(uint32_t)) !=
-            (wave32_vcc ? build_s_mov_b32(kRdna4VccLo, *patch->indirect_return_saved_vcc_sgpr, arch)
-                        : build_s_nop(0, arch))) {
+            (wave32_vcc
+                 ? build_s_mov_b32(kAmdGpuVccLo, *patch->indirect_return_saved_vcc_sgpr, arch)
+                 : build_s_nop(0, arch))) {
       errors.emplace_back("ConSan relay reservoir proof found a corrupted normal execution path");
       return;
     }

@@ -722,7 +722,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     return false;
   const uint16_t exec_base = *registers.exec_save_sgpr;
   const auto save_original = instrumentation::build_s_mov_b64(
-      static_cast<uint16_t>(exec_base + original_exec_save_offset), kRdna4ExecLo, arch);
+      static_cast<uint16_t>(exec_base + original_exec_save_offset), kAmdGpuExecLo, arch);
   if (!save_original)
     return false;
   words.push_back(*save_original);
@@ -732,7 +732,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         build_v_mov_b32_e32(key_vgpr, vector_source_vgpr(*registers.cached_key_vgpr), arch));
     const auto valid =
         instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), key_vgpr, arch);
-    const auto narrow = instrumentation::build_s_and_saveexec_b64(exec_base, kRdna4VccLo, arch);
+    const auto narrow = instrumentation::build_s_and_saveexec_b64(exec_base, kAmdGpuVccLo, arch);
     InstructionSequence sequence(words);
     return sequence.emit_all(valid, narrow);
   }
@@ -740,7 +740,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     words.push_back(build_v_mov_b32_e32(key_vgpr, *registers.cached_key_sgpr, arch));
     const auto valid =
         instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), key_vgpr, arch);
-    const auto narrow = instrumentation::build_s_and_saveexec_b64(exec_base, kRdna4VccLo, arch);
+    const auto narrow = instrumentation::build_s_and_saveexec_b64(exec_base, kAmdGpuVccLo, arch);
     InstructionSequence sequence(words);
     return sequence.emit_all(valid, narrow);
   }
@@ -757,7 +757,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       const auto fits =
           instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value_vgpr, arch);
       const auto narrow = instrumentation::build_s_and_saveexec_b64(
-          static_cast<uint16_t>(exec_base + exec_save_offset), kRdna4VccLo, arch);
+          static_cast<uint16_t>(exec_base + exec_save_offset), kAmdGpuVccLo, arch);
       InstructionSequence sequence(words);
       if (!sequence.emit_all(high, fits, narrow))
         return false;
@@ -793,18 +793,19 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const auto not_reserved =
       instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(key_vgpr), value_vgpr, arch);
   const auto narrow_reserved = instrumentation::build_s_and_saveexec_b64(
-      static_cast<uint16_t>(exec_base + 6u), kRdna4VccLo, arch);
+      static_cast<uint16_t>(exec_base + 6u), kAmdGpuVccLo, arch);
   const auto add_one =
       instrumentation::build_v_add_u32(key_vgpr, scalar_positive_inline_u32(1), key_vgpr, arch);
   // The Y-coordinate predicate journal at +2 is dead after the packed key has
   // been formed. Reuse it here instead of +8, which the surrounding inline
   // transaction reserves for the guest VCC snapshot.
   const uint16_t valid_exec = static_cast<uint16_t>(exec_base + 2u);
-  const auto save_valid = instrumentation::build_s_mov_b64(valid_exec, kRdna4ExecLo, arch);
+  const auto save_valid = instrumentation::build_s_mov_b64(valid_exec, kAmdGpuExecLo, arch);
   const auto select_invalid = instrumentation::build_s_andn2_b64(
-      kRdna4ExecLo, static_cast<uint16_t>(exec_base + original_exec_save_offset), valid_exec, arch);
+      kAmdGpuExecLo, static_cast<uint16_t>(exec_base + original_exec_save_offset), valid_exec,
+      arch);
   const auto zero_invalid = instrumentation::build_v_mov_b32_literal(key_vgpr, 0u, arch);
-  const auto restore_valid = instrumentation::build_s_mov_b64(kRdna4ExecLo, valid_exec, arch);
+  const auto restore_valid = instrumentation::build_s_mov_b64(kAmdGpuExecLo, valid_exec, arch);
   InstructionSequence sequence(words);
   // Keep zero as the persistent invalid sentinel for lanes excluded by a
   // coordinate-width or reserved-key predicate. The caller still receives
@@ -926,14 +927,14 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const uint16_t eligible = static_cast<uint16_t>(exec_base + 6u);
 
   const auto restore_exec = [&](uint16_t source) {
-    const auto instruction = instrumentation::build_s_mov_b64(kRdna4ExecLo, source, arch);
+    const auto instruction = instrumentation::build_s_mov_b64(kAmdGpuExecLo, source, arch);
     if (!instruction)
       return false;
     words.push_back(*instruction);
     return true;
   };
   const auto save_exec = [&](uint16_t destination) {
-    const auto instruction = instrumentation::build_s_mov_b64(destination, kRdna4ExecLo, arch);
+    const auto instruction = instrumentation::build_s_mov_b64(destination, kAmdGpuExecLo, arch);
     if (!instruction)
       return false;
     words.push_back(*instruction);
@@ -941,7 +942,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   };
   const auto narrow_vcc = [&] {
     const auto instruction =
-        instrumentation::build_s_and_saveexec_b64(exec_base, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(exec_base, kAmdGpuVccLo, arch);
     if (!instruction)
       return false;
     words.push_back(*instruction);
@@ -1039,7 +1040,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     if (!narrow_vcc())
       return false;
     const auto self_ancestor = instrumentation::build_s_xor_b64(
-        needed, static_cast<uint16_t>(exec_base + 4u), kRdna4ExecLo, arch);
+        needed, static_cast<uint16_t>(exec_base + 4u), kAmdGpuExecLo, arch);
     const auto retain_skipped = instrumentation::build_s_xor_b64(skipped, skipped, needed, arch);
     if (!self_ancestor || !retain_skipped)
       return false;
@@ -1264,7 +1265,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     if (!save_exec(static_cast<uint16_t>(exec_base + 4u)))
       return false;
     const auto valid_union = instrumentation::build_s_xor_b64(
-        kRdna4ExecLo, winners, static_cast<uint16_t>(exec_base + 4u), arch);
+        kAmdGpuExecLo, winners, static_cast<uint16_t>(exec_base + 4u), arch);
     if (!valid_union)
       return false;
     words.push_back(*valid_union);
@@ -1277,7 +1278,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       return false;
     words.insert(words.end(), increment->begin(), increment->end());
     const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
-        base, value, value, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+        base, value, value, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
     if (!claim)
       return false;
     words.insert(words.end(), claim->begin(), claim->end());
@@ -1302,7 +1303,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     words.push_back(*combine);
   }
 
-  const auto failed = instrumentation::build_s_andn2_b64(kRdna4ExecLo, eligible, winners, arch);
+  const auto failed = instrumentation::build_s_andn2_b64(kAmdGpuExecLo, eligible, winners, arch);
   if (!failed)
     return false;
   words.push_back(*failed);
@@ -1317,7 +1318,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   for (uint16_t index = 0; index < 5u; ++index) {
     if (!restore_exec(eligible))
       return false;
-    const auto loser = instrumentation::build_s_andn2_b64(kRdna4ExecLo, eligible, winners, arch);
+    const auto loser = instrumentation::build_s_andn2_b64(kAmdGpuExecLo, eligible, winners, arch);
     if (!loser)
       return false;
     words.push_back(*loser);
@@ -1361,7 +1362,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     words.push_back(build_v_mov_b32_e32(expected, vector_source_vgpr(value), arch));
     words.push_back(build_v_mov_b32_e32(value, vector_source_vgpr(hash), arch));
     const auto rollback = instrumentation::build_flat_atomic_cmpswap_b32(
-        base, value, value, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+        base, value, value, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
     if (!rollback)
       return false;
     words.insert(words.end(), rollback->begin(), rollback->end());
@@ -1420,8 +1421,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       const uint16_t kind_exec = static_cast<uint16_t>(exec_base + 4u);
       if (!save_exec(kind_exec))
         return false;
-      const auto select_inherited =
-          instrumentation::build_s_and_b64(kRdna4ExecLo, kRdna4ExecLo, *inherited_first_exec, arch);
+      const auto select_inherited = instrumentation::build_s_and_b64(kAmdGpuExecLo, kAmdGpuExecLo,
+                                                                     *inherited_first_exec, arch);
       const auto inherited = instrumentation::build_v_mov_b32_literal(
           value, static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::Inherited), arch);
       if (!select_inherited || !inherited)
@@ -1500,7 +1501,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       return false;
     words.insert(words.end(), ready->begin(), ready->end());
     const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(
-        base, value, value, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+        base, value, value, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
     if (!commit)
       return false;
     words.insert(words.end(), commit->begin(), commit->end());
@@ -1521,15 +1522,15 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 2u);
   const uint16_t exec_base = *point.moi_exec_save_sgpr;
   const auto narrow_if_valid =
-      instrumentation::build_s_and_saveexec_b64(exec_base, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(exec_base, kAmdGpuVccLo, arch);
   const auto narrow_if_low_matches = instrumentation::build_s_and_saveexec_b64(
-      static_cast<uint16_t>(exec_base + 2u), kRdna4VccLo, arch);
+      static_cast<uint16_t>(exec_base + 2u), kAmdGpuVccLo, arch);
   const auto narrow_if_high_matches = instrumentation::build_s_and_saveexec_b64(
-      static_cast<uint16_t>(exec_base + 4u), kRdna4VccLo, arch);
+      static_cast<uint16_t>(exec_base + 4u), kAmdGpuVccLo, arch);
   const auto narrow_if_workgroup_matches = instrumentation::build_s_and_saveexec_b64(
-      static_cast<uint16_t>(exec_base + 6u), kRdna4VccLo, arch);
+      static_cast<uint16_t>(exec_base + 6u), kAmdGpuVccLo, arch);
   const auto narrow_if_other_owner = instrumentation::build_s_and_saveexec_b64(
-      static_cast<uint16_t>(exec_base + 14u), kRdna4VccLo, arch);
+      static_cast<uint16_t>(exec_base + 14u), kAmdGpuVccLo, arch);
   // The low/high address-match journals are dead once owner qualification
   // begins. Reuse them for the longer-lived same-owner and validated masks.
   // InlineShadow reserves +8:+9 for guest VCC and +10 for guest SCC; using
@@ -1538,13 +1539,13 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const uint16_t same_owner_exec = static_cast<uint16_t>(exec_base + 2u);
   const uint16_t validated_exec = static_cast<uint16_t>(exec_base + 4u);
   const auto select_same_owner = instrumentation::build_s_andn2_b64(
-      same_owner_exec, static_cast<uint16_t>(exec_base + 14u), kRdna4ExecLo, arch);
+      same_owner_exec, static_cast<uint16_t>(exec_base + 14u), kAmdGpuExecLo, arch);
   const auto restore_owner_candidates =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, static_cast<uint16_t>(exec_base + 14u), arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, static_cast<uint16_t>(exec_base + 14u), arch);
   const auto save_matching_exec =
-      instrumentation::build_s_mov_b64(static_cast<uint16_t>(exec_base + 16u), kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(static_cast<uint16_t>(exec_base + 16u), kAmdGpuExecLo, arch);
   const auto restore_workgroup_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, static_cast<uint16_t>(exec_base + 12u), arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, static_cast<uint16_t>(exec_base + 12u), arch);
   if (!narrow_if_valid || !narrow_if_low_matches || !narrow_if_high_matches ||
       !narrow_if_workgroup_matches || !narrow_if_other_owner || !select_same_owner ||
       !restore_owner_candidates || !save_matching_exec || !restore_workgroup_exec) {
@@ -1747,7 +1748,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       value_vgpr, consan_moi_exact_shadow::max_epoch + 1u, arch);
   const auto epoch_in_range = instrumentation::build_v_cmp_gt_u32_vcc(
       vector_source_vgpr(value_vgpr), token_value_vgpr, arch);
-  const auto narrow_epoch = instrumentation::build_s_and_saveexec_b64(exec_base, kRdna4VccLo, arch);
+  const auto narrow_epoch =
+      instrumentation::build_s_and_saveexec_b64(exec_base, kAmdGpuVccLo, arch);
   if (!sequence.emit_all(epoch_nonzero, narrow_epoch, epoch_limit, epoch_in_range, narrow_epoch)) {
     errors.emplace_back("ConSan MOI inline atomic acquire patch could not validate token epoch");
     return false;
@@ -1758,23 +1760,23 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   // and the self release is never published as a token. Other-owner lanes keep
   // their direct entry and unmodified snapshot. Empty same-owner snapshots do
   // not establish an inter-owner edge and are removed before publication.
-  const auto save_validated = instrumentation::build_s_mov_b64(validated_exec, kRdna4ExecLo, arch);
+  const auto save_validated = instrumentation::build_s_mov_b64(validated_exec, kAmdGpuExecLo, arch);
   const auto intersect_same =
-      instrumentation::build_s_and_b64(same_owner_exec, same_owner_exec, kRdna4ExecLo, arch);
-  const auto restore_same = instrumentation::build_s_mov_b64(kRdna4ExecLo, same_owner_exec, arch);
+      instrumentation::build_s_and_b64(same_owner_exec, same_owner_exec, kAmdGpuExecLo, arch);
+  const auto restore_same = instrumentation::build_s_mov_b64(kAmdGpuExecLo, same_owner_exec, arch);
   const auto count_nonzero =
       instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), snapshot_count, arch);
   const auto save_same_nonempty =
-      instrumentation::build_s_mov_b64(static_cast<uint16_t>(exec_base + 14u), kRdna4ExecLo, arch);
+      instrumentation::build_s_mov_b64(static_cast<uint16_t>(exec_base + 14u), kAmdGpuExecLo, arch);
   const auto decrement_literal = instrumentation::build_v_mov_b32_literal(
       temporary_vgpr, std::numeric_limits<uint32_t>::max(), arch);
   const auto decrement_count = instrumentation::build_v_add_u32(
       snapshot_count, vector_source_vgpr(temporary_vgpr), snapshot_count, arch);
   const auto zero = instrumentation::build_v_mov_b32_literal(temporary_vgpr, 0u, arch);
   const auto select_other_valid =
-      instrumentation::build_s_andn2_b64(kRdna4ExecLo, validated_exec, same_owner_exec, arch);
+      instrumentation::build_s_andn2_b64(kAmdGpuExecLo, validated_exec, same_owner_exec, arch);
   const auto include_same_nonempty = instrumentation::build_s_xor_b64(
-      kRdna4ExecLo, kRdna4ExecLo, static_cast<uint16_t>(exec_base + 14u), arch);
+      kAmdGpuExecLo, kAmdGpuExecLo, static_cast<uint16_t>(exec_base + 14u), arch);
   const auto preserve_inherited_first = instrumentation::build_s_mov_b64(
       same_owner_exec, static_cast<uint16_t>(exec_base + 14u), arch);
   if (!save_validated || !intersect_same || !restore_same || !count_nonzero ||
@@ -1831,11 +1833,11 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         inline_access_present && !point.moi_persistent_sgprs.epoch();
     const auto widen_exec =
         widen_consumer_segment
-            ? instrumentation::build_s_mov_b64(kRdna4ExecLo, kScalarInlineNegativeOneOperand, arch)
+            ? instrumentation::build_s_mov_b64(kAmdGpuExecLo, kScalarInlineNegativeOneOperand, arch)
             : std::nullopt;
     const auto restore_matching_exec =
         widen_consumer_segment ? instrumentation::build_s_mov_b64(
-                                     kRdna4ExecLo, static_cast<uint16_t>(exec_base + 16u), arch)
+                                     kAmdGpuExecLo, static_cast<uint16_t>(exec_base + 16u), arch)
                                : std::nullopt;
     const auto advance_epoch = instrumentation::build_v_add_u32(
         point.moi_owner_epoch_vgprs->epoch, scalar_positive_inline_u32(1),
@@ -1969,27 +1971,27 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   words.push_back(*enter_if_nonempty);
   const size_t empty_exec_skip = words.size();
   words.push_back(build_s_branch(/*offset_dwords=*/0, arch));
-  const auto save_scan_exec = instrumentation::build_s_mov_b64(scan_exec, kRdna4ExecLo, arch);
+  const auto save_scan_exec = instrumentation::build_s_mov_b64(scan_exec, kAmdGpuExecLo, arch);
   if (!save_scan_exec)
     return false;
   words.push_back(*save_scan_exec);
 
   const auto restore_exec = [&](uint16_t source) -> bool {
-    const auto restore = instrumentation::build_s_mov_b64(kRdna4ExecLo, source, arch);
+    const auto restore = instrumentation::build_s_mov_b64(kAmdGpuExecLo, source, arch);
     if (!restore)
       return false;
     words.push_back(*restore);
     return true;
   };
   const auto save_exec = [&](uint16_t destination) -> bool {
-    const auto save = instrumentation::build_s_mov_b64(destination, kRdna4ExecLo, arch);
+    const auto save = instrumentation::build_s_mov_b64(destination, kAmdGpuExecLo, arch);
     if (!save)
       return false;
     words.push_back(*save);
     return true;
   };
   const auto narrow_vcc = [&]() -> bool {
-    const auto narrow = instrumentation::build_s_and_saveexec_b64(narrow_save, kRdna4VccLo, arch);
+    const auto narrow = instrumentation::build_s_and_saveexec_b64(narrow_save, kAmdGpuVccLo, arch);
     if (!narrow)
       return false;
     words.push_back(*narrow);
@@ -2054,7 +2056,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     if (!narrow_vcc() || !save_exec(high_nonzero_exec))
       return false;
     const auto combine =
-        instrumentation::build_s_xor_b64(kRdna4ExecLo, mask_b, high_nonzero_exec, arch);
+        instrumentation::build_s_xor_b64(kAmdGpuExecLo, mask_b, high_nonzero_exec, arch);
     if (!combine)
       return false;
     words.push_back(*combine);
@@ -2180,7 +2182,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     return false;
 
   const auto valid_union = instrumentation::build_s_xor_b64(mask_a, empty_exec, ready_exec, arch);
-  const auto malformed = instrumentation::build_s_andn2_b64(kRdna4ExecLo, scan_exec, mask_a, arch);
+  const auto malformed = instrumentation::build_s_andn2_b64(kAmdGpuExecLo, scan_exec, mask_a, arch);
   if (!valid_union || !malformed)
     return false;
   words.push_back(*valid_union);
@@ -2473,21 +2475,21 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const uint16_t stable_guest_address = static_cast<uint16_t>(base + required_scratch_count - 2u);
 
   const auto restore_exec = [&](uint16_t source) -> bool {
-    const auto restore = instrumentation::build_s_mov_b64(kRdna4ExecLo, source, arch);
+    const auto restore = instrumentation::build_s_mov_b64(kAmdGpuExecLo, source, arch);
     if (!restore)
       return false;
     words.push_back(*restore);
     return true;
   };
   const auto save_exec = [&](uint16_t destination) -> bool {
-    const auto save = instrumentation::build_s_mov_b64(destination, kRdna4ExecLo, arch);
+    const auto save = instrumentation::build_s_mov_b64(destination, kAmdGpuExecLo, arch);
     if (!save)
       return false;
     words.push_back(*save);
     return true;
   };
   const auto narrow_vcc = [&]() -> bool {
-    const auto narrow = instrumentation::build_s_and_saveexec_b64(narrow_save, kRdna4VccLo, arch);
+    const auto narrow = instrumentation::build_s_and_saveexec_b64(narrow_save, kAmdGpuVccLo, arch);
     if (!narrow)
       return false;
     words.push_back(*narrow);
@@ -2632,7 +2634,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     return false;
 
   const auto valid_union =
-      instrumentation::build_s_xor_b64(kRdna4ExecLo, empty_exec, ready_exec, arch);
+      instrumentation::build_s_xor_b64(kAmdGpuExecLo, empty_exec, ready_exec, arch);
   const auto claim_new =
       instrumentation::build_v_add_u32(cas_new, scalar_positive_inline_u32(1), prior_version, arch);
   if (!valid_union || !claim_new ||
@@ -2644,7 +2646,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   words.insert(words.end(), claim_new->begin(), claim_new->end());
   words.push_back(build_v_mov_b32_e32(cas_expected, vector_source_vgpr(prior_version), arch));
   const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
-      slot_address, cas_new, cas_new, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+      slot_address, cas_new, cas_new, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
   if (!claim)
     return false;
   words.insert(words.end(), claim->begin(), claim->end());
@@ -2660,8 +2662,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
 
   const auto select_failed_attempt =
       instrumentation::build_s_andn2_b64(committed_exec, eligible_exec, claimed_exec, arch);
-  const auto inspect_claimed = instrumentation::build_s_mov_b64(kRdna4ExecLo, claimed_exec, arch);
-  const auto restore_failed = instrumentation::build_s_mov_b64(kRdna4ExecLo, committed_exec, arch);
+  const auto inspect_claimed = instrumentation::build_s_mov_b64(kAmdGpuExecLo, claimed_exec, arch);
+  const auto restore_failed = instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec, arch);
   const auto decrement_retry = instrumentation::build_s_sub_u32(
       retry_count_sgpr, retry_count_sgpr, scalar_positive_inline_u32(1), arch);
   const auto retries_remain =
@@ -2709,7 +2711,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       return false;
   } else {
     const auto preguest_failed =
-        instrumentation::build_s_andn2_b64(kRdna4ExecLo, eligible_exec, claimed_exec, arch);
+        instrumentation::build_s_andn2_b64(kAmdGpuExecLo, eligible_exec, claimed_exec, arch);
     if (!preguest_failed)
       return false;
     words.push_back(*preguest_failed);
@@ -2807,7 +2809,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         return false;
       words.insert(words.end(), restore_expected->begin(), restore_expected->end());
       const auto restore_prior = instrumentation::build_flat_atomic_cmpswap_b32(
-          slot_address, cas_new, cas_new, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+          slot_address, cas_new, cas_new, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
       if (!restore_prior)
         return false;
       words.insert(words.end(), restore_prior->begin(), restore_prior->end());
@@ -2821,7 +2823,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       if (!narrow_vcc() || !save_exec(committed_exec))
         return false;
       const auto restore_failed =
-          instrumentation::build_s_andn2_b64(kRdna4ExecLo, ready_exec, committed_exec, arch);
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, ready_exec, committed_exec, arch);
       if (!restore_failed)
         return false;
       words.push_back(*restore_failed);
@@ -2832,7 +2834,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
               temporary, cas_new, arch))
         return false;
       const auto rebuild_failed =
-          instrumentation::build_s_andn2_b64(kRdna4ExecLo, eligible_exec, claimed_exec, arch);
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, eligible_exec, claimed_exec, arch);
       if (!rebuild_failed)
         return false;
       words.push_back(*rebuild_failed);
@@ -2844,7 +2846,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       if (!restore_exec(failed_exec) || !save_exec(claimed_exec))
         return false;
       const auto rebuild_failed =
-          instrumentation::build_s_andn2_b64(kRdna4ExecLo, original_exec, claimed_exec, arch);
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, original_exec, claimed_exec, arch);
       if (!rebuild_failed)
         return false;
       words.push_back(*rebuild_failed);
@@ -2881,7 +2883,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       return false;
     words.insert(words.end(), unlock_expected->begin(), unlock_expected->end());
     const auto unlock = instrumentation::build_flat_atomic_cmpswap_b32(
-        slot_address, cas_new, cas_new, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+        slot_address, cas_new, cas_new, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
     if (!unlock)
       return false;
     words.insert(words.end(), unlock->begin(), unlock->end());
@@ -2895,7 +2897,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     if (!narrow_vcc() || !save_exec(committed_exec))
       return false;
     const auto failed =
-        instrumentation::build_s_andn2_b64(kRdna4ExecLo, original_exec, committed_exec, arch);
+        instrumentation::build_s_andn2_b64(kAmdGpuExecLo, original_exec, committed_exec, arch);
     if (!failed)
       return false;
     words.push_back(*failed);
@@ -3005,7 +3007,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       !save_exec(committed_exec))
     return false;
   const auto select_distinct_collision =
-      instrumentation::build_s_andn2_b64(kRdna4ExecLo, failed_exec, committed_exec, arch);
+      instrumentation::build_s_andn2_b64(kAmdGpuExecLo, failed_exec, committed_exec, arch);
   if (!select_distinct_collision)
     return false;
   words.push_back(*select_distinct_collision);
@@ -3050,7 +3052,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   words.insert(words.end(), commit_new->begin(), commit_new->end());
   words.insert(words.end(), commit_expected->begin(), commit_expected->end());
   const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(
-      slot_address, cas_new, cas_new, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+      slot_address, cas_new, cas_new, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
   if (!commit)
     return false;
   words.insert(words.end(), commit->begin(), commit->end());
@@ -3064,7 +3066,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   if (!narrow_vcc() || !save_exec(committed_exec))
     return false;
   const auto postguest_failed =
-      instrumentation::build_s_andn2_b64(kRdna4ExecLo, claimed_exec, committed_exec, arch);
+      instrumentation::build_s_andn2_b64(kAmdGpuExecLo, claimed_exec, committed_exec, arch);
   if (!postguest_failed)
     return false;
   words.push_back(*postguest_failed);
@@ -3459,7 +3461,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     const uint16_t version_before = static_cast<uint16_t>(scratch_vgpr + 20u);
     const uint16_t version_retry_count = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 20u);
     const auto restore_original_exec = instrumentation::build_s_mov_b64(
-        kRdna4ExecLo, static_cast<uint16_t>(*point.moi_exec_save_sgpr + 12u), arch);
+        kAmdGpuExecLo, static_cast<uint16_t>(*point.moi_exec_save_sgpr + 12u), arch);
     if (!restore_original_exec ||
         !append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch) ||
         !append_inline_workgroup_key(words, *workgroup_sources,
@@ -3612,7 +3614,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   }
 
   const auto restore_original_exec = instrumentation::build_s_mov_b64(
-      kRdna4ExecLo, static_cast<uint16_t>(*point.moi_exec_save_sgpr + 12u), arch);
+      kAmdGpuExecLo, static_cast<uint16_t>(*point.moi_exec_save_sgpr + 12u), arch);
   if (!restore_original_exec) {
     errors.emplace_back("ConSan MOI inline atomic patch could not restore original EXEC");
     return std::nullopt;

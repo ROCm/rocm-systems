@@ -862,7 +862,7 @@ TEST(ConSan, FlatLoadCheckTrapProofRewritesPaddedSecondKernelSite) {
   const uint16_t vcc_save_sgpr =
       static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
   const std::array<uint32_t, 13> expected_words = {
-      *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      *instrumentation::build_s_mov_b64(vcc_save_sgpr, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0xEC05007Cu,
       0x00000002u,
       0x00000000u, // original flat_load_b32 v2, v[0:1]
@@ -874,7 +874,7 @@ TEST(ConSan, FlatLoadCheckTrapProofRewritesPaddedSecondKernelSite) {
       0x7C9A0B02u, // v_cmp_ne_u32_e32 v2, v5
       0xBFA30001u, // s_cbranch_vccz +1
       0xBF900000u, // s_trap 0
-      *instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
+      *instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x118);
   EXPECT_EQ(rewritten_words, expected_words);
@@ -1442,7 +1442,7 @@ TEST(ConSan, FlatStoreCheckTrapProofRewritesPaddedSecondKernelSite) {
   const uint16_t vcc_save_sgpr =
       static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
   const std::array<uint32_t, 13> expected_words = {
-      *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      *instrumentation::build_s_mov_b64(vcc_save_sgpr, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0xEC06807Cu,
       0x01000000u,
       0x00000000u, // original flat_store_b32 v[0:1], v2
@@ -1454,7 +1454,7 @@ TEST(ConSan, FlatStoreCheckTrapProofRewritesPaddedSecondKernelSite) {
       0x7C9A0B02u, // v_cmp_ne_u32_e32 v2, v5
       0xBFA30001u, // s_cbranch_vccz +1
       0xBF900000u, // s_trap 0
-      *instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
+      *instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x118);
   EXPECT_EQ(rewritten_words, expected_words);
@@ -1493,7 +1493,7 @@ TEST(ConSan, FlatStoreB16CheckTrapProofEncodesRdna4Readback) {
   const uint16_t vcc_save_sgpr =
       static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
   const auto rewritten_words = patched_words_at_file_offset<13>(result, 0x118);
-  EXPECT_EQ(rewritten_words[0], *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo,
+  EXPECT_EQ(rewritten_words[0], *instrumentation::build_s_mov_b64(vcc_save_sgpr, kAmdGpuVccLo,
                                                                   ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_EQ(rewritten_words[1], store[0]);
   EXPECT_EQ(rewritten_words[2], store[1]);
@@ -1503,7 +1503,7 @@ TEST(ConSan, FlatStoreB16CheckTrapProofEncodesRdna4Readback) {
   EXPECT_EQ(rewritten_words[5], readback[0]);
   EXPECT_EQ(rewritten_words[6], readback[1]);
   EXPECT_EQ(rewritten_words[7], readback[2]);
-  EXPECT_EQ(rewritten_words[12], *instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr,
+  EXPECT_EQ(rewritten_words[12], *instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save_sgpr,
                                                                    ROCJITSU_CODE_ARCH_RDNA4));
 }
 
@@ -1544,7 +1544,7 @@ TEST(ConSan, FlatStoreCheckTrapProofRewritesGfx1250VflatStore) {
   const uint16_t vcc_save_sgpr =
       static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
   const auto rewritten_words = patched_words_at_file_offset<8>(result, 0x118);
-  EXPECT_EQ(rewritten_words[0], *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo,
+  EXPECT_EQ(rewritten_words[0], *instrumentation::build_s_mov_b64(vcc_save_sgpr, kAmdGpuVccLo,
                                                                   ROCJITSU_CODE_ARCH_CDNA5));
   EXPECT_EQ(rewritten_words[1], store[0]);
   EXPECT_EQ(rewritten_words[2], store[1]);
@@ -1601,7 +1601,7 @@ TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250Wave64MaybeGroupReadback)
   const uint16_t vcc_save_sgpr =
       static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
   const auto rewritten_words = patched_words_at_file_offset<18>(result, 0x118);
-  EXPECT_EQ(rewritten_words[0], *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo,
+  EXPECT_EQ(rewritten_words[0], *instrumentation::build_s_mov_b64(vcc_save_sgpr, kAmdGpuVccLo,
                                                                   ROCJITSU_CODE_ARCH_CDNA5));
   EXPECT_EQ(rewritten_words[1], store[0]);
   EXPECT_EQ(rewritten_words[2], store[1]);
@@ -1623,7 +1623,7 @@ TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250Wave64MaybeGroupReadback)
   ASSERT_EQ(mask_byte->size(), 2u);
   EXPECT_EQ(rewritten_words[12], (*mask_byte)[0]);
   EXPECT_EQ(rewritten_words[13], (*mask_byte)[1]);
-  EXPECT_EQ(rewritten_words[17], *instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr,
+  EXPECT_EQ(rewritten_words[17], *instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save_sgpr,
                                                                    ROCJITSU_CODE_ARCH_CDNA5));
 }
 
@@ -2548,7 +2548,7 @@ TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepDelay) {
   const uint16_t vcc_save_sgpr =
       static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
   const std::array<uint32_t, 13> expected_words = {
-      *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      *instrumentation::build_s_mov_b64(vcc_save_sgpr, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0xEC06807Cu,
       0x01000000u,
       0x00000000u, // original flat_store_b32 v[0:1], v2
@@ -2560,7 +2560,7 @@ TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepDelay) {
       0x7C9A0B02u, // v_cmp_ne_u32_e32 v2, v5
       0xBFA30001u, // s_cbranch_vccz +1
       0xBF900000u, // s_trap 0
-      *instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
+      *instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x118);
   EXPECT_EQ(rewritten_words, expected_words);
@@ -2603,7 +2603,7 @@ TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepVarDelay) {
       static_cast<uint16_t>(result.patches.front().required_sgpr_count - 2u);
   EXPECT_FALSE(vcc_save_sgpr == 0u || vcc_save_sgpr == 1u);
   const std::array<uint32_t, 13> expected_words = {
-      *instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      *instrumentation::build_s_mov_b64(vcc_save_sgpr, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0xEC06807Cu,
       0x01000000u,
       0x00000000u, // original flat_store_b32 v[0:1], v2
@@ -2615,7 +2615,7 @@ TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepVarDelay) {
       0x7C9A0B02u, // v_cmp_ne_u32_e32 v2, v5
       0xBFA30001u, // s_cbranch_vccz +1
       0xBF900000u, // s_trap 0
-      *instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
+      *instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x118);
   EXPECT_EQ(rewritten_words, expected_words);
@@ -2908,11 +2908,11 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedLoadInPlace) {
       0xD8D80000u,
       0x03000002u, // duplicate ds_load_b32 v3, v2
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0701u, // v_cmp_ne_u32_e32 vcc_lo, v1, v3
       0xBFA30001u, // s_cbranch_vccz +1, skipping trap when equal
       0xBF900000u, // s_trap 0
-      build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
       0xBFB00000u, // original s_endpgm after padding
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x100);
@@ -4292,22 +4292,22 @@ TEST(ConSan, ProbeLdsCheckTrapAllSupportedPolicyIgnoresNominalPatchLimit) {
       0xD8D80000u,
       0x03000002u, // duplicate ds_load_b32 v3, v2
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0701u, // v_cmp_ne_u32_e32 vcc_lo, v1, v3
       0xBFA30001u, // s_cbranch_vccz +1, skipping trap when equal
       0xBF900000u, // s_trap 0
-      build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
       0xD8D80000u,
       0x04000005u, // original ds_load_b32 v4, v5
       0xBF800000u, // delay
       0xD8D80000u,
       0x03000005u, // duplicate ds_load_b32 v3, v5
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0704u, // v_cmp_ne_u32_e32 vcc_lo, v4, v3
       0xBFA30001u, // s_cbranch_vccz +1, skipping trap when equal
       0xBF900000u, // s_trap 0
-      build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x100);
   EXPECT_EQ(rewritten_words, expected_words);
@@ -4349,11 +4349,11 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedU16D16LoadInPlace) {
       0xDA980000u,
       0x03000002u, // duplicate ds_load_u16_d16 v3, v2
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0701u, // v_cmp_ne_u32_e32 vcc_lo, v1, v3
       0xBFA30001u, // s_cbranch_vccz +1, skipping trap when equal
       0xBF900000u, // s_trap 0
-      build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
       0xBFB00000u, // original s_endpgm after padding
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x100);
@@ -4394,11 +4394,11 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedU16D16HiLoadInPlace) {
       0xDA9C0000u,
       0x03000002u, // duplicate ds_load_u16_d16_hi v3, v2
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0701u, // v_cmp_ne_u32_e32 vcc_lo, v1, v3
       0xBFA30001u, // s_cbranch_vccz +1, skipping trap when equal
       0xBF900000u, // s_trap 0
-      build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
       0xBFB00000u, // original s_endpgm after padding
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x100);
@@ -4449,11 +4449,11 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedByteD16LoadsInPlace) {
         load_word0,
         0x03000002u, // duplicate byte d16 load v3, v2
         0xBFC60000u, // s_wait_dscnt 0
-        build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+        build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
         0x7C9A0701u, // v_cmp_ne_u32_e32 vcc_lo, v1, v3
         0xBFA30001u, // s_cbranch_vccz +1, skipping trap when equal
         0xBF900000u, // s_trap 0
-        build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+        build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
         0xBFB00000u, // original s_endpgm after padding
     };
     const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x100);
@@ -4548,11 +4548,11 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanUseSleepDelay) {
       0xD8D80000u,
       0x03000002u, // duplicate ds_load_b32 v3, v2
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0701u, // v_cmp_ne_u32_e32 vcc_lo, v1, v3
       0xBFA30001u, // s_cbranch_vccz +1, skipping trap when equal
       0xBF900000u, // s_trap 0
-      build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
       0xBFB00000u, // original s_endpgm after padding
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x100);
@@ -4574,7 +4574,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanUseSleepVarDelay) {
   options.scratch_vgpr = 3;
   options.delay_mode = ConSanDelayMode::SleepVar;
   options.delay_nops = 1;
-  options.delay_var_ssrc = kRdna4VccLo;
+  options.delay_var_ssrc = kAmdGpuVccLo;
 
   const auto result = test_lower_consan(bytes, options);
 
@@ -4589,15 +4589,15 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanUseSleepVarDelay) {
   const std::array<uint32_t, 12> expected_words = {
       0xD8D80000u,
       0x01000002u, // original ds_load_b32 v1, v2
-      build_s_sleep_var(kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_sleep_var(kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0xD8D80000u,
       0x03000002u, // duplicate ds_load_b32 v3, v2
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0701u, // v_cmp_ne_u32_e32 vcc_lo, v1, v3
       0xBFA30001u, // s_cbranch_vccz +1, skipping trap when equal
       0xBF900000u, // s_trap 0
-      build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
       0xBFB00000u, // original s_endpgm after padding
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x100);
@@ -4664,11 +4664,11 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedStoreInPlace) {
       0xD8D80000u,
       0x03000002u, // readback ds_load_b32 v3, v2
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0701u, // v_cmp_ne_u32_e32 vcc_lo, v1, v3
       0xBFA30001u, // s_cbranch_vccz +1, skipping trap when equal
       0xBF900000u, // s_trap 0
-      build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
       0xBFB00000u, // original s_endpgm after padding
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x100);
@@ -4721,7 +4721,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanReportMismatchToMarkerBuffer) {
       0xD8D80000u,
       0x03000002u, // readback ds_load_b32 v3, v2
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0701u, // v_cmp_ne_u32_e32 vcc_lo, v1, v3
       0xBFA3000Cu, // s_cbranch_vccz +12, skipping marker store when equal
       (*mov_report_lo)[0],
@@ -4736,7 +4736,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanReportMismatchToMarkerBuffer) {
       (*store_marker)[0],
       (*store_marker)[1],
       (*store_marker)[2],
-      build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
       0xBF800000u,
       0xBF800000u,
       0xBFB00000u, // original s_endpgm after padding
@@ -4782,14 +4782,14 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedB64LoadInPlace) {
       0xD9D80000u,
       0x05000009u, // duplicate ds_load_b64 v[5:6], v9
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0B01u, // v_cmp_ne_u32_e32 vcc_lo, v1, v5
       0xBFA30001u, // s_cbranch_vccz +1, skipping trap when equal
       0xBF900000u, // s_trap 0
       0x7C9A0D02u, // v_cmp_ne_u32_e32 vcc_lo, v2, v6
       0xBFA30001u, // s_cbranch_vccz +1, skipping trap when equal
       0xBF900000u, // s_trap 0
-      build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
       0xBFB00000u, // original s_endpgm after padding
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x100);
@@ -4833,7 +4833,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedB128StoreInPlace) {
       0xDBFC0000u,
       0x05000009u, // readback ds_load_b128 v[5:8], v9
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0B01u, // v_cmp_ne_u32_e32 vcc_lo, v1, v5
       0xBFA30001u, // s_cbranch_vccz +1, skipping trap when equal
       0xBF900000u, // s_trap 0
@@ -4846,7 +4846,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedB128StoreInPlace) {
       0x7C9A1104u, // v_cmp_ne_u32_e32 vcc_lo, v4, v8
       0xBFA30001u, // s_cbranch_vccz +1, skipping trap when equal
       0xBF900000u, // s_trap 0
-      build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
       0xBFB00000u, // original s_endpgm after padding
   };
   const auto rewritten_words = patched_words_at_file_offset<expected_words.size()>(result, 0x100);
@@ -4887,11 +4887,11 @@ TEST(ConSan, ProbeLdsCheckTrapModeAutoScratchUsesLiveness) {
       0xD8D80000u,
       0x05000002u, // duplicate ds_load_b32 v5, v2
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(4, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(4, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0B01u, // v_cmp_ne_u32_e32 vcc_lo, v1, v5
       0xBFA30001u, // s_cbranch_vccz +1, skipping trap when equal
       0xBF900000u, // s_trap 0
-      build_s_mov_b32(kRdna4VccLo, 4, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 4, ROCJITSU_CODE_ARCH_RDNA4),
       0x06080603u, // original v_add_f32_e32 after padding
       0xBFB00000u, // original s_endpgm
   };
@@ -5154,11 +5154,11 @@ TEST(ConSan, ProbeLdsCheckTrapModeRejectsLocalCaveOwnedByAnotherFunction) {
       0xD8D80000u,
       0x03000002u, // duplicate ds_load_b32 v3, v2
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0701u, // v_cmp_ne_u32_e32 vcc_lo, v1, v3
       0xBFA30001u, // s_cbranch_vccz +1
       0xBF900000u, // s_trap 0
-      build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
       build_s_branch(-26, ROCJITSU_CODE_ARCH_RDNA4),
   };
   const auto cave_words = patched_words_at_file_offset<expected_cave.size()>(
@@ -5371,7 +5371,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesReachableUncoveredNopCaveFor2addrB64Load) 
       0xD9DC0000u,
       0x05000009u, // duplicate ds_load_2addr_b64 v[5:8], v9
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0B01u, // v_cmp_ne_u32_e32 vcc_lo, v1, v5
       0xBFA30001u, // s_cbranch_vccz +1
       0xBF900000u, // s_trap 0
@@ -5384,7 +5384,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesReachableUncoveredNopCaveFor2addrB64Load) 
       0x7C9A1104u, // v_cmp_ne_u32_e32 vcc_lo, v4, v8
       0xBFA30001u, // s_cbranch_vccz +1
       0xBF900000u, // s_trap 0
-      build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
       build_s_branch(-44, ROCJITSU_CODE_ARCH_RDNA4),
   };
   const auto cave_words = patched_words_at_file_offset<expected_cave.size()>(
@@ -5445,7 +5445,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesReachableUncoveredNopCaveForB128Store) {
       0xDBFC0000u,
       0x05000009u, // readback ds_load_b128 v[5:8], v9
       0xBFC60000u, // s_wait_dscnt 0
-      build_s_mov_b32(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(0, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4),
       0x7C9A0B01u, // v_cmp_ne_u32_e32 vcc_lo, v1, v5
       0xBFA30001u, // s_cbranch_vccz +1
       0xBF900000u, // s_trap 0
@@ -5458,7 +5458,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesReachableUncoveredNopCaveForB128Store) {
       0x7C9A1104u, // v_cmp_ne_u32_e32 vcc_lo, v4, v8
       0xBFA30001u, // s_cbranch_vccz +1
       0xBF900000u, // s_trap 0
-      build_s_mov_b32(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kAmdGpuVccLo, 0, ROCJITSU_CODE_ARCH_RDNA4),
       build_s_branch(-44, ROCJITSU_CODE_ARCH_RDNA4),
   };
   const auto cave_words = patched_words_at_file_offset<expected_cave.size()>(
@@ -5869,9 +5869,9 @@ TEST(ConSan, Cdna3LdsVccSaveSkipsPartiallyLiveScalarPair) {
   const std::vector<uint32_t> body =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
   const auto save_vcc =
-      instrumentation::build_s_mov_b64(vcc_save, kRdna4VccLo, ROCJITSU_CODE_ARCH_CDNA3);
+      instrumentation::build_s_mov_b64(vcc_save, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_CDNA3);
   const auto restore_vcc =
-      instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save, ROCJITSU_CODE_ARCH_CDNA3);
+      instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save, ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_TRUE(save_vcc);
   ASSERT_TRUE(restore_vcc);
   EXPECT_NE(std::ranges::find(body, *save_vcc), body.end());
@@ -6455,9 +6455,9 @@ TEST(ConSan, Gfx1250SharedLdsDeadVccSaveSatisfiesEveryOwnerDescriptor) {
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
   EXPECT_TRUE(contains_subsequence(
       body, std::array{build_s_mov_b32(static_cast<uint16_t>(patch->required_sgpr_count - 1u),
-                                       kRdna4VccLo, ROCJITSU_CODE_ARCH_CDNA5)}));
+                                       kAmdGpuVccLo, ROCJITSU_CODE_ARCH_CDNA5)}));
   EXPECT_TRUE(contains_subsequence(
-      body, std::array{build_s_mov_b32(kRdna4VccLo,
+      body, std::array{build_s_mov_b32(kAmdGpuVccLo,
                                        static_cast<uint16_t>(patch->required_sgpr_count - 1u),
                                        ROCJITSU_CODE_ARCH_CDNA5)}));
   for (std::string_view owner_name : {"shared_owner_0", "shared_owner_1"}) {

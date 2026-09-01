@@ -4,15 +4,13 @@
 #include "rocjitsu/code/patch/consan/consan_moi_dynamic_record_emission.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 namespace rocjitsu::consan_moi_detail {
 namespace {
-
-inline constexpr uint16_t kRdna4VccLo = 106;
-inline constexpr uint8_t kRdna4ScopeDevice = 2;
 
 [[nodiscard]] bool append_moi_global_atomic_wait(std::vector<uint32_t> &words,
                                                  rj_code_arch_t arch) {
@@ -47,7 +45,8 @@ inline constexpr uint8_t kRdna4ScopeDevice = 2;
       static_cast<uint16_t>(scratch_vgpr + 2u), value, arch);
   const auto atomic_or = instrumentation::build_flat_atomic_or_u32(
       scratch_vgpr, static_cast<uint16_t>(scratch_vgpr + 2u),
-      static_cast<uint16_t>(scratch_vgpr + 2u), /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+      static_cast<uint16_t>(scratch_vgpr + 2u), /*return_old_value=*/true, kAmdGpuScopeDevice,
+      arch);
   InstructionSequence sequence(words);
   return sequence.emit_all(mov_address_lo, mov_address_hi, mov_value, atomic_or) &&
          append_moi_global_atomic_wait(words, arch);
@@ -56,7 +55,7 @@ inline constexpr uint8_t kRdna4ScopeDevice = 2;
 [[nodiscard]] bool append_atomic_load_u32(std::vector<uint32_t> &words, uint16_t address_vgpr,
                                           uint16_t result_vgpr, rj_code_arch_t arch) {
   const auto atomic_load = instrumentation::build_flat_atomic_add_u32(
-      address_vgpr, result_vgpr, result_vgpr, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+      address_vgpr, result_vgpr, result_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
   const uint32_t zero = build_v_mov_b32_e32(result_vgpr, scalar_positive_inline_u32(0), arch);
   InstructionSequence sequence(words);
   return sequence.emit_all(zero, atomic_load) && append_moi_global_atomic_wait(words, arch);
@@ -83,7 +82,7 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
   const auto is_zero =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), result_vgpr, arch);
   const auto select_unpublished =
-      instrumentation::build_s_and_saveexec_b64(exec_save_sgpr, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(exec_save_sgpr, kAmdGpuVccLo, arch);
   const auto wait = instrumentation::build_s_wait_global_load0(arch);
   InstructionSequence sequence(words);
   if (!sequence.emit_all(mov_address_lo, mov_address_hi, load, wait, is_zero, select_unpublished))

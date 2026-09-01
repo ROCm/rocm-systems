@@ -67,7 +67,7 @@ constexpr auto kMoiAtomicKindRelease = rocjitsu::ConSanMoiAtomicEventKind::Relea
 constexpr auto kMoiAtomicKindAcquire = rocjitsu::ConSanMoiAtomicEventKind::Acquire;
 constexpr auto kMoiFenceKindRelease = rocjitsu::ConSanMoiFenceEventKind::Release;
 constexpr auto kMoiFenceKindAcquire = rocjitsu::ConSanMoiFenceEventKind::Acquire;
-constexpr uint32_t kRdna4ScopeDevice = 2;
+constexpr uint32_t kAmdGpuScopeDevice = 2;
 constexpr uint32_t kRdna4AtomicNoReturnTh = 0;
 constexpr uint32_t kRdna4AtomicReturnTh = 1;
 
@@ -2295,7 +2295,7 @@ TEST(ConSanMoiHipTest, FlatAtomicWritesDynamicRecord) {
   EXPECT_EQ(record.workgroup_y, 0u);
   EXPECT_EQ(record.workgroup_z, 0u);
   EXPECT_EQ(record.kind, kMoiAtomicKindRelease);
-  EXPECT_EQ(record.scope, kRdna4ScopeDevice);
+  EXPECT_EQ(record.scope, kAmdGpuScopeDevice);
   EXPECT_EQ(record.semantics, kRdna4AtomicNoReturnTh);
   EXPECT_NE(record.atomic_address, 0u);
   EXPECT_NE(record.instruction_offset, 0u);
@@ -2334,16 +2334,16 @@ TEST(ConSanMoiHipTest, AtomicHandoffOrdersTwoWaveAccesses) {
       << "atomic events " << same_address.atomic_records[0].event_index << ", "
       << same_address.atomic_records[1].event_index;
   EXPECT_EQ(same_address.atomic_records[1].kind, kMoiAtomicKindAcquire);
-  EXPECT_EQ(same_address.atomic_records[0].scope, kRdna4ScopeDevice);
-  EXPECT_EQ(same_address.atomic_records[1].scope, kRdna4ScopeDevice);
+  EXPECT_EQ(same_address.atomic_records[0].scope, kAmdGpuScopeDevice);
+  EXPECT_EQ(same_address.atomic_records[1].scope, kAmdGpuScopeDevice);
   EXPECT_EQ(same_address.atomic_records[0].semantics, kRdna4AtomicNoReturnTh);
   EXPECT_EQ(same_address.atomic_records[1].semantics, kRdna4AtomicReturnTh);
   EXPECT_EQ(same_address.atomic_records[0].atomic_address,
             same_address.atomic_records[1].atomic_address);
   EXPECT_EQ(same_address.fence_records[0].kind, kMoiFenceKindRelease);
   EXPECT_EQ(same_address.fence_records[1].kind, kMoiFenceKindAcquire);
-  EXPECT_EQ(same_address.fence_records[0].scope, kRdna4ScopeDevice);
-  EXPECT_EQ(same_address.fence_records[1].scope, kRdna4ScopeDevice);
+  EXPECT_EQ(same_address.fence_records[0].scope, kAmdGpuScopeDevice);
+  EXPECT_EQ(same_address.fence_records[1].scope, kAmdGpuScopeDevice);
   EXPECT_EQ(same_address.fence_records[0].communication_token,
             same_address.atomic_records[0].atomic_address);
   EXPECT_EQ(same_address.fence_records[1].communication_token,

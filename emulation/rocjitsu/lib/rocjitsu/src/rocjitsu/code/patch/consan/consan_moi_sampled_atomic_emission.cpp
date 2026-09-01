@@ -407,8 +407,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
     return std::nullopt;
   }
-  const auto save_exec = instrumentation::build_s_mov_b64(original_exec, kRdna4ExecLo, arch);
-  const auto active_mask = instrumentation::build_s_mov_b64(temporary_exec, kRdna4ExecLo, arch);
+  const auto save_exec = instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch);
+  const auto active_mask = instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch);
   const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
       value, temporary_exec, scalar_positive_inline_u32(0), arch);
   const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
@@ -416,14 +416,14 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto first =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch);
   const auto narrow_first =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
   if (!sequence.emit_all(save_exec, active_mask, mbcnt_lo, mbcnt_hi, first, narrow_first))
     return std::nullopt;
 
   const auto publishing = instrumentation::build_v_mov_b32_literal(value, 1u, arch);
   const auto empty = instrumentation::build_v_mov_b32_literal(expected, 0u, arch);
   const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
-      base, value, value, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+      base, value, value, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
   // BANK still names the causal-window slot stored in the pending payload.
   // Address the pending table through a separate (window, owner) index so all
   // waves at one static last-arriver RMW can retain their exact acquire.
@@ -458,7 +458,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto claimed =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch);
   const auto narrow_claimed =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
   if (!sequence.emit_all(claimed, narrow_claimed))
     return std::nullopt;
   if (!sequence.emit_branch(contention_label, InstructionSequence::BranchKind::SccZero))
@@ -549,7 +549,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto ready = instrumentation::build_v_mov_b32_literal(value, 2u, arch);
   const auto expected_publishing = instrumentation::build_v_mov_b32_literal(expected, 1u, arch);
   const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(
-      base, value, value, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+      base, value, value, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
   if (!sequence.emit(wait_store) || !append_pending_address() ||
       !sequence.emit_all(ready, expected_publishing, commit) ||
       !append_moi_global_atomic_wait(words, arch)) {
@@ -558,7 +558,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto committed =
       instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
   const auto narrow_committed =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
   if (!sequence.emit_all(committed, narrow_committed))
     return std::nullopt;
   if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::SccZero))
@@ -571,7 +571,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
 
   const auto append_counter_path = [&](size_t counter_offset) -> bool {
-    const auto restore = instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, arch);
+    const auto restore = instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch);
     if (!sequence.emit_all(restore, active_mask, mbcnt_lo, mbcnt_hi, first, narrow_first))
       return false;
     if (!append_atomic_fetch_add_one_u32(words, report_base + counter_offset, value, base, arch))
@@ -589,7 +589,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
           offsetof(ConSanMoiReportHeader, sampled_pending_acquire_collision_count)))
     return std::nullopt;
 
-  const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, arch);
+  const auto restore_exec = instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch);
   if (!sequence.bind(restore_label) || !sequence.emit(restore_exec) ||
       !append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch))
     return std::nullopt;
@@ -744,7 +744,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto restore_label = sequence.make_label();
   if (!append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch))
     return std::nullopt;
-  const auto save_exec = instrumentation::build_s_mov_b64(original_exec, kRdna4ExecLo, arch);
+  const auto save_exec = instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch);
   if (!save_exec)
     return std::nullopt;
   words.push_back(*save_exec);
@@ -765,7 +765,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     const auto compare =
         instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
     const auto narrow =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
     if (!sequence.emit_all(mov, compare, narrow))
       return false;
     return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero);
@@ -776,7 +776,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     const auto compare =
         instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected_vgpr), value, arch);
     const auto narrow =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
     if (!sequence.emit_all(compare, narrow))
       return false;
     return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero);
@@ -789,7 +789,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       return false;
     }
     const auto narrow =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
     if (!sequence.emit(narrow))
       return false;
     return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero);
@@ -834,7 +834,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
   const auto narrow_current_vcc = [&]() -> bool {
     const auto narrow =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
     if (!sequence.emit(narrow))
       return false;
     return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero);
@@ -883,7 +883,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto owner_equal = instrumentation::build_v_cmp_eq_u32_vcc(
       vector_source_vgpr(*owner_epoch_vgprs.owner), value, arch);
   const auto narrow_owner =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
   if (!sequence.emit_all(owner_shift, owner_mask, owner_equal, narrow_owner))
     return std::nullopt;
   if (!sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero))
@@ -927,7 +927,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   if (!narrow_current_vcc())
     return std::nullopt;
 
-  const auto matching_exec = instrumentation::build_s_mov_b64(temporary_exec, kRdna4ExecLo, arch);
+  const auto matching_exec = instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch);
   const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
       value, temporary_exec, scalar_positive_inline_u32(0), arch);
   const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
@@ -935,7 +935,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto first =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch);
   const auto narrow_first =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
   if (!sequence.emit_all(matching_exec, mbcnt_lo, mbcnt_hi, first, narrow_first))
     return std::nullopt;
 
@@ -944,7 +944,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
         value, kConSanMoiSampledSyncPublishingDescriptor, arch);
     const auto zero = instrumentation::build_v_mov_b32_literal(expected, 0, arch);
     const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
-                                                                      kRdna4ScopeDevice, arch);
+                                                                      kAmdGpuScopeDevice, arch);
     if (!consan_detail::append_moi_indexed_address(
             words,
             {.table_address =
@@ -959,7 +959,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     const auto claimed =
         instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch);
     const auto narrow_claimed =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
     if (!sequence.emit_all(claimed, narrow_claimed))
       return false;
     if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::SccZero))
@@ -985,7 +985,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     const auto final_expected = instrumentation::build_v_mov_b32_literal(
         expected, kConSanMoiSampledSyncPublishingDescriptor, arch);
     const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
-                                                                       kRdna4ScopeDevice, arch);
+                                                                       kAmdGpuScopeDevice, arch);
     if (!sequence.emit(wait) ||
         !consan_detail::append_moi_indexed_address(
             words,
@@ -1002,7 +1002,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     const auto committed =
         instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
     const auto narrow_committed =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
     if (!sequence.emit_all(committed, narrow_committed))
       return false;
     if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::SccZero))
@@ -1033,7 +1033,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   // became empty. Reconstitute the guest mask and select exactly one active
   // lane so the collision counter is neither lost nor multiplied by wave size.
   const auto restore_collision_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch);
   const auto collision_mask = instrumentation::build_s_mov_b64(temporary_exec, original_exec, arch);
   const auto collision_mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
       value, temporary_exec, scalar_positive_inline_u32(0), arch);
@@ -1042,7 +1042,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto collision_first =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch);
   const auto narrow_collision =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
   if (!sequence.bind(collision_label) ||
       !sequence.emit_all(restore_collision_exec, collision_mask, collision_mbcnt_lo,
                          collision_mbcnt_hi, collision_first, narrow_collision))
@@ -1051,7 +1051,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
           words, report_base + offsetof(ConSanMoiReportHeader, sampled_dropped_window_count), value,
           base, arch))
     return std::nullopt;
-  const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, arch);
+  const auto restore_exec = instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch);
   if (!sequence.bind(restore_label) || !sequence.emit(restore_exec) ||
       !append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch))
     return std::nullopt;

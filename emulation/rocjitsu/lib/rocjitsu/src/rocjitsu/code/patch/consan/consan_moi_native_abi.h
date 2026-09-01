@@ -20,14 +20,6 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu::consan_moi_impl {
 
-// Special scalar-source operand encodings shared by the supported target
-// profiles. Native emitters consume these names; mode policy must not infer
-// their numeric values.
-inline constexpr uint16_t kRdna4ExecLo = 126u;
-inline constexpr uint16_t kRdna4ExecHi = 127u;
-inline constexpr uint16_t kRdna4VccLo = 106u;
-inline constexpr uint16_t kRdna4VccHi = 107u;
-inline constexpr uint16_t kRdna4WorkitemIdX = 0u;
 inline constexpr uint16_t kScalarInlineNegativeOneOperand = 193u;
 inline constexpr uint16_t kScalarOperandTtmpBase = 108u;
 inline constexpr uint16_t kScalarOperandSharedBase = 235u;
@@ -36,7 +28,6 @@ inline constexpr uint16_t kTtmpRdna4GridX = 9u;
 inline constexpr uint16_t kTtmpGfx1250ClusterWorkgroupId = 6u;
 inline constexpr uint32_t kMaxVgprs = kConSanOrdinaryVgprLimit;
 inline constexpr uint32_t kMaxSgprs = 106u;
-inline constexpr uint8_t kRdna4ScopeDevice = 2u;
 inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256u;
 
 [[nodiscard]] constexpr uint16_t ttmp_scalar_operand(uint16_t ttmp) {

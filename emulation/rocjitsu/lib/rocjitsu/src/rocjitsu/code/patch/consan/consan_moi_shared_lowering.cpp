@@ -797,7 +797,7 @@ bool apply_moi_descriptor_requirements(
       const auto slot_in_capacity =
           instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(value_vgpr), slot_vgpr, arch);
       const auto narrow_exec =
-          instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kRdna4VccLo, arch);
+          instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kAmdGpuVccLo, arch);
       if (!mov_capacity || !slot_in_capacity || !narrow_exec) {
         errors.emplace_back(
             "ConSan MOI dynamic access-record probe could not encode capacity guard");
@@ -941,7 +941,7 @@ bool apply_moi_descriptor_requirements(
       }
       const auto wait_store = instrumentation::build_s_wait_global_store0(arch);
       const auto restore_exec =
-          instrumentation::build_s_mov_b64(kRdna4ExecLo, *point.moi_exec_save_sgpr, arch);
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, *point.moi_exec_save_sgpr, arch);
       if (!wait_store || !restore_exec) {
         errors.emplace_back(
             "ConSan MOI dynamic access-record probe could not drain stores or restore EXEC");
@@ -1106,7 +1106,7 @@ bool apply_moi_descriptor_requirements(
   std::optional<size_t> address_group_loop;
   if (automatic_banked_capture) {
     const auto save_original_exec =
-        instrumentation::build_s_mov_b64(original_exec_sgpr, kRdna4ExecLo, arch);
+        instrumentation::build_s_mov_b64(original_exec_sgpr, kAmdGpuExecLo, arch);
     if (!save_original_exec) {
       errors.emplace_back("ConSan MOI first-light probe could not retain its incoming EXEC");
       return std::nullopt;
@@ -1149,9 +1149,9 @@ bool apply_moi_descriptor_requirements(
     const auto select_address =
         instrumentation::build_v_cmp_eq_u32_vcc(address_key_sgpr, *lds_byte_offset_vgpr, arch);
     const auto narrow_group =
-        instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kAmdGpuVccLo, arch);
     const auto save_address_group =
-        instrumentation::build_s_mov_b64(address_group_exec_sgpr, kRdna4ExecLo, arch);
+        instrumentation::build_s_mov_b64(address_group_exec_sgpr, kAmdGpuExecLo, arch);
     const auto lane_rank_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
         record_value_vgpr, address_group_exec_sgpr, scalar_positive_inline_u32(0), arch);
     const auto lane_rank_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
@@ -1160,7 +1160,7 @@ bool apply_moi_descriptor_requirements(
     const auto first_in_group = instrumentation::build_v_cmp_eq_u32_vcc(
         scalar_positive_inline_u32(0), record_value_vgpr, arch);
     const auto narrow_representative =
-        instrumentation::build_s_and_saveexec_b64(address_group_exec_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(address_group_exec_sgpr, kAmdGpuVccLo, arch);
     if (!read_address || !select_address || !narrow_group || !save_address_group || !lane_rank_lo ||
         !lane_rank_hi || !first_in_group || !narrow_representative) {
       errors.emplace_back(
@@ -1179,7 +1179,7 @@ bool apply_moi_descriptor_requirements(
     words.push_back(*narrow_representative);
   } else {
     const auto save_incoming_exec =
-        instrumentation::build_s_mov_b64(*point.moi_exec_save_sgpr, kRdna4ExecLo, arch);
+        instrumentation::build_s_mov_b64(*point.moi_exec_save_sgpr, kAmdGpuExecLo, arch);
     const auto lane_rank_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
         record_value_vgpr, *point.moi_exec_save_sgpr, scalar_positive_inline_u32(0), arch);
     const auto lane_rank_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
@@ -1188,7 +1188,7 @@ bool apply_moi_descriptor_requirements(
     const auto first_active = instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
                                                                       record_value_vgpr, arch);
     const auto narrow_first =
-        instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kRdna4VccLo, arch);
+        instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kAmdGpuVccLo, arch);
     if (!save_incoming_exec || !lane_rank_lo || !lane_rank_hi || !first_active || !narrow_first) {
       errors.emplace_back("ConSan MOI first-light probe could not elect a representative lane");
       return std::nullopt;
@@ -1268,7 +1268,7 @@ bool apply_moi_descriptor_requirements(
         build_v_mov_b32_e32(record_compare_high_vgpr, scalar_positive_inline_u32(0), arch));
     const auto claim_dispatch = instrumentation::build_flat_atomic_cmpswap_b64(
         record_address_vgpr, record_value_vgpr, record_value_vgpr,
-        /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+        /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
     if (!claim_dispatch) {
       errors.emplace_back("ConSan MOI first-light probe could not claim a dispatch slot");
       return std::nullopt;
@@ -1535,7 +1535,7 @@ bool apply_moi_descriptor_requirements(
         build_v_mov_b32_e32(record_compare_high_vgpr, scalar_positive_inline_u32(0), arch));
     const auto claim = instrumentation::build_flat_atomic_cmpswap_b64(
         record_address_vgpr, record_value_vgpr, record_value_vgpr,
-        /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+        /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
     if (!claim) {
       errors.emplace_back("ConSan MOI first-light probe could not encode its publication claim");
       return std::nullopt;
@@ -1688,7 +1688,7 @@ bool apply_moi_descriptor_requirements(
         record_value_high_vgpr, static_cast<uint32_t>(ConSanMoiShadowAccessKind::Empty), arch);
     const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(
         record_address_vgpr, record_value_vgpr, record_value_vgpr,
-        /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+        /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
     if (!commit_value || !commit_expected || !commit) {
       errors.emplace_back("ConSan MOI first-light probe could not commit its publication");
       return std::nullopt;
@@ -1827,7 +1827,7 @@ bool apply_moi_descriptor_requirements(
         build_v_mov_b32_e32(record_value_high_vgpr, scalar_positive_inline_u32(0), arch));
     const auto read_commit = instrumentation::build_flat_atomic_cmpswap_b32(
         record_address_vgpr, record_value_vgpr, record_value_vgpr,
-        /*return_old_value=*/true, kRdna4ScopeDevice, arch);
+        /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
     const auto publication_incomplete = instrumentation::build_v_cmp_eq_u32_vcc(
         scalar_positive_inline_u32(static_cast<uint32_t>(ConSanMoiShadowAccessKind::Empty)),
         record_value_vgpr, arch);
@@ -2069,7 +2069,7 @@ bool apply_moi_descriptor_requirements(
     const auto remove_group = instrumentation::build_s_xor_b64(
         *point.moi_exec_save_sgpr, *point.moi_exec_save_sgpr, address_group_exec_sgpr, arch);
     const auto select_remaining =
-        instrumentation::build_s_mov_b64(kRdna4ExecLo, *point.moi_exec_save_sgpr, arch);
+        instrumentation::build_s_mov_b64(kAmdGpuExecLo, *point.moi_exec_save_sgpr, arch);
     if (!remove_group || !select_remaining) {
       errors.emplace_back("ConSan MOI first-light probe could not advance its address-group loop");
       return std::nullopt;
@@ -2100,7 +2100,8 @@ bool apply_moi_descriptor_requirements(
 
   const uint16_t restore_exec_sgpr =
       automatic_banked_capture ? original_exec_sgpr : *point.moi_exec_save_sgpr;
-  const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, restore_exec_sgpr, arch);
+  const auto restore_exec =
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, restore_exec_sgpr, arch);
   if (!restore_exec) {
     errors.emplace_back("ConSan MOI first-light probe could not restore EXEC");
     return std::nullopt;
