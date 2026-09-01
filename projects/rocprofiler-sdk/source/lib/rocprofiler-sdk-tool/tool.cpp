@@ -1642,9 +1642,9 @@ get_replay_profile(rocprofiler_agent_id_t agent_id, uint64_t pass_index)
     const auto profiles = agent_profiles.profiles.find(agent_id);
     if(profiles == agent_profiles.profiles.end() || profiles->second.empty()) return std::nullopt;
 
-    // SDK contract: replay_pass_count reported exactly profiles->second.size() passes for this agent,
-    // so the pass index must land in [0, #groups). A larger index means the SDK drove more passes
-    // than we asked for; scream, then fall back to the wrapped index so a non-CI build stays
+    // SDK contract: replay_pass_count reported exactly profiles->second.size() passes for this
+    // agent, so the pass index must land in [0, #groups). A larger index means the SDK drove more
+    // passes than we asked for; scream, then fall back to the wrapped index so a non-CI build stays
     // in-bounds.
     ROCP_CI_LOG_IF(ERROR, pass_index >= profiles->second.size())
         << "kernel replay: pass_index=" << pass_index
