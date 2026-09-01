@@ -397,7 +397,7 @@ tests/python/
 ├── integration/                       # Live device: one suite per API area
 │   ├── __init__.py
 │   ├── test_api_coverage.py           # Every public API must be driven by a suite here
-│   ├── test_memory_partition_lifecycle.py  # Standalone sudo script, not a runner suite
+│   ├── memory_partition_lifecycle.py       # Standalone sudo script, not a runner suite
 │   ├── gpu/
 │   │   ├── test_power.py              # Every GPU power API: rejection + validated reads
 │   │   └── ...                        # clock, memory, thermal, ras, partition, pci, xgmi, ...
@@ -664,9 +664,9 @@ shown in parentheses.
 | Old file (`tests/python_unittest/`) | New location (`tests/python/`) |
 | :--- | :--- |
 | `unit_tests.py` | `unit/<component>/test_<feature>.py` for logic (e.g. `unit/system/test_bdf.py`) and `integration/<component>/test_<feature>.py` for the per-API suites (e.g. `integration/gpu/test_power.py`); a suite that stubs `sys.modules` declares `ModuleIsolationMixin` |
-| `integration_tests.py` | `functional/<component>/test_<feature>.py` (e.g. `functional/system/test_init.py`, `functional/gpu/test_power.py`, `functional/nic/test_discovery.py`) |
+| `integration_test.py` | `functional/<component>/test_<feature>.py` (e.g. `functional/system/test_init.py`, `functional/gpu/test_power.py`, `functional/nic/test_discovery.py`) |
 | `partition_metric_unit_test.py` | `unit/gpu/test_cli_metric_partition.py` |
-| `cli_tests.py` | `cli/test_<command>.py`, one per command (shared scaffolding in `cli/base.py`) |
+| `cli_unit_test.py` | `cli/test_<command>.py`, one per command (shared scaffolding in `cli/base.py`) |
 | `perf_tests.py` | `functional/gpu/test_benchmark.py` |
 | `perf_cputests.py` | `functional/cpu/test_benchmark.py` |
 | `common.py` | `common/common.py` |

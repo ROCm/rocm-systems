@@ -92,16 +92,18 @@ prove layers 3 and 7 are done.
 | Suite | Path | Runner |
 |-------|------|--------|
 | C++ GTest | `tests/amd_smi_test/` | `build/tests/amd_smi_test/amdsmitst` |
-| Python all tiers | `tests/python_unittest/run_tests.py` | `python3` (`--unit --integration --functional --cli`) |
-| Python unit | `tests/python_unittest/unit_tests.py` | `python3` (no hardware) |
-| Python integration | `tests/python_unittest/integration_tests.py` | `python3` (per-API, live device) |
-| Python functional | `tests/python_unittest/functional_tests.py` | `python3` (live device + root) |
-| Python CLI | `tests/python_unittest/cli_tests.py` | `python3` |
-| Python perf | `tests/python_unittest/perf_tests.py` | `python3` |
+| Python all tiers | `tests/python/run_tests.py` | `python3` (`--unit --integration --functional --cli`) |
+| Python unit | `tests/python/unit_tests.py` | `python3` (no hardware) |
+| Python integration | `tests/python/integration_tests.py` | `python3` (per-API, live device) |
+| Python functional | `tests/python/functional_tests.py` | `python3` (live device + root) |
+| Python CLI | `tests/python/cli_tests.py` | `python3` |
+| Python benchmarks | `tests/python/functional_tests.py -k benchmark` | `python3` |
 | ABI checks | `tests/abi_check/` | CI workflow |
 | API summary | `tests/api_summary.py` | `python3` |
 
-All tests require GPU hardware. Python tests need `AMDSMI_PATH=/opt/rocm/share/amd_smi`.
+CMake installs `tests/python/` to `tests/python_unittest/`, so the installed tree
+uses that path instead. Every tier but `unit` requires GPU hardware; the device
+tiers also need root. Python tests need `AMDSMI_PATH=/opt/rocm/share/amd_smi`.
 
 # Build & Packaging
 
