@@ -32,11 +32,6 @@ struct FaultApplicationState {
   [[nodiscard]] bool successful() const { return errors.empty(); }
 };
 
-[[nodiscard]] ConSanFaultSelectionView
-fault_selection_view(const ConSanTransformArtifacts &result) {
-  return {.program_inventory = result.program_inventory, .fault_sites = result.fault_sites};
-}
-
 [[nodiscard]] ConSanFaultSelectionView fault_selection_view(const FaultApplicationState &state) {
   return {.program_inventory = state.program_inventory, .fault_sites = state.fault_sites};
 }
@@ -1959,21 +1954,21 @@ find_fault_plan(std::span<const ConSanFaultMutationPlan> plans, ConSanFaultMutat
 
 [[nodiscard]] bool validate_fault_application_plans(std::span<const ConSanFaultMutationPlan> plans,
                                                     const ProgramInventory &inventory,
-                                                    ConSanTransformArtifacts &result) {
+                                                    std::vector<std::string> &errors) {
   for (size_t index = 0; index < plans.size(); ++index) {
     const ConSanFaultMutationPlan &plan = plans[index];
     if (!plan.well_formed()) {
-      result.errors.emplace_back("ConSan fault application received malformed typed plan " +
-                                 std::to_string(index));
+      errors.emplace_back("ConSan fault application received malformed typed plan " +
+                          std::to_string(index));
       return false;
     }
     if (plan.source_code_object != inventory.code_object_id()) {
-      result.errors.emplace_back(
+      errors.emplace_back(
           "ConSan fault application rejected a plan from a different pristine code object");
       return false;
     }
     if (std::ranges::count(plans, plan.kind, &ConSanFaultMutationPlan::kind) != 1) {
-      result.errors.emplace_back(
+      errors.emplace_back(
           "ConSan fault application received duplicate plans for one mutation kind");
       return false;
     }
@@ -1988,7 +1983,7 @@ void apply_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code_a
                                   bool require_exactly_one,
                                   std::span<const ConSanFaultMutationPlan> plans,
                                   ConSanTransformArtifacts &result) {
-  if (!validate_fault_application_plans(plans, result.program_inventory, result))
+  if (!validate_fault_application_plans(plans, result.program_inventory, result.errors))
     return;
   FaultApplicationState transaction(result);
 

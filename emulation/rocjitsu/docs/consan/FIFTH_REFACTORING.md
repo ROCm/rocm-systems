@@ -7131,3 +7131,49 @@ parallel scan and reverse-layer dependencies. The payoff is still small at the
 whole-project scale. Remaining broad lowering mutation surfaces, target and
 mode locality, material whole-refactoring shrinkage, and the independent
 completion audit remain open. The goal therefore remains active.
+
+### 16.96 Convergence checkpoint 95: private fault-application transaction
+
+The fault-application trace followed every selection-view construction through
+barrier, atomic, LDS, and ordinary-memory mutation. All mechanism calls consume
+`FaultApplicationState`, the private candidate transaction that prevents
+partial bytes, proof, tallies, and diagnostics from leaking before the complete
+set is accepted. A second adapter from `ConSanTransformArtifacts` to the same
+selection view had no callers. Separately, typed-plan validation accepted the
+whole transaction only to append an error string.
+
+The dead broad-transaction adapter is deleted. Typed-plan validation now
+receives `ProgramInventory` and its exact diagnostic sink; it cannot inspect or
+mutate any other lowering state. The architecture gate caps
+`consan_fault_injection.inc` at five reviewed whole-transaction sites: private
+transaction construction, the complete application publication boundary, and
+the three explicit proof/debug mutations. All internal fault mechanisms and
+selection helpers remain confined to their private transaction.
+
+| Signal | Checkpoint 95 | Cumulative change | Slice change from checkpoint 94 |
+| --- | ---: | ---: | ---: |
+| Production files | 274 | +45 | 0 |
+| Physical production lines | 102,930 | **-2,046** | **-5** |
+| Nonblank production lines | 96,690 | **-2,394** | **-4** |
+| Production implementation lines | 88,997 | **-2,453** | **-4** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **134 / 49** | **-142 / -8** | **-2 / 0** |
+| `ConSanPatchInfo` references / files | 210 / 31 | +10 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Whole-transaction mentions in fault implementation | **5** | n/a | **-2** |
+| Dead whole-transaction selection adapters | **0** | n/a | **-1** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and all **101/101** named fault,
+fault-composition, fault-retry, MOI-fault, and architecture-boundary tests.
+Checkpoint 92 passed all 1,295 host/component tests, and checkpoint 91 passed
+all 4,776 nonphysical tests across the five-target simulator matrix. No test
+was added, removed, renamed, disabled, or replaced, and no physical gfx1201
+test was run.
+
+This deletion-bearing checkpoint strengthens Sections 14.1, 14.5, 14.7, and
+14.8 by removing an unneeded visibility path into a component that already had
+the correct private transaction. The whole-project payoff remains small.
+Remaining broad lowering mutation surfaces, target and mode locality, material
+whole-refactoring shrinkage, and the independent completion audit remain open.
+The goal therefore remains active.
