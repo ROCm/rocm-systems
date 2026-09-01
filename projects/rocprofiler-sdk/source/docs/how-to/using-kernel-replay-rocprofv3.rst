@@ -9,9 +9,12 @@ Using kernel replay with rocprofv3
 ======================================
 
 ``rocprofv3 --kernel-replay-beta-enabled`` collects several hardware-counter groups in **one
-application run**. For each kernel dispatch, the profiler snapshots the device memory the kernel
-can mutate, re-executes that dispatch once per ``--pmc`` group, and restores the snapshot between
-passes so every group observes identical inputs.
+application run**. For each kernel dispatch, the profiler snapshots every tracked coarse-grained
+allocation owned by that dispatch's agent -- not only the memory the kernel itself can reach --
+re-executes that dispatch once per ``--pmc`` group, and restores the snapshot between passes so
+every group observes identical inputs. Host RAM use and copy time therefore scale with the agent's
+whole tracked footprint rather than with the kernel's working set, as `What is snapshotted`_
+describes.
 
 Without the flag, multiple ``--pmc`` groups use *application replay*: the whole application is
 re-run from start to finish once per group. Kernel replay is useful when those full re-runs are
