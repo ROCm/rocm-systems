@@ -4,35 +4,36 @@ Insert `s_ttracedata` markers into HIP device code for SQTT/ATT tracing.
 Two modes: manual user markers and automatic instrumentation via an LLVM pass plugin.
 Zero runtime cost when disabled.
 
+The marker producer and its device header now live in
+`llvm-project/amd/sqtt-marker`; this repository contains the decoder and its
+post-processing tools. The commands below use the plugin from that LLVM
+project.
+
 ## Prerequisites
 
-- ROCm 7.13 or
-- Rocprofiler-sdk built from develop.
+- An LLVM build with AMDGPU support
+- `llvm-project/amd/sqtt-marker`
 
 ## Building the pass plugin
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm
-cmake --build build
+cmake -S /path/to/llvm-project/amd/sqtt-marker -B build-sqtt-marker \
+      -DLLVM_DIR=/path/to/llvm/lib/cmake/llvm
+cmake --build build-sqtt-marker
 ```
 
-This produces `build/lib/libsqttinstrumentpass.so`.
-
-Use `CMAKE_PREFIX_PATH` to select a specific ROCm installation:
-
-```bash
-cmake -B build-rocm713 -DCMAKE_PREFIX_PATH=/opt/rocm-7.13.0
-cmake --build build-rocm713
-```
+This produces `build-sqtt-marker/lib/libsqtt-marker.so`.
+The plugin must be built against the same LLVM build used by the compiler
+process that loads it.
 
 ## Quick start
 
 ### User markers only
 
-Add markers to your HIP code and compile with `-DSQTT_ENABLED=1`:
+Add markers to your HIP code and compile with `-DAMD_SQTT_MARKER_ENABLE=1`:
 
 ```cpp
-#include "markers.hpp"
+#include <amd_sqtt_marker/sqtt_marker.h>
 
 __global__ void my_kernel(float *data, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -46,11 +47,11 @@ __global__ void my_kernel(float *data, int n) {
 ```
 
 ```bash
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ my_kernel.hip -o my_kernel
 ```
 
-Without `-DSQTT_ENABLED=1` (or with `-DSQTT_ENABLED=0`), all marker calls
+Without `-DAMD_SQTT_MARKER_ENABLE=1` (or with `-DAMD_SQTT_MARKER_ENABLE=0`), all marker calls
 compile to nothing. You can leave them in production code permanently.
 
 `sqtt_marker_data(name, value)` emits a named point marker followed by one raw
@@ -66,9 +67,9 @@ waves on matching CUs/SIMDs/WGs emit markers:
 ```bash
 # Only CU 0, SIMD 0, all workgroups
 SQTT_SCOPE_CU=0x1 SQTT_SCOPE_SIMD=0x1 \
-hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 \
+      -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ my_kernel.hip -o my_kernel
 ```
 
 By default the pass limits markers to CU 0-1 (`SQTT_SCOPE_CU=0x3`).
@@ -81,18 +82,18 @@ SQTT already generates wave start/end markers for them.
 
 ```bash
 SQTT_INSTRUMENT_FUNCTIONS=10 \
-hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 \
+      -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ my_kernel.hip -o my_kernel
 ```
 
 Use weighted cost instead of instruction count:
 
 ```bash
 SQTT_INSTRUMENT_FUNCTIONS=cost:50 \
-hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 \
+      -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ my_kernel.hip -o my_kernel
 ```
 
 ### Automatic barrier instrumentation
@@ -102,9 +103,9 @@ Insert point markers around standalone `s_barrier`, `s_barrier_signal`, and
 
 ```bash
 SQTT_INSTRUMENT_BARRIERS=1 \
-hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 \
+      -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ my_kernel.hip -o my_kernel
 ```
 
 ### Automatic memory operation markers
@@ -114,9 +115,9 @@ Insert point markers around groups of global/buffer/flat memory operations
 
 ```bash
 SQTT_INSTRUMENT_MEMORY=2:5 \
-hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 \
+      -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ my_kernel.hip -o my_kernel
 ```
 
 Format: `N:M` where N = number of memory ops per marker, M = max instruction
@@ -134,27 +135,27 @@ cache line utilization analysis, stride detection, and coalescing analysis:
 
 ```bash
 SQTT_TRACE_ADDRESSES=memory \
-hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 \
+      -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ my_kernel.hip -o my_kernel
 ```
 
 Trace LDS addresses only:
 
 ```bash
 SQTT_TRACE_ADDRESSES=lds \
-hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 \
+      -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ my_kernel.hip -o my_kernel
 ```
 
 Trace both global and LDS:
 
 ```bash
 SQTT_TRACE_ADDRESSES=memory,lds \
-hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 \
+      -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ my_kernel.hip -o my_kernel
 ```
 
 `SQTT_TRACE_ADDRESSES` and `SQTT_INSTRUMENT_MEMORY` are mutually exclusive.
@@ -193,9 +194,9 @@ SQTT_INSTRUMENT_BARRIERS=1 \
 SQTT_INSTRUMENT_MEMORY=2:5 \
 SQTT_SCOPE_CU=0x1 \
 SQTT_SCOPE_SIMD=0x1 \
-hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 \
+      -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ my_kernel.hip -o my_kernel
 ```
 
 ## Marker API
@@ -208,9 +209,9 @@ sqtt_marker_point("checkpoint");    // point event (no push/pop)
 
 // Numeric markers (sched_barrier(0) on each side; pass plugin adds the
 // SQTT_MEM_BARRIER-controlled boundary on top)
-sqtt_marker_enter(uint32_t id);     // push scope
-sqtt_marker_exit(uint32_t id);      // pop scope
-sqtt_marker_point(uint32_t id);     // point event
+sqtt_marker_enter_id(uint32_t id);     // push scope
+sqtt_marker_exit_id(uint32_t id);      // pop scope
+sqtt_marker_point_id(uint32_t id);     // point event
 ```
 
 ### Named markers (recommended)
@@ -218,7 +219,7 @@ sqtt_marker_point(uint32_t id);     // point event
 Use string-based markers for readable trace output with automatic ID management:
 
 ```cpp
-#include "markers.hpp"
+#include <amd_sqtt_marker/sqtt_marker.h>
 
 __global__ void my_kernel(float *data, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -237,7 +238,7 @@ __global__ void my_kernel(float *data, int n) {
 }
 ```
 
-Named markers require the pass plugin (`-fpass-plugin=build/lib/libsqttinstrumentpass.so`).
+Named markers require the pass plugin (`-fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so`).
 The pass:
 
 1. Finds all `sqtt_marker_enter("...")`, `sqtt_marker_exit("...")`,
@@ -250,9 +251,9 @@ The pass:
 5. Records `U:ID:name` entries in the `.sqtt_funcmap` section
 
 If you forget to load the pass plugin, you get a linker error
-("undefined reference to `__sqtt_named_marker_enter`") -- no silent miscompilation.
+("undefined reference to `sqtt_marker_enter`") -- no silent miscompilation.
 
-When `SQTT_ENABLED=0` (the default), all markers compile to nothing.
+When `AMD_SQTT_MARKER_ENABLE=0` (the default), all markers compile to nothing.
 
 ### Numeric markers
 
@@ -269,7 +270,7 @@ or the preprocessor, not runtime behavior.
 
 | Variable | Values | Default | Description |
 |---|---|---|---|
-| `SQTT_ENABLED` | `0`, `1` | `0` | Pass as `-DSQTT_ENABLED=1` to hipcc. When 0, all user marker calls compile to nothing. |
+| `AMD_SQTT_MARKER_ENABLE` | `0`, `1` | `0` | Pass as `-DAMD_SQTT_MARKER_ENABLE=1` to hipcc. When 0, all user marker calls compile to nothing. |
 
 ### Scope control plugin options (environment variables)
 
@@ -294,17 +295,17 @@ directly via `getenv()`.
 
 ### Shader wave trace as seen with auto instrumentation and user markers together
 
-![Global view trace](../docs/markers/trace.png)
+![Global view trace](trace.png)
 
 ### Coarse Flamegraph derived from the previous trace without instruction tracing
 
-![Coarse flamegraph](../docs/markers/globalflame.png)
+![Coarse flamegraph](globalflame.png)
 
 ### Fine Flamegraph derived from the previous trace with instruction tracing
 
-![Fine flamegraph](../docs/markers/fineflame.png)
+![Fine flamegraph](fineflame.png)
 
-### User markers (`test/markers/kernels/heavy.cpp`)
+### User marker example
 
 The kernel in `heavy.cpp` uses named markers to annotate producer/consumer
 threads and individual phases (memory loads, LDS stores, MFMA compute). Here is the
@@ -344,15 +345,15 @@ sqtt_marker_exit("Consumer Thread");
 Build with the pass plugin and capture a trace:
 
 ```bash
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ test/markers/kernels/heavy.cpp -o heavy
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ heavy.cpp -o heavy
 
 rocprofv3 --att -d trace -- ./heavy
 ```
 
 ### Automatic function instrumentation
 
-The `auto.cpp` test contains a kernel calling device functions of varying size.
+The `auto.cpp` example contains a kernel calling device functions of varying size.
 Functions exceeding the threshold are automatically instrumented with entry/exit
 markers -- no source changes needed:
 
@@ -386,8 +387,8 @@ Build with automatic function instrumentation and capture a trace:
 
 ```bash
 SQTT_INSTRUMENT_FUNCTIONS=10 \
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ test/markers/kernels/auto.cpp -o auto
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ auto.cpp -o auto
 
 rocprofv3 --att -d trace -- ./auto
 ```
@@ -539,15 +540,15 @@ Check that markers appear in the IR:
 
 ```bash
 SQTT_INSTRUMENT_FUNCTIONS=5 \
-hipcc -DSQTT_ENABLED=1 \
-      -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ -S -emit-llvm my_kernel.hip -o - \
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 \
+      -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ -S -emit-llvm my_kernel.hip -o - \
       | grep ttracedata
 ```
 
 Check that disabled builds have no markers:
 
 ```bash
-hipcc -I include/rocprof_trace_decoder/cxx/ -S -emit-llvm my_kernel.hip -o - | grep ttracedata
+hipcc -I /path/to/llvm-project/amd/sqtt-marker/include/ -S -emit-llvm my_kernel.hip -o - | grep ttracedata
 # (should produce no output)
 ```

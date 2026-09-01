@@ -44,36 +44,6 @@ if(UNIT_TESTS)
     add_subdirectory(unit)
 endif()
 
-if(BUILD_MARKERS)
-    if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND NOT TARGET SQTTInstrumentPass)
-        add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../markers ${CMAKE_CURRENT_BINARY_DIR}/markers)
-    endif()
-
-    find_program(
-        HIPCC_EXECUTABLE
-        NAMES hipcc
-        HINTS /opt/rocm/bin)
-    if(HIPCC_EXECUTABLE AND TARGET SQTTInstrumentPass)
-        add_test(NAME markers-python COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/markers/run_tests.py)
-        set_tests_properties(
-            markers-python
-            PROPERTIES
-                TIMEOUT
-                300
-                LABELS
-                "markers;integration-tests"
-                WORKING_DIRECTORY
-                ${TTD_PROJECT_SOURCE_DIR}
-                ENVIRONMENT
-                "HIPCC=${HIPCC_EXECUTABLE};SQTT_BUILD_DIR=${CMAKE_BINARY_DIR};SQTT_PASS_PLUGIN=$<TARGET_FILE:SQTTInstrumentPass>"
-        )
-    elseif(NOT TARGET SQTTInstrumentPass)
-        message(WARNING "SQTTInstrumentPass target not found; skipping SQTT marker Python tests")
-    else()
-        message(WARNING "hipcc not found; skipping SQTT marker Python tests")
-    endif()
-endif()
-
 if(BUILD_INTEGRATION_TESTS)
     set(Python3_FIND_UNVERSIONED_NAMES LAST)
     find_package(
