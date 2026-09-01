@@ -18,7 +18,9 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/except.h"
 #include "util/log.h"
 
@@ -102,7 +104,9 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 
   wfs_.resize(config.num_wf_slots);
   sgpr_file_.init(config.num_wf_slots * config.sgprs_per_wf, config.sgprs_per_wf);
-  sgpr_to_wave_.resize(config.num_wf_slots * config.sgprs_per_wf, nullptr);
+  sgpr_block_owners_.resize(config.num_wf_slots);
+  if (std::has_single_bit(config.sgprs_per_wf))
+    sgpr_block_shift_ = std::countr_zero(config.sgprs_per_wf);
 
   // Completer port: CP sends dispatch activation messages here.
   cpl_ = add_port(std::make_unique<simdojo::Port>("cpl", 0, this, simdojo::PortDirection::IN,
@@ -213,6 +217,8 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   wf->vgpr_write_mask_ = wf->lane_mask();
   wf->vcc_ = 0;
   wf->m0_ = 0;
+  wf->set_shader_engine_id(shader_engine_id_);
+  wf->set_scratch_scoreboard_id(scratch_scoreboard_base_ + wf_id);
   wf->set_status_raw(0);
   wf->set_apertures(shared_aperture_base_, shared_aperture_limit_, private_aperture_base_,
                     private_aperture_limit_);
@@ -220,11 +226,14 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   wf->set_ready_cycle(cycle_counter_);
   wf->trace_inst_count_ = 0;
 
-  std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + num_sgprs, wf);
-  fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgpr_allocation_block_size(), wf);
+  sgpr_block_owners_[static_cast<uint32_t>(sgpr_base) / config_.sgprs_per_wf] = {
+      wf, static_cast<uint32_t>(sgpr_base) + config_.sgprs_per_wf};
+  set_vgpr_block_owner(static_cast<uint32_t>(vgpr_base), wf);
 
-  util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", wf_id,
-                   " pc=0x", std::hex, pc, std::dec, " wg=", wg_id, " pid=", wf->process_id());
+  util::Logger::cp([&](auto &os) {
+    os << "DISPATCH_WF cu=" << full_path() << " wf=" << wf->wf_id() << " slot=" << wf_id << " pc=0x"
+       << std::hex << pc << std::dec << " wg=" << wg_id << " pid=" << wf->process_id();
+  });
 
   schedule_work();
   return wf;
@@ -242,6 +251,7 @@ size_t ComputeUnitCore::num_wfs() const {
 void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   if (wf.sgpr_alloc().count > 0) {
+    sgpr_block_owners_[wf.sgpr_alloc().base / config_.sgprs_per_wf] = {};
     sgpr_file_.free(wf.sgpr_alloc().base);
     free_vgprs(wf.vgpr_alloc().base);
   }
@@ -277,6 +287,15 @@ void ComputeUnitCore::maybe_reset_lds_alloc() {
 
 void ComputeUnitCore::begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count,
                                       uint32_t num_named_barriers) {
+  // The driver's s_icache_inv rides the launch packet, so it lands once per
+  // dispatch, not once per wave: a kernel VA reused by a later dispatch still
+  // sees fresh code, while the sibling waves of one dispatch keep filling a
+  // shared I$ instead of cold-starting each other.
+  if (inst_cache_dispatch_id_ != dispatch_id) {
+    inst_cache_.invalidate_all();
+    inst_cache_dispatch_id_ = dispatch_id;
+  }
+
   const uint64_t key = wg_key(dispatch_id, wg_id);
   active_wgs_[key] = wf_count;
   if (wf_count <= 1) {
@@ -677,8 +696,20 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   }
 
   rj_code_binary_inst_t words[4];
-  for (int i = 0; i < 4; ++i)
-    words[i] = memory_->fetch32(active->pc + i * 4, vmid);
+  static_assert(sizeof(words) == InstructionCache::kFetchBytes,
+                "the I$ fetch width must match the issue window");
+  if (debug_active()) {
+    // A debugger writes breakpoints straight into code memory with none of the
+    // maintenance that invalidates the I$, so bypass it while one is attached.
+    for (int i = 0; i < 4; ++i)
+      words[i] = memory_->fetch32(active->pc + i * 4, vmid);
+  } else {
+    // A session that has come and gone may have written over lines cached
+    // before it attached, whether or not this wave issued while it was
+    // running. Take the invalidation set_debug_active() published.
+    sync_inst_cache_debug_epoch();
+    inst_cache_.fetch(*memory_, active->pc, vmid, reinterpret_cast<uint8_t *>(words));
+  }
 
   active->trace_inst_count_++;
 
@@ -708,7 +739,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     if (active->num_vgprs_ > 0) {
       util::Logger::vm([&](auto &os) {
         uint32_t vb = active->vgpr_alloc().base;
-        os << std::format("{} wg[{}] wf[{}] EXECUTE #{} pc={:#x} {} sz={}", this->full_path(),
+        os << std::format("{} wg[{}] wf[{}] EXECUTE #{} pc={:#x} {} sz={}", full_path(),
                           active->wg_id(), active->wf_id(), active->trace_inst_count_, active->pc,
                           inst->mnemonic(), inst_size);
         os << " enc=";
@@ -738,8 +769,33 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
       auto config = trap_handler_resolver_(*active);
       if (config && config->tba != 0) {
         const uint64_t saved_pc = active->pc;
+        const uint32_t saved_status = active->status_raw();
+        const auto properties = isa_properties(this->arch());
+        const auto wave_state_layout = properties.wave_state_layout;
+        const bool uses_split_wave_state = wave_state_layout != WaveStateLayout::Legacy;
         active->set_ttmp(0, static_cast<uint32_t>(saved_pc));
-        active->set_ttmp(1, static_cast<uint32_t>(saved_pc >> 32) | (trap_id << 16));
+        if (uses_split_wave_state) {
+          // GFX12 trap entry carries the four-bit trap id in TTMP1[31:28].
+          // GFX12.0 has a 48-bit PC and preserves SCHED_MODE in TTMP1[27:26];
+          // GFX12.5 expands the PC to 57 bits and enters privileged scheduling.
+          const uint32_t pc_hi_mask =
+              wave_state_layout == WaveStateLayout::Gfx12_5 ? 0x01FFFFFFu : 0x0000FFFFu;
+          const uint32_t sched_mode = wave_state_layout == WaveStateLayout::Gfx12
+                                          ? (active->wave_sched_mode_raw() & 0x3u) << 26
+                                          : 0u;
+          active->set_ttmp(1, (static_cast<uint32_t>(saved_pc >> 32) & pc_hi_mask) | sched_mode |
+                                  ((trap_id & 0xFu) << 28));
+          const uint32_t debug_enabled = config->debug_enabled ? (1u << 23) : 0u;
+          active->set_ttmp(11, (active->ttmp(11) & ~(1u << 23)) | debug_enabled);
+          constexpr uint16_t kWholeStatePriv = 4u | (31u << 11);
+          uint32_t state_priv = 0;
+          const auto state_result = read_hwreg_field(*active, kWholeStatePriv, state_priv);
+          assert(state_result == HwregAccessResult::Success);
+          (void)state_result;
+          active->set_ttmp(12, state_priv);
+        } else {
+          active->set_ttmp(1, static_cast<uint32_t>(saved_pc >> 32) | (trap_id << 16));
+        }
         // Dispatch identity. Which TTMPs carry it is architecture-specific and
         // this must not disagree with what CWSR publishes for the same wave, or
         // rocm-dbgapi correlates the stopped wave to the wrong workgroup.
@@ -750,21 +806,23 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
         // rest use the gfx9 layout, TTMP8/9/10 = workgroup id x/y/z, which is
         // also what CWSR serializes (cwsr.cpp writes wg_coord into ttmp[8..10]).
         // Writing the flat wg_id() into TTMP8 disagreed with that too.
-        if (!isa_properties(this->arch()).uses_ttmp_workgroup_ids) {
+        if (!properties.uses_ttmp_workgroup_ids) {
           const auto &wg = active->wg_coord();
           active->set_ttmp(8, wg[0]);
           active->set_ttmp(9, wg[1]);
           active->set_ttmp(10, wg[2]);
         }
-        active->set_ttmp(11, ((active->aql_packet_id() & 0x1FFFFFFu) << 6) |
-                                 (active->wave_in_group() & 0x3Fu));
-        active->set_ttmp(12, active->status_raw());
-        const uint32_t debug_enabled = config->debug_enabled ? (1u << 23) : 0u;
-        active->set_ttmp(13, (active->ttmp(13) & ~(1u << 23)) | debug_enabled);
+        if (!uses_split_wave_state) {
+          active->set_ttmp(11, ((active->aql_packet_id() & 0x1FFFFFFu) << 6) |
+                                   (active->wave_in_group() & 0x3Fu));
+          active->set_ttmp(12, saved_status);
+          const uint32_t debug_enabled = config->debug_enabled ? (1u << 23) : 0u;
+          active->set_ttmp(13, (active->ttmp(13) & ~(1u << 23)) | debug_enabled);
+        }
         active->set_ttmp(14, static_cast<uint32_t>(config->tma));
         active->set_ttmp(15, static_cast<uint32_t>(config->tma >> 32));
         active->set_trap_id(trap_id);
-        active->set_trap_saved_status(active->status_raw());
+        active->set_trap_saved_status(saved_status);
         active->set_trap_saved_exec(active->exec());
         active->set_trap_interrupt_sent(false);
         // A fresh handler entry owns the halt state from here on; a marker left
@@ -772,6 +830,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
         // s_sendmsghalt that has already been resumed past.
         active->set_self_halted(false);
         active->set_in_trap_handler(true);
+        if (uses_split_wave_state)
+          active->set_status_raw(saved_status | kPrivilegedStatusBit);
         active->pc = config->tba;
         delete inst;
         return;
@@ -789,10 +849,9 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     auto mn = std::string_view(inst->mnemonic());
     if (mn.find("s_setpc") != std::string_view::npos ||
         mn.find("s_swappc") != std::string_view::npos) {
-      uint32_t ssrc0_idx = words[0] & 0x7F;
-      uint32_t sb = active->sgpr_alloc().base;
-      uint64_t target = static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx)) |
-                        (static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx + 1)) << 32);
+      const Operand *target_operand = inst->src_operand(0);
+      assert(target_operand && "indirect PC instruction must have a target operand");
+      uint64_t target = RegisterAccess(*active).read_scalar64(*target_operand);
       if (target == 0) {
         active->halt();
         delete inst;
@@ -941,11 +1000,19 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     return;
   }
   if (inst->is_memory_op()) {
-    if (inst->data() && inst->data()->tag() == GLOBAL_MEM) {
-      auto *d = inst->data_as<VectorMemState>();
-      d->issue_pc = active->pc;
+    if (!inst->data()) {
+      // A memory execute path can intentionally reject an invalid complete
+      // register operand before constructing pipeline state. Treat that as a
+      // fully suppressed instruction: no route callback, wait-counter update,
+      // or memory transaction is permitted.
+      delete inst;
+    } else {
+      if (inst->data()->tag() == GLOBAL_MEM) {
+        auto *d = inst->data_as<VectorMemState>();
+        d->issue_pc = active->pc;
+      }
+      route_memory_inst(inst, *active);
     }
-    route_memory_inst(inst, *active);
   } else
     delete inst;
 
@@ -963,8 +1030,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   // the generated call sites use. A local copy here would keep checking the
   // old bits if the EXCP set ever widened.
   const uint32_t new_alu_causes = active->pending_alu_causes() & kAluExceptionTrapstsMask;
-  const uint32_t enabled_alu_causes =
-      (active->mode_raw() & kAluExceptionModeMask) >> kAluExceptionModeShift;
+  const uint32_t enabled_alu_causes = alu_exception_trap_enables(*active);
   if ((new_alu_causes & enabled_alu_causes) != 0 && alu_exception_handler_ &&
       alu_exception_handler_(*active))
     return;
@@ -1016,7 +1082,7 @@ bool ComputeUnitCore::step() {
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_CP)) {
     if ((step_count_ & 0xFFFFF) == 0) {
       util::Logger::cp([&](auto &os) {
-        os << std::format("CU[{}] steps={}M", this->full_path(), step_count_ >> 20);
+        os << std::format("CU[{}] steps={}M", full_path(), step_count_ >> 20);
         for (auto &wf : wfs_) {
           auto st = wf->state();
           if (st == WfState::RUNNING || st == WfState::WAITCNT || st == WfState::BARRIER)
