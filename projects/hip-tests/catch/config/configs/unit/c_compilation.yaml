@@ -6,3 +6,12 @@ c_compilation:
   Unit_hipBf16Compile_ctest:
     <<: *level_2
     tags: [integration, rtc]
+  Unit_hipFp8Compile_ctest:
+    <<: *level_2
+    tags: [integration, rtc]
+  Unit_hipFp4Compile_ctest:
+    <<: *level_2
+    tags: [integration, rtc]
+  Unit_hipFp6Compile_ctest:
+    <<: *level_2
+    tags: [integration, rtc]
