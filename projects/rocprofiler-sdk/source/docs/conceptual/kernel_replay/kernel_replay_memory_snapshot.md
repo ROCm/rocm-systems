@@ -104,6 +104,13 @@ Capture of a single region fails if the host allocation fails under memory press
 from the resize) or if the device-to-host copy fails. Either leaves the snapshot incomplete, and
 `snap()` returns with `ok == false`.
 
+Two whole-snapshot conditions produce the same result. Reserving the inventory metadata can itself
+run out of host memory, and HSA may refuse to enumerate the module-scope variables of a loaded
+executable. The second matters because a `__device__` global that was never discovered is one that
+is never restored, so passes 2..N would read state accumulated by pass 1 and report counters for
+inputs that differ from the first pass. Neither is fatal: both log which condition was hit and
+decline replay for that dispatch.
+
 The replay loop treats that as a decision point, not an error to push through: restoring a partial
 snapshot between passes would write back some regions and leave others carrying a later pass's
 mutations, corrupting application data. So on `ok == false` the loop warns, closes the CONFIG
