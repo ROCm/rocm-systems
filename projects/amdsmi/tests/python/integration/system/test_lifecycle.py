@@ -105,6 +105,14 @@ class TestSystemLifecycle(api.ApiTestCase):
             api.Param("node_handle", ("0", node), [("invalid", api.BAD_HANDLE)]),
         )
 
+    def test_get_tray_info(self):
+        # node_handle is reserved and must be NULL, so the valid value is None
+        # and only a wrong type is refused.
+        self.both(
+            "amdsmi_get_tray_info",
+            api.Param("node_handle", ("null", None), [("bad-type", api.BAD_INT)]),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
