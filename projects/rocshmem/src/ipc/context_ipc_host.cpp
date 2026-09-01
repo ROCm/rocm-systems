@@ -109,6 +109,8 @@ __host__ void IPCHostContext::putmem(void *dest, const void *source,
 __host__ void IPCHostContext::getmem(void *dest, const void *source,
                                      size_t nelems, int pe) {
   if (is_ipc_non_mpi()) {
+    // Flush before reading the peer's memory
+    host_interface->hdp_flush();
     CHECK_HIP(hipMemcpyAsync(dest, shmem_ptr(source, pe), nelems,
                              hipMemcpyDefault, ctx_stream_));
     // Blocking get: destination buffer must be populated on return.
