@@ -343,17 +343,34 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   if(BUILD_TESTS)
     include(ExternalProject)
     set(ROCJPEG_TEST_BIN_DIR ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/bin)
+    set(ROCJPEG_STAGE_DIR ${CMAKE_BINARY_DIR}/stage)
+
+    # Stage-install the library and its cmake/include artifacts into the build
+    # tree so ExternalProject find_package() works without requiring a prior
+    # sudo make install. cmake --install --prefix rewrites all install paths,
+    # and configure_package_config_file generates relocatable relative paths,
+    # so the staged config correctly resolves headers and libs.
+    add_custom_target(stage_${PROJECT_NAME}
+      COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --prefix ${ROCJPEG_STAGE_DIR}
+      DEPENDS ${PROJECT_NAME}
+      COMMENT "Staging ${PROJECT_NAME} into build tree for test builds"
+    )
 
     # Helper macro to add one ExternalProject test and register its install
+    # ROCM_PATH keeps pointing at the real ROCm tree so find_package(HIP),
+    # libva, etc. resolve correctly. CMAKE_PREFIX_PATH is prepended with the
+    # stage dir so find_package(rocjpeg) picks up the staged config instead
+    # of any previously installed version.
     macro(rocjpeg_add_test_ext TEST_EXE TEST_SOURCE_DIR)
       ExternalProject_Add(test_${TEST_EXE}
         SOURCE_DIR ${TEST_SOURCE_DIR}
-        CMAKE_ARGS -DROCM_PATH=${CMAKE_INSTALL_PREFIX}
+        CMAKE_ARGS -DROCM_PATH=${ROCM_PATH}
+                   -DCMAKE_PREFIX_PATH=${ROCJPEG_STAGE_DIR}
                    -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
         BUILD_ALWAYS ON
         INSTALL_COMMAND ""
-        DEPENDS ${PROJECT_NAME}
+        DEPENDS stage_${PROJECT_NAME}
       )
       ExternalProject_Get_Property(test_${TEST_EXE} BINARY_DIR)
       install(PROGRAMS ${BINARY_DIR}/${TEST_EXE} DESTINATION ${ROCJPEG_TEST_BIN_DIR} OPTIONAL)
