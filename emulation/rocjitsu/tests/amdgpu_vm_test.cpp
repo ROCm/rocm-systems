@@ -218,6 +218,38 @@ TEST(ComputeUnitConfigTest, RejectsVgprSpanAboveIsaMaximum) {
   EXPECT_THROW((void)VmFixture("cdna3", 1, 32, 64, 104, 513), util::ConfigError);
 }
 
+TEST(ComputeUnitConfigTest, DirectFactoryRejectsModelOnlyConcreteTarget) {
+  amdgpu::GpuMemory memory("memory");
+  amdgpu::L2Cache l2("l2");
+  const amdgpu::ComputeUnitCore::Config config{
+      .arch = ROCJITSU_CODE_ARCH_CDNA5,
+      .target = ROCJITSU_CODE_TARGET_GFX1251,
+      .num_wf_slots = 8,
+      .sgprs_per_wf = 104,
+      .vgprs_per_wf = 256,
+      .lds_size_kb = 64,
+  };
+
+  EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2),
+               util::ConfigError);
+}
+
+TEST(ComputeUnitConfigTest, DirectFactoryRejectsTargetFromAnotherArchitecture) {
+  amdgpu::GpuMemory memory("memory");
+  amdgpu::L2Cache l2("l2");
+  const amdgpu::ComputeUnitCore::Config config{
+      .arch = ROCJITSU_CODE_ARCH_CDNA5,
+      .target = ROCJITSU_CODE_TARGET_GFX950,
+      .num_wf_slots = 8,
+      .sgprs_per_wf = 104,
+      .vgprs_per_wf = 256,
+      .lds_size_kb = 64,
+  };
+
+  EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2),
+               util::ConfigError);
+}
+
 // Drive the engine until the listed CUs have no resident wavefronts. A wavefront
 // frees itself at s_endpgm (num_wfs()/has_active_wfs() drop as it halts), so the
 // kernel is complete once every listed CU reports idle. Waves that need their final
