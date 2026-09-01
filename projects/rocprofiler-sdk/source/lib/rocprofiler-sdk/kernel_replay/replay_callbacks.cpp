@@ -221,6 +221,10 @@ execute_config_phase_enter(const hsa::Queue&              queue,
                                            ROCPROFILER_KERNEL_REPLAY_CONFIG,
                                            plan.config_data);
 
+    // We expect only one context for kernel replay
+    ROCP_FATAL_IF(config_contexts.size() > 1) << fmt::format(
+        "Expected exactly ONE context for kernel replay, saw {}", config_contexts.size());
+
     plan.replay_pass_count        = plan.config_data.replay_pass_count;
     plan.replay_continue          = plan.config_data.replay_continue;
     plan.config_contexts          = std::move(config_contexts);
