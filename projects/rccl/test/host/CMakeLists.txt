@@ -256,7 +256,7 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 get_filename_component(_gcc_install_dir "${_gcc_libstdcpp}" DIRECTORY)
-set(CMAKE_CXX_FLAGS_INIT "--gcc-install-dir=${_gcc_install_dir} --offload-host-only")
+set(CMAKE_CXX_FLAGS_INIT "--gcc-install-dir=${_gcc_install_dir} --offload-host-only -I${ROCM_PATH}/include")
 
 project(rccl-HostUnitTests LANGUAGES CXX)
 
