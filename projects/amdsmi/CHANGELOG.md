@@ -14,6 +14,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Expanded `amdsmi_gpu_block_t` enum with 20 new RAS IP blocks**.  
+  - Added blocks: from `AMDSMI_GPU_BLOCK_MMSCH` to `AMDSMI_GPU_BLOCK_UCIE_PCS` at bit positions 19-38.
+  - Updated `AMDSMI_GPU_BLOCK_LAST` to `AMDSMI_GPU_BLOCK_UCIE_PCS`.
+
 - **An empty nested section now renders as `N/A` in human-readable CLI output**.  
   - Any `amd-smi` command whose output contains an empty sub-section printed a bare `SECTION:` header with nothing under it. It now prints `SECTION: N/A`, matching how empty lists are already rendered.
   - This covers every subcommand that uses the standard human-readable renderer, not only the AI-NIC `RDMA_DEVICES` case that prompted it.
@@ -22,6 +26,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Optimized
 
 ### Resolved Issues
+
+- **Fixed an out-of-bounds read in the DRM example's RAS block listing**.  
+  - `amd_smi_drm_example.cc` iterated every `amdsmi_gpu_block_t` value but indexed a 14-entry name array, so every block from `AMDSMI_GPU_BLOCK_MCA` onward read past the end of the array and printed a garbage label. The list now covers all 39 blocks and the lookup is bounds-checked.
 
 - **Fixed `amd-smi ras --afid --folder --json` emitting nothing when no CPER files are readable**.  
   - When every `.cper` file in the folder was skipped (e.g. rejected as a symlink), the JSON path printed empty output, so consumers feeding stdout to `json.loads` failed with `Expecting value: line 1 column 1 (char 0)`. It now emits `[]` for that case, matching the `--cper --json` contract.
