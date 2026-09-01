@@ -291,6 +291,44 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
   )
 
+  # Option to build test binaries during the main build (without running them)
+  option(BUILD_TESTS "Build test binaries and install to share/${PROJECT_NAME}/bin" OFF)
+
+  if(BUILD_TESTS)
+    include(ExternalProject)
+    set(ROCDECODE_TEST_BIN_DIR ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/bin)
+
+    # Helper macro to add one ExternalProject test and register its install
+    macro(rocdecode_add_test_ext TEST_EXE TEST_SOURCE_DIR)
+      ExternalProject_Add(test_${TEST_EXE}
+        SOURCE_DIR ${TEST_SOURCE_DIR}
+        CMAKE_ARGS -DROCM_PATH=${CMAKE_INSTALL_PREFIX}
+                   -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+                   -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        BUILD_ALWAYS ON
+        INSTALL_COMMAND ""
+        DEPENDS ${PROJECT_NAME}
+      )
+      ExternalProject_Get_Property(test_${TEST_EXE} BINARY_DIR)
+      install(PROGRAMS ${BINARY_DIR}/${TEST_EXE} DESTINATION ${ROCDECODE_TEST_BIN_DIR} OPTIONAL)
+    endmacro()
+
+    # Samples that do NOT require FFmpeg
+    rocdecode_add_test_ext(videodecoderaw    ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeRaw)
+    rocdecode_add_test_ext(rocdecdecode      ${CMAKE_CURRENT_SOURCE_DIR}/samples/rocdecDecode)
+    # Negative API test (source under test/)
+    rocdecode_add_test_ext(rocdecodenegativetest ${CMAKE_CURRENT_SOURCE_DIR}/test/rocDecodeNegativeApiTests)
+
+    # Extended tests (require FFmpeg)
+    if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
+      rocdecode_add_test_ext(videodecode      ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecode)
+      rocdecode_add_test_ext(videodecodeperf  ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodePerf)
+      rocdecode_add_test_ext(videodecodebatch ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeBatch)
+      rocdecode_add_test_ext(videodecodergb   ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeRGB)
+      rocdecode_add_test_ext(videodecodemem   ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeMem)
+    endif()
+  endif()
+
   # make test with CTest
   set(BUILD_FROM_SOURCE ON)
   enable_testing()
