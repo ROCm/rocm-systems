@@ -117,6 +117,10 @@ ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, cha
 }
 ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) { ::abort(); }
+// src/plugin/profiler.cc:871. Not fail-loud: ncclPrepareTasks:601 reaches this on
+// a happy path, and "no profiler plugin loaded" is the truth for a host-only
+// binary that links no plugin, not a steering choice.
+bool ncclProfilerPluginLoaded(void) { return false; }
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRegCleanup(struct ncclComm* comm) { return ncclSuccess; }

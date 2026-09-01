@@ -2109,6 +2109,31 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_SecondContiguousP2p_AppendsToSameBatch) {
   EXPECT_EQ(0b11ull, bp.tailBatch()->offsetBitset) << "slots 0 and 1";
 }
 
+// The bcast item cap at :240. Mutation-driven: llvm-cov shows :240 executing,
+// but changing `nBcasts == maxitem` to `nBcasts > maxitem` left the whole suite
+// green, because no test ever queued enough bcast items to reach the cap. With
+// `>` the equality never fires, nBcasts runs past maxitem and the batch never
+// splits -- so this is a real behaviour difference, not an equivalent mutant.
+TEST_F(EnqueueMicrotest, AddWorkBatch_BcastCapSplitsAtExactlyMaxItem) {
+  BatchPlanComm bp;
+  const size_t bcastSize = ncclDevWorkSize(ncclDevWorkTypeBcast);
+  const int maxitem = ncclMaxDevWorkBatchBytes(bp.c()->cudaArch) / int(sizeof(ncclDevWorkBcast));
+  ASSERT_GT(maxitem, 1) << "the cap must be reachable by adding items";
+
+  // Contiguous offsets, so the extension rule at :248-249 keeps appending rather
+  // than opening a batch of its own: `0 != offset % workSize` is what would
+  // otherwise split these and mask the cap.
+  for (int i = 0; i < maxitem; ++i) {
+    addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, uint32_t(i * bcastSize));
+  }
+  const int beforeCap = bp.queueLength();
+
+  // The (maxitem + 1)th item is the first to see nBcasts == maxitem.
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, uint32_t(maxitem * bcastSize));
+  EXPECT_EQ(beforeCap + 1, bp.queueLength())
+      << "the cap at :240 must open a new batch on the item that reaches maxitem";
+}
+
 TEST_F(EnqueueMicrotest, AddWorkBatch_DifferentWorkType_ForcesNewBatch) {
   // `newBatch |= batch->workType != workType` must be the ONLY splitter here, so
   // every other path to a second node has to be shut off first. The second call
@@ -3224,5 +3249,3 @@ TEST_F(EnqueueMicrotest, RedOpCreate_RecorderFailure_Propagates) {
             ncclRedOpCreatePreMulSum_impl(&op, &s, ncclFloat32,
                                           ncclScalarHostImmediate, rc.get()));
 }
-
-
