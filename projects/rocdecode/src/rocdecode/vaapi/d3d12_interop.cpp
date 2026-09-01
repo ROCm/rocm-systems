@@ -176,10 +176,15 @@ rocDecStatus D3D12Interop::CreateSharedResources(rocDecVideoSurfaceFormat format
         IDXGIAdapter1* adapter = nullptr;
         for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
             DXGI_ADAPTER_DESC1 desc;
-            adapter->GetDesc1(&desc);
-            if (desc.AdapterLuid.HighPart == adapter_luid.HighPart &&
+            HRESULT desc_hr = adapter->GetDesc1(&desc);
+            if (SUCCEEDED(desc_hr) &&
+                desc.AdapterLuid.HighPart == adapter_luid.HighPart &&
                 desc.AdapterLuid.LowPart == adapter_luid.LowPart) {
                 break;
+            }
+            if (FAILED(desc_hr)) {
+                InfoLog(g_rocdec_logger, "IDXGIAdapter1::GetDesc1 failed for adapter " + ROCDEC_TOSTR(i) +
+                        " (HRESULT=0x" + ToHex(desc_hr) + "), skipping");
             }
             adapter->Release();
             adapter = nullptr;
@@ -190,7 +195,7 @@ rocDecStatus D3D12Interop::CreateSharedResources(rocDecVideoSurfaceFormat format
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_DEVICE_INVALID;
         }
-        hr = D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0,
+        HRESULT hr = D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0,
                                __uuidof(ID3D12Device), reinterpret_cast<void**>(&d3d12_device_));
         adapter->Release();
         if (FAILED(hr) || d3d12_device_ == nullptr) {
@@ -392,8 +397,8 @@ rocDecStatus D3D12Interop::CopyToStagingBuffer(int pic_idx) {
     // This is a COPY-type queue/command list: D3D12 does not track resource states on
     // copy queues (all resources are treated as COMMON), so no ResourceBarrier transitions
     // to COPY_SOURCE/COPY_DEST are needed -- and issuing them here would be invalid.
-    d3d12_cmd_allocator_->Reset();
-    d3d12_cmd_list_->Reset(d3d12_cmd_allocator_, nullptr);
+    CHECK_D3D12(d3d12_cmd_allocator_->Reset());
+    CHECK_D3D12(d3d12_cmd_list_->Reset(d3d12_cmd_allocator_, nullptr));
 
     for (UINT sub = 0; sub < num_subresources; sub++) {
         D3D12_TEXTURE_COPY_LOCATION src = {};
@@ -414,7 +419,7 @@ rocDecStatus D3D12Interop::CopyToStagingBuffer(int pic_idx) {
         d3d12_cmd_list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
     }
 
-    d3d12_cmd_list_->Close();
+    CHECK_D3D12(d3d12_cmd_list_->Close());
     ID3D12CommandList* lists[] = { d3d12_cmd_list_ };
     d3d12_copy_queue_->ExecuteCommandLists(1, lists);
 
@@ -433,7 +438,9 @@ rocDecStatus D3D12Interop::CopyToStagingBuffer(int pic_idx) {
         return ROCDEC_RUNTIME_ERROR;
     }
     if (completed < d3d12_fence_value_) {
-        d3d12_fence_->SetEventOnCompletion(d3d12_fence_value_, d3d12_fence_event_);
+        // If SetEventOnCompletion fails, the event is never signaled and the wait below
+        // would block forever -- fail here instead of hanging.
+        CHECK_D3D12(d3d12_fence_->SetEventOnCompletion(d3d12_fence_value_, d3d12_fence_event_));
         WaitForSingleObject(d3d12_fence_event_, INFINITE);
     }
 
