@@ -107,6 +107,11 @@ option(
     OFF
 )
 option(
+    RJ_BUILD_BENCHMARKS
+    "Build the optional symmetric gfx950/gfx1250 benchmark suite"
+    OFF
+)
+option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
     OFF
@@ -420,6 +425,14 @@ add_subdirectory(fuzz/decode)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(tools/rocjitsu)
+endif()
+if(RJ_BUILD_BENCHMARKS OR BUILD_TESTING)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        if(RJ_BUILD_BENCHMARKS)
+            message(FATAL_ERROR "RJ_BUILD_BENCHMARKS is supported only on Linux")
+        endif()
+    endif()
+    add_subdirectory(benchmarks)
 endif()
 if(BUILD_TESTING)
     add_subdirectory(tests)

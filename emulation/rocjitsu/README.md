@@ -54,6 +54,7 @@ tools/rocjitsu/         CLI (local, daemon, attach modes)
 configs/                GPU topology JSON files
 schemas/                FlatBuffers schemas
 tests/                  Test suite
+benchmarks/             Reproducible performance suite and runner
 docs/                   Design documents and guides
 ```
 
@@ -122,6 +123,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | [Benchmarking](docs/benchmarking.md) | Reproducible performance and memory measurement protocol |
 | [Configuration](docs/configuration.md) | JSON config format and topology |
 | [CLI & Transport](docs/rocjitsu-cli.md) | CLI modes, daemon RPC protocol |
+| [Benchmarking](docs/benchmarking.md) | Symmetric gfx950/gfx1250 suite, runner, and JSON artifacts |
 | [Race Detector](docs/race-detector.md) | Race detection tutorial and internals |
 | [Debugging with ROCgdb](docs/rocgdb-debugging.md) | Debug emulated GPU kernels with ROCgdb: breakpoints, watchpoints, faults, multi-wave |
 

@@ -27,7 +27,16 @@ cmake --build build
 | `RJ_ENABLE_MSAN` | `OFF` | Enable MemorySanitizer |
 | `RJ_SANITIZER_RUNTIME` | `AUTO` | Select `AUTO`, `SHARED`, or `STATIC` sanitizer runtime linkage |
 | `RJ_CLANG_TIDY` | `OFF` | Enable clang-tidy static analysis |
+| `RJ_BUILD_BENCHMARKS` | `OFF` | Build the optional gfx950/gfx1250 benchmark workloads |
 | `LTO` | `OFF` | Enable link-time optimization for Release/RelWithDebInfo |
+
+`RJ_BUILD_BENCHMARKS` requires a ROCm SDK whose compiler supports both
+`gfx950` and `gfx1250`. Install the pinned binary packages from
+`benchmarks/requirements.txt` into a Python 3.12 environment and pass the
+resulting SDK root as `ROCM_PATH`. The in-tree adapter links to the installed
+HIP and hipBLASLt packages; CMake does not fetch or build benchmark
+requirements from source. See
+[benchmarking.md](benchmarking.md) for the complete workflow.
 
 ### Sanitizer builds
 
