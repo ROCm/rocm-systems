@@ -4,6 +4,7 @@
 #include "common/path.hpp"
 #include "filesystem.hpp"
 
+#include <array>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
@@ -533,8 +534,8 @@ TEST_F(PathTest, CreateParentDirsAndOpenOfstream_ExistingDirectoryIsNotAnError)
 
 TEST_F(PathTest, CreateParentDirsAndOpenOfstream_BareFilenameCreatesNoDirectory)
 {
-    char saved_cwd[PATH_MAX];
-    ASSERT_NE(getcwd(saved_cwd, sizeof(saved_cwd)), nullptr);
+    std::array<char, PATH_MAX> saved_cwd{};
+    ASSERT_NE(getcwd(saved_cwd.data(), saved_cwd.size()), nullptr);
     ASSERT_EQ(chdir(m_test_dir.c_str()), 0);
 
     std::ofstream out_fstream;
@@ -544,7 +545,7 @@ TEST_F(PathTest, CreateParentDirsAndOpenOfstream_BareFilenameCreatesNoDirectory)
 
     EXPECT_TRUE(is_regular_file(m_test_dir + "/bare.txt"));
 
-    ASSERT_EQ(chdir(saved_cwd), 0);
+    ASSERT_EQ(chdir(saved_cwd.data()), 0);
 }
 
 TEST_F(PathTest, CreateParentDirsAndOpenOfstream_UncreatableParentReturnsFalse)

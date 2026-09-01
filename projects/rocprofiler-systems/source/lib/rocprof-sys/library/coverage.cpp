@@ -10,6 +10,7 @@
 #include "library/thread_data.hpp"
 #include <cstdint>
 
+#include <spdlog/fmt/fmt.h>
 #include <timemory/backends/threading.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/utility/popen.hpp>
@@ -222,9 +223,8 @@ post_process()
             }
             for(auto& itr : _coverage_data)
             {
-                auto _addr = fmt::format("0x{:x}", itr.address);
-                ofs << std::setw(8) << itr.count << "  " << std::setw(8) << _addr << "  "
-                    << itr.source << "\n";
+                auto addr = fmt::format("0x{:x}", itr.address);
+                ofs << fmt::format("{:>8}  {:>8}  {}\n", itr.count, addr, itr.source);
             }
         }
         else
