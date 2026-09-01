@@ -7,6 +7,19 @@
 #ifndef _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP4_H_
 #define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP4_H_
 
+#if !defined(__cplusplus)
+#include "amd_hip_fp8.h"  // storage typedefs (C fallback)
+typedef __hip_fp8_storage_t __hip_fp4_storage_t;
+typedef __hip_fp8_storage_t __hip_fp4x2_storage_t;
+typedef __hip_fp8x2_storage_t __hip_fp4x4_storage_t;
+typedef enum __hip_fp4_interpretation_t {
+  __HIP_E2M1 = 0,
+} __hip_fp4_interpretation_t;
+typedef struct { __hip_fp4_storage_t __x; } __hip_fp4_e2m1;
+typedef struct { __hip_fp4x2_storage_t __x; } __hip_fp4x2_e2m1;
+typedef struct { __hip_fp4x4_storage_t __x; } __hip_fp4x4_e2m1;
+#else  // !defined(__cplusplus)
+
 #if defined(__HIPCC_RTC__)
 #define __FP4_HOST_DEVICE__ __device__
 #define __FP4_HOST_DEVICE_STATIC__ __FP4_HOST_DEVICE__ static
@@ -591,4 +604,5 @@ struct __hip_fp4x4_e2m1 {
 #endif  // !defined(__HIP_NO_FP4_CONVERSION_OPERATORS__)
 };
 
+#endif  // !defined(__cplusplus)
 #endif  // _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP4_H_
