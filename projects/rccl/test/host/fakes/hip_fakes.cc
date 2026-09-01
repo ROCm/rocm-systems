@@ -20,6 +20,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
+#include "fail_loud.h"   // FailLoud: the one abort-on-unreachable spelling
 #include "hip_fakes.h"   // g_hip* hook declarations + ResetHipFakes()
 #include "hip_profile_interceptor_fakes.h"  // X-list of the profile-runtime HIP entry points
 
@@ -475,11 +476,7 @@ hipError_t hipMemPoolSetAttribute(hipMemPool_t, hipMemPoolAttr, void*) { return 
 // Aborting rather than returning hipErrorInvalidValue: a host-only microtest
 // that reaches a kernel launch or module load is broken, not merely unexercised.
 namespace {
-[[noreturn]] void UnreachedHipEntry(const char* fn) {
-  std::fprintf(stderr, "[hip_fakes] unfaked HIP call: %s\n", fn);
-  std::fflush(stderr);
-  ::abort();
-}
+[[noreturn]] void UnreachedHipEntry(const char* fn) { FailLoud("hip_fakes", fn); }
 }  // namespace
 
 // extern "C" is stated rather than inherited from the HIP declaration: if a

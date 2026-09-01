@@ -50,9 +50,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   matters. `enqueue.cc:28` pulls in the device header `src/device/common.h`,
   which cannot compile host-only; the TU pre-sets that header's include guard and
   supplies the six `ncclDevKernel_Generic_N` kernels as host surrogates (their
-  addresses are stored in a table, never launched). Three shared `nccl_stubs.cc`
-  entries are omitted for this target via `RCCL_STUBS_OMIT_<symbol>` macros — see
-  `fakes/enqueue_stub_overrides.cc` for the 1:1 mapping. See
+  addresses are stored in a table, never launched). Two shared `nccl_stubs.cc`
+  entries are omitted for this target via `RCCL_STUBS_OMIT_<symbol>` macros
+  because `enqueue.cc` defines them itself. See
   `test_categories_micro_enqueue.yaml`.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**) — `init.cc` (via `INIT_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
@@ -158,6 +158,58 @@ test:
 > `rccl-HostUnitTests`, is likewise hermetic and does not provide `hip::host`
 > either — "host-only" means *where code runs*; the microtest additionally means
 > *no HIP-runtime linkage*.)
+
+## Where a fake belongs
+
+**A fakes file is named after the production TU that DEFINES the symbol, never
+after the test target that first needed it.** A fake can only ever replace an
+*external*, so "the unit under test owns it" is never the reason a symbol is in
+a file — if it were owned by the UUT there would be nothing to fake. Filing by
+target instead produces the same symbol faked three times in three files, each
+slightly weaker than the others, which is what `rccl::Recorder` and `ncclGetEnv`
+had become before this map existed.
+
+| Production TU | Fakes file |
+|---|---|
+| `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
+| `src/collectives.cc` | `fakes/collectives_fakes.cc` |
+| `src/dev_runtime.cc` | `fakes/dev_runtime_fakes.cc` |
+| `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
+| `src/init.cc` comm lifecycle | `fakes/comm_fakes.cc` |
+| `src/misc/param.cc` + `getenv` interposition | `fakes/env_fakes.cc` |
+| `src/misc/strongstream.cc` | `fakes/strongstream_stubs.cc` |
+| `src/misc/utils.cc` | `fakes/utils_fakes.cc` |
+| `src/os/linux.cc` | `fakes/os_fakes.cc` |
+| `src/proxy.cc` | `fakes/proxy_fakes.cc` |
+| `src/rccl_wrap.cc` | `fakes/rccl_wrap_fakes.cc` |
+| `src/recorder.cc` | `fakes/recorder_fakes.cc` |
+| `src/register/*.cc` | `fakes/register_stubs.cc` |
+| `src/scheduler/*.cc` and the deep launch paths | `fakes/sched_stubs.cc` |
+| `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
+| `src/transport/*` | `fakes/transport_stubs.cc` |
+| core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
+| reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
+| HIP runtime | `fakes/hip_fakes.cc` |
+
+Two things do NOT follow the rule, deliberately:
+
+- `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
+  pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
+  It therefore cannot link into the enqueue target and stays target-shaped.
+- `ncclStrongStreamAcquire` / `Release` stay in `nccl_fakes.cc` rather than
+  `strongstream_stubs.cc`: they carry `ASSERT_HOOK_MATCHES_PROD` drift
+  assertions and moving those is a larger change.
+
+`<uut>_fakes.h` (e.g. `enqueue_fakes.h`) is an aggregation header: it includes
+the per-TU headers that unit's tests use and declares the `Reset<Uut>Fakes()`
+that chains their per-TU resets. It defines no seams itself.
+
+**`RCCL_STUBS_OMIT_<symbol>` is only for a symbol the unit under test defines**,
+where the omission exists purely to avoid a duplicate at link time. If a target
+instead needs a real *value* where the shared floor aborts, that symbol wants a
+seam in its owning TU's fakes file, which serves every target at once. Reaching
+for an omit macro plus a private replacement file is how `rcclUseAinic` ended up
+faked in two places.
 
 ## Adding more controllable seams
 

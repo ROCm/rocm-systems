@@ -6,16 +6,21 @@
 
 // Fail-loud stub floor for the core nccl/rccl symbols, satisfying link-time symbol closure for host-only microtests.
 
-// Some targets must omit an individual stub because their unit under test (or
-// their own fakes) already defines that symbol. Each such stub is guarded by its
-// own RCCL_STUBS_OMIT_<symbol> macro rather than one target-wide mode switch, so
-// the exclusion names exactly what it drops and a reviewer can see the 1:1
-// mapping to a replacement.
+// Some targets must omit an individual stub because their unit under test
+// already defines that symbol. Each such stub is guarded by its own
+// RCCL_STUBS_OMIT_<symbol> macro rather than one target-wide mode switch, so the
+// exclusion names exactly what it drops.
 //
 // Note the limit of this: target_compile_definitions apply to EVERY source in
 // the target, so a source added later still sees all of that target's omission
 // macros. What the per-symbol scheme buys is legibility and a narrow blast
 // radius per symbol -- not source-level isolation.
+//
+// An omit macro is ONLY for a symbol the unit under test itself defines. If a
+// target instead needs a real VALUE where this floor aborts, that symbol wants a
+// seam in the fakes file named after its owning production TU, which serves
+// every target at once. rcclUseAinic was the counter-example and now lives in
+// transport_stubs.cc.
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -23,6 +28,7 @@
 #include <functional>
 #include <sched.h>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "nccl.h"
@@ -117,24 +123,16 @@ ncclResult_t ncclRegCleanup(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInit(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
 ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) { return ncclSuccess; }
+// ncclStrongStreamDestruct and the rest of src/misc/strongstream.cc: strongstream_stubs.cc.
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) { ::abort(); }
-ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) { ::abort(); }
-// Controllable (was fail-loud). Records gfxarch: :1577 forwards comm->archName into it and stores the
-// result in comm->topo->tuning, so without the recorder `IndexForArch(archName)` -> `IndexForArch("")` is invisible.
-extern int g_tuningIndexValue;
-extern std::string g_tuningIndexLastArch;
-int rcclGetTuningIndexForArch(const char* gfxarch) {
-  g_tuningIndexLastArch = gfxarch ? gfxarch : "<null>";
-  return g_tuningIndexValue;
-}
-// Omitted when RCCL_STUBS_OMIT_rcclUseAinic is defined -- a unit needs a real
-// value, not a fail-loud stub; see its own fakes.
-#ifndef RCCL_STUBS_OMIT_rcclUseAinic
-bool rcclUseAinic() { ::abort(); }
-#endif
+// src/rccl_wrap.cc symbols (rcclCommSetP2pShiftSize, rcclCanUseWarpSpeedAuto,
+// rcclHierarchicalTempBufferSize, rcclParamWarpSpeedForceEnable,
+// rcclParamHierarchicalAllGather, rcclParamHierarchicalReduceScatter):
+// rccl_wrap_fakes.cc.
+// rcclGetTuningIndexForArch (src/graph/tuning.cc): tuning_fakes.cc.
+// rcclUseAinic (src/transport/net.cc): transport_stubs.cc.
 
 ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { return ncclSuccess; }
 ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob*, ncclResult_t(*)(struct ncclAsyncJob*), void(*)(struct ncclAsyncJob*), void(*)(void*), struct ncclComm*) { ::abort(); }
@@ -143,8 +141,7 @@ ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob*, ncclResult_t(*)(struct ncclAs
 #ifndef RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
 int64_t ncclParamGraphStreamOrdering() { return 0; }
 #endif
-int64_t rcclParamHierarchicalAllGather() { ::abort(); }
-int64_t rcclParamPxnOptQpUsage() { ::abort(); }
+int64_t rcclParamPxnOptQpUsage() { ::abort(); }  // src/channel.cc:14
 namespace latency_profiler { ncclResult_t collTraceInit(struct ncclComm*) { ::abort(); } ncclResult_t collTraceDestroy(struct ncclComm*) { ::abort(); } }
 ncclResult_t ncclCommDestroy(ncclComm_t) { ::abort(); }
 ncclResult_t ncclCommInitRank(ncclComm_t*, int, ncclUniqueId, int) { ::abort(); }
@@ -153,6 +150,15 @@ char ncclLastError[1024] = {};
 thread_local int ncclGroupDepth = 0;
 thread_local ncclResult_t ncclGroupError = ncclSuccess;
 const char* rcclGitHash = "microtest";
+
+// Read-only process state, deliberately NOT reset per test: nothing in a unit
+// under test writes them and no test assigns them. Give one a seam the moment a
+// test starts scripting it, because an unrestored global that a test DOES write
+// is an order-dependent flake.
+int ncclCudaDriverVersionCache = 12000;       // src/misc/cudawrap.cc
+bool ncclCudaLaunchBlocking = false;          // src/misc/cudawrap.cc
+int ncclProfilerEventMask = 0;                // src/profiler.cc
+std::unordered_map<uint64_t, int> ncclDevFuncNameToId;  // generated device table
 
 extern int g_getROCmVersionResult;
 extern unsigned int g_rocmVersionMajor;
@@ -173,8 +179,3 @@ ncclResult_t ncclMemFree(void* ptr) { ::abort(); }
 }
 
 ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) { ::abort(); }
-int64_t rcclParamHierarchicalReduceScatter() { ::abort(); }
-size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceScatter) { ::abort(); }
-
-int64_t rcclParamWarpSpeedForceEnable() { ::abort(); }
-bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) { ::abort(); }

@@ -9,6 +9,8 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
   fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
   fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
+  fakes/recorder_fakes.cc              # src/recorder.cc
+  fakes/utils_fakes.cc                 # src/misc/utils.cc (targets without the real utils.cc)
   fakes/collective_stubs.cc            # fail-loud collective launch + transport floor
   fakes/devcomm_fakes.cc
   fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
@@ -141,13 +143,19 @@ if(BUILD_TESTS)
   # ---------------------------------------------------------------------------
   set(TEST_MICRO_INIT_SOURCE_FILES
     init-test.cc
-    fakes/init_fakes.cc                  # init-only seams (micro_getenv, ResetInitFakes)
+    fakes/init_fakes.cc                  # init-only seams (ResetInitFakes)
     fakes/bootstrap_stubs.cc             # fail-loud stub floor, grouped by subsystem
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc                  # core/lifecycle stubs + data symbols
     fakes/nccl_fakes.cc                  # reusable nccl* stubs
     fakes/hip_fakes.cc                   # HIP runtime seams
+    # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
+    fakes/rccl_wrap_fakes.cc             # src/rccl_wrap.cc
+    fakes/recorder_fakes.cc              # src/recorder.cc
+    fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
+    fakes/tuning_fakes.cc                # src/graph/tuning.cc
     ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
     ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch/GcnArchNameFormat
     ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc     # real busId/hash helpers
@@ -237,26 +245,42 @@ if(BUILD_TESTS)
   # production .cc into an existing TU would collide on file-scope state
   # (enqueue.cc has 41 statics and 16 NCCL_PARAM/RCCL_PARAM globals).
   #
-  # Three symbols must be omitted from the shared nccl_stubs.cc for this target:
+  # Two symbols must be omitted from the shared nccl_stubs.cc for this target:
   # enqueue.cc defines ncclInitKernelsForDevice and ncclParamGraphStreamOrdering
-  # itself, and rcclUseAinic needs a real value rather than a fail-loud stub.
-  # Each is omitted by its OWN RCCL_STUBS_OMIT_<symbol> macro rather than one
-  # target-wide switch, so the exclusion names exactly what it drops. (These are
-  # still target-wide definitions -- a source added here later sees all three --
-  # but each names a single symbol, so the mapping to its replacement in
-  # fakes/enqueue_stub_overrides.cc stays reviewable.)
+  # itself. Each is omitted by its OWN RCCL_STUBS_OMIT_<symbol> macro rather than
+  # one target-wide switch, so the exclusion names exactly what it drops. (These
+  # are still target-wide definitions -- a source added here later sees both --
+  # but each names a single symbol.) An omit macro is only ever for a symbol the
+  # UNIT UNDER TEST defines; a target that needs a real value where the floor
+  # aborts gets a seam in the owning TU's fakes file instead.
   # ---------------------------------------------------------------------------
+  # The four *_stubs.cc below read control globals only init_fakes.cc defines; this
+  # target links solely because --gc-sections drops them. Dropping that flag needs
+  # each global rehomed to its owning TU's fakes file, not init_fakes.cc added here.
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
     enqueue-test.cc
-    fakes/enqueue_fakes.cc               # enqueue-only seams (ResetEnqueueFakes)
-    fakes/enqueue_stubs.cc               # fail-loud floor for launch/graph paths
-    fakes/enqueue_stub_overrides.cc      # replacements for omitted shared stubs
+    fakes/enqueue_fakes.cc               # ResetEnqueueFakes chain only
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
+    # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/ce_fakes.cc                    # src/ce_coll.cc
+    fakes/collectives_fakes.cc           # src/collectives.cc name tables/helpers
+    fakes/comm_fakes.cc                  # src/init.cc comm lifecycle
+    fakes/dev_runtime_fakes.cc           # src/dev_runtime.cc
+    fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
+    fakes/os_fakes.cc                    # src/os/linux.cc aligned alloc
+    fakes/proxy_fakes.cc                 # src/proxy.cc
+    fakes/rccl_wrap_fakes.cc             # src/rccl_wrap.cc
+    fakes/recorder_fakes.cc              # src/recorder.cc
+    fakes/register_stubs.cc              # src/register/*.cc
+    fakes/sched_stubs.cc                 # src/scheduler/*.cc + deep launch paths
+    fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
+    fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc
+    fakes/tuning_fakes.cc                # src/graph/tuning.cc
     ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
     ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch
     ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc     # real busId/hash helpers
@@ -283,11 +307,10 @@ if(BUILD_TESTS)
   # no _tmp suffix (contrast transport/p2p.cc -> p2p_tmp.cc).
   target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE
     ${RCCL_COMMON_COMPILE_DEFS}
-    # Per-symbol omissions from the shared nccl_stubs.cc; see
-    # fakes/enqueue_stub_overrides.cc for what supplies each one instead.
+    # Per-symbol omissions from the shared nccl_stubs.cc; enqueue.cc itself
+    # supplies both, so neither needs a replacement definition.
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
-    RCCL_STUBS_OMIT_rcclUseAinic
     ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc")
   # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
   foreach(_hip_tgt hip::host hip::device)
@@ -666,6 +689,11 @@ set(TEST_MICRO_INIT_SOURCE_FILES
   fakes/nccl_stubs.cc
   fakes/nccl_fakes.cc
   fakes/hip_fakes.cc
+  fakes/env_fakes.cc
+  fakes/rccl_wrap_fakes.cc
+  fakes/recorder_fakes.cc
+  fakes/strongstream_stubs.cc
+  fakes/tuning_fakes.cc
   ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
   ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
   ${RCCL_HIPIFY_DIR}/src/misc/utils.cc
@@ -724,17 +752,30 @@ endforeach()
 # rccl-UnitTestsMicroEnqueue (standalone mode) -- see the in-build block for the
 # rationale behind the separate binary and the RCCL_STUBS_OMIT_* macros.
 # ---------------------------------------------------------------------------
+# Same --gc-sections link-order coupling as the in-build list; see the comment there.
 set(TEST_MICRO_ENQUEUE_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/enqueue-test.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_stubs.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_stub_overrides.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/transport_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/hip_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/ce_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/collectives_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/comm_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/dev_runtime_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/env_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/os_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/proxy_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/rccl_wrap_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/recorder_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/register_stubs.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/sched_stubs.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/strongstream_stubs.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/sym_kernels_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/tuning_fakes.cc
   ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
   ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
   ${RCCL_HIPIFY_DIR}/src/misc/utils.cc
@@ -762,7 +803,6 @@ target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
   RCCL_STUBS_OMIT_ncclInitKernelsForDevice
   RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
-  RCCL_STUBS_OMIT_rcclUseAinic
   ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue.cc"
 )
 

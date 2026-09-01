@@ -21,4 +21,15 @@
 #define NCCL_PARAM(name, env, deftVal) \
     int64_t ncclParam##name() { return g_loadParam((env), (deftVal)); }
 
+// The real RCCL_PARAM macros cache and declare a pthread_mutex_t global; redirect
+// them the same way so params stay per-test controllable. Both spellings expand
+// identically: RCCL_PARAM_NCCL_ALIAS differs only in also accepting the NCCL_
+// name in production, which is not something a redirected body models.
+#undef RCCL_PARAM
+#define RCCL_PARAM(name, env, deftVal) \
+    int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
+#undef RCCL_PARAM_NCCL_ALIAS
+#define RCCL_PARAM_NCCL_ALIAS(name, env, deftVal) \
+    int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
+
 #endif  // RCCL_TEST_HOST_PARAM_REDIRECT_H_

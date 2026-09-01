@@ -30,16 +30,7 @@
 // transitive includes see them.
 #include "alloc.h"
 
-#include "fakes/param_redirect.h"
-
-// The real RCCL_PARAM macros cache and declare a pthread_mutex_t global;
-// redirect so params stay per-test controllable.
-#undef RCCL_PARAM
-#define RCCL_PARAM(name, env, deftVal) \
-  int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
-#undef RCCL_PARAM_NCCL_ALIAS
-#define RCCL_PARAM_NCCL_ALIAS(name, env, deftVal) \
-  int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
+#include "fakes/param_redirect.h"  // redirects NCCL_PARAM and both RCCL_PARAM spellings
 
 #include "fakes/nvtx_redirect.h"  // neuter / block nvtx.h before enqueue.cc includes it
 
@@ -299,6 +290,25 @@ TEST_F(EnqueueMicrotest, ShmemDynamicSize_Gfx950_UsesItsOwnMaxNthreads) {
                 "ShmemDynamicSize_Gfx950_UsesItsOwnMaxNthreads differential.");
   constexpr int kWarps950 = RCCL_GFX950_MAX_NTHREADS / 32;
   EXPECT_EQ(rcclShmemScratchWarpSize(950, 32) * kWarps950, rcclShmemDynamicSize(950, 32));
+}
+#else
+TEST_F(EnqueueMicrotest, ShmemDynamicSize_DeviceLinker_IsAlwaysZero) {
+  // The arm this build actually SHIPS. ENABLE_DEVICE_LINKER defaults ON
+  // (projects/rccl/CMakeLists.txt:92) and reaches this binary through the rccl
+  // target's COMPILE_DEFINITIONS (src/CMakeLists.txt:1065 ->
+  // test/CMakeLists.txt:208 -> RCCL_COMMON_COMPILE_DEFS), so the three tests
+  // above are compiled out of the default configuration and this is the only
+  // ShmemDynamicSize coverage there.
+  //
+  // Under RCCL_DEVICE_LINKER the scratch and ncclShmem are static __shared__
+  // (device/common.h), so asking for the same bytes as DYNAMIC shmem would
+  // double-count and overflow the per-block LDS budget. enqueue.cc:73-78
+  // therefore returns 0 for every input, with both parameters cast to void.
+  EXPECT_EQ(0, rcclShmemDynamicSize(600, 32));
+  EXPECT_EQ(0, rcclShmemDynamicSize(700, 32)) << "the arch gate is inert on this arm";
+  EXPECT_EQ(0, rcclShmemDynamicSize(942, 32));
+  EXPECT_EQ(0, rcclShmemDynamicSize(950, 32)) << "the gfx950 ternary is inert on this arm";
+  EXPECT_EQ(0, rcclShmemDynamicSize(950, 64)) << "WarpSize is unread on this arm";
 }
 #endif
 
@@ -1520,8 +1530,9 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_NvlsUnsupported_SkipsNvlsAlgorithms
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task2, 1 << 20, /*collNet=*/0,
                                              /*nvls=*/1, 1, 0, on.ptr()));
   bool anyNvls = false;
-  for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p)
+  for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p) {
     anyNvls |= on.written(NCCL_ALGO_NVLS, p) || on.written(NCCL_ALGO_NVLS_TREE, p);
+  }
   EXPECT_TRUE(anyNvls) << "with nvlsSupport=1 the NVLS rows must be populated";
 }
 
@@ -1867,15 +1878,22 @@ TEST_F(EnqueueMicrotest, RedOpCreate_NullComm_RejectedByCommCheck) {
 // ===========================================================================
 
 namespace {
+// One place that stamps a topology's single GPU node with an arch string. Both
+// fixtures below set the same pair of fields, and a copy that forgets the count
+// leaves the gcn string unreachable rather than failing.
+void SetSingleGpuArch(ncclTopoSystem* topo, const char* gcn) {
+  topo->nodes[GPU].count = 1;
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn,
+                sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "%s", gcn);
+}
+
 struct BatchComm {
   std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
   std::unique_ptr<ncclComm> comm{new ncclComm{}};
   BatchComm(int nNodes, const char* gcn) {
     comm->nNodes = nNodes;
     comm->topo = topo.get();
-    topo->nodes[GPU].count = 1;
-    std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn,
-                  sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "%s", gcn);
+    SetSingleGpuArch(topo.get(), gcn);
   }
   ncclComm* get() { return comm.get(); }
 };
@@ -2079,20 +2097,26 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_SecondContiguousP2p_AppendsToSameBatch) {
 
 TEST_F(EnqueueMicrotest, AddWorkBatch_DifferentWorkType_ForcesNewBatch) {
   // `newBatch |= batch->workType != workType` must be the ONLY splitter here, so
-  // every other path to a second node has to be shut off first:
-  //   byte budget (:242)  p2p 64 + bcast 48 = 112 < 192, so it cannot fire
-  //   bcast cap  (:238)   nBcasts 1 != maxitem 341
-  //   extension  (:248-9) offset must be a MULTIPLE of the bcast work size, or
+  // every other path to a second node has to be shut off first. The second call
+  // is Bcast, so it takes the `workType == ncclDevWorkTypeBcast` arm at :238:
+  //   bcast cap (:240)    the ONLY other splitter reachable on this arm.
+  //                       nBcasts is 0, not 1 -- the p2p call opened a new batch
+  //                       and reset it at :270, and p2p never increments it
+  //                       (:289-291). maxitem is 341, so it cannot fire.
+  //   byte budget (:242)  lives in the `else` arm and is NEVER evaluated here.
+  //                       An assertion on it would pass no matter what the
+  //                       budget was, so this test does not make one.
+  //   extension (:248-9)  offset must be a MULTIPLE of the bcast work size, or
   //                       `0 != offset % workSize` enqueues a node anyway --
   //                       this is what made the p2p size (64 % 48 = 16) wrong.
   // A Coll->CollReg version cannot work at all: two coll items are 320 B against
-  // the 192 B budget, so :242 splits them whatever the workType guard does.
+  // the 192 B budget, and coll DOES take the else arm, so :242 splits them
+  // whatever the workType guard does.
   // Verified by mutation: `newBatch |= false` leaves 1 batch here.
   BatchPlanComm bp;
   const size_t bcastSize = ncclDevWorkSize(ncclDevWorkTypeBcast);
-  ASSERT_LT(ncclDevWorkSize(ncclDevWorkTypeP2p) + bcastSize,
-            size_t(NCCL_MAX_DEV_WORK_BATCH_BYTES))
-      << "both items must fit one batch, or the byte budget is the splitter";
+  ASSERT_LT(1, ncclMaxDevWorkBatchBytes(bp.c()->cudaArch) / int(sizeof(ncclDevWorkBcast)))
+      << "maxitem must exceed the single bcast item, or the :240 cap is the splitter";
   addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
   addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, uint32_t(bcastSize));
   EXPECT_EQ(2, bp.queueLength());
@@ -2304,27 +2328,30 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_EveryItemLandsInExactlyOneBatch) {
 
 namespace {
 struct FinishComm {
-  std::unique_ptr<ncclComm> comm{new ncclComm{}};
-  std::unique_ptr<ncclKernelPlan> plan{new ncclKernelPlan{}};
+  // Holds a BatchPlanComm rather than repeating the comm/plan pair and the
+  // memory-stack lifetime. That also picks up its memPermanent construct, which
+  // is inert for these tests but load-bearing for anything reaching
+  // addProxyOpIfNeeded -- the weaker of two near-identical fixtures is where a
+  // future test lands by accident.
+  //
+  // (0, 0) reproduces what `new ncclComm{}` gave this fixture before: these tests
+  // were written against a zero nNodes and cudaArch, not BatchPlanComm's 1/942.
+  BatchPlanComm base{0, 0};
   std::vector<std::unique_ptr<ncclProxyOp>> ops;   // keep proxy ops alive
 
   FinishComm() {
-    ncclMemoryStackConstruct(&comm->memScoped);
-    comm->workArgsBytes = 1 << 16;   // generous: the args-storage arm is taken
+    c()->workArgsBytes = 1 << 16;   // generous: the args-storage arm is taken
   }
-  ~FinishComm() { ncclMemoryStackDestruct(&comm->memScoped); }
 
-  ncclComm* c() { return comm.get(); }
-  ncclKernelPlan* p() { return plan.get(); }
-  ncclKernelPlanner::WipPlan::Channel* chan(int id) {
-    return &comm->planner.wipPlan.channels[id];
-  }
-  void markChannel(int c) { plan->channelMask.masks[c / 64] |= (1ULL << (c % 64)); }
+  ncclComm* c() { return base.c(); }
+  ncclKernelPlan* p() { return base.p(); }
+  ncclKernelPlanner::WipPlan::Channel* chan(int id) { return base.chan(id); }
+  void markChannel(int c) { p()->channelMask.masks[c / 64] |= (1ULL << (c % 64)); }
 
   // Queue n work batches on channel c, each stamped with a recognisable funcId.
   void addBatches(int c, int n, int funcIdBase) {
     for (int i = 0; i < n; ++i) {
-      addWorkBatchToPlan(comm.get(), plan.get(), c, ncclDevWorkTypeColl,
+      addWorkBatchToPlan(this->c(), p(), c, ncclDevWorkTypeColl,
                          funcIdBase + i, uint32_t(i * ncclDevWorkSize(ncclDevWorkTypeColl)));
     }
     markChannel(c);
@@ -2339,12 +2366,12 @@ struct FinishComm {
 
   // The packed batch array finishPlan wrote.
   ncclDevWorkBatch* batchZero() {
-    return (ncclDevWorkBatch*)(plan->kernelArgs + 1);
+    return (ncclDevWorkBatch*)(p()->kernelArgs + 1);
   }
   std::vector<uint64_t> mergedOpCounts() {
     std::vector<uint64_t> out;
     // The intrusive link for proxyOpQueue is `enqNext` (comm.h:387), not `next`.
-    for (auto* op = ncclIntruQueueHead(&plan->proxyOpQueue); op != nullptr; op = op->enqNext) {
+    for (auto* op = ncclIntruQueueHead(&p()->proxyOpQueue); op != nullptr; op = op->enqNext) {
       out.push_back(op->opCount);
     }
     return out;
@@ -2992,26 +3019,23 @@ namespace {
 // reads archName for the arch-specific overrides and the maxThreads table when
 // it converts an algorithm choice into a warp count.
 struct AlgoInfoComm {
-  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
-  std::unique_ptr<ncclComm> comm{new ncclComm{}};
-  AlgoInfoComm() {
-    comm->nRanks = 8;
-    comm->nNodes = 1;
-    comm->maxLocalRanks = 8;
-    comm->localRanks = 8;
+  // Holds a CostComm for the comm/topo pair, the rank counts and the XGMI_ALL
+  // stamp; adds only what topoGetAlgoInfo needs beyond updateCollCostTable.
+  // Parameterised like CostComm rather than hardcoding 8/1, since
+  // topoGetAlgoInfo reads both nRanks and nNodes.
+  CostComm base;
+  AlgoInfoComm(int nRanks = 8, int nNodes = 1) : base(nRanks, nNodes) {
+    ncclComm* comm = base.get();
     comm->WarpSize = 32;
-    topo->type = RCCL_TOPO_XGMI_ALL;
-    topo->nodes[GPU].count = 1;
-    std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn,
-                  sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "%s", "gfx942");
-    comm->topo = topo.get();
+    SetSingleGpuArch(&base.topo(), "gfx942");
     for (int a = 0; a < NCCL_NUM_ALGORITHMS; ++a) {
       for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p) {
         comm->maxThreads[a][p] = 256;
       }
     }
   }
-  ncclComm* get() { return comm.get(); }
+  ncclComm* get() { return base.get(); }
+  ncclTopoSystem& topo() { return base.topo(); }
 };
 }  // namespace
 
