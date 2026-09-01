@@ -388,14 +388,12 @@ rocDecStatus D3D12Interop::CopyToStagingBuffer(int pic_idx) {
     // We override Offset and RowPitch to match the expected linear layout, but keep Width/Height/Format
     // from D3D12's GetCopyableFootprints so the copy source is read correctly.
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT src_footprints[3] = {};
-    UINT src_num_rows[3] = {};
-    UINT64 src_row_sizes[3] = {};
-    UINT64 src_total = 0;
     // NV12/P010: 2 subresources. Planar YUV: may need more, but D3D12 NV12 is always 2.
     UINT num_subresources = (tex_desc.Format == DXGI_FORMAT_NV12 || tex_desc.Format == DXGI_FORMAT_P010 ||
                              tex_desc.Format == DXGI_FORMAT_P016) ? 2 : 1;
+    // Only the footprints are used below; pass nullptr for the optional row-count/size/total out-params.
     d3d12_device_->GetCopyableFootprints(&tex_desc, 0, num_subresources, 0,
-                                         src_footprints, src_num_rows, src_row_sizes, &src_total);
+                                         src_footprints, nullptr, nullptr, nullptr);
 
     // Record copy commands: texture (tiled) -> buffer (linear) for each subresource.
     // This is a COPY-type queue/command list: D3D12 does not track resource states on
