@@ -101,7 +101,7 @@ def filter_dispatch_frame(
 
     The frame carries the profiler's column names, so both the counter frame
     and the PC-sampling trace can be filtered by the same rules. Kernel ids
-    index the gpu- and dispatch-filtered ranking, the same ids the cli mode's
+    index the gpu and dispatch filtered ranking, the same ids the cli mode's
     top stats table shows.
     """
     if filter_gpu_ids:
