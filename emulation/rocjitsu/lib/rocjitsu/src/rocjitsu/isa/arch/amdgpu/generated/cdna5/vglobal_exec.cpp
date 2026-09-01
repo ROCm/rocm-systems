@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vglobal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -468,7 +469,6 @@ void GlobalLoadAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     d->wf_size = wf.wf_size();
     d->wg_id = wf.wg_id();
     d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
     uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);
     int64_t offset = static_cast<int64_t>(signed_ioffset(inst_.ioffset));
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -496,7 +496,6 @@ void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     d->wf_size = wf.wf_size();
     d->wg_id = wf.wg_id();
     d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
     uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);
     int64_t offset = static_cast<int64_t>(signed_ioffset(inst_.ioffset));
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {

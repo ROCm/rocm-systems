@@ -1281,7 +1281,8 @@ class TestDeriveVectorUnary:
         )
         assert 'read_scaled_src(index) * scale' in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
-        assert 'amdgpu::RegisterAccess(wf.cu()).write_vgpr' in cpp
+        assert 'write_vgpr_region' in cpp
+        assert 'dst_region.set_lane' in cpp
 
     @pytest.mark.parametrize(
         ('name', 'op', 'read_helper', 'encode_helper'),
@@ -1336,6 +1337,8 @@ class TestDeriveVectorUnary:
         assert 'pack_scaled_dst(index' in cpp
         assert 'read_scaled_input(index) / scale' in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
+        assert 'read_vgpr_region' in cpp
+        assert 'write_vgpr_region' in cpp
 
     @pytest.mark.parametrize(
         ('name', 'op', 'read_helper', 'encode_helper'),
@@ -2236,8 +2239,8 @@ class TestDeriveDsRead:
         [
             ('DS_LOAD_TR4_B64', 'ds_read_tr_b4', 2, 1),
             ('DS_LOAD_TR6_B96', 'ds_read_tr_b6', 3, 2),
-            ('DS_LOAD_TR8_B64', 'ds_read_tr_b8', 2, 3),
-            ('DS_LOAD_TR_B64', 'ds_read_tr_b8', 2, 3),
+            ('DS_LOAD_TR8_B64', 'ds_read_tr_b8', 2, 7),
+            ('DS_LOAD_TR_B64', 'ds_read_tr_b8', 2, 7),
             ('DS_LOAD_TR16_B128', 'ds_read_tr_b16', 4, 4),
             ('DS_LOAD_TR_B128', 'ds_read_tr_b16', 4, 4),
             ('DS_READ_B64_TR_B16', 'ds_read_tr_b16', 2, 5),
