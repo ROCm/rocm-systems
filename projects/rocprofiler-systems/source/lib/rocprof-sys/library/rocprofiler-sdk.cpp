@@ -65,8 +65,8 @@
 #include <timemory/process/threading.hpp>
 #include <timemory/utility/types.hpp>
 
+#include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
-#include <spdlog/fmt/ranges.h>
 
 #include "logger/debug.hpp"
 
