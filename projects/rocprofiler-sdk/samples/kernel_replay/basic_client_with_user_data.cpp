@@ -57,8 +57,7 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record,
 {
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY) return;
 
-    auto* payload =
-        static_cast<rocprofiler_callback_tracing_kernel_replay_data_t*>(record.payload);
+    auto* payload = static_cast<rocprofiler_callback_tracing_kernel_replay_data_t*>(record.payload);
     if(payload->dispatch_info.workgroup_size.x != kReplayBlockX) return;
 
     auto* callback_data = static_cast<replay_user_data*>(callback_args);
@@ -129,8 +128,7 @@ tool_fini(void*)
             g_replay_data.passes_seen.load(),
             expected_passes,
             static_cast<unsigned long>(g_replay_data.max_passes));
-    if(g_replay_data.replayed.load() != 1 ||
-       g_replay_data.passes_seen.load() != expected_passes)
+    if(g_replay_data.replayed.load() != 1 || g_replay_data.passes_seen.load() != expected_passes)
         std::abort();
 }
 }  // namespace
