@@ -89,7 +89,8 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     int index;
     struct ncclTaskColl* next = task->next;
     ncclDevRedOp_t symkOp = symkRedOp(task->opHost, task->opDev.op);
-    bool symAvailable = ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count);
+    bool symAvailable = task->symkExtract >= 0 &&
+                        ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count);
 
     if (symAvailable) {
       NCCLCHECK(ncclDevrFindWindow(comm, task->sendbuff, &task->sendWin));
