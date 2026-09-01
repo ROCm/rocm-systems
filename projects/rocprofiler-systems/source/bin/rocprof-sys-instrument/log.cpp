@@ -4,7 +4,7 @@
 #include "log.hpp"
 #include "fwd.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <cmath>
 #include <cstdint>

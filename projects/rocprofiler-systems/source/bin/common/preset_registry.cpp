@@ -7,7 +7,7 @@
 #include "common/path.hpp"
 #include "embedded_presets.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <cerrno>
 #include <cstdlib>

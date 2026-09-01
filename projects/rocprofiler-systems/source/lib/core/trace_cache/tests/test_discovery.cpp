@@ -3,8 +3,8 @@
 
 #include "core/trace_cache/discovery.hpp"
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
-#include <spdlog/fmt/fmt.h>
 
 #include <dirent.h>
 #include <sys/stat.h>

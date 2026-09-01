@@ -5,6 +5,7 @@ on:
     branches: [develop]
     paths:
       - 'projects/cuid/**'
+      - 'projects/rocprofiler-sdk/source/lib/common/sha256.cpp'
       - '.github/workflows/cuid-workflow.yml'
   workflow_dispatch:
 
@@ -18,6 +19,32 @@ env:
   ROCM_DIR: /opt/rocm
 
 jobs:
+  sha256-drift-check:
+    name: SHA-256 Drift Check
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    steps:
+      # Runner workspace (including the top-level dir itself) can be left root-owned by other
+      # container jobs; this job has no host sudo access, so use a throwaway root container
+      # (docker is already required here for build-and-test) to clear it and hand it back.
+      - name: Clean workspace
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE":/workspace alpine sh -c \
+            "find /workspace -mindepth 1 -delete && chown $(id -u):$(id -g) /workspace"
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/cuid/tests/check_sha256_drift.py
+            projects/cuid/lib/src/sha256.cc
+            projects/rocprofiler-sdk/source/lib/common/sha256.cpp
+          sparse-checkout-cone-mode: false
+
+      - name: Check for sha256 drift
+        run: python3 projects/cuid/tests/check_sha256_drift.py
+
   build-and-test:
     name: Build and Test
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
@@ -43,6 +70,11 @@ jobs:
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
+      # Container runs as root, so clean any root-owned leftovers before checkout.
+      # GITHUB_WORKSPACE is a bind-mounted directory, not just its contents.
+      - name: Clean workspace
+        run: find "$GITHUB_WORKSPACE" -mindepth 1 -delete
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set Project Directory
@@ -63,41 +95,6 @@ jobs:
 
           echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
 
-      - name: Build and Install OpenSSL 3.0 (if needed)
-        id: openssl
-        run: |
-          set -e
-
-          # Check OpenSSL version
-          OPENSSL_VER=$(openssl version | awk '{print $2}')
-          echo "Current OpenSSL version: $OPENSSL_VER"
-          if [[ "$OPENSSL_VER" != 3.* ]]; then
-             echo "Installing OpenSSL 3.0..."
-
-             # Install build tools
-             if command -v apt-get &> /dev/null; then
-                 apt-get update
-                 apt-get install -y wget build-essential zlib1g-dev perl
-             elif command -v dnf &> /dev/null; then
-                 dnf install -y wget make gcc perl zlib-devel perl-core
-             elif command -v zypper &> /dev/null; then
-                 zypper install -y wget make gcc perl zlib-devel perl-core
-             fi
-
-             cd /tmp
-             wget https://github.com/openssl/openssl/releases/download/openssl-3.0.21/openssl-3.0.21.tar.gz
-             echo "617e29af8e421f46649484a4937e48c685e47f46488167c982f88bc4ec1d522f  openssl-3.0.21.tar.gz" | sha256sum -c -
-             tar -xzvf openssl-3.0.21.tar.gz
-             cd openssl-3.0.21
-             ./config
-             make -j $(nproc)
-             make install
-             ldconfig
-             echo "OPENSSL_ROOT_DIR=/usr/local" >> $GITHUB_ENV
-          else
-             echo "OpenSSL 3.0+ already installed."
-          fi
-
       - name: Build and Install CUID
         run: |
           set -e
@@ -110,7 +107,7 @@ jobs:
           cd $BUILD_FOLDER
 
           # Configure
-          cmake ${{ env.PROJECT_DIR }} -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_ROOT_DIR }} -DBUILD_TESTS=ON -DBUILD_DAEMON=OFF
+          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DBUILD_DAEMON=OFF
 
           # Build
           make -j $(nproc)
@@ -156,3 +153,63 @@ jobs:
         with:
           name: cuid-test-results-${{ matrix.os }}
           path: /tmp/test-results-${{ matrix.os }}
+
+  clang-tidy:
+    name: clang-tidy
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    container:
+      # this runs once rather than across full build-and-test matrix
+      image: ${{ vars.Ubuntu22_DOCKER_IMAGE }}
+      options: --rm -u root
+
+    steps:
+      - name: Clean workspace
+        run: find "$GITHUB_WORKSPACE" -mindepth 1 -delete
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set Project Directory
+        run: |
+          # Find the directory containing the main CMakeLists.txt for CUID
+          # Prioritize finding it in projects/cuid
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/cuid/CMakeLists.txt" -exec dirname {} \;)
+
+          if [ -z "$TARGET_DIR" ]; then
+            echo "Could not find CMakeLists.txt in projects/cuid. Searching workspace..."
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -name "CMakeLists.txt" | grep "projects/cuid" | head -n 1 | xargs dirname)
+          fi
+
+          if [ -z "$TARGET_DIR" ]; then
+             echo "Could not find CMakeLists.txt for CUID."
+             exit 1
+          fi
+
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
+
+      - name: Configure CUID
+        run: |
+          set -e
+
+          # Build daemon so its sources land in compile_commands.json
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          rm -rf $BUILD_FOLDER
+          mkdir -p $BUILD_FOLDER
+          cd $BUILD_FOLDER
+
+          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DBUILD_DAEMON=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          make -j $(nproc)
+
+      - name: Run clang-tidy
+        run: |
+          set -e
+
+          if ! command -v clang-tidy &> /dev/null; then
+            apt-get update && apt-get install -y clang-tidy
+          fi
+
+          cd ${{ env.PROJECT_DIR }}
+          # .clang-tidy at the project root is picked up per-file automatically.
+          clang-tidy -p build $(find lib/src cli daemon -name '*.cc')

@@ -352,7 +352,12 @@ def get_att_paths(args):
     if args.att_library_path:
         library_paths.extend(args.att_library_path)
     elif os.environ.get("ROCPROF_ATT_LIBRARY_PATH"):
-        return os.environ.get("ROCPROF_ATT_LIBRARY_PATH")
+        # Return a list (not a bare str) so the caller iterates over paths and
+        # not over the individual characters of the string. Support a
+        # colon-separated list for consistency with LD_LIBRARY_PATH.
+        for itr in os.environ["ROCPROF_ATT_LIBRARY_PATH"].split(":"):
+            if itr and itr not in library_paths:
+                library_paths += [itr]
     else:
         default_lib_path_env = os.environ.get("LD_LIBRARY_PATH", "").split(":") + [
             f"{ROCM_DIR}/lib"
@@ -369,6 +374,11 @@ def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
     library_paths = get_att_paths(args)
 
     for path in library_paths:
+        # Skip entries that are not existing directories so a stray value (e.g.
+        # an empty string, a file, or a bad path) cannot become an os.walk()
+        # root and silently trigger a full "/" scan.
+        if not path or not os.path.isdir(path):
+            continue
         for root, dirs, files in os.walk(path, topdown=True):
             for itr in files:
                 if att_lib_name in itr:

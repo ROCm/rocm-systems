@@ -300,7 +300,8 @@ void RdcMetricFetcherImpl::get_ecc_total(uint32_t gpu_index, rdc_field_t field_i
   if (!value) {
     return;
   }
-  for (uint32_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
+  // amdsmi_gpu_block_t is a 64-bit flag enum; a 32-bit counter wraps to 0 and never exits.
+  for (uint64_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
     err =
         amdsmi_get_gpu_ecc_status(processor_handle, static_cast<amdsmi_gpu_block_t>(b), &err_state);
     if (err != AMDSMI_STATUS_SUCCESS) {
@@ -412,7 +413,8 @@ void RdcMetricFetcherImpl::get_ecc_deferred_total(uint32_t gpu_index, rdc_field_
   amdsmi_status_t err = get_processor_handle_from_id(gpu_index, &processor_handle);
 
   uint64_t deferred_count = 0;
-  for (uint32_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
+  // amdsmi_gpu_block_t is a 64-bit flag enum; a 32-bit counter wraps to 0 and never exits.
+  for (uint64_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
     amdsmi_ras_err_state_t err_state = AMDSMI_RAS_ERR_STATE_INVALID;
     err =
         amdsmi_get_gpu_ecc_status(processor_handle, static_cast<amdsmi_gpu_block_t>(b), &err_state);

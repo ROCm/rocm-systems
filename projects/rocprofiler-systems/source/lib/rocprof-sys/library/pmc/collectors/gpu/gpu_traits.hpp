@@ -19,8 +19,8 @@
 #include <utility>
 #include <vector>
 
-#include <spdlog/fmt/fmt.h>
-#include <spdlog/fmt/ranges.h>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
 namespace rocprofsys::pmc::collectors::gpu
 {

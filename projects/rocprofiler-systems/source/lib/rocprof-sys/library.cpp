@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <cstdint>
+#include <fmt/ranges.h>
 #include <timemory/log/color.hpp>
 //
 //  above should always be included first

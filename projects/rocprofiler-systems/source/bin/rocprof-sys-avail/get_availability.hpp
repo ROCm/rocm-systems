@@ -8,7 +8,7 @@
 #include "get_categories.hpp"
 #include "info_type.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <timemory/components/metadata.hpp>
 #include <timemory/components/properties.hpp>

@@ -13,7 +13,7 @@
 #include "get_availability.hpp"
 #include "info_type.hpp"
 #include <cstdint>
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include "hw_counter_query.hpp"
 

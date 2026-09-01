@@ -17,7 +17,7 @@
 #include "fwd.hpp"
 #include "log.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/environment/types.hpp>

@@ -10,8 +10,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <spdlog/fmt/fmt.h>
-
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::gpu

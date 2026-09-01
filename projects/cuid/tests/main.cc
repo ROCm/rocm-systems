@@ -8,6 +8,7 @@
 #include "unit/file_lock_test.h"
 #include "unit/gim_util_test.h"
 #include "unit/id_string_test.h"
+#include "unit/sha256_test.h"
 #include "unit/status_string_test.h"
 #include "unit/utilities_test.h"
 #include "unit/version_read_test.h"
@@ -44,6 +45,16 @@ TEST(cuidtstUnprivileged, IdString) {
 
 TEST(cuidtstUnprivileged, Utilities) {
   TestUtilities tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, Sha256Kat) {
+  TestSha256Kat tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, HmacSha256Kat) {
+  TestHmacSha256Kat tst;
   RunGenericTest(&tst);
 }
 
