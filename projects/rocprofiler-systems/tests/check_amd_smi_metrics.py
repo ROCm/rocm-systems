@@ -403,18 +403,22 @@ def _parse_xgmi_json(data: dict) -> dict[int, bool]:
         link_metrics = entry.get("link_metrics")
         if not isinstance(gpu_id, int) or not isinstance(link_metrics, dict):
             continue
-        if link_metrics.get("link_type") != "XGMI":
-            continue
 
-        available = _is_available(link_metrics.get("bit_rate")) or _is_available(
-            link_metrics.get("max_bandwidth")
-        )
-        for link in _collect_dicts(link_metrics.get("links", [])):
-            available = (
-                available
-                or _is_available(link.get("read"))
-                or _is_available(link.get("write"))
+        # link_type comes from amdsmi_topo_get_link_type(), not from the metric
+        # fields below, and stays "N/A" when that topology query fails or finds
+        # no peer link. Only a positive "PCIE" reading rules XGMI out.
+        available = False
+        link_type = link_metrics.get("link_type")
+        if not (isinstance(link_type, str) and link_type.strip().upper() == "PCIE"):
+            available = _is_available(link_metrics.get("bit_rate")) or _is_available(
+                link_metrics.get("max_bandwidth")
             )
+            for link in _collect_dicts(link_metrics.get("links", [])):
+                available = (
+                    available
+                    or _is_available(link.get("read"))
+                    or _is_available(link.get("write"))
+                )
 
         result[gpu_id] = result.get(gpu_id, False) or available
 
