@@ -127,6 +127,7 @@ jobs:
       LOG_FILE: ${{ github.workspace }}/coco-${{ inputs.mode }}-${{ inputs.job }}-${{ github.run_id }}.log
       COCO_DIR: ${{ github.workspace }}/_coco-${{ github.run_id }}-${{ github.run_attempt }}
       COCO_OUTPUT: ${{ inputs.mode == 'pr' && format('{0}/coco-results-pr-{1}-{2}-{3}', github.workspace, inputs.job, github.run_id, github.run_attempt) || '' }}
+      COCO_VENV: /tmp/coco-venv-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       # Limit the checkout to the composite action's own directory.
       - name: Checkout rocm-systems
@@ -163,8 +164,6 @@ jobs:
 
       - name: Install coco
         working-directory: ${{ env.COCO_DIR }}/tRCCL
-        env:
-          COCO_VENV: ${{ env.COCO_DIR }}/venv
         run: |
           set -euo pipefail
           # Never activated; invoked by absolute path.
@@ -190,7 +189,6 @@ jobs:
           SOFTWARE: ${{ inputs.software }}
           PR_STACKS: ${{ inputs.pr_stacks }}
           COCO_DATABASE_URL: ${{ secrets.RCCL_COCO_DB_URL }}
-          COCO_VENV: ${{ env.COCO_DIR }}/venv
           COCO_OUTPUT: ${{ env.COCO_OUTPUT }}
         run: |
           set -euo pipefail
@@ -299,6 +297,7 @@ jobs:
           COCO_OUTPUT: ${{ env.COCO_OUTPUT }}
         run: |
           rm -rf "${COCO_DIR}"
+          rm -rf "${COCO_VENV}"
           if [[ -n "${COCO_OUTPUT}" ]]; then
             rm -rf "${COCO_OUTPUT}"
           fi
