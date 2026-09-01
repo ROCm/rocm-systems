@@ -17,6 +17,7 @@
 #include "hip.h"
 #include "io.h"
 #include "masyncmonitor.h"
+#include "mbackend.h"
 #include "mbuffer.h"
 #include "mfile.h"
 #include "mhip.h"
@@ -631,6 +632,28 @@ TEST_F(AsyncIoOp, bindAllParamsAreFixedAfter)
     (void)current_io_size;
 }
 
+TEST_F(AsyncIoOp, failoverGateArmsWhenFallbackNeeded)
+{
+    op->failover                   = std::make_shared<AsyncFailoverState>();
+    op->failover->fallback_needed  = true;
+    op->bytes_transferred_internal = -1;
+    op->write_result               = false;
+    async_failover_gate(op.get());
+    ASSERT_EQ(op->bytes_transferred_internal, 0);
+    ASSERT_TRUE(op->write_result);
+}
+
+TEST_F(AsyncIoOp, failoverGateSkipsWhenFallbackNotNeeded)
+{
+    op->failover                   = std::make_shared<AsyncFailoverState>();
+    op->failover->fallback_needed  = false;
+    op->bytes_transferred_internal = -1;
+    op->write_result               = false;
+    async_failover_gate(op.get());
+    ASSERT_LT(op->bytes_transferred_internal, 0);
+    ASSERT_FALSE(op->write_result);
+}
+
 struct AsyncIoOpCleanup : public AsyncIoOp {
     void SetUp() override
     {
@@ -970,6 +993,81 @@ TEST_F(FastpathAsyncIO, syslogCalledWhenCleanupEnqueueAlsoFails)
                  Hip::RuntimeError);
 }
 
+TEST_F(FastpathAsyncIO, orchestratorEnqueuesFallbackWhenScoreNonNegative)
+{
+    SetUpStreamFlags();
+    StrictMock<MAsyncMonitor> masync_monitor;
+    auto                      m_fallback = std::make_shared<StrictMock<MBackend>>();
+    Fastpath                  fastpath;
+    fastpath.register_fallback_backend(m_fallback);
+
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mbuffer, getGpuId).WillOnce(Return(0));
+    EXPECT_CALL(*mstream, getHipDevice).WillOnce(Return(0));
+    EXPECT_CALL(masync_monitor, addOp);
+    EXPECT_CALL(*mstream, getLock);
+    EXPECT_CALL(*mstream, getHipStream).Times(2);
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_fastpath_copy), _));
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_cleanup), _));
+
+    EXPECT_CALL(*m_fallback, score).WillOnce(Return(0));
+    EXPECT_CALL(*m_fallback, enqueueAsyncIo);
+
+    fastpath.async_io(IoType::Read, mfile, mbuffer, &size, &file_offset, &buffer_offset, &bytes_transferred,
+                      mstream);
+}
+
+TEST_F(FastpathAsyncIO, orchestratorSkipsFallbackWhenScoreNegative)
+{
+    SetUpStreamFlags();
+    StrictMock<MAsyncMonitor> masync_monitor;
+    auto                      m_fallback = std::make_shared<StrictMock<MBackend>>();
+    Fastpath                  fastpath;
+    fastpath.register_fallback_backend(m_fallback);
+
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mbuffer, getGpuId).WillOnce(Return(0));
+    EXPECT_CALL(*mstream, getHipDevice).WillOnce(Return(0));
+    EXPECT_CALL(masync_monitor, addOp);
+    EXPECT_CALL(*mstream, getLock);
+    EXPECT_CALL(*mstream, getHipStream).Times(2);
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_fastpath_copy), _));
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_cleanup), _));
+
+    // Fallback refuses the IO, so no fallback jobs are enqueued.
+    EXPECT_CALL(*m_fallback, score).WillOnce(Return(-1));
+
+    fastpath.async_io(IoType::Read, mfile, mbuffer, &size, &file_offset, &buffer_offset, &bytes_transferred,
+                      mstream);
+}
+
+TEST_F(FastpathAsyncIO, orchestratorSwallowsFallbackEnqueueFailure)
+{
+    SetUpStreamFlags();
+    StrictMock<MAsyncMonitor> masync_monitor;
+    auto                      m_fallback = std::make_shared<StrictMock<MBackend>>();
+    Fastpath                  fastpath;
+    fastpath.register_fallback_backend(m_fallback);
+
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mbuffer, getGpuId).WillOnce(Return(0));
+    EXPECT_CALL(*mstream, getHipDevice).WillOnce(Return(0));
+    EXPECT_CALL(masync_monitor, addOp);
+    EXPECT_CALL(*mstream, getLock);
+    EXPECT_CALL(*mstream, getHipStream).Times(2);
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_fastpath_copy), _));
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_cleanup), _));
+
+    // The primary jobs are already queued, so a failed fallback enqueue is logged
+    // and swallowed rather than propagated.
+    EXPECT_CALL(*m_fallback, score).WillOnce(Return(0));
+    EXPECT_CALL(*m_fallback, enqueueAsyncIo).WillOnce(Throw(std::runtime_error("boom")));
+    EXPECT_CALL(msys, syslog);
+
+    ASSERT_NO_THROW(fastpath.async_io(IoType::Read, mfile, mbuffer, &size, &file_offset, &buffer_offset,
+                                      &bytes_transferred, mstream));
+}
+
 struct AsyncFastpathCopyParams {
     IoType io_type;
     bool   fixed_buffer_offset;
@@ -1078,6 +1176,55 @@ TEST_P(AsyncFastpathCopyOp, sizeClampedToMaxRwCount)
     }
     async_fastpath_copy(op.get());
     ASSERT_EQ(op->bytes_transferred_internal, static_cast<ssize_t>(hipFile::getMaxRwCount()));
+}
+
+TEST_P(AsyncFastpathCopyOp, eligibleSystemErrorSetsFallbackNeeded)
+{
+    op->failover = std::make_shared<AsyncFailoverState>();
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(42));
+    if (io_type == IoType::Read) {
+        EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Throw(std::system_error(ENODEV, std::generic_category())));
+    }
+    else {
+        EXPECT_CALL(mhip, hipAmdFileWrite)
+            .WillOnce(Throw(std::system_error(EREMOTEIO, std::generic_category())));
+    }
+    async_fastpath_copy(op.get());
+    ASSERT_EQ(op->bytes_transferred_internal, -hipFileInternalError);
+    ASSERT_TRUE(op->failover->fallback_needed);
+}
+
+TEST_P(AsyncFastpathCopyOp, ineligibleSystemErrorLeavesFallbackNotNeeded)
+{
+    op->failover = std::make_shared<AsyncFailoverState>();
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(42));
+    if (io_type == IoType::Read) {
+        EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Throw(std::system_error(EIO, std::generic_category())));
+    }
+    else {
+        EXPECT_CALL(mhip, hipAmdFileWrite).WillOnce(Throw(std::system_error(EIO, std::generic_category())));
+    }
+    async_fastpath_copy(op.get());
+    ASSERT_EQ(op->bytes_transferred_internal, -hipFileInternalError);
+    ASSERT_FALSE(op->failover->fallback_needed);
+}
+
+TEST_P(AsyncFastpathCopyOp, successLeavesFallbackNotNeeded)
+{
+    op->failover = std::make_shared<AsyncFailoverState>();
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(42));
+    if (io_type == IoType::Read) {
+        EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Return(size));
+    }
+    else {
+        EXPECT_CALL(mhip, hipAmdFileWrite).WillOnce(Return(size));
+    }
+    async_fastpath_copy(op.get());
+    ASSERT_EQ(op->bytes_transferred_internal, static_cast<ssize_t>(size));
+    ASSERT_FALSE(op->failover->fallback_needed);
 }
 
 INSTANTIATE_TEST_SUITE_P(AsyncFastpathCopyOpSuite, AsyncFastpathCopyOp,
