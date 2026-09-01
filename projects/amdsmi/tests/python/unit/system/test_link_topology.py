@@ -19,8 +19,7 @@ from common.common import amdsmi
 
 class TestLinkTopology(unittest.TestCase):
     def test_struct_size_matches_host_abi(self):
-        # The unified struct must be 64 bytes so the baremetal and host
-        # interfaces are binary compatible.
+        # 64 bytes keeps the baremetal and host interfaces binary compatible.
         self.assertEqual(ctypes.sizeof(amdsmi.amdsmi_wrapper.amdsmi_link_topology_t), 64)
 
     def test_struct_fields(self):
@@ -36,8 +35,7 @@ class TestLinkTopology(unittest.TestCase):
         ):
             self.assertIn(expected, field_names)
 
-        # Field offsets must match the C ABI exactly; a reorder that preserves
-        # the 64-byte size would otherwise pass silently and break host ABI.
+        # Offsets must match the C ABI; a same-size reorder would break it silently.
         self.assertEqual(struct_type.weight.offset, 0)
         self.assertEqual(struct_type.link_status.offset, 8)
         self.assertEqual(struct_type.link_type.offset, 12)
@@ -51,31 +49,26 @@ class TestLinkTopology(unittest.TestCase):
         self.assertTrue(hasattr(amdsmi, "amdsmi_get_link_topology"))
 
     def test_rejects_non_handle_arguments(self):
-        # Argument validation happens before any library call, so this raises
-        # without needing a GPU present.
+        # Validation happens before any library call, so no GPU is needed.
         with self.assertRaises(amdsmi.amdsmi_interface.AmdSmiParameterException):
             amdsmi.amdsmi_interface.amdsmi_get_link_topology("not-a-handle", "also-bad")
 
     def test_rejects_bad_destination_handle(self):
-        # The both-bad case above trips on the first argument, so a valid source
-        # with an invalid destination is what exercises the second-argument guard.
+        # A valid source with a bad destination exercises the second-argument guard.
         src = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
         with self.assertRaises(amdsmi.amdsmi_interface.AmdSmiParameterException):
             amdsmi.amdsmi_interface.amdsmi_get_link_topology(src, "also-bad")
 
     def test_success_path_returns_mapped_dict(self):
-        # Mock the ctypes entry point so the success path runs without a GPU,
-        # locking the struct-to-dict mapping.
+        # Mock the entry point so the success path runs without a GPU.
         src = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
         dst = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
 
         def _fill(_src, _dst, topology_ref):
-            # topology_ref is the ctypes byref() argument; ._obj is the
-            # underlying amdsmi_link_topology_t the binding reads back.
+            # ._obj is the underlying struct the binding reads back.
             topology = topology_ref._obj
             topology.weight = 42
-            # link_type XGMI (2) is a concrete type, so a coherent result pairs
-            # it with link_status ENABLED (0).
+            # XGMI (2) is a concrete type, so pair it with link_status ENABLED (0).
             topology.link_status = 0
             topology.link_type = 2
             topology.num_hops = 3
@@ -97,8 +90,7 @@ class TestLinkTopology(unittest.TestCase):
         self.assertEqual(result["fb_sharing"], 1)
 
     def test_disabled_link_maps_status_and_capped_hops(self):
-        # Complements the enabled case: locks the disabled/not-applicable
-        # mapping and the uint8_t-capped (255) num_hops passing through.
+        # Complements the enabled case: disabled mapping and capped (255) hops.
         src = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
         dst = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
 

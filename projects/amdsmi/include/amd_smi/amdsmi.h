@@ -6885,35 +6885,24 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
  *
  *  @platform{gpu_bm_linux} @platform{host}
  *
- *  @details Writes the link weight, status, type, abstracted hop count, and
- *  framebuffer sharing flag for the connection between @p processor_handle_src
- *  and @p processor_handle_dst into @p topology_info.
+ *  @details Aggregates the link weight, status, type, abstracted hop count, and
+ *  framebuffer-sharing flag for the connection between @p processor_handle_src
+ *  and @p processor_handle_dst into a single ::amdsmi_link_topology_t, mirroring
+ *  the host interface.
  *
- *  This is the unified topology query that aggregates the information
- *  otherwise obtained from ::amdsmi_topo_get_link_type and
- *  ::amdsmi_topo_get_link_weight into a single ::amdsmi_link_topology_t
- *  structure, matching the host interface.
+ *  @note @p num_hops is the abstracted topology step count from
+ *  ::amdsmi_topo_get_link_type, not the number of physical xGMI links.
  *
- *  @note The @p num_hops value is the abstracted topology step count reported
- *  by ::amdsmi_topo_get_link_type, not the number of physical xGMI links.
+ *  @note On @platform{gpu_bm_linux}, @p link_status is derived from the resolved
+ *  link type, not live hardware state. The source only resolves a concrete type
+ *  on success, so a successful call always reports ::AMDSMI_LINK_STATUS_ENABLED;
+ *  the DISABLED, INACTIVE, and ERROR states are not produced on baremetal.
  *
- *  @note On @platform{gpu_bm_linux}, the @p link_status is derived from link-type
- *  resolvability rather than live hardware state: it is reported as
- *  ::AMDSMI_LINK_STATUS_ENABLED when the connection resolves to a concrete link
- *  type and ::AMDSMI_LINK_STATUS_DISABLED otherwise. The
- *  ::AMDSMI_LINK_STATUS_INACTIVE and ::AMDSMI_LINK_STATUS_ERROR states are not
- *  produced on baremetal.
+ *  @note @p fb_sharing is best-effort: a P2P query that cannot complete is
+ *  reported as 0, indistinguishable from a genuine "not shared" result.
  *
- *  @note The @p fb_sharing flag reflects whether the two devices can directly
- *  access each other's framebuffer over P2P. It is best-effort: if the
- *  underlying P2P-accessibility query cannot be completed @p fb_sharing is
- *  reported as 0 (not shared), which is indistinguishable from a genuine
- *  "not shared" result.
- *
- *  @note The link type, weight, and framebuffer-sharing values are queried
- *  sequentially and not atomically, so a concurrent topology change between the
- *  individual queries may leave the returned fields reflecting slightly
- *  different points in time.
+ *  @note link type, weight, and fb_sharing are queried sequentially, not
+ *  atomically, so a concurrent topology change may skew the returned fields.
  *
  *  @param[in] processor_handle_src the source processor handle
  *
