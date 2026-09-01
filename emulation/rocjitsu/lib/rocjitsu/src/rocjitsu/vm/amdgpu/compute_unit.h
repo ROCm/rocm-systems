@@ -8,6 +8,7 @@
 #define ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_
 
 #include "rocjitsu/base/api.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -23,6 +24,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/wf_scheduler.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
+#include "rocjitsu/vm/emulation_fidelity.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
@@ -105,6 +107,7 @@ public:
     uint32_t sgprs_per_wf; ///< Scalar GPRs per wavefront (allocation granularity).
     uint32_t vgprs_per_wf; ///< Vector GPRs per wavefront (allocation granularity).
     uint32_t lds_size_kb;  ///< Local Data Share size in kilobytes.
+    EmulationFidelity fidelity = EmulationFidelity::Permissive;
   };
 
   ~ComputeUnitCore() override = default;
@@ -547,6 +550,16 @@ public:
   /// @brief Return the physical SGPR allocation block size per wavefront.
   uint32_t sgpr_allocation_block_size() const { return config_.sgprs_per_wf; }
 
+  /// @brief Select how known hardware-contract violations are handled.
+  void set_emulation_fidelity(EmulationFidelity fidelity) { config_.fidelity = fidelity; }
+
+  [[nodiscard]] EmulationFidelity emulation_fidelity() const { return config_.fidelity; }
+
+  /// @brief Number of fail-closed fidelity violations observed by this CU.
+  [[nodiscard]] uint64_t fidelity_violation_count() const {
+    return fidelity_violation_count_.load(std::memory_order_relaxed);
+  }
+
   /// @brief Test whether a physical SGPR range is contained in a wavefront's
   /// fixed simulator storage block.
   /// @details This is an isolation boundary, not the descriptor-derived
@@ -558,15 +571,36 @@ public:
                physical_base, physical_count);
   }
 
-  /// @brief Test whether a physical VGPR range is contained in a wavefront's
-  /// fixed simulator storage block.
-  /// @details This is an isolation boundary, not the descriptor-derived
-  /// architectural allocation extent recorded in `wf.vgpr_alloc().count`.
+  /// @brief Test whether a wavefront may access a physical VGPR range.
+  /// @details Permissive mode checks the fixed simulator storage block. Strict
+  /// mode additionally enforces the descriptor-derived ordinary-VGPR extent
+  /// and reports a fatal fidelity violation when that extent is exceeded.
   [[nodiscard]] bool owns_vgpr_range(const Wavefront &wf, uint32_t physical_base,
                                      uint32_t physical_count) const {
-    return &wf.raw_cu() == this && wf.vgpr_alloc().count != 0 &&
-           RegAllocation{wf.vgpr_alloc().base, vgpr_allocation_block_size()}.contains(
-               physical_base, physical_count);
+    if (&wf.raw_cu() != this || wf.vgpr_alloc().count == 0 || physical_count == 0)
+      return false;
+    const bool owns_storage =
+        RegAllocation{wf.vgpr_alloc().base, vgpr_allocation_block_size()}.contains(physical_base,
+                                                                                   physical_count);
+    if (config_.fidelity != EmulationFidelity::Strict)
+      return owns_storage;
+
+    if (physical_base < wf.vgpr_alloc().base)
+      return false;
+
+    // COMPUTE_PGM_RSRC1 describes the allocated ordinary VGPR prefix. AccVGPR
+    // operands use a separate physical bank and separate architecture rules;
+    // this first strict check deliberately leaves that bank to a future
+    // architecture-aware allocation contract rather than rejecting it by a
+    // comparison that is known to be wrong.
+    const uint32_t relative_base = physical_base - wf.vgpr_alloc().base;
+    if (relative_base >= isa_properties(arch()).max_addressable_vgprs_per_wf)
+      return owns_storage;
+    if (wf.vgpr_alloc().contains(physical_base, physical_count))
+      return owns_storage;
+
+    report_vgpr_allocation_violation(wf, relative_base, physical_count);
+    return false;
   }
 
 private:
@@ -973,6 +1007,22 @@ protected:
   Lds lds_;
   ImmediateClusterLdsMulticastEngine default_cluster_lds_multicast_engine_;
   ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
+
+  void report_vgpr_allocation_violation(const Wavefront &wf, uint32_t relative_base,
+                                        uint32_t register_count) const {
+    const uint64_t prior = fidelity_violation_count_.fetch_add(1, std::memory_order_relaxed);
+    if (prior != 0)
+      return;
+    util::Logger::warn("RocJitsu strict fidelity violation: wave accessed ordinary VGPR range v",
+                       relative_base, ":v", relative_base + register_count - 1,
+                       " outside descriptor allocation v0:v", wf.num_vgprs() - 1, " at pc=0x",
+                       std::hex, wf.pc, std::dec, " arch=", static_cast<int>(arch()));
+    if (engine())
+      engine()->request_exit("strict fidelity violation: VGPR access exceeds descriptor allocation",
+                             1);
+  }
+
+  mutable std::atomic<uint64_t> fidelity_violation_count_{0};
   uint32_t next_lds_alloc_ = 0; ///< Next free LDS offset for per-WG allocation.
   std::unordered_set<uint64_t> lds_pinned_clusters_;
   ScalarMemPipeline scalar_mem_pipeline_;
