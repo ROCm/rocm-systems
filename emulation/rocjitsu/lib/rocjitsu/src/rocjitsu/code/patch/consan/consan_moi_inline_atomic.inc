@@ -46,7 +46,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return;
   }
 
-  const std::span<const uint8_t> active_bytes = active_moi_bytes(bytes, result);
+  const std::span<const uint8_t> active_bytes = result.active_bytes(bytes);
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -254,10 +254,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, options, options,
                                candidate_point, semantics, arch);
   }
-  if (!apply_moi_descriptor_requirements(patcher, code_object, result, descriptor_requirements,
-                                         scalar_requirements, private_requirements, nullptr,
-                                         nullptr, arch, "ConSan MOI inline atomic patch",
-                                         result.errors)) {
+  if (!apply_moi_descriptor_requirements(patcher, code_object, result.program_inventory,
+                                         descriptor_requirements, scalar_requirements,
+                                         private_requirements, nullptr, nullptr, arch,
+                                         "ConSan MOI inline atomic patch", result.errors)) {
     return;
   }
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());

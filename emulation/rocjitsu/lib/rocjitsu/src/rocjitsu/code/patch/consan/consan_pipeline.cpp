@@ -671,30 +671,23 @@ void TransformResult::discard_replacement(std::string warning) {
   replacement.clear();
   private_lowering_.patches.clear();
   coverage_ledger.discard_instrumented_lowerings();
-  std::vector<ConSanCommittedLowering> rejections;
+  ConSanCoverageLedger rejected_coverage = coverage_ledger;
+  bool rejections_valid = true;
   for (const ConSanProbeIntent &intent : observation_plan().probe_intents) {
     const ConSanIntentCoverageEntry *entry = coverage_ledger.intent_entry(intent.id);
     if (entry == nullptr || entry->lowering != ConSanLoweringOutcomeKind::Pending)
       continue;
     const std::array<ConSanProbeIntentId, 1> ids = {intent.id};
-    auto rejection = make_consan_committed_lowering(
-        observation_plan(), ids, std::span<const ConSanCommittedLoweringLocation>{},
-        ConSanLoweringOutcomeKind::ResourceRejected, "runtime-owned report allocation failed");
-    if (!rejection) {
-      errors.emplace_back("ConSan runtime binding produced an invalid intent rejection");
+    if (!rejected_coverage.publish_lowering_rejection(ids,
+                                                      ConSanLoweringOutcomeKind::ResourceRejected,
+                                                      "runtime-owned report allocation failed")) {
+      errors.emplace_back("ConSan runtime binding could not publish intent rejections");
+      rejections_valid = false;
       break;
     }
-    rejections.push_back(std::move(*rejection));
   }
-  ConSanCoverageLedger rejected_coverage = coverage_ledger;
-  bool rejections_valid = true;
-  if (!rejected_coverage.publish_lowering_commits(std::move(rejections))) {
-    errors.emplace_back("ConSan runtime binding could not publish intent rejections");
-    rejections_valid = false;
-  }
-  if (rejections_valid) {
+  if (rejections_valid)
     coverage_ledger = std::move(rejected_coverage);
-  }
   dispatch_requirements = {};
   warnings.push_back(std::move(warning));
   stage_record(*this, ConSanPipelineStage::RuntimeBinding).status =

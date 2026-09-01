@@ -464,14 +464,14 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
 
 void build_sync_event_inventory(std::span<const uint8_t> bytes,
                                 SynchronizationInventoryBuildView inventory,
-                                const ConSanTransformArtifacts &result, rj_code_arch_t arch) {
+                                const ProgramInventory &program_inventory, rj_code_arch_t arch) {
   const ConSanCodeObjectId code_object_id = make_consan_code_object_id(bytes);
   inventory.sync_events.clear();
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+  for (const ConSanKernelInfo &kernel : program_inventory.kernels()) {
     if (!is_rocclr_runtime_kernel_name(kernel.name))
       append_sync_events_for_container(code_object_id, kernel, true, arch, inventory.sync_events);
   }
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
+  for (const ConSanFunctionInfo &function : program_inventory.functions())
     append_sync_events_for_container(code_object_id, function, false, arch, inventory.sync_events);
 }
 
@@ -545,9 +545,9 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
 
 [[nodiscard]] std::vector<std::unique_ptr<BasicBlock>>
 build_sync_basic_blocks(const AmdGpuCodeObject &code_object, Decoder &decoder, rj_code_arch_t arch,
-                        const ConSanTransformArtifacts &result) {
+                        const ProgramInventory &program_inventory) {
   const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
-      code_object, result.program_inventory.kernels(), result.program_inventory.functions());
+      code_object, program_inventory.kernels(), program_inventory.functions());
   return BasicBlock::build(code_object, decoder, arch, cfg.leaders, cfg.code_ranges);
 }
 
@@ -1200,7 +1200,7 @@ template <typename Container>
   return false;
 }
 
-[[nodiscard]] bool is_workgroup_flat_communication(const ConSanTransformArtifacts &result,
+[[nodiscard]] bool is_workgroup_flat_communication(const ProgramInventory &program_inventory,
                                                    const ConSanSyncEvent &event) {
   if (event.address_source != ConSanSyncAddressSource::FlatVector)
     return false;
@@ -1210,13 +1210,12 @@ template <typename Container>
   if (event.raw_scope == 1u)
     return true;
   if (event.in_kernel) {
-    return std::ranges::any_of(
-        result.program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
-          return container_has_exact_group_flat_communication_site(kernel, event);
-        });
+    return std::ranges::any_of(program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
+      return container_has_exact_group_flat_communication_site(kernel, event);
+    });
   }
   return std::ranges::any_of(
-      result.program_inventory.functions(), [&](const ConSanFunctionInfo &function) {
+      program_inventory.functions(), [&](const ConSanFunctionInfo &function) {
         return container_has_exact_group_flat_communication_site(function, event);
       });
 }
@@ -1248,17 +1247,16 @@ template <typename Container>
   return consan_uses_gfx12_rdna_execution(arch) && site->raw_scope && *site->raw_scope == 1u;
 }
 
-[[nodiscard]] bool exact_workgroup_flat_acquire_encoding(const ConSanTransformArtifacts &result,
+[[nodiscard]] bool exact_workgroup_flat_acquire_encoding(const ProgramInventory &program_inventory,
                                                          const ConSanSyncEvent &event,
                                                          rj_code_arch_t arch) {
   if (event.in_kernel) {
-    return std::ranges::any_of(
-        result.program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
-          return container_has_exact_group_flat_acquire_encoding(kernel, event, arch);
-        });
+    return std::ranges::any_of(program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
+      return container_has_exact_group_flat_acquire_encoding(kernel, event, arch);
+    });
   }
   return std::ranges::any_of(
-      result.program_inventory.functions(), [&](const ConSanFunctionInfo &function) {
+      program_inventory.functions(), [&](const ConSanFunctionInfo &function) {
         return container_has_exact_group_flat_acquire_encoding(function, event, arch);
       });
 }
@@ -1650,7 +1648,7 @@ atomic_release_wait_boundary(const ConSanSyncSequence &atomic,
 void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                                      rj_code_arch_t arch, const SyncEventSemanticIndex &events,
                                      SynchronizationInventoryBuildView inventory,
-                                     const ConSanTransformArtifacts &result) {
+                                     const ProgramInventory &program_inventory) {
   std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
   std::vector<ConSanSyncSequence> associated;
   associated.reserve(sync_sequences.size());
@@ -1751,7 +1749,8 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
     if (sequence.kind != ConSanSyncSequenceKind::Atomic)
       continue;
     const ConSanSyncEvent *communication = first_sequence_event(events, sequence);
-    if (communication == nullptr || !is_workgroup_flat_communication(result, *communication))
+    if (communication == nullptr ||
+        !is_workgroup_flat_communication(program_inventory, *communication))
       continue;
     sequence.raw_scope = 1u;
     if (sequence.memory_role != ConSanSyncMemoryRole::Unknown &&
@@ -2165,7 +2164,7 @@ void associate_ordinary_release_sync_sequences(
 void associate_ordinary_acquire_sync_sequences(
     const std::vector<std::unique_ptr<BasicBlock>> &blocks, const SyncEventSemanticIndex &events,
     rj_code_arch_t arch, SynchronizationInventoryBuildView inventory,
-    const ConSanTransformArtifacts &result) {
+    const ProgramInventory &program_inventory) {
   std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
   struct Association {
     size_t cache_index = 0;
@@ -2183,8 +2182,8 @@ void associate_ordinary_acquire_sync_sequences(
     const ConSanSyncEvent *load = first_sequence_event(events, load_sequence);
     if (load == nullptr)
       continue;
-    if (is_workgroup_flat_communication(result, *load) &&
-        !exact_workgroup_flat_acquire_encoding(result, *load, arch))
+    if (is_workgroup_flat_communication(program_inventory, *load) &&
+        !exact_workgroup_flat_acquire_encoding(program_inventory, *load, arch))
       continue;
     std::vector<size_t> cache_matches;
     std::vector<size_t> bounded_metadata_matches;
@@ -2344,7 +2343,7 @@ void associate_ordinary_acquire_sync_sequences(
       continue;
     const ConSanSyncEvent *load = first_sequence_event(events, sequence);
     if (load == nullptr || load->width_bits != 32u || load->execution_owners.empty() ||
-        !is_workgroup_flat_communication(result, *load))
+        !is_workgroup_flat_communication(program_inventory, *load))
       continue;
     bool ordered_encoding = false;
     const auto visit = [&](const auto &container) {
@@ -2358,13 +2357,13 @@ void associate_ordinary_acquire_sync_sequences(
           site->operation != ConSanOrdinaryMemoryOperation::Load ||
           site->flat_address_space_hint != ConSanFlatAddressSpaceHint::Group)
         return;
-      ordered_encoding = exact_workgroup_flat_acquire_encoding(result, *load, arch);
+      ordered_encoding = exact_workgroup_flat_acquire_encoding(program_inventory, *load, arch);
     };
     if (load->in_kernel) {
-      for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
+      for (const ConSanKernelInfo &kernel : program_inventory.kernels())
         visit(kernel);
     } else {
-      for (const ConSanFunctionInfo &function : result.program_inventory.functions())
+      for (const ConSanFunctionInfo &function : program_inventory.functions())
         visit(function);
     }
     if (!ordered_encoding)
@@ -2704,7 +2703,8 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
   }
 
   build_fault_site_inventory(code_object_bytes, arch, result);
-  build_sync_event_inventory(code_object_bytes, synchronization_inventory, result, arch);
+  build_sync_event_inventory(code_object_bytes, synchronization_inventory, result.program_inventory,
+                             arch);
   if (options.flavor == ConSanFlavor::Moi &&
       !canonicalize_sync_events_by_physical_site(synchronization_inventory, result)) {
     result.program_inventory = inventory_builder.view();
@@ -2713,7 +2713,8 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
 
   const SyncEventSemanticIndex sync_events =
       build_sync_event_semantic_index(synchronization_inventory.sync_events);
-  const auto sync_blocks = build_sync_basic_blocks(code_object, decoder, arch, result);
+  const auto sync_blocks =
+      build_sync_basic_blocks(code_object, decoder, arch, result.program_inventory);
   build_singleton_sync_sequences(sync_blocks, synchronization_inventory);
   associate_barrier_sync_sequences(
       sync_blocks,
@@ -2722,7 +2723,7 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
                                              static_cast<const MutationRequest &>(options)),
       synchronization_inventory);
   associate_atomic_sync_sequences(sync_blocks, arch, sync_events, synchronization_inventory,
-                                  result);
+                                  result.program_inventory);
   build_barrier_lifecycle_group_inventory(synchronization_inventory);
   if (options.fault_move_barrier) {
     build_barrier_move_destination_inventory(code_object, sync_blocks, sync_events, arch,
@@ -2733,7 +2734,7 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
   associate_ordinary_release_sync_sequences(sync_blocks, arch, sync_events,
                                             synchronization_inventory);
   associate_ordinary_acquire_sync_sequences(sync_blocks, sync_events, arch,
-                                            synchronization_inventory, result);
+                                            synchronization_inventory, result.program_inventory);
   build_moi_fence_candidate_inventory(synchronization_inventory);
   result.program_inventory = inventory_builder.view();
   build_perturbation_candidate_inventory(result.program_inventory, perturbation);

@@ -97,10 +97,10 @@ make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
     const MoiDescriptorPrivateRequirements &private_requirements,
     const MoiDescriptorLdsRequirements *lds_requirements, rj_code_arch_t arch,
     ConSanTransformArtifacts &result) {
-  return apply_moi_descriptor_requirements(patcher, code_object, result, descriptor_requirements,
-                                           scalar_requirements, private_requirements,
-                                           lds_requirements, &capabilities, arch,
-                                           "ConSan MOI access", result.errors);
+  return apply_moi_descriptor_requirements(patcher, code_object, result.program_inventory,
+                                           descriptor_requirements, scalar_requirements,
+                                           private_requirements, lds_requirements, &capabilities,
+                                           arch, "ConSan MOI access", result.errors);
 }
 
 /// Initialize one appended MOI access image and materialize its shared direct

@@ -66,11 +66,6 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 
-std::span<const uint8_t> active_moi_bytes(std::span<const uint8_t> original,
-                                          const ConSanTransformArtifacts &result) {
-  return result.modified() ? std::span<const uint8_t>(result.replacement) : original;
-}
-
 bool consan_detail::range_overlaps(uint16_t lhs_base, uint16_t lhs_count, uint16_t rhs_base,
                                    uint16_t rhs_count) {
   const uint32_t lhs_end = static_cast<uint32_t>(lhs_base) + lhs_count;

@@ -672,7 +672,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
           flat_options.max_patches = 0u;
           try_apply_flat_check_trap_patch(*code_object, *target_profile, flat_options, result);
         } else if (auto reserved_ranges =
-                       reserved_ranges_for_existing_patches(*code_object, result)) {
+                       reserved_ranges_for_existing_patches(*code_object, result.patches)) {
           ConSanOptions flat_options = redundant_options;
           if (flat_options.max_patches_is_expert_limit)
             flat_options.max_patches = max_patches - access_patches;

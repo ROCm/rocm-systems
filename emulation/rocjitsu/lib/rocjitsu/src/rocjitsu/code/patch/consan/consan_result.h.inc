@@ -252,6 +252,10 @@ struct ConSanTransformArtifacts {
   [[nodiscard]] bool modified() const {
     return outcome == ConSanTransformOutcome::ModifiedValid || !patches.empty();
   }
+  /// Return the current candidate image after any committed mutation.
+  [[nodiscard]] std::span<const uint8_t> active_bytes(std::span<const uint8_t> original) const {
+    return modified() ? std::span<const uint8_t>(replacement) : original;
+  }
   /// Mark a candidate image without overwriting a prior failure outcome.
   void mark_modified() {
     if (outcome == ConSanTransformOutcome::Unchanged)

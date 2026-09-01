@@ -88,8 +88,8 @@
 
 class MoiPatchAnchorRangeIndex {
 public:
-  explicit MoiPatchAnchorRangeIndex(const ConSanTransformArtifacts &result) {
-    for (const ConSanPatchLoweringProduct &patch : result.patches) {
+  explicit MoiPatchAnchorRangeIndex(std::span<const ConSanPatchInfo> patches) {
+    for (const ConSanPatchLoweringProduct &patch : patches) {
       if (patch.original_size != 0u)
         ranges_.emplace_back(patch.anchor_offset, patch.anchor_offset + patch.original_size);
     }
@@ -599,7 +599,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
 
 [[nodiscard]] std::optional<MoiReservedBarrierIslandLayout>
 find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
-                                                 const ConSanTransformArtifacts &result,
+                                                 std::span<const ConSanPatchInfo> patches,
                                                  rj_code_arch_t arch,
                                                  const MoiRecordReplayAccessOutput &access_output,
                                                  size_t barrier_count,
@@ -609,7 +609,7 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
 
   std::unordered_set<uint64_t> access_anchors;
   uint64_t first_access_body = std::numeric_limits<uint64_t>::max();
-  for (const ConSanPatchLoweringProduct &patch : result.patches) {
+  for (const ConSanPatchLoweringProduct &patch : patches) {
     if (patch.kind != ConSanPatchKind::InlineMoiExactShadowStore &&
         patch.kind != ConSanPatchKind::TrampolineMoiExactShadowStore &&
         patch.kind != ConSanPatchKind::InlineMoiAccessRecordStore &&
@@ -623,7 +623,7 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
 
   uint64_t access_island_begin = std::numeric_limits<uint64_t>::max();
   uint64_t access_island_end = 0u;
-  for (const ConSanPatchLoweringProduct &patch : result.patches) {
+  for (const ConSanPatchLoweringProduct &patch : patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
         !access_anchors.contains(patch.anchor_offset)) {
       continue;
@@ -647,7 +647,7 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
   }
 
   std::unordered_set<uint64_t> generated_branch_relays;
-  for (const ConSanPatchLoweringProduct &patch : result.patches) {
+  for (const ConSanPatchLoweringProduct &patch : patches) {
     if (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
         patch.original_size == 0u && patch.trampoline_size == sizeof(uint32_t)) {
       generated_branch_relays.insert(patch.trampoline_offset);
@@ -821,7 +821,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
     return;
   }
 
-  const std::span<const uint8_t> active_bytes = active_moi_bytes(bytes, result);
+  const std::span<const uint8_t> active_bytes = result.active_bytes(bytes);
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -833,7 +833,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
   std::vector<MoiBarrierEvidenceSitePlan> selected_candidates;
   selected_candidates.reserve(options.max_patches);
   std::unordered_set<uint64_t> selected_offsets;
-  const MoiPatchAnchorRangeIndex occupied_anchors(result);
+  const MoiPatchAnchorRangeIndex occupied_anchors(result.patches);
   for (const MoiBarrierEvidenceSitePlan &candidate : candidates) {
     if (selected_candidates.size() == options.max_patches)
       break;
@@ -1224,7 +1224,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
   const std::optional<MoiReservedBarrierIslandLayout> barrier_island_layout =
       operating_point.moi_exec_save_sgpr
           ? find_record_replay_reserved_barrier_island_begin(
-                old_text, result, arch, access_output, planned_candidates.size(),
+                old_text, result.patches, arch, access_output, planned_candidates.size(),
                 moi_reserved_access_sync_island_count(result.program_inventory,
                                                       result.observation_plan(), options, options,
                                                       semantics))
@@ -2120,7 +2120,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
   retain_emitted_owners(visible_evidence_private_requirements);
   retain_emitted_owners(visible_evidence_sgpr_requirements);
   if (!apply_moi_descriptor_requirements(
-          patcher, code_object, result, visible_evidence_vgpr_requirements,
+          patcher, code_object, result.program_inventory, visible_evidence_vgpr_requirements,
           visible_evidence_sgpr_requirements, visible_evidence_private_requirements, nullptr,
           nullptr, arch, "ConSan MOI inline-shadow barrier epoch patch", result.errors)) {
     return;
@@ -2252,7 +2252,7 @@ void try_apply_record_replay_barrier_record_patch(
     return;
   }
 
-  const std::span<const uint8_t> active_bytes = active_moi_bytes(bytes, result);
+  const std::span<const uint8_t> active_bytes = result.active_bytes(bytes);
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -2266,7 +2266,7 @@ void try_apply_record_replay_barrier_record_patch(
   std::vector<PlannedBarrierRecord> selected_candidates;
   selected_candidates.reserve(max_candidates);
   std::unordered_set<uint64_t> selected_offsets;
-  const MoiPatchAnchorRangeIndex occupied_anchors(result);
+  const MoiPatchAnchorRangeIndex occupied_anchors(result.patches);
   MoiResourcePlanningStatePtr standalone_resource_state = make_moi_resource_planning_state(
       bytes, arch, result.program_inventory, result.observation_plan(), result.resource_plans,
       options, options, operating_point);
@@ -2344,7 +2344,7 @@ void try_apply_record_replay_barrier_record_patch(
                                                 arch, kMoiLocalIndirectIslandWords);
   if (operating_point.moi_exec_save_sgpr) {
     const auto reserved_barrier_island_layout = find_record_replay_reserved_barrier_island_begin(
-        old_text, result, arch, access_output, selected_candidates.size(),
+        old_text, result.patches, arch, access_output, selected_candidates.size(),
         moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan(),
                                               options, options, semantics));
     if (reserved_barrier_island_layout) {
@@ -2743,10 +2743,10 @@ void try_apply_record_replay_barrier_record_patch(
     }
     return;
   }
-  if (!apply_moi_descriptor_requirements(patcher, code_object, result, descriptor_requirements,
-                                         scalar_requirements, private_requirements, nullptr,
-                                         nullptr, arch, "ConSan MOI barrier record patch",
-                                         result.errors)) {
+  if (!apply_moi_descriptor_requirements(patcher, code_object, result.program_inventory,
+                                         descriptor_requirements, scalar_requirements,
+                                         private_requirements, nullptr, nullptr, arch,
+                                         "ConSan MOI barrier record patch", result.errors)) {
     return;
   }
   (void)publish_moi_sync_patch(result, patcher, new_text, options.patched_image_growth_limit,

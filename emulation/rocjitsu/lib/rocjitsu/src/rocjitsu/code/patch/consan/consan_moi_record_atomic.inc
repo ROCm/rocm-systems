@@ -43,7 +43,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     return;
   }
 
-  const std::span<const uint8_t> active_bytes = active_moi_bytes(bytes, result);
+  const std::span<const uint8_t> active_bytes = result.active_bytes(bytes);
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -159,10 +159,10 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     note_descriptor_requirements(descriptor_requirements, planned.resources);
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, planned.emission, arch);
   }
-  if (!apply_moi_descriptor_requirements(patcher, code_object, result, descriptor_requirements,
-                                         scalar_requirements, private_requirements, nullptr,
-                                         nullptr, arch, "ConSan MOI atomic record patch",
-                                         result.errors)) {
+  if (!apply_moi_descriptor_requirements(patcher, code_object, result.program_inventory,
+                                         descriptor_requirements, scalar_requirements,
+                                         private_requirements, nullptr, nullptr, arch,
+                                         "ConSan MOI atomic record patch", result.errors)) {
     return;
   }
 

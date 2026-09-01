@@ -1,15 +1,17 @@
 [[nodiscard]] std::unordered_set<uint64_t>
-sc_admitted_access_file_offsets(const ConSanTransformArtifacts &result, ConSanAccessOrigin origin) {
+sc_admitted_access_file_offsets(const ProgramInventory &inventory,
+                                const ConSanObservationPlan &observation,
+                                ConSanAccessOrigin origin) {
   std::unordered_set<uint64_t> admitted_text_offsets;
-  admitted_text_offsets.reserve(result.observation_plan().probe_intents.size());
-  for (const ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
-    if (intent.physical_site.code_object == result.program_inventory.code_object_id())
+  admitted_text_offsets.reserve(observation.probe_intents.size());
+  for (const ConSanProbeIntent &intent : observation.probe_intents) {
+    if (intent.physical_site.code_object == inventory.code_object_id())
       admitted_text_offsets.insert(intent.physical_site.original_text_offset);
   }
 
   std::unordered_set<uint64_t> offsets;
   offsets.reserve(admitted_text_offsets.size());
-  for (const ConSanAccessInventorySite &access : result.program_inventory.access_sites())
+  for (const ConSanAccessInventorySite &access : inventory.access_sites())
     if (access.origin == origin &&
         admitted_text_offsets.contains(access.physical_id.original_text_offset))
       offsets.insert(access.file_offset);
@@ -17,13 +19,13 @@ sc_admitted_access_file_offsets(const ConSanTransformArtifacts &result, ConSanAc
 }
 
 [[nodiscard]] std::vector<ConSanProbeIntentId>
-sc_pending_access_intent_ids(const ConSanTransformArtifacts &result, const PhysicalSiteId &site) {
+sc_pending_access_intent_ids(const ConSanCoverageLedger &coverage, const PhysicalSiteId &site) {
   std::vector<ConSanProbeIntentId> intent_ids;
-  for (const ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
+  for (const ConSanProbeIntent &intent : coverage.observation_plan().probe_intents) {
     if (intent.kind != ConSanProbeIntentKind::RedundantAccessObservation ||
         intent.physical_site != site)
       continue;
-    const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(intent.id);
+    const ConSanIntentCoverageEntry *entry = coverage.intent_entry(intent.id);
     if (entry != nullptr && entry->lowering == ConSanLoweringOutcomeKind::Pending)
       intent_ids.push_back(intent.id);
   }
@@ -34,13 +36,11 @@ sc_pending_access_intent_ids(const ConSanTransformArtifacts &result, const Physi
                                                const PhysicalSiteId &site,
                                                ConSanLoweringOutcomeKind outcome,
                                                std::string detail) {
-  std::vector<ConSanProbeIntentId> intent_ids = sc_pending_access_intent_ids(result, site);
+  std::vector<ConSanProbeIntentId> intent_ids =
+      sc_pending_access_intent_ids(result.coverage_ledger, site);
   if (intent_ids.empty())
     return true;
-  auto commit = make_consan_committed_lowering(result.observation_plan(), intent_ids,
-                                               std::span<const ConSanCommittedLoweringLocation>{},
-                                               outcome, std::move(detail));
-  if (!commit || !result.coverage_ledger.publish_lowering_commit(std::move(*commit))) {
+  if (!result.coverage_ledger.publish_lowering_rejection(intent_ids, outcome, std::move(detail))) {
     result.errors.emplace_back(
         "ConSan SuperCollider could not publish an intent-bound access rejection");
     return false;

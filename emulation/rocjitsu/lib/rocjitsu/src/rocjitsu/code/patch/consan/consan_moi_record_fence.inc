@@ -30,7 +30,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     return;
   }
 
-  const std::span<const uint8_t> active_bytes = active_moi_bytes(bytes, result);
+  const std::span<const uint8_t> active_bytes = result.active_bytes(bytes);
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -163,10 +163,10 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     result.warnings.emplace_back("ConSan MOI fence record patch found no patchable fences");
     return;
   }
-  if (!apply_moi_descriptor_requirements(patcher, code_object, result, descriptor_requirements,
-                                         scalar_requirements, private_requirements, nullptr,
-                                         nullptr, arch, "ConSan MOI fence record patch",
-                                         result.errors))
+  if (!apply_moi_descriptor_requirements(patcher, code_object, result.program_inventory,
+                                         descriptor_requirements, scalar_requirements,
+                                         private_requirements, nullptr, nullptr, arch,
+                                         "ConSan MOI fence record patch", result.errors))
     return;
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());

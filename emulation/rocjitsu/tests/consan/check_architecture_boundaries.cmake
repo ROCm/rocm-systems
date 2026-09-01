@@ -318,6 +318,23 @@ if(NOT _committed_patch_location_owner MATCHES
         "ConSan shared committed-patch location construction is missing"
     )
 endif()
+foreach(_semantic_commit_client IN LISTS _consan_production_files)
+    if(_semantic_commit_client MATCHES
+       "consan_(access_policy[.]cpp|observation_plan[.]h[.]inc|placement[.]inc)$")
+        continue()
+    endif()
+    _consan_assert_no_match(
+        "${_semantic_commit_client}"
+        "make_consan_committed_lowering"
+        "lowering clients must use the typed instrumented or rejection publication boundary"
+    )
+endforeach()
+file(READ "${_consan_dir}/consan_observation_plan.h.inc" _rejection_publication_contract)
+if(NOT _rejection_publication_contract MATCHES "publish_lowering_rejection")
+    message(FATAL_ERROR
+        "ConSan coverage ledger lost its non-instrumented publication authority"
+    )
+endif()
 
 # Object-wide mode semantics are selected once by their mode owners and then
 # consumed as one immutable product. Common resource and emission components
@@ -768,6 +785,44 @@ foreach(_resource_planning_owner IN ITEMS consan_moi_pipeline.h consan_moi_pipel
         "resource planning must return a typed result for coordinator publication"
     )
 endforeach()
+foreach(_read_only_transaction_client IN ITEMS
+    consan_sync_analysis.inc
+    consan_placement.h
+    consan_placement.inc
+    consan_moi_shared_lowering.h
+    consan_moi_shared_lowering.cpp
+    consan_moi_barrier.inc
+    consan_supercollider_common.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_read_only_transaction_client}"
+        "const[ \\t]+ConSanTransformArtifacts[ \\t]*&"
+        "read-only helpers must consume immutable inventory, coverage, or patch products"
+    )
+endforeach()
+foreach(_file IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_file}"
+        "active_moi_bytes"
+        "the transformation transaction must own current candidate-image selection"
+    )
+endforeach()
+file(READ "${_consan_dir}/consan_moi_shared_lowering.h" _moi_descriptor_mutation_contract)
+if(NOT _moi_descriptor_mutation_contract MATCHES
+       "apply_moi_descriptor_requirements[^;]*ProgramInventory" OR
+   _moi_descriptor_mutation_contract MATCHES
+       "apply_moi_descriptor_requirements[^;]*ConSanTransformArtifacts")
+    message(FATAL_ERROR
+        "ConSan descriptor mutation must consume immutable inventory, not the broad transaction"
+    )
+endif()
+file(READ "${_consan_dir}/consan_placement.h" _common_placement_contract)
+if(NOT _common_placement_contract MATCHES
+       "reserved_ranges_for_existing_patches[^;]*span<const ConSanPatchInfo>")
+    message(FATAL_ERROR
+        "ConSan existing-patch reservation must consume the patch-proof span"
+    )
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_pipeline.cpp"
     "plan_consan_(record_replay|sampled|inline_shadow)_evidence"

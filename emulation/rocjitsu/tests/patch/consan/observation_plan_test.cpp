@@ -560,21 +560,18 @@ TEST(ConSanObservationPlan, CommittedLoweringRejectsExactlyItsBoundIntents) {
   result.coverage_ledger = ConSanCoverageLedger(plan);
 
   const std::array rejected_id = {ConSanProbeIntentId{1}};
-  auto rejection = make_consan_committed_lowering(
-      plan, rejected_id, std::span<const ConSanCommittedLoweringLocation>{},
-      ConSanLoweringOutcomeKind::ResourceRejected, "no scratch registers",
-      ConSanRuntimeStaticMapping{}, ConSanRegisterPlanReason::NoLegalWindow);
-  ASSERT_TRUE(rejection);
-  ASSERT_TRUE(result.coverage_ledger.publish_lowering_commit(std::move(*rejection)));
+  ASSERT_TRUE(result.coverage_ledger.publish_lowering_rejection(
+      rejected_id, ConSanLoweringOutcomeKind::ResourceRejected, "no scratch registers",
+      ConSanRegisterPlanReason::NoLegalWindow));
   EXPECT_EQ(result.coverage_ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Pending);
   EXPECT_EQ(result.coverage_ledger.intent_entry({1})->lowering,
             ConSanLoweringOutcomeKind::ResourceRejected);
   EXPECT_EQ(result.coverage_ledger.intent_entry({1})->resource_rejection_reason,
             ConSanRegisterPlanReason::NoLegalWindow);
 
-  EXPECT_FALSE(make_consan_committed_lowering(
-      plan, rejected_id, std::span<const ConSanCommittedLoweringLocation>{},
-      ConSanLoweringOutcomeKind::PlacementRejected, "wrong domain", ConSanRuntimeStaticMapping{},
+  ConSanCoverageLedger invalid_reason(plan);
+  EXPECT_FALSE(invalid_reason.publish_lowering_rejection(
+      rejected_id, ConSanLoweringOutcomeKind::PlacementRejected, "wrong domain",
       ConSanRegisterPlanReason::NoLegalWindow));
 
   const std::array both_ids = {ConSanProbeIntentId{0}, ConSanProbeIntentId{1}};

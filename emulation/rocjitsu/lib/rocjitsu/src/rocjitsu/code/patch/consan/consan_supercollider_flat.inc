@@ -195,8 +195,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                                      std::span<const ByteRange> initial_reserved_ranges) {
   const rj_code_arch_t arch = target.arch;
 
-  const std::unordered_set<uint64_t> admitted_file_offsets =
-      sc_admitted_access_file_offsets(result, ConSanAccessOrigin::Flat);
+  const std::unordered_set<uint64_t> admitted_file_offsets = sc_admitted_access_file_offsets(
+      result.program_inventory, result.observation_plan(), ConSanAccessOrigin::Flat);
   std::map<uint64_t, const ConSanAccessInventorySite *> admitted_sites;
   for (const ConSanAccessInventorySite &access : result.program_inventory.access_sites()) {
     if (access.origin != ConSanAccessOrigin::Flat ||
@@ -1192,7 +1192,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
 
     PlannedFlatCheckTrapPatch planned;
     planned.site = &site;
-    planned.intent_ids = sc_pending_access_intent_ids(result, site.physical_id);
+    planned.intent_ids = sc_pending_access_intent_ids(result.coverage_ledger, site.physical_id);
     if (planned.intent_ids.empty()) {
       result.errors.emplace_back(
           "ConSan flat check/trap proof selected a site without a pending semantic intent");

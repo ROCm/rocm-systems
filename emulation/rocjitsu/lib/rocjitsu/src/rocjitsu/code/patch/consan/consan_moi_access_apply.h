@@ -69,9 +69,9 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo>
                 static_cast<size_t>(patch_bytes));
   }
 
-  if (!apply_moi_descriptor_requirements(replacement, result, descriptor_requirements,
-                                         scalar_requirements, private_requirements,
-                                         lds_requirements, capabilities, arch,
+  if (!apply_moi_descriptor_requirements(replacement, result.program_inventory,
+                                         descriptor_requirements, scalar_requirements,
+                                         private_requirements, lds_requirements, capabilities, arch,
                                          "ConSan MOI " + std::string(probe_name), result.errors)) {
     return false;
   }

@@ -1226,6 +1226,14 @@ public:
   /// cannot diverge into independently mutable representations.
   [[nodiscard]] bool publish_lowering_commit(ConSanCommittedLowering commit);
 
+  /// Construct and publish one non-instrumented outcome against exact
+  /// plan-owned intent identity. Rejection clients supply semantic identity
+  /// and outcome only; empty location/runtime proof is owned by the ledger.
+  [[nodiscard]] bool publish_lowering_rejection(
+      std::span<const ConSanProbeIntentId> intent_ids, ConSanLoweringOutcomeKind outcome,
+      std::string detail = {},
+      std::optional<ConSanRegisterPlanReason> resource_rejection_reason = std::nullopt);
+
   /// Atomically publish a complete group of lowering transactions. No entry
   /// changes when any transaction is stale or malformed.
   [[nodiscard]] bool publish_lowering_commits(std::vector<ConSanCommittedLowering> commits);

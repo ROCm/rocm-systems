@@ -590,6 +590,15 @@ bool ConSanCoverageLedger::publish_lowering_commit(ConSanCommittedLowering commi
   return true;
 }
 
+bool ConSanCoverageLedger::publish_lowering_rejection(
+    std::span<const ConSanProbeIntentId> intent_ids, ConSanLoweringOutcomeKind outcome,
+    std::string detail, std::optional<ConSanRegisterPlanReason> resource_rejection_reason) {
+  auto commit = make_consan_committed_lowering(
+      observation_plan_, intent_ids, std::span<const ConSanCommittedLoweringLocation>{}, outcome,
+      std::move(detail), ConSanRuntimeStaticMapping{}, resource_rejection_reason);
+  return commit && publish_lowering_commit(std::move(*commit));
+}
+
 bool ConSanCoverageLedger::publish_lowering_commits(std::vector<ConSanCommittedLowering> commits) {
   ConSanCoverageLedger next = *this;
   for (ConSanCommittedLowering &commit : commits) {

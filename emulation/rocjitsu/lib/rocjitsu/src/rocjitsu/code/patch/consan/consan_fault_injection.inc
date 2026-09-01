@@ -723,8 +723,8 @@ ConSanFaultPlanningResult build_fault_mutation_plan(const ConSanOptions &options
   return result;
 }
 
-[[nodiscard]] bool has_proof_nop_candidate(const ConSanTransformArtifacts &result) {
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+[[nodiscard]] bool has_proof_nop_candidate(const ProgramInventory &inventory) {
+  for (const ConSanKernelInfo &kernel : inventory.kernels()) {
     if (kernel.preflight_action == ConSanPreflightAction::Candidate)
       return true;
   }
@@ -738,7 +738,7 @@ void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch
         "ConSan proof NOP patch skipped ROCclr runtime helper code object");
     return;
   }
-  if (!has_proof_nop_candidate(result)) {
+  if (!has_proof_nop_candidate(result.program_inventory)) {
     result.warnings.emplace_back(
         "ConSan proof NOP patch skipped code object without supported DBI candidate "
         "sites");
@@ -2160,15 +2160,15 @@ void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_a
 }
 
 [[nodiscard]] const ConSanAccessInventorySite *
-find_first_supported_lds_read_b32_site(const ConSanTransformArtifacts &result) {
+find_first_supported_lds_read_b32_site(const ProgramInventory &inventory) {
   const ConSanAccessInventorySite *best = nullptr;
-  for (const ConSanAccessInventorySite &site : result.program_inventory.access_sites()) {
+  for (const ConSanAccessInventorySite &site : inventory.access_sites()) {
     if (!site.container.is_kernel() || !site.container.kernel_descriptor_file_offset ||
         site.origin != ConSanAccessOrigin::NativeLds || site.kind != ConSanLdsAccessKind::Read ||
         !site.lowering.replay_guest_access.available() || site.decoded_width_bits != 32)
       continue;
-    const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_descriptor(
-        *site.container.kernel_descriptor_file_offset);
+    const ConSanKernelInfo *kernel =
+        inventory.find_kernel_by_descriptor(*site.container.kernel_descriptor_file_offset);
     if (kernel == nullptr || kernel->preflight_action == ConSanPreflightAction::Blocked)
       continue;
     if (best == nullptr || site.file_offset < best->file_offset)
@@ -2179,7 +2179,8 @@ find_first_supported_lds_read_b32_site(const ConSanTransformArtifacts &result) {
 
 void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                 ConSanTransformArtifacts &result) {
-  const ConSanAccessInventorySite *site = find_first_supported_lds_read_b32_site(result);
+  const ConSanAccessInventorySite *site =
+      find_first_supported_lds_read_b32_site(result.program_inventory);
   if (site == nullptr) {
     result.warnings.emplace_back("ConSan LDS endpgm proof found no supported ds_read_b32 site");
     return;

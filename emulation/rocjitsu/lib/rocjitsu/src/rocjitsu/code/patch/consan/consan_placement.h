@@ -64,7 +64,7 @@ struct KernelMaxRegisterRefs {
 [[nodiscard]] bool overlaps_reserved_range(std::span<const ByteRange> ranges, ByteRange range);
 [[nodiscard]] std::optional<std::vector<ByteRange>>
 reserved_ranges_for_existing_patches(const AmdGpuCodeObject &code_object,
-                                     const ConSanTransformArtifacts &result);
+                                     std::span<const ConSanPatchInfo> patches);
 
 [[nodiscard]] std::vector<LocalNopCave>
 find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ProgramInventory &inventory,

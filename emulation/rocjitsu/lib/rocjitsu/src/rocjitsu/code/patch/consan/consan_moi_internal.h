@@ -53,12 +53,6 @@ struct MoiObjectModeSemantics {
 
 namespace rocjitsu {
 
-/// Return the current code-object image after any already committed MOI
-/// mutation. Incremental lowering must inspect this image rather than the
-/// original bytes once a preceding engine component has emitted a patch.
-[[nodiscard]] std::span<const uint8_t> active_moi_bytes(std::span<const uint8_t> original,
-                                                        const ConSanTransformArtifacts &result);
-
 /// Immutable input to one MOI resource-solving run.
 ///
 /// The problem binds the exact image and target to effective semantic request,

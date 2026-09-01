@@ -4041,8 +4041,9 @@ implementation. The explicit contract costs 17 implementation lines, reducing
 the cumulative shrink to 33 lines; this is locality progress but emphatically
 not the material code-size evidence required by Section 14.8. Other reviewed
 common mode budgets, broad mutable products, remaining target locality, legacy
-harvesting, both complete extension exercises, and the independent completion
-audit remain open. The goal therefore remains active.
+harvesting, and the independent completion audit remain open. Section 14.4's
+two extension exercises remain complete and enforced. The goal therefore
+remains active.
 
 ### 16.45 Convergence checkpoint 44: operation-composed shared barriers
 
@@ -4115,9 +4116,10 @@ semantic operations, a new mode can reuse those operations without shared or
 target edits, two parallel authorities are harvested, enforcement is tighter,
 coverage grows, and production shrinks. The cumulative 52-line reduction is
 still not material for a 91-thousand-line implementation, however. Remaining
-target locality, broad mutable products, larger deletion opportunities, the
-target-side extension exercise, and the independent Section 14 completion
-audit remain open. The goal therefore remains active.
+target locality, broad mutable products, larger deletion opportunities, and the
+independent Section 14 completion audit remain open. Section 14.4's two
+extension exercises remain complete and enforced. The goal therefore remains
+active.
 
 ### 16.46 Convergence checkpoint 45: immutable object-mode semantics
 
@@ -4185,9 +4187,9 @@ above the starting baseline. That is an honestly recorded migration cost, not
 Section 14.8 progress, and it increases the urgency of converging or deleting
 the wide plumbing that made a two-field product expensive to carry. Remaining
 target locality, broad mutable products and transactions, larger legacy
-harvesting, material whole-refactoring shrinkage, the target-side extension
-exercise, and the independent Section 14 completion audit remain open. The
-goal therefore remains active.
+harvesting, material whole-refactoring shrinkage, and the independent Section
+14 completion audit remain open. Section 14.4's two extension exercises remain
+complete and enforced. The goal therefore remains active.
 
 ### 16.47 Convergence checkpoint 46: mode-owned report ABI selection
 
@@ -4243,9 +4245,9 @@ legacy helpers are gone, coverage grows, and production shrinks by eighteen
 implementation lines. The whole refactoring is again net-negative, but a
 four-line cumulative reduction is not material. Remaining target locality,
 broad mutable products and transactions, larger legacy harvesting, material
-whole-refactoring shrinkage, the target-side extension exercise, and the
-independent Section 14 completion audit remain open. The goal therefore remains
-active.
+whole-refactoring shrinkage, and the independent Section 14 completion audit
+remain open. Section 14.4's two extension exercises remain complete and
+enforced. The goal therefore remains active.
 
 ### 16.48 Convergence checkpoint 47: immutable resource-planning input
 
@@ -4305,9 +4307,9 @@ The main resource solver now has one immutable input authority and a typed
 forward result, while production shrinks by another eighteen implementation
 lines. The cumulative twenty-two-line reduction is still not material.
 Remaining target locality, operating-point and transaction breadth, larger
-legacy harvesting, material whole-refactoring shrinkage, the target-side
-extension exercise, and the independent Section 14 completion audit remain
-open. The goal therefore remains active.
+legacy harvesting, material whole-refactoring shrinkage, and the independent
+Section 14 completion audit remain open. Section 14.4's two extension exercises
+remain complete and enforced. The goal therefore remains active.
 
 ### 16.49 Convergence checkpoint 48: plan-owned synchronization commits
 
@@ -4364,9 +4366,10 @@ This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, 14.8, and
 14.9. It deletes another duplicated cross-mode mechanism and brings the
 cumulative implementation reduction to thirty-nine lines. That is still not
 material. Remaining target locality, operating-point and transaction breadth,
-larger legacy harvesting, material whole-refactoring shrinkage, the target-side
-extension exercise, and the independent Section 14 completion audit remain
-open. The goal therefore remains active.
+larger legacy harvesting, material whole-refactoring shrinkage, and the
+independent Section 14 completion audit remain open. Section 14.4's two
+extension exercises remain complete and enforced. The goal therefore remains
+active.
 
 ### 16.50 Convergence checkpoint 49: shared instrumented-patch geometry
 
@@ -4426,6 +4429,70 @@ their distinct attribution and applicability rules, a broad transaction input
 is narrowed, coverage grows, and production shrinks. The cumulative
 fifty-eight-line implementation reduction is still not material. Remaining
 target locality, operating-point and transaction breadth, larger legacy
-harvesting, material whole-refactoring shrinkage, the target-side extension
-exercise, and the independent Section 14 completion audit remain open. The
-goal therefore remains active.
+harvesting, material whole-refactoring shrinkage, and the independent Section
+14 completion audit remain open. Section 14.4's two extension exercises remain
+complete and enforced. The goal therefore remains active.
+
+### 16.51 Convergence checkpoint 50: narrow read-only transformation boundaries
+
+A deep read of the remaining broad transformation-transaction inputs separated
+mutation ownership from read-only proof consumption. Synchronization analysis,
+descriptor mutation, existing-patch reservation, SuperCollider selection, and
+fault-candidate queries accepted the complete `ConSanTransformArtifacts`
+transaction even though they read only one immutable product. MOI candidate
+image selection was a free helper that also inspected the transaction, while
+three rejection paths independently constructed empty-location semantic
+commits before publishing them to the coverage ledger.
+
+Read-only component boundaries now consume the exact product they require:
+`ProgramInventory`, `ConSanObservationPlan`, `ConSanCoverageLedger`, or a span
+of committed `ConSanPatchInfo` proof. The explicit patch-proof spans account
+for the small increase in `ConSanPatchInfo` references; they replace a much
+broader and less informative dependency. The transformation transaction itself
+owns selection of its current candidate image, and remains visible only where
+mutation and rollback are actually coordinated. The coverage ledger now owns
+construction and publication of non-instrumented outcomes through
+`publish_lowering_rejection`; MOI terminal rejection, SuperCollider rejection,
+and runtime-binding rollback no longer manufacture semantic commits locally.
+Raw semantic-commit construction is confined to the access-policy authority
+and the shared placement adapter that converts committed patch geometry into
+instrumented proof.
+
+The architecture gate rejects const broad-transaction inputs from the migrated
+read-only clients, rejects the retired free candidate-image helper everywhere,
+requires descriptor mutation to consume program inventory and patch
+reservation to consume patch proof, and rejects raw semantic-commit
+construction outside its two declared owners. The existing direct coverage
+test now exercises the ledger-owned rejection operation, including rejection
+of an invalid reason/outcome pairing. No behavior defect was established in
+this slice.
+
+| Signal | Checkpoint 50 | Cumulative change | Slice change from checkpoint 49 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,395 | +420 | 0 |
+| Nonblank production lines | 99,112 | +29 | 0 |
+| Production implementation lines | 91,391 | **-59** | **-1** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **175 / 52** | **-101 / -5** | **-20 / -4** |
+| `ConSanPatchInfo` references / files | 210 / 30 | +10 / +2 | +4 / +2 |
+| `ConSanMoiOperatingPoint` references / files | 357 / 63 | +67 / +12 | 0 / 0 |
+| Raw semantic-commit construction owners | **2** | n/a | converged |
+| Retired free candidate-image helpers | **0** | n/a | **-1** |
+| Test inventory | **5,382** | **+37** | 0 |
+
+Validation includes a final-tree `-j16` build; 36 focused boundary, coverage,
+and pipeline tests; the exact architecture-boundary test; and all 4,747
+nonphysical tests over the five emulated targets at `-j16`. No test was
+removed, renamed, disabled, or replaced. This host-side ownership slice does
+not change emitted bytes; checkpoint 49's immediately preceding complete 635-
+test serialized gfx1201 result remains the periodic physical baseline.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, and 14.9.
+The broad transaction surface contracted materially, but the one-line slice
+reduction and cumulative fifty-nine-line implementation reduction are not yet
+material code-size convergence. Section 14.4's mode and target extension
+fixtures remain complete and enforced since checkpoint 17. Remaining target
+locality, operating-point and mutable-transaction breadth, larger legacy
+harvesting, material whole-refactoring shrinkage, and the independent Section
+14 completion audit remain open. The goal therefore remains active.

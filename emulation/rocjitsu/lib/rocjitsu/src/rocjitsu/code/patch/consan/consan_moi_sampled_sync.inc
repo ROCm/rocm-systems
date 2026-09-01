@@ -899,7 +899,7 @@ void try_apply_sampled_barrier_sync_patch(
   if (candidates.size() > options.max_patches)
     candidates.resize(options.max_patches);
 
-  const std::span<const uint8_t> active_bytes = active_moi_bytes(bytes, result);
+  const std::span<const uint8_t> active_bytes = result.active_bytes(bytes);
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -1014,10 +1014,10 @@ void try_apply_sampled_barrier_sync_patch(
     result.warnings.emplace_back("ConSan MOI sampled barrier sync found no patchable sequence");
     return;
   }
-  if (!apply_moi_descriptor_requirements(patcher, code_object, result, descriptor_requirements,
-                                         MoiDescriptorSgprRequirements{}, private_requirements,
-                                         nullptr, nullptr, arch, "ConSan MOI sampled barrier sync",
-                                         result.errors))
+  if (!apply_moi_descriptor_requirements(patcher, code_object, result.program_inventory,
+                                         descriptor_requirements, MoiDescriptorSgprRequirements{},
+                                         private_requirements, nullptr, nullptr, arch,
+                                         "ConSan MOI sampled barrier sync", result.errors))
     return;
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
@@ -1628,7 +1628,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     return;
   }
 
-  const std::span<const uint8_t> active_bytes = active_moi_bytes(bytes, result);
+  const std::span<const uint8_t> active_bytes = result.active_bytes(bytes);
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -2036,10 +2036,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     result.warnings.emplace_back("ConSan MOI sampled atomic sync found no patchable sequence");
     return;
   }
-  if (!apply_moi_descriptor_requirements(patcher, code_object, result, descriptor_requirements,
-                                         MoiDescriptorSgprRequirements{}, private_requirements,
-                                         nullptr, nullptr, arch, "ConSan MOI sampled atomic sync",
-                                         result.errors))
+  if (!apply_moi_descriptor_requirements(patcher, code_object, result.program_inventory,
+                                         descriptor_requirements, MoiDescriptorSgprRequirements{},
+                                         private_requirements, nullptr, nullptr, arch,
+                                         "ConSan MOI sampled atomic sync", result.errors))
     return;
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());

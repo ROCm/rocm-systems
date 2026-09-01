@@ -1702,7 +1702,7 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
         "ConSan MOI could not resolve every replacement owner while enabling workgroup IDs");
     return false;
   }
-  if (!apply_moi_descriptor_requirements(patcher, code_object, result,
+  if (!apply_moi_descriptor_requirements(patcher, code_object, result.program_inventory,
                                          MoiDescriptorVgprRequirements{}, scalar_requirements,
                                          MoiDescriptorPrivateRequirements{}, nullptr, nullptr, arch,
                                          "ConSan MOI full workgroup-ID payload", result.errors))
@@ -2132,9 +2132,9 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
                                    static_cast<uint16_t>(required));
   }
   if (!apply_moi_descriptor_requirements(
-          patcher, code_object, result, MoiDescriptorVgprRequirements{}, dispatch_sgpr_requirements,
-          private_requirements, nullptr, nullptr, arch, "ConSan MOI private-epoch prologue",
-          result.errors))
+          patcher, code_object, result.program_inventory, MoiDescriptorVgprRequirements{},
+          dispatch_sgpr_requirements, private_requirements, nullptr, nullptr, arch,
+          "ConSan MOI private-epoch prologue", result.errors))
     return;
   for (const PlannedPrivateEpochPrologue &item : planned) {
     if (item.emission.dispatch_capture.present() &&
@@ -2367,7 +2367,7 @@ void try_apply_owner_epoch_prologue_patch(
     return;
   }
 
-  const std::span<const uint8_t> active_bytes = active_moi_bytes(bytes, result);
+  const std::span<const uint8_t> active_bytes = result.active_bytes(bytes);
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -2807,8 +2807,8 @@ void try_apply_owner_epoch_prologue_patch(
     note_maximum_descriptor_extent(prologue_sgpr_requirements, canonical->descriptor_file_offset,
                                    item.required_sgpr_count);
   }
-  if (!apply_moi_descriptor_requirements(patcher, code_object, result, prologue_vgpr_requirements,
-                                         prologue_sgpr_requirements,
+  if (!apply_moi_descriptor_requirements(patcher, code_object, result.program_inventory,
+                                         prologue_vgpr_requirements, prologue_sgpr_requirements,
                                          MoiDescriptorPrivateRequirements{}, nullptr, nullptr, arch,
                                          "ConSan MOI owner/epoch prologue", result.errors))
     return;

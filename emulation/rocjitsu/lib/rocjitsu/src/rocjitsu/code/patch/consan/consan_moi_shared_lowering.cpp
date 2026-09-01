@@ -510,28 +510,28 @@ moi_descriptor_policy(const RuntimeCapabilities *capabilities, rj_code_arch_t ar
 
 bool apply_moi_descriptor_requirements(
     CodeObjectPatcher &patcher, const AmdGpuCodeObject &active_code_object,
-    const ConSanTransformArtifacts &result, const MoiDescriptorVgprRequirements &vgprs,
+    const ProgramInventory &program_inventory, const MoiDescriptorVgprRequirements &vgprs,
     const MoiDescriptorSgprRequirements &sgprs,
     const MoiDescriptorPrivateRequirements &private_segment_bytes,
     const MoiDescriptorLdsRequirements *group_segment_bytes,
     const RuntimeCapabilities *capabilities, rj_code_arch_t arch, std::string_view subject,
     std::vector<std::string> &errors) {
   return apply_consan_descriptor_mutations_to_patcher(
-      patcher, result.program_inventory, active_code_object,
+      patcher, program_inventory, active_code_object,
       {vgprs, sgprs, private_segment_bytes,
        group_segment_bytes == nullptr ? kNoMoiLdsRequirements : *group_segment_bytes},
       moi_descriptor_policy(capabilities, arch), arch, subject, errors);
 }
 
 bool apply_moi_descriptor_requirements(
-    std::vector<uint8_t> &image, const ConSanTransformArtifacts &result,
+    std::vector<uint8_t> &image, const ProgramInventory &program_inventory,
     const MoiDescriptorVgprRequirements &vgprs, const MoiDescriptorSgprRequirements &sgprs,
     const MoiDescriptorPrivateRequirements &private_segment_bytes,
     const MoiDescriptorLdsRequirements *group_segment_bytes,
     const RuntimeCapabilities *capabilities, rj_code_arch_t arch, std::string_view subject,
     std::vector<std::string> &errors) {
   return apply_consan_descriptor_mutations_to_bytes(
-      image, result.program_inventory,
+      image, program_inventory,
       {vgprs, sgprs, private_segment_bytes,
        group_segment_bytes == nullptr ? kNoMoiLdsRequirements : *group_segment_bytes},
       moi_descriptor_policy(capabilities, arch), arch, subject, errors);

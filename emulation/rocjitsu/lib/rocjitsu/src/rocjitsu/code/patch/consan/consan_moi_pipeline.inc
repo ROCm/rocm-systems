@@ -125,13 +125,11 @@ void publish_pending_moi_lowering_rejections(
     }
     if (pending.empty())
       continue;
-    auto commit = make_consan_committed_lowering(
-        result.observation_plan(), pending, std::span<const ConSanCommittedLoweringLocation>{},
-        ConSanLoweringOutcomeKind::ResourceRejected,
-        "MOI resource plan rejected intents: " +
-            std::string(consan_register_plan_reason_name(plan.reason)),
-        ConSanRuntimeStaticMapping{}, plan.reason);
-    if (!commit || !result.coverage_ledger.publish_lowering_commit(std::move(*commit))) {
+    if (!result.coverage_ledger.publish_lowering_rejection(
+            pending, ConSanLoweringOutcomeKind::ResourceRejected,
+            "MOI resource plan rejected intents: " +
+                std::string(consan_register_plan_reason_name(plan.reason)),
+            plan.reason)) {
       result.errors.emplace_back("ConSan MOI could not publish a resource rejection");
       return;
     }
@@ -142,19 +140,16 @@ void publish_pending_moi_lowering_rejections(
     if (entry == nullptr || entry->lowering != ConSanLoweringOutcomeKind::Pending)
       continue;
     const std::array<ConSanProbeIntentId, 1> ids = {intent.id};
-    auto commit = whole_transform_resource_failure
-                      ? make_consan_committed_lowering(
-                            result.observation_plan(), ids,
-                            std::span<const ConSanCommittedLoweringLocation>{},
-                            ConSanLoweringOutcomeKind::ResourceRejected,
-                            "MOI whole-transform resource validation rejected the admitted intent",
-                            ConSanRuntimeStaticMapping{}, *whole_transform_resource_failure)
-                      : make_consan_committed_lowering(
-                            result.observation_plan(), ids,
-                            std::span<const ConSanCommittedLoweringLocation>{},
-                            ConSanLoweringOutcomeKind::PlacementRejected,
-                            "MOI lowerer selected no placement for the admitted intent");
-    if (!commit || !result.coverage_ledger.publish_lowering_commit(std::move(*commit))) {
+    const ConSanLoweringOutcomeKind outcome = whole_transform_resource_failure
+                                                  ? ConSanLoweringOutcomeKind::ResourceRejected
+                                                  : ConSanLoweringOutcomeKind::PlacementRejected;
+    const std::string_view detail = whole_transform_resource_failure
+                                        ? "MOI whole-transform resource validation rejected the "
+                                          "admitted intent"
+                                        : "MOI lowerer selected no placement for the admitted "
+                                          "intent";
+    if (!result.coverage_ledger.publish_lowering_rejection(ids, outcome, std::string(detail),
+                                                           whole_transform_resource_failure)) {
       result.errors.emplace_back("ConSan MOI could not publish a placement rejection");
       return;
     }

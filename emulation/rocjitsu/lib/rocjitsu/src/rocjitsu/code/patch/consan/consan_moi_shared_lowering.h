@@ -54,7 +54,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
 
 [[nodiscard]] bool apply_moi_descriptor_requirements(
     CodeObjectPatcher &patcher, const AmdGpuCodeObject &active_code_object,
-    const ConSanTransformArtifacts &result, const MoiDescriptorVgprRequirements &vgprs,
+    const ProgramInventory &program_inventory, const MoiDescriptorVgprRequirements &vgprs,
     const MoiDescriptorSgprRequirements &sgprs,
     const MoiDescriptorPrivateRequirements &private_segment_bytes,
     const MoiDescriptorLdsRequirements *group_segment_bytes,
@@ -62,7 +62,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     std::vector<std::string> &errors);
 
 [[nodiscard]] bool apply_moi_descriptor_requirements(
-    std::vector<uint8_t> &image, const ConSanTransformArtifacts &result,
+    std::vector<uint8_t> &image, const ProgramInventory &program_inventory,
     const MoiDescriptorVgprRequirements &vgprs, const MoiDescriptorSgprRequirements &sgprs,
     const MoiDescriptorPrivateRequirements &private_segment_bytes,
     const MoiDescriptorLdsRequirements *group_segment_bytes,
