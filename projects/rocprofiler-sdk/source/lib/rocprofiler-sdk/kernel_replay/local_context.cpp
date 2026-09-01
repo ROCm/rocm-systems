@@ -46,9 +46,9 @@ record_override(rocprofiler_context_id_t context_id, bool active)
     // Only contexts globally active when the loop began may be toggled: a local start must not
     // promote a globally-stopped context (its service/callback thread is stopped), and there is
     // nothing to stop for one either. Reject and record nothing otherwise. (C3)
-    if(tl_control->pre_active.count(context_id.handle) == 0)
+    if(tl_control->pre_active.count(context_id) == 0)
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
-    tl_control->overrides[context_id.handle] = active;
+    tl_control->overrides[context_id] = active;
     return ROCPROFILER_STATUS_SUCCESS;
 }
 }  // namespace
@@ -57,7 +57,8 @@ scoped_local_context_control::scoped_local_context_control(
     const context::context_array_t& active_contexts)
 {
     for(const auto* ctx : active_contexts)
-        if(ctx != nullptr) m_control.pre_active.emplace(ctx->context_idx);
+        if(ctx != nullptr)
+            m_control.pre_active.emplace(rocprofiler_context_id_t{.handle = ctx->context_idx});
     tl_control = &m_control;
 }
 
@@ -91,7 +92,7 @@ std::optional<bool>
 local_context_override(rocprofiler_context_id_t context_id)
 {
     if(tl_control == nullptr) return std::nullopt;
-    auto itr = tl_control->overrides.find(context_id.handle);
+    auto itr = tl_control->overrides.find(context_id);
     if(itr == tl_control->overrides.end()) return std::nullopt;
     return itr->second;
 }
