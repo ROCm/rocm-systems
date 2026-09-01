@@ -125,6 +125,24 @@ register_agents_and_find_traceable(thread_trace::DispatchThreadTracer&          
 
     return nullptr;
 }
+
+// pre_kernel_call() only reaches dispatch_cb_fn once the tracer's agent map and the fake queue's
+// AgentCache resolve to the same hsa_agent_t and the agent admits a dispatch. Neither is something
+// the override decides, so establish that a dispatch lands before asserting anything about the
+// override. Without this the forced-off expectation below passes on a node that never dispatches
+// at all, which is indistinguishable from the skip it is meant to prove.
+bool
+baseline_reaches_dispatch_cb(thread_trace::DispatchThreadTracer& tracer,
+                             const hsa::Queue&                   queue,
+                             std::atomic<int>&                   hits,
+                             rocprofiler_user_data_t*            user_data)
+{
+    hits.store(0);
+    tracer.pre_kernel_call(queue, /*kernel_id=*/1, /*dispatch_id=*/0, user_data, nullptr);
+    const bool reached = hits.load() == 1;
+    hits.store(0);
+    return reached;
+}
 }  // namespace
 
 TEST(thread_trace, local_context_override_skips_pre_kernel_call)
@@ -158,8 +176,18 @@ TEST(thread_trace, local_context_override_skips_pre_kernel_call)
     context::context dummy{};
     dummy.context_idx = params.context_id.handle;
 
-    tracer.pre_kernel_call(fq, /*kernel_id=*/1, /*dispatch_id=*/1, &user_data, nullptr);
-    EXPECT_EQ(hits.load(), 1);
+    // Separate the two ways a missing baseline can arise: an override left behind outside a replay
+    // loop is a defect in the code under test and must fail here, whereas an agent that cannot
+    // deliver a dispatch at all is an environment limit and skips below.
+    ASSERT_FALSE(kernel_replay::local_context_override(params.context_id).has_value())
+        << "no replay loop is active, so this context must carry no override";
+
+    if(!baseline_reaches_dispatch_cb(tracer, fq, hits, &user_data))
+    {
+        tracer.resource_deinit();
+        GTEST_SKIP() << "no dispatch reaches the ATT callback through a fake queue on this agent, "
+                        "so a forced-off skip cannot be told apart from no dispatch at all";
+    }
 
     {
         auto                                        active = as_active(dummy);
@@ -176,7 +204,7 @@ TEST(thread_trace, local_context_override_skips_pre_kernel_call)
 
     hits.store(0);
     tracer.pre_kernel_call(fq, /*kernel_id=*/1, /*dispatch_id=*/3, &user_data, nullptr);
-    EXPECT_EQ(hits.load(), 1);
+    EXPECT_EQ(hits.load(), 1) << "the local stop must not outlive the replay loop";
 
     tracer.resource_deinit();
 }
@@ -211,6 +239,16 @@ TEST(thread_trace, local_context_override_forced_on_still_invokes_dispatch_cb)
 
     context::context dummy{};
     dummy.context_idx = params.context_id.handle;
+
+    ASSERT_FALSE(kernel_replay::local_context_override(params.context_id).has_value())
+        << "no replay loop is active, so this context must carry no override";
+
+    if(!baseline_reaches_dispatch_cb(tracer, fq, hits, &user_data))
+    {
+        tracer.resource_deinit();
+        GTEST_SKIP() << "no dispatch reaches the ATT callback through a fake queue on this agent, "
+                        "so a forced-on dispatch would prove nothing";
+    }
 
     {
         auto                                        active = as_active(dummy);
