@@ -1,0 +1,24 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# CMake package configuration for libamdcuid.
+#
+# Usage:
+#     find_package(amdcuid CONFIG REQUIRED)
+#     target_link_libraries(mytarget PRIVATE amdcuid::amdcuid)
+#
+# The imported target carries its own include directory, so a consumer never
+# needs to name a path. That is the point: the previous integration paired a
+# find_library() with a separately guessed include directory, which can be
+# right in one half and wrong in the other.
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# The only external dependency is the platform CSPRNG. On Windows that is
+# bcrypt, which the exported target links; on POSIX it is getrandom(2) in libc.
+# SHA-256 and HMAC are in-tree, so there is deliberately no OpenSSL here.
+
+include("${CMAKE_CURRENT_LIST_DIR}/amdcuid-targets.cmake")
+
+check_required_components(amdcuid)
