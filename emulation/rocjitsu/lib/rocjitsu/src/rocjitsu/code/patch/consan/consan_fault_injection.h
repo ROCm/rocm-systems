@@ -9,40 +9,18 @@
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_fault_planning.h"
 
-#include <cstddef>
+#include <span>
 
 namespace rocjitsu {
 
 class AmdGpuCodeObject;
 
-[[nodiscard]] size_t applied_fault_mutation_count(const ConSanTransformArtifacts &result);
-
-void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                        const ConSanFaultMutationPlan &plan,
-                                        ConSanTransformArtifacts &result);
-void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
-                                            const ConSanFaultMutationPlan &plan,
-                                            ConSanTransformArtifacts &result);
-void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_object,
-                                               const ConSanFaultMutationPlan &plan,
-                                               ConSanTransformArtifacts &result);
-void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                        const ConSanFaultMutationPlan &plan,
-                                        const ConSanPatchedImageGrowthLimit &growth_limit,
-                                        ConSanTransformArtifacts &result);
-void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                  const ConSanFaultMutationPlan *address_plan,
-                                  const ConSanFaultMutationPlan *order_plan,
-                                  const ConSanFaultMutationPlan *scope_plan,
+/// Validate and apply one complete set of typed fault plans. Exact mutation
+/// mechanisms and their composition order are private to the fault component.
+void apply_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
+                                  const ConSanOptions &context,
+                                  std::span<const ConSanFaultMutationPlan> plans,
                                   ConSanTransformArtifacts &result);
-void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                               const ConSanFaultMutationPlan &plan,
-                               ConSanTransformArtifacts &result);
-void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
-                                    const ConSanFaultMutationPlan *address_plan,
-                                    const ConSanFaultMutationPlan *order_plan,
-                                    const ConSanFaultMutationPlan *scope_plan,
-                                    ConSanTransformArtifacts &result);
 
 void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                bool force_trampoline, ConSanTransformArtifacts &result);

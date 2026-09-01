@@ -107,7 +107,7 @@ void compose_consan_fault_mutation(std::span<const uint8_t> code_object_bytes,
                                    ConSanTransformArtifacts &result) {
   AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
   const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
-  apply_fault_mutation_to_inventory(code_object, arch, context, plans, result);
+  apply_consan_fault_mutations(code_object, arch, context, plans, result);
 }
 
 } // namespace rocjitsu

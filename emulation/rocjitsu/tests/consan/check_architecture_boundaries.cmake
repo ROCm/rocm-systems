@@ -877,8 +877,14 @@ if(NOT _fault_planning_contract MATCHES "ConSanFaultPlanningInput" OR
     message(FATAL_ERROR "ConSan fault planning lost its explicit input/product contract")
 endif()
 file(READ "${_consan_dir}/consan_fault_injection.h" _fault_application_contract)
+if(NOT _fault_application_contract MATCHES
+   "apply_consan_fault_mutations[^;]*ConSanFaultMutationPlan")
+    message(FATAL_ERROR
+        "ConSan fault application lost its one complete typed-plan transaction"
+    )
+endif()
 foreach(
-    _typed_fault_application
+    _private_fault_mechanism
     IN ITEMS
        try_apply_barrier_drop_fault_patch
        try_apply_barrier_move_fault_patch
@@ -888,13 +894,19 @@ foreach(
        try_apply_lds_fault_patch
        try_apply_ordinary_fault_patch
 )
-    if(NOT _fault_application_contract MATCHES
-       "${_typed_fault_application}[^;]*ConSanFaultMutationPlan")
+    if(_fault_application_contract MATCHES "${_private_fault_mechanism}")
         message(FATAL_ERROR
-            "ConSan fault application must consume its retained typed plan: ${_typed_fault_application}"
+            "ConSan fault mechanism leaked through the component contract: ${_private_fault_mechanism}"
         )
     endif()
 endforeach()
+file(READ "${_consan_dir}/consan_composition.inc" _fault_composition_body)
+if(_fault_composition_body MATCHES "find_fault_plan" OR
+   _fault_composition_body MATCHES "try_apply_.*fault_patch")
+    message(FATAL_ERROR
+        "ConSan composition must not rediscover or dispatch private fault mechanisms"
+    )
+endif()
 
 file(READ "${_consan_dir}/consan_growth_policy.h" _growth_policy_contract)
 if(_growth_policy_contract MATCHES "ConSanOptions" OR

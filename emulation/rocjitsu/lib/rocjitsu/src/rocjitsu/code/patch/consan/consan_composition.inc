@@ -280,123 +280,6 @@ void clear_fault_mutation_kinds(MutationRequest &request) {
   request.fault_ordinary_weaken_scope = false;
 }
 
-[[nodiscard]] const ConSanFaultMutationPlan *
-find_fault_plan(std::span<const ConSanFaultMutationPlan> plans, ConSanFaultMutationKind kind) {
-  const auto plan = std::ranges::find(plans, kind, &ConSanFaultMutationPlan::kind);
-  return plan == plans.end() ? nullptr : &*plan;
-}
-
-[[nodiscard]] bool validate_fault_application_plans(std::span<const ConSanFaultMutationPlan> plans,
-                                                    const ProgramInventory &inventory,
-                                                    ConSanTransformArtifacts &result) {
-  for (size_t index = 0; index < plans.size(); ++index) {
-    const ConSanFaultMutationPlan &plan = plans[index];
-    if (!plan.well_formed()) {
-      result.errors.emplace_back("ConSan fault application received malformed typed plan " +
-                                 std::to_string(index));
-      return false;
-    }
-    if (plan.source_code_object != inventory.code_object_id()) {
-      result.errors.emplace_back(
-          "ConSan fault application rejected a plan from a different pristine code object");
-      return false;
-    }
-    if (std::ranges::count(plans, plan.kind, &ConSanFaultMutationPlan::kind) != 1) {
-      result.errors.emplace_back(
-          "ConSan fault application received duplicate plans for one mutation kind");
-      return false;
-    }
-  }
-  return true;
-}
-
-void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                       const ConSanOptions &context,
-                                       std::span<const ConSanFaultMutationPlan> plans,
-                                       ConSanTransformArtifacts &result) {
-  if (!validate_fault_application_plans(plans, result.program_inventory, result))
-    return;
-
-  if (const ConSanFaultMutationPlan *plan =
-          find_fault_plan(plans, ConSanFaultMutationKind::DropBarrier)) {
-    try_apply_barrier_drop_fault_patch(code_object, arch, *plan, result);
-  }
-  if (const ConSanFaultMutationPlan *plan =
-          find_fault_plan(plans, ConSanFaultMutationKind::MoveBarrierPair);
-      plan != nullptr && result.errors.empty()) {
-    try_apply_barrier_move_fault_patch(code_object, arch, *plan, context.patched_image_growth_limit,
-                                       result);
-  }
-  if (const ConSanFaultMutationPlan *plan =
-          find_fault_plan(plans, ConSanFaultMutationKind::BarrierIdScope);
-      plan != nullptr && result.errors.empty()) {
-    try_apply_barrier_id_scope_fault_patch(code_object, *plan, result);
-  }
-  if (const ConSanFaultMutationPlan *plan =
-          find_fault_plan(plans, ConSanFaultMutationKind::BarrierParticipantCount);
-      plan != nullptr && result.errors.empty() &&
-      result.outcome != ConSanTransformOutcome::Unsupported) {
-    try_apply_barrier_participant_fault_patch(code_object, *plan, result);
-  }
-
-  const ConSanFaultMutationPlan *atomic_address =
-      find_fault_plan(plans, ConSanFaultMutationKind::AtomicWrongAddress);
-  const ConSanFaultMutationPlan *atomic_order =
-      find_fault_plan(plans, ConSanFaultMutationKind::AtomicWeakenOrder);
-  const ConSanFaultMutationPlan *atomic_scope =
-      find_fault_plan(plans, ConSanFaultMutationKind::AtomicWeakenScope);
-  if ((atomic_address || atomic_order || atomic_scope) && result.errors.empty()) {
-    const ConSanFaultMutationPlan &primary =
-        atomic_address ? *atomic_address : (atomic_order ? *atomic_order : *atomic_scope);
-    if ((atomic_address && atomic_address->primary_identity != primary.primary_identity) ||
-        (atomic_order && atomic_order->primary_identity != primary.primary_identity) ||
-        (atomic_scope && atomic_scope->primary_identity != primary.primary_identity)) {
-      result.errors.emplace_back(
-          "ConSan atomic fault plans do not describe one composed semantic target");
-    } else {
-      try_apply_atomic_fault_patch(code_object, arch, atomic_address, atomic_order, atomic_scope,
-                                   result);
-    }
-  }
-  if (const ConSanFaultMutationPlan *plan =
-          find_fault_plan(plans, ConSanFaultMutationKind::LdsWrongAddress);
-      plan != nullptr && result.errors.empty()) {
-    try_apply_lds_fault_patch(code_object, arch, *plan, result);
-  }
-
-  const ConSanFaultMutationPlan *ordinary_address =
-      find_fault_plan(plans, ConSanFaultMutationKind::OrdinaryWrongAddress);
-  const ConSanFaultMutationPlan *ordinary_order =
-      find_fault_plan(plans, ConSanFaultMutationKind::OrdinaryWeakenOrder);
-  const ConSanFaultMutationPlan *ordinary_scope =
-      find_fault_plan(plans, ConSanFaultMutationKind::OrdinaryWeakenScope);
-  if ((ordinary_address || ordinary_order || ordinary_scope) && result.errors.empty()) {
-    const ConSanFaultMutationPlan &primary =
-        ordinary_address ? *ordinary_address : (ordinary_order ? *ordinary_order : *ordinary_scope);
-    const auto same_target = [&](const ConSanFaultMutationPlan *plan) {
-      return plan == nullptr ||
-             (plan->primary_identity == primary.primary_identity &&
-              plan->selection_sequence_identity == primary.selection_sequence_identity &&
-              plan->ordered_member_identities == primary.ordered_member_identities);
-    };
-    if (!same_target(ordinary_address) || !same_target(ordinary_order) ||
-        !same_target(ordinary_scope)) {
-      result.errors.emplace_back(
-          "ConSan ordinary fault plans do not describe one composed semantic target");
-    } else {
-      try_apply_ordinary_fault_patch(code_object, ordinary_address, ordinary_order, ordinary_scope,
-                                     result);
-    }
-  }
-  result.mutation.fault.applied = applied_fault_mutation_count(result);
-  if (context.fault_require_exactly_one && result.outcome != ConSanTransformOutcome::Unsupported &&
-      result.mutation.fault.applied != 1u) {
-    result.errors.emplace_back(
-        "ConSan fault injection required exactly one applied mutation, got " +
-        std::to_string(result.mutation.fault.applied));
-  }
-}
-
 } // namespace
 
 [[nodiscard]] ConSanTransformArtifacts try_patch_consan_impl(
@@ -508,8 +391,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
         has_perturbation ? pristine_mutation_plan : std::move(pristine_mutation_plan);
     AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
     const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
-    apply_fault_mutation_to_inventory(code_object, arch, fault_options, fault_result.fault_plans,
-                                      fault_result);
+    apply_consan_fault_mutations(code_object, arch, fault_options, fault_result.fault_plans,
+                                 fault_result);
     fault_result =
         finalize_consan_result(std::move(fault_result), code_object_bytes,
                                fault_options.moi_report_dispatch_id, false, nullptr, execution);
