@@ -7269,3 +7269,51 @@ policy and publication ownership. Remaining broad lowering mutation surfaces,
 target and mode locality, larger legacy harvesting, material whole-refactoring
 shrinkage, and the independent completion audit remain open. The goal therefore
 remains active.
+
+### 16.99 Convergence checkpoint 98: separate synchronization proof from publication
+
+The synchronization-lowering trace followed commit construction and terminal
+publication through InlineShadow barrier and atomic lowering, Record/Replay
+barrier, atomic, and fence lowering, and Sampled barrier and atomic lowering.
+Commit construction validates plan-owned intent identities against the
+immutable observation plan, converts committed geometry into a semantic
+lowering, and reports failure. Only the later publication operation applies
+growth policy and atomically publishes replacement bytes, coverage commits,
+patch products, failure state, and the modified outcome. Both operations had
+accepted the whole transform transaction.
+
+Commit construction now receives exactly `ConSanObservationPlan` and the
+diagnostic sink. Every mode owner passes those dependencies explicitly;
+terminal publication remains the sole broad-transaction operation. The
+architecture gate caps both the synchronization-emission interface and
+implementation at one `ConSanTransformArtifacts` mention, thereby enforcing
+the distinction between immutable semantic proof construction and mutable
+publication rather than merely documenting it.
+
+| Signal | Checkpoint 98 | Cumulative change | Slice change from checkpoint 97 |
+| --- | ---: | ---: | ---: |
+| Production files | 274 | +45 | 0 |
+| Physical production lines | 102,934 | **-2,042** | +6 |
+| Nonblank production lines | 96,694 | **-2,390** | +6 |
+| Production implementation lines | 89,001 | **-2,449** | +6 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **126 / 48** | **-150 / -9** | **-3 / 0** |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Whole-transaction mentions in synchronization emission | **2** | n/a | **-3** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and all **1,295/1,295**
+`ConSan.*` and `ConSanMoi.*` host/component tests. That suite covers all
+synchronization engines and their target-specific fixtures. Checkpoint 91
+passed all 4,776 nonphysical tests across the five-target simulator matrix. No
+test was added, removed, renamed, disabled, or replaced, and no physical
+gfx1201 test was run.
+
+This slice strengthens Sections 14.1, 14.3, and 14.5 by making forward proof
+construction independent of the mutation bus across every mode. Its six-line
+cost is an explicit interface investment, not a shrinkage claim, and must be
+repaid by later deletion and consolidation. Remaining broad lowering mutation
+surfaces, target and mode locality, larger legacy harvesting, material
+whole-refactoring shrinkage, and the independent completion audit remain open.
+The goal therefore remains active.

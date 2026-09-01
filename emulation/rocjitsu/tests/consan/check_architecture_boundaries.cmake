@@ -709,6 +709,14 @@ if(NOT _moi_sync_commit_contract MATCHES "append_moi_sync_lowering_commit" OR
         "ConSan synchronization commit boundary lost its plan-owned intent set"
     )
 endif()
+foreach(_sync_emission_owner IN ITEMS consan_moi_sync_emission.h consan_moi_sync_emission.cpp)
+    _consan_assert_match_count_at_most(
+        "${_consan_dir}/${_sync_emission_owner}"
+        "ConSanTransformArtifacts"
+        1
+        "synchronization proof construction must consume observation and diagnostic products"
+    )
+endforeach()
 foreach(_patch_commit_client IN ITEMS
     consan_moi_access_apply.cpp
     consan_moi_sync_emission.cpp

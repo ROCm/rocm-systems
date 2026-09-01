@@ -98,14 +98,13 @@ private:
 };
 
 [[nodiscard]] bool append_moi_sync_intent_lowering_commit(
-    ConSanTransformArtifacts &result, std::span<const ConSanProbeIntentId> intent_ids,
-    const ConSanCommittedPatchGeometry &patch, std::string_view probe_name,
-    std::vector<ConSanCommittedLowering> &commits) {
-  auto commit =
-      make_consan_instrumented_patch_lowering(result.observation_plan(), intent_ids, patch);
+    const ConSanObservationPlan &observation, std::vector<std::string> &errors,
+    std::span<const ConSanProbeIntentId> intent_ids, const ConSanCommittedPatchGeometry &patch,
+    std::string_view probe_name, std::vector<ConSanCommittedLowering> &commits) {
+  auto commit = make_consan_instrumented_patch_lowering(observation, intent_ids, patch);
   if (!commit) {
-    result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
-                               " produced an invalid intent-bound lowering");
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                        " produced an invalid intent-bound lowering");
     return false;
   }
   commits.push_back(std::move(*commit));

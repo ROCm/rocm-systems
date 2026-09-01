@@ -18,18 +18,19 @@ class CodeObjectPatcher;
 namespace rocjitsu::consan_moi_impl {
 
 [[nodiscard]] bool append_moi_sync_intent_lowering_commit(
-    ConSanTransformArtifacts &result, std::span<const ConSanProbeIntentId> intent_ids,
-    const ConSanCommittedPatchGeometry &patch, std::string_view probe_name,
-    std::vector<ConSanCommittedLowering> &commits);
+    const ConSanObservationPlan &observation, std::vector<std::string> &errors,
+    std::span<const ConSanProbeIntentId> intent_ids, const ConSanCommittedPatchGeometry &patch,
+    std::string_view probe_name, std::vector<ConSanCommittedLowering> &commits);
 
 template <typename EvidencePlan>
-[[nodiscard]] bool append_moi_sync_lowering_commit(ConSanTransformArtifacts &result,
+[[nodiscard]] bool append_moi_sync_lowering_commit(const ConSanObservationPlan &observation,
+                                                   std::vector<std::string> &errors,
                                                    const EvidencePlan &plan,
                                                    const ConSanCommittedPatchGeometry &patch,
                                                    std::string_view probe_name,
                                                    std::vector<ConSanCommittedLowering> &commits) {
-  return append_moi_sync_intent_lowering_commit(result, plan.intent_ids(), patch, probe_name,
-                                                commits);
+  return append_moi_sync_intent_lowering_commit(observation, errors, plan.intent_ids(), patch,
+                                                probe_name, commits);
 }
 
 /// Atomically publish one completed synchronization mutation. Mode owners

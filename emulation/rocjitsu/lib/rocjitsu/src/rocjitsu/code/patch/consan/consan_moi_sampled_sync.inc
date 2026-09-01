@@ -1096,8 +1096,9 @@ void try_apply_sampled_barrier_sync_patch(
     info.covered_sync_event_count =
         static_cast<uint32_t>(planned.candidate.sequence->member_event_identities.size());
     note_moi_probe_patch_info(info, planned);
-    if (!append_moi_sync_lowering_commit(result, planned.candidate.barrier, info,
-                                         "sampled barrier sync", lowering_commits))
+    if (!append_moi_sync_lowering_commit(result.observation_plan(), result.errors,
+                                         planned.candidate.barrier, info, "sampled barrier sync",
+                                         lowering_commits))
       return false;
     patches.push_back(std::move(info));
     return true;
@@ -1445,7 +1446,8 @@ void try_apply_sampled_barrier_sync_patch(
         info.covered_sync_event_count =
             static_cast<uint32_t>(planned.candidate.sequence->member_event_identities.size());
         note_moi_probe_patch_info(info, planned);
-        if (!append_moi_sync_lowering_commit(result, planned.candidate.barrier, info,
+        if (!append_moi_sync_lowering_commit(result.observation_plan(), result.errors,
+                                             planned.candidate.barrier, info,
                                              "sampled barrier sync", lowering_commits))
           return;
         patches.push_back(std::move(info));
@@ -2077,8 +2079,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     info.sampled_first_slot = planned.candidate.selected_slot;
     info.sampled_window_bank_count = planned.candidate.bank_count;
     note_moi_probe_patch_info(info, planned);
-    if (!append_moi_sync_lowering_commit(result, planned.candidate.atomic, info,
-                                         "sampled atomic sync", lowering_commits))
+    if (!append_moi_sync_lowering_commit(result.observation_plan(), result.errors,
+                                         planned.candidate.atomic, info, "sampled atomic sync",
+                                         lowering_commits))
       return false;
     patches.push_back(std::move(info));
     return true;
