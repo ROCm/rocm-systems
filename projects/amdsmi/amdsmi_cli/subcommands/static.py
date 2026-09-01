@@ -95,12 +95,57 @@ class StaticCommands:
         if not self.logger.is_json_format():
             self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
+    def _static_cuid_seed(self):
+        """State of the node-wide CUID derivation seed.
+
+        Reported flat as `seed_provisioned` and `seed_fingerprint`, the names
+        the machine-readable contract fixes, so JSON, CSV and the screen carry
+        the same keys. The library never returns the seed itself, only whether
+        one is provisioned and a fingerprint of it.
+        """
+        seed_dict = {"seed_provisioned": "N/A", "seed_fingerprint": "N/A"}
+        try:
+            seed_info = amdsmi_interface.amdsmi_get_cuid_seed_info()
+            seed_dict["seed_provisioned"] = seed_info["provisioned"]
+            seed_dict["seed_fingerprint"] = seed_info["fingerprint"]
+        except (amdsmi_exception.AmdSmiLibraryException, AttributeError) as e:
+            # A seed store this caller cannot read is a node whose state is
+            # unavailable, not an unprovisioned one. Say which, since the two
+            # call for different next steps.
+            if isinstance(e, amdsmi_exception.AmdSmiLibraryException) and (
+                e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM
+            ):
+                seed_dict["seed_provisioned"] = "N/A (requires root)"
+                seed_dict["seed_fingerprint"] = "N/A (requires root)"
+            logging.debug("Failed to get cuid seed info | %s", e)
+
+        return seed_dict
+
+    def _report_cuid_seed(self):
+        """Report the node seed's state once for the invocation.
+
+        The seed is a property of the node, not of a device, so it is emitted
+        beside the per-device blocks: JSON as top-level keys alongside
+        `gpu_data`, the other formats as their own short block ahead of the
+        devices.
+        """
+        seed_dict = self._static_cuid_seed()
+        if self.logger.is_json_format():
+            self.logger.store_node_json_output.update(seed_dict)
+            return
+
+        self.logger.output = seed_dict
+        self.logger.print_output()
+        self.logger.output = {}
+
     def static_gpu(
         self,
         args,
         multiple_devices=False,
         gpu=None,
         asic=None,
+        cuid=None,
+        cuid_primary=None,
         bus=None,
         vbios=None,
         limit=None,
@@ -130,6 +175,9 @@ class StaticCommands:
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             gpu (device_handle, optional): device_handle for target device. Defaults to None.
             asic (bool, optional): Value override for args.asic. Defaults to None.
+            cuid (bool, optional): Value override for args.cuid. Defaults to None.
+            cuid_primary (bool, optional): Value override for args.cuid_primary.
+                Defaults to None.
             bus (bool, optional): Value override for args.bus. Defaults to None.
             vbios (bool, optional): Value override for args.vbios. Defaults to None.
             limit (bool, optional): Value override for args.limit. Defaults to None.
@@ -154,6 +202,15 @@ class StaticCommands:
             args.gpu = gpu
         if asic:
             args.asic = asic
+        if cuid:
+            args.cuid = cuid
+        if cuid_primary:
+            args.cuid_primary = cuid_primary
+        if args.cuid_primary:
+            # --cuid-primary selects a field of the CUID block, so asking for it
+            # asks for the block. Without this it is a no-op alongside any other
+            # flag.
+            args.cuid = True
         if bus:
             args.bus = bus
         if vbios:
@@ -222,6 +279,16 @@ class StaticCommands:
         if args.partition:
             current_platform_args += ["partition"]
             current_platform_values += [args.partition]
+
+        # Note: CUID is a special case for the same reason, and is not an
+        # amd-smi static default argument either.
+        # Reason: it changes the shape of the default output for every existing
+        #         consumer of `amd-smi static --json`, and on a build without
+        #         libamdcuid it adds a block of "N/A" to every GPU. Opt in with
+        #         --cuid or --cuid-primary.
+        if args.cuid:
+            current_platform_args += ["cuid"]
+            current_platform_values += [args.cuid]
 
         if not self.group_check_printed:
             self.helpers.check_required_groups()
@@ -311,6 +378,42 @@ class StaticCommands:
                 logging.debug("Failed to get asic info for gpu %s | %s", gpu_id, e.get_error_info())
 
             static_dict["asic"] = asic_dict
+        if args.cuid:
+            # Absence is reported, not omitted: to a script, a field that
+            # disappears is indistinguishable from a parsing failure. Every key
+            # below is always present, primary_cuid carrying a sentinel saying
+            # why when it was not asked for.
+            cuid_dict = {
+                "derived_cuid": "N/A",
+                "primary_cuid": "N/A (not requested)",
+                "component_type": "N/A",
+                "auxiliary": "N/A",
+                "source": "N/A",
+            }
+
+            try:
+                # AttributeError is caught alongside the library exception: the
+                # interface layer already raises
+                # AmdSmiLibraryException(NOT_SUPPORTED) against a libamd_smi.so
+                # that predates these symbols, but this is a default-adjacent
+                # path and the belt and braces costs nothing.
+                cuid_info = amdsmi_interface.amdsmi_get_gpu_cuid_info(args.gpu)
+                cuid_dict["derived_cuid"] = cuid_info["derived"]
+                cuid_dict["component_type"] = cuid_info["component_type"]
+                cuid_dict["auxiliary"] = cuid_info["auxiliary"]
+                cuid_dict["source"] = cuid_info["source"]
+
+                # The primary embeds the device serial number and static output
+                # ends up in public bug reports, so it is shown only when asked
+                # for and only when the caller could read it.
+                if args.cuid_primary:
+                    cuid_dict["primary_cuid"] = (
+                        cuid_info["primary"] if cuid_info["primary"] else "N/A (requires root)"
+                    )
+            except (amdsmi_exception.AmdSmiLibraryException, AttributeError) as e:
+                logging.debug("Failed to get cuid info for gpu %s | %s", gpu_id, e)
+
+            static_dict["cuid"] = cuid_dict
         if args.bus:
             bus_info = {
                 "bdf": "N/A",
@@ -1692,6 +1795,13 @@ class StaticCommands:
                 if getattr(args, attr):
                     gpu_args_enabled = True
                     break
+
+        # The derivation seed is node-wide, so it is reported here, once for the
+        # invocation, rather than in static_gpu, which runs once per device.
+        # --cuid-primary selects a field of the CUID block, so it implies the
+        # block, as static_gpu also takes it.
+        if getattr(args, "cuid", False) or getattr(args, "cuid_primary", False):
+            self._report_cuid_seed()
 
         # Handle CPU and GPU initialization cases
         if self.helpers.is_amd_hsmp_initialized() and self.helpers.is_amdgpu_initialized():

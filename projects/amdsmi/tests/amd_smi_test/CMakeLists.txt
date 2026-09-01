@@ -100,6 +100,14 @@ target_include_directories(
 # Absolute path to the committed mock CPER fixtures (unit/gpu/mock_cper).
 target_compile_definitions(${TEST} PRIVATE AMDSMI_TEST_MOCK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/unit/gpu/mock_cper")
 
+# The ABI is identical either way, so without this the tests cannot tell a build
+# without libamdcuid from one where the library has nothing to say for this
+# device, and they skip on AMDSMI_STATUS_NOT_SUPPORTED in both cases. src/ is
+# configured first, so BUILD_CUID is already in the cache.
+if(BUILD_CUID)
+    target_compile_definitions(${TEST} PRIVATE BUILD_CUID)
+endif()
+
 if(ENABLE_WSL_BACKEND)
     target_compile_definitions(${TEST} PRIVATE ENABLE_WSL_BACKEND)
     target_include_directories(${TEST} PRIVATE ${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include)
