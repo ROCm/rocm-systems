@@ -9,13 +9,12 @@
 #include <algorithm>
 #include <cinttypes>
 #include <cstdlib>
-#include <cstring>
 #include <fstream>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_container_id_parser.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 
 extern "C" {
@@ -200,32 +199,33 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
 
   if (name.empty()) return AMDSMI_STATUS_API_FAILED;
 
-  // Bounded copy: strncpy(dst, src, min(CAP, len)) leaves info.name without a
-  // NUL terminator when name.length() >= AMDSMI_MAX_STRING_LENGTH, so a later
-  // strlen/print reads past the buffer.
-  const size_t name_len =
-      std::min<size_t>(AMDSMI_MAX_STRING_LENGTH - 1, name.length());
-  std::memcpy(info.name, name.data(), name_len);
-  info.name[name_len] = '\0';
+  // strncpy(dst, src, min(CAP, len)) leaves info.name unterminated when
+  // name.length() >= AMDSMI_MAX_STRING_LENGTH; readlink() of /proc/<pid>/exe
+  // can produce up to PATH_MAX bytes.
+  amd::smi::CopyBounded(info.name, sizeof(info.name), name);
 
-  // Security-hardened container ID extraction: anchored type_name match +
-  // charset whitelist + bounded length. See
-  // amd_smi/impl/amd_smi_container_id_parser.h for the full threat model. This
-  // replaced a 16-char fixed truncation that (a) broke interop with
-  // `docker inspect` (moby fullLen=64) and (b) permitted log injection /
-  // shell metachar smuggling.
-  static_assert(AMDSMI_MAX_CONTAINER_ID_LENGTH < AMDSMI_MAX_STRING_LENGTH,
-                "container_name must fit ID + NUL terminator");
-  for (int i = 0; i < AMDSMI_MAX_CONTAINER_TYPE; i++) {
+  std::vector<std::string> cgroup_lines;
+  {
     std::ifstream cgroup_info(cgroup_path.c_str());
-    for (std::string line; getline(cgroup_info, line);) {
-      if (amd::smi::ExtractContainerId(line, container_type_name[i],
-                                       info.container_name,
-                                       AMDSMI_MAX_STRING_LENGTH) > 0) {
+    for (std::string line; getline(cgroup_info, line);) cgroup_lines.push_back(line);
+  }
+
+  // The SHA-256 scan covers every OCI runtime, and so Kubernetes, whatever
+  // the cgroup driver. The named-type scan then handles the formats that
+  // carry no SHA-256: LXC names and Docker short IDs.
+  for (const auto& line : cgroup_lines) {
+    if (amd::smi::ExtractOciContainerId(line, info.container_name, sizeof(info.container_name)) >
+        0) {
+      break;
+    }
+  }
+  for (int i = 0; info.container_name[0] == '\0' && i < AMDSMI_MAX_CONTAINER_TYPE; i++) {
+    for (const auto& line : cgroup_lines) {
+      if (amd::smi::ExtractContainerId(line, container_type_name[i], info.container_name,
+                                       sizeof(info.container_name)) > 0) {
         break;
       }
     }
-    if (info.container_name[0] != '\0') break;
   }
   info.pid = (uint32_t)pid;
 

@@ -40,6 +40,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - This covers every subcommand that uses the standard human-readable renderer, not only the AI-NIC `RDMA_DEVICES` case that prompted it.
   - `monitor`, `partition`, `topology`, `xgmi`, and the default no-argument output print tables and are unchanged.
 
+- **`container_name` in process info is now derived from an anchored, charset-validated cgroup match**, which changes the reported value in two cases.  
+  - systemd-managed LXC payloads (`0::/lxc.payload.<name>`) now report an empty `container_name`: the container-type match requires `/` or `-` after `lxc`, and `.` does not qualify.
+  - Nested LXC (`0::/lxc/<parent>/<child>`) now reports `<parent>` rather than `<parent>/<child>`, because `/` is no longer accepted inside an ID.
+  - Containers started by containerd, CRI-O or Podman previously reported an empty `container_name` and now report their ID. The value is the bare 64-character SHA-256, with the runtime's cgroup prefix (`cri-containerd-`, `crio-`, `docker-`, `libpod-`) and any `.scope` suffix excluded, since that is the form `docker inspect`, the Docker Engine API and the CRI runtime and image services accept.
+
 ### Optimized
 
 ### Resolved Issues
@@ -63,8 +68,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed container ID truncation and hardened cgroup parsing for `container_name` in process info**.  
   - Container IDs are no longer truncated to 16 characters, restoring interop with `docker inspect` and Kubernetes tooling (Docker/containerd use the full 64-character ID).
-  - The cgroup parser now anchors the container-type match and restricts the ID to `[a-zA-Z0-9_-]`, rejecting control bytes, shell metacharacters, embedded NULs, and non-ASCII smuggling.
-  - Bounded the process-name copy and the `max_link_speed` `sscanf` read to prevent unterminated or oversized writes.
+  - `container_name` is now populated for containerd, CRI-O and Podman workloads, not only for Docker and LXC. The cgroup match no longer depends on the runtime name appearing in the path, so Kubernetes pods are identified under both the systemd and cgroupfs drivers and under either cgroup hierarchy.
+  - The cgroup parser now anchors the container-type match on path separators and restricts the ID to `[a-zA-Z0-9_-]`, so control bytes, shell metacharacters and embedded NULs can no longer reach `container_name`.
+  - An ID too long for `container_name` is now reported as absent instead of silently truncated, so a clipped prefix can never be mistaken for a complete ID.
+  - Bounded the process-name copy, which previously left `amdsmi_proc_info_t.name` without a NUL terminator for executable paths of 256 bytes or more, causing reads past the end of the buffer.
+  - Bounded the `max_link_speed` parse in `amdsmi_get_pcie_info`, which read the unit token with an unbounded `%s` into a 256-byte stack buffer. The token was discarded, so it is now skipped rather than stored.
 
 - **Fixed `amd-smi set -L/--clk-limit <clk> max <value>` not enforcing caps that fall between clock levels**.  
   - For `mclk` and `fclk` ONLY, which expose a discrete DPM table, the requested `max` is now rounded down to the nearest selectable clock level, so the enforced limit never exceeds the requested value.

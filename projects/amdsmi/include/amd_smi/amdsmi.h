@@ -67,11 +67,6 @@ typedef enum {
  */
 #define AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK 64  //!< Maximum number of XGMI physical links
 #define AMDSMI_MAX_CONTAINER_TYPE 2           //!< Maximum number of container types
-//!< Maximum length of a container ID extracted from /proc/<pid>/cgroup.
-//!< Matches upstream Docker/containerd/CRI-O SHA-256 full ID length
-//!< (moby/moby stringid.go: fullLen = 64). Also fits LXC container names
-//!< which follow the [a-zA-Z0-9_-] charset and are typically short.
-#define AMDSMI_MAX_CONTAINER_ID_LENGTH 64
 
 /**
  * @brief The following structure holds the gpu metrics values for a device.
