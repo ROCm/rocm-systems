@@ -269,7 +269,7 @@ def validate_perfetto_trace(
     presence-only checks.
 
     Args:
-        trace_path: Path to perfetto-trace.proto file
+        trace_path: Path to perfetto-trace.pftrace file
         tests_dir: Path to directory containing validation scripts
         categories: List of categories to filter by (-m flag)
         labels: Expected labels (-l flag)

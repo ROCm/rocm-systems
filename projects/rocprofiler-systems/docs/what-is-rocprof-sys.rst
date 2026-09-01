@@ -19,8 +19,9 @@ timeline of events, while the aggregated formats summarize high-level results:
   (``.db``). This is the default output format, and can also be requested explicitly
   with ``--output-format rocpd``. You can view and analyze ``rocpd`` files with the
   `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/>`_ tool.
-* **Perfetto**: A detailed trace stored as a protocol buffer (``.proto``), selected with
-  ``--output-format proto``. Upload the Perfetto output files at
+* **Perfetto**: A detailed trace stored as a protocol buffer (``.pftrace``), selected
+  with ``--output-format pftrace`` (``proto`` is a deprecated alias). Upload the
+  Perfetto output files at
   `ui.perfetto.dev <https://ui.perfetto.dev/>`_ to visualize the results in any modern
   web browser.
 * **Text**: Aggregated high-level results as human-readable text files, selected with
@@ -32,7 +33,7 @@ timeline of events, while the aggregated formats summarize high-level results:
   filtering, and visualization in Jupyter notebooks.
 
 Tokens are space- or comma-separated, so multiple formats can be requested at once, for
-example ``--output-format proto rocpd``. For details on all formats, see
+example ``--output-format pftrace rocpd``. For details on all formats, see
 :doc:`./how-to/understanding-rocprof-sys-output`.
 
 To use ROCm Systems Profiler for instrumentation, follow these two configuration steps:

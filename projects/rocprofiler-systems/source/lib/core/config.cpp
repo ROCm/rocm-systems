@@ -1164,7 +1164,7 @@ configure_settings(bool _init)
                               "perfetto", "io", "filename", "deprecated", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::PERFETTO_FILE, "Perfetto filename",
-                              std::string{ "perfetto-trace.proto" }, "perfetto", "io",
+                              std::string{ "perfetto-trace.pftrace" }, "perfetto", "io",
                               "filename", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(
@@ -2738,13 +2738,13 @@ get_perfetto_output_filename()
     {
         LOG_ERROR("Error! ROCPROFSYS_PERFETTO_FILE not found. Please check your "
                   "environment configuration.");
-        return fmt::format("{}/perfetto-trace-{}.proto", pwd, getpid());
+        return fmt::format("{}/perfetto-trace-{}.pftrace", pwd, getpid());
     }
 
     auto basename = dynamic_cast<tim::tsettings<std::string>&>(*setting->second).get();
 
     auto dir = std::string{};
-    auto ext = std::string{ "proto" };
+    auto ext = std::string{ "pftrace" };
 
     if(const auto pos_dir = basename.find_last_of('/'); pos_dir != std::string::npos)
     {
@@ -3122,7 +3122,7 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 
     auto _pos_dir = _val.find_last_of('/');
     auto _dir     = std::string{};
-    auto _ext     = std::string{ "proto" };
+    auto _ext     = std::string{ "pftrace" };
 
     if(_pos_dir != std::string::npos)
     {
