@@ -149,6 +149,32 @@ set(CPACK_RPM_PACKAGE_AUTOREQ OFF)
 # Alternatively, we could set CPACK_RPM_PACKAGE_PROVIDES,
 # but then we would have to maintain it...
 
+# Do not claim ownership of the directories ROCm provides.
+#
+# CPack auto-generates a %dir entry for every parent directory of an installed
+# file. As such, installing into ROCm's prefix declares this package as a
+# co-owner. RPM permits co-ownership only when mode, owner, and group match
+# exactly, otherwise RPM declares a file conflict and aborts the install. ROCm
+# is a hard dependency, so these parent directories must exist; hipfile does not
+# need to co-own them.
+#
+# ROCm 7.14+ changed the ownership permissions by setting the `setgid` bit for
+# ROCm's directories (nightly releases currently do not have this property).
+# We cannot fine tune the permissions ourselves as CPack does not support
+# configuring `setgid`. By explicitly excluding co-ownership of any parent
+# directories, we can avoid this conflict cleanly.
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+    "/opt"
+    "/opt/rocm"
+    "${CMAKE_INSTALL_PREFIX}"
+    "${CMAKE_INSTALL_PREFIX}/bin"
+    "${CMAKE_INSTALL_PREFIX}/include"
+    "${CMAKE_INSTALL_PREFIX}/lib"
+    "${CMAKE_INSTALL_PREFIX}/lib/cmake"
+    "${CMAKE_INSTALL_PREFIX}/share"
+    "${CMAKE_INSTALL_PREFIX}/share/doc"
+)
+
 # Set DEB/RPM Release Information
 # rocm_create_package checks if following variables are defined in the environment:
 #   - CPACK_DEBIAN_PACKAGE_RELEASE
