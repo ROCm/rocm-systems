@@ -542,7 +542,7 @@ struct ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     (void)ord;
     (void)abortFlag;
     auto& sdmaRequest = reinterpret_cast<nccl::gin::anvil::detail::ncclGinAnvilSdmaRequest&>(request);
-    if (sdmaRequest.complete) __threadfence_system();
+    if (sdmaRequest.complete) NCCL_GIN_THREADFENCE_SYSTEM();
   }
 };
 
