@@ -63,7 +63,6 @@
 namespace rocjitsu {
 
 using consan_detail::append_moi_workitem_owner_derivation;
-using consan_detail::build_moi_relocated_guest_access_words;
 using consan_detail::MoiBarrierEvidenceSitePlan;
 using consan_detail::MoiSpecialStateSgprs;
 using consan_detail::MoiWorkitemOwnerDerivationPlan;

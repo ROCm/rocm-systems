@@ -572,6 +572,15 @@ moi_guest_access_relocation_requires_adjusted_address(const ConSanMoiCandidate &
 build_moi_relocated_guest_access_words(const MoiGuestAccessRelocationRequest &request,
                                        std::vector<std::string> &errors);
 
+/// Build and append one relocated guest access, publishing its exact encoded
+/// width when requested. This is the single mutation boundary shared by mode
+/// emitters; address selection and surrounding ordering remain mode policy.
+[[nodiscard]] bool append_moi_relocated_guest_access(
+    std::vector<uint32_t> &words, std::span<const uint8_t> image,
+    const ConSanMoiCandidate &candidate, const ConSanTargetProfile *target,
+    uint16_t replay_address_vgpr, std::optional<uint16_t> adjusted_address_vgpr,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_word_count = nullptr);
+
 /// Selected scalar-register plan for preserving the guest's VCC and SCC
 /// across one injected operation sequence.
 ///

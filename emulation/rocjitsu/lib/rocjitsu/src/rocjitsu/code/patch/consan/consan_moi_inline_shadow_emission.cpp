@@ -27,8 +27,8 @@
 namespace rocjitsu::consan_moi_impl {
 
 using consan_detail::append_moi_device_cache_refresh;
+using consan_detail::append_moi_relocated_guest_access;
 using consan_detail::append_reload_moi_spilled_vgpr;
-using consan_detail::build_moi_relocated_guest_access_words;
 using consan_detail::moi_guest_access_relocation_requires_adjusted_address;
 using consan_detail::moi_spilled_vgpr_reload_result_name;
 using consan_detail::MoiSpilledVgprReloadResult;
@@ -3397,21 +3397,13 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
       moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
   const uint16_t guest_address_vgpr =
       capture_high_bank_address ? *candidate.lowering.form->address_vgpr : *lds_byte_offset_vgpr;
-  const auto guest_words = build_moi_relocated_guest_access_words(
-      {.image = bytes,
-       .candidate = &candidate,
-       .target = target,
-       .replay_address_vgpr = guest_address_vgpr,
-       .adjusted_address_vgpr =
-           reserve_two_address_replay_scratch
-               ? std::optional<uint16_t>(static_cast<uint16_t>(scratch_vgpr + scratch_count - 1u))
-               : std::nullopt},
-      errors);
-  if (!guest_words)
+  if (!append_moi_relocated_guest_access(
+          words, bytes, candidate, target, guest_address_vgpr,
+          reserve_two_address_replay_scratch
+              ? std::optional<uint16_t>(static_cast<uint16_t>(scratch_vgpr + scratch_count - 1u))
+              : std::nullopt,
+          errors, guest_instruction_word_count))
     return std::nullopt;
-  if (guest_instruction_word_count)
-    *guest_instruction_word_count = static_cast<uint32_t>(guest_words->size());
-  words.insert(words.end(), guest_words->begin(), guest_words->end());
   return words;
 }
 

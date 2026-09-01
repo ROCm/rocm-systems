@@ -664,6 +664,26 @@ _consan_assert_no_match(
     "ROCJITSU_CODE_ARCH_"
     "shared MOI support must consume target-neutral mechanism operations"
 )
+foreach(_relocation_client IN ITEMS
+    consan_moi_sampled_access_emission.cpp
+    consan_moi_shared_lowering.cpp
+    consan_moi_inline_shadow_emission.cpp
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_relocation_client}"
+        "build_moi_relocated_guest_access_words"
+        "mode emitters must publish relocated guest words through one shared append boundary"
+    )
+endforeach()
+file(READ "${_consan_dir}/consan_moi_relocation.cpp" _moi_relocation_owner)
+string(REGEX MATCHALL "append_pc_delta_builder" _moi_indirect_target_recipes
+       "${_moi_relocation_owner}")
+list(LENGTH _moi_indirect_target_recipes _moi_indirect_target_recipe_count)
+if(NOT _moi_indirect_target_recipe_count EQUAL 1)
+    message(FATAL_ERROR
+        "ConSan SCC-preserving indirect jumps must share one target-preparation recipe"
+    )
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_sync_emission.cpp"
     "consan_uses_gfx9_cdna_encoding|ConSanMoiLiteralDispatchIdPolicy|moi_report_dispatch_id_source_permitted"

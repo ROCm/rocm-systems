@@ -5220,3 +5220,59 @@ still not material whole-refactoring shrinkage. Remaining architecture
 locality, broader operating-point and mutable-transaction surfaces, larger
 legacy harvesting, material Section 14.8 evidence, and the independent Section
 14 completion audit remain open. The goal therefore remains active.
+
+### 16.63 Convergence checkpoint 62: shared guest-relocation publication
+
+The cross-mode emission deep read compared displaced guest-access handling in
+Record/Replay, Sampled, and InlineShadow rather than classifying it by mode
+tokens. Four paths—Record/Replay dynamic access, Sampled dense access, Sampled
+spill-backed recovery, and InlineShadow access—made the same relocation
+request, checked the same optional word product, copied its exact width, and
+appended it to an emission buffer. Their semantic differences occur before and
+after that sequence: each mode still chooses its replay address, optional
+split-address scratch, guest offset, bank transition, and required wait.
+
+One `append_moi_relocated_guest_access` operation now owns construction and
+publication of that mechanism-neutral product. All four paths pass their
+mode-selected inputs to it and retain their distinct ordering. The deep read
+also found that immediate indirect jumps and the Sampled deferred-guest return
+each independently built the same SCC snapshot, PC materialization, target
+delta, and SCC restoration. One private relocation-owner operation now emits
+that prefix; the public operations append either `s_setpc` for an immediate
+transfer or the target wait needed before a guest instruction and later
+`s_setpc`.
+
+The four mode-local append sequences, four stale builder imports, and the
+second indirect-target recipe are deleted. The architecture gate forbids mode
+emitters from calling the word builder directly and requires exactly one
+PC-delta recipe in the relocation owner. It does not forbid mode-local address
+or ordering decisions, which are the genuine semantic differences.
+
+| Signal | Checkpoint 62 | Cumulative change | Slice change from checkpoint 61 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,172 | +197 | **-18** |
+| Nonblank production lines | 98,857 | **-226** | **-23** |
+| Production implementation lines | 91,126 | **-324** | **-26** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **174 / 52** | **-102 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Mode-local relocated-word append sequences | **0** | n/a | **-4** |
+| SCC-preserving indirect-target recipes | **1** | n/a | **-1** |
+| Test inventory | **5,388** | **+43** | 0 |
+
+Validation includes a final-tree `-j16` build; 33 focused relocation,
+split-address, far-return, mode-emission, and architecture-boundary tests; all
+4,753 nonphysical tests over the five emulated targets at `-j16`; and all 635
+physical gfx1201 tests serialized at `-j1`. No test was removed, renamed,
+disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, 14.8, and
+14.9. Mode emitters now own only the semantic choices around guest relocation,
+while one common mechanism owns word publication and indirect target
+preparation. The cumulative reduction reaches 324 implementation lines, still
+short of material whole-refactoring shrinkage. Remaining architecture
+locality, broader operating-point and mutable-transaction surfaces, larger
+legacy harvesting, material Section 14.8 evidence, and the independent Section
+14 completion audit remain open. The goal therefore remains active.

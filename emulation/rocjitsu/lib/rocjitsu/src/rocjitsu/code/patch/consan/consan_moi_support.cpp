@@ -236,6 +236,21 @@ std::optional<std::vector<uint32_t>> consan_detail::build_moi_relocated_guest_ac
   return words;
 }
 
+bool consan_detail::append_moi_relocated_guest_access(
+    std::vector<uint32_t> &words, std::span<const uint8_t> image,
+    const ConSanMoiCandidate &candidate, const ConSanTargetProfile *target,
+    uint16_t replay_address_vgpr, std::optional<uint16_t> adjusted_address_vgpr,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_word_count) {
+  auto guest_words = build_moi_relocated_guest_access_words(
+      {image, &candidate, target, replay_address_vgpr, adjusted_address_vgpr}, errors);
+  if (!guest_words)
+    return false;
+  if (guest_instruction_word_count)
+    *guest_instruction_word_count = static_cast<uint32_t>(guest_words->size());
+  words.insert(words.end(), guest_words->begin(), guest_words->end());
+  return true;
+}
+
 bool consan_detail::append_save_moi_special_state(std::vector<uint32_t> &words,
                                                   const MoiSpecialStateSgprs &registers,
                                                   const ConSanTargetProfile &target) {
@@ -481,7 +496,6 @@ uint16_t moi_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement, rj_
 namespace {
 
 using consan_detail::append_moi_workitem_owner_derivation;
-using consan_detail::build_moi_relocated_guest_access_words;
 using consan_detail::moi_guest_access_relocation_requires_adjusted_address;
 using consan_detail::MoiSpecialStateSgprs;
 
