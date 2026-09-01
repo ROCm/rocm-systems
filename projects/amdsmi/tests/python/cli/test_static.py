@@ -21,6 +21,35 @@ class TestStatic(TestCliBase):
         self.RunCmds(cmds)
         return
 
+    def test_asic_revision_id_keys(self):
+        """The revision ids must reach JSON and CSV, not only the human output."""
+        self.common.print_func_name("")
+        keys = ("chip_rev_id", "external_rev_id")
+
+        cmd = "amd-smi static --asic --json"
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+        payload = json.loads(data)
+        gpus = payload["gpu_data"] if isinstance(payload, dict) else payload
+        self.assertTrue(gpus, f"no GPU entries in '{cmd}'")
+        for gpu in gpus:
+            for key in keys:
+                self.assertIn(key, gpu["asic"])
+        json_values = {key: [gpu["asic"][key] for gpu in gpus] for key in keys}
+
+        cmd = "amd-smi static --asic --csv"
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+        rows = data.splitlines()
+        header = rows[0].split(",")
+        # Compare the values, not just the header, so a dropped field is caught.
+        for key in keys:
+            self.assertIn(key, header)
+            column = header.index(key)
+            csv_values = [row.split(",")[column] for row in rows[1:] if row.strip()]
+            self.assertEqual(csv_values, json_values[key])
+        return
+
     def test_mem_carveout_gtt(self):
         """Test static --mem-carveout and node --gtt flags (display mode only)"""
         self.common.print_func_name("")
