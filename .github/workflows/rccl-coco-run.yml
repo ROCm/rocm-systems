@@ -127,7 +127,6 @@ jobs:
       LOG_FILE: ${{ github.workspace }}/coco-${{ inputs.mode }}-${{ inputs.job }}-${{ github.run_id }}.log
       COCO_DIR: ${{ github.workspace }}/_coco-${{ github.run_id }}-${{ github.run_attempt }}
       COCO_OUTPUT: ${{ inputs.mode == 'pr' && format('{0}/coco-results-pr-{1}-{2}-{3}', github.workspace, inputs.job, github.run_id, github.run_attempt) || '' }}
-      COCO_VENV: /tmp/coco-venv-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       # Limit the checkout to the composite action's own directory.
       - name: Checkout rocm-systems
@@ -147,16 +146,8 @@ jobs:
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - name: Set up Python
+        if: contains(inputs.runs_on, 'ruby')
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        env:
-          # Some runners' _work directory lives on an NFS mount that does
-          # unstable (non-sync) writes under load; extracting the Python
-          # toolchain's few thousand small files there has been observed to
-          # silently truncate a file's tail while still reporting the
-          # correct length (e.g. a torn ensurepip pip wheel that fails to
-          # open as a zip). Redirect the tool cache to the runner host's
-          # local disk, which isn't subject to that failure mode.
-          RUNNER_TOOL_CACHE: /tmp/gh-tool-cache-${{ runner.name }}
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -164,6 +155,8 @@ jobs:
 
       - name: Install coco
         working-directory: ${{ env.COCO_DIR }}/tRCCL
+        env:
+          COCO_VENV: ${{ env.COCO_DIR }}/venv
         run: |
           set -euo pipefail
           # Never activated; invoked by absolute path.
@@ -189,6 +182,7 @@ jobs:
           SOFTWARE: ${{ inputs.software }}
           PR_STACKS: ${{ inputs.pr_stacks }}
           COCO_DATABASE_URL: ${{ secrets.RCCL_COCO_DB_URL }}
+          COCO_VENV: ${{ env.COCO_DIR }}/venv
           COCO_OUTPUT: ${{ env.COCO_OUTPUT }}
         run: |
           set -euo pipefail
@@ -297,7 +291,6 @@ jobs:
           COCO_OUTPUT: ${{ env.COCO_OUTPUT }}
         run: |
           rm -rf "${COCO_DIR}"
-          rm -rf "${COCO_VENV}"
           if [[ -n "${COCO_OUTPUT}" ]]; then
             rm -rf "${COCO_OUTPUT}"
           fi
