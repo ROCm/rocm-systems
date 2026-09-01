@@ -1141,6 +1141,11 @@ finalize()
 
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+        // one of this or the HIP runtime's exit handler must run before
+        // hsa::queue_controller_fini() since they rely on the queue interceptor
+        pc_sampling::stop_all_services();
+#endif
         hsa::queue_controller_fini();
         thread_trace::finalize();
         ompt::finalize_ompt();

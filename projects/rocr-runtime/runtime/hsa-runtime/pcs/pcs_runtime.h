@@ -93,14 +93,14 @@ class PcsRuntime {
     core::Agent* agent;
     void SetThunkId(HsaPcSamplingTraceId thunkId) { thunkId_ = thunkId; }
     HsaPcSamplingTraceId ThunkId() { return thunkId_; }
-    bool isActive() { return active_; }
-    void start() { active_ = true; }
-    void stop() { active_ = false; }
+    bool isActive() { return active_.load(std::memory_order_acquire); }
+    void start() { active_.store(true, std::memory_order_release); }
+    void stop() { active_.store(false, std::memory_order_release); }
 
    private:
     HsaPcSamplingTraceId thunkId_;
 
-    bool active_;  // Set to true when the session is started
+    std::atomic<bool> active_{false};  // Set to true when the session is started
     bool valid_;   // Whether configuration parameters are valid
     size_t sample_size_;
 

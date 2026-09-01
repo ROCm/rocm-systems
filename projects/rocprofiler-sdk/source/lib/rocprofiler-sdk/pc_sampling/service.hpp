@@ -84,6 +84,19 @@ service_sync(rocprofiler_client_id_t client_id);
 
 void
 service_fini();
+
+/// \brief Stops the HSA-level PC sampling session (if enabled) on every registered
+/// context, joining ROCr's per-XCC sampler threads and consumer thread and flushing
+/// their buffers.
+///
+/// Must run before both `hsa::queue_controller_fini()` (which tears down the
+/// intercept-marker infrastructure the stop/flush path uses) and ROCr's
+/// `hsa_shut_down()` (whose `~GpuAgent()` deadlocks if a session is still live).
+/// Whichever of those happens first is not fixed, so both call sites invoke this.
+/// Safe to call unconditionally and repeatedly: the enabled-flag CAS in `stop_service`
+/// makes every call after the first a no-op.
+void
+stop_all_services();
 }  // namespace pc_sampling
 }  // namespace rocprofiler
 

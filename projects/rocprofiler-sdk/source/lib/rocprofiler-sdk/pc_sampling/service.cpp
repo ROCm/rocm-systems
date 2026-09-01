@@ -364,6 +364,16 @@ service_fini()
     flush_all_agents_buffers();
 }
 
+void
+stop_all_services()
+{
+    for(const auto* ctx :
+        context::get_registered_contexts([](const auto* c) { return c->pc_sampler != nullptr; }))
+    {
+        stop_service(ctx);
+    }
+}
+
 }  // namespace pc_sampling
 }  // namespace rocprofiler
 
