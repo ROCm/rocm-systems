@@ -990,7 +990,10 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
         bool             isExcluded = false;
         computeSymmetricExclude(rank, world_size, excludeList, isExcluded);
 
-        ncclComm_t child = NCCL_COMM_NULL;
+        // Excluded ranks do not shrink; they contribute a trivial pass so the
+        // collective assert below stays balanced across all ranks.
+        ncclComm_t child    = NCCL_COMM_NULL;
+        bool       shrinkOk = true;
         if(!isExcluded)
         {
             res = ncclCommShrink(parent,
@@ -999,15 +1002,15 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
                                  &child,
                                  nullptr,
                                  NCCL_SHRINK_DEFAULT);
-            ASSERT_TRUE(res == ncclSuccess || res == ncclInProgress)
-                << "iter=" << iter << " shrink returned " << res;
             // *newcomm stays NCCL_COMM_NULL until the child job completes, so
-            // drain the parent first. Local asserts (not ASSERT_MPI_*):
-            // excluded ranks skip this branch and would desync a collective.
-            ASSERT_EQ(ncclSuccess, waitForAsyncResult(parent));
-            ASSERT_NE(child, nullptr);
-            ASSERT_EQ(ncclSuccess, waitForAsyncResult(child));
+            // drain the parent first, then the now-populated child handle.
+            shrinkOk = (res == ncclSuccess || res == ncclInProgress)
+                       && waitForAsyncResult(parent) == ncclSuccess && child != nullptr
+                       && waitForAsyncResult(child) == ncclSuccess;
         }
+        // Collective: every rank participates, so a failure on any included rank
+        // fails the run instead of hanging excluded ranks in the barriers below.
+        ASSERT_MPI_TRUE(shrinkOk);
 
         MPI_Barrier(MPI_COMM_WORLD);
 
