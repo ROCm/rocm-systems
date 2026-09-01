@@ -27,6 +27,8 @@
 #include <hip_test_process.hh>
 
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <utility>
 
@@ -114,6 +116,28 @@ inline uint64_t hrr_capture_direct_kargs(const fs::path& cap_path) {
     return 0;
   return lost;
 }
+
+// Recover the live value the ptr-dump paired with a recorded one.
+//
+// The dump prints the live side with %p, whose rendering is not portable:
+// glibc emits "0x1" and "(nil)", the MSVC CRT emits zero-padded hex with no
+// prefix and no null spelling ("0000000000000001", "0000000000000000"). Only
+// the recorded side is formatted by HRR itself, so match on that and parse
+// whatever the platform produced instead of comparing formatted text.
+inline bool hrr_live_arg(const std::string& out, uint64_t recorded,
+                         uint64_t* live) {
+  char needle[64];
+  snprintf(needle, sizeof(needle), "recorded=0x%llx -> live=",
+           static_cast<unsigned long long>(recorded));
+  const size_t at = out.find(needle);
+  if (at == std::string::npos) return false;
+
+  const char* p = out.c_str() + at + strlen(needle);
+  if (strncmp(p, "(nil)", 5) == 0) { *live = 0; return true; }
+  // Base 16 accepts both the bare digits MSVC prints and glibc's 0x prefix.
+  *live = strtoull(p, nullptr, 16);
+  return true;
+}
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -138,22 +162,17 @@ TEST_CASE("Unit_HRR_KernelArgs_SentinelKeptLostPointerNulled", "[hrr]") {
   INFO("Replay:\n" << out);
   CHECK(rc == 0);
 
-  char sentinel_line[128];
-  snprintf(sentinel_line, sizeof(sentinel_line),
-           "recorded=0x%llx -> live=0x%llx",
-           static_cast<unsigned long long>(kSentinel),
-           static_cast<unsigned long long>(kSentinel));
-  char lost_line[128];
-  snprintf(lost_line, sizeof(lost_line), "recorded=0x%llx -> live=(nil)",
-           static_cast<unsigned long long>(lost));
-
   // A value no device VA could be keeps its meaning.
-  CHECK(out.find(sentinel_line) != std::string::npos);
+  uint64_t sentinel_live = 0;
+  REQUIRE(hrr_live_arg(out, kSentinel, &sentinel_live));
+  CHECK(sentinel_live == kSentinel);
   CHECK(out.find("not an address, passing it through unchanged") !=
         std::string::npos);
 
   // An address-shaped value that resolves nowhere does not.
-  CHECK(out.find(lost_line) != std::string::npos);
+  uint64_t lost_live = 1;
+  REQUIRE(hrr_live_arg(out, lost, &lost_live));
+  CHECK(lost_live == 0);
   CHECK(out.find("passing null so it faults at first use") !=
         std::string::npos);
 
