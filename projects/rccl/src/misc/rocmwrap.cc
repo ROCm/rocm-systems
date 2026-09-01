@@ -116,8 +116,10 @@ done:
   return ok;
 }
 
-// Determine whether CUMEM & VMM RDMA is supported on this platform
-int ncclIsCuMemSupported() {
+// Returns 1 when the platform can run the cuMem VMM path at runtime.
+// When requireGfx1250ForAutoEnable is set, also enforces the gfx1250 gate used
+// by NCCL_CUMEM_ENABLE=-2 auto-detect; NCCL_CUMEM_ENABLE=1 bypasses that gate.
+static int ncclCuMemCapabilityCheck(int requireGfx1250ForAutoEnable) {
   CUdevice currentDev;
   int cudaDev;
   int cudaDriverVersion;
@@ -126,13 +128,13 @@ int ncclIsCuMemSupported() {
   ncclResult_t ret = ncclSuccess;
   char gcnArch[256] = "unknown";
 
-  // Auto-detect (NCCL_CUMEM_ENABLE=-2) only turns cuMem on where the VMM path is
-  // required; NCCL_CUMEM_ENABLE=1 bypasses this gate.
   CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
-  if (GetGcnArchName(cudaDev, gcnArch) != 0 || !IsArchMatch(gcnArch, "gfx1250")) {
-    INFO(NCCL_INIT, "cuMem auto-enable is limited to gfx1250 (detected %s); set NCCL_CUMEM_ENABLE=1 to override",
-         gcnArch);
-    return 0;
+  if (requireGfx1250ForAutoEnable) {
+    if (GetGcnArchName(cudaDev, gcnArch) != 0 || !IsArchMatch(gcnArch, "gfx1250")) {
+      INFO(NCCL_INIT, "cuMem auto-enable is limited to gfx1250 (detected %s); set NCCL_CUMEM_ENABLE=1 to override",
+           gcnArch);
+      return 0;
+    }
   }
 
   if (ncclGetKernelVersionCode() < KERNEL_VERSION_CODE(6, 8)) {
@@ -164,6 +166,17 @@ int ncclIsCuMemSupported() {
   return supported;
 error:
   return (ret == ncclSuccess);
+}
+
+// Determine whether CUMEM & VMM RDMA is supported on this platform
+int ncclIsCuMemSupported() {
+  return ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/1);
+}
+
+// Runtime cuMem capability without the gfx1250 auto-enable gate. Used when
+// NCCL_CUMEM_ENABLE=1 forces the VMM path on non-gfx1250 platforms.
+int ncclCuMemRuntimeSupported() {
+  return ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/0);
 }
 
 int ncclCuMemEnable() {
