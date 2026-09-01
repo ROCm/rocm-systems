@@ -47,20 +47,6 @@ THE SOFTWARE.
     },
 };
 */
-static const std::map<amdsmi_gpu_block_t, const char*> kBlockNameMap = {
-    {AMDSMI_GPU_BLOCK_UMC, "UMC"},     {AMDSMI_GPU_BLOCK_SDMA, "SDMA"},
-    {AMDSMI_GPU_BLOCK_GFX, "GFX"},     {AMDSMI_GPU_BLOCK_MMHUB, "MMHUB"},
-    {AMDSMI_GPU_BLOCK_ATHUB, "ATHUB"}, {AMDSMI_GPU_BLOCK_PCIE_BIF, "PCIE_BIF"},
-    {AMDSMI_GPU_BLOCK_HDP, "HDP"},     {AMDSMI_GPU_BLOCK_XGMI_WAFL, "XGMI_WAFL"},
-    {AMDSMI_GPU_BLOCK_DF, "DF"},       {AMDSMI_GPU_BLOCK_SMN, "SMN"},
-    {AMDSMI_GPU_BLOCK_SEM, "SEM"},     {AMDSMI_GPU_BLOCK_MP0, "MP0"},
-    {AMDSMI_GPU_BLOCK_MP1, "MP1"},     {AMDSMI_GPU_BLOCK_FUSE, "FUSE"},
-    {AMDSMI_GPU_BLOCK_MCA, "MCA"},     {AMDSMI_GPU_BLOCK_VCN, "VCN"},
-    {AMDSMI_GPU_BLOCK_JPEG, "JPEG"},   {AMDSMI_GPU_BLOCK_IH, "IH"},
-    {AMDSMI_GPU_BLOCK_MPIO, "MPIO"},
-};
-static_assert(AMDSMI_GPU_BLOCK_LAST == AMDSMI_GPU_BLOCK_MPIO, "kBlockNameMap needs to be updated");
-
 static const char* kRasErrStateStrings[] = {
     "None",                     // AMDSMI_RAS_ERR_STATE_NONE
     "Disabled",                 // AMDSMI_RAS_ERR_STATE_DISABLED
@@ -209,7 +195,6 @@ uint32_t ProcessCmdline(RDCTstGlobals* test, int arg_cnt, char** arg_list) {
   return 1;
 }
 
-const char* GetBlockNameStr(amdsmi_gpu_block_t id) { return kBlockNameMap.at(id); }
 const char* GetErrStateNameStr(amdsmi_ras_err_state_t st) { return kErrStateNameMap.at(st); }
 /*const char *GetGRPCChanStateStr(grpc_connectivity_state st) {
   return kGRPCChanState.at(st);
