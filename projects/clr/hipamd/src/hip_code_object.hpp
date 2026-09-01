@@ -9,7 +9,9 @@
 
 #include "hip_global.hpp"
 
+#include <atomic>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -208,7 +210,9 @@ class StatCO : public CodeObject {
   //! Reverse mapping of vars
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
   //! Tracks managed var initialization per device
-  std::unordered_map<int, bool> managedVarsDevicePtrInitalized_;
+  std::unique_ptr<std::atomic<bool>[]> managedVarsDevicePtrInitialized_;
+  //! Number of entries in managedVarsDevicePtrInitialized_
+  size_t managedVarsDevicePtrInitializedSize_ = 0;
 };
 
 };  // namespace hip

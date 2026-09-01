@@ -47,10 +47,11 @@ namespace RcclUnitTesting
     return a.find("gfx942") != std::string::npos || a.find("gfx950") != std::string::npos;
   }
 
-  // Scan the NCCL_DEBUG=INFO log files matching globPattern for the per-op protocol line emitted by
-  // the P2P send/recv enqueue path ("RCCL P2P SendRecv protocol=<proto>"), returning true if any
-  // line reports the given protocol ("LL128" or "Simple"). Used to assert that LL128 (or SIMPLE) was
-  // actually selected rather than relying on data correctness alone, which both protocols satisfy.
+  // Scan the NCCL_DEBUG_SUBSYS=COLL log files matching globPattern for the per-op protocol line
+  // emitted by the P2P send/recv enqueue path ("RCCL P2P SendRecv protocol=<proto>"), returning
+  // true if any line reports the given protocol ("LL128" or "Simple"). Used to assert that LL128
+  // (or SIMPLE) was actually selected rather than relying on data correctness alone, which both
+  // protocols satisfy.
   static bool DebugLogsContainProtocol(const std::string& globPattern, const char* protocol)
   {
     // Trailing space so "LL" does not also match the "LL128" log line (the enqueue log prints
@@ -282,7 +283,7 @@ namespace RcclUnitTesting
   // buffer allocation for correctness.
   //
   // Protocol selection is asserted (not just data correctness, which SIMPLE also satisfies) by
-  // scraping the NCCL_DEBUG=INFO protocol line. Protocol is chosen per channel (payload <=
+  // scraping the NCCL_DEBUG_SUBSYS=COLL protocol line. Protocol is chosen per channel (payload <=
   // nChannels * <threshold>), so the caller pins NCCL_MAX_P2P_NCHANNELS=1 (single channel) and pins
   // the relevant threshold env var (NCCL_P2P_LL128_THRESHOLD or NCCL_P2P_LL_THRESHOLD) to 16384 so
   // the 16 KiB boundary the element counts below straddle is deterministic and independent of the
@@ -503,7 +504,7 @@ namespace RcclUnitTesting
     std::string const debugGlob = "/tmp/rccl_legacy_ll_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_legacy_ll_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
@@ -534,7 +535,7 @@ namespace RcclUnitTesting
     std::string const debugGlob = "/tmp/rccl_ll128_disabled_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_disabled_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
@@ -571,7 +572,7 @@ namespace RcclUnitTesting
     std::string const debugGlob = "/tmp/rccl_ll128_enabled_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_enabled_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
@@ -612,7 +613,7 @@ namespace RcclUnitTesting
     std::string const debugGlob = "/tmp/rccl_ll128_disabled_gate_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_disabled_gate_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
@@ -645,7 +646,7 @@ namespace RcclUnitTesting
     std::string const debugGlob = "/tmp/rccl_ll128_indep_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_indep_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
@@ -689,7 +690,7 @@ namespace RcclUnitTesting
     std::string const debugGlob = "/tmp/rccl_sep_ll128_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_sep_ll128_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
@@ -726,7 +727,7 @@ namespace RcclUnitTesting
     std::string const debugGlob = "/tmp/rccl_sep_legacy_ll_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_sep_legacy_ll_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
