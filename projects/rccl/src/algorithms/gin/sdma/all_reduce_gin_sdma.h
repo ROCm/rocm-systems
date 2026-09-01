@@ -6,7 +6,7 @@
  *   lsaAllReduceTwoShotKernel — LSA reduce-scatter, barrier, LSA all-gather (remote reads only).
  *   lsaAllReduceTwoShotOverlappedKernel — same two shots pipelined, pushing the reduced column to
  *                                        peers so vector i is all-gathered while i+1 is reduced.
- *   ginAllReduceTwoShotKernel  — LSA reduce-scatter + multi-CTA GIN all-gather from recv.
+ *   ginAllReduceTwoShotKernel  — LSA reduce-scatter, intra-GPU CTA barrier, GIN all-gather from recv.
  *
  * One-shot follows projects/rccl-tests/src/all_reduce.cu allReduceLsaKernel.
  ******************************************************************************/
@@ -215,12 +215,50 @@ __global__ void ginAllReduceResetSignalsKernel(struct ncclDevComm devComm) {
   gin.resetSignal(static_cast<unsigned>(blockIdx.x));
 }
 
+// Intra-GPU barrier across every CTA on this device. LSA/world bar.sync only
+// pair CTA i with CTA i on other ranks, so they do not wait for sibling CTAs here.
+// Sense-reversing (same pattern as ncclCeGlobalBlockBarrier): last arriver clears
+// the count and flips sense; others spin on the sense word. The two device words
+// are allocated once at comm init; sense carries across graph replays.
+__device__ __forceinline__ void ginIntraGpuCtaBarrier(uint32_t* bar, unsigned nCtas) {
+  uint32_t* arrived = bar;
+  uint32_t* sense = bar + 1;
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    __threadfence();
+#if defined(__HIP_DEVICE_COMPILE__)
+    const uint32_t s = __hip_atomic_load(sense, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    const uint32_t prev = __hip_atomic_fetch_add(arrived, 1u, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    if (prev + 1u == nCtas) {
+      __hip_atomic_store(arrived, 0u, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      __hip_atomic_store(sense, 1u - s, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+    } else {
+      while (__hip_atomic_load(sense, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) == s) {
+        __builtin_amdgcn_s_sleep(1);
+      }
+    }
+#else
+    const uint32_t s = *static_cast<volatile uint32_t*>(sense);
+    const uint32_t prev = atomicAdd(arrived, 1u);
+    if (prev + 1u == nCtas) {
+      (void)atomicExch(arrived, 0u);
+      *static_cast<volatile uint32_t*>(sense) = 1u - s;
+    } else {
+      while (*static_cast<volatile uint32_t*>(sense) == s) {
+      }
+    }
+#endif
+  }
+  __syncthreads();
+}
+
 template <typename T>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ginAllReduceTwoShotKernel(struct ncclDevComm devComm, ncclWindow_t sendWin, size_t sendOff,
-                                            ncclWindow_t recvWin, size_t recvOff, size_t countPerRank, int nRanks) {
+                                            ncclWindow_t recvWin, size_t recvOff, size_t countPerRank, int nRanks,
+                                            uint32_t* intraGpuCtaBar) {
   constexpr int ginContext = 0;
 
   ncclGin gin{devComm, ginContext};
@@ -263,8 +301,11 @@ __launch_bounds__(512)
   }
 
   bar.sync(cta, cuda::memory_order_release);
+  // LSA/world barriers only pair CTA i across ranks. Wait for every local CTA's
+  // RS stores before CTA 0 GIN-puts the full reduced column.
+  ginIntraGpuCtaBarrier(intraGpuCtaBar, static_cast<unsigned>(gridDim.x));
 
-  // --- Shot 2: multi-CTA GIN all-gather (rccl-tests GinAlltoAllKernel) ---
+  // --- Shot 2: CTA 0 GIN all-gather of the full reduced column ---
   // The wait target is relative to a baseline read on the device at launch time, so it stays
   // correct across graph replays: nothing about the expected signal value is fixed on the host.
   const unsigned int signalIndex = static_cast<unsigned int>(blockIdx.x);
@@ -272,18 +313,11 @@ __launch_bounds__(512)
   ncclBarrierSession<ncclCoopCta> ginBar{cta, ncclTeamTagWorld(), gin, blockIdx.x};
   ginBar.sync(cta, cuda::memory_order_acquire, ncclGinFenceLevel::None);
 
-  // The 56-CTA grid is required for the reduce-scatter above. Puts are one per
-  // destination rank (nRanks <= 8), so only global tids 0..nRanks-1 — all in CTA 0 —
-  // issue them. Remaining CTAs skip this loop and join flush / the world barrier.
-  for (int dst = tid; dst < nRanks; dst += nthreads) {
-    gin.put(world, dst, recvWin, sliceRecvByteOff, recvWin, sliceRecvByteOff, chunkBytes,
-            ncclGin_SignalInc{signalIndex});
-  }
-
-  // Puts use this CTA's signalIndex. Only CTA 0 puts, so only signal 0 is incremented.
-  // Waiting on every CTA's own signal would hang; (rank % nthreads) / blockDim.x is
-  // also always 0 here because nthreads = 56*512 >> nRanks.
   if (blockIdx.x == 0) {
+    for (int dst = static_cast<int>(threadIdx.x); dst < nRanks; dst += static_cast<int>(blockDim.x)) {
+      gin.put(world, dst, recvWin, sliceRecvByteOff, recvWin, sliceRecvByteOff, chunkBytes,
+              ncclGin_SignalInc{signalIndex});
+    }
     gin.waitSignal(cta, signalIndex, signalValue + static_cast<uint64_t>(nRanks));
   }
   gin.flush(cta);

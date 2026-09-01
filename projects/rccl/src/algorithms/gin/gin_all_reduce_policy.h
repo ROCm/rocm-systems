@@ -19,7 +19,7 @@ constexpr int kGinAllReduceMaxRanks = 8;
 
 constexpr int kGinAllReduceMinBytes = 512ULL * 1024;
 constexpr int kGinAllReduceLsaThreadsPerCta = 512;
-constexpr size_t kGinAllReduceLsaOneShotMaxBytes = 8ULL * 1024 * 1024;
+constexpr size_t kGinAllReduceLsaOneShotMaxBytes = 4ULL * 1024 * 1024;
 constexpr size_t kGinAllReduceLsaTwoShotMidBytes = 32ULL * 1024 * 1024;
 constexpr size_t kGinAllReduceGinTwoShotMinBytes = 256ULL * 1024 * 1024;
 

@@ -16,6 +16,8 @@
 #include "nccl.h"
 #include "nccl_device.h"
 
+#include <stdint.h>
+
 struct ncclComm;
 
 // Size and CTA constants live in gin_all_reduce_policy.h so host unit tests and
@@ -27,14 +29,17 @@ struct ncclComm;
 // Lazily created on the first eligible AllReduce and torn down with the comm.
 // Declared unconditionally: ncclComm embeds this even when ENABLE_ROCSHMEM_GIN is off.
 //
-// Deliberately holds no per-launch host state. All cross-rank synchronization lives on the
+// Deliberately holds no per-launch host epoch. All cross-rank synchronization lives on the
 // device (LSA barrier epochs in the resource window, GIN signals and their shadows) and is
 // re-read by the kernel on every launch, which is what lets these collectives be captured
 // into a graph and replayed: a host-side counter baked into a kernel argument at capture time
 // would freeze at its captured value while the device counters kept advancing.
+// intraGpuCtaBar is two device uint32s (arrived, sense) for the GIN two-shot intra-GPU
+// CTA barrier; the pointer is stable, the words themselves advance on the device.
 struct ncclGinAllReduceState {
   bool initialized;
   struct ncclDevComm devComm;
+  uint32_t* intraGpuCtaBar;
 };
 
 #if defined(ENABLE_ROCSHMEM_GIN)

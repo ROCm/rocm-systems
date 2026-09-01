@@ -18,6 +18,7 @@
 
 #include "algorithms/gin/sdma/all_reduce_gin_sdma.h"
 #include "algorithms/dda/device/CollCommon.h"
+#include "alloc.h"
 #include "archinfo.h"
 #include "checks.h"
 #include "comm.h"
@@ -69,6 +70,12 @@ static ncclResult_t ncclGinAllReduceInitOnce(ncclComm* comm) {
   reqs.ginSignalCount = kGinAllReduceLsaCtas;
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
   NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &state->devComm, /*isInternal=*/true));
+
+  // Two words (arrived, sense) for ginIntraGpuCtaBarrier. ncclCudaCalloc is capture-safe
+  // (relaxed + side stream). Sense-reversing needs no per-launch host reset.
+  if (state->intraGpuCtaBar == nullptr) {
+    NCCLCHECK(ncclCudaCalloc(&state->intraGpuCtaBar, 2, comm->memManager));
+  }
 
   cudaStreamCaptureMode captureMode = cudaStreamCaptureModeRelaxed;
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&captureMode));
@@ -182,7 +189,8 @@ static ncclResult_t ncclAllReduceGinSdmaGinTwoShotTyped(const void* sendbuff, vo
   const size_t countPerRank = count / static_cast<size_t>(comm->nRanks);
 
   gin::sdma::ginAllReduceTwoShotKernel<T><<<kGinAllReduceLsaCtas, kGinAllReduceLsaThreadsPerCta, 0, stream>>>(
-    comm->ginAllReduceState.devComm, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, countPerRank, comm->nRanks);
+    comm->ginAllReduceState.devComm, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, countPerRank, comm->nRanks,
+    comm->ginAllReduceState.intraGpuCtaBar);
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
 }
@@ -267,6 +275,10 @@ ncclResult_t ncclAllReduceGinSdma(const void* sendbuff, void* recvbuff, size_t c
 
 ncclResult_t ncclGinAllReduceFinalize(ncclComm* comm) {
   struct ncclGinAllReduceState* state = &comm->ginAllReduceState;
+  if (state->intraGpuCtaBar != nullptr) {
+    NCCLCHECK(ncclCudaFree(state->intraGpuCtaBar, comm->memManager));
+    state->intraGpuCtaBar = nullptr;
+  }
   if (state->initialized) {
     NCCLCHECK(ncclDevCommDestroy(comm, &state->devComm));
     state->initialized = false;
