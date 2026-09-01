@@ -220,9 +220,18 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
 // Pure query: is CE AllReduce currently allowed on this comm?
 bool rcclCeAllReduceAllowed(struct ncclComm* comm);
-// CE AllReduce knobs (defined in rccl_wrap.cc).
+// CE AllReduce knobs (defined in rccl_wrap.cc). Both default to -1 (unset), which
+// resolves to the per-arch default; use the resolvers below rather than the raw
+// params so an unset env var does not read as "disabled".
 RCCL_PARAM_DECLARE(CeAllReduce);
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
+// Is CE AllReduce enabled for this comm? RCCL_CE_ALLREDUCE wins when set;
+// otherwise CE AllReduce is on only for the arch it is tuned for (gfx1250) and
+// off elsewhere, independent of that arch table's ceNonRegMax/ceRegMax entries.
+bool rcclCeAllReduceEnabled(const struct ncclComm* comm);
+// Same resolution for RCCL_FORCE_CE_ALLREDUCE, which lets CE AllReduce (2-shot
+// and registered) run without CTAPolicy=ZERO.
+bool rcclForceCeAllReduceEnabled(const struct ncclComm* comm);
 RCCL_PARAM_DECLARE(CeArMaxMsgBytes);     // -1 = use ceNonRegMax[AR] (2-shot) from arch table
 RCCL_PARAM_DECLARE(CeArRegMaxMsgBytes);  // -1 = use ceRegMax[AR] (registered) from arch table
 // 2-shot AllReduce size cap: env RCCL_CE_AR_MAX_MSG_BYTES if set, else

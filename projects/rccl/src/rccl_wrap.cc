@@ -54,10 +54,11 @@ RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
 RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
-RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 1);
+// -1 = unset: fall back to the per-arch default (see rcclCeAllReduceEnabled).
+RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", -1);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
-RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 1);
+RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", -1);
 RCCL_PARAM(CeArMaxMsgBytes,    "CE_AR_MAX_MSG_BYTES", -1);     // -1 = use ceArMax (2-shot)
 RCCL_PARAM(CeArRegMaxMsgBytes, "CE_AR_REG_MAX_MSG_BYTES", -1); // -1 = use ceArRegMax (registered)
 
@@ -765,6 +766,26 @@ size_t rcclCeAr2ShotMax(const ncclComm* comm) {
   return table->ceNonRegMax[ncclFuncAllReduce];
 }
 
+// CE AllReduce is only tuned on gfx1250, so it is default-on there and stays off
+// everywhere else. Without this gate the arch tables for gfx942/gfx950 (which set
+// ceNonRegMax[AR] = 256 MiB) would let unregistered 2-shot, and -- via force --
+// registered CE, service AllReduce on arches that were never measured for it.
+static bool rcclCeAllReduceArchDefault(const ncclComm* comm) {
+  return comm != nullptr && IsArchMatch(comm->archName, "gfx1250");
+}
+
+bool rcclCeAllReduceEnabled(const ncclComm* comm) {
+  const int64_t param = rcclParamCeAllReduce();
+  if (param >= 0) return param != 0;
+  return rcclCeAllReduceArchDefault(comm);
+}
+
+bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
+  const int64_t param = rcclParamForceCeAllReduce();
+  if (param >= 0) return param != 0;
+  return rcclCeAllReduceArchDefault(comm);
+}
+
 size_t rcclCeNonRegMin(const ncclComm* comm, ncclFunc_t func) {
   const rcclArchThresholds* table = ddaArchTable(comm);
   if (table == nullptr) return 0;
@@ -1021,15 +1042,16 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && !rankMultiple);
 }
 
-bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc) {
-  static int enabled = rcclParamCeAllReduce();
-  static int force = rcclParamForceCeAllReduce();
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
+                        const void* acc) {
+  const bool enabled = rcclCeAllReduceEnabled(comm);
+  const bool force = rcclForceCeAllReduceEnabled(comm);
   if (!enabled) {
     // Log once per process, not on every eligibility check (called per AllReduce).
     static bool warnedDisabled = false;
     if (!warnedDisabled) {
       warnedDisabled = true;
-      INFO(NCCL_INIT, "CE AllReduce not enabled. Set RCCL_CE_ALLREDUCE=1 to enable.");
+      INFO(NCCL_INIT, "CE AllReduce not enabled on %s. Set RCCL_CE_ALLREDUCE=1 to enable.", comm->archName);
     }
     return false;
   }
@@ -1206,7 +1228,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // develop's single "will CE AllReduce service this call" gate (collectives.cc
   // ncclAllReduce_impl). force = RCCL_FORCE_CE_ALLREDUCE; symReg probes whether the
   // buffers are CE-registrable symmetric windows (uses ncclDevSum, matching develop).
-  const bool force = rcclParamForceCeAllReduce() != 0;
+  const bool force = rcclForceCeAllReduceEnabled(comm);
   const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
@@ -1271,7 +1293,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // is cleared unless graph-allowed, op-supported, count-divisible and RCCL_CE_ALLREDUCE.
   bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType);
   const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
-  if (!ceArGraphAllowed || !ceAllReduceOpSupported || (count % (size_t)comm->nRanks != 0) || !rcclParamCeAllReduce()) {
+  if (!ceArGraphAllowed || !ceAllReduceOpSupported || (count % (size_t)comm->nRanks != 0) ||
+      !rcclCeAllReduceEnabled(comm)) {
     ceAvailable = false;
   }
   // Tuning cap only: registered CE has no staging allocation, so this does not

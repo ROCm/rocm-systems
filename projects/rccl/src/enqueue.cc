@@ -3896,7 +3896,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         // silently drop it. Checked once here rather than inside rcclUseCeAllReduce(), since this
         // function no longer calls it for the AllReduce case.
         if (info->acc != nullptr || !ceArGraphAllowed || !ceAllReduceOpSupported ||
-            (info->count % (size_t)comm->nRanks != 0) || !rcclParamCeAllReduce()) {
+            (info->count % (size_t)comm->nRanks != 0) || !rcclCeAllReduceEnabled(comm)) {
           ceAvailable = false;
         } else if (ceAllReduceOpSupported) {
           // Unregistered 2-shot: table/env cap of 0 disables it; otherwise the
@@ -3904,7 +3904,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
           const size_t twoShotMax = rcclCeAr2ShotMax(comm);
           if (twoShotMax == 0 || totalBytes > twoShotMax || totalBytes > comm->ceColl.ceArMaxBytes ||
-              !rcclParamForceCeAllReduce() || !comm->symmetricSupport || comm->nNodes > 1) {
+              !rcclForceCeAllReduceEnabled(comm) || !comm->symmetricSupport || comm->nNodes > 1) {
             ceAllReduceFits = false;
           } else {
             ceAllReduceFits = true;
@@ -3917,7 +3917,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         !ceCapturing && ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       // Uncapped sym-window CE AllReduce (-R 2), without flipping whole comm to CE mode
       bool ceArSymRegistered =
-        info->coll == ncclFuncAllReduce && rcclParamForceCeAllReduce() && ceAvailable && !hasSysmemSegment;
+        info->coll == ncclFuncAllReduce && rcclForceCeAllReduceEnabled(comm) && ceAvailable && !hasSysmemSegment;
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
       // Sym-window CE AllGather (-R 2) above the symk/CE crossover, without requiring
       // CTAPolicy=ZERO to flip the whole comm to CE mode. Same predicate the
