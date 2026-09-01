@@ -24,7 +24,7 @@
       std::cout << "AMDSMI call returned " << RET << " at line " << __LINE__ << std::endl; \
       amdsmi_status_code_to_string(RET, &err_str);                                         \
       std::cout << err_str << std::endl;                                                   \
-      return RET;                                                                          \
+      return static_cast<int>(RET);                                                        \
     }                                                                                      \
   }
 
@@ -1435,7 +1435,7 @@ int main() {
         printf("amdsmi_get_gpu_process_list(): No processes found.\n\n");
       } else {
         std::cout << "Processes found: " << num_process << "\n";
-        amdsmi_proc_info_t process_info_list[num_process];
+        std::vector<amdsmi_proc_info_t> process_info_list(num_process);
         amdsmi_proc_info_t process = {};
         uint64_t mem = 0, gtt_mem = 0, cpu_mem = 0, vram_mem = 0, sdma_usage = 0;
         uint64_t gfx = 0, enc = 0;
@@ -1446,7 +1446,7 @@ int main() {
                  static_cast<uint32_t>(bdf.device_number),
                  static_cast<uint32_t>(bdf.function_number));
         ret = amdsmi_get_gpu_process_list(processor_handles[device_index], &num_process,
-                                          process_info_list);
+                                          process_info_list.data());
         std::cout << "Allocation size for process list: " << num_process << "\n";
         CHK_AMDSMI_RET(ret);
         for (auto idx = uint32_t(0); idx < num_process; ++idx) {
@@ -1471,7 +1471,7 @@ int main() {
             "+=======+"
             "+=============+=============+=============+============"
             "==+=========================================+\n");
-        for (int it = 0; it < static_cast<int>(num_process); it++) {
+        for (uint32_t it = 0; it < num_process; it++) {
           char command[30];
           struct passwd* pwd = nullptr;
           struct stat st;
@@ -2074,11 +2074,11 @@ int main() {
         constexpr uint64_t kU64Max = std::numeric_limits<uint64_t>::max();
         constexpr uint8_t kU8Max = std::numeric_limits<uint8_t>::max();
 
-        auto u64_str = [kU64Max](uint64_t v) -> std::string {
+        auto u64_str = [](uint64_t v) -> std::string {
           return (v == kU64Max) ? "N/A" : std::to_string(v);
         };
         // Matches CLI: active flags shown as ACTIVE / NOT ACTIVE / N/A
-        auto active_str = [kU8Max](uint8_t v) -> std::string {
+        auto active_str = [](uint8_t v) -> std::string {
           if (v == kU8Max) return "N/A";
           return v ? "ACTIVE" : "NOT ACTIVE";
         };

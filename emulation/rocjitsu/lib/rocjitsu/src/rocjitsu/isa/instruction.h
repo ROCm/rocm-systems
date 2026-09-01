@@ -333,6 +333,13 @@ public:
   /// @brief Opcode within the encoding format.
   [[nodiscard]] uint16_t opcode() const { return opcode_; }
 
+  /// @brief Target feature bits required to decode this instruction form.
+  ///
+  /// The generated constructor records both mnemonic-wide and encoding-form
+  /// requirements. Decoder instances compare this mask with the immutable
+  /// feature set of their concrete GPU target before exposing the instruction.
+  [[nodiscard]] uint64_t required_isa_features() const { return required_isa_features_; }
+
   /// @brief Produce the disassembly string for this instruction.
   ///
   /// @details On first call, generates and caches the disassembly string. Subsequent
@@ -412,6 +419,11 @@ protected:
   uint16_t encoding_id_ = 0;
   /// @brief Opcode within the encoding format.
   uint16_t opcode_ = 0;
+  /// @brief Feature mask emitted from the ISA-variant manifest.
+  // A 32-bit mask fits in the alignment padding before src_loc_. Keep this
+  // compact: Instruction is on decode/simulation hot paths and every generated
+  // instruction derives from it.
+  uint32_t required_isa_features_ = 0;
   /// @brief Source byte offset assigned at construction or by Decoder::decode().
   uint64_t src_loc_ = 0;
 

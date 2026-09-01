@@ -27,6 +27,8 @@
 #include "cuid_platform.h"
 #include "cuid_util.h"
 
+namespace {
+
 // helper function to get a hash from the raw bytes of a derived ID
 void get_hash_from_raw(uint8_t raw_bytes[16], uint8_t out_hash[14]) {
   // just remove the reserved bits from the raw bytes to get the hash
@@ -43,6 +45,8 @@ void build_derived_id_from_file_entry(const CuidFileEntry& entry, amdcuid_derive
   CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
   get_hash_from_raw(id.raw_bits, id.hash);
 }
+
+}  // namespace
 
 amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac* hmac) const {
   // attempt to find the derived CUID in file first
@@ -137,8 +141,11 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac*
   }
 
   // if not found, generate derived CUID
-  amdcuid_primary_id primary;
-  status = get_primary_cuid(primary);
+  amdcuid_primary_id primary = {};
+  if (get_primary_cuid(primary) != AMDCUID_STATUS_SUCCESS) {
+    primary.raw_bits[14] =
+        0x20;  // ensure temporary bit is set so temp CUID is still generated on failure
+  }
   // check the temporary bit in the primary CUID to determine whether to use the
   // real HMAC key or the temp key for derived CUID generation
   bool temp = primary.raw_bits[14] & 0x20;  // check the temp indicator bit in the reserved bits
