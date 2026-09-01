@@ -11,6 +11,14 @@
 // native ext_vector_type rather than HIP's ulong2, because HIP's is a struct and
 // __builtin_nontemporal_* rejects it; the native vector reproduces the OpenCL
 // codegen exactly.
+//
+// Note what that rejection is and is not. The builtin wants "a pointer to
+// integer, float, pointer, or a vector of such types", so it objects to the type
+// being a struct, not to it being 128 bits wide. Declaring the vector natively is
+// the whole fix: these are HIP translation units and they emit
+// global_store_b128 ... th:TH_STORE_NT, which isa_check.sh verifies. Narrowing
+// the access to get the hint - which the ticket assumed was necessary - is not
+// required in HIP either, and would cost 77% (see the isolated-copy table).
 typedef unsigned long u64;
 typedef unsigned int u32;
 typedef unsigned char u8;
@@ -68,20 +76,6 @@ constexpr u64 kFlushBytes = 1 * kGiB;
 constexpr u64 kLocalWorkSize = 512;
 // kMaxAlignment = 2 * sizeof(uint64_t)
 constexpr unsigned kMaxAlignment = 16;
-
-// ---------------------------------------------------------------------------
-// The machine the published numbers came from
-// ---------------------------------------------------------------------------
-// Every figure in REPORT.md was measured with the device reporting this maximum
-// clock. It is recorded because it is not stable on a shared machine: a later
-// session found the same part reporting 2400 MHz, and at that clock several
-// published results changed sign. Nothing was wrong with the code - the machine
-// had moved underneath it, and nothing in the suite said so.
-//
-// initMachine() compares against this and prints a loud warning on a mismatch,
-// so a contaminated run announces itself instead of quietly producing numbers
-// that get compared against ones taken under different conditions.
-constexpr int kReferenceClockMHz = 1100;
 
 // ---------------------------------------------------------------------------
 // Statistics

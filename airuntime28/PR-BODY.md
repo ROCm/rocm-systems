@@ -5,9 +5,12 @@ Adds `__amd_rocclr_copyBufferNT` — `__amd_rocclr_copyBuffer` with
 default **false**.
 
 It keeps `ulong2` and tests `aligned_size == sizeof(ulong2)`, so it reaches its own wide path.
-That is the point of doing this in `blitcl.cpp`: the builtin rejects HIP's `ulong2`, which is a
-struct, and the obvious workaround is to narrow the store to 64-bit. `blitcl.cpp` is OpenCL,
-where `ulong2` is a native vector the builtin accepts, so no access width is given up.
+
+Worth stating plainly, because the ticket assumed otherwise: **adding the hint does not cost
+access width.** `__builtin_nontemporal_store` rejects HIP's `ulong2` because that type is a
+struct, not because 128 bits is too wide — the builtin accepts a pointer to any native vector,
+and HIP reaches 128-bit non-temporal stores through `ext_vector_type(2)`. Here the question
+does not arise at all: `blitcl.cpp` is OpenCL, where `ulong2` is already a native vector.
 
 ## Why, measured
 

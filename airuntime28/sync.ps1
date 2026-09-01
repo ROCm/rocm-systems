@@ -19,7 +19,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$extensions = @('.sh', '.cc', '.hip', '.h', '.hpp', '.cpp', '.py', '.md', '.ps1', '.tsv', '.gitattributes')
+$extensions = @('.sh', '.hip', '.h', '.hpp', '.cpp', '.py', '.md', '.ps1', '.tsv', '.gitattributes')
 
 function Get-TextFiles {
     Get-ChildItem -Recurse -File |

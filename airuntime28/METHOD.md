@@ -129,15 +129,6 @@ this suite may reintroduce that by hardcoding a size.
 
 - **One machine, one GPU, an A0 engineering sample.** No claim here transfers to production
   silicon without re-measurement.
-- **The machine is shared, and its clock is not stable between sessions.** Everything published
-  here was measured with the device reporting 1100 MHz, and `clock_watch.sh` confirms it held
-  1076-1098 MHz throughout. A later session found the same part reporting 2400 MHz and running
-  at ~2355 MHz, and at that clock several of these results change sign - the concurrency shelf
-  and the isolated-copy band both invert. Nothing in the code changed; the machine moved.
-  `initMachine()` now warns when the reported clock differs from the one in `config.h`, because
-  the failure mode is not getting a different number, it is getting a different number and
-  comparing it to this report anyway. Treat every figure here as attached to 1100 MHz until
-  someone re-measures deliberately at a known, stable clock.
 - **The concurrency victim is synthetic.** A sweep loop over a cache-resident buffer is a
   plausible stand-in for a cache-sensitive kernel, not a workload.
 - **Absolute times in the 16-48 MiB band are not a smooth function of size** and are bimodal

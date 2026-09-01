@@ -8,11 +8,7 @@ cd "$(dirname "$0")"
 
 HIPCC=${HIPCC:-/opt/rocm/bin/hipcc}
 ARCH=${ARCH:-gfx1250}
-# -x hip is explicit rather than inferred from the extension. hipcc would infer it
-# for .cc anyway, but hip-tests states it outright for the same reason: it is the
-# one flag that decides whether __global__ is device code or a syntax error, and
-# it should not depend on which driver happens to invoke the compiler.
-FLAGS="--offload-arch=$ARCH -x hip -O3 -std=c++17"
+FLAGS="--offload-arch=$ARCH -O3 -std=c++17"
 
 EXPERIMENTS=(
   isolated_copy       # headline table: 9 variants, cold streaming copy
@@ -32,7 +28,7 @@ targets=("$@")
 
 fail=0
 for e in "${targets[@]}"; do
-  src="src/experiments/${e}.cc"
+  src="src/experiments/${e}.hip"
   if [ ! -f "$src" ]; then
     printf '  %-20s SKIP (no %s)\n' "$e" "$src"
     continue

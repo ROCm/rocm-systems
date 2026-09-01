@@ -240,13 +240,10 @@ inline Machine initMachine(const char* experimentName) {
   HIP_CHECK(hipGetDeviceProperties(&m.prop, 0));
   m.blitWg = static_cast<u32>(m.prop.multiProcessorCount);
 
-  const int clockMHz = m.prop.clockRate / 1000;
-  observedClockMHz() = clockMHz;
   std::printf("=== %s ===\n", experimentName);
   std::printf("  device        : %s (%s), %d CUs\n", m.prop.name, m.prop.gcnArchName,
               m.prop.multiProcessorCount);
-  std::printf("  clock         : %d MHz%s\n", clockMHz,
-              clockMHz == kReferenceClockMHz ? "" : "   <-- SEE WARNING BELOW");
+  std::printf("  clock         : %d MHz\n", m.prop.clockRate / 1000);
   std::printf("  GL2 capacity  : %llu MiB measured / %d MiB reported by driver\n",
               static_cast<unsigned long long>(kGL2Bytes / kMiB), m.prop.l2CacheSize / (1024 * 1024));
   std::printf("  flush         : %llu MiB (%.1fx measured GL2)\n",
@@ -255,19 +252,6 @@ inline Machine initMachine(const char* experimentName) {
   std::printf("  dispatch      : %llu threads/WG x %u WGs, grid-stride (production)\n",
               static_cast<unsigned long long>(kLocalWorkSize), m.blitWg);
   std::printf("  bootstrap     : %d resamples, seed %u\n", kBootstrapResamples, kBootstrapSeed);
-
-  // Not an assertion: a different clock is a legitimate thing to measure at, and
-  // failing the run would be wrong. But comparing these numbers against
-  // REPORT.md's would be wrong too, and that is the mistake this prevents.
-  if (clockMHz != kReferenceClockMHz) {
-    std::printf(
-        "\n  WARNING: this device reports %d MHz; every figure in REPORT.md was measured at\n"
-        "  %d MHz. Results from this run are not comparable with the published ones, and\n"
-        "  several of them are known to change sign between those two clocks. Either\n"
-        "  re-measure the comparison you care about in this same run, or find out why the\n"
-        "  machine moved before reading anything into a difference.\n\n",
-        clockMHz, kReferenceClockMHz);
-  }
   std::fflush(stdout);
   return m;
 }

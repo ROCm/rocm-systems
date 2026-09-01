@@ -14,17 +14,11 @@ src/common/         the measurement core - one definition of each concept
   kernels.h           read sweep, dependent-load chase, flush scratch
   geometry.h          production dispatch geometry, byte-exactness check
   variants.h          the nine blit variants and the ISA each must emit
-src/experiments/    one thin main per question (.cc, as in hip-tests)
+src/experiments/    one thin main per question
 remote/             build, run and inspect, on the target
 results/<stamp>/    one self-describing result set per run
 ```
 
-Experiment sources are `.cc` and the build passes `-x hip` explicitly, matching hip-tests,
-where 1348 of 1634 test sources are `.cc` and 440 of them contain `__global__`. hipcc infers
-`-x hip` for `.cc` on its own, so the flag is redundant when building through `build.sh`; it is
-stated anyway because it is the one flag that decides whether `__global__` is device code or a
-syntax error, and that should not depend on which driver happens to invoke the compiler. Plain
-`clang++` infers `-x c++` for `.cc` and would reject every kernel here without it.
 ## The one command
 
 On the target, in `~/airuntime28`:
