@@ -109,10 +109,10 @@ another during profiling. Kernel duration and throughput metrics reflect
 this serialized execution rather than the concurrent behavior that may
 occur during normal execution.
 
-Why are ``TCP_REQ`` and other counters zero on gfx115x or gfx120x?
-==================================================================
+Why are ``TCP_REQ`` and other counters zero on gfx115x?
+======================================================
 
-On gfx115x (RDNA 3.5) and gfx120x (RDNA 4) GPUs, the default ``AUTO``
+On gfx115x (RDNA 3.5) GPUs, the default ``AUTO``
 performance level can gate the perfmon clock. While that clock is gated,
 the hardware never increments the affected performance counters, so
 counters such as ``TCP_REQ``, ``TCP_REQ_READ``, ``TCP_REQ_WRITE``, and

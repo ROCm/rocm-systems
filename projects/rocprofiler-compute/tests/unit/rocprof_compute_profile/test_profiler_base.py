@@ -101,8 +101,6 @@ def test_partition_warning_messages(
         pytest.param("gfx1150", True, id="gfx1150"),
         pytest.param("gfx1151", True, id="gfx1151"),
         pytest.param("gfx1152", True, id="gfx1152"),
-        pytest.param("gfx1200", True, id="gfx1200"),
-        pytest.param("gfx1201", True, id="gfx1201"),
         pytest.param("gfx942", False, id="cdna"),
         pytest.param("gfx1100", False, id="rdna3"),
         pytest.param("gfx1250", False, id="gfx1250"),
@@ -110,7 +108,7 @@ def test_partition_warning_messages(
     ],
 )
 def test_pmc_power_gating_warning(gpu_arch, affected):
-    """Perfmon clock gating at AUTO applies to gfx115x and gfx120x only."""
+    """Perfmon clock gating at AUTO applies to gfx115x only."""
     message = _pmc_power_gating_warning(SimpleNamespace(gpu_arch=gpu_arch))
 
     if not affected:
