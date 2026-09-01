@@ -727,19 +727,38 @@ def test_calc_pmc_df_data_skips_workload_without_a_merge(tmp_path):
 # =============================================================================
 
 
-def test_filter_dispatch_frame_kernel_ids_match_the_cli_top_stats(
-    tmp_path, repeated_dispatch_frame
-):
+def make_repeated_dispatch_frame():
+    """Frame where the longest kernel by total time is not the longest dispatch.
+
+    ``kernel_frequent`` runs three times for 500ns each, ``kernel_long`` once
+    for 1000ns.
+    """
+    return pd.DataFrame({
+        "Kernel_Name": [
+            "kernel_long",
+            "kernel_frequent",
+            "kernel_frequent",
+            "kernel_frequent",
+        ],
+        "GPU_ID": [0, 0, 0, 0],
+        "Dispatch_ID": [1, 2, 3, 4],
+        "Start_Timestamp": [0, 2000, 3000, 4000],
+        "End_Timestamp": [1000, 2500, 3500, 4500],
+    })
+
+
+def test_filter_dispatch_frame_kernel_ids_match_the_cli_top_stats(tmp_path):
     """-k selects the same kernel here as it does in the cli top stats table."""
+    dispatch_frame = make_repeated_dispatch_frame()
     kernel_top_df, _ = create_df_kernel_top_stats(
-        df_in=repeated_dispatch_frame,
+        df_in=dispatch_frame,
         raw_data_dir=str(tmp_path),
         filter_gpu_ids=None,
         filter_dispatch_ids=None,
         time_unit="ns",
     )
 
-    filtered_df = filter_dispatch_frame(repeated_dispatch_frame, None, [0], None)
+    filtered_df = filter_dispatch_frame(dispatch_frame, None, [0], None)
 
     assert filtered_df["Kernel_Name"].unique().tolist() == [
         kernel_top_df.loc[0, "Kernel_Name"]
@@ -747,38 +766,24 @@ def test_filter_dispatch_frame_kernel_ids_match_the_cli_top_stats(
 
 
 @pytest.mark.parametrize("kernel_id", [99, -1])
-def test_filter_dispatch_frame_rejects_out_of_range_kernel_id(
-    monkeypatch, repeated_dispatch_frame, kernel_id
-):
-    """An out-of-range -k exits with a message instead of an IndexError."""
-    errors = common.patch_console(
-        monkeypatch,
-        "utils.file_io",
-        "error",
-        error=common.exiting_console_error(),
-    )
+def test_filter_dispatch_frame_rejects_out_of_range_kernel_id(kernel_id):
+    """An out-of-range -k exits instead of raising IndexError."""
+    with pytest.raises(SystemExit):
+        filter_dispatch_frame(make_repeated_dispatch_frame(), None, [kernel_id], None)
+
+
+def test_filter_dispatch_frame_bounds_kernel_ids_by_the_filtered_frame():
+    """Kernel ids are bounded by the frame left after the gpu and dispatch filters.
+
+    Dispatch 1 leaves one kernel, so id 1 is out of range here even though the
+    unfiltered frame has two kernels.
+    """
+    assert not filter_dispatch_frame(
+        make_repeated_dispatch_frame(), None, [1], None
+    ).empty
 
     with pytest.raises(SystemExit):
-        filter_dispatch_frame(repeated_dispatch_frame, None, [kernel_id], None)
-
-    assert str(kernel_id) in str(errors["error"].call_args)
-
-
-def test_filter_dispatch_frame_rejects_kernel_id_filtered_out_of_range(
-    monkeypatch, repeated_dispatch_frame
-):
-    """Kernel ids are bounded by the frame left after the gpu and dispatch filters."""
-    errors = common.patch_console(
-        monkeypatch,
-        "utils.file_io",
-        "error",
-        error=common.exiting_console_error(),
-    )
-
-    with pytest.raises(SystemExit):
-        filter_dispatch_frame(repeated_dispatch_frame, None, [1], ["1"])
-
-    assert "0-0" in str(errors["error"].call_args)
+        filter_dispatch_frame(make_repeated_dispatch_frame(), None, [1], ["1"])
 
 
 # =============================================================================

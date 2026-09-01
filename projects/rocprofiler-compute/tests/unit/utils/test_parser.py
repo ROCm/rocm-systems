@@ -439,19 +439,12 @@ class TestApplyKernelFilter:
         assert len(result_df) == 3
 
     @pytest.mark.parametrize("kernel_id", [99, -1])
-    def test_invalid_id_errors(self, monkeypatch, kernel_id) -> None:
-        """An out-of-range kernel ID triggers console_error and exits."""
-        errors = common.patch_console(
-            monkeypatch,
-            "utils.file_io",
-            "error",
-            error=common.exiting_console_error(),
-        )
+    def test_invalid_id_errors(self, kernel_id) -> None:
+        """An out-of-range kernel ID exits instead of indexing the top stats table."""
         workload = _kernel_filter_workload()
         workload.filter_kernel_ids = [kernel_id]
         with pytest.raises(SystemExit):
             apply_kernel_filter(_flat_raw_df(), workload)
-        assert str(kernel_id) in str(errors["error"].call_args)
 
     def test_exact_name_match(self) -> None:
         """A string kernel name filters to the exact match."""

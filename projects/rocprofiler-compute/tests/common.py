@@ -214,8 +214,3 @@ def patch_console(monkeypatch, module, *names, **overrides):
         monkeypatch.setattr(f"{module}.console_{name}", mock)
         mocks[name] = mock
     return mocks
-
-
-def exiting_console_error():
-    """Mock for console_error that records the call then exits, as the real one does."""
-    return Mock(side_effect=SystemExit(1))
