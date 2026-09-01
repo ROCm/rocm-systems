@@ -31,6 +31,7 @@
 #   ORCHESTRAI_CONTROL_RUNNER  runner for resolve/trigger/gate (default ubuntu-latest)
 #   ORCHESTRAI_WAIT_RUNNER     runner for the wait/verdict jobs (default ubuntu-latest)
 #     -> both must be able to reach ORCHESTRAI_PIPELINE_URL.
+#   ORCHESTRAI_SOURCE_TRIGGERED_BY  GitHub login; only completed runs by this user
 #
 # WHY THE PIPELINE URL MUST BE A VARIABLE: orchestrai_trigger.py turns it into
 # `build_urls`, a job output the downstream wait job reads. GitHub redacts secret
@@ -143,6 +144,7 @@ jobs:
           # it to ROCm/rocm-systems so a test run reads the real build history
           # instead of the fork's empty one.
           ORCHESTRAI_SOURCE_REPOSITORY: ${{ vars.ORCHESTRAI_SOURCE_REPOSITORY }}
+          ORCHESTRAI_SOURCE_TRIGGERED_BY: ${{ vars.ORCHESTRAI_SOURCE_TRIGGERED_BY }}
         run: python3 .github/scripts/orchestrai_resolve_build.py
 
       # Written before the matrix/trigger steps run, so "which build was under
@@ -160,13 +162,14 @@ jobs:
           if not src:
               print("No build with usable artifacts was found.")
           else:
-              print("| Platform | Run | Commit | Built | Families |")
-              print("|---|---|---|---|---|")
+              print("| Platform | Run | Commit | Built | Triggered by | Families |")
+              print("|---|---|---|---|---|---|")
               for platform, info in sorted(src.items()):
                   run = f"[{info['run_id']}]({info['run_url']})" if info.get("run_url") else info["run_id"]
                   print(
                       f"| {platform} | {run} | `{info.get('sha', '')[:12]}` | "
-                      f"{info.get('created_at', '')} | {', '.join(info.get('families', []))} |"
+                      f"{info.get('created_at', '')} | {info.get('triggered_by', '')} | "
+                      f"{', '.join(info.get('families', []))} |"
                   )
           PY
 

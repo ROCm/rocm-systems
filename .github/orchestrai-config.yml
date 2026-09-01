@@ -55,6 +55,12 @@ source_build:
   # to what eventually merges.
   repository: ""
 
+  # Only completed runs started by this GitHub user are considered. The resolver
+  # scans newest-first among matching runs and picks the first one whose
+  # artifacts are present in S3. Override at run time with the
+  # ORCHESTRAI_SOURCE_TRIGGERED_BY repo variable.
+  triggered_by: "gopalakrishnand"
+
   # How far back to look for a usable run. The build jobs of a Multi-Arch CI run
   # frequently succeed while some downstream test job fails, so the run's overall
   # conclusion is NOT a useful signal — a run is usable when its artifacts exist.

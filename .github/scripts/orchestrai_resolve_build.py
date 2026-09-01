@@ -13,6 +13,9 @@ routinely succeed while some downstream test job fails, which marks the whole
 run "failure" even though every artifact was published. So runs are scanned
 newest-first and the first one whose artifacts are actually present in S3 wins.
 
+When source_build.triggered_by is set, only completed runs started by that
+GitHub user are considered (matches actor.login and triggering_actor.login).
+
 Resolution is per platform, because a run may have built only one of them.
 
 Usage:
@@ -24,6 +27,7 @@ Env:
     GITHUB_REPOSITORY   this repo; the default source of the builds
     ORCHESTRAI_SOURCE_REPOSITORY  read builds from another repo instead
                         (set to ROCm/rocm-systems when testing from a fork)
+    ORCHESTRAI_SOURCE_TRIGGERED_BY  GitHub login filter (overrides config)
     SOURCE_RUN_ID       optional: pin an explicit run id instead of scanning
     PLATFORMS           optional: comma-separated platform filter
 
@@ -140,28 +144,69 @@ def probe_run(
     return True, sorted(families)
 
 
+def triggered_by_filter(cfg: dict[str, Any]) -> str:
+    """GitHub login to match against run actor/triggering_actor, or "" for any."""
+    return (
+        os.environ.get("ORCHESTRAI_SOURCE_TRIGGERED_BY")
+        or (cfg.get("source_build") or {}).get("triggered_by")
+        or ""
+    ).strip().lower()
+
+
+def run_triggered_by(run: dict[str, Any], login: str) -> bool:
+    """True when the run was started by `login` (case-insensitive)."""
+    actors = {
+        (run.get("actor") or {}).get("login", "").lower(),
+        (run.get("triggering_actor") or {}).get("login", "").lower(),
+    }
+    return login in actors
+
+
 def candidate_runs(cfg: dict[str, Any], repo: str, token: str) -> list[dict[str, Any]]:
     """Runs of the source workflow, newest first.
 
-    Deliberately NOT filtered on status. A Multi-Arch CI run publishes its
-    artifacts when the build stages finish, but the run stays in_progress for
-    many more hours while the downstream test jobs execute — recent runs took
-    anywhere from 8h to 20h end to end. Waiting for `completed` would mean always
-    testing yesterday's build. The artifact probe below is the real completeness
-    check, and it is a sound one: the family marker comes from math-libs, the
-    last build stage, so its presence implies the core runtime artifacts landed.
+    When triggered_by is unset, queued runs are skipped but in_progress runs are
+    kept — artifacts can land hours before the run finishes.
 
-    Queued runs are skipped outright — they cannot have artifacts yet.
+    When triggered_by is set, only completed runs by that user are kept. Among
+    those, the newest run with usable artifacts wins (see resolve()).
     """
     src = cfg["source_build"]
     limit = int(src.get("max_runs_to_scan", 40))
+    actor_filter = triggered_by_filter(cfg)
     query = urllib.parse.urlencode(
         {"branch": src["branch"], "per_page": min(limit, 100)}
     )
     workflow = urllib.parse.quote(src["workflow"], safe="")
     payload = gh_api(f"repos/{repo}/actions/workflows/{workflow}/runs?{query}", token)
     runs = payload.get("workflow_runs") or []
-    return [run for run in runs if run.get("status") != "queued"][:limit]
+
+    filtered: list[dict[str, Any]] = []
+    for run in runs:
+        if run.get("status") == "queued":
+            continue
+        if actor_filter:
+            if run.get("status") != "completed":
+                continue
+            if not run_triggered_by(run, actor_filter):
+                continue
+        filtered.append(run)
+
+    if actor_filter and not filtered:
+        print(
+            f"::warning::no completed runs of {src['workflow']} on "
+            f"{src['branch']} triggered by {actor_filter!r} in the last "
+            f"{len(runs)} run(s)",
+            file=sys.stderr,
+        )
+    elif actor_filter:
+        print(
+            f"Filtering to completed runs triggered by {actor_filter!r}: "
+            f"{len(filtered)} candidate(s) in the last {len(runs)} run(s)",
+            file=sys.stderr,
+        )
+
+    return filtered[:limit]
 
 
 def source_repository(cfg: dict[str, Any]) -> str:
@@ -181,6 +226,7 @@ def source_repository(cfg: dict[str, Any]) -> str:
 def run_summary(
     cfg: dict[str, Any], run: dict[str, Any], platform: str, repo: str
 ) -> dict:
+    actor = (run.get("actor") or {}).get("login", "")
     return {
         "repository": repo,
         "run_id": str(run["id"]),
@@ -190,6 +236,7 @@ def run_summary(
         "created_at": run.get("created_at", ""),
         "status": run.get("status", ""),
         "conclusion": run.get("conclusion") or "",
+        "triggered_by": actor,
         "artifact_base_url": artifact_prefix_url(cfg, str(run["id"]), platform),
     }
 
@@ -202,6 +249,15 @@ def resolve(
 
     if pinned:
         run = gh_api(f"repos/{repo}/actions/runs/{pinned}", token)
+        actor_filter = triggered_by_filter(cfg)
+        if actor_filter and not run_triggered_by(run, actor_filter):
+            actor = (run.get("actor") or {}).get("login", "?")
+            print(
+                f"::warning::pinned run {pinned} was triggered by {actor!r}, "
+                f"not {actor_filter!r} — using it anyway because SOURCE_RUN_ID "
+                "was set explicitly",
+                file=sys.stderr,
+            )
         for platform in platforms:
             usable, families = probe_run(cfg, pinned, platform)
             if not usable:
@@ -218,11 +274,20 @@ def resolve(
 
     runs = candidate_runs(cfg, repo, token)
     if not runs:
-        print(
-            "::warning::no completed runs found for "
-            f"{cfg['source_build']['workflow']} on {cfg['source_build']['branch']}",
-            file=sys.stderr,
-        )
+        actor_filter = triggered_by_filter(cfg)
+        if actor_filter:
+            print(
+                "::error::no completed runs found for "
+                f"{cfg['source_build']['workflow']} on "
+                f"{cfg['source_build']['branch']} triggered by {actor_filter!r}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "::warning::no completed runs found for "
+                f"{cfg['source_build']['workflow']} on {cfg['source_build']['branch']}",
+                file=sys.stderr,
+            )
         return resolved
 
     for platform in platforms:
@@ -242,9 +307,13 @@ def resolve(
             }
             break
         else:
+            actor_filter = triggered_by_filter(cfg)
+            extra = (
+                f" triggered by {actor_filter!r}" if actor_filter else ""
+            )
             print(
                 f"::warning::no {platform} build with usable artifacts in the last "
-                f"{len(runs)} run(s) of {cfg['source_build']['workflow']}",
+                f"{len(runs)} run(s){extra} of {cfg['source_build']['workflow']}",
                 file=sys.stderr,
             )
     return resolved
@@ -305,9 +374,12 @@ def main() -> None:
     check_age(cfg, resolved)
 
     for platform, info in resolved.items():
+        trigger = info.get("triggered_by", "")
+        trigger_note = f", by {trigger}" if trigger else ""
         print(
             f"{platform}: run {info['run_id']} ({info['sha'][:12]}, "
-            f"{info['created_at']}) families={','.join(info['families'])}",
+            f"{info['created_at']}{trigger_note}) "
+            f"families={','.join(info['families'])}",
             file=sys.stderr,
         )
 
@@ -321,11 +393,20 @@ def main() -> None:
         print(json.dumps(resolved, indent=2))
 
     if not resolved:
-        print(
-            "::error::No TheRock build with usable artifacts was found — nothing "
-            "to test. Check that the source workflow is still producing builds.",
-            file=sys.stderr,
-        )
+        actor_filter = triggered_by_filter(cfg)
+        if actor_filter:
+            print(
+                "::error::No TheRock build with usable artifacts was found from a "
+                f"completed run triggered by {actor_filter!r}. Check that "
+                f"{cfg['source_build']['workflow']} is still producing builds.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "::error::No TheRock build with usable artifacts was found — nothing "
+                "to test. Check that the source workflow is still producing builds.",
+                file=sys.stderr,
+            )
         sys.exit(1)
 
 
