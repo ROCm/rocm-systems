@@ -136,13 +136,13 @@ for example the number of counter groups collectable on the dispatch's agent.
 ## Localized context control
 
 Tools frequently want different services active on different passes — for example collect hardware
-counters on every pass but PC sampling on the last pass only. Calling the global
+counters on passes 0..N-2 and kernel dispatch timing on the last pass only. Calling the global
 `rocprofiler_start_context()` / `rocprofiler_stop_context()` would leak those changes into other,
 non-replayed dispatches. Instead the tool calls the localized enable/disable callbacks delivered in
 the `PASS` payload:
 
 ```c
-payload->replay_stop_context(my_pc_sampling_ctx);
+payload->replay_stop_context(my_timing_ctx);
 ```
 
 Contexts are configured and started **globally before replay** (outside the replay callbacks).
@@ -162,12 +162,11 @@ Semantics:
 **Service combination limits.** Dispatch counter collection and PC sampling are mutually exclusive
 on MI2xx/MI3xx when both would run on the **same** replay pass (clock gating). ATT and SPM cannot
 safely share one pass because both inject AQL instrumentation. Use separate passes and separate
-contexts — locally stop one service before starting another. Kernel dispatch tracing honors the
-contexts. Counter collection, SPM, and thread trace consult the override map at dispatch time and
-skip building AQL packets for disabled contexts. PC sampling and device counting are agent-wide
-today and continue collecting regardless of the recorded toggle. PC sampling therefore cannot
-currently be isolated from dispatch counters by assigning them to separate replay passes; do not
-combine those services until PC sampling honors localized overrides.
+contexts — locally stop one service before starting another — for services that **consult** the
+override map at dispatch time (dispatch counters, SPM, kernel dispatch tracing, and dispatch thread
+trace). PC sampling and device counting are agent-wide today and **ignore** localized toggles, so
+they keep collecting on every pass even when a tool records a local stop. Do not combine dispatch
+counter collection with PC sampling under replay until PC sampling honors localized overrides.
 
 See
 [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#localized-context-control-and-thread-scope)
