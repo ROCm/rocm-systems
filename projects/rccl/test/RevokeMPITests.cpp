@@ -574,12 +574,10 @@ static void computeAsymmetricExclude(int worldRank, int worldSize,
  */
 TEST_F(RevokeMPITest, Collective_Revoke_AsymmetricShrink_Collective)
 {
-    ASSERT_TRUE(validateTestPrerequisites(4,
-                                          kNoProcessLimit,
-                                          kNoPowerOfTwoRequired,
-                                          2,
-                                          kNoNodeLimit))
-        << "Test requires at least 4 MPI processes across 2 nodes";
+    if(!validateTestPrerequisites(4, kNoProcessLimit, kNoPowerOfTwoRequired, 2, kNoNodeLimit))
+    {
+        GTEST_SKIP() << "Test requires at least 4 MPI processes across 2 nodes";
+    }
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -774,12 +772,10 @@ TEST_F(RevokeMPITest, InFlightCollective_Revoke_Destroy_Clean)
  */
 TEST_F(RevokeMPITest, RepeatedRevokeShrinkCycles_ResourceCleanup)
 {
-    ASSERT_TRUE(validateTestPrerequisites(4,
-                                          kNoProcessLimit,
-                                          kNoPowerOfTwoRequired,
-                                          2,
-                                          kNoNodeLimit))
-        << "Test requires at least 4 MPI processes across 2 nodes";
+    if(!validateTestPrerequisites(4, kNoProcessLimit, kNoPowerOfTwoRequired, 2, kNoNodeLimit))
+    {
+        GTEST_SKIP() << "Test requires at least 4 MPI processes across 2 nodes";
+    }
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -960,10 +956,9 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ReturnsInProgress)
     ASSERT_MPI_EQ(ncclInvalidUsage, collRes);
 }
 
-// Non-blocking revoke -> shrink recovery on the same parent, following the
-// non-blocking contract: each async op is drained via ncclCommGetAsyncError
-// (waitForAsyncResult) before the next op, and the child handle is only read
-// after the shrink job completes. Regression for AICOMRCCL-2232.
+// Non-blocking revoke -> shrink on the same parent, per the non-blocking
+// contract: drain each async op (waitForAsyncResult) before the next.
+// Regression for AICOMRCCL-2232.
 TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
 {
     ASSERT_TRUE(validateTestPrerequisites(2,
@@ -983,11 +978,8 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
 
         ncclComm_t parent = getActiveCommunicator();
 
-        // Non-blocking revoke returns immediately while commRevokeAsync tears
-        // down the parent's proxy/sockets on a worker thread. The non-blocking
-        // contract requires draining it (poll parent to ncclSuccess) before the
-        // next op on the same comm; skipping this drain lets shrink race the
-        // teardown and child bootstrap fails with connection-refused.
+        // Drain the async revoke before reusing the comm; otherwise shrink
+        // races the parent teardown and child bootstrap fails (conn-refused).
         ncclResult_t res = ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT);
         ASSERT_MPI_TRUE(res == ncclSuccess || res == ncclInProgress);
         ASSERT_MPI_EQ(ncclSuccess, waitForAsyncResult(parent));
@@ -1009,12 +1001,9 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
                                  NCCL_SHRINK_DEFAULT);
             ASSERT_TRUE(res == ncclSuccess || res == ncclInProgress)
                 << "iter=" << iter << " shrink returned " << res;
-            // On a non-blocking parent *newcomm stays NCCL_COMM_NULL until the
-            // child init async job completes, and a NULL handle cannot be
-            // polled. Drain via the PARENT first; only then is the child handle
-            // guaranteed populated. These asserts are LOCAL (not ASSERT_MPI_*):
-            // the excluded rank skips this branch, so a collective assert here
-            // would desync against it.
+            // *newcomm stays NCCL_COMM_NULL until the child job completes, so
+            // drain the parent first. Local asserts (not ASSERT_MPI_*):
+            // excluded ranks skip this branch and would desync a collective.
             ASSERT_EQ(ncclSuccess, waitForAsyncResult(parent));
             ASSERT_NE(child, nullptr);
             ASSERT_EQ(ncclSuccess, waitForAsyncResult(child));
