@@ -251,22 +251,8 @@ std::string Monitor::MakeMonitorPath(MonitorTypes type, uint32_t sensor_id) {
   std::string tempPath = path_;
   std::string fn = kMonitorNameMap.at(type);
 
-  // Replace '#' placeholder with the sensor_id as a string.
-  //
-  // BUG FIX (2026-01): The original code used:
-  //   std::replace(fn.begin(), fn.end(), '#', static_cast<char>('0' + sensor_id));
-  //
-  // This only works correctly for sensor_id values 0-9. For larger values:
-  //   - sensor_id=10 produces ':' (ASCII 58)
-  //   - sensor_id=213 produces 0x05 (ENQ control character)
-  //
-  // Control characters in log output can cause terminal issues. For example,
-  // ENQ (0x05) triggers terminals to send their answerback string, which
-  // pollutes command output with text like "xterm-256color".
-  //
-  // The fix converts sensor_id to a proper string representation.
-  //
-  // This was found when turning logs on (RSMI_LOGGING=2 or higher)
+  // Substitute the sensor_id as a string: '0' + sensor_id only holds to 9, and
+  // beyond that emits control characters that corrupt terminal output.
   auto pos = fn.find('#');
   if (pos != std::string::npos) {
     fn.replace(pos, 1, std::to_string(sensor_id));
@@ -320,10 +306,13 @@ int32_t Monitor::setTempSensorLabelMap(void) {
     // If readMonitor fails, there is no label file for the file_index.
     // In that case, map the type to file index 0, which is not supported
     // and will fail appropriately later when we check for support.
-    if (ret) {
+    // A label this build does not know is treated the same way: throwing here
+    // would abort device discovery over one unrecognized sysfs string.
+    const auto name_it = ret ? kTempSensorNameMap.end() : kTempSensorNameMap.find(type_str);
+    if (name_it == kTempSensorNameMap.end()) {
       index_temp_type_map_.insert({file_index, RSMI_TEMP_TYPE_INVALID});
     } else {
-      t_type = kTempSensorNameMap.at(type_str);
+      t_type = name_it->second;
       temp_type_index_map_[t_type] = file_index;
       index_temp_type_map_.insert({file_index, t_type});
     }
