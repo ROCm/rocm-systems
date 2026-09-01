@@ -294,8 +294,8 @@ rocprofv3 --pmc <counters...> --kernel-replay-beta-enabled -- <app>
   without it.
 - The tool library creates the kernel replay context when the flag is given, and not otherwise.
 - There is no pass-count knob. The tool derives the pass count from the number of counter groups
-  collectable on the dispatch's agent and returns it from `pass_count_cb`.
-- The flag does not wire `replay_continue_cb` or the localized start/stop context callbacks.
+  collectable on the dispatch's agent and returns it from `replay_pass_count`.
+- The flag does not wire `replay_continue` or the localized start/stop context callbacks.
 - Without the flag, multiple `--pmc` groups continue to use application replay, where the whole
   application is re-run once per group.
 

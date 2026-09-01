@@ -17,7 +17,7 @@ Without the flag, multiple ``--pmc`` groups use *application replay*: the whole 
 re-run from start to finish once per group. Kernel replay is useful when those full re-runs are
 expensive or non-deterministic.
 
-This page is the command-line how-to. The SDK callback domain, ``pass_count_cb``, and localized
+This page is the command-line how-to. The SDK callback domain, ``replay_pass_count``, and localized
 context control are documented in :ref:`using-kernel-replay`.
 
 .. warning::
@@ -99,7 +99,7 @@ number of counter groups collectable on **that dispatch's GPU agent**. Pass ``i`
 many times as it has groups, so pass and group stay aligned.
 
 There is no ``--kernel-replay-passes`` flag and no pass-count environment variable. The CLI does
-not wire ``replay_continue_cb`` or the localized start/stop context callbacks; those remain SDK
+not wire ``replay_continue`` or the localized start/stop context callbacks; those remain SDK
 tool APIs (:ref:`using-kernel-replay`).
 
 Output
@@ -151,7 +151,7 @@ Limitations (CLI)
   a general "replay my kernel N times" switch.
 * **Each** ``--pmc`` **group must fit one hardware pass.**
 * **Fixed pass count** equal to the number of collectable groups on that agent. No
-  ``replay_continue_cb`` and no per-pass local-context toggles from the CLI.
+  ``replay_continue`` and no per-pass local-context toggles from the CLI.
 * **Counters only.** ``--att``, PC sampling, and ``--spm`` are rejected alongside
   ``--kernel-replay-beta-enabled``. Because the CLI has no per-pass toggles, any other service
   would remain enabled for every pass and report each kernel once per pass, all under the single
