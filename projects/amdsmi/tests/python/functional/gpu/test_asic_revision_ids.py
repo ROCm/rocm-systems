@@ -97,7 +97,9 @@ class TestGpuAsicRevisionIds(unittest.TestCase):
                 render_index = amdsmi.amdsmi_get_gpu_enumeration_info(processor)["drm_render"]
                 render_node = f"/dev/dri/renderD{render_index}"
                 words = _query_dev_info(render_node)
-            except (OSError, amdsmi.AmdSmiLibraryException) as exc:
+            except OSError as exc:
+                # Only an unreadable node is environmental; a library failure
+                # must not be downgraded to a skip.
                 unreachable.append(f"{processor}: {exc}")
                 continue
 

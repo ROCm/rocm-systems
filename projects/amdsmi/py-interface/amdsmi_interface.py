@@ -2870,8 +2870,9 @@ def amdsmi_get_gpu_asic_info(processor_handle: processor_handle_t) -> Dict[str, 
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     asic_info_struct = amdsmi_wrapper.amdsmi_asic_info_t()
-    # An older libamd_smi does not know these fields and leaves the reserved
-    # slots as the caller passed them, so seed N/A rather than the ctypes zero.
+    # A DRM libamd_smi predating these fields leaves the reserved slots as the
+    # caller passed them, so seed N/A rather than the ctypes zero. A WSL library
+    # that old clears the whole structure and still reports zero.
     asic_info_struct.chip_rev_id = MaxUIntegerTypes.UINT32_T
     asic_info_struct.external_rev_id = MaxUIntegerTypes.UINT32_T
     _check_res(
