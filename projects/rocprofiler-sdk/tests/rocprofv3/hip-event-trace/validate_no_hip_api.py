@@ -71,7 +71,22 @@ def test_no_hip_api_fields(json_data):
         assert r.agent_id.handle > 0
         assert r.queue_id.handle > 0
         assert r.hip_event_handle > 0
+        assert r.stream_id.handle > 0
         assert r.correlation_id.internal > 0
+
+
+def test_no_hip_api_timestamps(json_data):
+    """Verify timestamps are ordered when HIP API tracing is disabled."""
+    data = json_data["rocprofiler-sdk-tool"]
+    init_time = data["metadata"]["init_time"]
+
+    for itr in data["buffer_records"]["hip_event"]:
+        assert (
+            itr.start_timestamp < itr.end_timestamp
+        ), f"start >= end: {itr.start_timestamp} >= {itr.end_timestamp}"
+        assert (
+            itr.start_timestamp > init_time
+        ), f"start {itr.start_timestamp} before init {init_time}"
 
 
 def test_no_hip_api_cross_stream(json_data):
@@ -116,6 +131,18 @@ def test_no_hip_api_destroy_cleanup(json_data):
     )
 
 
+def test_no_hip_api_record_source_queue(json_data):
+    """Verify RECORD operations have source_queue_id == queue_id."""
+    records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
+    record_records = [r for r in records if r.operation == HIP_EVENT_RECORD]
+
+    for r in record_records:
+        assert r.source_queue_id.handle == r.queue_id.handle, (
+            f"RECORD source_queue_id ({r.source_queue_id.handle}) != "
+            f"queue_id ({r.queue_id.handle})"
+        )
+
+
 def test_no_hip_api_graph_capture_exclusion(json_data):
     """Verify graph capture records are excluded without HIP API tracing."""
     records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
@@ -124,9 +151,18 @@ def test_no_hip_api_graph_capture_exclusion(json_data):
         r.hip_event_handle for r in records if r.operation == HIP_EVENT_RECORD
     )
 
-    assert (
-        len(record_handles) == 4
-    ), f"Expected 4 unique RECORD handles, found {len(record_handles)}"
+    # The binary uses 4 non-capture events (event0, event1, coalesce_event, destroy_event)
+    # plus 1 capture event that should be excluded. If capture is excluded correctly,
+    # we see exactly 4 handles. If graph capture fails, we would see 5.
+    assert len(record_handles) <= 4, (
+        f"Expected at most 4 unique RECORD handles (capture_event should be excluded). "
+        f"Found {len(record_handles)}: {record_handles}. "
+        f"If 5 handles, graph capture exclusion may have failed."
+    )
+    assert len(record_handles) >= 4, (
+        f"Expected at least 4 unique RECORD handles (event0, event1, coalesce_event, "
+        f"destroy_event). Found {len(record_handles)}: {record_handles}."
+    )
 
 
 if __name__ == "__main__":

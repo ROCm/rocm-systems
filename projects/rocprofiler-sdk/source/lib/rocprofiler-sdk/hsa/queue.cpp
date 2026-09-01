@@ -373,6 +373,9 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         }
     }
 
+    if(queue_info_session.pending_waits_pooled_signal)
+        Queue::release_signal(queue_info_session.pending_waits_pooled_signal);
+
     queue_info_session.queue.async_complete();
 
     return false;
@@ -836,7 +839,8 @@ WriteInterceptor(const void* packets,
                     }
 
                     {
-                        // EXIT: barrier has been staged in transformed_packets
+                        // EXIT phase: GPU timestamps not yet available; PHASE_NONE fires from
+                        // BarrierAsyncSignalHandler
                         auto tracer_data = _barrier_data.callback_record;
                         tracing::execute_phase_exit_callbacks(
                             _barrier_data.tracing_data.callback_contexts,
@@ -1246,22 +1250,22 @@ WriteInterceptor(const void* packets,
             hsa_signal_t pooled_sig{.handle = 0};
             auto*        pooled = queue.create_signal(0, &pooled_sig, true);
 
+            // Reset to 0 so the GPU barrier decrements it to -1, matching the
+            // HSA_SIGNAL_CONDITION_EQ -1 condition in signal_async_handler.
+            get_core_table()->hsa_signal_store_screlease_fn(pooled_sig, 0);
+
             auto barrier   = hsa_barrier_and_packet_t{};
             barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
             barrier.header |= (1 << HSA_PACKET_HEADER_BARRIER);
             barrier.completion_signal = pooled_sig;
             transformed_packets.emplace_back(barrier);
 
+            _info_session.pending_waits_pooled_signal = pooled;
             auto shared = std::make_shared<info_session_t>(std::move(_info_session));
             queue.async_started();
             queue.signal_async_handler(
                 pooled, pooled_sig, new std::shared_ptr<info_session_t>(shared));
         }
-        else
-        {
-            // No kernel dispatches, no pending waits -- nothing to track.
-        }
-
         // Command is only executed if GLOG_v=2 or higher, otherwise it is a no-op
         ROCP_TRACE << fmt::format("QueueID {}: {}",
                                   queue.get_id().handle,

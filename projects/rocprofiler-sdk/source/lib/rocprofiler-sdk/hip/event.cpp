@@ -206,7 +206,12 @@ using pending_wait_map_t   = std::unordered_multimap<uint64_t, pending_wait_t>;
 
 using stream_is_capturing_fn_t = hipError_t (*)(hipStream_t, hipStreamCaptureStatus*);
 
-stream_is_capturing_fn_t g_original_stream_is_capturing_fn = nullptr;
+stream_is_capturing_fn_t&
+get_stream_is_capturing_fn()
+{
+    static auto _v = stream_is_capturing_fn_t{nullptr};
+    return _v;
+}
 
 auto*
 get_event_info_map()
@@ -235,12 +240,12 @@ std::atomic<uint32_t> g_pending_wait_count{0};
 bool
 is_stream_capturing(hipStream_t stream)
 {
-    if(!g_original_stream_is_capturing_fn) return false;
+    if(!get_stream_is_capturing_fn()) return false;
     // Normalize nullptr to hipStreamPerThread: _spt variants resolve nullptr to the
     // per-thread default stream at the CLR level, which may itself be in capture mode.
     auto* resolved = (stream == nullptr) ? hipStreamPerThread : stream;
     auto  status   = hipStreamCaptureStatusNone;
-    auto  err      = g_original_stream_is_capturing_fn(resolved, &status);
+    auto  err      = get_stream_is_capturing_fn()(resolved, &status);
     return (err == hipSuccess && status == hipStreamCaptureStatusActive);
 }
 
@@ -546,8 +551,10 @@ lookup_coalesce_group(uint64_t hip_event_handle)
 void
 register_pending_wait(uint64_t signal_handle, pending_wait_t pw)
 {
-    get_pending_wait_map()->wlock([&](auto& map) { map.emplace(signal_handle, std::move(pw)); });
-    g_pending_wait_count.fetch_add(1, std::memory_order_release);
+    get_pending_wait_map()->wlock([&](auto& map) {
+        map.emplace(signal_handle, std::move(pw));
+        g_pending_wait_count.fetch_add(1, std::memory_order_relaxed);
+    });
 }
 
 bool
@@ -646,7 +653,7 @@ update_table<::HipDispatchTable>(::HipDispatchTable* table)
 
     if(table_has_entry<ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamIsCapturing>(table) &&
        table->hipStreamIsCapturing_fn)
-        g_original_stream_is_capturing_fn = table->hipStreamIsCapturing_fn;
+        get_stream_is_capturing_fn() = table->hipStreamIsCapturing_fn;
 }
 
 }  // namespace event

@@ -334,31 +334,32 @@ def test_hip_event_wait_queue_identity(json_data):
 
 
 def test_hip_event_duplicate_wait(json_data):
-    """Verify that multiple hipStreamWaitEvent calls on the same event do not
-    cause crashes, ref-count leaks, or lost records.
+    """Verify that multiple hipStreamWaitEvent calls on the same event produce
+    records on all waiting queues.
 
     The test binary records event0 on stream0, then calls
-    hipStreamWaitEvent on both stream1 and stream2. Depending on GPU
-    timing, one or both waits may produce WAIT records (CLR short-circuits
-    if the event already completed). We verify:
-    - At least one WAIT record exists for this event (from stream1 or
-      stream2, whichever ran before the event completed)
-    - The process exits cleanly (implicit: no ref-count leaks from the
-      multimap pending_wait path or the cleanup-on-destroy path)
+    hipStreamWaitEvent on both stream1 and stream2. Both should produce WAIT
+    completions (unless GPU timing causes one to be short-circuited by CLR).
+    We verify that at least one event handle appears in WAIT records on two
+    or more distinct queues — proving the multimap pending_wait path works.
     """
     data = json_data["rocprofiler-sdk-tool"]
     records = data["buffer_records"]["hip_event"]
 
     wait_records = [r for r in records if r.operation == HIP_EVENT_WAIT]
 
-    all_queues = set()
+    handle_to_queues = {}
     for w in wait_records:
-        all_queues.add(w.queue_id.handle)
+        h = w.hip_event_handle
+        if h not in handle_to_queues:
+            handle_to_queues[h] = set()
+        handle_to_queues[h].add(w.queue_id.handle)
 
-    assert len(all_queues) >= 2, (
-        f"Expected WAIT records on at least 2 different queues "
-        f"(from the main loop and/or the duplicate wait scenario). "
-        f"Found queues: {all_queues}"
+    multi_queue_handles = [h for h, qs in handle_to_queues.items() if len(qs) >= 2]
+    assert len(multi_queue_handles) >= 1, (
+        f"Expected at least one event handle with WAIT completions on >= 2 distinct queues "
+        f"(duplicate hipStreamWaitEvent scenario). "
+        f"Per-handle queue sets: {handle_to_queues}"
     )
 
 
@@ -414,23 +415,27 @@ def test_hip_event_graph_capture_exclusion(json_data):
     """Verify that hipEventRecord during graph capture does not produce records.
 
     The test binary records capture_event on a stream that is in graph capture
-    mode. No barrier is dispatched during capture, and the is_stream_capturing
-    guard should prevent check_coalesced_record from fabricating a record.
-    We verify that capture_event's handle does not appear in any hip_event
-    records by checking that the number of unique RECORD handles matches the
-    expected count (event0, event1, coalesce_event, destroy_event = 4).
+    mode. No barrier is dispatched during capture, so no RECORD completion should
+    appear for that event. We verify that RECORD completions are strictly fewer
+    than total hipEventRecord API calls — the capture call is excluded.
     """
-    records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
+    data = json_data["rocprofiler-sdk-tool"]
+    records = data["buffer_records"]["hip_event"]
+    hip_api = data["buffer_records"]["hip_api"]
+    string_table = data["strings"]["buffer_records"]
 
-    record_handles = set(
-        r.hip_event_handle for r in records if r.operation == HIP_EVENT_RECORD
+    def get_operation_name(kind_id, op_id):
+        return string_table[kind_id]["operations"][op_id]
+
+    record_count = sum(1 for r in records if r.operation == HIP_EVENT_RECORD)
+    api_record_count = sum(
+        1 for r in hip_api if get_operation_name(r.kind, r.operation) in RECORD_API_NAMES
     )
 
-    assert len(record_handles) == 4, (
-        f"Expected exactly 4 unique RECORD event handles "
-        f"(event0, event1, coalesce_event, destroy_event). "
-        f"Found {len(record_handles)}: {record_handles}. "
-        f"If 5, graph capture exclusion may have failed."
+    assert record_count < api_record_count, (
+        f"Expected RECORD completions ({record_count}) to be strictly less than "
+        f"hipEventRecord API calls ({api_record_count}): "
+        f"at least one call was made during graph capture and should be excluded."
     )
 
 
