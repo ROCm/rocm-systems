@@ -40,6 +40,23 @@ _PROFILER_INTERNAL_RE = re.compile(
     r"|^[WI]\d{8}\s"  # glog-style timestamps (W/I followed by YYYYMMDD)
 )
 
+_LLVM_OPTION_REGISTERED_MORE_THAN_ONCE = "registered more than once"
+_ROCPROFILER_LIBRARY_ALREADY_REGISTERED = (
+    "ROCPROFILER_REGISTER_LIBRARY is already set to"
+)
+_CONFLICTING_ROCM_INSTALLATIONS_MESSAGE = (
+    "The profiler output indicates two ROCm installations in one process. "
+    "The profiler and the workload must use the same ROCm.\n"
+    "TheRock torch packages depend on rocm[libraries]; do not install ROCm "
+    "and then torch, as that can downgrade ROCm. Install rocm[profiler] in "
+    "the same command as torch so this tool is not a second stack from "
+    "/opt/rocm. Replace device-gfx950 with your GPU target:\n"
+    "  python -m pip install --index-url "
+    "https://repo.amd.com/rocm/whl-multi-arch/ \\\n"
+    '    "rocm[profiler,libraries,device-gfx950]" "torch[device-gfx950]"\n'
+    "See https://github.com/ROCm/TheRock/blob/main/RELEASES.md"
+)
+
 ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
 
 # inject_roctx appends a trailing "|<backend>" suffix to marker names.
@@ -126,6 +143,16 @@ def _classify_output_line(line: str) -> None:
         console_debug(line)
     else:
         console_error(line, exit=False)
+
+
+def _conflicting_rocm_installations_message(output: str) -> Optional[str]:
+    """Return install guidance when output shows two ROCm installations."""
+    if (
+        _LLVM_OPTION_REGISTERED_MORE_THAN_ONCE in output
+        or _ROCPROFILER_LIBRARY_ALREADY_REGISTERED in output
+    ):
+        return _CONFLICTING_ROCM_INSTALLATIONS_MESSAGE
+    return None
 
 
 def run_prof(
@@ -271,6 +298,9 @@ def run_prof(
             stripped = line.strip()
             if stripped:
                 _classify_output_line(stripped)
+        conflicting_rocm_message = _conflicting_rocm_installations_message(output)
+        if conflicting_rocm_message is not None:
+            console_error(conflicting_rocm_message, exit=False)
         console_error("Profiling execution failed.")
 
     out_dir = Path(workload_dir) / "out"
