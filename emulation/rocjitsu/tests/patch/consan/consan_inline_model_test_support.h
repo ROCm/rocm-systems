@@ -58,6 +58,42 @@ consan_moi_inline_workgroup_key(uint32_t x, uint32_t y, uint32_t z,
   return {/*valid=*/true, /*value=*/packed + 1u};
 }
 
+/// Test oracle for the byte-provenance word emitted by InlineShadow.
+[[nodiscard]] constexpr uint32_t
+pack_consan_moi_exact_byte_cell_provenance(uint32_t byte_mask, uint32_t representative_lane) {
+  const ConSanMoiExactByteCellProvenance provenance =
+      consan_moi_exact_byte_cell_provenance_from_mask(byte_mask, representative_lane);
+  if (!provenance.valid)
+    return 0;
+  return byte_mask |
+         (static_cast<uint32_t>(provenance.byte_offset)
+          << consan_moi_exact_byte_cell::byte_offset_shift) |
+         (static_cast<uint32_t>(provenance.byte_offset + provenance.byte_count - 1u)
+          << consan_moi_exact_byte_cell::byte_end_minus_one_shift) |
+         ((representative_lane + 1u) << consan_moi_exact_byte_cell::lane_plus_one_shift);
+}
+
+/// Test oracle for decomposing one possibly unaligned access into the emitted
+/// exact byte-cell masks.
+[[nodiscard]] constexpr uint32_t consan_moi_exact_byte_mask_for_cell(uint32_t access_byte_offset,
+                                                                     uint32_t access_byte_count,
+                                                                     uint32_t relative_cell_index) {
+  if (access_byte_count == 0u)
+    return 0u;
+  const uint32_t start = access_byte_offset & (consan_moi_shadow_cell::granule_bytes - 1u);
+  const uint64_t relative_cell_start =
+      static_cast<uint64_t>(relative_cell_index) * consan_moi_shadow_cell::granule_bytes;
+  const uint64_t relative_cell_end = relative_cell_start + consan_moi_shadow_cell::granule_bytes;
+  const uint64_t access_end = static_cast<uint64_t>(start) + access_byte_count;
+  const uint64_t overlap_start = std::max<uint64_t>(start, relative_cell_start);
+  const uint64_t overlap_end = std::min(access_end, relative_cell_end);
+  if (overlap_start >= overlap_end)
+    return 0u;
+  const uint32_t cell_offset = static_cast<uint32_t>(overlap_start - relative_cell_start);
+  const uint32_t cell_count = static_cast<uint32_t>(overlap_end - overlap_start);
+  return ((1u << cell_count) - 1u) << cell_offset;
+}
+
 /// Test oracle for the packed-cell predicate emitted by InlineShadow.
 [[nodiscard]] constexpr bool
 consan_moi_exact_byte_cells_conflict(const ConSanMoiExactShadowEntry &current_access,

@@ -334,6 +334,11 @@ _consan_assert_no_match(
     "the exact-subset mechanism must not acquire mode policy or dispatch-preload planning"
 )
 _consan_assert_no_match(
+    "${_consan_dir}/consan_moi_exact_shadow_model.h.inc"
+    "pack_consan_moi_exact_byte_cell_provenance|consan_moi_exact_byte_mask_for_cell"
+    "host-only exact byte-cell emission oracles must remain test-owned"
+)
+_consan_assert_no_match(
     "${_consan_dir}/consan_moi_inline_exact_model.h.inc"
     "ConSanMoi(Sampled|RecordReplay)|consan_moi_(sampled|record_replay)|ConSanMoiDispatchId|consan_moi_(amdhsa_)?dispatch_id"
     "the InlineShadow exact contract must not acquire other-mode policy or dispatch-preload planning"

@@ -6800,3 +6800,50 @@ runtime, while reference construction stays independently test-owned. Broader
 pipeline and validation transactions, further target and mode locality,
 material whole-refactoring shrinkage, and the independent completion audit
 remain open. The goal therefore remains active.
+
+### 16.89 Convergence checkpoint 88: test-owned exact byte-cell emission oracles
+
+The follow-up caller trace of the shared exact-byte model distinguished host
+runtime mechanics from complete reference encoders. Production needs the
+byte-provenance decoder, exact conflict semantics, maximum cell geometry, and
+two compile-time lookup tables consumed by the InlineShadow GPU emitter. It
+does not call the host function that constructs a complete provenance word or
+the host function that decomposes an unaligned access into per-cell masks.
+Those two functions are used only as independent expected-value calculations
+for emitted InlineShadow behavior.
+
+The provenance packer and byte-cell mask decomposition now live beside the
+existing InlineShadow transaction and packed-conflict test oracles in
+`consan_inline_model_test_support.h`. The shared exact production contract
+retains the primitives actually consumed by Record/Replay, InlineShadow
+decoding, validation, and GPU emission. No production forwarding definition
+remains, and the architecture gate prevents both complete emission oracles
+from returning to the shared exact owner.
+
+| Signal | Checkpoint 88 | Cumulative change | Slice change from checkpoint 87 |
+| --- | ---: | ---: | ---: |
+| Production files | 272 | +43 | 0 |
+| Physical production lines | 102,969 | **-2,007** | **-33** |
+| Nonblank production lines | 96,732 | **-2,352** | **-31** |
+| Production implementation lines | 89,044 | **-2,406** | **-31** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **154 / 47** | **-122 / -10** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 326 / 60 | +36 / +9 | 0 / 0 |
+| Host-only exact byte-cell emission operations in production | **0** | n/a | **-2** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and all 23 focused exact-byte,
+exact-shadow, sparse-replay, InlineShadow snapshot, and architecture-boundary
+tests. The immediately preceding checkpoint exercised the full Sampled/hook
+consumer set, and checkpoint 86 passed the complete 4,776-test nonphysical
+matrix on the same tree ancestry. This slice removes unused production inline
+definitions without changing the production lookup tables, decoder, validator,
+or emitted GPU program. No test inventory or physical gfx1201 run changed.
+
+This deletion-bearing checkpoint strengthens Sections 14.3, 14.7, and 14.8.
+The shared exact contract is smaller and more honest about the runtime
+mechanisms it owns, while device-reference construction stays test-owned.
+Broad pipeline and validation transactions, further target and mode locality,
+material whole-refactoring shrinkage, and the independent completion audit
+remain open. The goal therefore remains active.
