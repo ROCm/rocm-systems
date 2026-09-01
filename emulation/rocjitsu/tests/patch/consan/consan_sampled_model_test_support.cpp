@@ -78,10 +78,10 @@ consan_moi_sampled_publish_access_records(const ConSanMoiReportHeader &header,
     const ConSanMoiAccessRecord &record = access_records[i];
     const uint32_t start_byte = record.lds_byte_count != 0
                                     ? record.lds_byte_offset
-                                    : record.start_cell * consan_moi_exact_shadow::granule_bytes;
+                                    : record.start_cell * consan_moi_shadow_cell::granule_bytes;
     const uint32_t byte_count = record.lds_byte_count != 0
                                     ? record.lds_byte_count
-                                    : record.cell_count * consan_moi_exact_shadow::granule_bytes;
+                                    : record.cell_count * consan_moi_shadow_cell::granule_bytes;
     if (byte_count == 0)
       continue;
 
@@ -168,10 +168,10 @@ consan_moi_sampled_publish_causal_windows(const ConSanMoiReportHeader &header,
     Window &window = windows[position->second];
     const uint32_t start_byte = record.lds_byte_count != 0
                                     ? record.lds_byte_offset
-                                    : record.start_cell * consan_moi_exact_shadow::granule_bytes;
+                                    : record.start_cell * consan_moi_shadow_cell::granule_bytes;
     const uint32_t byte_count = record.lds_byte_count != 0
                                     ? record.lds_byte_count
-                                    : record.cell_count * consan_moi_exact_shadow::granule_bytes;
+                                    : record.cell_count * consan_moi_shadow_cell::granule_bytes;
     const ConSanMoiShadowAccessKind kind = decode_kind(record.access_kind);
     const bool malformed =
         generation != header.generation ||

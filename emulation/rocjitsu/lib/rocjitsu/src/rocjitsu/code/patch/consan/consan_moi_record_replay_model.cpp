@@ -640,7 +640,7 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
         synchronization_metadata_capacity_for_workgroup(generation, workgroup_x, workgroup_y,
                                                         workgroup_z);
     ReplayWorkgroupState state(static_cast<uint64_t>(exact_shadow_entries.size()) *
-                                   consan_moi_exact_shadow::granule_bytes,
+                                   consan_moi_shadow_cell::granule_bytes,
                                replay.published_access_count, synchronization_metadata_capacity);
     state.generation = generation;
     state.workgroup_x = workgroup_x;
@@ -982,11 +982,11 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     const uint64_t lds_byte_offset_u64 =
         record.lds_byte_count != 0
             ? record.lds_byte_offset
-            : static_cast<uint64_t>(record.start_cell) * consan_moi_exact_shadow::granule_bytes;
+            : static_cast<uint64_t>(record.start_cell) * consan_moi_shadow_cell::granule_bytes;
     const uint64_t lds_byte_count_u64 =
         record.lds_byte_count != 0
             ? record.lds_byte_count
-            : static_cast<uint64_t>(record.cell_count) * consan_moi_exact_shadow::granule_bytes;
+            : static_cast<uint64_t>(record.cell_count) * consan_moi_shadow_cell::granule_bytes;
     if (lds_byte_offset_u64 > std::numeric_limits<uint32_t>::max() ||
         lds_byte_count_u64 > std::numeric_limits<uint32_t>::max()) {
       ++replay.processed_access_count;
@@ -1042,9 +1042,9 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
         access.kind, access.owner_id, access.epoch, static_cast<uint32_t>(access.generation),
         access.instruction_offset);
     const uint64_t byte_end = static_cast<uint64_t>(access.lds_byte_offset) + access.lds_byte_count;
-    const uint64_t start_cell = access.lds_byte_offset >> consan_moi_exact_shadow::granule_shift;
-    const uint64_t end_cell = (byte_end + consan_moi_exact_shadow::granule_bytes - 1u) >>
-                              consan_moi_exact_shadow::granule_shift;
+    const uint64_t start_cell = access.lds_byte_offset >> consan_moi_shadow_cell::granule_shift;
+    const uint64_t end_cell = (byte_end + consan_moi_shadow_cell::granule_bytes - 1u) >>
+                              consan_moi_shadow_cell::granule_shift;
     for (uint64_t cell = start_cell;
          cell < end_cell && cell < state.exported_exact_shadow_entries.size(); ++cell) {
       state.exported_exact_shadow_entries[cell] = packed;

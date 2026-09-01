@@ -673,14 +673,14 @@ TEST(ConSanMoiAutoReportPlan, InlineCapacityChangesAtEveryLdsByte) {
             aligned.layout.exact_shadow_entry_capacity +
                 aligned.layout.inline_exact_dispatch_bank_count);
 
-  inventory.inline_lds_bytes += consan_moi_exact_shadow::granule_bytes - 1u;
+  inventory.inline_lds_bytes += consan_moi_shadow_cell::granule_bytes - 1u;
   const auto later_bytes = plan_consan_moi_auto_report(inventory);
   ASSERT_TRUE(later_bytes.complete());
   EXPECT_EQ(later_bytes.layout.inline_exact_dispatch_bank_count,
             next_cell.layout.inline_exact_dispatch_bank_count);
   EXPECT_EQ(later_bytes.layout.exact_shadow_entry_capacity,
             next_cell.layout.exact_shadow_entry_capacity +
-                (consan_moi_exact_shadow::granule_bytes - 1u) *
+                (consan_moi_shadow_cell::granule_bytes - 1u) *
                     next_cell.layout.inline_exact_dispatch_bank_count);
 }
 
@@ -698,7 +698,7 @@ TEST(ConSanMoiAutoReportPlan, EveryAbiCapacityRejectsOnePastUint32) {
       {.engine = ConSanMoiEngine::InlineShadow, .inline_causal_snapshot_count = overflow},
       {.engine = ConSanMoiEngine::InlineShadow, .inline_acquired_epoch_token_count = overflow},
       {.engine = ConSanMoiEngine::InlineShadow,
-       .inline_lds_bytes = overflow * consan_moi_exact_shadow::granule_bytes},
+       .inline_lds_bytes = overflow * consan_moi_shadow_cell::granule_bytes},
   };
   for (const auto &inventory : inventories) {
     const auto plan = plan_consan_moi_auto_report(inventory);

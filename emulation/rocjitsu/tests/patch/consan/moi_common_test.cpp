@@ -1676,7 +1676,7 @@ void expect_moi_engines_admit_native_b96_accesses(
           const uint16_t saved_address_vgpr = static_cast<uint16_t>(
               loop_counter_vgpr + consan_detail::inline_shadow_loop_scratch_count(
                                       test_admitted_accesses(result).front().decoded_width_bits,
-                                      consan_moi_exact_shadow::granule_bytes));
+                                      consan_moi_shadow_cell::granule_bytes));
           EXPECT_LT(saved_address_vgpr, reserved_end);
           EXPECT_NE(std::ranges::find(body, build_v_mov_b32_e32(saved_address_vgpr,
                                                                 vector_source_vgpr(0u), arch)),
@@ -3315,7 +3315,7 @@ TEST(ConSanMoi, AutoReportInventoryCountsAdmittedLogicalRangesBeforeAllocation) 
     } else if (engine == ConSanMoiEngine::InlineShadow) {
       EXPECT_TRUE(inventory.inline_diagnostic_count_adaptive);
       EXPECT_EQ(inventory.inline_lds_bytes, kConSanMoiInlineShadowConservativeExactShadowEntries *
-                                                consan_moi_exact_shadow::granule_bytes);
+                                                consan_moi_shadow_cell::granule_bytes);
       const uint64_t dispatch_banks =
           consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes);
       EXPECT_EQ(inventory.diagnostic_count, inventory.access_range_count * dispatch_banks *
@@ -3431,14 +3431,14 @@ TEST(ConSanMoi, AutoReportInventoryCoversFullLdsApertureForFlatGroupAccess) {
   const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
   EXPECT_EQ(inventory.access_range_count, 1u);
   EXPECT_EQ(inventory.inline_lds_bytes, kConSanMoiInlineShadowConservativeExactShadowEntries *
-                                            consan_moi_exact_shadow::granule_bytes);
+                                            consan_moi_shadow_cell::granule_bytes);
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
   ASSERT_TRUE(plan.complete());
   EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count,
             consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes));
   EXPECT_EQ(plan.layout.exact_shadow_entry_capacity,
             kConSanMoiInlineShadowConservativeExactShadowEntries *
-                consan_moi_exact_shadow::granule_bytes *
+                consan_moi_shadow_cell::granule_bytes *
                 plan.layout.inline_exact_dispatch_bank_count);
 }
 

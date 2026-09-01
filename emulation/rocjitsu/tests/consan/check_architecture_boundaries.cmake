@@ -272,7 +272,7 @@ _consan_assert_no_match(
     "host-only InlineShadow reference oracles must not return to the production report contract"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_shadow_models.h.inc"
+    "${_consan_dir}/consan_moi_exact_shadow_model.h.inc"
     "ConSanMoiInlineAcquiredEpochTokenPublishResult|consan_moi_inline_publish_acquired_epoch_token|consan_moi_inline_acquired_epoch_orders|consan_moi_inline_acquired_epoch_orders_pair|consan_moi_inline_stable_token_orders\\("
     "host-only InlineShadow token reference oracles must not return to production shadow models"
 )
@@ -282,9 +282,34 @@ _consan_assert_no_match(
     "host-only Sampled publication and replay oracles must remain test-owned"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_shadow_models.h.inc"
+    "${_consan_dir}/consan_moi_sampled_model.h.inc"
     "consan_moi_sampled_(publish_sync_metadata|publish_access_records|publish_causal_windows|replay_entries|replay_snapshots|replay_causal_windows|begin_causal_claim|commit_causal_claim|abort_causal_claim)"
     "host-only Sampled publication and replay oracle declarations must remain test-owned"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_shadow_models.h.inc"
+    "#include|[{};]"
+    "retired mixed shadow-model contract must remain an inert comment-only tombstone"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_shadow_common.h.inc"
+    "ConSanMoi(Sampled|RecordReplay|Inline)|consan_moi_(sampled|record_replay|inline)"
+    "shared shadow mechanics must remain independent of individual modes"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_exact_shadow_model.h.inc"
+    "ConSanMoi(Sampled|RecordReplay)|consan_moi_(sampled|record_replay)"
+    "the exact-subset mechanism must not acquire Sampled or Record/Replay policy"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sampled_model.h.inc"
+    "ConSanMoi(RecordReplay|Inline)|consan_moi_(record_replay|inline)|consan_moi_exact_shadow"
+    "the Sampled report contract must consume shared mechanics without other mode policy"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_record_replay_model.h.inc"
+    "ConSanMoi(Sampled|Inline)|consan_moi_(sampled|inline)"
+    "the Record/Replay report contract must not acquire Sampled or InlineShadow policy"
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_record_replay_model.cpp"

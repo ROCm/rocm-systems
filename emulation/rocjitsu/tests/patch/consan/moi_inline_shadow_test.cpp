@@ -147,9 +147,9 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
       12, layout.inline_exact_dispatch_bank_count - 1u, 12, ROCJITSU_CODE_ARCH_RDNA4);
   const auto scale_dispatch_bank =
       build_v_mul_lo_u32_vop3_literal(12, dispatch_bank_stride, 12, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto start_cell_shift = build_v_lshrrev_b32_e32(
-      12, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift), 0,
-      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto start_cell_shift =
+      build_v_lshrrev_b32_e32(12, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
+                              0, ROCJITSU_CODE_ARCH_RDNA4);
   const auto byte_index_shift =
       build_v_lshlrev_b32_e32(12, scalar_positive_inline_u32(3), 12, ROCJITSU_CODE_ARCH_RDNA4);
   const auto address_add = build_v_add_u64_vgpr_offset(8, 12, ROCJITSU_CODE_ARCH_RDNA4);
@@ -209,7 +209,7 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
   EXPECT_EQ(count_subsequence(text_words, *second_cell_offset), 1u)
       << "a potentially unaligned dword must publish its second possible cell explicitly";
   const auto second_cell_bytes = ib::build_v_mov_b32_literal(
-      /*vdst=*/12u, consan_moi_exact_shadow::granule_bytes, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vdst=*/12u, consan_moi_shadow_cell::granule_bytes, ROCJITSU_CODE_ARCH_RDNA4);
   const auto clamp_second_cell =
       ib::build_v_min_u32(/*vdst=*/12u, vector_source_vgpr(/*access_end=*/11u),
                           /*vsrc1=*/12u, ROCJITSU_CODE_ARCH_RDNA4);
@@ -895,7 +895,7 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
       *patch->scratch_vgpr, /*has_exec_save=*/true, options.moi_track_atomics);
   const auto safe_cell_scale = ib::build_v_mul_lo_u32_literal(
       static_cast<uint16_t>(*patch->scratch_vgpr + 4u), diagnostic_slot_vgpr,
-      consan_moi_exact_shadow::granule_bytes, loop_counter_vgpr, ROCJITSU_CODE_ARCH_CDNA4);
+      consan_moi_shadow_cell::granule_bytes, loop_counter_vgpr, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(safe_cell_scale);
   EXPECT_FALSE(contains_subsequence(patch_words, *safe_cell_scale))
       << "narrow accesses must unroll rather than use unplanned loop state";
@@ -2405,7 +2405,7 @@ TEST(ConSanMoi, Rdna4AccessOnlyInlineShadowUsesInitializedWorkgroupLocalLdsMirro
       << "each possible local cell has one cold diagnostic claim";
   const auto second_cell_bytes =
       ib::build_v_mov_b32_literal(static_cast<uint16_t>(access_scratch + 4u),
-                                  consan_moi_exact_shadow::granule_bytes, ROCJITSU_CODE_ARCH_RDNA4);
+                                  consan_moi_shadow_cell::granule_bytes, ROCJITSU_CODE_ARCH_RDNA4);
   const auto clamp_second_cell =
       ib::build_v_min_u32(static_cast<uint16_t>(access_scratch + 4u),
                           vector_source_vgpr(static_cast<uint16_t>(access_scratch + 8u)),
@@ -5384,7 +5384,7 @@ TEST(ConSanMoi, InlineShadowProbeCoversNativeWidthAndTwoAddressFamilies) {
             ROCJITSU_CODE_ARCH_RDNA4);
         ASSERT_TRUE(version_cas);
         const uint32_t unrolled_cell_count =
-            expected_width_bits <= consan_moi_exact_shadow::granule_bytes * 8u
+            expected_width_bits <= consan_moi_shadow_cell::granule_bytes * 8u
                 ? consan_moi_maximum_cell_count_for_unaligned_bytes(expected_width_bits / 8u)
                 : 1u;
         EXPECT_EQ(count_subsequence(text_words, *version_cas),
@@ -6012,7 +6012,7 @@ TEST(ConSanMoi, InlineShadowProbeCanPatchTwoAppendedCaveSites) {
   const uint32_t save_address =
       build_v_mov_b32_e32(/*vdst=*/24, vector_source_vgpr(/*vsrc=*/0), ROCJITSU_CODE_ARCH_RDNA4);
   const auto load_cell = build_v_lshrrev_b32_e32(
-      /*vdst=*/12, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
+      /*vdst=*/12, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
       /*vsrc1=*/24, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(load_cell);
   ASSERT_GE(load_cave.size(), 3u);
@@ -6094,7 +6094,7 @@ TEST(ConSanMoi, Cdna4InlineShadowPackedTokenOwnerPreservesClobberedLoadAddress) 
                           ROCJITSU_CODE_ARCH_CDNA4);
   const auto index_saved_address = instrumentation::build_v_lshrrev_b32(
       static_cast<uint16_t>(*options.scratch_vgpr + 4u),
-      scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift), saved_load_address,
+      scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift), saved_load_address,
       ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(index_saved_address);
   ASSERT_FALSE(cave.empty());
@@ -6225,7 +6225,7 @@ TEST(ConSanMoi, Gfx1250InlineShadowCapturesHighBankLdsAddressBeforeScratchUse) {
       static_cast<uint16_t>(consan_detail::inline_shadow_loop_counter_vgpr(
                                 kScratchVgpr, /*has_exec_save=*/true, options.moi_track_atomics) +
                             consan_detail::inline_shadow_loop_scratch_count(
-                                /*width_bits=*/32u, consan_moi_exact_shadow::granule_bytes));
+                                /*width_bits=*/32u, consan_moi_shadow_cell::granule_bytes));
   const uint32_t capture =
       build_v_mov_b32_e32(captured_address_vgpr, vector_source_vgpr(kEncodedAddressVgpr), kArch);
   const uint32_t select_low =
@@ -7956,7 +7956,7 @@ TEST(ConSanMoi, InlineShadowPreservesTwoAddressLoadAddressAliasedBySecondResult)
   EXPECT_EQ(cave_words[0], build_v_mov_b32_e32(/*vdst=*/156, vector_source_vgpr(/*vsrc=*/107),
                                                ROCJITSU_CODE_ARCH_RDNA4));
   const auto cell = build_v_lshrrev_b32_e32(
-      /*vdst=*/142, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
+      /*vdst=*/142, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
       /*vsrc1=*/142, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(cell);
   const std::array<uint32_t, 2> guest_load = {text_words[0], text_words[1]};
@@ -8800,7 +8800,7 @@ TEST(ConSanMoi, InlineShadowPublishesStronglyClassifiedFlatLdsCell) {
   std::memcpy(text_words.data(), patched.text_sections().front()->data(),
               patched.text_sections().front()->size());
   const auto start_cell_shift = build_v_lshrrev_b32_e32(
-      /*vdst=*/12, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
+      /*vdst=*/12, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
       /*vsrc=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   const auto atomic_swap = build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
       /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/13, /*return_old_value=*/true, /*scope=*/2,
@@ -9141,7 +9141,7 @@ TEST(ConSanMoi, ExactByteCellMasksCoverEveryUnalignedBoundary) {
 }
 
 TEST(ConSanMoi, InlineShadowLoopScratchKeepsNarrowUnalignedCrossingsUnrolled) {
-  constexpr uint32_t kGranuleBytes = consan_moi_exact_shadow::granule_bytes;
+  constexpr uint32_t kGranuleBytes = consan_moi_shadow_cell::granule_bytes;
   EXPECT_EQ(consan_detail::inline_shadow_loop_scratch_count(/*width_bits=*/0u, kGranuleBytes), 0u);
   EXPECT_EQ(consan_detail::inline_shadow_loop_scratch_count(/*width_bits=*/8u, kGranuleBytes), 0u);
   EXPECT_EQ(consan_detail::inline_shadow_loop_scratch_count(/*width_bits=*/16u, kGranuleBytes), 0u);

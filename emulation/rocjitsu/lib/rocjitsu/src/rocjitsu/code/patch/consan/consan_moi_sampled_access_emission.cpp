@@ -638,7 +638,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
           build_v_mov_b32_e32(low_vgpr, vector_source_vgpr(*lds_byte_offset_vgpr), arch));
     }
     const auto cell = instrumentation::build_v_lshrrev_b32(
-        low_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift), low_vgpr,
+        low_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift), low_vgpr,
         arch);
     const auto residue = instrumentation::build_v_and_b32_literal(
         low_vgpr, request.moi_runtime_sample_stride - 1u, low_vgpr, arch);

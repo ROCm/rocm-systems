@@ -5291,7 +5291,7 @@ TEST(ConSanMoi, DynamicAccessRecordProbePreservesOverlappingLoadAddress) {
   EXPECT_EQ(cave[1], text_words[0]);
   EXPECT_EQ(cave[2], text_words[1]);
   const auto start_cell = build_v_lshrrev_b32_e32(
-      /*vdst=*/13, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
+      /*vdst=*/13, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
       saved_address_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(start_cell);
   EXPECT_NE(std::find(cave.begin() + 3, cave.end(), *start_cell), cave.end());
@@ -12012,7 +12012,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayCapturesHighBankLdsAddressBeforeSelectingScra
 
   const uint16_t value_vgpr = static_cast<uint16_t>(*patch.scratch_vgpr + 5u);
   const auto start_cell = build_v_lshrrev_b32_e32(
-      value_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
+      value_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
       captured_address_vgpr, kArch);
   ASSERT_TRUE(start_cell);
   EXPECT_NE(std::ranges::find(cave, *start_cell), cave.end());

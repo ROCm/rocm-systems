@@ -66,7 +66,7 @@ uint16_t inline_shadow_loop_scratch_count(const ConSanMoiCandidate &candidate) {
   // accesses retain an iteration counter and the workgroup key, since the
   // versioned transaction reuses all of its ordinary address temporaries.
   return consan_detail::inline_shadow_loop_scratch_count(candidate.width_bits(),
-                                                         consan_moi_exact_shadow::granule_bytes);
+                                                         consan_moi_shadow_cell::granule_bytes);
 }
 
 bool validate_inline_shadow_exec_save_sgpr(const ConSanRequest &request,
@@ -134,7 +134,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     uint32_t relative_cell_index = 0u) {
   if (!point.moi_exec_save_sgpr || layout.diagnostic_capacity == 0)
     return true;
-  if (shadow_granule_bytes != 1u && shadow_granule_bytes != consan_moi_exact_shadow::granule_bytes)
+  if (shadow_granule_bytes != 1u && shadow_granule_bytes != consan_moi_shadow_cell::granule_bytes)
     return false;
   if (prior_byte_provenance_vgpr.has_value() != current_byte_provenance_vgpr.has_value())
     return false;
@@ -1638,8 +1638,8 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     std::optional<uint16_t> relative_cell_index_vgpr, uint32_t byte_count,
     uint32_t shadow_granule_bytes, uint16_t provenance_vgpr, uint16_t mask_vgpr, uint16_t high_vgpr,
     uint16_t temporary_vgpr) {
-  if (byte_count == 0u || (shadow_granule_bytes != 1u &&
-                           shadow_granule_bytes != consan_moi_exact_shadow::granule_bytes))
+  if (byte_count == 0u ||
+      (shadow_granule_bytes != 1u && shadow_granule_bytes != consan_moi_shadow_cell::granule_bytes))
     return false;
 
   if (static_byte_offset != 0u) {
@@ -2307,7 +2307,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
       build_v_mov_b32_e32(saved_current_high_vgpr, vector_source_vgpr(current_high_vgpr), arch));
   if (!append_exact_byte_cell_provenance_base(
           words, arch, diagnostic_lds_byte_offset_vgpr, diagnostic_static_byte_offset, cell_index,
-          relative_cell_index_vgpr, byte_count, consan_moi_exact_shadow::granule_bytes,
+          relative_cell_index_vgpr, byte_count, consan_moi_shadow_cell::granule_bytes,
           current_low_vgpr, current_high_vgpr, provenance_temporary_vgpr, temporary_vgpr)) {
     errors.emplace_back("ConSan MOI local publish could not encode exact byte-cell provenance");
     return false;
@@ -2333,7 +2333,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   }
 
   const auto cell = instrumentation::build_v_lshrrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
+      temporary_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
       effective_offset_vgpr, arch);
   const uint32_t shadow_cell_capacity = workgroup_shadow.size / sizeof(uint64_t);
   const uint32_t final_cell_index = cell_index;
@@ -2460,7 +2460,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
           words, candidate, request, bound_resources, point, scratch_vgpr, arch, report_layout,
           old_value_vgpr, static_cast<uint16_t>(old_value_vgpr + 1u), current_low_vgpr,
           current_high_vgpr, diagnostic_lds_byte_offset_vgpr, diagnostic_static_byte_offset,
-          byte_count, consan_moi_exact_shadow::granule_bytes,
+          byte_count, consan_moi_shadow_cell::granule_bytes,
           /*special_state_already_saved=*/true,
           /*diagnostic_lane_mask_sgpr=*/std::nullopt,
           /*capture_first_diagnostic_only=*/true,
@@ -2633,7 +2633,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const uint64_t exact_shadow_base =
       *bound_resources.moi_report_buffer_address + layout.exact_shadow_entries_offset;
   const uint32_t external_shadow_granule_bytes =
-      byte_granular_external_shadow ? 1u : consan_moi_exact_shadow::granule_bytes;
+      byte_granular_external_shadow ? 1u : consan_moi_shadow_cell::granule_bytes;
 
   std::vector<uint32_t> words;
   words.reserve(candidate.size() / sizeof(uint32_t) + 64u + (point.moi_exec_save_sgpr ? 120u : 0u) +
@@ -2976,7 +2976,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
             return std::nullopt;
           }
           const auto advance_offset = instrumentation::build_v_add_u32(
-              loop_offset_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_bytes),
+              loop_offset_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_bytes),
               loop_offset_vgpr, arch);
           const auto advance_counter = instrumentation::build_v_add_u32(
               loop_counter_vgpr, scalar_positive_inline_u32(1), loop_counter_vgpr, arch);
@@ -3142,7 +3142,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
             build_v_mov_b32_e32(tmp_vgpr, vector_source_vgpr(effective_lds_byte_offset_vgpr), arch);
       } else {
         start_cell_shift = instrumentation::build_v_lshrrev_b32(
-            tmp_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
+            tmp_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
             effective_lds_byte_offset_vgpr, arch);
       }
       const auto byte_index_shift = instrumentation::build_v_lshlrev_b32(

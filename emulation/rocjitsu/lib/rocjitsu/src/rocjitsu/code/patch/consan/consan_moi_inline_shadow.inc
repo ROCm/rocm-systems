@@ -55,7 +55,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   const bool requires_wave_partitioned_exact_shadow =
       std::ranges::any_of(candidates, [&](const ConSanMoiCandidate *candidate) {
         return std::ranges::any_of(candidate->ranges, [](const ConSanAccessRange &range) {
-          return range.byte_width < consan_moi_exact_shadow::granule_bytes;
+          return range.byte_width < consan_moi_shadow_cell::granule_bytes;
         });
       });
   if (requires_wave_partitioned_exact_shadow) {

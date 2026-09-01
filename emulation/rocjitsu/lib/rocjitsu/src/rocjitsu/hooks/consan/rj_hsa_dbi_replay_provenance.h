@@ -55,9 +55,9 @@ struct ConSanMoiReplayProvenanceRepair {
     if (count == 0 && record.lds_byte_count != 0) {
       const uint64_t byte_end = static_cast<uint64_t>(record.lds_byte_offset) +
                                 static_cast<uint64_t>(record.lds_byte_count);
-      start = record.lds_byte_offset >> consan_moi_exact_shadow::granule_shift;
-      const uint64_t end = (byte_end + consan_moi_exact_shadow::granule_bytes - 1u) >>
-                           consan_moi_exact_shadow::granule_shift;
+      start = record.lds_byte_offset >> consan_moi_shadow_cell::granule_shift;
+      const uint64_t end = (byte_end + consan_moi_shadow_cell::granule_bytes - 1u) >>
+                           consan_moi_shadow_cell::granule_shift;
       count = end - start;
     }
     const uint64_t end = start + count;

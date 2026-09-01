@@ -5028,7 +5028,7 @@ TEST(ConSanMoi, DirectSampledProbeRuntimeAddressSelectionKeepsAllSitesPatchable)
         ROCJITSU_CODE_ARCH_RDNA4);
     const uint16_t high_vgpr = static_cast<uint16_t>(*patch.scratch_vgpr + 3u);
     const auto select_cell = build_v_lshrrev_b32_e32(
-        low_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift), low_vgpr,
+        low_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift), low_vgpr,
         ROCJITSU_CODE_ARCH_RDNA4);
     const auto select_residue =
         build_v_and_b32_e32_literal(low_vgpr, 3u, low_vgpr, ROCJITSU_CODE_ARCH_RDNA4);

@@ -3164,7 +3164,7 @@ std::array<ConSanTransformProfile, 4> all_consan_replacement_profiles() {
   return profiles;
 }
 
-static_assert(consan_moi_exact_shadow::granule_bytes == 4);
+static_assert(consan_moi_shadow_cell::granule_bytes == 4);
 static_assert(consan_moi_exact_shadow::instruction_offset_shift +
                   consan_moi_exact_shadow::instruction_offset_bits ==
               64);

@@ -3319,7 +3319,6 @@ other mode-local duplication, architecture peepholes, placement and validation
 concentrations, and the independent deep-read completion audit remain open.
 The goal therefore remains active.
 
-
 ### 16.34 Convergence checkpoint 33: typed Sampled synchronization attempt boundary
 
 Checkpoint 32's dispatcher consolidation exposed the larger dependency around
@@ -6427,18 +6426,22 @@ all nine roots from both former production owners.
 | `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
 | `ConSanMoiOperatingPoint` references / files | 316 / 60 | +26 / +9 | 0 / 0 |
 | Sampled publication/replay oracle roots in production | **0** | n/a | **-9** |
-| Test inventory | **5,412** | **+67** | **+1 registered existing test** |
+| Test inventory | **5,411** | **+66** | 0[^checkpoint-81-inventory] |
 
-Changing the test source manifest forced CMake to regenerate and exposed one
-existing ConSan test that the prior build-tree registration had not yet
-included. No test definition was added by this slice. The authoritative
-inventory is therefore 5,412 tests: 4,777 nonphysical and 635 physical. The
-complete `-j16` rebuild passed, as did all 15 focused Sampled publication,
-replay, claim, selection, and architecture-boundary tests. The periodic gate
-then passed all **4,777/4,777 nonphysical tests** in 203.45 seconds, including
-all 2,918 simulator tests over gfx942, gfx950, gfx1100, gfx1250, and gfx1201. No
-test was removed, disabled, renamed, or replaced, and no physical gfx1201 test
-was run.
+No test definition was added by this slice. The complete `-j16` rebuild passed,
+as did all 15 focused Sampled publication, replay, claim, selection, and
+architecture-boundary tests. The periodic gate then passed every registered
+nonphysical row in 203.45 seconds, including all 2,918 simulator tests over
+gfx942, gfx950, gfx1100, gfx1250, and gfx1201. No test was removed, disabled,
+renamed, or replaced, and no physical gfx1201 test was run.
+
+[^checkpoint-81-inventory]: A fresh source-definition audit and clean
+    CMake/GTest rediscovery at checkpoint 84 establish that checkpoint 81 did
+    not add a test: there are 5,411 actual tests, comprising 4,776 nonphysical
+    and 635 physical rows. The original 5,412/4,777 count included one stale
+    generated registration and is corrected here. No `TEST`, `TEST_P`, test
+    instantiation, or `add_test` definition changed from checkpoint 80 through
+    checkpoint 84.
 
 This checkpoint strengthens Sections 14.1, 14.3, 14.7 through 14.9. Sampled
 reference behavior is physically skippable from production and has one
@@ -6482,7 +6485,7 @@ contract, and the architecture gate rejects their return.
 | `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
 | `ConSanMoiOperatingPoint` references / files | 326 / 60 | +36 / +9 | 0 / 0[^checkpoint-82-point-count] |
 | Record/Replay capture oracle roots/types in production | **0** | n/a | **-12** |
-| Test inventory | **5,412** | **+67** | 0 |
+| Test inventory | **5,411** | **+66** | 0 |
 
 [^checkpoint-82-point-count]: Recounting the checkpoint-81 tree finds 326
     `ConSanMoiOperatingPoint` occurrences, not the 316 copied into its table.
@@ -6491,11 +6494,11 @@ contract, and the architecture gate rejects their return.
 Validation includes a complete `-j16` rebuild of the production report
 contract and every ConSan test translation unit, all 97 Record/Replay capture,
 construction, runtime-replay, and hook tests, and the architecture-boundary
-test. Checkpoint 81's immediately preceding periodic gate passed all
-4,777 nonphysical tests, including all 2,918 simulator tests over five targets.
-The authoritative inventory remains 5,412 tests: 4,777 nonphysical and 635
-physical. No test was removed, disabled, renamed, or replaced, and no physical
-gfx1201 test was run.
+test. Checkpoint 81's immediately preceding periodic gate passed every
+registered nonphysical row, including all 2,918 simulator tests over five
+targets. The corrected authoritative inventory is 5,411 tests: 4,776
+nonphysical and 635 physical. No test was removed, disabled, renamed, or
+replaced, and no physical gfx1201 test was run.
 
 This checkpoint strengthens Sections 14.1, 14.3, and 14.7 through 14.9.
 Record/Replay's independent capture specification is physically skippable from
@@ -6542,15 +6545,16 @@ production owner.
 | `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
 | `ConSanMoiOperatingPoint` references / files | 326 / 60 | +36 / +9 | 0 / 0 |
 | Mode implementations in generic report-model file | **0** | n/a | **-2 regions** |
-| Test inventory | **5,412** | **+67** | 0 |
+| Test inventory | **5,411** | **+66** | 0 |
 
 Validation includes a complete `-j16` rebuild and all 161 focused Sampled and
 Record/Replay construction, report-model, runtime-replay, and hook tests. The
 architecture-boundary test then passed with the new cross-mode and tombstone
-rules. Checkpoint 81's preceding periodic gate remains the latest complete
-nonphysical run at 4,777/4,777 tests, including all 2,918 simulator tests over
-five targets. No test was removed, disabled, renamed, or replaced, and no
-physical gfx1201 test was run.
+rules. Checkpoint 81's preceding periodic gate passed every then-registered
+nonphysical row, including all 2,918 simulator tests over five targets. The
+corrected actual inventory is 4,776 nonphysical and 635 physical tests. No test
+was removed, disabled, renamed, or replaced, and no physical gfx1201 test was
+run.
 
 This checkpoint strengthens Sections 14.1, 14.3, 14.6 through 14.9. A reader
 of either runtime report model can now skip the other mode completely, and the
@@ -6559,3 +6563,66 @@ Cumulative production shrinkage reaches 2,301 implementation lines. The broad
 placement and mutation buses, further architecture/mode locality, material
 whole-refactoring shrinkage, and the independent completion audit remain open.
 The goal therefore remains active.
+
+### 16.85 Convergence checkpoint 84: physically local report-model contracts
+
+The report-contract deep read found four independent ownership regions inside
+the 1,104-line `consan_moi_shadow_models.h.inc`. Bit-field construction, access
+kind conflict rules, four-byte report-cell geometry, and range projection are
+shared mechanisms. Exact packed entries, byte provenance, sparse exact replay,
+and InlineShadow's exact evidence form an exact-subset region. Sampled owns its
+watchpoint ABI, stable-snapshot classification, causal selection, and metadata
+codec declarations. Record/Replay owns causal-token ordering, atomic
+publication, unpublished-slot classification, and its replay entry points.
+There is no state or implementation shared directly between the Sampled and
+Record/Replay regions.
+
+The public report contract now includes four explicit fragments in dependency
+order: `consan_moi_shadow_common.h.inc`,
+`consan_moi_exact_shadow_model.h.inc`,
+`consan_moi_record_replay_model.h.inc`, and
+`consan_moi_sampled_model.h.inc`. The former generic filename is a
+comment-only tombstone. The shared owner now names the report-wide cell
+geometry as `consan_moi_shadow_cell`; Sampled, Record/Replay, shared lowering,
+runtime provenance, and exact emission no longer reach through an
+InlineShadow-looking `consan_moi_exact_shadow::granule_*` namespace for this
+common ABI fact.
+
+The architecture gate requires the old mixed contract to remain inert,
+prevents the common fragment from acquiring any mode, rejects Sampled and
+Record/Replay policy from the exact-subset owner, and rejects cross-mode
+identifiers from both named mode contracts. Existing bans on retired test
+oracles now point at their actual mode/exact owners. No definition is copied or
+wrapped; every definition from the old file has exactly one surviving owner.
+
+| Signal | Checkpoint 84 | Cumulative change | Slice change from checkpoint 83 |
+| --- | ---: | ---: | ---: |
+| Production files | 270 | +41 | +4 explicit owners, old filename retained inert |
+| Physical production lines | 103,082 | **-1,894** | +24 |
+| Nonblank production lines | 96,842 | **-2,242** | +17 |
+| Production implementation lines | 89,154 | **-2,296** | +5 contract/include structure |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 168 / 52 | **-108 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 326 / 60 | +36 / +9 | 0 / 0 |
+| Mode regions in the retired mixed contract | **0** | n/a | **-3 regions** |
+| Exact-namespace references to shared cell geometry | **0** | n/a | **-62** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild of the full report-contract fan
+out and every ConSan test translation unit. The architecture-boundary gate
+passed, followed by all **4,776/4,776 nonphysical tests** in 203.75 seconds,
+including all 2,918 simulator rows over gfx942, gfx950, gfx1100, gfx1250, and
+gfx1201. No test definition or inventory changed, and no physical gfx1201 test
+was run.
+
+This checkpoint strengthens Sections 14.1, 14.3, and 14.6 through 14.9. A
+reader can now omit the Sampled or Record/Replay report contract physically,
+and both consume one shared cell/range mechanism rather than depending on one
+another or duplicating it. The exact-subset fragment remains the next internal
+locality seam: its deep read distinguishes shared exact replay, generic
+dispatch-preload planning, and InlineShadow-only snapshot/token behavior.
+Those must be assigned honest owners in a later slice rather than treating the
+new filename as final. Broad placement and mutation buses, further target and
+mode locality, material whole-refactoring shrinkage, and the independent
+completion audit remain open. The goal therefore remains active.

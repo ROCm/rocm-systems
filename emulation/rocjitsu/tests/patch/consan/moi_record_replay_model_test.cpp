@@ -2358,7 +2358,7 @@ TEST(ConSanMoi, RecordReplaySparseProvenanceDoesNotScaleByWorkgroupLdsExtent) {
   ConSanMoiReportHeader header = make_consan_moi_report_header(
       /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/kWorkgroupCount,
       /*diagnostic_capacity=*/1,
-      /*exact_shadow_entry_capacity=*/kLdsBytes / consan_moi_exact_shadow::granule_bytes,
+      /*exact_shadow_entry_capacity=*/kLdsBytes / consan_moi_shadow_cell::granule_bytes,
       /*sampled_watchpoint_capacity=*/0);
   header.access_record_count = kWorkgroupCount;
 
@@ -2372,12 +2372,12 @@ TEST(ConSanMoi, RecordReplaySparseProvenanceDoesNotScaleByWorkgroupLdsExtent) {
     record.access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
     record.lds_byte_offset = kLdsBytes - sizeof(uint32_t);
     record.lds_byte_count = sizeof(uint32_t);
-    record.start_cell = kLdsBytes / consan_moi_exact_shadow::granule_bytes - 1u;
+    record.start_cell = kLdsBytes / consan_moi_shadow_cell::granule_bytes - 1u;
     record.cell_count = 1;
   }
 
   std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
-  std::vector<uint64_t> shadow(kLdsBytes / consan_moi_exact_shadow::granule_bytes);
+  std::vector<uint64_t> shadow(kLdsBytes / consan_moi_shadow_cell::granule_bytes);
   const ConSanMoiRecordReplayResult replay =
       consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
 

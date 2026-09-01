@@ -907,7 +907,7 @@ bool apply_moi_descriptor_requirements(
         return std::nullopt;
       }
       const auto start_cell_shift = instrumentation::build_v_lshrrev_b32(
-          value_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
+          value_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
           *effective_lds_byte_offset_vgpr, arch);
       if (!start_cell_shift) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not encode start cell");
@@ -1644,7 +1644,7 @@ bool apply_moi_descriptor_requirements(
       return std::nullopt;
     }
     const auto start_cell = instrumentation::build_v_lshrrev_b32(
-        record_value_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
+        record_value_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift),
         *effective_lds_byte_offset_vgpr, arch);
     if (!start_cell) {
       errors.emplace_back("ConSan MOI first-light probe could not encode start cell");

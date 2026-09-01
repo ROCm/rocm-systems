@@ -24,10 +24,9 @@
 #include <variant>
 #include <vector>
 
-// These implementation fragments declare the report-side contract in
-// dependency order. None exposes lowerer state, patch proof, or resource
-// placement. Their eventual physical consolidation does not affect the
-// report/lowering boundary enforced by this header.
+// These fragments declare the report-side contract in dependency order:
+// shared ABI and mechanisms first, then exact-subset and mode-owned models.
+// None exposes lowerer state, patch proof, or resource placement.
 #include "rocjitsu/code/patch/consan/consan_moi_core_types.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay_types.h.inc"
@@ -40,6 +39,12 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_report_helpers.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_shadow_models.h.inc"
+#include "rocjitsu/code/patch/consan/consan_moi_shadow_common.h.inc"
+
+#include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_model.h.inc"
+
+#include "rocjitsu/code/patch/consan/consan_moi_record_replay_model.h.inc"
+
+#include "rocjitsu/code/patch/consan/consan_moi_sampled_model.h.inc"
 
 } // namespace rocjitsu
