@@ -282,21 +282,20 @@ void clear_fault_mutation_kinds(MutationRequest &request) {
 
 } // namespace
 
-[[nodiscard]] ConSanTransformArtifacts try_patch_consan_impl(
-    std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
-    std::span<const CarriedPerturbationPlan> carried_plans = {},
-    std::optional<ConSanTransformArtifacts> pristine_inventory = std::nullopt,
-    ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
-    const ConSanPreappliedMutationLayout &preapplied_mutation = {},
-    std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {},
-    bool require_applicable_fault_plan = false, ConSanLoweringExecution *execution = nullptr,
-    ConSanLoweringExtent extent = ConSanLoweringExtent::Complete,
-    const ConSanLoweringObservation *observation = nullptr) {
+[[nodiscard]] ConSanTransformArtifacts
+try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+                      const ConSanMoiOperatingPoint &initial_operating_point,
+                      std::span<const CarriedPerturbationPlan> carried_plans = {},
+                      std::optional<ConSanTransformArtifacts> pristine_inventory = std::nullopt,
+                      ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
+                      const ConSanPreappliedMutationLayout &preapplied_mutation = {},
+                      bool require_applicable_fault_plan = false,
+                      ConSanLoweringExecution *execution = nullptr,
+                      ConSanLoweringExtent extent = ConSanLoweringExtent::Complete,
+                      const ConSanLoweringObservation *observation = nullptr) {
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanTransformArtifacts result;
-  result.moi_operating_point.owner_transient_sgprs.assign(initial_owner_transient_sgprs.begin(),
-                                                          initial_owner_transient_sgprs.end());
   ConSanPerturbationPlanningState local_perturbation;
   ConSanPerturbationPlanningState &perturbation =
       inspected_perturbation == nullptr ? local_perturbation : *inspected_perturbation;
@@ -328,7 +327,7 @@ void clear_fault_mutation_kinds(MutationRequest &request) {
     return result;
   }
   if (has_fault && !options.fault_dry_run) {
-    MoiOptions planning_options = options;
+    ConSanOptions planning_options = options;
     planning_options.fault_dry_run = true;
     if (!has_perturbation)
       planning_options.fault_require_exactly_one = false;
@@ -347,8 +346,8 @@ void clear_fault_mutation_kinds(MutationRequest &request) {
       build_perturbation_plan(planning_options, pristine_perturbation, pristine_mutation_plan);
     } else {
       pristine_mutation_plan =
-          try_patch_consan_impl(code_object_bytes, planning_options, {}, std::nullopt,
-                                &pristine_perturbation, {}, {}, true, execution);
+          try_patch_consan_impl(code_object_bytes, planning_options, initial_operating_point, {},
+                                std::nullopt, &pristine_perturbation, {}, true, execution);
     }
     const size_t retained_planned_faults = pristine_mutation_plan.mutation.fault.planned;
     const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
@@ -366,7 +365,7 @@ void clear_fault_mutation_kinds(MutationRequest &request) {
     // Apply corruption to a pristine image first, then inventory and instrument
     // that image. This is essential for address/order faults: probes must model
     // the instruction the GPU will actually execute.
-    MoiOptions fault_options = options;
+    ConSanOptions fault_options = options;
     fault_options.flavor = ConSanFlavor::SuperCollider;
     fault_options.probe_nop = false;
     fault_options.probe_trampoline_nop = false;
@@ -405,7 +404,7 @@ void clear_fault_mutation_kinds(MutationRequest &request) {
     const major_image_ownership::ScopedPhase composite_phase(
         major_image_ownership::Phase::CompositeIncrementalPatch);
 
-    MoiOptions instrument_options = options;
+    ConSanOptions instrument_options = options;
     ConSanPreappliedMutationLayout instrument_preapplied;
     clear_fault_mutation_kinds(instrument_options);
     // Cardinality was enforced on the mutation stage. The subsequent
@@ -453,8 +452,9 @@ void clear_fault_mutation_kinds(MutationRequest &request) {
     }
     const std::span<const CarriedPerturbationPlan> instrument_carried = staged_carried;
     ConSanTransformArtifacts instrument_result = finalize_consan_result(
-        try_patch_consan_impl(mutation_stage.image, instrument_options, instrument_carried, {},
-                              &perturbation, instrument_preapplied, {}, false, execution),
+        try_patch_consan_impl(mutation_stage.image, instrument_options, initial_operating_point,
+                              instrument_carried, {}, &perturbation, instrument_preapplied, false,
+                              execution),
         mutation_stage.image, instrument_options.moi_report_dispatch_id,
         /*validating_carried_composite_stage=*/!instrument_carried.empty(), &perturbation,
         execution);
@@ -621,7 +621,8 @@ void clear_fault_mutation_kinds(MutationRequest &request) {
     // section objects and names, and derived state cannot overlap every
     // stage's parser, patcher, text, and transaction.
     code_object.reset();
-    return try_patch_consan_moi(std::move(result), options, code_object_bytes, arch, execution);
+    return try_patch_consan_moi(std::move(result), options, initial_operating_point,
+                                code_object_bytes, arch, execution);
   }
 
   if (options.flavor != ConSanFlavor::SuperCollider) {

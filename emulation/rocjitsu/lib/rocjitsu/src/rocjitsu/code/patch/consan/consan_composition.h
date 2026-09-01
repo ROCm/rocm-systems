@@ -17,13 +17,13 @@ namespace rocjitsu {
 /// their compiled contracts. This private boundary deliberately exposes only
 /// complete top-level products; component-private staging state remains owned
 /// by the composition implementation.
-[[nodiscard]] ConSanTransformArtifacts compose_consan_lowering(
-    std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
-    ConSanPerturbationPlanningState *inspected_perturbation,
-    const ConSanPreappliedMutationLayout &preapplied_mutation,
-    std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs,
-    ConSanLoweringExecution *execution, ConSanLoweringExtent extent,
-    const ConSanLoweringObservation *observation);
+[[nodiscard]] ConSanTransformArtifacts
+compose_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+                        const ConSanMoiOperatingPoint &initial_operating_point,
+                        ConSanPerturbationPlanningState *inspected_perturbation,
+                        const ConSanPreappliedMutationLayout &preapplied_mutation,
+                        ConSanLoweringExecution *execution, ConSanLoweringExtent extent,
+                        const ConSanLoweringObservation *observation);
 
 [[nodiscard]] bool
 compose_consan_observation(const ConSanOptions &options, ConSanTransformArtifacts &result,

@@ -34,8 +34,6 @@
 
 namespace rocjitsu {
 
-struct MoiOptions;
-
 /// Return the current code-object image after any already committed MOI
 /// mutation. Incremental lowering must inspect this image rather than the
 /// original bytes once a preceding engine component has emitted a patch.
@@ -269,7 +267,7 @@ private:
 /// and optional dispatch and runtime-selection behavior for one kernel. The
 /// native emitter receives this plan plus only the body and return addresses,
 /// which may differ between paired kernarg-preload entries. It therefore
-/// cannot independently reinterpret `MoiOptions`, patch metadata, or the
+/// cannot independently reinterpret full request/operating-point state, patch metadata, or the
 /// kernel descriptor while emitting those bodies.
 struct MoiPrivateEpochPrologueEmissionPlan {
   /// First VGPR in the entry-local temporary window.
@@ -384,7 +382,7 @@ struct MoiEntryScalarBackup {
 /// registers and decoding the kernel-entry ABI. Body and return addresses and
 /// displaced guest words remain call-specific because paired kernarg-preload
 /// entries may share this semantic plan while occupying different locations.
-/// The native emitter therefore cannot consult `MoiOptions`, patch metadata,
+/// The native emitter therefore cannot consult full request/operating-point state, patch metadata,
 /// or a kernel descriptor to rediscover any initialization decision.
 struct MoiOwnerEpochPrologueEmissionPlan {
   /// VGPR receiving the owner identity when no persistent owner SGPR exists.
@@ -474,7 +472,7 @@ struct MoiOwnerEpochPrologueEmissionPlan {
 /// restore participating lanes. A previously initialized key may reside in
 /// either `cached_key_vgpr` or `cached_key_sgpr`; when neither is present, the
 /// emitter derives the key from the supplied launch-coordinate sources.
-/// Keeping this plan separate from `MoiOptions` prevents the key emitter from
+/// Keeping this plan separate from the full operating point prevents the key emitter from
 /// observing engine policy, report layout, or unrelated resource choices.
 struct MoiWorkgroupKeyRegisterPlan {
   std::optional<uint16_t> exec_save_sgpr;

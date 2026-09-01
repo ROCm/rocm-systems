@@ -86,15 +86,16 @@ MoiObjectModePlan plan_record_replay_object_mode(const ConSanRequest &request,
   return plan;
 }
 
-void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
-                                      rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, const ConSanOptions &options,
+                                      ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
+                                      MoiResourcePlanningState &resource_state,
                                       std::span<const ConSanMoiCandidate> candidates,
                                       const MoiObjectFacts &facts,
                                       ConSanTransformArtifacts &result) {
   MoiRecordReplayAccessOutput access_output;
   if (const ConSanTargetProfile *target = consan_target_profile(arch)) {
-    try_apply_first_light_access_record_patch(bytes, options, options, *target, resource_state,
-                                              access_output, candidates, result);
+    try_apply_first_light_access_record_patch(bytes, options, operating_point, *target,
+                                              resource_state, access_output, candidates, result);
   } else if (options.moi_report_buffer_address) {
     result.warnings.emplace_back("ConSan MOI first-light probe does not support this architecture");
   }
@@ -112,23 +113,23 @@ void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, MoiOptions
       !atomic_or_fence_relevant) {
     // Planning may admit access sites whose bodies all fail placement. Drop
     // automatic state only when no standalone record can consume it.
-    options.moi_initialize_owner_epoch = false;
-    options.reset_moi_owner_epoch_vgprs();
-    options.moi_record_replay_workgroup_vgprs = {};
-    options.moi_persistent_sgprs.record_replay_workgroup = {};
-    options.moi_dispatch_identity.reset_vgpr();
-    options.owner_persistent_vgprs.clear();
-    result.moi_operating_point = options;
+    operating_point.moi_initialize_owner_epoch = false;
+    operating_point.reset_moi_owner_epoch_vgprs();
+    operating_point.moi_record_replay_workgroup_vgprs = {};
+    operating_point.moi_persistent_sgprs.record_replay_workgroup = {};
+    operating_point.moi_dispatch_identity.reset_vgpr();
+    operating_point.owner_persistent_vgprs.clear();
+    result.moi_operating_point = operating_point;
     result.warnings.emplace_back(
         "ConSan MOI record/replay dropped unconsumed automatic state after all access probes "
         "failed placement");
   }
-  try_apply_atomic_record_patch(bytes, options, options, arch, result);
+  try_apply_atomic_record_patch(bytes, options, operating_point, arch, result);
   if (result.errors.empty())
-    try_apply_record_replay_barrier_patch(bytes, options, options, arch, resource_state,
+    try_apply_record_replay_barrier_patch(bytes, options, operating_point, arch, resource_state,
                                           access_output, result);
   if (result.errors.empty())
-    try_apply_fence_record_patch(bytes, options, options, arch, result);
+    try_apply_fence_record_patch(bytes, options, operating_point, arch, result);
 }
 
 uint16_t record_replay_access_scratch_vgpr_count(const ConSanRequest &request,

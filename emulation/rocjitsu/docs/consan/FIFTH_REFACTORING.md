@@ -3689,3 +3689,81 @@ attempt ownership in placement/composition/orchestration, material code-size
 reduction, the remaining architecture peepholes, extension exercises, and the
 independent deep-read completion audit remain open. The goal therefore remains
 active.
+
+### 16.40 Convergence checkpoint 39: eliminate the production attempt aggregate
+
+Checkpoint 38 confined `MoiOptions` to what appeared to be an orchestration
+lifecycle, but a full trace showed that the lifecycle did not require an
+aggregate at all. Its constructor seeded three explicit register overrides;
+placement then mutated the operating-point base; composition copied the whole
+object three times while changing only immutable fault or instrumentation
+input; the MOI coordinator copied it once to carry effective request and
+placement state together; mode dispatch passed it to three entries that had
+already split it immediately; and one fallback reconstructed it solely to
+mutate the operating-point base. This was residual inheritance plumbing, not a
+cohesive production component.
+
+Production now carries `ConSanOptions` and `ConSanMoiOperatingPoint` as separate
+products from point construction through composition, retry, resource solving,
+mode dispatch, mode-local cleanup, common barriers, prologues, and final
+publication. The one conversion from caller overrides to an unresolved point
+is `initial_consan_moi_operating_point`; every later change is visibly solver-
+or mode-owned state. Record/Replay's legitimate post-placement cleanup mutates
+only the point. Composition's fault-planning, fault-application, and
+instrumentation copies contain only immutable input. Dispatch fallback copies
+only its base point. The production type, all six production whole-attempt
+copies/constructions, all 26 remaining references, and every inherited cast
+needed by that aggregate are gone.
+
+The trace also exposed a parallel test-seeding channel that passed an
+owner-local transient assignment beside the initial point through completion,
+composition, recursion, and result construction. Focused test support now puts
+that assignment into its test point before entering production, so the complete
+state follows the same one-product route as ordinary lowering. The inherited
+`MoiOptions` spelling survives only as a test-source convenience in
+`consan_test_support.h`; it delegates initial point construction to the
+production authority and is absent from the declared production scope. This
+preserves hundreds of readable focused fixtures without retaining a production
+compatibility path.
+
+The architecture-boundary gate now rejects `MoiOptions` in every production
+`.cpp`, `.h`, and `.inc` file. That production-wide rule replaces the old three
+mode-entry occurrence budgets and the emitter-only prohibition; those
+superseded checks were deleted. Existing component-specific rules still reject
+inherited input/point casts because they enforce a broader and still useful
+boundary.
+
+| Signal | Checkpoint 39 | Cumulative change | Slice change from checkpoint 38 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,437 | +462 | **-12** |
+| Nonblank production lines | 99,155 | +72 | **-10** |
+| Production implementation lines | 91,445 | **-5** | **-3** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | **-26 / -14** |
+| `ConSanTransformArtifacts` references / files | 206 / 56 | **-70 / -1** | **-1 / 0** |
+| `ConSanPatchInfo` references / files | 205 / 28 | +5 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 350 / 63 | +60 / +12 | **+8 / +5** |
+| Production whole-attempt copies/constructions | **0** | n/a | **-6** |
+| Parallel initial transient-assignment channels | **0** | n/a | **-1** |
+| Test inventory | 5,379 | +34 | 0 |
+
+Validation includes a final-tree `-j16` rebuild; all 874 `ConSanMoi*` and
+architecture-boundary focused tests in 4.9 seconds, including the 825-test core
+subset; all 4,744 nonphysical tests at `-j16` in about 180 seconds, including
+the unchanged 2,908 simulator rows over five targets; and all 635 physical
+gfx1201 tests serialized at `-j1` in about 99 seconds. The production-wide
+boundary test was rerun after removing its superseded rules and passed in 1.62
+seconds. No test was removed, renamed, disabled, added, or replaced.
+
+This checkpoint materially strengthens Sections 14.1, 14.3, 14.5, 14.6,
+14.7, 14.8, and 14.9. The principal mixed request/state bus identified in the
+post-fourth-refactoring audit no longer exists in production; modes and shared
+mechanisms consume the same explicit products without duplicating code; a
+parallel state channel and its redundant gates were harvested; and the slice
+shrinks rather than wrapping the legacy design. The explicit operating point
+is still union-shaped and now appears in more named boundaries, so its
+remaining field/component fanout needs a fresh semantic audit rather than being
+declared solved from the zero aggregate count. Material whole-refactoring
+shrinkage, remaining target locality, the extension exercises, and the
+independent Section 14 completion audit also remain open. The goal therefore
+remains active.

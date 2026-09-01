@@ -83,16 +83,16 @@ namespace kd = rocr::llvm::amdhsa;
 
 #include "rocjitsu/code/patch/consan/consan_composition.inc"
 
-ConSanTransformArtifacts compose_consan_lowering(
-    std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
-    ConSanPerturbationPlanningState *inspected_perturbation,
-    const ConSanPreappliedMutationLayout &preapplied_mutation,
-    std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs,
-    ConSanLoweringExecution *execution, ConSanLoweringExtent extent,
-    const ConSanLoweringObservation *observation) {
-  return try_patch_consan_impl(code_object_bytes, options, {}, std::nullopt, inspected_perturbation,
-                               preapplied_mutation, initial_owner_transient_sgprs, false, execution,
-                               extent, observation);
+ConSanTransformArtifacts
+compose_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+                        const ConSanMoiOperatingPoint &initial_operating_point,
+                        ConSanPerturbationPlanningState *inspected_perturbation,
+                        const ConSanPreappliedMutationLayout &preapplied_mutation,
+                        ConSanLoweringExecution *execution, ConSanLoweringExtent extent,
+                        const ConSanLoweringObservation *observation) {
+  return try_patch_consan_impl(code_object_bytes, options, initial_operating_point, {},
+                               std::nullopt, inspected_perturbation, preapplied_mutation, false,
+                               execution, extent, observation);
 }
 
 bool compose_consan_observation(const ConSanOptions &options, ConSanTransformArtifacts &result,

@@ -28,21 +28,22 @@
 
 namespace rocjitsu {
 
-ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
-                                              const MoiOptions &options,
-                                              std::span<const uint8_t> code_object_bytes,
-                                              rj_code_arch_t arch,
-                                              ConSanLoweringExecution *execution) {
+ConSanTransformArtifacts
+try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &options,
+                     const ConSanMoiOperatingPoint &initial_operating_point,
+                     std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch,
+                     ConSanLoweringExecution *execution) {
   using namespace consan_moi_impl;
 
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
-  MoiOptions effective_options = options;
+  ConSanOptions effective_options = options;
+  ConSanMoiOperatingPoint effective_point = initial_operating_point;
   if (!result.moi_operating_point.owner_transient_sgprs.empty()) {
-    effective_options.owner_transient_sgprs = result.moi_operating_point.owner_transient_sgprs;
+    effective_point.owner_transient_sgprs = result.moi_operating_point.owner_transient_sgprs;
   }
   if (!result.moi_operating_point.owner_persistent_vgprs.empty()) {
-    effective_options.owner_persistent_vgprs = result.moi_operating_point.owner_persistent_vgprs;
+    effective_point.owner_persistent_vgprs = result.moi_operating_point.owner_persistent_vgprs;
   }
   result.outcome =
       result.errors.empty() ? ConSanTransformOutcome::Unchanged : ConSanTransformOutcome::Invalid;
@@ -86,7 +87,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                             });
   object_facts.has_admitted_barrier = object_facts.admitted_barrier_count != 0u;
   object_facts.target_supports_dense_barrier_router = consan_is_capability_arch(arch);
-  object_facts.has_explicit_persistent_state = effective_options.moi_owner_epoch_vgprs.complete();
+  object_facts.has_explicit_persistent_state = effective_point.moi_owner_epoch_vgprs.complete();
   object_facts.has_report_buffer = effective_options.moi_report_buffer_address.has_value();
   AmdGpuCodeObject original_code_object(code_object_bytes.data(), code_object_bytes.size());
   const uint64_t original_text_size = original_code_object.text_sections().size() == 1
@@ -101,14 +102,14 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                                        decision.semantic_site.physical.original_text_offset,
                                        original_text_size);
                           });
-  MoiObjectModePlan mode_plan = plan_moi_object_mode(effective_options, effective_options,
+  MoiObjectModePlan mode_plan = plan_moi_object_mode(effective_options, effective_point,
                                                      object_facts, result.observation_plan());
   effective_options.moi_owner_source = mode_plan.owner_source;
   effective_options.moi_track_atomics = mode_plan.track_atomics;
   effective_options.moi_track_barriers = mode_plan.track_barriers;
-  effective_options.moi_initialize_owner_epoch = mode_plan.initialize_owner_epoch;
-  effective_options.moi_record_replay_dense_barrier_router = mode_plan.dense_barrier_router;
-  effective_options.moi_inline_access_present = mode_plan.inline_access_present;
+  effective_point.moi_initialize_owner_epoch = mode_plan.initialize_owner_epoch;
+  effective_point.moi_record_replay_dense_barrier_router = mode_plan.dense_barrier_router;
+  effective_point.moi_inline_access_present = mode_plan.inline_access_present;
   result.warnings.insert(result.warnings.end(), std::make_move_iterator(mode_plan.warnings.begin()),
                          std::make_move_iterator(mode_plan.warnings.end()));
   result.errors.insert(result.errors.end(), std::make_move_iterator(mode_plan.errors.begin()),
@@ -124,16 +125,16 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                                             effective_options, result.program_inventory,
                                             result.observation_plan(), moi_candidates);
   MoiResourcePlanningStatePtr resource_planning_state_owner =
-      make_moi_resource_planning_state(resource_problem, effective_options, result.resource_plans);
+      make_moi_resource_planning_state(resource_problem, effective_point, result.resource_plans);
   MoiResourcePlanningState &resource_planning_state = *resource_planning_state_owner;
   const auto rebuild_resource_plans = [&] {
     rebuild_moi_resource_plans(resource_planning_state, effective_options, effective_options,
-                               effective_options, effective_options, moi_candidates, result);
+                               effective_options, effective_point, moi_candidates, result);
   };
   rebuild_resource_plans();
   const MoiDynamicStackSpillPolicy dynamic_stack_spill =
       plan_moi_dynamic_stack_spill(effective_options.moi_engine, arch);
-  effective_options.moi_dynamic_stack_spill =
+  effective_point.moi_dynamic_stack_spill =
       dynamic_stack_spill.backend_supported &&
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
         if (plan.source != ConSanRegisterAllocationSource::SpillRequired)
@@ -144,7 +145,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
           return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
         });
       });
-  if (configure_automatic_moi_owner_sgpr(effective_options, resource_problem, result.resource_plans,
+  if (configure_automatic_moi_owner_sgpr(effective_point, resource_problem, result.resource_plans,
                                          result.warnings, resource_planning_state))
     rebuild_resource_plans();
   // Dispatch identity is persistent across every instrumented site, whereas
@@ -153,7 +154,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // high referenced SGPR does not let the transient window consume the last
   // fresh registers and make dispatch identity spuriously impossible.
   ConSanMoiOperatingPointUpdate dispatch_placement = configure_automatic_moi_dispatch_id_sgprs(
-      effective_options, resource_problem, result.resource_plans, resource_planning_state);
+      effective_point, resource_problem, result.resource_plans, resource_planning_state);
   result.warnings.insert(result.warnings.end(),
                          std::make_move_iterator(dispatch_placement.diagnostics.begin()),
                          std::make_move_iterator(dispatch_placement.diagnostics.end()));
@@ -161,51 +162,48 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     result.outcome = ConSanTransformOutcome::Unsupported;
   } else {
     const bool dispatch_placement_changed = dispatch_placement.changed;
-    static_cast<ConSanMoiOperatingPoint &>(effective_options) =
-        std::move(dispatch_placement.attempted_operating_point);
+    effective_point = std::move(dispatch_placement.attempted_operating_point);
     if (dispatch_placement_changed)
       rebuild_resource_plans();
   }
   ConSanMoiResourcePlanningResult exec_planning = solve_automatic_moi_exec_save_resources(
-      resource_planning_state, effective_options, effective_options, resource_problem,
-      moi_candidates, result);
+      resource_planning_state, effective_options, effective_point, resource_problem, moi_candidates,
+      result);
   if (!exec_planning.success()) {
     result.errors.insert(result.errors.end(), std::make_move_iterator(exec_planning.errors.begin()),
                          std::make_move_iterator(exec_planning.errors.end()));
   } else if (auto accepted = std::move(exec_planning).accept()) {
-    static_cast<ConSanMoiOperatingPoint &>(effective_options) =
-        std::move(accepted->operating_point);
+    effective_point = std::move(accepted->operating_point);
     result.resource_plans = std::move(accepted->site_plans);
     result.warnings.insert(result.warnings.end(),
                            std::make_move_iterator(accepted->diagnostics.begin()),
                            std::make_move_iterator(accepted->diagnostics.end()));
   }
-  if (configure_inline_moi_owner_sgpr(effective_options, effective_options, result.warnings))
+  if (configure_inline_moi_owner_sgpr(effective_options, effective_point, result.warnings))
     rebuild_resource_plans();
   // Preserve the last complete scalar-placement proof even if a subsequent
   // dispatch override rejects the transform. Unsupported results use this
   // typed partial plan to explain which safe registers had already been
   // established without exposing mutable search options.
-  result.moi_operating_point = effective_options;
+  result.moi_operating_point = effective_point;
   ConSanMoiOperatingPointAttempt dispatch_fallback = plan_moi_dispatch_id_fallback(
-      effective_options, effective_options, resource_problem, result.resource_plans);
+      effective_options, effective_point, resource_problem, result.resource_plans);
   if (dispatch_fallback.accepted()) {
-    static_cast<ConSanMoiOperatingPoint &>(effective_options) =
-        std::move(dispatch_fallback.attempted_operating_point);
+    effective_point = std::move(dispatch_fallback.attempted_operating_point);
     result.warnings.insert(result.warnings.end(),
                            std::make_move_iterator(dispatch_fallback.diagnostics.begin()),
                            std::make_move_iterator(dispatch_fallback.diagnostics.end()));
     rebuild_resource_plans();
   }
   if (result.outcome != ConSanTransformOutcome::Unsupported)
-    result.moi_operating_point = effective_options;
+    result.moi_operating_point = effective_point;
   std::optional<ConSanMoiScalarValidationFailure> scalar_validation_failure;
   if (result.outcome != ConSanTransformOutcome::Unsupported) {
-    scalar_validation_failure = validate_moi_dispatch_id_sgprs(effective_options, effective_options,
-                                                               effective_options, arch);
+    scalar_validation_failure =
+        validate_moi_dispatch_id_sgprs(effective_options, effective_options, effective_point, arch);
     if (!scalar_validation_failure) {
       scalar_validation_failure = validate_moi_ordinary_scalar_state(
-          effective_options, effective_options, effective_options, arch);
+          effective_options, effective_options, effective_point, arch);
     }
   }
   if (scalar_validation_failure) {
@@ -221,9 +219,8 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // atomics. A code object containing only rejected sync sites remains
   // access-only instrumentation.
   ConSanMoiPersistentPlacementUpdate persistent_placement =
-      configure_automatic_moi_persistent_vgprs(effective_options, resource_problem,
-                                               effective_options, result.resource_plans,
-                                               resource_planning_state);
+      configure_automatic_moi_persistent_vgprs(effective_point, resource_problem, effective_options,
+                                               result.resource_plans, resource_planning_state);
   result.warnings.insert(result.warnings.end(),
                          std::make_move_iterator(persistent_placement.diagnostics.begin()),
                          std::make_move_iterator(persistent_placement.diagnostics.end()));
@@ -232,15 +229,14 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     result.outcome = ConSanTransformOutcome::Unsupported;
   } else {
     const bool persistent_placement_changed = persistent_placement.changed;
-    static_cast<ConSanMoiOperatingPoint &>(effective_options) =
-        std::move(persistent_placement.attempted_operating_point);
+    effective_point = std::move(persistent_placement.attempted_operating_point);
     prologue_scratch_assignments = std::move(persistent_placement.prologue_scratch_assignments);
     if (persistent_placement_changed)
       rebuild_resource_plans();
   }
-  result.moi_operating_point = effective_options;
+  result.moi_operating_point = effective_point;
   if (result.outcome != ConSanTransformOutcome::Unsupported)
-    scalar_validation_failure = validate_moi_dispatch_id_vgprs(effective_options);
+    scalar_validation_failure = validate_moi_dispatch_id_vgprs(effective_point);
   if (scalar_validation_failure) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.warnings.push_back(std::move(scalar_validation_failure->diagnostic));
@@ -250,7 +246,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     return result;
   }
   if (mode_plan.reserve_dynamic_stack_prologue_entry &&
-      moi_initializes_owner_epoch(effective_options, effective_options)) {
+      moi_initializes_owner_epoch(effective_options, effective_point)) {
     for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       if (!kernel.has_text_range || !kernel.uses_dynamic_stack.value_or(false))
         continue;
@@ -283,12 +279,12 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                plan.source != ConSanRegisterAllocationSource::Unsupported;
       });
   if (result.errors.empty() && inline_atomic_without_access && has_usable_atomic_plan &&
-      moi_initializes_owner_epoch(effective_options, effective_options)) {
+      moi_initializes_owner_epoch(effective_options, effective_point)) {
     // Atomic-only objects do not need access-layout information in their
     // owner/epoch prologue. Emit it before the large atomic helpers so the
     // original kernel entry can reach it without consuming a scarce local
     // branch island.
-    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_options,
+    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_point,
                                          prologue_scratch_assignments, arch, result);
     owner_epoch_prologue_applied_early =
         std::ranges::any_of(result.patches, [](const ConSanPatchLoweringProduct &patch) {
@@ -296,14 +292,14 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
         });
   }
   if (result.errors.empty())
-    apply_moi_mode_patches(code_object_bytes, effective_options, arch, resource_planning_state,
-                           moi_candidates, object_facts, result);
+    apply_moi_mode_patches(code_object_bytes, effective_options, effective_point, arch,
+                           resource_planning_state, moi_candidates, object_facts, result);
   if (result.errors.empty() && !owner_epoch_prologue_applied_early &&
       (!mode_plan.prologue_requires_consumer || result.modified()))
-    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_options,
+    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_point,
                                          prologue_scratch_assignments, arch, result);
   if (result.errors.empty())
-    result.moi_operating_point = effective_options;
+    result.moi_operating_point = effective_point;
   if (result.outcome == ConSanTransformOutcome::Unsupported || !result.errors.empty()) {
     publish_pending_moi_lowering_rejections(result);
     return result;

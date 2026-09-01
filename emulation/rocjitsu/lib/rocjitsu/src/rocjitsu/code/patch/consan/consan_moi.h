@@ -14,7 +14,8 @@ namespace rocjitsu {
 struct ConSanLoweringObservation;
 
 [[nodiscard]] ConSanTransformArtifacts
-try_patch_consan_moi(ConSanTransformArtifacts result, const MoiOptions &options,
+try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &options,
+                     const ConSanMoiOperatingPoint &initial_operating_point,
                      std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch,
                      ConSanLoweringExecution *execution = nullptr);
 

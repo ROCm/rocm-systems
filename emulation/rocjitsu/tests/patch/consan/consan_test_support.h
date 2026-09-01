@@ -54,6 +54,15 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 
+/// Focused-test convenience aggregate. Production constructs and carries
+/// immutable input and operating-point state as separate products.
+struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {
+  MoiOptions() = default;
+  MoiOptions(const ConSanOptions &options)
+      : ConSanOptions(options),
+        ConSanMoiOperatingPoint(initial_consan_moi_operating_point(options)) {}
+};
+
 /// Focused classifier/planner tests start from decoded sites so they can
 /// exercise rejection mapping as well as normalized address planning.
 /// Production lowering carries ConSanAtomicLoweringForm across that boundary.
@@ -126,18 +135,22 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
                                         resource_source, allow_post_guest_spill_operand_overlap);
 }
 
-/// Explicitly test-only access to compatibility-lowering working state. No
+/// Explicitly test-only access to a seeded downstream operating point. No
 /// production header declares this symbol.
-[[nodiscard]] ConSanTransformArtifacts complete_consan_lowering(
-    std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
+[[nodiscard]] ConSanTransformArtifacts complete_consan_lowering_with_operating_point(
+    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &initial_operating_point,
     ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
     const ConSanPreappliedMutationLayout &preapplied_mutation = {},
-    std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {});
+    ConSanLoweringExecution *execution = nullptr,
+    ConSanLoweringExtent extent = ConSanLoweringExtent::Complete,
+    const ConSanLoweringObservation *observation = nullptr);
 
 [[nodiscard]] inline ConSanTransformArtifacts
 test_lower_consan(std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
                   ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
-  return complete_consan_lowering(code_object_bytes, options, inspected_perturbation);
+  return complete_consan_lowering_with_operating_point(code_object_bytes, options, options,
+                                                       inspected_perturbation);
 }
 
 /// Lower one focused fixture whose input image already contains committed
@@ -147,7 +160,8 @@ test_lower_consan(std::span<const uint8_t> code_object_bytes, const MoiOptions &
 [[nodiscard]] inline ConSanTransformArtifacts test_lower_consan_with_preapplied_mutation(
     std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
     const ConSanPreappliedMutationLayout &preapplied_mutation) {
-  return complete_consan_lowering(code_object_bytes, options, nullptr, preapplied_mutation);
+  return complete_consan_lowering_with_operating_point(code_object_bytes, options, options, nullptr,
+                                                       preapplied_mutation);
 }
 
 /// Lower one focused fixture from an explicitly selected owner-local transient
@@ -159,8 +173,9 @@ test_lower_consan(std::span<const uint8_t> code_object_bytes, const MoiOptions &
 test_lower_consan_with_owner_transient_sgpr_assignment(
     std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
     const ConSanMoiTransientSgprAssignment &assignment) {
-  return complete_consan_lowering(code_object_bytes, options, nullptr, {},
-                                  std::span{&assignment, 1u});
+  ConSanMoiOperatingPoint point = options;
+  point.owner_transient_sgprs = {assignment};
+  return complete_consan_lowering_with_operating_point(code_object_bytes, options, point);
 }
 
 /// Request the complete dry-run synchronization and fault-site inventory used
@@ -170,7 +185,8 @@ test_lower_consan_with_owner_transient_sgpr_assignment(
 test_semantic_inventory(std::span<const uint8_t> code_object_bytes, MoiOptions options,
                         ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
   options.fault_dry_run = true;
-  return complete_consan_lowering(code_object_bytes, options, inspected_perturbation);
+  return complete_consan_lowering_with_operating_point(code_object_bytes, options, options,
+                                                       inspected_perturbation);
 }
 
 /// Build the dry-run semantic inventory required to select a barrier-move
@@ -181,7 +197,8 @@ test_barrier_move_inventory(std::span<const uint8_t> code_object_bytes, MoiOptio
                             ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
   options.fault_move_barrier = true;
   options.fault_dry_run = true;
-  return complete_consan_lowering(code_object_bytes, options, inspected_perturbation);
+  return complete_consan_lowering_with_operating_point(code_object_bytes, options, options,
+                                                       inspected_perturbation);
 }
 namespace {
 

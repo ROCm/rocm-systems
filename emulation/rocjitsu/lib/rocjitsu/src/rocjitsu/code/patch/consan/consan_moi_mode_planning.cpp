@@ -53,12 +53,13 @@ MoiObjectModePlan plan_moi_object_mode(const ConSanRequest &request,
   return moi_mode_operations(request.moi_engine).plan(request, point, facts, observation_plan);
 }
 
-void apply_moi_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
-                            rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+void apply_moi_mode_patches(std::span<const uint8_t> bytes, const ConSanOptions &options,
+                            ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
+                            MoiResourcePlanningState &resource_state,
                             std::span<const ConSanMoiCandidate> candidates,
                             const MoiObjectFacts &facts, ConSanTransformArtifacts &result) {
   moi_mode_operations(options.moi_engine)
-      .apply(bytes, options, arch, resource_state, candidates, facts, result);
+      .apply(bytes, options, operating_point, arch, resource_state, candidates, facts, result);
 }
 
 MoiPersistentStateDemand plan_moi_persistent_state_demand(const ConSanRequest &request,

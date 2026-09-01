@@ -4642,8 +4642,7 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
 plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperatingPoint &base,
                               const MoiResourceProblem &problem,
                               std::span<const ConSanCandidateResourcePlan> site_plans) {
-  MoiOptions options(input);
-  static_cast<ConSanMoiOperatingPoint &>(options) = base;
+  ConSanMoiOperatingPoint point = base;
   ConSanMoiOperatingPointAttempt attempt{
       .attempted_operating_point = base,
       .accepted_fallback = std::nullopt,
@@ -4653,8 +4652,8 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
   const MoiDispatchIdentityPlan dispatch_identity =
       plan_moi_dispatch_identity(problem.request(), {});
   if (!consan_is_capability_arch(arch) || !dispatch_identity.fallback_kind ||
-      !options.moi_dispatch_identity.automatic_sgpr() || !options.moi_dispatch_identity.sgpr() ||
-      !options.moi_exec_save_sgpr) {
+      !point.moi_dispatch_identity.automatic_sgpr() || !point.moi_dispatch_identity.sgpr() ||
+      !point.moi_exec_save_sgpr) {
     return attempt;
   }
 
@@ -4663,15 +4662,15 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
   // Sampled instead retains the independently proven EXEC window and overrides
   // only a conflicting dispatch pair with its literal identity representation.
   std::vector<ConSanMoiTransientSgprAssignment> &owner_transient_sgprs =
-      options.owner_transient_sgprs;
+      point.owner_transient_sgprs;
   owner_transient_sgprs.clear();
-  options.automatic_moi_partial_exec_save_sgprs = true;
+  point.automatic_moi_partial_exec_save_sgprs = true;
   const bool dispatch_only = dispatch_identity.fallback_replans_dispatch_only;
-  MoiResourcePlanningState planning_state(problem, options, site_plans);
+  MoiResourcePlanningState planning_state(problem, point, site_plans);
   std::vector<std::string> diagnostics;
-  if (!configure_automatic_moi_transient_sgpr_assignments(options, problem, site_plans, diagnostics,
+  if (!configure_automatic_moi_transient_sgpr_assignments(point, problem, site_plans, diagnostics,
                                                           planning_state, dispatch_only)) {
-    attempt.attempted_operating_point = static_cast<const ConSanMoiOperatingPoint &>(options);
+    attempt.attempted_operating_point = point;
     return attempt;
   }
 
@@ -4698,9 +4697,9 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
           const auto owner_contexts = resolve_moi_scalar_owner_contexts(planning_state, owners);
           if (!owner_contexts ||
               !moi_scalar_contexts_admit_reserved_window(
-                  owner_contexts->summaries, *options.moi_exec_save_sgpr,
-                  moi_exec_save_sgpr_count(
-                      resolve_moi_exec_save_requirement(options, options, options), arch),
+                  owner_contexts->summaries, *point.moi_exec_save_sgpr,
+                  moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(input, input, point),
+                                           arch),
                   arch)) {
             continue;
           }
@@ -4713,7 +4712,7 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
     // The dispatch-only proof must not reclassify a globally liveness-dead
     // EXEC window as an owner-wide reserved window. The latter is deliberately
     // stricter and would reject guest uses outside instrumentation sites.
-    options.automatic_moi_partial_exec_save_sgprs = base.automatic_moi_partial_exec_save_sgprs;
+    point.automatic_moi_partial_exec_save_sgprs = base.automatic_moi_partial_exec_save_sgprs;
   }
 
   // The component planner connects all callers of shared text. It retains the
@@ -4723,12 +4722,12 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
   const bool selected_zero_generation = std::ranges::any_of(
       owner_transient_sgprs, [](const auto &assignment) { return !assignment.dispatch_id_sgpr; });
   if (!selected_zero_generation) {
-    attempt.attempted_operating_point = static_cast<const ConSanMoiOperatingPoint &>(options);
+    attempt.attempted_operating_point = point;
     return attempt;
   }
 
   diagnostics.emplace_back(dispatch_identity.fallback_diagnostic);
-  attempt.attempted_operating_point = static_cast<const ConSanMoiOperatingPoint &>(options);
+  attempt.attempted_operating_point = point;
   attempt.accepted_fallback = dispatch_identity.fallback_kind;
   attempt.diagnostics = std::move(diagnostics);
   return attempt;

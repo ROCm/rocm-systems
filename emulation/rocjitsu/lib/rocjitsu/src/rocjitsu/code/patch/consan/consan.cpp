@@ -24,6 +24,8 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
   try {
+    const ConSanMoiOperatingPoint initial_operating_point =
+        initial_consan_moi_operating_point(options);
     ConSanTransformArtifacts inventory = std::move(inventory_artifacts);
     if (options.flavor != ConSanFlavor::Moi)
       inventory.errors.emplace_back("ConSan MOI inventory retry requires the MOI flavor");
@@ -86,8 +88,8 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
       // mutation. Rebuild for the rare late-fault path instead of coupling
       // the retained inventory to every mutation-specific analysis choice.
       ConSanTransformArtifacts result =
-          compose_consan_lowering(code_object_bytes, options, nullptr, {}, {}, execution,
-                                  ConSanLoweringExtent::Complete, nullptr);
+          compose_consan_lowering(code_object_bytes, options, initial_operating_point, nullptr, {},
+                                  execution, ConSanLoweringExtent::Complete, nullptr);
       try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
       return finalize_consan_result(std::move(result), code_object_bytes,
                                     options.moi_report_dispatch_id, false, nullptr, execution);
@@ -97,8 +99,8 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
       return finalize_consan_result(std::move(inventory), code_object_bytes,
                                     options.moi_report_dispatch_id, false, nullptr, execution);
     }
-    ConSanTransformArtifacts result =
-        try_patch_consan_moi(std::move(inventory), options, code_object_bytes, arch, execution);
+    ConSanTransformArtifacts result = try_patch_consan_moi(
+        std::move(inventory), options, initial_operating_point, code_object_bytes, arch, execution);
     try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
     return finalize_consan_result(std::move(result), code_object_bytes,
                                   options.moi_report_dispatch_id, false, nullptr, execution);
@@ -116,21 +118,19 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
   }
 }
 
-[[nodiscard]] ConSanTransformArtifacts complete_consan_lowering_observed(
-    std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
+[[nodiscard]] ConSanTransformArtifacts complete_consan_lowering_with_operating_point(
+    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &initial_operating_point,
     ConSanPerturbationPlanningState *inspected_perturbation,
-    const ConSanPreappliedMutationLayout &preapplied_mutation,
-    std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs,
-    ConSanLoweringExecution *execution, ConSanLoweringExtent extent,
-    const ConSanLoweringObservation *observation) {
+    const ConSanPreappliedMutationLayout &preapplied_mutation, ConSanLoweringExecution *execution,
+    ConSanLoweringExtent extent, const ConSanLoweringObservation *observation) {
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
   try {
-    MoiOptions effective_options = options;
     ConSanTransformArtifacts result = compose_consan_lowering(
-        code_object_bytes, effective_options, inspected_perturbation, preapplied_mutation,
-        initial_owner_transient_sgprs, execution, extent, observation);
+        code_object_bytes, options, initial_operating_point, inspected_perturbation,
+        preapplied_mutation, execution, extent, observation);
     const bool stopped_after_inventory =
         extent == ConSanLoweringExtent::ThroughProgramInventory && execution != nullptr &&
         execution->program_inventory_passes != 0u && execution->observation_plan_passes == 0u;
@@ -143,7 +143,7 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
         result.outcome = ConSanTransformOutcome::Invalid;
       return result;
     }
-    try_apply_unmatched_barrier_wait_abort(code_object_bytes, effective_options, result);
+    try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
     result =
         finalize_consan_result(std::move(result), code_object_bytes, options.moi_report_dispatch_id,
                                false, inspected_perturbation, execution);
@@ -161,16 +161,6 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
   }
 }
 
-ConSanTransformArtifacts complete_consan_lowering(
-    std::span<const uint8_t> code_object_bytes, const MoiOptions &options,
-    ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
-    const ConSanPreappliedMutationLayout &preapplied_mutation = {},
-    std::span<const ConSanMoiTransientSgprAssignment> initial_owner_transient_sgprs = {}) {
-  return complete_consan_lowering_observed(code_object_bytes, options, inspected_perturbation,
-                                           preapplied_mutation, initial_owner_transient_sgprs,
-                                           nullptr, ConSanLoweringExtent::Complete, nullptr);
-}
-
 ConSanTransformArtifacts lower_consan(std::span<const uint8_t> code_object_bytes,
                                       const ConSanOptions &options,
                                       ConSanLoweringExecution *execution,
@@ -178,8 +168,9 @@ ConSanTransformArtifacts lower_consan(std::span<const uint8_t> code_object_bytes
                                       const ConSanLoweringObservation *observation) {
   if (execution != nullptr)
     *execution = {};
-  return complete_consan_lowering_observed(code_object_bytes, options, nullptr, {}, {}, execution,
-                                           extent, observation);
+  return complete_consan_lowering_with_operating_point(code_object_bytes, options,
+                                                       initial_consan_moi_operating_point(options),
+                                                       nullptr, {}, execution, extent, observation);
 }
 
 } // namespace rocjitsu

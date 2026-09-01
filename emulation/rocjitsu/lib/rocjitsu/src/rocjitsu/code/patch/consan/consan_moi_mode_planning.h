@@ -200,8 +200,9 @@ make_moi_object_mode_plan(const ConSanRequest &request, const ConSanMoiOperating
 /// Run the selected engine's lowering sequence. Shared placement has already
 /// accepted an operating point; the engine owns which access and sync
 /// consumers run, their order, and any mode-local post-placement cleanup.
-void apply_moi_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
-                            rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+void apply_moi_mode_patches(std::span<const uint8_t> bytes, const ConSanOptions &options,
+                            ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
+                            MoiResourcePlanningState &resource_state,
                             std::span<const ConSanMoiCandidate> candidates,
                             const MoiObjectFacts &facts, ConSanTransformArtifacts &result);
 
@@ -239,9 +240,9 @@ plan_inline_shadow_evidence_requirements(const MoiEvidencePlanningContext &conte
 struct MoiModeOperations {
   MoiObjectModePlan (*plan)(const ConSanRequest &, const ConSanMoiOperatingPoint &,
                             const MoiObjectFacts &, const ConSanObservationPlan &);
-  void (*apply)(std::span<const uint8_t>, MoiOptions &, rj_code_arch_t, MoiResourcePlanningState &,
-                std::span<const ConSanMoiCandidate>, const MoiObjectFacts &,
-                ConSanTransformArtifacts &);
+  void (*apply)(std::span<const uint8_t>, const ConSanOptions &, ConSanMoiOperatingPoint &,
+                rj_code_arch_t, MoiResourcePlanningState &, std::span<const ConSanMoiCandidate>,
+                const MoiObjectFacts &, ConSanTransformArtifacts &);
   uint16_t (*access_scratch_vgpr_count)(const ConSanRequest &, const BoundRuntimeResources &,
                                         const ConSanMoiOperatingPoint &, const ConSanMoiCandidate &,
                                         rj_code_arch_t);

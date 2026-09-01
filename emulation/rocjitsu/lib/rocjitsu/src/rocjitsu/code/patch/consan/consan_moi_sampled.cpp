@@ -154,17 +154,19 @@ MoiObjectModePlan plan_sampled_object_mode(const ConSanRequest &request,
   return plan;
 }
 
-void apply_sampled_mode_patches(std::span<const uint8_t> bytes, MoiOptions &options,
-                                rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+void apply_sampled_mode_patches(std::span<const uint8_t> bytes, const ConSanOptions &options,
+                                ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
+                                MoiResourcePlanningState &resource_state,
                                 std::span<const ConSanMoiCandidate> candidates,
                                 const MoiObjectFacts &, ConSanTransformArtifacts &result) {
-  try_apply_direct_sampled_watchpoint_patch(bytes, options, options, arch, resource_state,
+  try_apply_direct_sampled_watchpoint_patch(bytes, options, operating_point, arch, resource_state,
                                             candidates, result);
   if (result.errors.empty())
-    try_apply_sampled_atomic_sync_patch(bytes, options, options, arch, resource_state, result);
+    try_apply_sampled_atomic_sync_patch(bytes, options, operating_point, arch, resource_state,
+                                        result);
   if (result.errors.empty())
-    try_apply_sampled_barrier_sync_patch(bytes, options, options, arch, resource_state, candidates,
-                                         result);
+    try_apply_sampled_barrier_sync_patch(bytes, options, operating_point, arch, resource_state,
+                                         candidates, result);
 }
 
 uint16_t sampled_access_scratch_vgpr_count(const ConSanRequest &request,

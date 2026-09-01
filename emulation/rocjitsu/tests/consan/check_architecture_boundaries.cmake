@@ -262,6 +262,11 @@ file(GLOB _consan_production_files "${_consan_dir}/*.cpp" "${_consan_dir}/*.h" "
 foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_file}"
+        "MoiOptions"
+        "production must carry immutable input and MOI operating-point state separately"
+    )
+    _consan_assert_no_match(
+        "${_file}"
         "moi_(inline|record_replay)_(indirect_(pc|scc)|dispatch_key|call_return)_sgpr|moi_router_(indirect_(pc|scc)|dispatch_key|call_return)_sgpr|moi_inline_(branch_only_scalar_spill|dynamic_stack_borrowed_sgpr)"
         "scalar-router and branch-only preservation state must remain shared typed allocations"
     )
@@ -512,12 +517,6 @@ foreach(_sampled_owner IN ITEMS consan_moi_sampled.h consan_moi_sampled_access.i
         "Sampled components must separate immutable input from operating-point state"
     )
 endforeach()
-_consan_assert_match_count_at_most(
-    "${_consan_dir}/consan_moi_sampled.cpp"
-    "MoiOptions"
-    1
-    "Sampled may use the broad attempt only at its mode entry"
-)
 string(
     REGEX MATCHALL
     "consan_detail::append_moi_indexed_address"
@@ -581,12 +580,6 @@ foreach(
         "Record/Replay components must separate immutable input from operating-point state"
     )
 endforeach()
-_consan_assert_match_count_at_most(
-    "${_consan_dir}/consan_moi_record_replay.cpp"
-    "MoiOptions"
-    1
-    "Record/Replay may use the broad attempt only at its mode entry"
-)
 foreach(
     _inline_shadow_owner
     IN ITEMS
@@ -600,12 +593,6 @@ foreach(
         "InlineShadow components must separate immutable input from operating-point state"
     )
 endforeach()
-_consan_assert_match_count_at_most(
-    "${_consan_dir}/consan_moi_inline_shadow.cpp"
-    "MoiOptions"
-    1
-    "InlineShadow may use the broad attempt only at its mode entry"
-)
 foreach(_barrier_owner IN ITEMS consan_moi_barrier.h consan_moi_barrier.inc)
     _consan_assert_no_match(
         "${_consan_dir}/${_barrier_owner}"
@@ -1206,26 +1193,6 @@ foreach(_private_fault_mechanism IN LISTS _private_fault_mechanisms)
     endif()
 endforeach()
 
-# Native emission and target-operation components accept narrow operation
-# contracts, not the broad mutable MoiOptions bus.
-file(
-    GLOB _native_emitter_sources
-    "${_consan_dir}/*emission*.cpp"
-    "${_consan_dir}/*emission*.h"
-    "${_consan_dir}/*target_ops*.cpp"
-    "${_consan_dir}/*target_ops*.h"
-    "${_consan_dir}/consan_moi_access_target.cpp"
-    "${_consan_dir}/consan_moi_access_target.h"
-    "${_consan_dir}/consan_moi_target_address.cpp"
-    "${_consan_dir}/consan_moi_target_address.h"
-)
-foreach(_file IN LISTS _native_emitter_sources)
-    _consan_assert_no_match(
-        "${_file}"
-        "MoiOptions"
-        "native emitters must accept narrow typed plans"
-    )
-endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_dynamic_record_emission.h"
     "ConSanMoiOperatingPoint|BoundRuntimeResources"

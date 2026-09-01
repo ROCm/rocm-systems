@@ -3,19 +3,13 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_lowering.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <span>
-
-namespace rocjitsu {
-
-ConSanTransformArtifacts complete_consan_lowering(std::span<const uint8_t> code_object_bytes,
-                                                  const ConSanOptions &options);
-
-} // namespace rocjitsu
 
 namespace {
 
@@ -25,8 +19,7 @@ void require(bool condition) {
 }
 
 void exercise_transform(std::span<const uint8_t> input, const rocjitsu::ConSanOptions &options) {
-  const rocjitsu::ConSanTransformArtifacts result =
-      rocjitsu::complete_consan_lowering(input, options);
+  const rocjitsu::ConSanTransformArtifacts result = rocjitsu::lower_consan(input, options);
   require(result.program_inventory.code_object_id() == rocjitsu::make_consan_code_object_id(input));
   if (result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid) {
     require(!result.replacement.empty());

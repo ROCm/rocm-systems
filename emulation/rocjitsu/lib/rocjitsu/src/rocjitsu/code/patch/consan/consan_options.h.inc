@@ -1060,27 +1060,21 @@ struct ConSanMoiOperatingPoint {
   bool operator==(const ConSanMoiOperatingPoint &) const = default;
 };
 
-/// Internal attempt context used only by MOI planning and native emitters.
-///
-/// It combines immutable caller input with one independently copyable operating
-/// point. Keeping the base contracts separate makes broad internal mechanism
-/// dependencies visible and prevents non-MOI code from acquiring placement
-/// output. Public orchestration and report planning never consume this type;
-/// narrow per-patch plans own the decisions that cross semantic boundaries.
-struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {
-  MoiOptions() = default;
-  /// Start a fresh MOI attempt from caller input. The implicit conversion is
-  /// intentional at the internal lowering boundary: production callers carry no
-  /// resolved state, while focused mechanism tests may pass this derived type
-  /// directly to preserve an explicitly seeded downstream state.
-  MoiOptions(const ConSanOptions &options) : ConSanOptions(options) {
-    moi_exec_save_sgpr = options.requested_moi_exec_save_sgpr;
-    moi_owner_sgpr.set(options.requested_moi_owner_sgpr);
-    if (options.requested_moi_owner_vgpr && options.requested_moi_epoch_vgpr)
-      set_moi_owner_epoch_vgprs(*options.requested_moi_owner_vgpr,
-                                *options.requested_moi_epoch_vgpr);
+/// Construct the initial unresolved point from explicit caller overrides.
+/// Placement owns every subsequent mutation; keeping this conversion narrow
+/// prevents immutable request state and solver output from becoming one
+/// inherited attempt bus.
+[[nodiscard]] inline ConSanMoiOperatingPoint
+initial_consan_moi_operating_point(const ConSanOptions &options) {
+  ConSanMoiOperatingPoint point;
+  point.moi_exec_save_sgpr = options.requested_moi_exec_save_sgpr;
+  point.moi_owner_sgpr.set(options.requested_moi_owner_sgpr);
+  if (options.requested_moi_owner_vgpr && options.requested_moi_epoch_vgpr) {
+    point.set_moi_owner_epoch_vgprs(*options.requested_moi_owner_vgpr,
+                                    *options.requested_moi_epoch_vgpr);
   }
-};
+  return point;
+}
 
 /// Process-local exact-one budget for repeated dynamic loads of one stable
 /// fault-site identity. The caller serializes observe() with code-object load
