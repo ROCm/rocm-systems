@@ -44,12 +44,14 @@ constexpr int kGinA2AMaxRanks = 16;
 constexpr int kGinA2ASdmaCtas = 1;
 
 // One put per thread, so the block only has to cover the peers. Rounded up to a
-// full wavefront instead of leaving a partial one.
+// full wavefront instead of leaving a partial one. The LSA bands below size their
+// own blocks and are not bound by these.
 constexpr int kGinA2ASdmaMinThreads = 64;
+constexpr int kGinA2ASdmaMaxThreads = 256;
 
 inline int ginA2ASdmaThreads(int nRanks) {
   int threads = nRanks < kGinA2ASdmaMinThreads ? kGinA2ASdmaMinThreads : nRanks;
-  return threads > kGinA2AThreadsPerCta ? kGinA2AThreadsPerCta : threads;
+  return threads > kGinA2ASdmaMaxThreads ? kGinA2ASdmaMaxThreads : threads;
 }
 
 // Best measured LSA geometry per size range.
@@ -178,11 +180,11 @@ bool ncclAllToAllGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* rec
   if (!comm->symmetricSupport) return false;
   if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL) return false;
 
-  // Every rank must be reachable over LSA.
-  if (ncclTeamLsa(comm).nRanks != comm->nRanks) return false;
-
   // This path runs on the comm's shared GIN backend, so it has to be SDMA.
   if (comm->sharedRes->ginState.ginType != (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
+
+  // Every rank must be reachable over LSA.
+  if (ncclTeamLsa(comm).nRanks != comm->nRanks) return false;
 
   // sendbuff == recvbuff is accepted. ncclAlltoAll defines no in-place semantics
   // (unlike ncclAlltoAllv), and the reference GIN kernel likewise runs the same

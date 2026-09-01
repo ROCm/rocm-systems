@@ -15,7 +15,6 @@ struct ncclComm;
 
 // Upper bound on CTAs, and so on the LSA barriers and GIN signals reserved here.
 constexpr int kGinA2AMaxCtas = 64;
-constexpr int kGinA2AThreadsPerCta = 256;
 
 // Lazily created on the first eligible alltoall and torn down with the comm.
 // Declared unconditionally, or rcclras and librccl disagree on ncclComm layout.
