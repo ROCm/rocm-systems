@@ -279,6 +279,19 @@ _consan_assert_match_count_at_most(
     "whole lowering transaction may appear only at finalization and mutation adapters"
 )
 _consan_assert_no_match(
+    "${_consan_dir}/consan_result.h.inc"
+    "validate_consan_modified_elf"
+    "deliberate-corruption final proof API is test-owned"
+)
+file(
+    READ
+    "${ROCJITSU_SOURCE_DIR}/tests/patch/consan/consan_final_validation_test_support.h"
+    _consan_final_validation_test_support
+)
+if(NOT _consan_final_validation_test_support MATCHES "validate_consan_modified_elf")
+    message(FATAL_ERROR "ConSan final-validation test adapter lost its declaration")
+endif()
+_consan_assert_no_match(
     "${_consan_dir}/consan_validation.inc"
     "(relay|island)_vertices|branch_only_relay_targets"
     "relay validators must not rebuild parallel patch-inventory views"

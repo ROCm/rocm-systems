@@ -340,13 +340,3 @@ consan_barrier_operand_source_name(ConSanBarrierSite::OperandSource source);
 
 [[nodiscard]] std::optional<ConSanFlavor> parse_consan_flavor(std::string_view value);
 [[nodiscard]] std::optional<ConSanMoiEngine> parse_consan_moi_engine(std::string_view value);
-
-/// Re-run the structural final-ELF validation used before a modified result is
-/// made installable. The expected report dispatch identity is a runtime input,
-/// not transform output; tests exercising a nonzero literal identity must pass
-/// the same value used for lowering. Exposed for bounded mutation/property
-/// tests.
-[[nodiscard]] std::vector<std::string>
-validate_consan_modified_elf(std::span<const uint8_t> original_bytes,
-                             const ConSanTransformArtifacts &modified_result,
-                             uint64_t expected_moi_report_dispatch_id = 0);

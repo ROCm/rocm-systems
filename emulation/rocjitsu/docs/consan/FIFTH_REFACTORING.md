@@ -6991,3 +6991,47 @@ deletion or consolidation from a newly exposed boundary rather than add
 another contract. Lowering-side mutation surfaces, remaining target and mode
 locality, material whole-refactoring shrinkage, and the independent completion
 audit remain open. The goal therefore remains active.
+
+### 16.93 Convergence checkpoint 92: test-owned final-proof ingress
+
+The final-proof caller trace distinguished production's mandatory validation
+operation from `validate_consan_modified_elf`, an entry point that deliberately
+re-runs that operation on corrupted lowerer artifacts. Every caller of the
+latter is a focused mutation/property test or the transform fuzzer; production
+finalization calls the internal narrow proof operation directly. Nevertheless,
+the deliberate-corruption entry point and its test-oriented documentation were
+exported from the production result contract.
+
+The declaration now lives in
+`consan_final_validation_test_support.h`. The common ConSan test support and
+the fuzzer include that header, while the production implementation remains in
+the validation component beside the proof operation it adapts. The architecture
+gate rejects the symbol in `consan_result.h.inc` and requires the test-owned
+declaration. No production caller, validator, behavior, or proof was moved.
+
+| Signal | Checkpoint 92 | Cumulative change | Slice change from checkpoint 91 |
+| --- | ---: | ---: | ---: |
+| Production files | 272 | +43 | 0 |
+| Physical production lines | 102,908 | **-2,068** | **-10** |
+| Nonblank production lines | 96,678 | **-2,406** | **-9** |
+| Production implementation lines | 88,991 | **-2,459** | **-4** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **138 / 47** | **-138 / -10** | **-1 / 0** |
+| `ConSanPatchInfo` references / files | 210 / 30 | +10 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Deliberate-corruption final-proof declarations in production headers | **0** | n/a | **-1** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and all **1,295/1,295** host and
+component tests named `ConSan.*` or `ConSanMoi.*`, including the architecture
+boundary. Checkpoint 91 immediately before this declaration-only slice passed
+all 4,776 nonphysical tests across the full five-target simulator matrix. No
+test was added, removed, renamed, disabled, or replaced, and no physical
+gfx1201 test was run.
+
+This deletion-bearing checkpoint strengthens Sections 14.1, 14.5, 14.7, and
+14.8 by removing a test-only API from the production contract while retaining
+the real validator and every adversarial test. Its size payoff is deliberately
+small; broader lowering-side mutation surfaces, remaining target and mode
+locality, material whole-refactoring shrinkage, and the independent completion
+audit remain open. The goal therefore remains active.

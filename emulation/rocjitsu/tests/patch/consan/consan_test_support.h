@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "consan_final_validation_test_support.h"
 #include "lowering_commit_test_support.h"
 
 #include "rocjitsu/code/patch/consan/consan.h"
