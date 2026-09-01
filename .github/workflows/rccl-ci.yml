@@ -60,7 +60,7 @@ jobs:
       timeout_minutes: 240
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
-      # TheRock pinned ref committed 2026-08-26; bump when refreshing artifacts.
+      # TheRock pinned ref committed 2026-09-01; bump when refreshing artifacts.
       therock_ref: ${{ inputs.therock_ref || '1f1f06bf4cac2a28635aa563a411ede7625746d4' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
@@ -82,7 +82,7 @@ jobs:
       non_gating: true
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
-      # TheRock pinned ref committed 2026-08-26; bump when refreshing artifacts.
+      # TheRock pinned ref committed 2026-09-01; bump when refreshing artifacts.
       therock_ref: ${{ inputs.therock_ref || '1f1f06bf4cac2a28635aa563a411ede7625746d4' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
@@ -105,7 +105,7 @@ jobs:
       non_gating: true
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
-      # TheRock pinned ref committed 2026-08-26; bump when refreshing artifacts.
+      # TheRock pinned ref committed 2026-09-01; bump when refreshing artifacts.
       therock_ref: ${{ inputs.therock_ref || '1f1f06bf4cac2a28635aa563a411ede7625746d4' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
