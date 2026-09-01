@@ -29,6 +29,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/dlog_drain.hpp"
+#include "lib/rocprofiler-sdk/kfd/env_parse.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/poll_reader.hpp"
@@ -125,6 +126,25 @@ start_max_age_ns()
     return _cached;
 }
 
+// Hard size cap on a GPU's retained-START map. start_max_age_ns() above is only
+// the slow age backstop, so this is the bound that actually holds under a
+// sustained EOP loss -- exactly the role D9's cap plays for the hub, sized the
+// same way and for the same reason (the map is per-GPU, and a workload's genuine
+// in-flight peak is hundreds of thousands of dispatches). The [1, 4194304] range
+// and the reject-and-default parse are D8/D9's shared contract; read once, forced
+// at reader start so no worker thread races a concurrent setenv.
+size_t
+pending_starts_cap()
+{
+    static const size_t _cached = []() -> size_t {
+        constexpr long _dflt = 2'000'000;
+        auto           _v =
+            env_long_in_range("ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_STARTS", 1, 4'194'304);
+        return static_cast<size_t>(_v.value_or(_dflt));
+    }();
+    return _cached;
+}
+
 // Overflow depth at which the processor is clearly not keeping up. Not a cap:
 // dropping here would lose records the ring already gave us.
 constexpr size_t kOverflowWarnDepth = 256;
@@ -157,7 +177,12 @@ struct processor_state
 {
     std::unordered_map<uint32_t, pair_state> by_gpu = {};
 
-    pair_state& for_gpu(uint32_t gpu_id) { return by_gpu[gpu_id]; }
+    pair_state& for_gpu(uint32_t gpu_id)
+    {
+        auto [it, ins] = by_gpu.try_emplace(gpu_id);
+        if(ins) it->second.max_pending_starts = pending_starts_cap();
+        return it->second;
+    }
 };
 
 // Validated before any sizing math uses it.
@@ -858,9 +883,14 @@ processor_loop()
         // reader's release so the following pipe.empty() is guaranteed to see it.
         // Covers only copied-but-unpublished EOPs (F4); an EOP still in the ring is
         // the accepted R10 residual and is not gated here.
-        const uint64_t _gc_now = common::timestamp_ns();
-        if(gc_gate_open(st.reader_copied_unpublished.load(std::memory_order_acquire),
-                        st.pipe.empty()) &&
+        // Sequenced into named locals rather than passed inline: the order of
+        // evaluation of function arguments is UNSPECIFIED, so the required
+        // "in-flight load, THEN pipe.empty()" ordering cannot be expressed by
+        // argument position.
+        const uint64_t _gc_now      = common::timestamp_ns();
+        const uint64_t _unpublished = st.reader_copied_unpublished.load(std::memory_order_acquire);
+        const bool     _pipe_empty  = st.pipe.empty();
+        if(gc_gate_open(_unpublished, _pipe_empty) &&
            _gc_now - last_gc_ns >= kProcessorEvictIntervalNs)
         {
             last_gc_ns = _gc_now;
@@ -910,7 +940,8 @@ processor_loop()
             "KFD dispatch-log pairing census (gpu_id={}): {} START record(s) drained, {} EOP "
             "record(s) drained, {} EOP(s) unmatched, {} START(s) overwritten on a live key, {} "
             "ambiguous EOP(s) dropped, {} equal-tick EOP(s) dropped, {} stale EOP(s) dropped, {} "
-            "START(s) evicted stale, {} START(s) still retained at exit",
+            "START(s) evicted stale, {} START(s) evicted by the size cap, {} START(s) still "
+            "retained at exit",
             _gpu_itr.first,
             _p.starts_seen,
             _p.eops_seen,
@@ -920,6 +951,7 @@ processor_loop()
             _p.equal_tick_drops,
             _p.stale_eop_drops,
             _p.starts_evicted,
+            _p.starts_cap_evicted,
             _p.pending_starts.size());
     }
 }
@@ -1126,6 +1158,64 @@ reader_loop()
             auto&                 _s   = st.sessions[slot_of[k - kFirstStreamPollSlot]];
             if(_s.quarantined) continue;
 
+            // F11: POLLERR alone is usually a recoverable reset, but a GPU reset
+            // raises the FATAL latch (EPOLLERR without HUP -- fatal and terminal are
+            // independent latches in the driver) after which the stream never produces
+            // again ("no live consumer, do not arm"). Read STREAM_OP_STATUS to tell
+            // them apart; FATAL is terminal.
+            //
+            // Also probed with NO revents at all while the empty-wake backstop is
+            // tripped: the backstop polls only the control fd and zeroes the stream
+            // revents, so classify_terminal_revents() reports `none` forever and a
+            // stream that went fatal underneath it would never be re-examined -- the
+            // session would stay `ready`, handing out correlation keys nothing can
+            // ever deliver. Restricted to the backstop's poll TIMEOUT so the extra
+            // ioctl runs at the poll-timeout cadence, not per wake.
+            const bool _probe_fatal =
+                (_act == terminal_action::keep_live) || (_backstop && rc == 0);
+            if(_probe_fatal && (read_stream_status_flags(_s) & KFD_DLOG_STATUS_FATAL) != 0)
+            {
+                // Drain-first: defer while records remain (the top-of-loop drain
+                // already ran this pass; firmware produces nothing more after
+                // FATAL, so this converges) so no already-published record is lost.
+                if(session_has_pending(_s) || !_s.overflow.empty()) continue;
+                log_stream_status(_s);
+                ROCP_WARNING << fmt::format(
+                    "KFD dispatch-log: gpu_id={} stream FATAL (revents=0x{:x}); GPU reset, "
+                    "draining, quarantining, and disabling signal-less process-wide",
+                    _s.gpu_id,
+                    static_cast<unsigned>(fds[k].revents));
+                // Clear ready before quarantine so find_session()/establish_session()
+                // stop handing out keys for a stream that can never deliver them.
+                _s.ready.store(false, std::memory_order_release);
+                _s.quarantined   = true;
+                _quarantined_any = true;
+                // Smallest safe containment: the reset invalidated the clock domain
+                // this stream's windows were opened against, so drop the whole
+                // signal-less path process-wide (hub disable latch drains+ledgers
+                // live entries) rather than risk mis-windowing against a reset clock.
+                //
+                // Ring and overflow are dry above, but the batches already PUBLISHED
+                // into the pipe are not: this session's final EOP, and the EOPs of
+                // every healthy GPU queued behind it, are still waiting on the
+                // processor. Draining the hub first would ledger their entries and
+                // leave those records unmatched. So latch admission closed, let the
+                // processor consume what is published (the same gate the closed-window
+                // GC uses -- copied-unpublished first, then pipe.empty), and only then
+                // ledger the residual. Bounded by the close budget so one wedged
+                // processor cannot stall the ring for the other GPUs; on timeout the
+                // disable proceeds exactly as it did before.
+                signal_less_disable_latch().store(true, std::memory_order_release);
+                const uint64_t _pipe_deadline = common::timestamp_ns() + close_drain_budget_ns();
+                while(!gc_gate_open(st.reader_copied_unpublished.load(std::memory_order_acquire),
+                                    st.pipe.empty()) &&
+                      common::timestamp_ns() < _pipe_deadline &&
+                      !st.stop.load(std::memory_order_acquire))
+                    std::this_thread::sleep_for(std::chrono::microseconds{200});
+                signal_less_disable_permanently();
+                continue;
+            }
+
             if(_act == terminal_action::none)
             {
                 // A real poll of this stream showing no error clears the edge trigger
@@ -1137,36 +1227,6 @@ reader_loop()
 
             if(_act == terminal_action::keep_live)
             {
-                // F11: POLLERR alone is usually a recoverable reset, but a GPU reset
-                // raises the FATAL latch (EPOLLERR without HUP -- fatal and terminal
-                // are independent latches in the driver) after which the stream never
-                // produces again ("no live consumer, do not arm"). Read STREAM_OP_STATUS
-                // to tell them apart; FATAL is terminal.
-                if((read_stream_status_flags(_s) & KFD_DLOG_STATUS_FATAL) != 0)
-                {
-                    // Drain-first: defer while records remain (the top-of-loop drain
-                    // already ran this pass; firmware produces nothing more after
-                    // FATAL, so this converges) so no already-published record is lost.
-                    if(session_has_pending(_s) || !_s.overflow.empty()) continue;
-                    log_stream_status(_s);
-                    ROCP_WARNING << fmt::format(
-                        "KFD dispatch-log: gpu_id={} stream FATAL (revents=0x{:x}); GPU reset, "
-                        "draining, quarantining, and disabling signal-less process-wide",
-                        _s.gpu_id,
-                        static_cast<unsigned>(fds[k].revents));
-                    // Clear ready before quarantine so find_session()/establish_session()
-                    // stop handing out keys for a stream that can never deliver them.
-                    _s.ready.store(false, std::memory_order_release);
-                    _s.quarantined   = true;
-                    _quarantined_any = true;
-                    // Smallest safe containment: the reset invalidated the clock domain
-                    // this stream's windows were opened against, so drop the whole
-                    // signal-less path process-wide (hub disable latch drains+ledgers
-                    // live entries) rather than risk mis-windowing against a reset clock.
-                    signal_less_disable_permanently();
-                    continue;
-                }
-
                 // Recoverable reset: describe it ONCE per episode -- POLLERR is
                 // returned by poll() every pass, so an unlatched warning would spin
                 // the log -- then keep the stream live. The wake already fed the
@@ -1364,6 +1424,15 @@ start_kfd_reader()
     // a proven completion are constructed lazily, but they run off the pipe, not
     // the ring, so a first-use allocation there cannot cause an overrun.)
     overrun_reported();
+
+    // Same reasoning for the env-backed knobs: each caches its read in a
+    // function-local static on first use, and common::get_env* scans `environ`,
+    // which races a concurrent setenv. Populate them all HERE, on the one
+    // serialized start path under setup_mu with no worker thread yet in existence,
+    // instead of letting a processor/producer/teardown thread do it lazily.
+    start_max_age_ns();
+    pending_starts_cap();
+    signal_less_prime_env();
 
     // Processor first: it must be ready to consume before the reader can publish,
     // otherwise the first batches are dropped for no reason.

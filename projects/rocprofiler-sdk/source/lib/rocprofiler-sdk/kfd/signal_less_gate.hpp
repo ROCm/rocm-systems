@@ -39,6 +39,12 @@ namespace kfd
 bool
 signal_less_feature_enabled();
 
+// Populate every env-backed knob's first-use cache from ONE serialized thread,
+// before any worker/producer exists. Call sites read `environ` via
+// common::get_env*, which is unsafe against a concurrent setenv. Idempotent.
+void
+signal_less_prime_env();
+
 // True if the loss policy deliberately leaked this id, in which case
 // correlation_id_finalize() must NOT force-retire it: its kernel may still be
 // running and its references were intentionally not dropped.

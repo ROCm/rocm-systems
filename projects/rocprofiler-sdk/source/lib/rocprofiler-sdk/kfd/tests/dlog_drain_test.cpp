@@ -310,6 +310,46 @@ TEST(dlog_drain, evict_stale_starts)
     EXPECT_EQ(st.pairing.pending_starts.count(2), 1u);
 }
 
+// The hard size cap bounds pending_starts even when nothing ages out: past the
+// cap an insert evicts the OLDEST retained START (by seen_at_ns) and counts it.
+TEST(dlog_drain, pending_starts_size_cap_evicts_oldest)
+{
+    auto mk_start = [](uint32_t dispatch_id, uint64_t ts) {
+        auto c             = copied_record{};
+        c.rec.record_type  = kRecStart;
+        c.rec.doorbell_off = 4100;
+        c.rec.dispatch_id  = dispatch_id;
+        c.rec.ts_lo        = static_cast<uint32_t>(ts);
+        return c;
+    };
+
+    pair_state pairing;
+    pairing.max_pending_starts = 2;
+    recorder rec;
+
+    // Three distinct keys, each in its own batch so seen_at_ns strictly increases.
+    for(uint32_t i = 1; i <= 3; ++i)
+    {
+        auto batch = std::vector<copied_record>{mk_start(i, 10 * i)};
+        pair_records(batch.data(), batch.size(), pairing, /*now_ns=*/1000 * i, rec.on_record());
+    }
+
+    EXPECT_EQ(pairing.pending_starts.size(), 2u) << "the cap is a hard bound";
+    EXPECT_EQ(pairing.starts_cap_evicted, 1u);
+    const uint64_t k1 = (uint64_t{4100} << 32) | 1u;
+    EXPECT_EQ(pairing.pending_starts.count(k1), 0u) << "the oldest START is the victim";
+
+    // A recurring key is exempt: it cannot grow the map, and evicting there could
+    // pick the very key being touched and reset its ambiguity latch.
+    const uint64_t k3    = (uint64_t{4100} << 32) | 3u;
+    auto           again = std::vector<copied_record>{mk_start(3, 99)};
+    pair_records(again.data(), again.size(), pairing, /*now_ns=*/4000, rec.on_record());
+    EXPECT_EQ(pairing.pending_starts.size(), 2u);
+    EXPECT_EQ(pairing.starts_cap_evicted, 1u) << "no eviction for a recurring key";
+    ASSERT_EQ(pairing.pending_starts.count(k3), 1u);
+    EXPECT_TRUE(pairing.pending_starts[k3].ambiguous) << "the duplicate still latches ambiguous";
+}
+
 // Invalid geometry (0 regions, too many, or non-power-of-two rrc) is rejected.
 TEST(dlog_drain, invalid_geometry_rejected)
 {

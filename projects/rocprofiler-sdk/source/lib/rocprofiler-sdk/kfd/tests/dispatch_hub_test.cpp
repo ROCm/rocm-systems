@@ -225,6 +225,15 @@ TEST(DispatchHub, resolution_rule)
     ASSERT_TRUE(register_win(hub, K, mk_window(5, 200), /*corr_id=*/2));
     EXPECT_FALSE(end_nostart(hub, K, 300).has_value());
 }
+{  // a stale EOP (its own START was lost, it predates this window) must NOT
+   // consume the newer entry: reject BEFORE take, leaving it PENDING for its own.
+    auto hub = hub_t{};
+    ASSERT_TRUE(register_win(hub, K, mk_window(5, 100)));
+    EXPECT_FALSE(end_nostart(hub, K, 50).has_value()) << "EOP before t_open rejected";
+    EXPECT_FALSE(end_nostart(hub, K, 100).has_value()) << "EOP at t_open rejected";
+    EXPECT_EQ(hub.pending_count(), 1u) << "a rejected EOP consumes nothing";
+    EXPECT_TRUE(end_nostart(hub, K, 300).has_value()) << "its own later EOP still resolves";
+}
 }
 {  // a contained START with end < start is dropped (free sanity check).
     auto hub = hub_t{};
@@ -943,6 +952,32 @@ TEST(EnvLongInRange, reject_and_default_never_clamp)
 
     set("1000");
     EXPECT_EQ(env_long_in_range(var, 0, 1000).value_or(-1), 1000) << "upper endpoint accepted";
+
+    ::unsetenv(var);
+}
+
+// The strict opt-in switch: ONLY an explicit true value enables. Everything else
+// -- unset, empty, a false word, a typo, a number -- is DISABLED (fail-closed),
+// and nothing throws or fatals.
+TEST(EnvBoolOptIn, only_explicit_true_enables)
+{
+    const char* var = "ROCPROFILER_KFD_DLOG_TEST_ENVBOOL";
+    auto        set = [&](const char* v) { ::setenv(var, v, 1); };
+
+    ::unsetenv(var);
+    EXPECT_FALSE(env_bool_opt_in(var)) << "unset -> off";
+
+    for(const char* _yes : {"1", "true", "yes", "on"})
+    {
+        set(_yes);
+        EXPECT_TRUE(env_bool_opt_in(var)) << _yes << " enables";
+    }
+    for(const char* _no :
+        {"0", "false", "no", "off", "", "flase", "2", "TRUE", "99999999999999999"})
+    {
+        set(_no);
+        EXPECT_FALSE(env_bool_opt_in(var)) << "'" << _no << "' must not enable";
+    }
 
     ::unsetenv(var);
 }

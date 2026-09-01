@@ -67,5 +67,30 @@ env_long_in_range(std::string_view name, long lo, long hi)
     }
     return _val;
 }
+
+// Same reject-and-default policy for a STRICT OPT-IN switch: only an explicit
+// true value turns the feature on. Unset, empty, a recognized false value, or
+// anything unrecognized all yield false -- the unrecognized case with exactly one
+// warning naming the variable and the value.
+//
+// common::get_env<bool> cannot serve here: it maps an unrecognized word ("flase")
+// to TRUE, fatals on empty, and throws on an out-of-range number. For an
+// LD_PRELOAD switch that changes completion semantics, every one of those is the
+// wrong direction -- a typo must never silently enable it and a bad value must
+// never throw out of a static initializer.
+inline bool
+env_bool_opt_in(std::string_view name)
+{
+    auto _raw = common::get_env_optional(name);
+    if(!_raw) return false;  // unset: off, no warning
+
+    const std::string& _s = *_raw;
+    if(_s == "1" || _s == "true" || _s == "yes" || _s == "on") return true;
+    if(_s == "0" || _s == "false" || _s == "no" || _s == "off" || _s.empty()) return false;
+
+    ROCP_WARNING << "KFD dispatch-log: " << name << "='" << _s
+                 << "' is not one of 1/true/yes/on or 0/false/no/off; treating as DISABLED";
+    return false;
+}
 }  // namespace kfd
 }  // namespace rocprofiler
