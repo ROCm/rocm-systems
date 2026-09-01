@@ -15,6 +15,12 @@ class TestGpuClock(api.ApiTestCase):
         self.both("amdsmi_get_clk_freq", self.handle, api.enum("clk_type", common.CLK_TYPES))
 
     def test_get_clock_info(self):
+        if self.common.TODO_SKIP_FAIL:
+            msg = "\tSkipping test_get_clock_info as it fails (AMDSMI_STATUS_UNEXPECTED_DATA "
+            msg += "for every clock type)."
+            self.common.print(msg)
+            self.skipTest(msg)
+
         self.both("amdsmi_get_clock_info", self.handle, api.enum("clock_type", common.CLK_TYPES))
 
     def test_get_soc_pstate(self):

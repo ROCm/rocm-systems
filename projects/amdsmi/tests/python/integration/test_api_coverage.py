@@ -12,6 +12,10 @@ import common.common as common
 
 _TIER_DIR = pathlib.Path(__file__).resolve().parent
 
+# Module-level helpers that format an already-fetched struct rather than calling
+# the library. Their only caller is amdsmi_get_ainic_info(), which is driven.
+_FORMATTERS = frozenset({"amdsmi_get_ainic_info_detail", "amdsmi_get_ainic_info_summary"})
+
 # Naming an API in a comment or a message must not count as covering it, so
 # match only the drivers that actually call one.
 _DRIVEN = re.compile(
@@ -27,7 +31,9 @@ class TestApiCoverage(unittest.TestCase):
         public = {
             name
             for name in dir(common.amdsmi)
-            if name.startswith("amdsmi_") and callable(getattr(common.amdsmi, name))
+            if name.startswith("amdsmi_")
+            and callable(getattr(common.amdsmi, name))
+            and name not in _FORMATTERS
         }
         driven = set()
         for path in _TIER_DIR.rglob("test_*.py"):
