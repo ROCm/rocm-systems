@@ -133,7 +133,7 @@ add_kr_lc_test(
 add_kr_lc_test(
     test-kernel-replay-local-context-pc-sampling-stop-after-0
     ENVIRONMENT
-    "KR_LC_SERVICES=pc-sampling;KR_LC_PASSES=4;KR_LC_STOP_PASS=1;ROCPROFILER_PC_SAMPLING_BETA_ENABLED=ON"
+    "KR_LC_SERVICES=pc-sampling;KR_LC_PASSES=4;KR_LC_STOP_PASS=1"
     DISABLED
     ${IS_PC_SAMPLING_DISABLED})
 
