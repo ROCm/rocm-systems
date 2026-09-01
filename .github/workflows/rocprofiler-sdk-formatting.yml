@@ -36,6 +36,7 @@ jobs:
       with:
         sparse-checkout: |
           projects/rocprofiler-sdk
+          shared/sha256
 
     - name: Extract branch name
       shell: bash
