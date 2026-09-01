@@ -189,7 +189,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsDispatchIdentityPolicy) {
   request.moi_engine = ConSanMoiEngine::RecordReplay;
   auto plan = plan_moi_dispatch_identity(request, {});
   EXPECT_TRUE(plan.needs_dispatch_id);
-  EXPECT_FALSE(plan.permits_private_entry_capture);
+  EXPECT_TRUE(plan.permits_private_entry_capture);
   EXPECT_EQ(plan.fallback_kind, ConSanMoiFallbackKind::RecordReplayZeroGeneration);
   EXPECT_FALSE(plan.fallback_replans_dispatch_only);
 

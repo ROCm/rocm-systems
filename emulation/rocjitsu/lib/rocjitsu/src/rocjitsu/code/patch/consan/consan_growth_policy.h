@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -35,7 +36,8 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
 [[nodiscard]] inline bool
 replace_consan_text(CodeObjectPatcher &patcher, std::span<const uint8_t> new_text,
                     const ConSanPatchedImageGrowthLimit &growth_limit, std::string_view operation,
-                    const ConSanCodeObjectId &input_id, std::vector<std::string> &errors) {
+                    const ConSanCodeObjectId &input_id, std::vector<std::string> &errors,
+                    std::optional<ConSanTransformFailureCause> *failure_cause = nullptr) {
   const size_t current_image_bytes = patcher.image_bytes().size();
   if (!input_id.valid()) {
     errors.emplace_back("ConSan " + std::string(operation) +
@@ -53,6 +55,8 @@ replace_consan_text(CodeObjectPatcher &patcher, std::span<const uint8_t> new_tex
     return false;
   }
   if (budget->already_exceeded) {
+    if (failure_cause)
+      *failure_cause = ConSanTransformFailureCause::PatchedImageGrowthLimit;
     errors.emplace_back("ConSan " + std::string(operation) +
                         " rejected patched-image file growth: required total " +
                         std::to_string(budget->existing_growth_bytes) + " bytes, limit " +
@@ -67,6 +71,8 @@ replace_consan_text(CodeObjectPatcher &patcher, std::span<const uint8_t> new_tex
     return true;
 
   if (replacement.outcome() == TextReplacementOutcome::FileGrowthLimitExceeded) {
+    if (failure_cause)
+      *failure_cause = ConSanTransformFailureCause::PatchedImageGrowthLimit;
     const size_t transaction_growth = *replacement.required_file_growth();
     const size_t required_total =
         util::saturating_add(budget->existing_growth_bytes, transaction_growth);

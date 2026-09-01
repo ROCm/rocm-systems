@@ -167,7 +167,8 @@ MoiPersistentStateDemand plan_record_replay_persistent_state_demand(
       moi_initializes_owner_epoch(request, point) || demand.needs_entry_workgroup_tuple;
   demand.needs_persistent_dispatch_capture =
       facts.access_count && record_replay_uses_automatic_banked_capture(request, resources) &&
-      !consan_moi_detail::moi_has_runtime_hardware_dispatch_id(point);
+      !consan_moi_detail::moi_has_runtime_hardware_dispatch_id(point) &&
+      !(point.automatic_moi_private_epoch && point.moi_dispatch_identity.private_fallback());
   // This is an automatic operating-point choice, not a user-facing limit.
   // Small barrier inventories benefit from compact persistent-epoch barriers;
   // larger barrier-dense objects benefit more from private-epoch access
@@ -197,6 +198,7 @@ MoiDispatchIdentityPlan plan_record_replay_dispatch_identity(const ConSanRequest
                                                              const MoiDispatchIdentityFacts &) {
   return {
       .needs_dispatch_id = true,
+      .permits_private_entry_capture = true,
       .fallback_kind = ConSanMoiFallbackKind::RecordReplayZeroGeneration,
       .fallback_diagnostic =
           "ConSan MOI selected owner-local zero-generation records where the hardware "

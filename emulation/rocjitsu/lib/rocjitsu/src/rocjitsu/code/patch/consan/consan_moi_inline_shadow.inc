@@ -1318,7 +1318,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 
     if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
                              "MOI inline-shadow probe", result.program_inventory.code_object_id(),
-                             result.errors)) {
+                             result.errors, &result.transform_failure_cause)) {
       return;
     }
     if (!result.publish_access_lowering(std::move(patcher).emit(), "ConSan MOI inline-shadow probe",

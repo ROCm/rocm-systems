@@ -292,6 +292,8 @@ public:
   std::vector<uint8_t> replacement;
   /// Final static classification of the transformation attempt.
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Invalid;
+  /// Stable machine-readable cause for loader-visible transform rejection.
+  std::optional<ConSanTransformFailureCause> transform_failure_cause;
   /// Non-fatal diagnostics from analysis, lowering, and binding.
   std::vector<std::string> warnings;
   /// Fatal static-transform diagnostics.

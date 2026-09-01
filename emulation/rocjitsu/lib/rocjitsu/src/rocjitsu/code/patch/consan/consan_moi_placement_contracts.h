@@ -107,6 +107,7 @@ struct MoiPlannedAccessPatch {
   std::optional<VgprSpillSequence> spill;
   std::optional<SgprSpillSequence> scalar_spill;
   std::optional<uint32_t> private_epoch_offset;
+  std::optional<uint32_t> private_dispatch_id_offset;
   std::optional<consan_detail::MoiWorkitemOwnerDerivationPlan> owner_derivation;
   uint32_t persistent_private_state_end = 0;
   uint32_t required_private_bytes = 0;

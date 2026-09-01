@@ -23,6 +23,7 @@ public:
   [[nodiscard]] bool store_vgpr(uint32_t offset, uint16_t value_vgpr);
   [[nodiscard]] bool store_literal(uint32_t offset, uint32_t value);
   [[nodiscard]] bool store_sgpr(uint32_t offset, uint16_t value_sgpr);
+  [[nodiscard]] bool store_private(uint32_t offset, uint32_t private_offset);
   [[nodiscard]] bool store_workgroup(uint32_t offset, const ConSanMoiWorkgroupSource &source,
                                      MissingWorkgroupSource missing = MissingWorkgroupSource::Skip);
 
@@ -38,10 +39,12 @@ private:
 struct ConSanMoiReportDispatchIdSource {
   std::optional<uint16_t> sgpr;
   std::optional<uint16_t> vgpr;
+  std::optional<uint32_t> private_offset;
   std::optional<uint64_t> literal;
 
   [[nodiscard]] bool is_well_formed() const {
     return static_cast<uint8_t>(sgpr.has_value()) + static_cast<uint8_t>(vgpr.has_value()) +
+               static_cast<uint8_t>(private_offset.has_value()) +
                static_cast<uint8_t>(literal.has_value()) ==
            1u;
   }
@@ -50,6 +53,7 @@ struct ConSanMoiReportDispatchIdSource {
 struct ConSanMoiReportDispatchIdPlanningContext {
   const ConSanMoiOperatingPoint &point;
   const BoundRuntimeResources &resources;
+  std::optional<uint32_t> private_offset = std::nullopt;
 };
 
 [[nodiscard]] ConSanMoiReportDispatchIdSource

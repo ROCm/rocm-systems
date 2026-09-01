@@ -17,7 +17,8 @@ void try_apply_first_light_access_record_patch(
   if (options.max_patches == 0 || layout.access_record_capacity == 0)
     return;
   if (!options.moi_dynamic_access_records && layout.record_replay_access_dispatch_bank_count > 1u &&
-      !moi_has_runtime_hardware_dispatch_id(operating_point)) {
+      !moi_has_runtime_hardware_dispatch_id(operating_point) &&
+      !operating_point.moi_dispatch_identity.private_fallback()) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.warnings.emplace_back(
         "ConSan MOI automatic Record/Replay identity tables require runtime hardware dispatch "
@@ -555,7 +556,8 @@ void try_apply_first_light_access_record_patch(
       private_layout = private_layout_cache.resolve(
           cache_descriptor, result.program_inventory, *resources, arch, result.warnings,
           {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
-           .record_replay_workgroup = true});
+           .record_replay_workgroup = true,
+           .dispatch_id = candidate_point.moi_dispatch_identity.private_fallback()});
       if (!private_layout) {
         result.warnings.emplace_back(
             "ConSan MOI first-light probe could not build private epoch state");
@@ -653,6 +655,7 @@ void try_apply_first_light_access_record_patch(
         planned_logical_range_count, layout, spill_overlaps_guest_operands,
         spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
+        private_layout ? private_layout->dispatch_id_offset : std::nullopt,
         private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr,
         owner_derivation, candidate_errors, &probe_guest_instruction_offset,
         &guest_instruction_word_count);
@@ -910,6 +913,7 @@ void try_apply_first_light_access_record_patch(
     planned.incoming_vgpr_bank_mode = candidate.incoming_vgpr_bank_mode;
     if (private_layout) {
       planned.private_epoch_offset = private_layout->epoch_offset;
+      planned.private_dispatch_id_offset = private_layout->dispatch_id_offset;
       planned.private_workgroup_offsets = private_layout->record_replay_workgroup_offsets;
       planned.persistent_private_state_end = private_layout->ephemeral_base;
     }
@@ -1152,7 +1156,8 @@ void try_apply_first_light_access_record_patch(
           planned_patch.record_index, planned_record_count, planned_patch.logical_range_index,
           layout, planned_patch.spill_overlaps_guest_operands,
           planned_patch.spill ? &*planned_patch.spill : nullptr, planned_patch.private_epoch_offset,
-          &planned_patch.private_workgroup_offsets, planned_patch.owner_derivation, result.errors);
+          planned_patch.private_dispatch_id_offset, &planned_patch.private_workgroup_offsets,
+          planned_patch.owner_derivation, result.errors);
       if (!words)
         return;
 
@@ -1486,7 +1491,7 @@ void try_apply_first_light_access_record_patch(
 
     if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
                              "MOI first-light probe", result.program_inventory.code_object_id(),
-                             result.errors)) {
+                             result.errors, &result.transform_failure_cause)) {
       return;
     }
     if (!result.publish_access_lowering(std::move(patcher).emit(), "ConSan MOI first-light probe",
@@ -1523,8 +1528,9 @@ void try_apply_first_light_access_record_patch(
                 planned_record_count, planned_patch.logical_range_index, layout,
                 planned_patch.spill_overlaps_guest_operands,
                 planned_patch.spill ? &*planned_patch.spill : nullptr,
-                planned_patch.private_epoch_offset, &planned_patch.private_workgroup_offsets,
-                planned_patch.owner_derivation, result.errors);
+                planned_patch.private_epoch_offset, planned_patch.private_dispatch_id_offset,
+                &planned_patch.private_workgroup_offsets, planned_patch.owner_derivation,
+                result.errors);
           },
           [](const PlannedAccessRecordPatch &planned_patch) {
             const ConSanMoiCandidate &candidate = *planned_patch.candidate;

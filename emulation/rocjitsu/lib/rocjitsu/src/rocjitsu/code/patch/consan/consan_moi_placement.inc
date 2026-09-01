@@ -5840,6 +5840,7 @@ void note_moi_access_patch_info(ConSanPatchPlacementEffects &effects,
   effects.scratch_vgpr = patch.resources.base;
   effects.owner_descriptor_file_offsets = patch.resources.owner_descriptor_file_offsets;
   effects.persistent_epoch_private_offset = patch.private_epoch_offset;
+  effects.persistent_dispatch_id_private_offset = patch.private_dispatch_id_offset;
   effects.persistent_owner_private_offset =
       patch.owner_derivation ? patch.owner_derivation->entry_workitem_x_private_offset
                              : std::nullopt;

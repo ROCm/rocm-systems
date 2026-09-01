@@ -154,6 +154,25 @@ struct ConSanPerturbationPlanningState {
   std::vector<ConSanPerturbationPlan> plans;
 };
 
+/// Stable root cause for a failed transform that reaches the loader hook.
+/// This is deliberately separate from human-readable errors so structured
+/// rejection diagnostics never depend on prose matching.
+enum class ConSanTransformFailureCause : uint8_t {
+  PatchedImageGrowthLimit,
+  OverlappingPatchRanges,
+};
+
+[[nodiscard]] constexpr std::string_view
+consan_transform_failure_cause_name(ConSanTransformFailureCause cause) {
+  switch (cause) {
+  case ConSanTransformFailureCause::PatchedImageGrowthLimit:
+    return "patched-image-growth-limit";
+  case ConSanTransformFailureCause::OverlappingPatchRanges:
+    return "overlapping-patch-ranges";
+  }
+  return "unknown";
+}
+
 /// Counts one validation-only mutation domain as it moves from a user request
 /// through semantic selection to emitted replacement bytes.
 ///
@@ -240,6 +259,9 @@ struct ConSanTransformArtifacts {
   std::vector<uint8_t> replacement;
   /// Final static classification of the transformation attempt.
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
+  /// Machine-readable cause paired with transform errors at the loader
+  /// boundary. Empty for failures that do not yet have a stable taxonomy.
+  std::optional<ConSanTransformFailureCause> transform_failure_cause;
   /// Non-fatal diagnostics retained from analysis and lowering.
   std::vector<std::string> warnings;
   /// Fatal static-transform diagnostics emitted by lowering or final

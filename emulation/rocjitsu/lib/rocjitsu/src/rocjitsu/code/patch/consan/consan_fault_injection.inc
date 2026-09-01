@@ -8,7 +8,8 @@ struct FaultApplicationState {
       : program_inventory(result.program_inventory), fault_sites(result.fault_sites),
         barrier_move_destinations(result.barrier_move_destinations),
         replacement(result.replacement), patches(result.patches), mutation(result.mutation),
-        outcome(result.outcome), warnings(result.warnings), errors(result.errors) {}
+        outcome(result.outcome), transform_failure_cause(result.transform_failure_cause),
+        warnings(result.warnings), errors(result.errors) {}
 
   const ProgramInventory &program_inventory;
   std::span<const ConSanFaultSite> fault_sites;
@@ -17,6 +18,7 @@ struct FaultApplicationState {
   std::vector<ConSanPatchInfo> patches;
   ConSanMutationOutcome mutation;
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
+  std::optional<ConSanTransformFailureCause> transform_failure_cause;
   std::vector<std::string> warnings;
   std::vector<std::string> errors;
 
@@ -1394,7 +1396,8 @@ static void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_obje
                   cave_words.size() * sizeof(uint32_t));
     }
     if (!replace_consan_text(patcher, new_text, growth_limit, "markerless barrier move",
-                             result.program_inventory.code_object_id(), result.errors)) {
+                             result.program_inventory.code_object_id(), result.errors,
+                             &result.transform_failure_cause)) {
       return;
     }
     result.replacement = std::move(patcher).emit();
@@ -2070,6 +2073,7 @@ void apply_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code_a
 
   const bool accepted = transaction.successful();
   result.errors = std::move(transaction.errors);
+  result.transform_failure_cause = transaction.transform_failure_cause;
   if (!accepted) {
     result.mutation.fault.applied = mechanisms_succeeded
                                         ? transaction.mutation.fault.applied

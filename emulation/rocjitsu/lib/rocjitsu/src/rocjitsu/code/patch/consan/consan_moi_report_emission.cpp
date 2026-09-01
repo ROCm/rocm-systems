@@ -44,6 +44,16 @@ bool ConSanMoiRecordEmitter::store_sgpr(uint32_t offset, uint16_t value_sgpr) {
   return store_vgpr(offset, temporary_vgpr_);
 }
 
+bool ConSanMoiRecordEmitter::store_private(uint32_t offset, uint32_t private_offset) {
+  const auto load = instrumentation::build_private_load_b32(temporary_vgpr_, private_offset, arch_);
+  const auto wait = instrumentation::build_s_wait_private_load0(arch_);
+  if (!load || !wait)
+    return false;
+  words_.insert(words_.end(), load->begin(), load->end());
+  words_.push_back(*wait);
+  return store_vgpr(offset, temporary_vgpr_);
+}
+
 bool ConSanMoiRecordEmitter::store_workgroup(uint32_t offset,
                                              const ConSanMoiWorkgroupSource &source,
                                              MissingWorkgroupSource missing) {
@@ -63,8 +73,10 @@ plan_dispatch_id_sources(const ConSanMoiReportDispatchIdPlanningContext &context
   return {
       .sgpr = context.point.moi_dispatch_identity.sgpr(),
       .vgpr = context.point.moi_dispatch_identity.vgpr(),
+      .private_offset = context.private_offset,
       .literal = context.point.moi_dispatch_identity.sgpr() ||
-                         context.point.moi_dispatch_identity.vgpr() || !literal_permitted
+                         context.point.moi_dispatch_identity.vgpr() || context.private_offset ||
+                         !literal_permitted
                      ? std::nullopt
                      : std::optional<uint64_t>{context.resources.moi_report_dispatch_id},
   };
@@ -99,6 +111,17 @@ bool append_moi_report_dispatch_id_word(std::vector<uint32_t> &words,
     words.push_back(build_v_mov_b32_e32(
         destination_vgpr, vector_source_vgpr(static_cast<uint16_t>(*source.vgpr + register_word)),
         arch));
+    return true;
+  }
+  if (source.private_offset) {
+    const auto load = instrumentation::build_private_load_b32(
+        destination_vgpr, *source.private_offset + (high_word ? SpillManager::kSlotBytes : 0u),
+        arch);
+    const auto wait = instrumentation::build_s_wait_private_load0(arch);
+    if (!load || !wait)
+      return false;
+    words.insert(words.end(), load->begin(), load->end());
+    words.push_back(*wait);
     return true;
   }
   const uint32_t literal_word = static_cast<uint32_t>(*source.literal >> (high_word ? 32u : 0u));
@@ -161,6 +184,9 @@ bool append_store_moi_report_dispatch_id_pair(ConSanMoiRecordEmitter &record,
             ? !record.store_sgpr(offset, static_cast<uint16_t>(*source.sgpr + register_word))
         : source.vgpr
             ? !record.store_vgpr(offset, static_cast<uint16_t>(*source.vgpr + register_word))
+        : source.private_offset
+            ? !record.store_private(offset, *source.private_offset +
+                                                (high_word ? SpillManager::kSlotBytes : 0u))
             : !record.store_literal(
                   offset, static_cast<uint32_t>(*source.literal >> (high_word ? 32u : 0u)))) {
       return false;

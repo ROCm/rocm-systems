@@ -550,6 +550,7 @@ bool apply_moi_descriptor_requirements(
     uint32_t record_index, uint32_t record_count, uint32_t logical_range_index,
     const ConSanMoiReportBufferLayout &layout, bool spill_overlaps_guest_operands,
     const VgprSpillSequence *spill, std::optional<uint32_t> private_epoch_offset,
+    std::optional<uint32_t> private_dispatch_id_offset,
     const ConSanMoiPersistentWorkgroupPrivateOffsets *private_workgroup_offsets,
     const std::optional<MoiWorkitemOwnerDerivationPlan> &owner_derivation,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
@@ -671,6 +672,8 @@ bool apply_moi_descriptor_requirements(
     return std::nullopt;
   }
   const ConSanMoiWorkgroupSources workgroup_sources = *persistent_workgroup_sources;
+  const auto dispatch_id_sources = consan_moi_detail::moi_bound_dispatch_id_sources(
+      {point, bound_resources, private_dispatch_id_offset});
 
   std::vector<uint32_t> words;
   words.reserve(candidate.size() / sizeof(uint32_t) + 1u + 7u * 12u + 9u + 10u + 20u + 24u +
@@ -840,8 +843,7 @@ bool apply_moi_descriptor_requirements(
           !append_dynamic_record_store_moi_report_dispatch_id_pair(
               words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation),
-              consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}), slot_vgpr,
-              scratch_vgpr, arch) ||
+              dispatch_id_sources, slot_vgpr, scratch_vgpr, arch) ||
           !append_dynamic_record_event_index_store(
               words, kAccessRecordLayout, base + offsetof(ConSanMoiReportHeader, event_counter),
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, event_index), slot_vgpr,
@@ -1000,9 +1002,7 @@ bool apply_moi_descriptor_requirements(
   }
   const auto append_claim_token = [&](uint16_t low_vgpr, uint16_t high_vgpr,
                                       uint16_t temporary_vgpr) {
-    if (!append_moi_report_dispatch_id_pair(
-            words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
-            low_vgpr, high_vgpr, arch))
+    if (!append_moi_report_dispatch_id_pair(words, dispatch_id_sources, low_vgpr, high_vgpr, arch))
       return false;
     const auto low_xor_literal = instrumentation::build_v_mov_b32_literal(
         temporary_vgpr, static_cast<uint32_t>(kConSanMoiRecordReplayClaimTokenXorMask), arch);
@@ -1301,10 +1301,8 @@ bool apply_moi_descriptor_requirements(
     if (!prior_dispatch_low_xor_literal || !decode_prior_dispatch_low ||
         !sequence.emit(*prior_dispatch_low_xor_literal) ||
         !sequence.emit(*decode_prior_dispatch_low) ||
-        !append_moi_report_dispatch_id_word(
-            words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
-            record_compare_vgpr,
-            /*high_word=*/false, arch)) {
+        !append_moi_report_dispatch_id_word(words, dispatch_id_sources, record_compare_vgpr,
+                                            /*high_word=*/false, arch)) {
       errors.emplace_back("ConSan MOI first-light probe could not compare a dispatch slot");
       return std::nullopt;
     }
@@ -1327,10 +1325,8 @@ bool apply_moi_descriptor_requirements(
     if (!prior_dispatch_high_xor_literal || !decode_prior_dispatch_high ||
         !sequence.emit(*prior_dispatch_high_xor_literal) ||
         !sequence.emit(*decode_prior_dispatch_high) ||
-        !append_moi_report_dispatch_id_word(
-            words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
-            record_compare_vgpr,
-            /*high_word=*/true, arch)) {
+        !append_moi_report_dispatch_id_word(words, dispatch_id_sources, record_compare_vgpr,
+                                            /*high_word=*/true, arch)) {
       errors.emplace_back("ConSan MOI first-light probe could not compare a dispatch slot");
       return std::nullopt;
     }
@@ -1571,9 +1567,8 @@ bool apply_moi_descriptor_requirements(
       return std::nullopt;
     }
     if (!record.store_vgpr(offsetof(ConSanMoiAccessRecord, event_index), record_compare_vgpr) ||
-        !append_store_moi_report_dispatch_id_pair(
-            record, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
-            offsetof(ConSanMoiAccessRecord, generation)) ||
+        !append_store_moi_report_dispatch_id_pair(record, dispatch_id_sources,
+                                                  offsetof(ConSanMoiAccessRecord, generation)) ||
         !record.store_workgroup(offsetof(ConSanMoiAccessRecord, workgroup_x),
                                 workgroup_sources.x) ||
         !record.store_workgroup(offsetof(ConSanMoiAccessRecord, workgroup_y),
@@ -1750,10 +1745,8 @@ bool apply_moi_descriptor_requirements(
       }
       words.insert(words.end(), low_xor_literal->begin(), low_xor_literal->end());
       words.push_back(*low_xor);
-      if (!append_moi_report_dispatch_id_word(
-              words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
-              record_compare_vgpr,
-              /*high_word=*/false, arch)) {
+      if (!append_moi_report_dispatch_id_word(words, dispatch_id_sources, record_compare_vgpr,
+                                              /*high_word=*/false, arch)) {
         return fail("ConSan MOI first-light probe could not materialize a dispatch low word");
       }
       const auto low_mismatch = instrumentation::build_v_cmp_ne_u32_vcc(
@@ -1778,10 +1771,8 @@ bool apply_moi_descriptor_requirements(
       }
       words.insert(words.end(), high_xor_literal->begin(), high_xor_literal->end());
       words.push_back(*high_xor);
-      if (!append_moi_report_dispatch_id_word(
-              words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
-              record_compare_vgpr,
-              /*high_word=*/true, arch)) {
+      if (!append_moi_report_dispatch_id_word(words, dispatch_id_sources, record_compare_vgpr,
+                                              /*high_word=*/true, arch)) {
         return fail("ConSan MOI first-light probe could not materialize a dispatch high word");
       }
       const auto high_mismatch = instrumentation::build_v_cmp_ne_u32_vcc(
@@ -1853,9 +1844,8 @@ bool apply_moi_descriptor_requirements(
     if (automatic_banked_capture) {
       const auto reject_dispatch_mismatch = [&](uint32_t offset, bool high_word) {
         if (!record.load(offset, record_value_vgpr) ||
-            !append_moi_report_dispatch_id_word(
-                words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
-                record_compare_vgpr, high_word, arch)) {
+            !append_moi_report_dispatch_id_word(words, dispatch_id_sources, record_compare_vgpr,
+                                                high_word, arch)) {
           return false;
         }
         const auto mismatch = instrumentation::build_v_cmp_ne_u32_vcc(

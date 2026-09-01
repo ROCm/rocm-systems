@@ -94,6 +94,7 @@ private:
     uint32_t record_index, uint32_t record_count, uint32_t logical_range_index,
     const ConSanMoiReportBufferLayout &layout, bool spill_overlaps_guest_operands,
     const VgprSpillSequence *spill, std::optional<uint32_t> private_epoch_offset,
+    std::optional<uint32_t> private_dispatch_id_offset,
     const ConSanMoiPersistentWorkgroupPrivateOffsets *private_workgroup_offsets,
     const std::optional<consan_detail::MoiWorkitemOwnerDerivationPlan> &owner_derivation,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,

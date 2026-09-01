@@ -60,7 +60,8 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 [[nodiscard]] std::optional<MoiRecordEventEmissionPlan> resolve_moi_record_event_emission_plan(
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
     const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, rj_code_arch_t arch,
-    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets,
+    std::optional<uint32_t> private_dispatch_id_offset) {
   const auto workgroup_sources =
       record_replay_persistent_workgroup_sources(request.moi_engine, point, private_offsets);
   const auto special_state = moi_special_state_sgprs(request, point);
@@ -92,7 +93,8 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
                                      : std::nullopt,
       .workgroup_sources = *workgroup_sources,
       .special_state = *special_state,
-      .dispatch_id_sources = moi_bound_dispatch_id_sources({point, bound_resources}),
+      .dispatch_id_sources =
+          moi_bound_dispatch_id_sources({point, bound_resources, private_dispatch_id_offset}),
       .runtime_workgroup_gate = runtime_workgroup_gate,
       .indirect_jump = moi_indirect_jump_sgprs(request, point),
   };
@@ -133,7 +135,8 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
     private_layout = build_moi_private_epoch_layout(
         inventory, resources, arch, warnings,
         {.owner = request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
-         .record_replay_workgroup = true});
+         .record_replay_workgroup = true,
+         .dispatch_id = event_point.moi_dispatch_identity.private_fallback()});
     if (!private_layout)
       return std::nullopt;
   }
@@ -147,7 +150,8 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 
   auto emission = resolve_moi_record_event_emission_plan(
       request, bound_resources, event_point, resources.base, arch,
-      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr);
+      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr,
+      private_layout ? private_layout->dispatch_id_offset : std::nullopt);
   if (!emission) {
     warnings.emplace_back(std::string(warning_context) +
                           " has an incomplete Record/Replay emission plan");

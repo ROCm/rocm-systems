@@ -261,7 +261,7 @@ void try_apply_unmatched_barrier_wait_abort_impl(std::span<const uint8_t> origin
   }
   if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
                            "unmatched barrier abort", result.program_inventory.code_object_id(),
-                           result.errors)) {
+                           result.errors, &result.transform_failure_cause)) {
     return;
   }
   result.replacement = std::move(patcher).emit();
@@ -388,7 +388,8 @@ struct InventoryRange {
 
 void validate_patch_byte_accounting(const FinalValidationEnvironment &environment,
                                     const ConSanTransformArtifacts &result,
-                                    std::vector<std::string> &errors) {
+                                    std::vector<std::string> &errors,
+                                    std::optional<ConSanTransformFailureCause> *failure_cause) {
   const size_t initial_error_count = errors.size();
   if (!environment.original_text.available || !environment.replacement_text.available) {
     errors.emplace_back(
@@ -515,6 +516,8 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
       if (!exact_alias && !nested_cross_phase && !nested_sc_relay_donor &&
           !nested_composed_access_atomic && !nested_composed_sampled_access_atomic &&
           !nested_composed_entry_prefix) {
+        if (failure_cause)
+          *failure_cause = ConSanTransformFailureCause::OverlappingPatchRanges;
         errors.emplace_back(
             "ConSan final validation found partially overlapping patch ranges: existing=" +
             std::to_string(existing->bytes.begin) + "-" + std::to_string(existing->bytes.end) +
@@ -4269,7 +4272,8 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
 [[nodiscard]] std::vector<std::string> validate_final_consan_elf(
     std::span<const uint8_t> original_bytes, const ConSanTransformArtifacts &result,
     uint64_t expected_moi_report_dispatch_id, bool validating_carried_composite_stage = false,
-    const ConSanPerturbationPlanningState *carried_perturbation = nullptr) {
+    const ConSanPerturbationPlanningState *carried_perturbation = nullptr,
+    std::optional<ConSanTransformFailureCause> *failure_cause = nullptr) {
   std::vector<std::string> errors;
   const major_image_ownership::ScopedPhase validation_phase(
       major_image_ownership::Phase::FinalValidation, /*only_if_none=*/true);
@@ -4332,7 +4336,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   FinalValidationEnvironment environment(original, replacement);
   const BranchRelayValidationInventory relay_inventory =
       make_branch_relay_validation_inventory(result.patches);
-  validate_patch_byte_accounting(environment, result, errors);
+  validate_patch_byte_accounting(environment, result, errors, failure_cause);
   validate_patch_decoding(environment, result, errors);
   validate_sc_indirect_island_semantics(environment, result, errors);
   validate_branch_only_continuation_semantics(environment, result, relay_inventory, errors);
@@ -4394,7 +4398,8 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
     } else {
       std::vector<std::string> validation_errors =
           validate_final_consan_elf(original_bytes, result, expected_moi_report_dispatch_id,
-                                    validating_carried_composite_stage, carried_perturbation);
+                                    validating_carried_composite_stage, carried_perturbation,
+                                    &result.transform_failure_cause);
       result.errors.insert(result.errors.end(), std::make_move_iterator(validation_errors.begin()),
                            std::make_move_iterator(validation_errors.end()));
       if (result.errors.empty()) {

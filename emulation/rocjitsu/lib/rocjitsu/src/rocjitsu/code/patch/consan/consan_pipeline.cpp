@@ -516,6 +516,7 @@ void TransformResult::publish_lowering_artifacts(ConSanTransformArtifacts loweri
   mutation = std::move(lowering.mutation);
   replacement = std::move(lowering.replacement);
   outcome = lowering.outcome;
+  transform_failure_cause = lowering.transform_failure_cause;
   warnings = std::move(lowering.warnings);
   errors = std::move(lowering.errors);
   private_lowering_.fault_sites = std::move(lowering.fault_sites);
@@ -533,6 +534,7 @@ ConSanTransformArtifacts TransformResult::take_lowering_artifacts() {
   lowering.mutation = std::move(mutation);
   lowering.replacement = std::move(replacement);
   lowering.outcome = outcome;
+  lowering.transform_failure_cause = transform_failure_cause;
   lowering.warnings = std::move(warnings);
   lowering.errors = std::move(errors);
   lowering.fault_sites = std::move(private_lowering_.fault_sites);

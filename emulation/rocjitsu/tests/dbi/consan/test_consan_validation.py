@@ -538,7 +538,7 @@ class ConSanValidationTest(unittest.TestCase):
         summary = validation._coverage_summary(
             "[rocjitsu-dbi-hooks] ConSan load rejection reader=73 "
             "reason=transform-error status=4112 policy=strict action=terminate "
-            "exit_code=92\n"
+            "exit_code=92 cause=patched-image-growth-limit\n"
         )
         self.assertFalse(summary["accepted"])
         self.assertEqual(
@@ -553,6 +553,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "policy": "strict",
                 "action": "terminate",
                 "exit_code": "92",
+                "cause": "patched-image-growth-limit",
             },
         )
 

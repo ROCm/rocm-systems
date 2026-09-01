@@ -2011,7 +2011,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
       }
     }
     const uint16_t prologue_temporary_vgpr_count =
-        has_private_workgroup_key ? 3u : (workgroup_shadow ? 2u : 1u);
+        has_private_workgroup_key ? 3u : ((has_private_dispatch_id || workgroup_shadow) ? 2u : 1u);
     const bool fixed_lane_entry_scalar_reservoir = kernel_point.moi_exec_save_sgpr &&
                                                    kernel_point.has_moi_scalar_spill() &&
                                                    !kernel.uses_dynamic_stack.value_or(false);
@@ -2239,7 +2239,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
 
   if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
                            "MOI private-epoch prologue", result.program_inventory.code_object_id(),
-                           result.errors)) {
+                           result.errors, &result.transform_failure_cause)) {
     return;
   }
   result.replacement = std::move(patcher).emit();
@@ -3189,7 +3189,7 @@ void try_apply_owner_epoch_prologue_patch(
   }
   if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
                            "MOI owner/epoch prologue", result.program_inventory.code_object_id(),
-                           result.errors)) {
+                           result.errors, &result.transform_failure_cause)) {
     return;
   }
 

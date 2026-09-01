@@ -39,7 +39,8 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 [[nodiscard]] std::optional<MoiRecordEventEmissionPlan> resolve_moi_record_event_emission_plan(
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
     const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, rj_code_arch_t arch,
-    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets = nullptr);
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets = nullptr,
+    std::optional<uint32_t> private_dispatch_id_offset = std::nullopt);
 
 struct MoiPlannedRecordEvent : MoiPlannedProbeResources {
   MoiRecordEventEmissionPlan emission;

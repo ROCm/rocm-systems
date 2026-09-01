@@ -48,6 +48,9 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
 [[nodiscard]] bool append_dynamic_record_store_u32_scalar_src(
     std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t field_address,
     uint16_t scalar_src, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch);
+[[nodiscard]] bool append_dynamic_record_store_u32_private(
+    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t field_address,
+    uint32_t private_offset, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch);
 [[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
     std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
     const ConSanMoiReportDispatchIdSource &sources, uint16_t slot_vgpr, uint16_t scratch_vgpr,

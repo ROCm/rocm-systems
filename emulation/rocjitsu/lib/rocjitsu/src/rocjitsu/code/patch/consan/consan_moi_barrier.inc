@@ -958,7 +958,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(
         }
         const auto record_emission = resolve_moi_record_event_emission_plan(
             options, options, candidate_point, resources->base, arch,
-            &access_patch->persistent_record_replay_workgroup_private_offsets);
+            &access_patch->persistent_record_replay_workgroup_private_offsets,
+            access_patch->persistent_dispatch_id_private_offset);
         if (!record_emission) {
           result.warnings.emplace_back(
               "ConSan MOI Record/Replay dense barrier has an incomplete emission plan");
@@ -2735,7 +2736,8 @@ void try_apply_record_replay_barrier_record_patch(
     if (pruned_provisional_reservoirs) {
       if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
                                "MOI barrier reservoir cleanup",
-                               result.program_inventory.code_object_id(), result.errors)) {
+                               result.program_inventory.code_object_id(), result.errors,
+                               &result.transform_failure_cause)) {
         return;
       }
       result.replacement = std::move(patcher).emit();

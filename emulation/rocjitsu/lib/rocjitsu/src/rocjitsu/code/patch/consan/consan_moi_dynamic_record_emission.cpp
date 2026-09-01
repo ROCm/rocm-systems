@@ -155,6 +155,20 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
   return true;
 }
 
+[[nodiscard]] bool append_dynamic_record_store_u32_private(
+    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t field_address,
+    uint32_t private_offset, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch) {
+  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + layout.value_vgpr_offset);
+  const auto load = instrumentation::build_private_load_b32(value_vgpr, private_offset, arch);
+  const auto wait = instrumentation::build_s_wait_private_load0(arch);
+  if (!load || !wait)
+    return false;
+  words.insert(words.end(), load->begin(), load->end());
+  words.push_back(*wait);
+  return append_dynamic_record_store_u32_vgpr(words, layout, field_address, value_vgpr, slot_vgpr,
+                                              scratch_vgpr, arch);
+}
+
 [[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
     std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
     const ConSanMoiReportDispatchIdSource &source, uint16_t slot_vgpr, uint16_t scratch_vgpr,
@@ -173,6 +187,11 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
             ? append_dynamic_record_store_u32_vgpr(
                   words, layout, field_address, static_cast<uint16_t>(*source.vgpr + register_word),
                   slot_vgpr, scratch_vgpr, arch)
+        : source.private_offset
+            ? append_dynamic_record_store_u32_private(
+                  words, layout, field_address,
+                  *source.private_offset + (high_word ? SpillManager::kSlotBytes : 0u), slot_vgpr,
+                  scratch_vgpr, arch)
             : append_dynamic_record_store_u32_literal(
                   words, layout, field_address,
                   static_cast<uint32_t>(*source.literal >> (high_word ? 32u : 0u)), slot_vgpr,
