@@ -22,6 +22,8 @@ namespace
 // Stand-in ncclComm that passes every ncclAllToAllGinSdmaEligible() gate up to the
 // window lookup, so each test below spoils one earlier field. bigSize must stay
 // non-zero or ncclTeamLsa() runs real device-runtime init here and crashes.
+// Purpose-built like DdaIpcMockComm: common/MockComm.hpp builds topology and
+// arch state that no eligibility gate reads.
 struct GinAlltoAllMockComm
 {
     ncclComm            comm{};
@@ -57,12 +59,16 @@ bool envEquals(const char* name, const char* value)
 
 } // namespace
 
-// Every assertion here is EXPECT_FALSE, because the one path to a true verdict
-// runs through registered ncclDevrWindows and ncclDevrWindowSorted is private to
-// dev_runtime.cc. That leaves the 16 B alignment gate and the eligible case to
-// the MPI tests in transport/GinDeviceMPITests.cpp. It also means no single test
-// can prove *which* gate rejected -- except BuffersNotRegistered, which is the
-// one case where deleting the gate under test flips the verdict to true.
+// These tests document the gate list. They do not detect a deleted gate. The mock
+// registers no window, so every case below is rejected by the window lookup, which
+// runs after the gate it targets: delete the nNodes check and MultiNode still gets
+// false, and still passes. BuffersNotRegistered is the exception, because there the
+// window lookup is the gate under test, so removing it flips the verdict to true.
+//
+// The baseline cannot be true while ncclDevrWindowSorted is defined in
+// dev_runtime.cc rather than the header, so the mock cannot populate winSorted.
+// The 16 B alignment gate and the eligible case stay with the MPI tests in
+// transport/GinDeviceMPITests.cpp.
 class GinAlltoAllEligibilityTest : public ::testing::Test
 {
 protected:

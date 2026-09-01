@@ -2615,24 +2615,20 @@ TEST_F(GinMPIDeviceTests, SymPtr_PutAndPutValue) {
 
 // Reference single-node alltoall: every rank puts its slice for every peer
 // into that peer's recvbuf via gin.put + SignalInc, then waits on its own
-// signal cell for nRanks increments. Ported one-for-one from
-// examples/06_device_api/02_gin_alltoall_pure/main.cu so a regression in
-// put + signal + barrier + flush composed under realistic load surfaces here.
-__global__ void alltoallPureKernel(
+// signal cell for nRanks increments. Mirrors ginAlltoAllBody (device impl 3) in
+// rccl-tests/src/alltoall.cu, minus its trailing release sync, so a regression
+// in put + signal + barrier + flush composed under load surfaces here.
+// Body shared by the two reference kernels below. bar is whichever session the
+// caller built, so the identical put + signal + flush composition runs under
+// both the generic barrier and the dedicated world-team GIN barrier.
+template <typename BarT>
+__device__ void alltoallPureBody(
+    ncclGin& gin, BarT& bar, unsigned int signalIndex, uint64_t signalValue,
     ncclWindow_t sendwin, size_t sendoffset,
     ncclWindow_t recvwin, size_t recvoffset,
     size_t count, struct ncclDevComm devComm) {
-  constexpr int ginContext = 0;
-  unsigned int signalIndex = blockIdx.x;
-  ncclGin gin{devComm, ginContext};
-  // Capture current signal cell so a count-sweep that reuses the same
-  // kernel/devComm doesn't conflate increments from past iterations.
-  uint64_t signalValue = gin.readSignal(signalIndex);
-
   // Cross-rank sync ensures every rank's sendbuf is registered before any
   // peer reads from it via gin.put below.
-  ncclBarrierSession<ncclCoopCta> bar{
-      ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x};
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
 
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -2656,38 +2652,55 @@ __global__ void alltoallPureKernel(
   gin.flush(ncclCoopCta());
 }
 
-// Single-node 2-8 ranks; count sweep {1, 1024, 1<<16}. Bit-for-bit verifies
-// the deterministic sendbuf[i] = rank*1000 + dst*100 + i pattern landed on
-// the right peer slot. The 1<<16 case (256 KiB / direction / peer) saturates
-// ring credit to exercise the postGfd credit-wait path.
-TEST_F(GinMPIDeviceTests, Alltoall_PureReference) {
-  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
-    GTEST_SKIP() << reason;
+// Generic session, provisioned from reqs.barrierCount. This is the rccl-tests
+// composition.
+__global__ void alltoallPureKernel(
+    ncclWindow_t sendwin, size_t sendoffset,
+    ncclWindow_t recvwin, size_t recvoffset,
+    size_t count, struct ncclDevComm devComm) {
+  unsigned int signalIndex = blockIdx.x;
+  ncclGin gin{devComm, /*ginContext=*/0};
+  // Capture current signal cell so a count-sweep that reuses the same
+  // kernel/devComm doesn't conflate increments from past iterations.
+  uint64_t signalValue = gin.readSignal(signalIndex);
 
-  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
-    GTEST_SKIP() << "Requires 2-8 ranks";
+  ncclBarrierSession<ncclCoopCta> bar{
+      ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x};
+  alltoallPureBody(gin, bar, signalIndex, signalValue,
+      sendwin, sendoffset, recvwin, recvoffset, count, devComm);
+}
 
-  ASSERT_EQ(ncclSuccess, createTestCommunicator());
-  ncclComm_t  comm   = getActiveCommunicator();
-  hipStream_t stream = getActiveStream();
+// Same collective on the dedicated world GIN pool, provisioned from
+// reqs.worldGinBarrierCount. This is the composition in
+// examples/06_device_api/02_alltoall_gin/c/main.cu.
+__global__ void alltoallWorldGinKernel(
+    ncclWindow_t sendwin, size_t sendoffset,
+    ncclWindow_t recvwin, size_t recvoffset,
+    size_t count, struct ncclDevComm devComm) {
+  unsigned int signalIndex = blockIdx.x;
+  ncclGin gin{devComm, /*ginContext=*/0};
+  uint64_t signalValue = gin.readSignal(signalIndex);
 
-  int rank = -1, nRanks = -1;
-  ncclCommUserRank(comm, &rank);
-  ncclCommCount(comm, &nRanks);
-  ASSERT_GE(nRanks, 2);
-  ASSERT_LE(nRanks, 8);
+  ncclGinBarrierSession<ncclCoopCta> bar{
+      ncclCoopCta(), gin, ncclTeamTagWorld{}, blockIdx.x};
+  alltoallPureBody(gin, bar, signalIndex, signalValue,
+      sendwin, sendoffset, recvwin, recvoffset, count, devComm);
+}
 
-  // The world-team ncclBarrierSession sizes its hybrid LSA+rail-GIN barriers from
-  // reqs.barrierCount (not lsa/railGinBarrierCount), and 0 hangs the rail arm.
-  // ginSignalCount=1 covers the kernel's own signalIndex=0.
-  ncclDevCommRequirements reqs = defaultGinReqs();
-  reqs.barrierCount        = 1;
-  reqs.ginSignalCount      = 1;
+// One CTA keeps barrier index 0 the only index in play; 512 threads is the
+// rccl-tests production launch shape.
+constexpr int kAlltoallRefCTAs    = 1;
+constexpr int kAlltoallRefThreads = 512;
 
-  // 1 (alignment/tail edges), 1024 (medium), 65536 (saturating).
+// Count sweep shared by the two alltoall reference tests: 1 (alignment/tail
+// edges), 1024 (medium), 65536 (saturating). Only reqs and the kernel differ
+// between them, so each caller supplies those. launch receives the registered
+// windows, the current count and the devComm. Asserts, so callers wrap this in
+// ASSERT_NO_FATAL_FAILURE.
+template <typename LaunchT>
+void runAlltoallReferenceSweep(ncclComm_t comm, hipStream_t stream, int rank, int nRanks,
+                               const ncclDevCommRequirements& reqs, LaunchT&& launch) {
   const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
-  constexpr int kCTAs          = 1;   // == barrierCount
-  constexpr int kThreadsPerCTA = 512; // matches the production example launch
 
   // Register windows ONCE (largest count) and reuse, BEFORE ncclDevCommCreate
   // activates GIN: some backends resolve a buffer's address at registration,
@@ -2742,10 +2755,7 @@ TEST_F(GinMPIDeviceTests, Alltoall_PureReference) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    alltoallPureKernel<<<kCTAs, kThreadsPerCTA, 0, stream>>>(
-        sendWin, /*sendoffset=*/0,
-        recvWin, /*recvoffset=*/0,
-        count, devComm);
+    launch(sendWin, recvWin, count, devComm);
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -2763,6 +2773,79 @@ TEST_F(GinMPIDeviceTests, Alltoall_PureReference) {
       }
     }
   }
+}
+
+// Single-node 2-8 ranks. Bit-for-bit verifies the deterministic
+// sendbuf[i] = rank*1000 + dst*100 + i pattern landed on the right peer slot.
+// The 1<<16 case (256 KiB / direction / peer) saturates ring credit to
+// exercise the postGfd credit-wait path.
+TEST_F(GinMPIDeviceTests, Alltoall_PureReference) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_GE(nRanks, 2);
+  ASSERT_LE(nRanks, 8);
+
+  // ncclBarrierSession(ncclTeamTagWorld) draws on the three hybrid pools, all
+  // sized by reqs.barrierCount rather than lsa/railGinBarrierCount, so leaving
+  // it 0 hangs the GIN arm. ginSignalCount=1 covers the kernel's signalIndex=0.
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.barrierCount   = 1;
+  reqs.ginSignalCount = 1;
+
+  ASSERT_NO_FATAL_FAILURE(runAlltoallReferenceSweep(comm, stream, rank, nRanks, reqs,
+      [&](ncclWindow_t sendWin, ncclWindow_t recvWin, size_t count, ncclDevComm& devComm) {
+        alltoallPureKernel<<<kAlltoallRefCTAs, kAlltoallRefThreads, 0, stream>>>(
+            sendWin, /*sendoffset=*/0,
+            recvWin, /*recvoffset=*/0,
+            count, devComm);
+      }));
+}
+
+// Same collective and same verification as Alltoall_PureReference, on the
+// dedicated world GIN barrier pool instead of the generic one. Keeps the
+// ncclTeamTagWorld constructor and worldGinBarrierCount covered, which the
+// generic session never touches.
+TEST_F(GinMPIDeviceTests, Alltoall_WorldGinBarrierReference) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_GE(nRanks, 2);
+  ASSERT_LE(nRanks, 8);
+
+  // worldGinBarrierCount allocates the world pool that the ncclTeamTagWorld
+  // constructor binds to, so no manual barrier requirement is needed.
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.worldGinBarrierCount = 1;
+  reqs.ginSignalCount       = 1;
+
+  ASSERT_NO_FATAL_FAILURE(runAlltoallReferenceSweep(comm, stream, rank, nRanks, reqs,
+      [&](ncclWindow_t sendWin, ncclWindow_t recvWin, size_t count, ncclDevComm& devComm) {
+        alltoallWorldGinKernel<<<kAlltoallRefCTAs, kAlltoallRefThreads, 0, stream>>>(
+            sendWin, /*sendoffset=*/0,
+            recvWin, /*recvoffset=*/0,
+            count, devComm);
+      }));
 }
 
 // Hybrid alltoall: LSA stores for intra-node peers + gin.put for cross-node

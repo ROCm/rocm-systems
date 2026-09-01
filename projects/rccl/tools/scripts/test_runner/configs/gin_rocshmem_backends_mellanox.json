@@ -136,6 +136,7 @@
         { "name": "SignalAdd_AndShadow",      "description": "GIN device signal-add and shadow counter",              "test_filter": "GinMPIDeviceTests.SignalAdd_AndShadow" },
         { "name": "SymPtr_PutAndPutValue",    "description": "GIN symmetric-pointer put and put-value",               "test_filter": "GinMPIDeviceTests.SymPtr_PutAndPutValue" },
         { "name": "Alltoall_PureReference",   "description": "GIN pure-reference alltoall kernel",                    "test_filter": "GinMPIDeviceTests.Alltoall_PureReference" },
+        { "name": "Alltoall_WorldGinBarrier", "description": "GIN alltoall on the world-team GIN barrier pool",       "test_filter": "GinMPIDeviceTests.Alltoall_WorldGinBarrierReference" },
         {
           "name": "AlltoallHybrid_Reference", "description": "GIN hybrid (LSA + GIN) alltoall reference (2 ranks/node)", "test_filter": "GinMPIDeviceTests.AlltoallHybrid_Reference",
           "num_ranks": 4, "num_gpus": 2
