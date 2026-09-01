@@ -472,9 +472,9 @@ def _augment_marker_rows(
     """Move the wire backend suffix from the Function column into a Backend
     column and the wire args segment into an Args column.
 
-    Returns the rows, the field names including Backend and Args, the count of rows whose
-    Function has no recognized backend suffix, and up to three sample Function
-    values from those rows.
+    Returns the rows, the field names including Backend and Args, the count of
+    rows whose Function has no recognized backend suffix, and up to three sample
+    Function values from those rows.
     """
     augmented_fieldnames = list(fieldnames)
     for column in ("Backend", "Args"):

@@ -75,7 +75,13 @@ if(NOT cxx_std_20 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     _skip_collector("compiler does not support C++20")
 endif()
 
-add_library(torch-trace-collector STATIC torch_trace_collector.cpp snapshot_store.cpp schema_arg_names.cpp)
+add_library(
+    torch-trace-collector
+    STATIC
+    torch_trace_collector.cpp
+    snapshot_store.cpp
+    schema_arg_names.cpp
+)
 target_include_directories(torch-trace-collector PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(torch-trace-collector SYSTEM PUBLIC ${_torch_include_dirs})
 target_link_libraries(

@@ -232,7 +232,7 @@ std::vector<std::string> decode_marker_path(const std::string& wire)
     std::size_t              start = 0;
     while (true)
     {
-        const auto        sep = path.find('/', start);
+        const auto sep = path.find('/', start);
         const std::string raw = path.substr(start,
                                             sep == std::string::npos ? std::string::npos : sep - start);
 

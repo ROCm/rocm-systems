@@ -119,7 +119,6 @@ def _extract_kernel_name(obj: object, default: str = "<triton_kernel>") -> str:
     return default
 
 
-
 # Launch kwargs that carry runtime geometry rather than kernel arguments.
 _LAUNCH_META_KWARGS = frozenset({
     "grid",

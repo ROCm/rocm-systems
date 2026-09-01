@@ -473,7 +473,8 @@ def test_ml_api_trace_output_same_for_rocpd_and_csv():
             "(self=float32[5x20])",
         ),
         (
-            "aten::cat:#1@aten.nested:0|args=(tensors=[float32[2x3], float32[2x3]], dim=Int)|torch",
+            "aten::cat:#1@aten.nested:0"
+            "|args=(tensors=[float32[2x3], float32[2x3]], dim=Int)|torch",
             "aten::cat:#1@aten.nested:0",
             "torch",
             "(tensors=[float32[2x3], float32[2x3]], dim=Int)",

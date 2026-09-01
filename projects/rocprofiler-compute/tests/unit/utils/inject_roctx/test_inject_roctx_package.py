@@ -606,9 +606,7 @@ def test_torch_pop_scope_routes_each_frame_to_its_originating_tier(torch_backend
 # Operator args capture
 # ---------------------------------------------------------------------------
 
-_MARKER_ARGS_CODEC_PATH = (
-    Path(__file__).resolve().parents[3] / "marker_args_codec.json"
-)
+_MARKER_ARGS_CODEC_PATH = Path(__file__).resolve().parents[3] / "marker_args_codec.json"
 _MARKER_ARGS_CODEC = json.loads(_MARKER_ARGS_CODEC_PATH.read_text(encoding="utf-8"))
 
 
@@ -864,19 +862,25 @@ def test_torch_build_dispatch_args_for_mm_relu_cat(monkeypatch):
     b = torch.zeros(3, 4, dtype=torch.float32)
     t = torch.zeros(2, 3, dtype=torch.float32)
 
-    assert torch_backend._build_dispatch_args(
-        torch.ops.aten.mm.default, (a, b), {}
-    ) == "(self=float32[2x3], mat2=float32[3x4])"
-    assert torch_backend._build_dispatch_args(
-        torch.ops.aten.relu.default, (t,), {}
-    ) == "(self=float32[2x3])"
-    assert torch_backend._build_dispatch_args(
-        torch.ops.aten.cat.default, ([t, t],), {"dim": 0}
-    ) == "(tensors=[float32[2x3], float32[2x3]], dim=int)"
+    assert (
+        torch_backend._build_dispatch_args(torch.ops.aten.mm.default, (a, b), {})
+        == "(self=float32[2x3], mat2=float32[3x4])"
+    )
+    assert (
+        torch_backend._build_dispatch_args(torch.ops.aten.relu.default, (t,), {})
+        == "(self=float32[2x3])"
+    )
+    assert (
+        torch_backend._build_dispatch_args(
+            torch.ops.aten.cat.default, ([t, t],), {"dim": 0}
+        )
+        == "(tensors=[float32[2x3], float32[2x3]], dim=int)"
+    )
 
     core.set_args_capture(True, True)
-    assert torch_backend._build_dispatch_args(
-        torch.ops.aten.cat.default, ([t, t],), {"dim": 1}
-    ) == "(tensors=[float32[2x3], float32[2x3]], dim=1)"
-
-
+    assert (
+        torch_backend._build_dispatch_args(
+            torch.ops.aten.cat.default, ([t, t],), {"dim": 1}
+        )
+        == "(tensors=[float32[2x3], float32[2x3]], dim=1)"
+    )

@@ -12,7 +12,6 @@ Invoked by absolute path as ``python <path>/launch.py --frameworks <name>
 import runpy
 import sys
 from pathlib import Path
-from typing import List
 
 # Make the inject_roctx package importable when run by absolute path.
 _PACKAGE_PARENT = str(Path(__file__).resolve().parents[2])
@@ -40,6 +39,7 @@ def _report_torch_trace_callback_errors() -> None:
         f"torch_trace_collector reported {callback_errors} callback error(s). "
         f"Some ROCTX markers may be missing or misattributed. Stats: {dict(stats)}",
     )
+
 
 _LAUNCHER_OPTIONS = ("--frameworks", "--capture-args", "--capture-arg-values")
 

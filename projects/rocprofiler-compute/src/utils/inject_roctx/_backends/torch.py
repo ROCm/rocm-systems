@@ -618,8 +618,6 @@ def dispatcher_marker_name_for(func: Callable[..., Any]) -> str:
     return raw
 
 
-
-
 def _format_dispatch_arg(obj: object) -> str:
     """Render one dispatch arg as ``dtype[d0xd1]`` for tensors, else a type
     name (or its value when value capture is enabled)."""
@@ -677,6 +675,7 @@ def _build_dispatch_args(
         return marker_format.cap_args("(" + ", ".join(parts) + ")")
     except Exception:
         return ""
+
 
 def install_dispatcher_hook() -> str:
     """C++ tier: no-op. Python tier: enter TorchDispatchMode on this thread."""
