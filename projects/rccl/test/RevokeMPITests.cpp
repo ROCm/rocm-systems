@@ -974,6 +974,8 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
 
     for(int iter = 0; iter < kIterations; ++iter)
     {
+        SCOPED_TRACE("iteration " + std::to_string(iter));
+
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
         ncclComm_t parent = getActiveCommunicator();
@@ -1003,10 +1005,30 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
                                  nullptr,
                                  NCCL_SHRINK_DEFAULT);
             // *newcomm stays NCCL_COMM_NULL until the child job completes, so
-            // drain the parent first, then the now-populated child handle.
-            shrinkOk = (res == ncclSuccess || res == ncclInProgress)
-                       && waitForAsyncResult(parent) == ncclSuccess && child != nullptr
-                       && waitForAsyncResult(child) == ncclSuccess;
+            // drain the parent first, then the now-populated child handle. Each
+            // stage records a non-fatal ADD_FAILURE (which does not return), so
+            // the collective assert below still reports the failing stage and
+            // iteration without leaving excluded ranks stuck in the barriers.
+            if(res != ncclSuccess && res != ncclInProgress)
+            {
+                shrinkOk = false;
+                ADD_FAILURE() << "shrink returned " << res;
+            }
+            else if(waitForAsyncResult(parent) != ncclSuccess)
+            {
+                shrinkOk = false;
+                ADD_FAILURE() << "parent drain after shrink did not reach ncclSuccess";
+            }
+            else if(child == nullptr)
+            {
+                shrinkOk = false;
+                ADD_FAILURE() << "child handle still NULL after parent drain";
+            }
+            else if(waitForAsyncResult(child) != ncclSuccess)
+            {
+                shrinkOk = false;
+                ADD_FAILURE() << "child drain did not reach ncclSuccess";
+            }
         }
         // Collective: every rank participates, so a failure on any included rank
         // fails the run instead of hanging excluded ranks in the barriers below.
