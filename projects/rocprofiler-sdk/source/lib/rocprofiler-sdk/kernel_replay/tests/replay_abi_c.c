@@ -100,12 +100,6 @@ rocprofiler_test_c_replay_offset_local_disable_cb(void)
     return offsetof(replay_data_c_t, replay_stop_context);
 }
 
-size_t
-rocprofiler_test_c_replay_offset_reserved_padding(void)
-{
-    return offsetof(replay_data_c_t, reserved_padding);
-}
-
 // Enum values as C sees them. An enum whose underlying type differs between the languages would
 // show up as a mismatch here rather than as a wrong branch taken at runtime in a tool.
 int
@@ -127,7 +121,7 @@ rocprofiler_test_c_replay_fill(void* record, uint64_t current_pass, uint64_t tot
 {
     replay_data_c_t* rec = (replay_data_c_t*) record;
 
-    rec->size         = offsetof(replay_data_c_t, reserved_padding);
+    rec->size         = sizeof(replay_data_c_t);
     rec->current_pass = current_pass;
     rec->total_passes = total_passes;
 }
