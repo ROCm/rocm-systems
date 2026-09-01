@@ -1240,15 +1240,12 @@ uint64_t sum_public_vram_bytes(const std::vector<KfdMemBank>& banks) {
       saw_public = true;
     }
   }
-  // Fall back to every bank when the node exposes no FB_PUBLIC heap, preserving
-  // the pre-filter total for APU/edge nodes that report memory differently.
   return saw_public ? public_total : all_total;
 }
 
 // /sys/class/kfd/kfd/topology/nodes/*/mem_banks/*/properties
 // size_in_bytes 68702699520
 int KFDNode::get_total_memory(uint64_t* total) {
-  std::ostringstream ss;
   if (total == nullptr) {
     return EINVAL;
   }
@@ -1266,19 +1263,12 @@ int KFDNode::get_total_memory(uint64_t* total) {
   f_path += "/";
   f_path += std::to_string(node_indx_);
   f_path += "/mem_banks";
-  int subDirCount = subDirectoryCountInPath(f_path);
-  ss << __PRETTY_FUNCTION__ << " | [before loop] Within " << f_path
-     << " has subdirectory count = " << std::to_string(subDirCount);
-  LOG_DEBUG(ss);
 
   auto kfd_node_dir = opendir(f_path.c_str());
   if (kfd_node_dir == nullptr) {
     return errno;
   }
 
-  // Collect every mem_bank's (heap_type, size). Advancing the iterator once per
-  // entry (instead of the old subDirCount guard, which re-read the first bank on
-  // multi-bank nodes) lets sum_public_vram_bytes keep only the public framebuffer.
   const std::string heap_type_property = "heap_type ";
   const std::string size_in_bytes_property = "size_in_bytes ";
   std::vector<KfdMemBank> banks;

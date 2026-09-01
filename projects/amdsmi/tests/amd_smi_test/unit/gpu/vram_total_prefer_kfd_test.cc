@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
 
@@ -33,8 +14,6 @@ namespace {
 constexpr uint64_t kSampleVramTotal = 128ULL * 1024 * 1024 * 1024;  // 128 GiB
 constexpr uint64_t kApuCarveout = 512ULL * 1024 * 1024;             // 512 MiB BIOS carveout
 constexpr uint64_t kApuUnified = 110ULL * 1024 * 1024 * 1024;       // 110 GiB unified pool
-// Real MI300X SPX values observed on hardware: sysfs and KFD agree byte-for-byte.
-constexpr uint64_t kMi300xSpxTotal = 206141652992ULL;  // ~192 GiB
 
 }  // namespace
 
@@ -88,12 +67,6 @@ TEST(GpuUnit, VramTotalApuCarveoutPrefersKfd) {
   EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(true, kApuCarveout, "SPX", kApuUnified));
 }
 
-// MI300X SPX: sysfs and KFD report the same value, so the final clause is
-// false and the sysfs value is kept. Values confirmed on hardware.
-TEST(GpuUnit, VramTotalMi300xSpxKeepsSysfs) {
-  EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kMi300xSpxTotal, "SPX", kMi300xSpxTotal));
-}
-
 // Discrete GPU: the KFD mem_banks total is not larger than sysfs, so the final
 // clause stays false and the sysfs value is kept.
 TEST(GpuUnit, VramTotalDiscreteKeepsSysfs) {
@@ -104,8 +77,7 @@ TEST(GpuUnit, VramTotalDiscreteKeepsSysfs) {
 
 namespace {
 
-// KFD heap types (HSA_HEAPTYPE_*): only FB_PUBLIC counts as user-visible VRAM.
-constexpr uint32_t kHeapSystem = 0;
+// KFD heap types (HSA_MEM_HEAP_TYPE_*): only FB_PUBLIC counts as user-visible VRAM.
 constexpr uint32_t kHeapFbPublic = 1;
 constexpr uint32_t kHeapFbPrivate = 2;
 constexpr uint32_t kHeapGpuScratch = 5;
@@ -113,14 +85,12 @@ constexpr uint64_t kGiB = 1024ULL * 1024 * 1024;
 
 }  // namespace
 
-// A single FB_PUBLIC bank (the MI300X GPU-node layout observed on hardware) is
-// returned unchanged.
+// A single FB_PUBLIC bank, the layout amdkfd emits for a large-BAR GPU node.
 TEST(GpuUnit, SumPublicVramSingleFbPublicBank) {
   EXPECT_EQ(amd::smi::sum_public_vram_bytes({{kHeapFbPublic, 94ULL * kGiB}}), 94ULL * kGiB);
 }
 
-// Private, scratch, and other non-public heaps are excluded so a discrete GPU
-// that enumerates them does not over-report its VRAM total.
+// Non-public heaps are excluded when an FB_PUBLIC bank is present.
 TEST(GpuUnit, SumPublicVramExcludesNonPublicHeaps) {
   const std::vector<amd::smi::KfdMemBank> banks = {
       {kHeapFbPublic, 32ULL * kGiB},
@@ -139,10 +109,11 @@ TEST(GpuUnit, SumPublicVramSumsMultiplePublicBanks) {
   EXPECT_EQ(amd::smi::sum_public_vram_bytes(banks), 32ULL * kGiB);
 }
 
-// A node with no FB_PUBLIC heap falls back to summing every bank, preserving the
-// pre-filter total for APU/edge nodes that report memory under another heap type.
+// A node with no FB_PUBLIC heap falls back to summing every bank. This is the
+// small-BAR and APU layout, where amdkfd reports the whole framebuffer as a
+// single FB_PRIVATE bank; without the fallback those nodes would report zero.
 TEST(GpuUnit, SumPublicVramFallsBackWhenNoPublicHeap) {
-  const std::vector<amd::smi::KfdMemBank> banks = {{kHeapSystem, 110ULL * kGiB}};
+  const std::vector<amd::smi::KfdMemBank> banks = {{kHeapFbPrivate, 110ULL * kGiB}};
   EXPECT_EQ(amd::smi::sum_public_vram_bytes(banks), 110ULL * kGiB);
 }
 

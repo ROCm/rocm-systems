@@ -4186,7 +4186,6 @@ rsmi_status_t rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t* sensor
 }
 
 namespace amd::smi {
-// See rocm_smi_vram.h for the three cases this covers. Implementation note:
 // APUs are detected by size (kfd_total > sysfs_total), not a flag, because the
 // driver exposes no APU marker (processor_type is AMD_GPU for APU and discrete
 // alike).
@@ -4237,8 +4236,7 @@ rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_
   // This is needed to avoid returning garbage value in case of failure
   ret = get_dev_value_int(mem_type_file, dv_ind, total);
 
-  // Prefer the KFD (mem_banks) total when sysfs is unusable, in a multi-partition
-  // mode, or an APU carveout. See vram_total_prefer_kfd for the rationale.
+  // See vram_total_prefer_kfd in rocm_smi_vram.h for when the KFD total wins.
   if (mem_type == RSMI_MEM_TYPE_VRAM) {
     bool sysfs_read_ok = (ret == RSMI_STATUS_SUCCESS);
     // Look up the KFD per-partition total non-fatally: unlike
