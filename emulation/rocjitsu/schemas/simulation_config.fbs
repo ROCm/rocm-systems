@@ -209,6 +209,7 @@ table VirtualMachineConfig {
   arch: string;                // ISA architecture identifier (e.g., "cdna3", "rv64i").
   gpu: AmdgpuConfig;           // AMDGPU hardware configuration.
   programs: [ProgramConfig];   // Programs to load and dispatch.
+  target: string;              // Concrete GPU target (e.g., "gfx1250"); defaults by arch.
 }
 
 // ---------------------------------------------------------------------------
