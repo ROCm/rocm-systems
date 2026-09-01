@@ -266,6 +266,11 @@ foreach(_file IN LISTS _extension_mode_sources)
         "mode providers may not name concrete target architectures"
     )
 endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_inline_model.h.inc"
+    "ConSanMoiInlineReleaseClaim|ConSanMoiInlineVersionedReleaseState|ConSanMoiInlineReleaseClaimResult|ConSanMoiInlineReleaseTransactionEvent|consan_moi_inline_plan_release_claim|consan_moi_inline_release_transaction_is_sound"
+    "host-only InlineShadow transaction oracles must not return to the production report contract"
+)
 file(READ "${ROCJITSU_SOURCE_DIR}/tests/patch/consan/analysis_test.cpp" _target_extension_test)
 file(
     READ

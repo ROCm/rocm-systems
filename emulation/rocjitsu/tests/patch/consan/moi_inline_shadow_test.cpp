@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "consan_inline_model_test_support.h"
 #include "consan_test_support.h"
 #include "embedded_schema.h"
 #include "rocjitsu/code/major_image_ownership.h"

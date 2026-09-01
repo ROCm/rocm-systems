@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "consan/consan_inline_model_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 
 #include <gtest/gtest.h>

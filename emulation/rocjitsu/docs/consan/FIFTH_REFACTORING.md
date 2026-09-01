@@ -6245,3 +6245,53 @@ for a 91,450-line baseline, so Section 14.8 remains open. The remaining broad
 placement and mutation transactions, the extension-exercise sufficiency audit,
 larger legacy harvesting, and the independent completion audit also remain
 open. The goal therefore remains active.
+
+### 16.79 Convergence checkpoint 78: test-owned InlineShadow transaction oracle
+
+The InlineShadow model deep read distinguished executable report contracts from
+host reference models. The versioned release-claim planner and release-
+transaction ordering checker were compiled into the production report-contract
+header, but no production component called them. GPU emission implements the
+actual transaction; only three focused host tests consumed these C++ functions
+to check claim-state and event-order examples. Their claim/result/event types
+were likewise test-only.
+
+The complete release-claim and transaction oracle now lives in
+`consan_inline_model_test_support.h`. The two tests that consume this part of
+the oracle include it explicitly. Production retains the real report ABI
+records, version encoding helpers that report processing consumes, and the
+stable release identity shared with later report contracts. It no longer
+exports a parallel host implementation of the GPU transaction as though it
+were a runtime component. The architecture gate prevents the six root oracle
+symbols and their dependent types from returning to the production InlineShadow
+report model.
+
+| Signal | Checkpoint 78 | Cumulative change | Slice change from checkpoint 77 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 105,034 | +58 | **-156** |
+| Nonblank production lines | 98,701 | **-383** | **-145** |
+| Production implementation lines | 90,958 | **-492** | **-140** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 168 / 52 | **-108 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 316 / 60 | +26 / +9 | 0 / 0 |
+| Host release-transaction oracle roots in production | **0** | n/a | **-6** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild across the report-contract header
+fan-out and all four release-claim, release-transaction, adversarial, and
+architecture-boundary tests. Checkpoint 77 immediately before this source-only
+ownership change passed all 4,776 nonphysical tests, including 2,918 simulator
+tests; no test was removed, disabled, renamed, or replaced in this slice. No
+physical gfx1201 test was run.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.7, and 14.8. A mode-local
+production contract no longer contains a host-only duplicate of emitted GPU
+semantics, while the independent oracle and all of its coverage remain clearly
+test-owned. Cumulative production shrinkage rises from 352 to 492
+implementation lines. The same deep read found additional host-only causal and
+qualification models still embedded in the InlineShadow production contract;
+those are concrete follow-on harvesting candidates. Section 14.8 is not yet
+materially satisfied, and the other completion-audit gaps remain open. The goal
+therefore remains active.
