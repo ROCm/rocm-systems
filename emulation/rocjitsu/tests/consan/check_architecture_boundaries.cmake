@@ -314,6 +314,11 @@ _consan_assert_no_match(
     "host-only Sampled publication and replay oracle declarations must remain test-owned"
 )
 _consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sampled_model.h.inc"
+    "consan_moi_sampled_(causal_mix|causal_window_selected)|pack_consan_moi_sampled_watchpoint_entry"
+    "host-only Sampled selection and encoding oracles must remain test-owned"
+)
+_consan_assert_no_match(
     "${_consan_dir}/consan_moi_shadow_models.h.inc"
     "#include|[{};]"
     "retired mixed shadow-model contract must remain an inert comment-only tombstone"

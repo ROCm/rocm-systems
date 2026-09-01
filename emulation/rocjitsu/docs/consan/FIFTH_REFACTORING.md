@@ -6752,3 +6752,51 @@ next convergence slice must cash in deletion or sharing rather than compound
 local growth. Final validation, composition, and mutation still contain broad
 transaction surfaces, and material whole-refactoring shrinkage plus the
 independent completion audit remain open. The goal therefore remains active.
+
+### 16.88 Convergence checkpoint 87: test-owned Sampled selection and encoding oracles
+
+The caller trace of the remaining Sampled host model separated report/runtime
+mechanics from three independent device-reference operations. Production host
+code decodes watchpoint entries, classifies stable snapshots and conflicts, and
+checks causal attachment. It never selects a causal window with the host hash
+or constructs a complete packed watchpoint entry: those operations are used by
+tests to calculate expected device behavior and to seed synthetic hook reports.
+The shared byte-count field encoder is different; the production GPU emitter
+uses it directly and it therefore remains in the Sampled production contract.
+
+The causal hash, whole causal-window selector, and complete watchpoint encoder
+now live in `consan_sampled_model_test_support.h`. Both the core Sampled tests
+and the separately linked HSA-hook tests consume that explicit test component.
+No production replacement or forwarding wrapper remains. The architecture gate
+prevents all three complete host oracles from returning to the production
+Sampled report model while deliberately permitting the byte-count primitive
+shared with device emission.
+
+| Signal | Checkpoint 87 | Cumulative change | Slice change from checkpoint 86 |
+| --- | ---: | ---: | ---: |
+| Production files | 272 | +43 | 0 |
+| Physical production lines | 103,002 | **-1,974** | **-49** |
+| Nonblank production lines | 96,763 | **-2,321** | **-46** |
+| Production implementation lines | 89,075 | **-2,375** | **-46** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **154 / 47** | **-122 / -10** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 326 / 60 | +36 / +9 | 0 / 0 |
+| Host-only Sampled selector/encoder operations in production | **0** | n/a | **-3** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild, including both the core test
+binary and the separately linked hook-test binary, and 171 focused Sampled,
+hook, and architecture-boundary tests. The exact inventory remains 5,411 tests:
+4,776 nonphysical tests, including 2,918 simulator rows, plus 635 physical
+gfx1201 tests. The immediately preceding checkpoint passed the complete 4,776-
+test nonphysical matrix on the same tree ancestry; this slice deletes unused
+production inline definitions without changing the production device emitter,
+decoder, analyzer, or generated code. No physical gfx1201 test was run.
+
+This deletion-bearing checkpoint strengthens Sections 14.3, 14.7, and 14.8.
+Sampled production now contains only behavior used by its emitter or report
+runtime, while reference construction stays independently test-owned. Broader
+pipeline and validation transactions, further target and mode locality,
+material whole-refactoring shrinkage, and the independent completion audit
+remain open. The goal therefore remains active.

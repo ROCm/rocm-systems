@@ -32,6 +32,7 @@
 #include <dlfcn.h>
 
 #include "hsa/hsa_api_trace_minimal.h"
+#include "patch/consan/consan_sampled_model_test_support.h"
 #include "patch/consan/lowering_commit_test_support.h"
 #include "patch/consan/transform_result_test_access.h"
 #include "rocjitsu/code/amdgpu_elf.h"
