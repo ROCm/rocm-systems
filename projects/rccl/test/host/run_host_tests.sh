@@ -280,12 +280,15 @@ do_coverage() {
   # llvm-cov's tracefiles (e.g. "line is hit but no branches evaluated"); disable
   # them and tolerate the format quirks. lcov 1.x has neither the checks nor the
   # error categories, so only pass these on >= 2.
-  local lcov_args=(--rc branch_coverage=1)
+  local lcov_args=()
   local lcov_major
   lcov_major="$(lcov --version 2>/dev/null | grep -oE '[0-9]+' | head -1)"
   if [ "${lcov_major:-0}" -ge 2 ]; then
-    lcov_args+=(--rc check_data_consistency=0
+    lcov_args+=(--rc branch_coverage=1
+                --rc check_data_consistency=0
                 --ignore-errors "inconsistent,unsupported,corrupt,format")
+  else
+    lcov_args+=(--rc lcov_branch_coverage=1)
   fi
 
   # lcov merges tracefiles by taking the union per line/branch: a line/branch is
