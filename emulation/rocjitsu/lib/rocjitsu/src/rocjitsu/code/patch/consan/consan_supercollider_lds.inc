@@ -884,7 +884,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                     arch, original_bytes, site.file_offset - site.physical_id.original_text_offset,
                     site_context.container_entry_text_offset, site.file_offset)
               : std::nullopt;
-      auto required_vgprs = lds_dword_count(site);
+      auto required_vgprs = access_dword_count(site);
       if (!required_vgprs) {
         ++missing_width_plan_site_count;
         continue;
@@ -984,7 +984,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         ConSanRegisterRequest request;
         request.reg_class = RegClass::VGPR;
         request.count = scratch_vgprs;
-        request.alignment = lds_scratch_tuple_base_is_valid(site, 1u) ? 1u : 2u;
+        request.alignment = access_scratch_tuple_base_is_valid(site, 1u) ? 1u : 2u;
         request.search_start = site_context.owner_descriptor_file_offsets.size() > 1u
                                    ? 0u
                                    : min_auto_scratch_vgpr.value_or(0u);

@@ -465,7 +465,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
     std::optional<uint32_t> &guest_instruction_word_offset, std::vector<std::string> &errors) {
   const rj_code_arch_t arch = target.arch;
   guest_instruction_word_offset.reset();
-  auto required_vgprs = lds_dword_count(site);
+  auto required_vgprs = access_dword_count(site);
   if (!required_vgprs) {
     errors.emplace_back("ConSan LDS check/trap proof selected unsupported width");
     return std::nullopt;
@@ -515,7 +515,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
     return std::nullopt;
   }
 
-  if (!lds_scratch_tuple_base_is_valid(site, scratch_vgpr)) {
+  if (!access_scratch_tuple_base_is_valid(site, scratch_vgpr)) {
     errors.emplace_back("ConSan LDS check/trap proof selected a misaligned tuple scratch base");
     return std::nullopt;
   }

@@ -5509,3 +5509,56 @@ The change removes 96 implementation lines and raises cumulative shrinkage to
 point and mutable-transaction surfaces, larger legacy harvesting, material
 whole-refactoring shrinkage, and the independent Section 14 completion audit
 remain open. The goal therefore remains active.
+
+### 16.68 Convergence checkpoint 67: one normalized access scratch contract
+
+The access-placement deep read found that common LDS placement and
+SuperCollider FLAT lowering independently interpreted the same normalized
+`ConSanAccessLoweringForm`. Both computed the access width, excluded address,
+destination, and data operands, enforced the classifier-owned tuple alignment,
+found the first register after those operands, honored an explicit scratch
+override, searched liveness, and fell back to a spill-backed allocation. The
+FLAT copy was mode-local implementation of common placement policy and did not
+include the normalized second data tuple in its range calculations.
+
+Common placement now owns one access scratch contract and its liveness and
+spill selection mechanisms. Both native LDS and SuperCollider FLAT lowering
+consume those operations; each retains only its genuine differences, such as
+multi-owner liveness intersection, descriptor-growth policy, spill-frame
+construction, and emitted probe semantics. The complete FLAT scratch helper
+family and its private operand-exclusion implementation are deleted from the
+SuperCollider support component.
+
+A direct contract regression constructs a normalized two-range access and
+proves that width, search floor, tuple alignment, explicit selection, and spill
+selection all account for every operand tuple. The architecture gate requires
+SuperCollider FLAT to consume all five common operations and forbids the
+mode-local scratch helper family from returning.
+
+| Signal | Checkpoint 67 | Cumulative change | Slice change from checkpoint 66 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 104,945 | **-30** | **-118** |
+| Nonblank production lines | 98,615 | **-468** | **-108** |
+| Production implementation lines | 90,875 | **-575** | **-108** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **174 / 52** | **-102 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Access scratch policy owners | **1 common placement owner** | n/a | **-1** |
+| SuperCollider-local FLAT scratch helpers | **0** | n/a | **-5** |
+| Test inventory | **5,389** | **+44** | **+1** |
+
+Validation includes a final-tree `-j16` build; 182 focused normalized-scratch,
+FLAT, LDS, and architecture-boundary tests; all 4,754 nonphysical tests over
+the five emulated targets at `-j16`; and all 635 physical gfx1201 tests
+serialized at `-j1`. No test was removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.7, 14.8, and 14.9.
+Mode locality no longer means that SuperCollider owns a copy of
+architecture-normalized placement policy, and 108 more implementation lines
+are harvested. Cumulative shrinkage reaches 575 lines. Remaining architecture
+locality, mode locality, broader operating-point and mutable-transaction
+surfaces, larger legacy harvesting, material whole-refactoring shrinkage, and
+the independent Section 14 completion audit remain open. The goal therefore
+remains active.

@@ -1117,6 +1117,35 @@ if(NOT _common_placement_contract MATCHES
         "ConSan existing-patch reservation must consume the patch-proof span"
     )
 endif()
+# Normalized access operands define one scratch-allocation contract. The
+# common placement owner supplies it to both LDS and SuperCollider FLAT
+# lowering; a mode-local copy would allow tuple and operand exclusions to
+# drift again.
+file(READ "${_consan_dir}/consan_placement.inc" _access_scratch_owner)
+file(READ "${_consan_dir}/consan_supercollider_support.h" _sc_support_contract)
+file(READ "${_consan_dir}/consan_supercollider_support.cpp" _sc_support_body)
+file(READ "${_consan_dir}/consan_supercollider_flat.inc" _sc_flat_body)
+foreach(_operation IN ITEMS
+    access_dword_count
+    access_scratch_tuple_base_is_valid
+    access_scratch_search_start
+    choose_scratch_vgpr
+    choose_spill_scratch_vgpr
+)
+    if(NOT _common_placement_contract MATCHES "${_operation}" OR
+       NOT _access_scratch_owner MATCHES "${_operation}" OR
+       NOT _sc_flat_body MATCHES "${_operation}")
+        message(FATAL_ERROR
+            "ConSan normalized access scratch operation lost its shared placement owner: ${_operation}"
+        )
+    endif()
+endforeach()
+if(_sc_support_contract MATCHES "flat_(dword_count|scratch)" OR
+   _sc_support_body MATCHES "flat_(dword_count|scratch)|choose_flat_(scratch|spill)")
+    message(FATAL_ERROR
+        "ConSan SuperCollider support regained a mode-local access scratch contract"
+    )
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_pipeline.cpp"
     "plan_consan_(record_replay|sampled|inline_shadow)_evidence"

@@ -403,7 +403,7 @@ bool is_relocatable_consan_barrier_destination(const Instruction &instruction, u
   return true;
 }
 
-[[nodiscard]] std::optional<uint16_t> lds_dword_count(const ConSanAccessInventorySite &access) {
+[[nodiscard]] std::optional<uint16_t> access_dword_count(const ConSanAccessInventorySite &access) {
   if (!access.lowering.form || access.lowering.form->data_register_count == 0u)
     return std::nullopt;
   return access.lowering.form->data_register_count;
@@ -419,8 +419,8 @@ bool is_relocatable_consan_barrier_destination(const Instruction &instruction, u
 /// Apply the classifier-owned alignment of the duplicated data tuple.
 /// Architecture and exact instruction spelling have already been normalized
 /// into the form, so scratch planning cannot rediscover a target exception.
-[[nodiscard]] bool lds_scratch_tuple_base_is_valid(const ConSanAccessInventorySite &access,
-                                                   uint16_t candidate) {
+[[nodiscard]] bool access_scratch_tuple_base_is_valid(const ConSanAccessInventorySite &access,
+                                                      uint16_t candidate) {
   return !access.lowering.form || access.lowering.form->data_register_alignment <= 1u ||
          candidate % access.lowering.form->data_register_alignment == 0u;
 }
@@ -458,7 +458,7 @@ bool is_relocatable_consan_barrier_destination(const Instruction &instruction, u
   return false;
 }
 
-[[nodiscard]] uint16_t lds_scratch_search_start(const ConSanAccessInventorySite &access) {
+[[nodiscard]] uint16_t access_scratch_search_start(const ConSanAccessInventorySite &access) {
   if (!access.lowering.form)
     return 0u;
   const ConSanAccessLoweringForm &form = *access.lowering.form;
@@ -507,7 +507,7 @@ find_liveness_scratch_vgpr(const ConSanAccessInventorySite &access, const Instru
     return std::nullopt;
 
   uint16_t search_start =
-      std::max(lds_scratch_search_start(access), min_auto_scratch_vgpr.value_or(0));
+      std::max(access_scratch_search_start(access), min_auto_scratch_vgpr.value_or(0));
   if (max_auto_scratch_vgpr && search_start >= *max_auto_scratch_vgpr)
     return std::nullopt;
   while (search_start < REGISTER_SET_MAX_VGPRS) {
@@ -520,7 +520,7 @@ find_liveness_scratch_vgpr(const ConSanAccessInventorySite &access, const Instru
     if (max_auto_scratch_vgpr && candidate_end == *max_auto_scratch_vgpr &&
         needs_scratch_headroom_at_descriptor_edge(access))
       return std::nullopt;
-    if (candidate_end <= 256 && lds_scratch_tuple_base_is_valid(access, *candidate) &&
+    if (candidate_end <= 256 && access_scratch_tuple_base_is_valid(access, *candidate) &&
         !is_forbidden_scratch_vgpr_run(access, *candidate, required_vgprs))
       return candidate;
     if (*candidate == UINT16_MAX)
@@ -537,7 +537,7 @@ choose_scratch_vgpr(const ConSanAccessInventorySite &access, const ConSanOptions
                     std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs) {
   if (options.scratch_vgpr) {
     if (static_cast<uint32_t>(*options.scratch_vgpr) + required_vgprs <= 256 &&
-        lds_scratch_tuple_base_is_valid(access, *options.scratch_vgpr) &&
+        access_scratch_tuple_base_is_valid(access, *options.scratch_vgpr) &&
         !is_forbidden_scratch_vgpr_run(access, *options.scratch_vgpr, required_vgprs))
       return *options.scratch_vgpr;
     return std::nullopt;
@@ -556,7 +556,7 @@ choose_spill_scratch_vgpr(const ConSanAccessInventorySite &access, uint16_t allo
   for (uint32_t candidate = 0;
        candidate + required_vgprs <= allocation_count && candidate + required_vgprs <= 256u;
        ++candidate) {
-    if (lds_scratch_tuple_base_is_valid(access, static_cast<uint16_t>(candidate)) &&
+    if (access_scratch_tuple_base_is_valid(access, static_cast<uint16_t>(candidate)) &&
         !is_forbidden_scratch_vgpr_run(access, static_cast<uint16_t>(candidate), required_vgprs))
       return static_cast<uint16_t>(candidate);
   }

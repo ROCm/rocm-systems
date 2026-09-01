@@ -84,11 +84,12 @@ find_first_relocatable_anchor(const AmdGpuCodeObject &code_object, rj_code_arch_
                                                              rj_code_arch_t arch,
                                                              std::string *error_out);
 
-[[nodiscard]] std::optional<uint16_t> lds_dword_count(const ConSanAccessInventorySite &access);
+[[nodiscard]] std::optional<uint16_t> access_dword_count(const ConSanAccessInventorySite &access);
 [[nodiscard]] bool vgpr_ranges_overlap(uint16_t lhs_base, uint16_t lhs_count, uint16_t rhs_base,
                                        uint16_t rhs_count);
-[[nodiscard]] bool lds_scratch_tuple_base_is_valid(const ConSanAccessInventorySite &access,
-                                                   uint16_t candidate);
+[[nodiscard]] bool access_scratch_tuple_base_is_valid(const ConSanAccessInventorySite &access,
+                                                      uint16_t candidate);
+[[nodiscard]] uint16_t access_scratch_search_start(const ConSanAccessInventorySite &access);
 [[nodiscard]] bool lds_load_clobbers_address(const ConSanAccessInventorySite &access);
 [[nodiscard]] std::optional<uint16_t>
 required_descriptor_vgpr_allocation_for_scratch(const ConSanAccessInventorySite &access,

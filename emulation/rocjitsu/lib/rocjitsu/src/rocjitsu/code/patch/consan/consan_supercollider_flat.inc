@@ -144,8 +144,8 @@ choose_flat_check_trap_indirect_scalar_scratch(
     std::optional<uint16_t> min_auto_scratch_vgpr, std::optional<uint16_t> max_auto_scratch_vgpr,
     uint16_t required_vgprs) {
   if (options.scratch_vgpr) {
-    return choose_flat_scratch_vgpr(access, options, inst, nullptr, min_auto_scratch_vgpr,
-                                    max_auto_scratch_vgpr, required_vgprs);
+    return choose_scratch_vgpr(access, options, inst, nullptr, min_auto_scratch_vgpr,
+                               max_auto_scratch_vgpr, required_vgprs);
   }
   if (inst == nullptr || owner_liveness.empty() ||
       std::ranges::any_of(owner_liveness,
@@ -162,7 +162,7 @@ choose_flat_check_trap_indirect_scalar_scratch(
   request.count = required_vgprs;
   request.alignment = access.lowering.form ? access.lowering.form->data_register_alignment : 1u;
   request.search_start =
-      std::max(flat_scratch_search_start(access), min_auto_scratch_vgpr.value_or(0u));
+      std::max(access_scratch_search_start(access), min_auto_scratch_vgpr.value_or(0u));
   // RegisterSet can represent target-specific VGPR banks above 255, but the
   // SuperCollider probe ABI directly encodes only ordinary low-bank VGPRs.
   // LivenessAnalysis::find_free_run enforced this bound through its configured
@@ -374,7 +374,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                         std::span<const LivenessAnalysis *const> owner_liveness,
                         std::vector<uint64_t> owner_descriptor_file_offsets) {
     ++supported_candidate_count;
-    auto required_vgprs = flat_dword_count(site);
+    auto required_vgprs = access_dword_count(site);
     if (!required_vgprs)
       return;
     auto action_words =
@@ -439,7 +439,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
             uses_dynamic_stack ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
                                : static_cast<uint16_t>(spill_vcc_save_pair_to_vgprs ? 2u : 0u);
         scratch_vgprs = instrumentation_scratch_vgprs + scalar_reservoir_count;
-        scratch = choose_flat_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
+        scratch = choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
         if (scratch && uses_dynamic_stack) {
           dynamic_stack_spill = build_dynamic_stack_borrowed_sgpr_spill_sequence(
               *scratch, scratch_vgprs, *vcc_save,
@@ -1147,7 +1147,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       return;
     }
     const ConSanAccessInventorySite &site = *candidate.site;
-    const auto required_vgprs = flat_dword_count(site);
+    const auto required_vgprs = access_dword_count(site);
     const auto compare_vgpr = flat_check_trap_compare_vgpr(site);
     if (!required_vgprs || !compare_vgpr) {
       result.errors.emplace_back("ConSan flat check/trap proof selected unsupported site");
@@ -1170,7 +1170,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     const bool use_trampoline = candidate.use_local_cave || candidate.use_appended_cave;
     ConSanPatchKind patch_kind = use_trampoline ? ConSanPatchKind::LocalCaveFlatLoadCheckTrap
                                                 : ConSanPatchKind::InlineFlatLoadCheckTrap;
-    if (!flat_scratch_tuple_base_is_valid(site, candidate.scratch_vgpr)) {
+    if (!access_scratch_tuple_base_is_valid(site, candidate.scratch_vgpr)) {
       result.errors.emplace_back(
           "ConSan flat check/trap proof selected a misaligned tuple scratch base");
       return;

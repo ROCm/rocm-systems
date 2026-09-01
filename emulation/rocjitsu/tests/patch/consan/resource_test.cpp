@@ -2,10 +2,39 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/consan/consan_placement.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 namespace rocjitsu {
 namespace {
+
+TEST(ConSanPlacement, NormalizedAccessScratchContractCoversEveryOperandTuple) {
+  ConSanAccessInventorySite access;
+  ConSanAccessLoweringForm &form = access.lowering.form.emplace();
+  form.data_register_count = 4u;
+  form.element_register_count = 2u;
+  form.data_register_alignment = 2u;
+  form.address_vgpr = 0u;
+  form.address_vgpr_count = 2u;
+  form.destination_vgpr = 2u;
+  form.destination_register_count = 4u;
+  form.data_vgpr = 6u;
+  form.second_data_vgpr = 8u;
+
+  ASSERT_EQ(access_dword_count(access), 4u);
+  EXPECT_EQ(access_scratch_search_start(access), 10u);
+  EXPECT_TRUE(access_scratch_tuple_base_is_valid(access, 10u));
+  EXPECT_FALSE(access_scratch_tuple_base_is_valid(access, 11u));
+
+  ConSanOptions options;
+  options.scratch_vgpr = 8u;
+  EXPECT_FALSE(
+      choose_scratch_vgpr(access, options, nullptr, nullptr, std::nullopt, std::nullopt, 2u));
+  options.scratch_vgpr = 10u;
+  EXPECT_EQ(choose_scratch_vgpr(access, options, nullptr, nullptr, std::nullopt, std::nullopt, 2u),
+            10u);
+  EXPECT_EQ(choose_spill_scratch_vgpr(access, 12u, 2u), 10u);
+}
 
 TEST(ConSanInstructionBuilder, EncodesInlineAtomicAddressOperations) {
   const auto xor_word = build_v_xor_b32_e32(
