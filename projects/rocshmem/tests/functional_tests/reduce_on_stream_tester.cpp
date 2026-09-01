@@ -73,7 +73,7 @@ ReduceOnStreamTester<T>::ReduceOnStreamTester(TesterArguments args)
 
   num_streams = args.num_wgs;
 
-  buf_elems = args.max_msg_size * n_pes * num_streams;
+  buf_elems = (args.max_msg_size / sizeof(T)) * n_pes * num_streams;
 
   source_buf = static_cast<T *>(alloc_test_buffer(buf_elems * sizeof(T), args.local_buf_type));
   dest_buf   = static_cast<T *>(alloc_test_buffer(buf_elems * sizeof(T)));
@@ -127,13 +127,14 @@ void ReduceOnStreamTester<T>::postLaunchKernel() {
     rocshmem_ctx_destroy(ctxs[i]);
 
   for (int i = 0; i < num_streams && i < static_cast<int>(num_timers); i++) {
+    start_time[i] = 0;
+    end_time[i]   = 0;
+    if (num_timed_msgs == 0) continue;
     float elapsed_time_ms = 0.0f;
     CHECK_HIP(hipEventElapsedTime(&elapsed_time_ms, start_events_timed[i],
                                   stop_events_timed[i]));
-    long long int elapsed_cycles = static_cast<long long int>(
+    end_time[i] = static_cast<long long int>(
         elapsed_time_ms * static_cast<float>(wall_clk_rate));
-    start_time[i] = 0;
-    end_time[i]   = elapsed_cycles;
   }
 
   for (int i = num_streams; i < static_cast<int>(num_timers); i++) {
@@ -157,12 +158,13 @@ template <typename T>
 void ReduceOnStreamTester<T>::launchKernel([[maybe_unused]] dim3 gridSize,
                                            [[maybe_unused]] dim3 blockSize,
                                            int loop, size_t size) {
-  int nreduce = static_cast<int>(size);
+  int nreduce = static_cast<int>(size / sizeof(T));
+  if (nreduce == 0) { num_msgs = num_timed_msgs = 0; return; }
 
   for (int i = 0; i < args.skip; i++) {
     for (int s = 0; s < num_streams; s++) {
-      T *wg_source = source_buf + s * n_pes * size;
-      T *wg_dest   = dest_buf   + s * n_pes * size;
+      T *wg_source = source_buf + s * n_pes * nreduce;
+      T *wg_dest   = dest_buf   + s * n_pes * nreduce;
       CHECKROCSHMEM(reduce_on_stream_sum<T>(ctxs[s], team_world_dup[s],
                                            wg_dest, wg_source, nreduce,
                                            streams[s]));
@@ -177,8 +179,8 @@ void ReduceOnStreamTester<T>::launchKernel([[maybe_unused]] dim3 gridSize,
       if (i == 0)
         CHECK_HIP(hipEventRecord(start_events_timed[s], streams[s]));
 
-      T *wg_source = source_buf + s * n_pes * size;
-      T *wg_dest   = dest_buf   + s * n_pes * size;
+      T *wg_source = source_buf + s * n_pes * nreduce;
+      T *wg_dest   = dest_buf   + s * n_pes * nreduce;
       CHECKROCSHMEM(reduce_on_stream_sum<T>(ctxs[s], team_world_dup[s],
                                            wg_dest, wg_source, nreduce,
                                            streams[s]));
@@ -196,8 +198,8 @@ template <typename T>
 void ReduceOnStreamTester<T>::verifyResults(size_t size) {
   T expected = static_cast<T>(n_pes);
   for (int s = 0; s < num_streams; s++) {
-    T *wg_dest = dest_buf + s * n_pes * size;
-    for (size_t i = 0; i < size; i++) {
+    T *wg_dest = dest_buf + s * n_pes * (size / sizeof(T));
+    for (size_t i = 0; i < size / sizeof(T); i++) {
       if (static_cast<float>(wg_dest[i]) != static_cast<float>(expected)) {
         fprintf(stderr,
                 "Data validation error at stream %d idx %zu: "
