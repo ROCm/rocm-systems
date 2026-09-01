@@ -54,7 +54,6 @@ class Param:
 
     def __init__(self, name, valid, bad, sweep=(), accepted=()):
         self.name = name
-        self.valid = valid
         self.bad = list(bad)
         self.sweep = list(sweep) or [valid]
         self.accepted = list(accepted) or [valid]
@@ -69,14 +68,14 @@ class Handle(Param):
         super().__init__(name, values[0], [("invalid", BAD_HANDLE)], sweep=values, accepted=values)
 
 
-def opaque(name, valid=("invalid", BAD_HANDLE)):
+def opaque(name):
     """A non-processor handle (socket, event, node, BDF).
 
-    The default ``valid`` is itself invalid, so it only suits an API whose sole
-    argument is this handle; pass a typed null handle otherwise, else the other
-    arguments are never the reason the call is refused.
+    The valid value is itself invalid, so this only suits an API whose sole
+    argument is this handle; otherwise the other arguments are never the reason
+    the call is refused.
     """
-    return Param(name, valid, [("invalid", BAD_HANDLE)])
+    return Param(name, ("invalid", BAD_HANDLE), [("invalid", BAD_HANDLE)])
 
 
 def integer(name, valid=0, bounds=False):
@@ -84,7 +83,8 @@ def integer(name, valid=0, bounds=False):
 
     ``bounds`` adds an out-of-range value. That value is type-correct, so it
     reaches the library instead of being refused by the binding: only set it on
-    a getter, and never on an argument that sizes an allocation.
+    a getter, and never on an argument that sizes an allocation. ``reject_only``
+    enforces this.
     """
     bad = [("bad-type", BAD_INT)]
     if bounds:
@@ -408,9 +408,9 @@ class ApiTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.common = Common(verbose)
         # One session per suite rather than per test: enumeration is the same
         # for every method and dominates the runtime of a rejection-only test.
+        cls.common = Common(verbose, probe_devices=False)
         cls.common.amdsmi_smart_init()
         cls.common.processors = amdsmi.amdsmi_get_processor_handles()
 
@@ -443,8 +443,8 @@ class ApiTestCase(unittest.TestCase):
             pass
 
     def setUp(self):
-        # The UMA-carveout and TTM setters honour this, so no stray write can
-        # reach sysfs or modprobe.d even if one of them accepts a bad argument.
+        # Gates only the UMA-carveout and TTM setters; every other setter is safe
+        # here solely because reject_only() drives binding-refused values.
         os.environ["AMDSMI_DRY_RUN"] = "1"
         self.addCleanup(os.environ.pop, "AMDSMI_DRY_RUN", None)
         self.api = ApiTest(self.common)
@@ -466,6 +466,13 @@ class ApiTestCase(unittest.TestCase):
 
     def reject_only(self, func_name, *params):
         """For an API that changes state: only the rejection path is safe here."""
+        for param in params:
+            if any(value is OUT_OF_RANGE for _, value in param.bad):
+                raise AssertionError(
+                    f"{func_name}({param.name}): an out-of-range value is type-correct, so"
+                    " it reaches the device. A state-changing API must be driven only with"
+                    " values the binding refuses -- drop bounds=True."
+                )
         self._announce()
         self.api.reject(func_name, *params)
 

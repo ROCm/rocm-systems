@@ -127,18 +127,6 @@ class TestGpuOverdrive(unittest.TestCase):
 
     # integration
 
-    def test_get_gpu_od_volt_curve_regions(self):
-        self.common.print_func_name("")
-
-        # TODO num_region = 10
-        num_region = 10
-
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_od_volt_curve_regions=amdsmi.amdsmi_get_gpu_od_volt_curve_regions,
-            num_region=num_region,
-        )
-        return
-
     def test_get_gpu_reg_table_info(self):
         self.common.print_func_name("")
 

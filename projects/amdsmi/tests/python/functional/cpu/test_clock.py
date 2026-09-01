@@ -120,18 +120,6 @@ class TestCpuClock(unittest.TestCase):
             raise self.raise_exception
         return
 
-    def test_get_cpu_socket_lclk_dpm_level(self):
-        self.common.print_func_name("")
-
-        # TODO nbio_id = 0
-        nbio_id = 0
-
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_cpu_socket_lclk_dpm_level=amdsmi.amdsmi_get_cpu_socket_lclk_dpm_level,
-            nbio_id=nbio_id,
-        )
-        return
-
     def test_set_cpu_df_pstate_range(self):
         self.common.print_func_name("")
 

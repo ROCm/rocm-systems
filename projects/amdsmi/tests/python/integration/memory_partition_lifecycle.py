@@ -16,7 +16,7 @@ Requirements
 
 Usage
 -----
-  sudo python3 tests/python/integration/test_memory_partition_lifecycle.py [--target NPS2]
+  sudo python3 tests/python/integration/memory_partition_lifecycle.py [--target NPS2]
 
 Exit codes
 ----------

@@ -76,9 +76,7 @@ class TestGpuThermal(api.ApiTestCase):
         )
 
     def test_reset_gpu_fan(self):
-        self.reject_only(
-            "amdsmi_reset_gpu_fan", self.handle, api.integer("sensor_idx", 0, bounds=True)
-        )
+        self.reject_only("amdsmi_reset_gpu_fan", self.handle, api.integer("sensor_idx", 0))
 
 
 if __name__ == "__main__":
