@@ -3501,9 +3501,10 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     t->collApiEventHandle = ncclProfilerApiState.collApiEventHandle;
     t->opCount = comm->opCount;
     t->acc = info->acc;
-    // Honor rcclSelectAllReduce / rcclSelectAllGather: collTaskAppend is used for
-    // both RCCL_SYMMETRIC and ring/tree. Without this, ncclMakeSymmetricTaskList
-    // would still extract -R 2 AllReduce after symMaxR2 withdrew symk.
+    // Honor rcclSelectAllReduce / rcclSelectAllGather / rcclSelectReduceScatter:
+    // collTaskAppend is used for both RCCL_SYMMETRIC and ring/tree. Without this,
+    // ncclMakeSymmetricTaskList would still extract -R 2 after the selector
+    // withdrew symk (NCCL_ALGO, or AllReduce/AllGather size windows).
     t->symkExtract = 0;
     if (info->decisionValid) {
       t->symkExtract = (info->decision.algo == RCCL_SYMMETRIC) ? 1 : -1;
@@ -3956,6 +3957,12 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr,
                                      comm->ddaScratch, comm->ddaPeerPtrsHost, opDev));
         }
+      } else if (info->coll == ncclFuncReduceScatter && info->decisionValid) {
+        // ReduceScatter has no CE; the selector already chose symmetric vs ring.
+        // Honor it here so NCCL_ALGO / !symEligible cannot be overridden by
+        // ncclMakeSymmetricTaskList (collTaskAppend sets symkExtract from decision).
+        INFO(NCCL_INIT, "Taking kernel-based collective path for ReduceScatter");
+        NCCLCHECK(collTaskAppend(comm, info, opDev));
       } else if ((!allGatherDecided &&
                   (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
                   !(rcclNcclAlgoEnvIsSet() && (info->coll == ncclFuncAllGather || info->coll == ncclFuncReduceScatter)) &&
