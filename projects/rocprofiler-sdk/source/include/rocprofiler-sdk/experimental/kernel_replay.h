@@ -104,19 +104,14 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
  */
 typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
 {
-    uint64_t                           size;           ///< Size of this struct (versioning)
-    rocprofiler_kernel_dispatch_info_t dispatch_info;  ///< Kernel dispatch info (always set)
-
+    uint64_t                                  size;  ///< Size of this struct
+    rocprofiler_kernel_dispatch_info_t        dispatch_info;  ///< Kernel dispatch info (always set)
+    uint64_t                                  current_pass;
+    uint64_t                                  total_passes;
     rocprofiler_kernel_replay_pass_count_cb_t replay_pass_count;
-
-    rocprofiler_kernel_replay_continue_cb_t replay_continue;
-
-    uint64_t current_pass;
-
-    uint64_t total_passes;
-
-    rocprofiler_kernel_replay_context_cb_t replay_start_context;
-    rocprofiler_kernel_replay_context_cb_t replay_stop_context;
+    rocprofiler_kernel_replay_continue_cb_t   replay_continue;
+    rocprofiler_kernel_replay_context_cb_t    replay_start_context;
+    rocprofiler_kernel_replay_context_cb_t    replay_stop_context;
 
     /// @var replay_pass_count
     /// @brief [CONFIG] Tool-provided callback returning the number of replay passes.
