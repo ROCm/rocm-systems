@@ -277,7 +277,7 @@ _consan_assert_no_match(
     "host-only InlineShadow token reference oracles must not return to production shadow models"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_model.cpp"
+    "${_consan_dir}/consan_moi_sampled_model.cpp"
     "consan_moi_sampled_(publish_sync_metadata|publish_access_records|publish_causal_windows|replay_entries|replay_snapshots|replay_causal_windows|begin_causal_claim|commit_causal_claim|abort_causal_claim)"
     "host-only Sampled publication and replay oracles must remain test-owned"
 )
@@ -287,9 +287,19 @@ _consan_assert_no_match(
     "host-only Sampled publication and replay oracle declarations must remain test-owned"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_model.cpp"
+    "${_consan_dir}/consan_moi_record_replay_model.cpp"
     "consan_moi_(compact_record_replay_trace|plan_record_replay_capture|replay_record_replay_capture)"
     "host-only Record/Replay capture oracles must remain test-owned"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_record_replay_model.cpp"
+    "ConSanMoiSampled|consan_moi_sampled"
+    "Record/Replay report analysis must not reacquire Sampled behavior"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sampled_model.cpp"
+    "ConSanMoiRecordReplay|consan_moi_record_replay"
+    "Sampled report analysis must not reacquire Record/Replay behavior"
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_report_helpers.h.inc"
@@ -2158,7 +2168,15 @@ _consan_assert_reviewed_mode_switch_budget(
     consan_moi_prologue.cpp 0 "mode-neutral MOI entry-state construction"
 )
 _consan_assert_reviewed_mode_switch_budget(
-    consan_moi_model.cpp 4 "mode-owned replay diagnostic provenance constants"
+    consan_moi_record_replay_model.cpp 4 "mode-owned replay diagnostic provenance constants"
+)
+_consan_assert_reviewed_mode_switch_budget(
+    consan_moi_sampled_model.cpp 0 "Sampled-only report model"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_model.cpp"
+    "#include|[{};]"
+    "retired mixed report model must remain an inert comment-only tombstone"
 )
 
 message(STATUS "ConSan architectural boundary checks passed")

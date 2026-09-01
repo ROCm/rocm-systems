@@ -6504,3 +6504,58 @@ normalization authority. Cumulative production shrinkage reaches 2,276
 implementation lines. Material whole-refactoring shrinkage, broad placement
 and mutation buses, remaining target/mode locality, and the independent
 completion audit remain open. The goal therefore remains active.
+
+### 16.84 Convergence checkpoint 83: mode-owned host report models
+
+After removing the test-only models, the remaining generic
+`consan_moi_model.cpp` had exactly two independent production responsibilities.
+Seven Sampled definitions encode, decode, snapshot-classify, and qualify
+Sampled metadata. The rest normalizes and replays Record/Replay reports,
+including exact-byte shadow state and causal atomic/fence ordering. A complete
+definition-and-caller trace found no mechanism or state shared between those
+regions; their only common dependency is the public report contract.
+
+The production build graph now compiles `consan_moi_sampled_model.cpp` and
+`consan_moi_record_replay_model.cpp` as the two explicit owners. The former has
+only the Sampled metadata and qualification definitions. The latter has only
+Record/Replay normalization, causal replay, exact shadow, diagnostics, and
+runtime analysis. The old generic filename remains compiled as a comment-only
+tombstone because of the operational no-delete rule. Narrowing each translation
+unit's includes also deleted the monolith's unrelated analysis, patching,
+builder, ISA, and standard-library include closure. No implementation was
+copied, wrapped, or left behind.
+
+The architecture gate requires the generic file to remain inert, rejects
+Sampled identifiers from the Record/Replay owner and Record/Replay identifiers
+from the Sampled owner, applies the reviewed mode-switch budgets to the named
+owners, and continues to reject the test-only model roots from their relevant
+production owner.
+
+| Signal | Checkpoint 83 | Cumulative change | Slice change from checkpoint 82 |
+| --- | ---: | ---: | ---: |
+| Production files | 266 | +37 | +2 named owners |
+| Physical production lines | 103,058 | **-1,918** | **-9** |
+| Nonblank production lines | 96,825 | **-2,259** | **-14** |
+| Production implementation lines | 89,149 | **-2,301** | **-25** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 168 / 52 | **-108 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 326 / 60 | +36 / +9 | 0 / 0 |
+| Mode implementations in generic report-model file | **0** | n/a | **-2 regions** |
+| Test inventory | **5,412** | **+67** | 0 |
+
+Validation includes a complete `-j16` rebuild and all 161 focused Sampled and
+Record/Replay construction, report-model, runtime-replay, and hook tests. The
+architecture-boundary test then passed with the new cross-mode and tombstone
+rules. Checkpoint 81's preceding periodic gate remains the latest complete
+nonphysical run at 4,777/4,777 tests, including all 2,918 simulator tests over
+five targets. No test was removed, disabled, renamed, or replaced, and no
+physical gfx1201 test was run.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.6 through 14.9. A reader
+of either runtime report model can now skip the other mode completely, and the
+build and boundary graphs state the same ownership as the implementation.
+Cumulative production shrinkage reaches 2,301 implementation lines. The broad
+placement and mutation buses, further architecture/mode locality, material
+whole-refactoring shrinkage, and the independent completion audit remain open.
+The goal therefore remains active.
