@@ -30,6 +30,7 @@
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <future>
@@ -501,9 +502,11 @@ TEST(queue_interposition, doorbell_blocks_while_queue_lifetime_lock_is_held)
 // order, and the run must not deadlock against the exclusive holder.
 TEST(queue_interposition, doorbell_stress_many_queues_concurrent_destroy)
 {
-    constexpr auto num_queues           = size_t{8};
-    constexpr auto dispatches_per_queue = size_t{20000};
-    constexpr auto ring_slots           = uint64_t{256};
+    const auto num_queues =
+        std::max<size_t>(1, common::get_env("ROCPROFILER_TEST_STRESS_THREADS", size_t{8}));
+    const auto dispatches_per_queue =
+        std::max<size_t>(1, common::get_env("ROCPROFILER_TEST_STRESS_DISPATCHES", size_t{20000}));
+    constexpr auto ring_slots = uint64_t{256};
 
     struct fake_queue_ring
     {

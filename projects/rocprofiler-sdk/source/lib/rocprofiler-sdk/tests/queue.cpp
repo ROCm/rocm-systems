@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
@@ -34,6 +35,7 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -108,6 +110,19 @@ void
 null_writer(const void*, uint64_t)
 {}
 
+// Dispatch-storm shape, overridable so the stress can be cranked without a rebuild.
+size_t
+stress_threads(size_t _default)
+{
+    return std::max<size_t>(1, common::get_env("ROCPROFILER_TEST_STRESS_THREADS", _default));
+}
+
+size_t
+stress_dispatches(size_t _default)
+{
+    return std::max<size_t>(1, common::get_env("ROCPROFILER_TEST_STRESS_DISPATCHES", _default));
+}
+
 // WriteInterceptor invokes the writer while still holding the shared lifetime lock
 // (queue.cpp:329 under the lock taken at :317), so these counters observe the inside of the
 // guarded region. The writer is a raw function pointer and cannot capture, hence file scope.
@@ -166,8 +181,8 @@ TEST(queue, write_interceptor_blocks_while_queue_lifetime_lock_is_held)
 // held would mean the two sections overlapped and ~Queue() could free the object mid-call.
 TEST(queue, write_interceptor_stress_under_concurrent_destroy)
 {
-    constexpr auto num_dispatch_threads  = size_t{8};
-    constexpr auto dispatches_per_thread = size_t{20000};
+    const auto num_dispatch_threads  = stress_threads(8);
+    const auto dispatches_per_thread = stress_dispatches(20000);
 
     auto _queue = FakeQueue{fake_agent_cache(), rocprofiler_queue_id_t{.handle = 1}};
 
@@ -229,8 +244,8 @@ TEST(queue, write_interceptor_stress_under_concurrent_destroy)
 // and overlap tests remain the guards for the lock itself.
 TEST(queue, real_destroy_queue_races_doorbell_lookup)
 {
-    constexpr auto num_producers        = size_t{4};
-    constexpr auto dispatches_per_queue = uint64_t{4000};
+    const auto     num_producers        = stress_threads(4);
+    const auto     dispatches_per_queue = uint64_t{stress_dispatches(4000)};
     constexpr auto ring_slots           = uint64_t{256};
 
     auto* qc = get_queue_controller();
