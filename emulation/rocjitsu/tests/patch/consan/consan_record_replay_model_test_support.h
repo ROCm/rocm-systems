@@ -10,6 +10,42 @@
 
 namespace rocjitsu {
 
+/// Test conveniences for replay fixtures that exercise only a prefix of the
+/// complete Record/Replay event product. Production report analysis calls the
+/// complete boundary directly.
+[[nodiscard]] inline ConSanMoiRecordReplayResult
+consan_moi_record_replay_access_records(ConSanMoiReportHeader &header,
+                                        std::span<const ConSanMoiAccessRecord> access_records,
+                                        std::span<ConSanMoiDiagnosticRecord> diagnostic_records,
+                                        std::span<uint64_t> exact_shadow_entries) {
+  return consan_moi_record_replay_access_records(
+      header, access_records, std::span<const ConSanMoiBarrierRecord>{},
+      std::span<const ConSanMoiRecordReplayAtomicEvent>{},
+      std::span<const ConSanMoiRecordReplayFenceEvent>{}, diagnostic_records, exact_shadow_entries);
+}
+
+[[nodiscard]] inline ConSanMoiRecordReplayResult
+consan_moi_record_replay_access_records(ConSanMoiReportHeader &header,
+                                        std::span<const ConSanMoiAccessRecord> access_records,
+                                        std::span<const ConSanMoiBarrierRecord> barrier_records,
+                                        std::span<ConSanMoiDiagnosticRecord> diagnostic_records,
+                                        std::span<uint64_t> exact_shadow_entries) {
+  return consan_moi_record_replay_access_records(
+      header, access_records, barrier_records, std::span<const ConSanMoiRecordReplayAtomicEvent>{},
+      std::span<const ConSanMoiRecordReplayFenceEvent>{}, diagnostic_records, exact_shadow_entries);
+}
+
+[[nodiscard]] inline ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
+    ConSanMoiReportHeader &header, std::span<const ConSanMoiAccessRecord> access_records,
+    std::span<const ConSanMoiBarrierRecord> barrier_records,
+    std::span<const ConSanMoiRecordReplayAtomicEvent> atomic_events,
+    std::span<ConSanMoiDiagnosticRecord> diagnostic_records,
+    std::span<uint64_t> exact_shadow_entries) {
+  return consan_moi_record_replay_access_records(
+      header, access_records, barrier_records, atomic_events,
+      std::span<const ConSanMoiRecordReplayFenceEvent>{}, diagnostic_records, exact_shadow_entries);
+}
+
 enum class ConSanMoiRecordReplayEventKind : uint16_t {
   Access = 1,
   Barrier = 2,

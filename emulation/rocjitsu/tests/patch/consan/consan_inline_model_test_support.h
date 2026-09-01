@@ -58,6 +58,15 @@ consan_moi_inline_workgroup_key(uint32_t x, uint32_t y, uint32_t z,
   return {/*valid=*/true, /*value=*/packed + 1u};
 }
 
+/// Test convenience for checking only the release snapshot's version envelope.
+/// Production readers classify the complete payload and never use this
+/// partial predicate as ordering authority.
+[[nodiscard]] constexpr bool consan_moi_inline_release_snapshot_is_stable(uint32_t version_before,
+                                                                          uint32_t version_after) {
+  return version_before == version_after &&
+         consan_moi_inline_release_version_is_ready(version_before);
+}
+
 /// Test oracle for the byte-provenance word emitted by InlineShadow.
 [[nodiscard]] constexpr uint32_t
 pack_consan_moi_exact_byte_cell_provenance(uint32_t byte_mask, uint32_t representative_lane) {

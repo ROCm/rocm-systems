@@ -6847,3 +6847,52 @@ mechanisms it owns, while device-reference construction stays test-owned.
 Broad pipeline and validation transactions, further target and mode locality,
 material whole-refactoring shrinkage, and the independent completion audit
 remain open. The goal therefore remains active.
+
+### 16.90 Convergence checkpoint 89: complete production replay and snapshot operations
+
+The mode-model caller trace next followed every Record/Replay replay overload
+and InlineShadow release-snapshot predicate. Production report analysis always
+supplies the complete Record/Replay product: access, barrier, atomic, and fence
+events plus diagnostic and exact-shadow storage. Three shorter overloads merely
+inserted empty spans for tests exercising a prefix of that product. Similarly,
+production InlineShadow readers classify the complete version-bracketed release
+payload; the predicate that checks only the two version words is a partial test
+convenience and is never accepted as production ordering authority.
+
+Production Record/Replay now declares and implements exactly one complete
+replay boundary. Its three prefix conveniences live in
+`consan_record_replay_model_test_support.h`, and all core and separately linked
+hook tests consume that mode-local test component. The partial InlineShadow
+version-envelope predicate now lives in `consan_inline_model_test_support.h`.
+No production forwarding overload or predicate remains. Boundary checks cap
+the production Record/Replay declaration and implementation at one replay
+operation and prevent the partial InlineShadow predicate from returning.
+
+| Signal | Checkpoint 89 | Cumulative change | Slice change from checkpoint 88 |
+| --- | ---: | ---: | ---: |
+| Production files | 272 | +43 | 0 |
+| Physical production lines | 102,909 | **-2,067** | **-60** |
+| Nonblank production lines | 96,679 | **-2,405** | **-53** |
+| Production implementation lines | 88,993 | **-2,457** | **-51** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **154 / 47** | **-122 / -10** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 326 / 60 | +36 / +9 | 0 / 0 |
+| Production Record/Replay replay declarations / implementations | **1 / 1** | n/a | **-3 / -3** |
+| Partial InlineShadow snapshot predicates in production | **0** | n/a | **-1** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild, including the separate HSA-hook
+binary, and all 190 focused Record/Replay, InlineShadow release-snapshot, hook,
+and architecture-boundary tests. Checkpoint 88 immediately before this slice
+also passed the complete exact/sparse shared-model gate, while checkpoint 86
+passed all 4,776 nonphysical tests on the same ancestry. This slice changes no
+production replay algorithm or report format; it deletes only incomplete
+convenience entry points. No test inventory or physical gfx1201 run changed.
+
+This deletion-bearing checkpoint strengthens Sections 14.3, 14.5, 14.7, and
+14.8. Each affected mode now exposes complete production operations while its
+test-only prefix/reference API remains physically mode-local. Broad pipeline
+and validation transactions, further target and mode locality, material
+whole-refactoring shrinkage, and the independent completion audit remain open.
+The goal therefore remains active.

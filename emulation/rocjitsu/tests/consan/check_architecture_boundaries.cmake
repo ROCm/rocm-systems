@@ -295,8 +295,20 @@ foreach(_file IN LISTS _extension_mode_sources)
 endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_inline_model.h.inc"
-    "ConSanMoiInlineReleaseClaim|ConSanMoiInlineVersionedReleaseState|ConSanMoiInlineReleaseClaimResult|ConSanMoiInlineReleaseTransactionEvent|consan_moi_inline_plan_release_claim|consan_moi_inline_release_transaction_is_sound|ConSanMoiInlineCausalTokenView|consan_moi_inline_capture_causal_snapshot|ConSanMoiInlineStableReleaseEvidence|ConSanMoiInlineQualificationExpectation|ConSanMoiInlineQualificationResult|consan_moi_inline_qualify_token_evidence|ConSanMoiInlineCausalImportPlan|consan_moi_inline_plan_causal_import"
+    "ConSanMoiInlineReleaseClaim|ConSanMoiInlineVersionedReleaseState|ConSanMoiInlineReleaseClaimResult|ConSanMoiInlineReleaseTransactionEvent|consan_moi_inline_plan_release_claim|consan_moi_inline_release_transaction_is_sound|consan_moi_inline_release_snapshot_is_stable|ConSanMoiInlineCausalTokenView|consan_moi_inline_capture_causal_snapshot|ConSanMoiInlineStableReleaseEvidence|ConSanMoiInlineQualificationExpectation|ConSanMoiInlineQualificationResult|consan_moi_inline_qualify_token_evidence|ConSanMoiInlineCausalImportPlan|consan_moi_inline_plan_causal_import"
     "host-only InlineShadow reference oracles must not return to the production report contract"
+)
+_consan_assert_match_count_at_most(
+    "${_consan_dir}/consan_moi_record_replay_model.h.inc"
+    "consan_moi_record_replay_access_records"
+    1
+    "production Record/Replay must expose only the complete replay boundary"
+)
+_consan_assert_match_count_at_most(
+    "${_consan_dir}/consan_moi_record_replay_model.cpp"
+    "consan_moi_record_replay_access_records"
+    1
+    "production Record/Replay must implement only the complete replay boundary"
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_inline_exact_model.h.inc"

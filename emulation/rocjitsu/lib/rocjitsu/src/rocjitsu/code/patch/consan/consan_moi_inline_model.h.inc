@@ -69,14 +69,6 @@ struct ConSanMoiInlineVersionedReleaseIdentity {
   return (version & 1u) != 0;
 }
 
-/// This validates only the version envelope around a field/snapshot read. The
-/// reader must separately validate every field and the complete snapshot.
-[[nodiscard]] constexpr bool consan_moi_inline_release_snapshot_is_stable(uint32_t version_before,
-                                                                          uint32_t version_after) {
-  return version_before == version_after &&
-         consan_moi_inline_release_version_is_ready(version_before);
-}
-
 enum class ConSanMoiInlineTokenEvidenceKind : uint8_t {
   Direct,
   Inherited,
