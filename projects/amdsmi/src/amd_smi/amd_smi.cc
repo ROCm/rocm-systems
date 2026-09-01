@@ -50,6 +50,7 @@
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "amd_smi/impl/amd_smi_test_internal.h"
+#include "amd_smi/impl/amd_smi_ualoe.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_uuid.h"
 #include "amd_smi/impl/xf86drm.h"
@@ -1457,6 +1458,18 @@ amdsmi_status_t amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processo
   }
   LOG_DEBUG(oam_ss);
 
+  // Retrieve Physical Accelerator ID (UALoE)
+  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
+#ifdef ENABLE_WSL_BACKEND
+  // get_mutex() indexes into the Linux RSMI device list, which WSL devices
+  // are never registered in; skip rather than lock a null mutex.
+  if (!gpu_device->backend())
+#endif
+  {
+    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
+    get_physical_acc_id_from_ualoe(gpu_device, &(info->physical_acc_id));
+  }
+
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -2431,6 +2444,7 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   info->target_graphics_version = std::numeric_limits<uint64_t>::max();
   info->subsystem_id = std::numeric_limits<uint32_t>::max();
   info->flags = 0;
+  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
 
   std::ostringstream ss;
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
@@ -2503,6 +2517,8 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   if (status == AMDSMI_STATUS_SUCCESS && tmp_oam_id != std::numeric_limits<uint16_t>::max()) {
     info->oam_id = static_cast<uint32_t>(tmp_oam_id);
   }
+
+  get_physical_acc_id_from_ualoe(gpu_device, &(info->physical_acc_id));
 
   auto tmp_num_of_compute_units = uint32_t(0);
   status = rsmi_wrapper(amd::smi::rsmi_dev_number_of_computes_get, processor_handle, 0,
@@ -4199,7 +4215,6 @@ amdsmi_status_t amdsmi_get_gpu_partition_metrics_info(amdsmi_processor_handle pr
   }
 
   copy_rsmi_gpu_metrics_to_amdsmi(rsmi_metrics, pgpu_metrics);
-  apply_gfx_activity_overrides(processor_handle, pgpu_metrics);
   return status;
 }
 
@@ -4229,7 +4244,6 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
   }
 
   copy_rsmi_gpu_metrics_to_amdsmi(rsmi_metrics, pgpu_metrics);
-  apply_gfx_activity_overrides(processor_handle, pgpu_metrics);
   return status;
 }
 
@@ -4687,14 +4701,7 @@ amdsmi_status_t amdsmi_reset_gpu(amdsmi_processor_handle processor_handle) {
 
 amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_handle,
                                             uint32_t* gpu_busy_percent) {
-  auto status = rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
-  if (status == AMDSMI_STATUS_SUCCESS && gpu_busy_percent != nullptr &&
-      is_gfx_activity_silenced(processor_handle)) {
-    // Sole output is gfx activity: return the N/A sentinel and report unsupported.
-    *gpu_busy_percent = std::numeric_limits<uint32_t>::max();
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
-  return status;
+  return rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
 }
 
 amdsmi_status_t amdsmi_get_vcn_busy_percent(amdsmi_processor_handle processor_handle,
@@ -4718,28 +4725,9 @@ amdsmi_status_t amdsmi_get_vcn_busy_percent(amdsmi_processor_handle processor_ha
 amdsmi_status_t amdsmi_get_utilization_count(amdsmi_processor_handle processor_handle,
                                              amdsmi_utilization_counter_t utilization_counters[],
                                              uint32_t count, uint64_t* timestamp) {
-  auto status = rsmi_wrapper(rsmi_utilization_count_get, processor_handle, 0,
-                             reinterpret_cast<rsmi_utilization_counter_t*>(utilization_counters),
-                             count, timestamp);
-  if (status == AMDSMI_STATUS_SUCCESS && utilization_counters != nullptr &&
-      is_gfx_activity_silenced(processor_handle)) {
-    uint32_t silenced = 0;
-    for (uint32_t i = 0; i < count; ++i) {
-      if (utilization_counters[i].type == AMDSMI_COARSE_GRAIN_GFX_ACTIVITY ||
-          utilization_counters[i].type == AMDSMI_FINE_GRAIN_GFX_ACTIVITY) {
-        utilization_counters[i].value = std::numeric_limits<uint64_t>::max();
-        utilization_counters[i].fine_value[0] = std::numeric_limits<uint64_t>::max();
-        utilization_counters[i].fine_value_count = 0;
-        ++silenced;
-      }
-    }
-    // Only unsupported when every requested counter was a silenced gfx type;
-    // a mixed request still returns its non-gfx values.
-    if (count > 0 && silenced == count) {
-      return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-  }
-  return status;
+  return rsmi_wrapper(rsmi_utilization_count_get, processor_handle, 0,
+                      reinterpret_cast<rsmi_utilization_counter_t*>(utilization_counters), count,
+                      timestamp);
 }
 
 amdsmi_status_t amdsmi_get_energy_count(amdsmi_processor_handle processor_handle,
