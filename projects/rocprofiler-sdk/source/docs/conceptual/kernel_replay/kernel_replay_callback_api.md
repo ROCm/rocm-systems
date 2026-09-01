@@ -9,8 +9,8 @@ it receives.
 
 The API is experimental. Its public header is
 `source/include/rocprofiler-sdk/experimental/kernel_replay.h`. The domain and payload are expected
-to change before a stable release. Command-line `rocprofv3` wiring is the stacked tool integration
-PR, not this SDK change.
+to change before a stable release. This page describes the SDK domain itself; `rocprofv3` exposes a
+narrower slice of it through its own command-line option.
 
 Decoupling replay from counter collection is the point of the design: a tool can use replay for
 hardware counters, kernel timing statistics, PC sampling, thread trace, SPM, or anything else, and
