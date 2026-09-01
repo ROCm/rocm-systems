@@ -276,6 +276,16 @@ _consan_assert_no_match(
     "ConSanMoiInlineAcquiredEpochTokenPublishResult|consan_moi_inline_publish_acquired_epoch_token|consan_moi_inline_acquired_epoch_orders|consan_moi_inline_acquired_epoch_orders_pair|consan_moi_inline_stable_token_orders\\("
     "host-only InlineShadow token reference oracles must not return to production shadow models"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_model.cpp"
+    "consan_moi_sampled_(publish_sync_metadata|publish_access_records|publish_causal_windows|replay_entries|replay_snapshots|replay_causal_windows|begin_causal_claim|commit_causal_claim|abort_causal_claim)"
+    "host-only Sampled publication and replay oracles must remain test-owned"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_shadow_models.h.inc"
+    "consan_moi_sampled_(publish_sync_metadata|publish_access_records|publish_causal_windows|replay_entries|replay_snapshots|replay_causal_windows|begin_causal_claim|commit_causal_claim|abort_causal_claim)"
+    "host-only Sampled publication and replay oracle declarations must remain test-owned"
+)
 file(READ "${ROCJITSU_SOURCE_DIR}/tests/patch/consan/analysis_test.cpp" _target_extension_test)
 file(
     READ

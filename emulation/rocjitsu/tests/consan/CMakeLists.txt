@@ -86,6 +86,7 @@ function(rj_add_consan_unit_sources target)
             patch/consan/moi_mode_planning_test.cpp
             patch/consan/moi_record_replay_model_test.cpp
             patch/consan/moi_record_replay_test.cpp
+            patch/consan/consan_sampled_model_test_support.cpp
             patch/consan/moi_sampled_test.cpp
             patch/consan/observation_plan_test.cpp
             patch/consan/pipeline_test.cpp

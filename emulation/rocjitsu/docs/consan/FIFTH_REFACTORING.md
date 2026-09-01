@@ -3319,6 +3319,7 @@ other mode-local duplication, architecture peepholes, placement and validation
 concentrations, and the independent deep-read completion audit remain open.
 The goal therefore remains active.
 
+
 ### 16.34 Convergence checkpoint 33: typed Sampled synchronization attempt boundary
 
 Checkpoint 32's dispatcher consolidation exposed the larger dependency around
@@ -6395,3 +6396,58 @@ tests under explicit test ownership. Cumulative production shrinkage reaches
 unproven at the whole-refactoring scale; broad placement and mutation buses,
 both extension exercises, and the independent completion audit remain open.
 The goal therefore remains active.
+
+### 16.82 Convergence checkpoint 81: Sampled publication/replay models are test components
+
+The mixed `consan_moi_model.cpp` deep read separated production Sampled
+authorities from host specification models. Sync metadata encoding is consumed
+by GPU emission; metadata and snapshot decoding, pending-acquire
+classification, and atomic attachment matching are consumed by the runtime
+report decoder. Those remain production. Nine other functions -- bounded sync
+publication, access/window publication, entry/snapshot/window replay, and
+causal claim/commit/abort -- had callers only in two unit-test files. They model
+device publication and replay examples but do not implement either production
+lowering or runtime report processing.
+
+The complete closed subsystem now compiles as the Sampled-owned test
+translation unit `consan_sampled_model_test_support.cpp`, behind the explicit
+`consan_sampled_model_test_support.h` contract. The two consuming tests include
+that contract directly. Its definitions and declarations are deleted from the
+production model and broad shadow-model contract; production ABI records remain
+because the real emitter and decoder use them. The architecture gate rejects
+all nine roots from both former production owners.
+
+| Signal | Checkpoint 81 | Cumulative change | Slice change from checkpoint 80 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 103,988 | **-988** | **-519** |
+| Nonblank production lines | 97,718 | **-1,366** | **-485** |
+| Production implementation lines | 90,016 | **-1,434** | **-478** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 168 / 52 | **-108 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 316 / 60 | +26 / +9 | 0 / 0 |
+| Sampled publication/replay oracle roots in production | **0** | n/a | **-9** |
+| Test inventory | **5,412** | **+67** | **+1 registered existing test** |
+
+Changing the test source manifest forced CMake to regenerate and exposed one
+existing ConSan test that the prior build-tree registration had not yet
+included. No test definition was added by this slice. The authoritative
+inventory is therefore 5,412 tests: 4,777 nonphysical and 635 physical. The
+complete `-j16` rebuild passed, as did all 15 focused Sampled publication,
+replay, claim, selection, and architecture-boundary tests. The periodic gate
+then passed all **4,777/4,777 nonphysical tests** in 203.45 seconds, including
+all 2,918 simulator tests over gfx942, gfx950, gfx1100, gfx1250, and gfx1201. No
+test was removed, disabled, renamed, or replaced, and no physical gfx1201 test
+was run.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.7 through 14.9. Sampled
+reference behavior is physically skippable from production and has one
+mode-named test owner, while its genuinely shared ABI and production encode/
+decode authorities remain single implementations. Cumulative shrinkage reaches
+1,434 production implementation lines. The neighboring Record/Replay capture
+model has the same apparent ownership problem but shares internal replay
+helpers with the runtime analyzer and requires a separate dependency-closure
+migration. Broad placement and mutation buses, both extension exercises, and
+the independent completion audit remain open. The goal therefore remains
+active.
