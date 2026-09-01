@@ -49,6 +49,7 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
     return false;
   }
   if (budget->already_exceeded) {
+    result.transform_failure_cause = ConSanTransformFailureCause::PatchedImageGrowthLimit;
     result.patched_image_growth_rejections.push_back(
         {.operation = std::string(operation),
          .policy = options.patched_image_growth_limit,
@@ -71,6 +72,7 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
     return true;
 
   if (replacement.outcome() == TextReplacementOutcome::FileGrowthLimitExceeded) {
+    result.transform_failure_cause = ConSanTransformFailureCause::PatchedImageGrowthLimit;
     const size_t transaction_growth = *replacement.required_file_growth();
     const size_t required_total =
         util::saturating_add(budget->existing_growth_bytes, transaction_growth);

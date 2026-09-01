@@ -8514,6 +8514,118 @@ TEST(ConSanMoi, Cdna4FullPressureUsesProvenHybridPersistentRegisterHoles) {
   })) << testing::PrintToString(colliding.warnings);
 }
 
+TEST(ConSanMoi, Cdna4RegisterSaturatedRecordReplayUsesPrivateDispatchIdentity) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto access =
+      build_cdna4_ds_store_b32(/*vaddr=*/2u, /*vdata=*/3u, /*byte_offset=*/0u, kArch);
+  const auto barrier = build_cdna4_s_barrier(kArch);
+  ASSERT_TRUE(access && barrier);
+
+  const auto make_fixture = [&](bool scalar_pressure) {
+    std::vector<uint32_t> words(768u, build_s_nop(0u, kArch));
+    size_t cursor = 0u;
+    for (size_t access_index = 0u; access_index < 5u; ++access_index) {
+      std::ranges::copy(*access, words.begin() + static_cast<ptrdiff_t>(cursor));
+      cursor += access->size();
+      if (access_index < 3u)
+        words[cursor++] = *barrier;
+    }
+    if (scalar_pressure) {
+      // Mirror the issue reproducer's empty-asm clobber: the descriptor declares
+      // all 106 scalar resources, preventing a persistent dispatch-ID pair, but
+      // those registers are not simultaneously live at the LDS/barrier sites.
+      // Site-local transient instrumentation state may therefore still use a
+      // liveness-proven scalar window.
+      words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/99u, kArch);
+    }
+    words.back() = build_s_endpgm(kArch);
+    std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+        words, scalar_pressure ? "gfx950_sgpr_pressure" : "gfx950_sgpr_control",
+        /*vgpr_granulated=*/0u);
+    mutate_first_kernel_descriptor(bytes, [&](KD &descriptor) {
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                      kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                      scalar_pressure ? 13u : 1u);
+    });
+    return bytes;
+  };
+
+  const ConSanMoiAutoReportPlan report_plan =
+      plan_consan_moi_auto_report({.engine = ConSanMoiEngine::RecordReplay,
+                                   .access_range_count = 5u,
+                                   .barrier_event_count = 3u});
+  ASSERT_TRUE(report_plan.complete());
+  const auto layout = consan_moi_auto_report_layout_override(report_plan);
+  ASSERT_TRUE(layout);
+
+  const auto instrument = [&](const std::vector<uint8_t> &bytes) {
+    ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+    options.max_patches = 8u;
+    options.moi_track_barriers = true;
+    options.moi_track_atomics = false;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = report_plan.required_bytes;
+    options.moi_report_layout = *layout;
+    return try_patch_consan(bytes, options);
+  };
+
+  const ConSanResult control = instrument(make_fixture(false));
+  ASSERT_TRUE(consan_patch_succeeded(control)) << testing::PrintToString(control.errors);
+  ASSERT_TRUE(control.modified) << testing::PrintToString(control.warnings);
+  EXPECT_TRUE(control.resolved_moi_dispatch_id_sgpr);
+
+  const ConSanResult pressure = instrument(make_fixture(true));
+  ASSERT_TRUE(consan_patch_succeeded(pressure))
+      << "warnings=" << testing::PrintToString(pressure.warnings)
+      << " errors=" << testing::PrintToString(pressure.errors)
+      << " plans=" << testing::PrintToString(pressure.resource_plans);
+  for (const ConSanCandidateResourcePlan &plan : pressure.resource_plans) {
+    EXPECT_NE(plan.source, ConSanRegisterAllocationSource::Unsupported)
+        << "site=" << static_cast<unsigned>(plan.site_kind) << " offset=" << plan.text_offset
+        << " reason=" << consan_register_plan_reason_name(plan.reason)
+        << " scratch_count=" << plan.scratch_vgpr_count
+        << " current_vgprs=" << plan.current_vgpr_count
+        << " max_referenced_vgprs=" << plan.max_referenced_vgpr_count
+        << " ordinary_limit=" << plan.ordinary_vgpr_limit;
+  }
+  ASSERT_TRUE(pressure.modified) << "warnings=" << testing::PrintToString(pressure.warnings)
+                                 << " plans=" << testing::PrintToString(pressure.resource_plans)
+                                 << " dispositions="
+                                 << testing::PrintToString(pressure.site_dispositions);
+  EXPECT_TRUE(pressure.final_validation_passed);
+  EXPECT_FALSE(pressure.resolved_moi_dispatch_id_sgpr);
+  EXPECT_TRUE(pressure.moi_private_epoch_automatic);
+  EXPECT_EQ(std::ranges::count_if(pressure.site_dispositions,
+                                  [](const auto &site) {
+                                    return site.site_kind == ConSanResourceSiteKind::Access &&
+                                           site.lowering_outcome ==
+                                               ConSanSiteLoweringOutcome::Patched;
+                                  }),
+            5u);
+  EXPECT_EQ(std::ranges::count_if(pressure.site_dispositions,
+                                  [](const auto &site) {
+                                    return site.site_kind == ConSanResourceSiteKind::Barrier &&
+                                           site.lowering_outcome ==
+                                               ConSanSiteLoweringOutcome::Patched;
+                                  }),
+            3u);
+  EXPECT_TRUE(std::ranges::none_of(pressure.site_dispositions, [](const auto &site) {
+    return site.resource_reason == ConSanRegisterPlanReason::NoLegalWindow;
+  }));
+  const auto private_prologue =
+      std::ranges::find(pressure.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
+                        &ConSanPatchInfo::kind);
+  ASSERT_NE(private_prologue, pressure.patches.end());
+  EXPECT_TRUE(private_prologue->persistent_dispatch_id_private_offset);
+  EXPECT_TRUE(std::ranges::all_of(pressure.patches, [](const ConSanPatchInfo &patch) {
+    if (patch.kind != ConSanPatchKind::InlineMoiAccessRecordStore &&
+        patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore &&
+        patch.kind != ConSanPatchKind::TrampolineMoiBarrierRecord)
+      return true;
+    return patch.persistent_dispatch_id_private_offset.has_value();
+  }));
+}
+
 TEST(ConSanMoi, CdnaRecordReplayMovesOnlyEmptyAccumulatorBoundaryForDynamicStackState) {
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     for (const uint8_t agpr_count : {0u, 1u}) {

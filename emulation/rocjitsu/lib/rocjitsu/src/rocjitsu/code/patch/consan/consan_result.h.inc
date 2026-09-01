@@ -84,6 +84,25 @@ struct ConSanPatchedImageGrowthRejection {
   size_t limit_bytes = 0;
 };
 
+/// Stable root cause for a failed transform that reaches the loader hook.
+/// This is deliberately separate from human-readable errors so structured
+/// rejection diagnostics never depend on prose matching.
+enum class ConSanTransformFailureCause : uint8_t {
+  PatchedImageGrowthLimit,
+  OverlappingPatchRanges,
+};
+
+[[nodiscard]] constexpr std::string_view
+consan_transform_failure_cause_name(ConSanTransformFailureCause cause) {
+  switch (cause) {
+  case ConSanTransformFailureCause::PatchedImageGrowthLimit:
+    return "patched-image-growth-limit";
+  case ConSanTransformFailureCause::OverlappingPatchRanges:
+    return "overlapping-patch-ranges";
+  }
+  return "unknown";
+}
+
 /// Aggregate branch-only routing activity. Pair attempts and route-failure
 /// counters count submitted and rejected request pairs, respectively. Plan
 /// calls count router invocations, including LDS convergence iterations.
@@ -493,6 +512,9 @@ struct ConSanResult {
   std::vector<ConSanFunctionInfo> functions;
   std::vector<ConSanFaultSite> fault_sites;
   std::vector<ConSanPatchedImageGrowthRejection> patched_image_growth_rejections;
+  /// Machine-readable cause paired with transform errors at the loader
+  /// boundary. Empty for failures that do not yet have a stable taxonomy.
+  std::optional<ConSanTransformFailureCause> transform_failure_cause;
   std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
   std::vector<ConSanFaultMutationPlan> fault_plans;
   std::vector<ConSanSyncEvent> sync_events;

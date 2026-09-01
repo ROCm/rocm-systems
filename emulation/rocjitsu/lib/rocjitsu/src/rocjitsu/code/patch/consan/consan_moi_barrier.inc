@@ -2551,16 +2551,19 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     }
     std::optional<MoiPrivateEpochLayout> private_layout;
     if (candidate_options.automatic_moi_private_epoch) {
-      private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
-                                                      /*include_owner=*/
-                                                      candidate_options.moi_owner_source ==
-                                                          ConSanMoiOwnerSource::WorkitemId,
-                                                      /*include_workgroup_key=*/false,
-                                                      /*include_record_replay_workgroup=*/true);
+      private_layout = build_moi_private_epoch_layout(
+          result, *resources, arch, result.warnings,
+          /*include_owner=*/
+          candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
+          /*include_workgroup_key=*/false,
+          /*include_record_replay_workgroup=*/true,
+          /*include_dispatch_id=*/
+          candidate_options.automatic_moi_private_dispatch_id);
       if (!private_layout)
         continue;
       candidate_options.moi_record_replay_workgroup_private_offsets =
           private_layout->record_replay_workgroup_offsets;
+      candidate_options.moi_dispatch_id_private_offset = private_layout->dispatch_id_offset;
     }
     if (!apply_record_replay_entry_workgroup_assignment(candidate_options,
                                                         resources->owner_descriptor_file_offsets)) {
@@ -2740,6 +2743,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     if (planned.private_layout) {
       candidate_options.moi_record_replay_workgroup_private_offsets =
           planned.private_layout->record_replay_workgroup_offsets;
+      candidate_options.moi_dispatch_id_private_offset = planned.private_layout->dispatch_id_offset;
     }
     if (!apply_moi_transient_sgpr_assignment(candidate_options,
                                              planned.resources.owner_descriptor_file_offsets)) {
@@ -3020,6 +3024,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     if (planned.private_layout) {
       info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
       info.persistent_owner_private_offset = planned.private_layout->owner_offset;
+      info.persistent_dispatch_id_private_offset = planned.private_layout->dispatch_id_offset;
       info.persistent_record_replay_workgroup_private_offsets =
           planned.private_layout->record_replay_workgroup_offsets;
       info.persistent_private_state_end = planned.private_layout->ephemeral_base;

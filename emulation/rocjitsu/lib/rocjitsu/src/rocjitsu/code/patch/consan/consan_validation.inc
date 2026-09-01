@@ -203,7 +203,8 @@ struct InventoryRange {
 
 [[nodiscard]] std::vector<std::string>
 validate_patch_byte_accounting(const AmdGpuCodeObject &original,
-                               const AmdGpuCodeObject &replacement, const ConSanResult &result) {
+                               const AmdGpuCodeObject &replacement, const ConSanResult &result,
+                               std::optional<ConSanTransformFailureCause> *failure_cause) {
   std::vector<std::string> errors;
   if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1) {
     errors.emplace_back(
@@ -334,6 +335,8 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
       if (!exact_alias && !nested_cross_phase && !nested_sc_relay_donor &&
           !nested_composed_access_atomic && !nested_composed_sampled_access_atomic &&
           !nested_composed_entry_prefix) {
+        if (failure_cause)
+          *failure_cause = ConSanTransformFailureCause::OverlappingPatchRanges;
         errors.emplace_back(
             "ConSan final validation found partially overlapping patch ranges: existing=" +
             std::to_string(existing->bytes.begin) + "-" + std::to_string(existing->bytes.end) +
@@ -4422,7 +4425,8 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
 }
 
 [[nodiscard]] std::vector<std::string>
-validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanResult &result) {
+validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanResult &result,
+                          std::optional<ConSanTransformFailureCause> *failure_cause = nullptr) {
   const major_image_ownership::ScopedPhase validation_phase(
       major_image_ownership::Phase::FinalValidation, /*only_if_none=*/true);
   std::vector<std::string> errors;
@@ -4483,7 +4487,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   if (result.patches.empty())
     errors.emplace_back("ConSan final validation found no patch inventory for a modified result");
   std::vector<std::string> accounting_errors =
-      validate_patch_byte_accounting(original, replacement, result);
+      validate_patch_byte_accounting(original, replacement, result, failure_cause);
   errors.insert(errors.end(), std::make_move_iterator(accounting_errors.begin()),
                 std::make_move_iterator(accounting_errors.end()));
   std::vector<std::string> decoding_errors = validate_patch_decoding(replacement, result);
@@ -4580,7 +4584,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
       result.applied_fault_logical_identity.reset();
     } else {
       std::vector<std::string> validation_errors =
-          validate_final_consan_elf(original_bytes, result);
+          validate_final_consan_elf(original_bytes, result, &result.transform_failure_cause);
       result.errors.insert(result.errors.end(), std::make_move_iterator(validation_errors.begin()),
                            std::make_move_iterator(validation_errors.end()));
       if (result.errors.empty()) {

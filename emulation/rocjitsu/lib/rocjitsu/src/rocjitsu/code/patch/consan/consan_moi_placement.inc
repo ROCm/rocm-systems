@@ -5544,6 +5544,26 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
     return false;
   }
   if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      options.moi_engine == ConSanMoiEngine::RecordReplay &&
+      std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
+        return plan.source != ConSanRegisterAllocationSource::Unsupported;
+      })) {
+    // Record/Replay already has owner-resolved private persistent layouts for
+    // fixed-stack CDNA kernels. Route dispatch identity through the same
+    // entry-captured prefix when no scalar pair survives arbitrary guest code.
+    // Dynamic-stack components cannot use address-free private state; the
+    // marker instead makes their later persistent-state pass allocate an
+    // entry-captured VGPR pair.
+    options.automatic_moi_private_dispatch_id = true;
+    options.moi_init_owner_epoch = true;
+    options.automatic_moi_private_epoch = true;
+    result.moi_private_epoch_automatic = true;
+    result.warnings.emplace_back(
+        "ConSan MOI selected owner-private hardware dispatch-ID state because no persistent "
+        "SGPR pair fits");
+    return true;
+  }
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       options.moi_engine == ConSanMoiEngine::InlineShadow &&
       std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
         return plan.source != ConSanRegisterAllocationSource::Unsupported &&

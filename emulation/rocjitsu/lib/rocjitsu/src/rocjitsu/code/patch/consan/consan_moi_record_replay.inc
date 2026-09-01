@@ -31,7 +31,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   if (options.max_patches == 0 || layout.access_record_capacity == 0)
     return;
   if (!options.moi_dynamic_access_records && layout.record_replay_access_dispatch_bank_count > 1u &&
-      !moi_has_runtime_hardware_dispatch_id(options)) {
+      !moi_has_runtime_hardware_dispatch_id(options) &&
+      !options.automatic_moi_private_dispatch_id) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.warnings.emplace_back(
         "ConSan MOI automatic Record/Replay identity tables require runtime hardware dispatch "
@@ -107,6 +108,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     std::optional<uint32_t> private_epoch_offset;
     std::optional<uint32_t> private_owner_offset;
     std::optional<uint16_t> private_owner_shift;
+    std::optional<uint32_t> private_dispatch_id_offset;
     ConSanMoiPersistentWorkgroupPrivateOffsets private_record_replay_workgroup_offsets;
     uint32_t persistent_private_state_end = 0;
     uint32_t required_private_bytes = 0;
@@ -894,17 +896,23 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         auto [cached, inserted] =
             private_layout_by_descriptor.try_emplace(descriptor, std::nullopt);
         if (inserted) {
-          cached->second = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
-                                                          /*include_owner=*/persist_workitem_owner,
-                                                          /*include_workgroup_key=*/false,
-                                                          /*include_record_replay_workgroup=*/true);
+          cached->second =
+              build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
+                                             /*include_owner=*/persist_workitem_owner,
+                                             /*include_workgroup_key=*/false,
+                                             /*include_record_replay_workgroup=*/true,
+                                             /*include_dispatch_id=*/
+                                             candidate_options.automatic_moi_private_dispatch_id);
         }
         private_layout = cached->second;
       } else {
-        private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
-                                                        /*include_owner=*/persist_workitem_owner,
-                                                        /*include_workgroup_key=*/false,
-                                                        /*include_record_replay_workgroup=*/true);
+        private_layout =
+            build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
+                                           /*include_owner=*/persist_workitem_owner,
+                                           /*include_workgroup_key=*/false,
+                                           /*include_record_replay_workgroup=*/true,
+                                           /*include_dispatch_id=*/
+                                           candidate_options.automatic_moi_private_dispatch_id);
       }
       if (private_layout && private_layout->owner_offset)
         private_owner_shift = common_moi_private_owner_shift(bytes, *resources, result.warnings);
@@ -919,6 +927,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     if (private_layout) {
       candidate_options.moi_record_replay_workgroup_private_offsets =
           private_layout->record_replay_workgroup_offsets;
+      candidate_options.moi_dispatch_id_private_offset = private_layout->dispatch_id_offset;
     }
     const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
         options, resources->owner_descriptor_file_offsets);
@@ -1297,6 +1306,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       planned.private_epoch_offset = private_layout->epoch_offset;
       planned.private_owner_offset = private_layout->owner_offset;
       planned.private_owner_shift = private_owner_shift;
+      planned.private_dispatch_id_offset = private_layout->dispatch_id_offset;
       planned.private_record_replay_workgroup_offsets =
           private_layout->record_replay_workgroup_offsets;
       planned.persistent_private_state_end = private_layout->ephemeral_base;
@@ -1846,6 +1856,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           planned_patch.spill_overlaps_guest_operands;
       candidate_options.moi_record_replay_workgroup_private_offsets =
           planned_patch.private_record_replay_workgroup_offsets;
+      candidate_options.moi_dispatch_id_private_offset = planned_patch.private_dispatch_id_offset;
       if (!apply_moi_transient_sgpr_assignment(
               candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
           !apply_record_replay_entry_workgroup_assignment(
@@ -1872,6 +1883,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
       info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
       info.persistent_owner_private_offset = planned_patch.private_owner_offset;
+      info.persistent_dispatch_id_private_offset = planned_patch.private_dispatch_id_offset;
       info.persistent_record_replay_workgroup_private_offsets =
           planned_patch.private_record_replay_workgroup_offsets;
       if (planned_patch.private_epoch_offset)
@@ -2216,6 +2228,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                 planned_patch.spill_overlaps_guest_operands;
             candidate_options.moi_record_replay_workgroup_private_offsets =
                 planned_patch.private_record_replay_workgroup_offsets;
+            candidate_options.moi_dispatch_id_private_offset =
+                planned_patch.private_dispatch_id_offset;
             if (!apply_moi_transient_sgpr_assignment(
                     candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
                 !apply_record_replay_entry_workgroup_assignment(
@@ -2240,6 +2254,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                 planned_patch.resources.owner_descriptor_file_offsets;
             info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
             info.persistent_owner_private_offset = planned_patch.private_owner_offset;
+            info.persistent_dispatch_id_private_offset = planned_patch.private_dispatch_id_offset;
             info.persistent_record_replay_workgroup_private_offsets =
                 planned_patch.private_record_replay_workgroup_offsets;
             if (planned_patch.private_epoch_offset)

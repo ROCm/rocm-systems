@@ -4004,6 +4004,31 @@ void run_hook_load_case(const ConSanHookProfile &profile, bool fail_closed,
   }
 }
 
+TEST(HsaHooksUnitTest, ConSanTransformRejectionReportsStableTypedCause) {
+  for (const auto [cause, expected] : std::array{
+           std::pair{rocjitsu::ConSanTransformFailureCause::PatchedImageGrowthLimit,
+                     std::string_view{"patched-image-growth-limit"}},
+           std::pair{rocjitsu::ConSanTransformFailureCause::OverlappingPatchRanges,
+                     std::string_view{"overlapping-patch-ranges"}},
+       }) {
+    SCOPED_TRACE(expected);
+    rocjitsu::ConSanResult result;
+    result.outcome = rocjitsu::ConSanTransformOutcome::Invalid;
+    result.errors.emplace_back("synthetic typed transform failure");
+    result.transform_failure_cause = cause;
+
+    testing::internal::CaptureStderr();
+    run_hook_load_case(kConSanHookProfiles[0], /*fail_closed=*/true, std::move(result),
+                       HSA_STATUS_ERROR_INVALID_CODE_OBJECT, /*expected_loaded_reader=*/0u);
+    const std::string log = testing::internal::GetCapturedStderr();
+    EXPECT_NE(log.find("ConSan load rejection reader=101 reason=transform-error status=4112 "
+                       "policy=default action=return-error exit_code=none cause=" +
+                       std::string(expected)),
+              std::string::npos)
+        << log;
+  }
+}
+
 void reset_pool_blocker(bool enabled) {
   std::lock_guard lock(g_pool_mutex);
   g_block_guest_pool_iteration = enabled;

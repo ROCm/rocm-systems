@@ -1054,6 +1054,17 @@ public:
     return store_vgpr(offset, temporary_vgpr_);
   }
 
+  [[nodiscard]] bool store_private(uint32_t offset, uint32_t private_offset) {
+    const auto load =
+        instrumentation::build_private_load_b32(temporary_vgpr_, private_offset, arch_);
+    const auto wait = instrumentation::build_s_wait_private_load0(arch_);
+    if (!load || !wait)
+      return false;
+    words_.insert(words_.end(), load->begin(), load->end());
+    words_.push_back(*wait);
+    return store_vgpr(offset, temporary_vgpr_);
+  }
+
   [[nodiscard]] bool
   store_workgroup(uint32_t offset, const ConSanMoiWorkgroupSource &source,
                   MissingWorkgroupSource missing = MissingWorkgroupSource::Skip) {
@@ -1075,11 +1086,13 @@ private:
 struct ConSanMoiReportDispatchIdWordSource {
   std::optional<uint16_t> sgpr;
   std::optional<uint16_t> vgpr;
+  std::optional<uint32_t> private_offset;
   uint32_t literal = 0;
 };
 
 [[nodiscard]] bool moi_has_runtime_hardware_dispatch_id(const ConSanOptions &options) {
-  return options.moi_dispatch_id_sgpr || options.moi_dispatch_id_vgpr;
+  return options.moi_dispatch_id_sgpr || options.moi_dispatch_id_vgpr ||
+         options.moi_dispatch_id_private_offset;
 }
 
 // Sampled reports are already isolated by their versioned report-buffer
@@ -1105,16 +1118,26 @@ moi_report_dispatch_id_word_source(const ConSanOptions &options, bool high_word)
   if (options.moi_dispatch_id_sgpr) {
     return ConSanMoiReportDispatchIdWordSource{
         .sgpr = static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + (high_word ? 1u : 0u)),
-        .vgpr = std::nullopt};
+        .vgpr = std::nullopt,
+        .private_offset = std::nullopt};
   }
   if (options.moi_dispatch_id_vgpr) {
     return ConSanMoiReportDispatchIdWordSource{
         .sgpr = std::nullopt,
-        .vgpr = static_cast<uint16_t>(*options.moi_dispatch_id_vgpr + (high_word ? 1u : 0u))};
+        .vgpr = static_cast<uint16_t>(*options.moi_dispatch_id_vgpr + (high_word ? 1u : 0u)),
+        .private_offset = std::nullopt};
+  }
+  if (options.moi_dispatch_id_private_offset) {
+    return ConSanMoiReportDispatchIdWordSource{
+        .sgpr = std::nullopt,
+        .vgpr = std::nullopt,
+        .private_offset = static_cast<uint32_t>(*options.moi_dispatch_id_private_offset +
+                                                (high_word ? SpillManager::kSlotBytes : 0u))};
   }
   return ConSanMoiReportDispatchIdWordSource{
       .sgpr = std::nullopt,
       .vgpr = std::nullopt,
+      .private_offset = std::nullopt,
       .literal = high_word ? static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u)
                            : static_cast<uint32_t>(options.moi_report_dispatch_id)};
 }
@@ -1123,7 +1146,7 @@ moi_report_dispatch_id_word_source(const ConSanOptions &options, bool high_word)
 moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSource &source,
                                         ConSanMoiLiteralDispatchIdPolicy policy,
                                         rj_code_arch_t arch) {
-  return source.sgpr || source.vgpr ||
+  return source.sgpr || source.vgpr || source.private_offset ||
          policy == ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture ||
          consan_arch_uses_literal_dispatch_identity(arch);
 }
@@ -1143,6 +1166,16 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
   }
   if (source.vgpr) {
     words.push_back(build_v_mov_b32_e32(destination_vgpr, vector_source_vgpr(*source.vgpr), arch));
+    return true;
+  }
+  if (source.private_offset) {
+    const auto load =
+        instrumentation::build_private_load_b32(destination_vgpr, *source.private_offset, arch);
+    const auto wait = instrumentation::build_s_wait_private_load0(arch);
+    if (!load || !wait)
+      return false;
+    words.insert(words.end(), load->begin(), load->end());
+    words.push_back(*wait);
     return true;
   }
   const auto materialize =
@@ -1177,6 +1210,12 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
     expected = *source.sgpr;
   } else if (source.vgpr) {
     expected = vector_source_vgpr(*source.vgpr);
+  } else if (source.private_offset) {
+    if (!append_moi_report_dispatch_id_word(words, options, clobberable_literal_temporary_vgpr,
+                                            high_word, arch, policy)) {
+      return false;
+    }
+    expected = vector_source_vgpr(clobberable_literal_temporary_vgpr);
   } else {
     // The literal path clobbers this temporary. Every caller must pass a dead
     // VGPR whose next use either overwrites or explicitly reloads it.
@@ -1204,9 +1243,10 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
     if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
       return false;
     const uint32_t offset = low_offset + (high_word ? sizeof(uint32_t) : 0u);
-    if (source.sgpr   ? !record.store_sgpr(offset, *source.sgpr)
-        : source.vgpr ? !record.store_vgpr(offset, *source.vgpr)
-                      : !record.store_literal(offset, source.literal)) {
+    if (source.sgpr             ? !record.store_sgpr(offset, *source.sgpr)
+        : source.vgpr           ? !record.store_vgpr(offset, *source.vgpr)
+        : source.private_offset ? !record.store_private(offset, *source.private_offset)
+                                : !record.store_literal(offset, source.literal)) {
       return false;
     }
   }
@@ -1359,6 +1399,20 @@ inline constexpr DynamicRecordLayout kDynamicDiagnosticRecordLayout = {
   return true;
 }
 
+[[nodiscard]] bool append_dynamic_record_store_u32_private(
+    std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t field_address,
+    uint32_t private_offset, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch) {
+  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + layout.value_vgpr_offset);
+  const auto load = instrumentation::build_private_load_b32(value_vgpr, private_offset, arch);
+  const auto wait = instrumentation::build_s_wait_private_load0(arch);
+  if (!load || !wait)
+    return false;
+  words.insert(words.end(), load->begin(), load->end());
+  words.push_back(*wait);
+  return append_dynamic_record_store_u32_vgpr(words, layout, field_address, value_vgpr, slot_vgpr,
+                                              scratch_vgpr, arch);
+}
+
 [[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
     std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
     const ConSanOptions &options, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch,
@@ -1375,6 +1429,10 @@ inline constexpr DynamicRecordLayout kDynamicDiagnosticRecordLayout = {
         : source.vgpr
             ? append_dynamic_record_store_u32_vgpr(words, layout, field_address, *source.vgpr,
                                                    slot_vgpr, scratch_vgpr, arch)
+        : source.private_offset
+            ? append_dynamic_record_store_u32_private(words, layout, field_address,
+                                                      *source.private_offset, slot_vgpr,
+                                                      scratch_vgpr, arch)
             : append_dynamic_record_store_u32_literal(words, layout, field_address, source.literal,
                                                       slot_vgpr, scratch_vgpr, arch);
     if (!stored)

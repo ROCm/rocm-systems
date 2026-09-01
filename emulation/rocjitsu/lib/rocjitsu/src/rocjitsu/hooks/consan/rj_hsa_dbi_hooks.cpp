@@ -3689,10 +3689,9 @@ hsa_status_t HSA_API rj_dbi_executable_symbol_get_info(hsa_executable_symbol_t s
 
 constexpr int kStrictLoadRejectionExitCode = 92;
 
-[[nodiscard]] hsa_status_t
-reject_code_object_load(const HookConfig &config, hsa_status_t status, uint64_t reader,
-                        std::string_view reason,
-                        FaultInstallationEvidence &fault_installation_evidence) {
+[[nodiscard]] hsa_status_t reject_code_object_load(
+    const HookConfig &config, hsa_status_t status, uint64_t reader, std::string_view reason,
+    FaultInstallationEvidence &fault_installation_evidence, std::string_view cause = {}) {
   const bool terminate = config.policy == HookPolicy::Strict;
   // Strict policy exits without unwinding this stack. Flush any applied
   // mutation evidence before the process terminates so fault qualification can
@@ -3700,10 +3699,13 @@ reject_code_object_load(const HookConfig &config, hsa_status_t status, uint64_t 
   fault_installation_evidence.emit();
   std::fprintf(stderr,
                "[rocjitsu-dbi-hooks] ConSan load rejection reader=%llu reason=%.*s "
-               "status=%d policy=%s action=%s exit_code=%s\n",
+               "status=%d policy=%s action=%s exit_code=%s",
                static_cast<unsigned long long>(reader), static_cast<int>(reason.size()),
                reason.data(), static_cast<int>(status), hook_policy_name(config.policy),
                terminate ? "terminate" : "return-error", terminate ? "92" : "none");
+  if (!cause.empty())
+    std::fprintf(stderr, " cause=%.*s", static_cast<int>(cause.size()), cause.data());
+  std::fputc('\n', stderr);
   std::fflush(stderr);
   // A caller that ignores the HSA code-object load error can retain a null
   // kernel symbol and crash later during launch. HIP does this for some
@@ -4471,9 +4473,12 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       for (const std::string &error : patch_result.errors)
         std::fprintf(stderr, "[rocjitsu-dbi-hooks] %s\n", error.c_str());
       if (config->fail_closed)
-        return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
-                                       code_object_reader.handle, "transform-error",
-                                       fault_installation_evidence);
+        return reject_code_object_load(
+            *config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT, code_object_reader.handle,
+            "transform-error", fault_installation_evidence,
+            patch_result.transform_failure_cause ? rocjitsu::consan_transform_failure_cause_name(
+                                                       *patch_result.transform_failure_cause)
+                                                 : std::string_view{});
     }
     if (install_action == rocjitsu::ConSanInstallAction::Reject) {
       std::fprintf(stderr,

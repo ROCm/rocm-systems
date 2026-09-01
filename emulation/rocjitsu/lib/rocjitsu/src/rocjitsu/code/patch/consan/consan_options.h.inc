@@ -572,6 +572,10 @@ struct ConSanOptions {
   std::optional<uint16_t> moi_owner_sgpr;
   std::optional<uint16_t> moi_dispatch_id_sgpr;
   std::optional<uint16_t> moi_dispatch_id_vgpr;
+  /// Site-local private-memory representation selected after entry capture.
+  /// Unlike the SGPR/VGPR forms, this offset is populated only while emitting
+  /// one owner-resolved probe.
+  std::optional<uint32_t> moi_dispatch_id_private_offset;
   std::optional<uint16_t> moi_owner_vgpr;
   std::optional<uint16_t> moi_epoch_vgpr;
   /// Uniform persistent state used when a dynamic-stack MOI owner has no

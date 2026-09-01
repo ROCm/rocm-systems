@@ -497,6 +497,8 @@ TEST(ConSan, RelativeGrowthLimitRejectsAndAdmitsAtExactPercentageBoundary) {
       " bytes (policy input-percent=" + std::to_string(admitting_percent - 1u) +
       ", original-input-image-bytes=" + std::to_string(fixture.bytes.size()) + ")";
   EXPECT_FALSE(rejected.modified);
+  EXPECT_EQ(rejected.transform_failure_cause,
+            ConSanTransformFailureCause::PatchedImageGrowthLimit);
   EXPECT_NE(std::ranges::find(rejected.errors, expected), rejected.errors.end())
       << testing::PrintToString(rejected.errors);
   ASSERT_EQ(rejected.patched_image_growth_rejections.size(), 1u);
@@ -533,6 +535,8 @@ TEST(ConSan, AbsoluteGrowthLimitReportsStructuredExactRejection) {
       " bytes (policy absolute-bytes=" + std::to_string(required_growth - 1u) + ")";
   EXPECT_NE(std::ranges::find(rejected.errors, expected), rejected.errors.end())
       << testing::PrintToString(rejected.errors);
+  EXPECT_EQ(rejected.transform_failure_cause,
+            ConSanTransformFailureCause::PatchedImageGrowthLimit);
   ASSERT_EQ(rejected.patched_image_growth_rejections.size(), 1u);
   EXPECT_EQ(rejected.patched_image_growth_rejections.front().required_total_growth_bytes,
             required_growth);
