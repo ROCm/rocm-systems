@@ -43,10 +43,13 @@ deliberate:
   snapshot because a single pass is the ordinary path.
 - **Localized start/stop as function pointers on the PASS payload**, mirroring
   `rocprofiler_start_context` / `rocprofiler_stop_context`, rather than a new public API.
-  Contexts are configured and started globally before replay; the toggles only mask which
-  already-active contexts participate in each pass.
-- **No pass-count environment variable.** A tool (including the stacked `rocprofv3` integration)
-  derives N itself — for example from `--pmc` groups per agent.
+  There is no local way to configure a service. Every context a tool wants on any pass is
+  configured and started globally, before replay, exactly as it would be without replay; the
+  toggles only mask which of those already-active contexts participate in each pass. A toggle
+  cannot promote a context that is globally stopped, and a context the tool never masks stays
+  active on every pass.
+- **No pass-count environment variable.** A tool derives N itself — `rocprofv3`, for example, from
+  its `--pmc` groups per agent.
 
 `ROCPROFILER_KERNEL_REPLAY_SNAPSHOT` and `ROCPROFILER_KERNEL_REPLAY_RESTORE` are TODOs in
 `fwd.h` for tool visibility into those phases; they are not implemented.
@@ -105,12 +108,17 @@ Replay serializes dispatches **on the agent** through the per-agent reader/write
 process-wide `QueueController::enable_serialization()` / `batch_packets` path used by counters, SPM,
 and thread trace. Other agents are not blocked.
 
+Passes are serialized within the loop as well: each pass drains its async completion handler before
+the next `PASS` `PHASE_ENTER`, so two passes of the same dispatch never overlap. That is what makes
+the between-pass restore safe, and it is why a replayed dispatch costs roughly N times a normal one
+plus the snapshot and restore copies.
+
 ## Snapshot design choice
 
-An earlier prototype hashed dirty pages and stored snapshots on disk. This design copies every
-tracked region into host RAM and writes it all back. Host-side and/or device-side hashing of dirty
-regions is expected in a future version so restore cost tracks bytes mutated rather than the whole
-footprint. See [Memory snapshot](kernel_replay_memory_snapshot.md).
+This design copies every tracked region into host RAM and writes it all back. It does not hash dirty
+pages and does not spill snapshots to disk. Host-side and/or device-side hashing of dirty regions is
+expected in a future version so restore cost tracks bytes mutated rather than the whole footprint.
+See [Memory snapshot](kernel_replay_memory_snapshot.md).
 
 ## Concurrency hardening (implemented)
 
