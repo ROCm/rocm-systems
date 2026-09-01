@@ -4,6 +4,7 @@
  */
 
 #ifdef __HIP_PLATFORM_AMD__
+#include "amd/device-malloc-kernel.h"
 #include "backend/asyncop-fallback.h"
 #include "backend/memcpy-kernel.h"
 #include "buffer.h"
@@ -755,6 +756,21 @@ public:
         ASSERT_EQ(attr, 1);
         ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
         ASSERT_EQ(hipFileStreamRegister(stream, 0), HIPFILE_SUCCESS);
+
+        // We have occasionally hit a hang in these tests using hipStreamWaitValue64. It appears
+        // that hipStreamWaitValue64 may block some initialization that gets triggered when the
+        // first kernel submission happens. We submit a kernel with a device-side malloc to
+        // trigger initialization first.
+        int *device_malloc_result{};
+        ASSERT_EQ(hipMalloc(reinterpret_cast<void **>(&device_malloc_result), sizeof(*device_malloc_result)),
+                  hipSuccess);
+        void *kernel_args[] = {&device_malloc_result};
+        ASSERT_EQ(hipLaunchKernel(reinterpret_cast<void *>(hipFileTestDeviceMallocKernel), dim3(1), dim3(1),
+                                  kernel_args, 0, stream),
+                  hipSuccess);
+        ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+        ASSERT_EQ(hipFree(device_malloc_result), hipSuccess);
+
         ASSERT_EQ(
             hipExtMallocWithFlags(reinterpret_cast<void **>(&flag), sizeof(uint64_t), hipMallocSignalMemory),
             hipSuccess);
