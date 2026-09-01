@@ -47,8 +47,10 @@ void print_usage(const char* program_name) {
   std::cout << "  --notify-daemon              Notify daemon to refresh device "
                "registry (for udev integration)\n";
   std::cout << "  --list                       List all devices and their CUIDs\n";
-  std::cout << "  --type <type>                Filter by device type (gpu, "
-               "cpu, nic, npu, platform)\n";
+  std::cout << "  --type <type>                Filter by device type (platform, cpu, gpu, "
+               "nic, npu,\n";
+  std::cout << "                               storage, memory, genpcie, genc, racktray, "
+               "rack, other)\n";
   std::cout << "                               Use with --list or --query-device\n";
   std::cout << "  --show-primary               Show primary CUIDs (requires "
                "root privileges)\n";
@@ -90,6 +92,20 @@ const char* device_type_to_string(amdcuid_device_type_t type) {
       return "NIC";
     case AMDCUID_DEVICE_TYPE_NPU:
       return "NPU";
+    case AMDCUID_DEVICE_TYPE_STORAGE:
+      return "STORAGE";
+    case AMDCUID_DEVICE_TYPE_MEMORY:
+      return "MEMORY";
+    case AMDCUID_DEVICE_TYPE_GENPCIE:
+      return "GENPCIE";
+    case AMDCUID_DEVICE_TYPE_GENC:
+      return "GENC";
+    case AMDCUID_DEVICE_TYPE_RACKTRAY:
+      return "RACKTRAY";
+    case AMDCUID_DEVICE_TYPE_RACK:
+      return "RACK";
+    case AMDCUID_DEVICE_TYPE_OTHER:
+      return "OTHER";
     case AMDCUID_DEVICE_TYPE_NONE:
       return "NONE";
     default:
@@ -106,6 +122,13 @@ amdcuid_device_type_t string_to_device_type(const std::string& type_str) {
   if (upper == "GPU") return AMDCUID_DEVICE_TYPE_GPU;
   if (upper == "NIC") return AMDCUID_DEVICE_TYPE_NIC;
   if (upper == "NPU") return AMDCUID_DEVICE_TYPE_NPU;
+  if (upper == "STORAGE") return AMDCUID_DEVICE_TYPE_STORAGE;
+  if (upper == "MEMORY") return AMDCUID_DEVICE_TYPE_MEMORY;
+  if (upper == "GENPCIE") return AMDCUID_DEVICE_TYPE_GENPCIE;
+  if (upper == "GENC") return AMDCUID_DEVICE_TYPE_GENC;
+  if (upper == "RACKTRAY") return AMDCUID_DEVICE_TYPE_RACKTRAY;
+  if (upper == "RACK") return AMDCUID_DEVICE_TYPE_RACK;
+  if (upper == "OTHER") return AMDCUID_DEVICE_TYPE_OTHER;
   return AMDCUID_DEVICE_TYPE_NONE;
 }
 

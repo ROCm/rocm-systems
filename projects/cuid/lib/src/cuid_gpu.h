@@ -47,6 +47,18 @@ class CuidGpu : public CuidDevice {
                                           const std::string& device_path,
                                           cuid::gim::GimClient* gim_client = nullptr);
 
+  // Source 1 of the serial precedence: amdgpu's sysfs `unique_id` attribute.
+  // Succeeds only for a well-formed, non-zero value; absent, empty, malformed
+  // or all-zero is a failure, so the caller carries on to the PCIe Device
+  // Serial Number rather than stopping at a source that yields nothing. `path`
+  // is a full path so a test can point it at a file.
+  static amdcuid_status_t read_unique_id(const std::string& path, uint64_t& fingerprint);
+
+  // Sources 2 and 3: the PCIe Device Serial Number extended capability, then
+  // the vendor-specific capability, each accepted only if it yields a non-zero
+  // value. Exposed for testing.
+  static amdcuid_status_t read_config_space_serial(const std::string& bdf, uint64_t& fingerprint);
+
   // Derive the render_node from an enumeration `device_path`. Strips a
   // trailing "/device" (as passed by /sys/class/drm enumeration) and, for
   // card paths, resolves the associated renderD node when one exists. Paths

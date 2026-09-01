@@ -62,9 +62,33 @@ set(CUID_HEADERS
 
 add_library(amdcuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})
 
+# Namespaced alias, so an in-tree consumer links the same name an installed
+# consumer does. A "::" name also makes CMake diagnose a typo as a missing
+# package rather than treating it as a bare -l flag.
+add_library(amdcuid::amdcuid ALIAS amdcuid_static)
+
+# Must match the alias, or an installed consumer links amdcuid::amdcuid_static
+# while an in-tree one links amdcuid::amdcuid.
+set_property(TARGET amdcuid_static PROPERTY EXPORT_NAME amdcuid)
+
 set_property(TARGET amdcuid_static PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-target_include_directories(amdcuid_static PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+# The public surface is include/ and nothing else, in the build tree exactly as
+# in the install tree. With this directory itself PUBLIC, an in-tree consumer
+# could write #include "src/hmac.h" and compile, then fail once installed
+# because src/ is not shipped.
+#
+# The library's own sources say #include "include/amd_cuid.h" and #include
+# "src/hmac.h", both relative to this directory, so it stays on the private
+# include path. The install path is relative on purpose: an absolute one baked
+# into the exported target makes the package non-relocatable.
+target_include_directories(
+    amdcuid_static
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${AMDCUID}>
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
 
 # Pass the version-independent shared config directory to the library at compile
 # time. All installed versions of the library must agree on this path so that
@@ -90,12 +114,14 @@ if(NOT TARGET rocm-sha256)
     add_subdirectory(${CUID_ROCM_SHA256_DIR} ${CMAKE_CURRENT_BINARY_DIR}/rocm-sha256)
 endif()
 
-# PRIVATE so the OBJECT library's objects land in amdcuid_static and the
-# installed archive defines SHA-256 symbols rather than importing.
-# Include dir is PUBLIC + BUILD_INTERFACE so in-tree targets that link
-# amdcuid_static and include rocm/sha2/sha256.h directly can find it;
-# shared/sha256 headers are never installed, and sha256.h is not part of the installed public API.
-target_link_libraries(amdcuid_static PRIVATE rocm-sha256)
+# Absorb the shared SHA-256 objects rather than linking the target. amdcuid_static
+# is in an export set, and a link dependency travels with it into that set even
+# when PRIVATE, so exporting a link to rocm-sha256, a build-tree helper that is
+# never installed, names a target the consumer does not have.
+# The include dir is PUBLIC and BUILD_INTERFACE so in-tree targets that link
+# amdcuid_static and include rocm/sha2/sha256.h directly can find it. Those
+# headers are never installed and sha256.h is not part of the installed API.
+target_sources(amdcuid_static PRIVATE $<TARGET_OBJECTS:rocm-sha256>)
 target_include_directories(amdcuid_static PUBLIC $<BUILD_INTERFACE:${CUID_ROCM_SHA256_DIR}/include>)
 
 # The only external dependency left is the platform CSPRNG.
@@ -103,12 +129,16 @@ if(WIN32)
     target_link_libraries(amdcuid_static PUBLIC bcrypt)
 endif()
 
-# Static library
+# Static library, as part of an export set so that consumers get an imported
+# target with its usage requirements attached rather than a bare path they have
+# to pair with a hand-written include directory.
 install(
     TARGETS amdcuid_static
+    EXPORT amdcuidTargets
     RUNTIME
         DESTINATION
             ${CMAKE_INSTALL_BINDIR} # Windows DLLs go here
+        COMPONENT ${LIB_COMPONENT}
     ARCHIVE
         DESTINATION
             ${CMAKE_INSTALL_LIBDIR} # Static libs & Windows import libs
@@ -118,6 +148,53 @@ install(
 # Install public headers
 set(PUBLIC_HEADERS ${INC_DIR}/amd_cuid.h)
 install(FILES ${PUBLIC_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${AMDCUID} COMPONENT ${LIB_COMPONENT})
+
+# CMake package: amdcuid-config.cmake, its version file and the target export.
+# This is what lets amd-smi (and anything else) say
+#
+#     find_package(amdcuid CONFIG)
+#     target_link_libraries(foo PRIVATE amdcuid::amdcuid)
+#
+# instead of find_library() plus a guessed include path: the imported target
+# carries the include directory and the link interface together, so a consumer
+# cannot get one right and the other wrong.
+include(CMakePackageConfigHelpers)
+
+set(AMDCUID_INSTALL_CMAKEDIR ${CMAKE_INSTALL_LIBDIR}/cmake/${AMDCUID})
+
+install(
+    EXPORT amdcuidTargets
+    FILE amdcuid-targets.cmake
+    NAMESPACE amdcuid::
+    DESTINATION ${AMDCUID_INSTALL_CMAKEDIR}
+    COMPONENT ${LIB_COMPONENT}
+)
+
+configure_package_config_file(
+    ${PROJECT_SOURCE_DIR}/cmake/amdcuid-config.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/amdcuid-config.cmake
+    INSTALL_DESTINATION ${AMDCUID_INSTALL_CMAKEDIR}
+)
+
+# SameMajorVersion: the ABI is the public header, and the format it describes is
+# frozen within a major version. A consumer asking for 1.2 must not be handed a
+# 2.x that renumbered a field.
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/amdcuid-config-version.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(
+    FILES ${CMAKE_CURRENT_BINARY_DIR}/amdcuid-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/amdcuid-config-version.cmake
+    DESTINATION ${AMDCUID_INSTALL_CMAKEDIR}
+    COMPONENT ${LIB_COMPONENT}
+)
+
+# The same export from the build tree, so a superbuild that has not installed
+# anything yet can still find_package() this by adding the build directory to
+# CMAKE_PREFIX_PATH.
+export(EXPORT amdcuidTargets FILE ${CMAKE_CURRENT_BINARY_DIR}/amdcuid-targets.cmake NAMESPACE amdcuid::)
 
 if(UNIX AND NOT APPLE)
     configure_file(

@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <iostream>
 
 #include "include/amd_cuid.h"
@@ -278,19 +279,21 @@ amdcuid_status_t CuidDeviceManager::get_devices_from_file_entries(CuidFile& cuid
 }
 
 amdcuid_status_t CuidDeviceManager::add_device(DevicePtr device) {
-  std::lock_guard<std::mutex> lock(manager_mutex_);
-
-  if (device) {
-    // Update the CUID index
-    amdcuid_derived_id derived;
-    if (device->get_derived_cuid(derived) == AMDCUID_STATUS_SUCCESS) {
-      cuid_index_[derived.UUIDv8_representation] = device;
-    }
-
-    devices_.push_back(device);
-  } else {
+  if (!device) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
+
+  // Derive first, then take the lock: get_derived_cuid() reads sysfs and then
+  // the record file, taking the record's advisory lock, which any local user
+  // can hold. Nothing in the derivation needs the manager's state.
+  amdcuid_derived_id derived;
+  const bool have_derived = device->get_derived_cuid(derived) == AMDCUID_STATUS_SUCCESS;
+
+  std::lock_guard<std::mutex> lock(manager_mutex_);
+  if (have_derived) {
+    cuid_index_[derived.UUIDv8_representation] = device;
+  }
+  devices_.push_back(device);
 
   return AMDCUID_STATUS_SUCCESS;
 }
@@ -406,12 +409,13 @@ amdcuid_status_t CuidDeviceManager::request_device(const std::string& device_pat
     status = CuidDaemonIpcClientUtils::request_add_device(device_path.c_str(), device_type,
                                                           &device_handle);
     if (status == AMDCUID_STATUS_SUCCESS) {
-      // Lookup device by handle and return it
+      // Lookup device by handle and return it. get_device_from_file_by_id()
+      // adopts the device into the manager itself, and add_device() push_backs
+      // unconditionally, so calling it again here duplicates it in devices_.
       status = get_device_from_file_by_id(device_handle, device);
       if (status != AMDCUID_STATUS_SUCCESS) {
         return status;
       }
-      add_device(device);
     }
     return status;
   } else {
@@ -565,5 +569,44 @@ amdcuid_status_t CuidDeviceManager::save_registry_to_files() {
   // ensure new unpriv file generated is reloaded into the file object
   unpriv_cuid_file_.load();
 
+  return status;
+}
+
+amdcuid_status_t CuidDeviceManager::invalidate_derived_cuids(const uint8_t new_key[key_length]) {
+  bool have_devices = false;
+  {
+    std::lock_guard<std::mutex> lock(manager_mutex_);
+
+    // The manager derives through the key object set_hmac() handed it; left on
+    // the old seed, build_cuid_index() would rebuild the index with the values
+    // this call exists to retire. hmac_ is null until the static wiring in
+    // cuid.cc has run, in which case there is nothing yet to re-key.
+    if (new_key && hmac_ != nullptr) {
+      const amdcuid_status_t status = hmac_->set_hmac_key(new_key);
+      if (status != AMDCUID_STATUS_SUCCESS) {
+        return status;
+      }
+    }
+
+    // Drop the recorded association, both the on-disk record and the copy each
+    // CuidFile holds, before anything recomputes: get_derived_cuid() reads the
+    // record ahead of deriving, so one left in place is read back and written
+    // straight into the regenerated file.
+    unpriv_cuid_file_.clear();
+    priv_cuid_file_.clear();
+    std::remove(unpriv_cuid_file_.get_file_path().c_str());
+    std::remove(priv_cuid_file_.get_file_path().c_str());
+    cuid_index_.clear();
+    have_devices = !devices_.empty();
+  }
+
+  // With the records gone every lookup recomputes under the new seed, so the
+  // invalidation is complete. Re-record where there are devices to record: a
+  // derived CUID is traceable to its component only while the store names both.
+  if (!have_devices) {
+    return AMDCUID_STATUS_SUCCESS;
+  }
+  const amdcuid_status_t status = save_registry_to_files();
+  build_cuid_index();
   return status;
 }

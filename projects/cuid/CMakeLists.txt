@@ -4,7 +4,11 @@
 #
 # Minimum version of cmake required
 #
-cmake_minimum_required(VERSION 3.14)
+# 3.21 for $<TARGET_OBJECTS:> on a non-OBJECT library, which lib/CMakeLists.txt
+# uses to fold the shared SHA-256 into the installed archive. The rest of
+# rocm-systems is on 3.20 (projects/amdsmi) and 3.14 was older than anything the
+# repository is actually built with.
+cmake_minimum_required(VERSION 3.21)
 
 set(AMDCUID "amdcuid" CACHE INTERNAL "")
 set(AMDCUID_PACKAGE ${AMDCUID} CACHE STRING "")
