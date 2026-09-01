@@ -1133,9 +1133,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     std::vector<uint32_t> displaced_tail_words;
   };
 
-  const auto wait_flat = target.wait_counter_family == ConSanWaitCounterFamily::Gfx9
-                             ? instrumentation::build_s_wait_flat_load_lds0(arch)
-                             : consan_sc_build_wait_dscnt(0, arch);
+  const auto wait_flat = consan_sc_build_guest_flat_completion_wait(arch);
   if (!wait_flat) {
     result.errors.emplace_back("ConSan flat check/trap proof could not encode sequence");
     return;

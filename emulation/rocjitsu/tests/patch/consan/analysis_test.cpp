@@ -117,6 +117,78 @@ TEST(ConSan, EveryTargetOwnsItsCacheOperationVocabulary) {
   expect(ROCJITSU_CODE_ARCH_CDNA5, "buffer_inv", Operation::Unsupported);
 }
 
+TEST(ConSan, EveryTargetOwnsItsWaitEffectVocabulary) {
+  namespace ib = instrumentation;
+  const auto is_exact_zero = [](const ConSanWaitInstructionEncoding &wait) {
+    return wait.drains_load || wait.drains_store || wait.drains_lds;
+  };
+  constexpr std::array kArchitectures = {
+      ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+      ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5,
+  };
+
+  for (const rj_code_arch_t arch : kArchitectures) {
+    const auto flat_load = ib::build_s_wait_flat_load0(arch);
+    ASSERT_TRUE(flat_load) << arch;
+    const ConSanWaitInstructionEncoding wait =
+        classify_consan_wait_instruction({}, *flat_load, arch);
+    EXPECT_TRUE(is_exact_zero(wait)) << arch;
+    EXPECT_TRUE(wait.drains_load) << arch;
+    EXPECT_TRUE(wait.drains_lds) << arch;
+    EXPECT_TRUE(wait.drains_lds || wait.release_boundary) << arch;
+  }
+
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    const auto store = ib::build_s_wait_global_store0(arch);
+    ASSERT_TRUE(store) << arch;
+    const ConSanWaitInstructionEncoding wait = classify_consan_wait_instruction({}, *store, arch);
+    EXPECT_TRUE(is_exact_zero(wait)) << arch;
+    EXPECT_TRUE(wait.drains_store) << arch;
+    EXPECT_FALSE(wait.release_boundary) << arch;
+  }
+
+  const auto gfx11_release = build_rdna3_s_wait_vscnt0(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_TRUE(gfx11_release);
+  const ConSanWaitInstructionEncoding gfx11 =
+      classify_consan_wait_instruction("s_waitcnt_vscnt", *gfx11_release, ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_TRUE(gfx11.bounded_release_counter_form);
+  EXPECT_TRUE(is_exact_zero(gfx11));
+  EXPECT_TRUE(gfx11.drains_store);
+  EXPECT_TRUE(gfx11.drains_lds || gfx11.release_boundary);
+  EXPECT_TRUE(gfx11.release_boundary);
+  const ConSanWaitInstructionEncoding gfx11_nonzero = classify_consan_wait_instruction(
+      "s_waitcnt_vscnt", *gfx11_release | 1u, ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_TRUE(gfx11_nonzero.bounded_release_counter_form);
+  EXPECT_FALSE(is_exact_zero(gfx11_nonzero));
+  EXPECT_FALSE(gfx11_nonzero.release_boundary);
+
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    const auto store = build_s_wait_storecnt0(arch);
+    const auto store_lds = build_s_wait_storecnt_dscnt0(arch);
+    ASSERT_TRUE(store) << arch;
+    ASSERT_TRUE(store_lds) << arch;
+    const ConSanWaitInstructionEncoding release =
+        classify_consan_wait_instruction("s_wait_storecnt", *store, arch);
+    EXPECT_TRUE(release.bounded_release_counter_form) << arch;
+    EXPECT_TRUE(is_exact_zero(release)) << arch;
+    EXPECT_TRUE(release.drains_store) << arch;
+    EXPECT_FALSE(release.drains_lds) << arch;
+    EXPECT_TRUE(release.drains_lds || release.release_boundary) << arch;
+    EXPECT_TRUE(release.release_boundary) << arch;
+    const ConSanWaitInstructionEncoding release_lds =
+        classify_consan_wait_instruction("s_wait_storecnt_dscnt", *store_lds, arch);
+    EXPECT_TRUE(is_exact_zero(release_lds)) << arch;
+    EXPECT_TRUE(release_lds.drains_store) << arch;
+    EXPECT_TRUE(release_lds.drains_lds) << arch;
+    EXPECT_TRUE(release_lds.release_boundary) << arch;
+    const ConSanWaitInstructionEncoding nonzero =
+        classify_consan_wait_instruction("s_wait_storecnt", *store | 1u, arch);
+    EXPECT_TRUE(nonzero.bounded_release_counter_form) << arch;
+    EXPECT_FALSE(is_exact_zero(nonzero)) << arch;
+    EXPECT_FALSE(nonzero.release_boundary) << arch;
+  }
+}
+
 TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite) {
   constexpr auto async_b8 = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB8Vglobal,
                                                  {.saddr = 0, .vdst = 7, .vaddr = 8});

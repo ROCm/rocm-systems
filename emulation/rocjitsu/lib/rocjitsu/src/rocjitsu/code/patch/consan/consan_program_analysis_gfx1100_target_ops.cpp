@@ -21,6 +21,12 @@ ConSanCacheOperationEncoding classify_gfx1100_cache_operation(std::string_view m
   return {};
 }
 
+ConSanWaitInstructionEncoding
+classify_gfx1100_wait_instruction(std::string_view mnemonic, uint32_t word, rj_code_arch_t arch) {
+  return classify_target_wait_instruction(word, arch, build_rdna3_s_wait_vscnt0(arch), false,
+                                          mnemonic == "s_waitcnt_vscnt");
+}
+
 ConSanVectorMemoryDecode decode_gfx1100_flat_memory(std::span<const uint8_t> instruction) {
   return decode_pregfx12_vector_memory<rdna3::FlatMachineInst>(instruction, false, 0u);
 }
@@ -43,6 +49,8 @@ namespace rocjitsu {
 extern const ConSanProgramAnalysisTargetOperations kConSanGfx1100ProgramAnalysisOperations = {
     .classify_cache_operation =
         consan_program_analysis_target_detail::classify_gfx1100_cache_operation,
+    .classify_wait_instruction =
+        consan_program_analysis_target_detail::classify_gfx1100_wait_instruction,
     .decode_flat_memory = consan_program_analysis_target_detail::decode_gfx1100_flat_memory,
     .decode_global_memory = consan_program_analysis_target_detail::decode_gfx1100_global_memory,
     .decode_atomic_site = consan_program_analysis_target_detail::decode_gfx1100_atomic_site,

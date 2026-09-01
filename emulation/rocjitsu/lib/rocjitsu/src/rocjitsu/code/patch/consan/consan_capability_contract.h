@@ -145,19 +145,6 @@ enum class ConSanWorkgroupIdentitySource : uint8_t {
   CommandProcessorTtmps,
 };
 
-/// Selects the target generation's wait-counter encoding and counter model.
-///
-/// ConSan uses this type when it must order injected memory operations with
-/// guest operations. The values name encoding families rather than individual
-/// wait instructions: exact counter choice and immediate construction remain
-/// the responsibility of the relevant lowerer. Keeping the distinction typed
-/// prevents product-family tests from silently standing in for wait semantics.
-enum class ConSanWaitCounterFamily : uint8_t {
-  Gfx9,
-  Gfx11,
-  Gfx12,
-};
-
 /// Names the direct scalar call form available to injected ConSan code.
 ///
 /// `SCallB64` and `SCallI64` have different encodings and return-address
@@ -329,7 +316,6 @@ struct ConSanTargetProfile {
   ConSanDispatchIdentitySource dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair;
   ConSanWorkgroupIdentitySource workgroup_identity =
       ConSanWorkgroupIdentitySource::DescriptorSystemSgprs;
-  ConSanWaitCounterFamily wait_counter_family = ConSanWaitCounterFamily::Gfx9;
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
   ConSanCodeTransportModel code_transport = ConSanCodeTransportModel::DirectCodeObject;
   ConSanResidentWaveIdentityEncoding resident_wave_identity;

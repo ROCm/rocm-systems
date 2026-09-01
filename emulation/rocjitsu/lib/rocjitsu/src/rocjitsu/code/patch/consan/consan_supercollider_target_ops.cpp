@@ -11,12 +11,9 @@
 
 namespace rocjitsu {
 
-std::optional<uint32_t> consan_sc_build_wait_dscnt(uint16_t count, rj_code_arch_t arch) {
-  // Every current SuperCollider consumer requests the completed state. Keep
-  // nonzero counts out of the semantic interface until an engine needs them.
-  if (count != 0)
-    return std::nullopt;
-  return instrumentation::build_s_wait_lds0(arch);
+std::optional<uint32_t> consan_sc_build_guest_flat_completion_wait(rj_code_arch_t arch) {
+  return consan_uses_gfx9_cdna_encoding(arch) ? instrumentation::build_s_wait_flat_load0(arch)
+                                              : instrumentation::build_s_wait_lds0(arch);
 }
 
 std::optional<uint32_t> consan_sc_delay_instruction_word_count(const ConSanOptions &options,

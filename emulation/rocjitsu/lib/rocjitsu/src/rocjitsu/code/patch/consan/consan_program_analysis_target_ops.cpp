@@ -46,6 +46,13 @@ ConSanCacheOperationEncoding classify_consan_cache_operation(std::string_view mn
       arch, &ConSanProgramAnalysisTargetOperations::classify_cache_operation, mnemonic);
 }
 
+ConSanWaitInstructionEncoding classify_consan_wait_instruction(std::string_view mnemonic,
+                                                               uint32_t word, rj_code_arch_t arch) {
+  return invoke_target_operation(arch,
+                                 &ConSanProgramAnalysisTargetOperations::classify_wait_instruction,
+                                 mnemonic, word, arch);
+}
+
 std::optional<ConSanScratchComponentEncoding>
 decode_consan_scratch_component_encoding(std::span<const uint8_t> instruction,
                                          rj_code_arch_t arch) {

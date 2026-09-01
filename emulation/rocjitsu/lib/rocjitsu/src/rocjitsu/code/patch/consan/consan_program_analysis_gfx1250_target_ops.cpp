@@ -99,6 +99,8 @@ namespace rocjitsu {
 extern const ConSanProgramAnalysisTargetOperations kConSanGfx1250ProgramAnalysisOperations = {
     .classify_cache_operation =
         consan_program_analysis_target_detail::classify_gfx1250_cache_operation,
+    .classify_wait_instruction =
+        consan_program_analysis_target_detail::classify_gfx12_wait_instruction,
     .decode_scratch_component =
         consan_program_analysis_target_detail::decode_gfx1250_scratch_component,
     .decode_lane_transfer = consan_program_analysis_target_detail::decode_gfx1250_lane_transfer,

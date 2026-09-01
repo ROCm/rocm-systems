@@ -22,8 +22,8 @@ struct ConSanScTwoAddressLdsByteOffsets {
   uint32_t second = 0;
 };
 
-[[nodiscard]] std::optional<uint32_t> consan_sc_build_wait_dscnt(uint16_t count,
-                                                                 rj_code_arch_t arch);
+[[nodiscard]] std::optional<uint32_t>
+consan_sc_build_guest_flat_completion_wait(rj_code_arch_t arch);
 
 [[nodiscard]] std::optional<uint32_t>
 consan_sc_delay_instruction_word_count(const ConSanOptions &options,

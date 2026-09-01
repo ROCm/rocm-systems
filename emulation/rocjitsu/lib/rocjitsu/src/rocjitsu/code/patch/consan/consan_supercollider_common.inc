@@ -520,7 +520,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
     return std::nullopt;
   }
 
-  auto wait_dscnt = consan_sc_build_wait_dscnt(0, arch);
+  auto wait_dscnt = instrumentation::build_s_wait_lds0(arch);
   auto first_compare_vgpr =
       form.destination_accvgpr &&
               target.accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned

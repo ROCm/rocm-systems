@@ -31,7 +31,6 @@ struct ExpectedTargetProfile {
   ConSanAccumulatorModel accumulator_model;
   ConSanDispatchIdentitySource dispatch_identity;
   ConSanWorkgroupIdentitySource workgroup_identity;
-  ConSanWaitCounterFamily wait_counter_family;
   ConSanDirectCallForm direct_call_form;
   ConSanCodeTransportModel code_transport;
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
@@ -84,7 +83,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned,
         .dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair,
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
-        .wait_counter_family = ConSanWaitCounterFamily::Gfx9,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
@@ -139,7 +137,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned,
         .dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair,
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
-        .wait_counter_family = ConSanWaitCounterFamily::Gfx9,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
@@ -194,7 +191,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .accumulator_model = ConSanAccumulatorModel::None,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
-        .wait_counter_family = ConSanWaitCounterFamily::Gfx11,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
@@ -250,7 +246,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .accumulator_model = ConSanAccumulatorModel::None,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
         .workgroup_identity = ConSanWorkgroupIdentitySource::CommandProcessorTtmps,
-        .wait_counter_family = ConSanWaitCounterFamily::Gfx12,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
@@ -309,7 +304,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .accumulator_model = ConSanAccumulatorModel::SelectableVgprBank,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
         .workgroup_identity = ConSanWorkgroupIdentitySource::CommandProcessorTtmps,
-        .wait_counter_family = ConSanWaitCounterFamily::Gfx12,
         .direct_call_form = ConSanDirectCallForm::SCallI64,
         .code_transport = ConSanCodeTransportModel::PerKernelOwnerTranslation,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
@@ -374,7 +368,6 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.accumulator_model, expected.accumulator_model);
   EXPECT_EQ(actual.dispatch_identity, expected.dispatch_identity);
   EXPECT_EQ(actual.workgroup_identity, expected.workgroup_identity);
-  EXPECT_EQ(actual.wait_counter_family, expected.wait_counter_family);
   EXPECT_EQ(actual.direct_call_form, expected.direct_call_form);
   EXPECT_EQ(actual.code_transport, expected.code_transport);
   EXPECT_EQ(actual.resident_wave_identity, expected.resident_wave_identity);

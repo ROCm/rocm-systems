@@ -21,6 +21,11 @@ ConSanCacheOperationEncoding classify_gfx9_cdna_cache_operation(std::string_view
   return {};
 }
 
+ConSanWaitInstructionEncoding classify_gfx9_cdna_wait_instruction(std::string_view, uint32_t word,
+                                                                  rj_code_arch_t arch) {
+  return classify_target_wait_instruction(word, arch, std::nullopt, false, false);
+}
+
 std::optional<ConSanScratchComponentEncoding>
 decode_gfx9_cdna_scratch_component(std::span<const uint8_t> instruction) {
   if (instruction.size() != sizeof(cdna4::FlatScratchMachineInst))
@@ -119,6 +124,8 @@ namespace rocjitsu {
 extern const ConSanProgramAnalysisTargetOperations kConSanGfx9CdnaProgramAnalysisOperations = {
     .classify_cache_operation =
         consan_program_analysis_target_detail::classify_gfx9_cdna_cache_operation,
+    .classify_wait_instruction =
+        consan_program_analysis_target_detail::classify_gfx9_cdna_wait_instruction,
     .decode_scratch_component =
         consan_program_analysis_target_detail::decode_gfx9_cdna_scratch_component,
     .decode_private_component =

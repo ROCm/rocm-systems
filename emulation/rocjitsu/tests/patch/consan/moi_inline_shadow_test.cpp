@@ -3317,7 +3317,8 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
       static_cast<uint16_t>(assignment.exec_save_sgpr + kInitializedEntrySgprCount - 1u),
       *prologue->entry_scalar_backup_vgpr, kInitializedEntrySgprCount - 1u,
       ROCJITSU_CODE_ARCH_RDNA4);
-  const auto restore_wait = instrumentation::build_s_wait_alu_va_sdst0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_wait =
+      instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(first_save);
   ASSERT_TRUE(last_save);
   ASSERT_TRUE(first_restore);

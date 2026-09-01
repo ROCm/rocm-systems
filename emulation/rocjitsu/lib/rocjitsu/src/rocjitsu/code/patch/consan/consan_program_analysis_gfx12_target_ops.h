@@ -29,6 +29,15 @@ classify_gfx12_cache_operation(std::string_view mnemonic,
   return {};
 }
 
+inline ConSanWaitInstructionEncoding
+classify_gfx12_wait_instruction(std::string_view mnemonic, uint32_t word, rj_code_arch_t arch) {
+  const bool bounded_release_counter_form =
+      mnemonic == "s_wait_storecnt" || mnemonic == "s_wait_storecnt_dscnt" ||
+      mnemonic == "s_wait_loadcnt" || mnemonic == "s_wait_loadcnt_dscnt";
+  return classify_target_wait_instruction(word, arch, std::nullopt, true,
+                                          bounded_release_counter_form);
+}
+
 template <typename Raw>
 std::optional<ConSanScratchComponentEncoding>
 decode_gfx12_scratch_component(std::span<const uint8_t> instruction) {

@@ -535,6 +535,21 @@ foreach(_cache_semantic_consumer IN ITEMS
         "cache semantic consumers must use target-normalized cache operations"
     )
 endforeach()
+foreach(_wait_semantic_consumer IN ITEMS
+    consan_sync_analysis.inc
+    consan_fault_injection.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_wait_semantic_consumer}"
+        "build_(rdna3_)?s_wait_(global|flat|lds|storecnt|loadcnt|vscnt)"
+        "wait semantic consumers must use target-normalized wait effects"
+    )
+    _consan_assert_no_match(
+        "${_consan_dir}/${_wait_semantic_consumer}"
+        "mnemonic[ \t]*==[ \t]*\"s_wait"
+        "wait semantic consumers must not recognize target-native wait mnemonics"
+    )
+endforeach()
 file(READ "${_consan_dir}/consan_program_analysis_target_ops.h"
      _program_analysis_normalized_contract)
 if(NOT _program_analysis_normalized_contract MATCHES "workgroup_acquire_ordering")
@@ -547,6 +562,32 @@ if(NOT _program_analysis_normalized_contract MATCHES "classify_cache_operation")
         "ConSan program-analysis target operations lost normalized cache-operation classification"
     )
 endif()
+if(NOT _program_analysis_normalized_contract MATCHES "classify_wait_instruction")
+    message(FATAL_ERROR
+        "ConSan program-analysis target operations lost normalized wait-effect classification"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_capability_contract.h"
+    "ConSanWaitCounterFamily|wait_counter_family"
+    "mode code must consume an exact wait operation rather than a broad encoding-family fact"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_supercollider_flat.inc"
+    "ConSanWaitCounterFamily|wait_counter_family|build_s_wait_flat_load0"
+    "SuperCollider flat lowering must consume its target-owned completion-wait operation"
+)
+file(READ "${_consan_dir}/consan_supercollider_target_ops.h" _sc_target_operations)
+if(NOT _sc_target_operations MATCHES "consan_sc_build_guest_flat_completion_wait")
+    message(FATAL_ERROR
+        "ConSan SuperCollider target operations lost guest-flat completion-wait ownership"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/../instrumentation_builder.h"
+    "build_s_wait_flat_(load|store)_lds0[(]|build_s_wait_alu_va_sdst0[(]rj_code_arch_t"
+    "instrumentation must not restore superseded duplicate wait-builder aliases"
+)
 _consan_assert_no_match(
     "${_consan_dir}/consan_access_classifier.cpp"
     "isa/arch/amdgpu/generated/|ROCJITSU_CODE_ARCH_"

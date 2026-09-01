@@ -399,24 +399,28 @@ build_v_readlane_b32(uint16_t sdst, uint16_t vsrc, uint16_t lane, rj_code_arch_t
                                           : std::nullopt;
 }
 
+template <bool Store, bool IncludesLds>
+[[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_memory0(rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+    return IncludesLds ? build_rdna3_s_wait_vmcnt_lgkmcnt0(arch) : build_rdna3_s_wait_vmcnt0(arch);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return IncludesLds ? build_cdna3_s_wait_vmcnt_lgkmcnt0(arch) : build_cdna3_s_wait_vmcnt0(arch);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return IncludesLds ? build_cdna4_s_wait_flat0(arch) : build_cdna4_s_wait_vmcnt0(arch);
+  if constexpr (IncludesLds)
+    return Store ? rocjitsu::build_s_wait_storecnt_dscnt0(arch)
+                 : rocjitsu::build_s_wait_loadcnt_dscnt0(arch);
+  return Store ? rocjitsu::build_s_wait_storecnt0(arch) : rocjitsu::build_s_wait_loadcnt0(arch);
+}
+
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_wait_flat_load0(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return build_rdna3_s_wait_vmcnt_lgkmcnt0(arch);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
-    return build_cdna3_s_wait_vmcnt_lgkmcnt0(arch);
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_flat0(arch)
-                                          : rocjitsu::build_s_wait_loadcnt_dscnt0(arch);
+  return build_s_wait_memory0<false, true>(arch);
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_wait_flat_store0(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return build_rdna3_s_wait_vmcnt_lgkmcnt0(arch);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
-    return build_cdna3_s_wait_vmcnt_lgkmcnt0(arch);
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_flat0(arch)
-                                          : rocjitsu::build_s_wait_storecnt_dscnt0(arch);
+  return build_s_wait_memory0<true, true>(arch);
 }
 
 // Instrumentation-owned global memory never aliases LDS. Keep these waits
@@ -425,22 +429,12 @@ build_s_wait_flat_store0(rj_code_arch_t arch) {
 // independent counters.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_wait_global_load0(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return build_rdna3_s_wait_vmcnt0(arch);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
-    return build_cdna3_s_wait_vmcnt0(arch);
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
-                                          : rocjitsu::build_s_wait_loadcnt0(arch);
+  return build_s_wait_memory0<false, false>(arch);
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_wait_global_store0(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return build_rdna3_s_wait_vmcnt0(arch);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
-    return build_cdna3_s_wait_vmcnt0(arch);
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
-                                          : rocjitsu::build_s_wait_storecnt0(arch);
+  return build_s_wait_memory0<true, false>(arch);
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_lds0(rj_code_arch_t arch) {
@@ -466,26 +460,6 @@ build_s_wait_scalar_load0(rj_code_arch_t arch) {
   if (!is_rdna4_family_arch(arch))
     return std::nullopt;
   return pack_sopp(rdna4::kSWaitKmcntSopp, 0);
-}
-
-[[nodiscard]] inline constexpr std::optional<uint32_t>
-build_s_wait_flat_load_lds0(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return build_rdna3_s_wait_vmcnt_lgkmcnt0(arch);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
-    return build_cdna3_s_wait_vmcnt_lgkmcnt0(arch);
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_flat0(arch)
-                                          : rocjitsu::build_s_wait_loadcnt_dscnt0(arch);
-}
-
-[[nodiscard]] inline constexpr std::optional<uint32_t>
-build_s_wait_flat_store_lds0(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return build_rdna3_s_wait_vmcnt_lgkmcnt0(arch);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
-    return build_cdna3_s_wait_vmcnt_lgkmcnt0(arch);
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_flat0(arch)
-                                          : rocjitsu::build_s_wait_storecnt_dscnt0(arch);
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
@@ -544,15 +518,6 @@ build_valu_to_salu_dependency_wait(rj_code_arch_t arch) {
     return build_cdna4_salu_dependency_delay(arch);
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
     return build_s_nop(0, arch);
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch);
-  if (!is_rdna4_family_arch(arch))
-    return std::nullopt;
-  return rocjitsu::build_s_wait_alu_va_sdst0(arch);
-}
-
-[[nodiscard]] inline constexpr std::optional<uint32_t>
-build_s_wait_alu_va_sdst0(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
     return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch);
   if (!is_rdna4_family_arch(arch))
@@ -1063,7 +1028,7 @@ build_workgroup_barrier_only(rj_code_arch_t arch) {
 build_workgroup_barrier(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA4)
     return copy_words(build_cdna4_s_barrier_with_memory_wait(arch));
-  const auto wait = build_s_wait_flat_load_lds0(arch);
+  const auto wait = build_s_wait_flat_load0(arch);
   const auto barrier = build_workgroup_barrier_only(arch);
   if (!wait || !barrier)
     return std::nullopt;

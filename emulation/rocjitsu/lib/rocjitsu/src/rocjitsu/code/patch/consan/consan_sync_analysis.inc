@@ -1254,40 +1254,28 @@ template <typename Container>
       });
 }
 
-[[nodiscard]] bool exact_zero_wait_word(uint32_t word, rj_code_arch_t arch, bool &drains_lds) {
-  const auto lds = instrumentation::build_s_wait_lds0(arch);
-  const auto flat_load = instrumentation::build_s_wait_flat_load0(arch);
-  const auto flat_store = instrumentation::build_s_wait_flat_store0(arch);
-  const auto store = build_s_wait_storecnt0(arch);
-  const auto store_ds = build_s_wait_storecnt_dscnt0(arch);
-  const auto load_ds = build_s_wait_loadcnt_dscnt0(arch);
-  const auto rdna3_store = build_rdna3_s_wait_vscnt0(arch);
-  if ((lds && word == *lds) || (flat_load && word == *flat_load) ||
-      (flat_store && word == *flat_store) || (store_ds && word == *store_ds) ||
-      (load_ds && word == *load_ds)) {
-    drains_lds = true;
-    return true;
-  }
-  return (store && word == *store) || (rdna3_store && word == *rdna3_store);
-}
-
 [[nodiscard]] bool is_bounded_acquire_bookkeeping(const Instruction &instruction);
+
+[[nodiscard]] std::vector<const Instruction *>
+instructions_preceding(const ConSanSyncSequence &sequence,
+                       const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+  std::vector<const Instruction *> result;
+  if (!sequence.basic_block_index || *sequence.basic_block_index >= blocks.size() ||
+      blocks[*sequence.basic_block_index] == nullptr)
+    return result;
+  for (const Instruction &instruction : blocks[*sequence.basic_block_index]->instructions()) {
+    if (instruction.src_loc() >= sequence.begin_text_offset)
+      break;
+    result.push_back(&instruction);
+  }
+  return result;
+}
 
 [[nodiscard]] std::optional<uint64_t>
 exact_workgroup_release_wait_boundary(const ConSanSyncSequence &sequence,
                                       const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                                       rj_code_arch_t arch) {
-  if (!sequence.basic_block_index || *sequence.basic_block_index >= blocks.size())
-    return std::nullopt;
-  BasicBlock *block = blocks[*sequence.basic_block_index].get();
-  if (block == nullptr)
-    return std::nullopt;
-  std::vector<const Instruction *> preceding;
-  for (const Instruction &instruction : block->instructions()) {
-    if (instruction.src_loc() >= sequence.begin_text_offset)
-      break;
-    preceding.push_back(&instruction);
-  }
+  const std::vector<const Instruction *> preceding = instructions_preceding(sequence, blocks);
   uint64_t boundary = sequence.begin_text_offset;
   bool saw_lds_zero = false;
   bool admitted_leading_clause = false;
@@ -1311,10 +1299,11 @@ exact_workgroup_release_wait_boundary(const ConSanSyncSequence &sequence,
       boundary = (*instruction)->src_loc();
       continue;
     }
-    bool drains_lds = false;
-    if (!exact_zero_wait_word((*instruction)->raw_encoding()[0], arch, drains_lds))
+    const ConSanWaitInstructionEncoding wait = classify_consan_wait_instruction(
+        (*instruction)->mnemonic(), (*instruction)->raw_encoding()[0], arch);
+    if (!wait.drains_lds && !wait.release_boundary)
       break;
-    saw_lds_zero |= drains_lds;
+    saw_lds_zero |= wait.drains_lds;
     boundary = (*instruction)->src_loc();
   }
   return saw_lds_zero ? std::optional<uint64_t>(boundary) : std::nullopt;
@@ -1327,10 +1316,7 @@ exact_workgroup_acquire_wait_end(const ConSanSyncSequence &sequence,
   if (!sequence.basic_block_index || *sequence.basic_block_index >= blocks.size())
     return std::nullopt;
   BasicBlock *block = blocks[*sequence.basic_block_index].get();
-  const auto expected_combined = instrumentation::build_s_wait_flat_load0(arch);
-  const auto expected_load = instrumentation::build_s_wait_global_load0(arch);
-  const auto expected_lds = instrumentation::build_s_wait_lds0(arch);
-  if (block == nullptr || !expected_combined || !expected_load || !expected_lds)
+  if (block == nullptr)
     return std::nullopt;
   constexpr uint64_t kMaximumAcquireSuffixBytes = 64u;
   uint64_t expected_offset = sequence.end_text_offset;
@@ -1350,11 +1336,12 @@ exact_workgroup_acquire_wait_end(const ConSanSyncSequence &sequence,
     expected_offset += static_cast<uint64_t>(size);
     if (size != static_cast<int>(sizeof(uint32_t)) || instruction.raw_encoding() == nullptr)
       continue;
-    const uint32_t word = instruction.raw_encoding()[0];
-    if (word == *expected_combined)
+    const ConSanWaitInstructionEncoding wait = classify_consan_wait_instruction(
+        instruction.mnemonic(), instruction.raw_encoding()[0], arch);
+    if (wait.drains_load && wait.drains_lds)
       return expected_offset;
-    saw_load_zero |= word == *expected_load;
-    saw_lds_zero |= word == *expected_lds;
+    saw_load_zero |= wait.drains_load;
+    saw_lds_zero |= wait.drains_lds;
     if (saw_load_zero && saw_lds_zero)
       return expected_offset;
   }
@@ -1584,23 +1571,7 @@ associate_atomic_cache_sequence(const ConSanSyncSequence *release, const ConSanS
 exact_release_wait_boundary(const ConSanSyncSequence &sequence,
                             const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                             rj_code_arch_t arch) {
-  if (!sequence.basic_block_index || *sequence.basic_block_index >= blocks.size()) {
-    return std::nullopt;
-  }
-  const auto expected_combined = build_s_wait_storecnt_dscnt0(arch);
-  const auto expected_store = build_s_wait_storecnt0(arch);
-  const auto expected_load_ds = build_s_wait_loadcnt_dscnt0(arch);
-  const auto expected_load = build_s_wait_loadcnt0(arch);
-  const auto expected_rdna3_store = build_rdna3_s_wait_vscnt0(arch);
-  BasicBlock *block = blocks[*sequence.basic_block_index].get();
-  if ((!expected_combined && !expected_store && !expected_rdna3_store) || block == nullptr)
-    return std::nullopt;
-  std::vector<const Instruction *> preceding;
-  for (const Instruction &instruction : block->instructions()) {
-    if (instruction.src_loc() >= sequence.begin_text_offset)
-      break;
-    preceding.push_back(&instruction);
-  }
+  const std::vector<const Instruction *> preceding = instructions_preceding(sequence, blocks);
   uint64_t suffix_begin = sequence.begin_text_offset;
   for (auto instruction = preceding.rbegin(); instruction != preceding.rend(); ++instruction) {
     const int size = (*instruction)->size();
@@ -1610,33 +1581,15 @@ exact_release_wait_boundary(const ConSanSyncSequence &sequence,
     suffix_begin = (*instruction)->src_loc();
     if (size != static_cast<int>(sizeof(uint32_t)) || (*instruction)->raw_encoding() == nullptr)
       return std::nullopt;
-    const uint32_t word = (*instruction)->raw_encoding()[0];
-    const std::string_view mnemonic = (*instruction)->mnemonic();
-    if ((mnemonic == "s_wait_storecnt" && (!expected_store || word != *expected_store)) ||
-        (mnemonic == "s_wait_storecnt_dscnt" &&
-         (!expected_combined || word != *expected_combined)) ||
-        (mnemonic == "s_wait_loadcnt_dscnt" && (!expected_load_ds || word != *expected_load_ds)) ||
-        (mnemonic == "s_wait_loadcnt" && (!expected_load || word != *expected_load)) ||
-        (mnemonic == "s_waitcnt_vscnt" &&
-         (!expected_rdna3_store || word != *expected_rdna3_store))) {
+    const ConSanWaitInstructionEncoding wait = classify_consan_wait_instruction(
+        (*instruction)->mnemonic(), (*instruction)->raw_encoding()[0], arch);
+    if (wait.bounded_release_counter_form && !wait.drains_load && !wait.drains_store &&
+        !wait.drains_lds)
       return std::nullopt;
-    }
-    if ((expected_combined && word == *expected_combined) ||
-        (expected_store && word == *expected_store) ||
-        (expected_rdna3_store && word == *expected_rdna3_store)) {
+    if (wait.release_boundary)
       return (*instruction)->src_loc();
-    }
   }
   return std::nullopt;
-}
-
-[[nodiscard]] std::optional<uint64_t>
-atomic_release_wait_boundary(const ConSanSyncSequence &atomic,
-                             const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                             rj_code_arch_t arch) {
-  if (atomic.kind != ConSanSyncSequenceKind::Atomic)
-    return std::nullopt;
-  return exact_release_wait_boundary(atomic, blocks, arch);
 }
 
 void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
@@ -1715,7 +1668,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
          sequence.memory_role != ConSanSyncMemoryRole::Acquire)) {
       continue;
     }
-    const auto boundary = atomic_release_wait_boundary(sequence, blocks, arch);
+    const auto boundary = exact_release_wait_boundary(sequence, blocks, arch);
     if (!boundary)
       continue;
     const bool already_acquire = sequence.memory_role == ConSanSyncMemoryRole::Acquire;
@@ -2007,17 +1960,6 @@ ordinary_release_cache_after_store(const ConSanSyncSequence &store,
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint64_t>
-ordinary_release_wait_boundary(const ConSanSyncSequence &store,
-                               const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                               rj_code_arch_t arch) {
-  if (store.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
-      store.operation != ConSanSyncOperation::OrdinaryStore) {
-    return std::nullopt;
-  }
-  return exact_release_wait_boundary(store, blocks, arch);
-}
-
 [[nodiscard]] std::vector<size_t>
 fence_sequence_indices_by_begin(std::span<const ConSanSyncSequence> sync_sequences) {
   std::vector<size_t> indices;
@@ -2145,7 +2087,7 @@ void associate_ordinary_release_sync_sequences(
             })) {
       continue;
     }
-    const auto boundary = ordinary_release_wait_boundary(sequence, blocks, arch);
+    const auto boundary = exact_release_wait_boundary(sequence, blocks, arch);
     if (!boundary)
       continue;
     sequence.memory_role = ConSanSyncMemoryRole::Release;

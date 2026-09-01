@@ -40,6 +40,19 @@ struct ConSanCacheOperationEncoding {
   bool ordinary_acquire_mutation_supported = false;
 };
 
+/// Target-normalized effect of one exact zero-count wait instruction.
+/// Nonzero and unrelated encodings keep every effect false. The bounded-form
+/// bit separately identifies counter mnemonics whose nonzero spelling must
+/// reject a compiler release suffix rather than behave like unrelated
+/// bookkeeping.
+struct ConSanWaitInstructionEncoding {
+  bool bounded_release_counter_form = false;
+  bool drains_load = false;
+  bool drains_store = false;
+  bool drains_lds = false;
+  bool release_boundary = false;
+};
+
 struct ConSanScratchComponentEncoding {
   uint16_t vector_address_vgpr = 0;
   uint16_t load_data_vgpr = 0;
@@ -141,6 +154,8 @@ struct ConSanDirectLdsTransferEncoding {
 /// which concrete target implements which decoder.
 struct ConSanProgramAnalysisTargetOperations {
   ConSanCacheOperationEncoding (*classify_cache_operation)(std::string_view) = nullptr;
+  ConSanWaitInstructionEncoding (*classify_wait_instruction)(std::string_view, uint32_t,
+                                                             rj_code_arch_t) = nullptr;
   std::optional<ConSanScratchComponentEncoding> (*decode_scratch_component)(
       std::span<const uint8_t>) = nullptr;
   std::optional<ConSanPrivateComponentEncoding> (*decode_private_component)(
@@ -163,6 +178,9 @@ struct ConSanProgramAnalysisTargetOperations {
 /// unsupported operation.
 [[nodiscard]] ConSanCacheOperationEncoding
 classify_consan_cache_operation(std::string_view mnemonic, rj_code_arch_t arch);
+
+[[nodiscard]] ConSanWaitInstructionEncoding
+classify_consan_wait_instruction(std::string_view mnemonic, uint32_t word, rj_code_arch_t arch);
 
 /// One additive target registration. Concrete packages supply an operations
 /// facet; the common registry supplies only the architecture key.

@@ -4764,3 +4764,96 @@ second layer. Remaining target locality, operating-point and mutable-
 transaction breadth, larger legacy harvesting, material shrinkage, and the
 independent Section 14 completion audit remain open. The goal therefore
 remains active.
+
+### 16.56 Convergence checkpoint 55: target-normalized wait effects
+
+The synchronization deep read continued through compiler wait suffixes. Common
+synchronization analysis independently reconstructed exact target words for
+workgroup release, workgroup acquire, and atomic/ordinary release. Those
+reconstructions encoded materially different contracts: gfx942/gfx950 have
+exact combined VM/LDS drains but no standalone compiler-release wait, gfx1100
+uses `s_waitcnt_vscnt 0` as its standalone release boundary, and gfx1201 and
+gfx1250 use exact store-count or store/DS-count waits. The release scanner also
+had to distinguish a nonzero native counter spelling, which invalidates the
+bounded suffix, from unrelated scalar bookkeeping, which may be crossed.
+Fault application then reconstructed the gfx12 release words three more times
+while discovering, validating, naming, and removing the selected boundary.
+
+The program-analysis target facet now publishes one
+`ConSanWaitInstructionEncoding` result. Its target-neutral effects say whether
+an exact instruction drains loads, stores, or LDS, whether it is a standalone
+release boundary, and whether its native counter form bounds the release scan.
+The gfx942/gfx950 family package supplies its combined wait behavior, the
+gfx1100 package owns the `vscnt` form, and the shared gfx12 package owns the
+four split-counter spellings and exact store-release behavior. Common
+synchronization analysis consequently expresses only the semantic
+requirements: a workgroup release must include an LDS drain, a workgroup
+acquire must obtain both load and LDS drains, and a compiler release suffix
+must contain an exact release boundary without crossing a nonzero bounded
+counter. Neither synchronization analysis nor fault application names a
+native wait mnemonic or builds a target-native wait word.
+
+Atomic fault dry-run planning and application previously repeated the same
+sequence-confidence, edge, fence, and release-wait selection. One
+`AtomicOrderBoundary` resolver now owns that decision for both phases. The
+application path has one validation/removal flow for a wait-only boundary and
+a cache/wait boundary instead of two copies, while retaining separate patch
+proof for each removed instruction. No behavior defect was established, but
+the convergence removes the possibility that planning and application drift
+on whether a CDNA wait is an independently removable release boundary.
+
+The forward contract also made related legacy wait structure unnecessary. The
+broad `ConSanWaitCounterFamily` profile fact had only one production consumer:
+a SuperCollider flat-completion branch. It and all twelve production
+references are deleted; an exact SuperCollider target operation now returns
+the required guest-flat completion wait. Four load/store and global/flat wait
+builders share one two-axis implementation. The two byte-for-byte duplicate
+`flat_*_lds0` aliases and the unused generic `s_wait_alu_va_sdst0` alias are
+deleted, and their callers use the surviving semantic operations. This is the
+required harvesting half of the slice rather than leaving a new normalization
+layer beside the old profile fact and aliases.
+
+A direct five-target regression proves combined drains on gfx942/gfx950,
+gfx1100's exact and nonzero `vscnt` forms, both gfx12 release forms, the
+gfx1201/gfx1250 agreement, and the absence of a standalone CDNA release
+boundary. Existing end-to-end regressions prove workgroup acquire/release,
+ordinary and atomic compiler-release association, exact fault removal across
+an intervening wait-ALU instruction, CDNA fault behavior, and SuperCollider
+flat completion on every target. The architecture gate requires the normalized
+wait operation, rejects native wait recognition and builder reconstruction
+from common synchronization/fault consumers, rejects restoration of the broad
+profile fact, keeps the SuperCollider branch behind its exact target
+operation, and prohibits the three retired builder aliases.
+
+| Signal | Checkpoint 55 | Cumulative change | Slice change from checkpoint 54 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,318 | +343 | **-89** |
+| Nonblank production lines | 99,017 | **-66** | **-95** |
+| Production implementation lines | 91,289 | **-161** | **-86** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **175 / 52** | **-101 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 30 | +10 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Native wait recipes in shared synchronization/fault consumers | **0** | n/a | converged |
+| Broad wait-counter-family references | **0** | n/a | **-12** |
+| Superseded duplicate wait-builder references | **0** | n/a | **-5** |
+| Target-normalized wait-effect authorities | **1 contract** | n/a | converged |
+| Test inventory | **5,387** | **+42** | **+1** |
+
+Validation includes a final-tree `-j16` build; 72 focused five-target wait,
+synchronization, atomic-fault, capability, builder, SuperCollider, and
+architecture-boundary tests; all 4,752 nonphysical tests over the five
+emulated targets at `-j16`; and all 635 physical gfx1201 tests serialized at
+`-j1`. No test was removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.2, 14.4, 14.5, 14.6, 14.7,
+14.8, 14.9, and 14.10. Wait meaning now crosses one target-owned typed
+boundary, a future target does not require edits to the common association or
+fault algorithms, and the slice deletes exactly the 86 implementation lines
+added by checkpoint 54. The cumulative implementation reduction is restored
+to 161 lines, but that remains far short of material whole-refactoring
+shrinkage. Remaining target locality, broad operating-point and mutable-
+transaction surfaces, larger legacy harvesting, material Section 14.8
+evidence, and the independent Section 14 completion audit remain open. The
+goal therefore remains active.

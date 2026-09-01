@@ -755,7 +755,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   const auto retain_in_bounds =
       instrumentation::build_s_and_b64(kRdna4ExecLo, selected_exec, kRdna4VccLo, arch);
   const auto loop = instrumentation::build_s_cbranch_execnz(0, arch);
-  const auto wait_ds = instrumentation::build_s_wait_flat_load_lds0(arch);
+  const auto wait_ds = instrumentation::build_s_wait_flat_load0(arch);
   const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, exec_save, arch);
   const auto restore_vcc = instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save, arch);
   const auto barrier = instrumentation::build_workgroup_barrier_only(arch);

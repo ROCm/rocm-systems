@@ -47,6 +47,43 @@ fault_selection_view(const ConSanTransformArtifacts &result) {
 select_fault_site_for_plan(const ConSanFaultSelectionView &inventory, const ConSanOptions &options,
                            ConSanFaultSiteKind kind, uint32_t legacy_index);
 
+struct AtomicOrderBoundary {
+  const ConSanSyncSequence *sequence = nullptr;
+  const ConSanSyncEvent *fence = nullptr;
+  std::optional<uint64_t> release_wait_text_offset;
+};
+
+[[nodiscard]] AtomicOrderBoundary resolve_atomic_order_boundary(const ProgramInventory &inventory,
+                                                                const ConSanFaultSite &site,
+                                                                AtomicFaultEncoding encoding,
+                                                                ConSanAtomicOrderEdge edge) {
+  AtomicOrderBoundary result;
+  if (!site.sync_event_identity)
+    return result;
+  const SynchronizationInventoryView sync = inventory.sync();
+  result.sequence = sync.find_unique_sequence_containing(*site.sync_event_identity);
+  if (result.sequence == nullptr ||
+      !consan_sync_confidence_meets(result.sequence->memory_role_confidence,
+                                    ConSanSemanticConfidence::Conservative)) {
+    return {};
+  }
+  if (edge != ConSanAtomicOrderEdge::Acquire && encoding != AtomicFaultEncoding::CdnaFlat)
+    result.release_wait_text_offset = result.sequence->release_wait_text_offset;
+  for (const std::string &identity : result.sequence->member_event_identities) {
+    const auto event = std::ranges::find_if(sync.sync_events, [&](const auto &candidate) {
+      return candidate.identity == identity && candidate.kind == ConSanSyncEventKind::Fence;
+    });
+    if (event != sync.sync_events.end() &&
+        (edge == ConSanAtomicOrderEdge::Any ||
+         (edge == ConSanAtomicOrderEdge::Release && is_release_cache_event(&*event)) ||
+         (edge == ConSanAtomicOrderEdge::Acquire && is_acquire_cache_event(&*event)))) {
+      result.fence = &*event;
+      break;
+    }
+  }
+  return result;
+}
+
 [[nodiscard]] std::optional<OrdinaryAcquireMutationTarget>
 select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventory,
                                         const ConSanOptions &options) {
@@ -592,53 +629,29 @@ ConSanFaultPlanningResult build_fault_mutation_plan(const ConSanOptions &options
         atomic == nullptr
             ? AtomicFaultEncoding::Unsupported
             : classify_consan_atomic_fault_encoding(atomic->mnemonic, atomic->size, arch);
-    const ConSanSyncSequence *sequence =
-        consan_atomic_fault_supports_order(encoding) && atomic->sync_event_identity
-            ? program_inventory.sync().find_unique_sequence_containing(*atomic->sync_event_identity)
-            : nullptr;
-    const ConSanSyncEvent *fence = nullptr;
-    std::optional<uint64_t> release_wait_text_offset;
-    if (sequence != nullptr &&
-        consan_sync_confidence_meets(sequence->memory_role_confidence,
-                                     ConSanSemanticConfidence::Conservative)) {
-      if (options.fault_atomic_order_edge != ConSanAtomicOrderEdge::Acquire &&
-          encoding != AtomicFaultEncoding::CdnaFlat)
-        release_wait_text_offset = sequence->release_wait_text_offset;
-      for (const std::string &identity : sequence->member_event_identities) {
-        const auto event = std::ranges::find_if(sync.sync_events, [&](const auto &candidate) {
-          return candidate.identity == identity && candidate.kind == ConSanSyncEventKind::Fence;
-        });
-        const bool edge_matches =
-            event != sync.sync_events.end() &&
-            (options.fault_atomic_order_edge == ConSanAtomicOrderEdge::Any ||
-             (options.fault_atomic_order_edge == ConSanAtomicOrderEdge::Release &&
-              is_release_cache_event(&*event)) ||
-             (options.fault_atomic_order_edge == ConSanAtomicOrderEdge::Acquire &&
-              is_acquire_cache_event(&*event)));
-        if (edge_matches) {
-          fence = &*event;
-          break;
-        }
-      }
-    }
+    const AtomicOrderBoundary boundary =
+        atomic != nullptr && consan_atomic_fault_supports_order(encoding)
+            ? resolve_atomic_order_boundary(program_inventory, *atomic, encoding,
+                                            options.fault_atomic_order_edge)
+            : AtomicOrderBoundary{};
     if (atomic == nullptr) {
       // The exact missing-site diagnostic above is authoritative.
     } else if (!consan_atomic_fault_supports_order(encoding)) {
       reject_application(
           "ConSan fault dry run cannot weaken order for the selected atomic encoding",
           "ConSan atomic order fault is unsupported for the selected atomic encoding");
-    } else if (fence == nullptr && !release_wait_text_offset) {
+    } else if (boundary.fence == nullptr && !boundary.release_wait_text_offset) {
       result.warnings.emplace_back(
           "ConSan fault dry run found no qualified atomic ordering boundary to weaken");
     } else {
       ConSanFaultMutationPlan plan = make_plan(ConSanFaultMutationKind::AtomicWeakenOrder, *atomic);
       plan.companion_identity =
-          fence != nullptr
-              ? std::optional<std::string>(fence->identity)
-              : std::optional<std::string>(sequence->identity + "|release-wait-boundary");
-      plan.logical_sequence_identity = sequence->identity;
-      plan.selection_sequence_identity = sequence->identity;
-      plan.ordered_member_identities = sequence->member_event_identities;
+          boundary.fence != nullptr
+              ? std::optional<std::string>(boundary.fence->identity)
+              : std::optional<std::string>(boundary.sequence->identity + "|release-wait-boundary");
+      plan.logical_sequence_identity = boundary.sequence->identity;
+      plan.selection_sequence_identity = boundary.sequence->identity;
+      plan.ordered_member_identities = boundary.sequence->member_event_identities;
       plan.atomic_order_edge = options.fault_atomic_order_edge;
       result.fault_plans.push_back(std::move(plan));
     }
@@ -1512,7 +1525,6 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
                                          const ConSanFaultMutationPlan *order_plan,
                                          const ConSanFaultMutationPlan *scope_plan,
                                          FaultApplicationState &result) {
-  const SynchronizationInventoryView sync = result.program_inventory.sync();
   const ConSanFaultMutationPlan *primary_plan =
       address_plan != nullptr ? address_plan : (order_plan != nullptr ? order_plan : scope_plan);
   const ConSanFaultSite *selected =
@@ -1527,19 +1539,14 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
 
   const AtomicFaultEncoding encoding =
       classify_consan_atomic_fault_encoding(selected->mnemonic, selected->size, arch);
-  if (scope_plan != nullptr && !consan_atomic_fault_supports_scope(encoding)) {
-    result.errors.emplace_back(
-        "ConSan atomic scope fault is unsupported for the selected atomic encoding");
-    return;
-  }
-  if (order_plan != nullptr && !consan_atomic_fault_supports_order(encoding)) {
-    result.errors.emplace_back(
-        "ConSan atomic order fault is unsupported for the selected atomic encoding");
-    return;
-  }
-  if (address_plan != nullptr && !consan_atomic_fault_supports_address(encoding)) {
-    result.errors.emplace_back(
-        "ConSan atomic address fault is unsupported for the selected atomic encoding");
+  const std::string_view unsupported_fault =
+      scope_plan != nullptr && !consan_atomic_fault_supports_scope(encoding)       ? "scope"
+      : order_plan != nullptr && !consan_atomic_fault_supports_order(encoding)     ? "order"
+      : address_plan != nullptr && !consan_atomic_fault_supports_address(encoding) ? "address"
+                                                                                   : "";
+  if (!unsupported_fault.empty()) {
+    result.errors.emplace_back("ConSan atomic " + std::string(unsupported_fault) +
+                               " fault is unsupported for the selected atomic encoding");
     return;
   }
 
@@ -1589,33 +1596,11 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
   if (order_plan != nullptr) {
     const ConSanAtomicOrderEdge order_edge =
         order_plan->atomic_order_edge.value_or(ConSanAtomicOrderEdge::Any);
-    const ConSanSyncSequence *sequence =
-        selected->sync_event_identity
-            ? result.program_inventory.sync().find_unique_sequence_containing(
-                  *selected->sync_event_identity)
-            : nullptr;
-    const ConSanSyncEvent *fence = nullptr;
-    std::optional<uint64_t> release_wait_text_offset;
-    if (sequence != nullptr &&
-        consan_sync_confidence_meets(sequence->memory_role_confidence,
-                                     ConSanSemanticConfidence::Conservative)) {
-      if (order_edge != ConSanAtomicOrderEdge::Acquire)
-        release_wait_text_offset = sequence->release_wait_text_offset;
-      for (const std::string &identity : sequence->member_event_identities) {
-        const auto event = std::ranges::find_if(sync.sync_events, [&](const auto &candidate) {
-          return candidate.identity == identity && candidate.kind == ConSanSyncEventKind::Fence;
-        });
-        const bool edge_matches =
-            event != sync.sync_events.end() &&
-            (order_edge == ConSanAtomicOrderEdge::Any ||
-             (order_edge == ConSanAtomicOrderEdge::Release && is_release_cache_event(&*event)) ||
-             (order_edge == ConSanAtomicOrderEdge::Acquire && is_acquire_cache_event(&*event)));
-        if (edge_matches) {
-          fence = &*event;
-          break;
-        }
-      }
-    }
+    AtomicOrderBoundary boundary =
+        resolve_atomic_order_boundary(result.program_inventory, *selected, encoding, order_edge);
+    const ConSanSyncSequence *sequence = boundary.sequence;
+    const ConSanSyncEvent *fence = boundary.fence;
+    std::optional<uint64_t> &release_wait_text_offset = boundary.release_wait_text_offset;
     // A cache-associated release sequence may not record the immediately
     // preceding store wait as its primary proof, but that wait becomes an
     // independently sufficient release proof once the cache operation is
@@ -1624,16 +1609,12 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
     if (encoding != AtomicFaultEncoding::CdnaFlat && !release_wait_text_offset &&
         order_edge != ConSanAtomicOrderEdge::Acquire && selected->text_offset >= sizeof(uint32_t) &&
         selected->file_offset >= sizeof(uint32_t)) {
-      const auto expected_combined = build_s_wait_storecnt_dscnt0(arch);
-      const auto expected_store = build_s_wait_storecnt0(arch);
       uint32_t preceding_word = 0;
       std::memcpy(&preceding_word,
                   result.replacement.data() + selected->file_offset - sizeof(uint32_t),
                   sizeof(preceding_word));
-      if ((expected_combined && preceding_word == *expected_combined) ||
-          (expected_store && preceding_word == *expected_store)) {
+      if (classify_consan_wait_instruction({}, preceding_word, arch).release_boundary)
         release_wait_text_offset = selected->text_offset - sizeof(uint32_t);
-      }
     }
     if (fence == nullptr && !release_wait_text_offset) {
       result.errors.emplace_back(
@@ -1646,7 +1627,7 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
     info.kind = ConSanPatchKind::InlineAtomicOrderRewrite;
     info.fault_primary_identity = selected->identity;
     info.fault_sequence_identity = sequence != nullptr ? sequence->identity : selected->identity;
-    std::optional<ConSanPatchInfo> release_wait_info;
+    std::string removed_boundary;
     if (fence != nullptr) {
       if (fence->size == 0 || fence->size % sizeof(uint32_t) != 0) {
         result.errors.emplace_back(
@@ -1658,59 +1639,22 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
       info.anchor_offset = fence->text_offset;
       info.trampoline_offset = fence->text_offset;
       info.original_size = fence->size;
-      std::string removed_boundary = fence->mnemonic;
-      // RDNA4 release lowering commonly uses global_wb followed immediately
-      // by s_wait_storecnt before the atomic. Removing only global_wb leaves
-      // a boundary which reinventory independently and correctly admits as a
-      // release, defeating the requested weaken-order mutation. Treat that
-      // adjacent cache/wait pair as one logical ordering boundary.
-      if (release_wait_text_offset) {
-        const auto expected_combined = build_s_wait_storecnt_dscnt0(arch);
-        const auto expected_store = build_s_wait_storecnt0(arch);
-        if (!expected_combined || !expected_store ||
-            *release_wait_text_offset >= selected->text_offset ||
-            selected->file_offset < selected->text_offset - *release_wait_text_offset) {
-          result.errors.emplace_back(
-              "ConSan atomic weaken-order mutation found malformed associated release wait");
-          return;
-        }
-        const uint64_t wait_file_offset =
-            selected->file_offset - (selected->text_offset - *release_wait_text_offset);
-        if (wait_file_offset > result.replacement.size() ||
-            sizeof(uint32_t) > result.replacement.size() - wait_file_offset) {
-          result.errors.emplace_back(
-              "ConSan atomic weaken-order mutation release wait exceeds the code object");
-          return;
-        }
-        uint32_t wait_word = 0;
-        std::memcpy(&wait_word, result.replacement.data() + wait_file_offset, sizeof(wait_word));
-        if (wait_word != *expected_combined && wait_word != *expected_store) {
-          result.errors.emplace_back(
-              "ConSan atomic weaken-order release wait no longer has its admitted encoding");
-          return;
-        }
-        std::memcpy(result.replacement.data() + wait_file_offset, &nop, sizeof(nop));
-        release_wait_info = info;
-        release_wait_info->anchor_offset = *release_wait_text_offset;
-        release_wait_info->trampoline_offset = *release_wait_text_offset;
-        release_wait_info->original_size = sizeof(uint32_t);
-        removed_boundary +=
-            wait_word == *expected_combined ? "/s_wait_storecnt_dscnt" : "/s_wait_storecnt";
-      }
-      result.warnings.emplace_back("ConSan atomic fault removed associated " + removed_boundary +
-                                   " while preserving " + selected->mnemonic);
-    } else {
-      const auto expected_combined = build_s_wait_storecnt_dscnt0(arch);
-      const auto expected_store = build_s_wait_storecnt0(arch);
-      if (!expected_combined || !expected_store ||
-          *release_wait_text_offset >= selected->text_offset ||
-          selected->file_offset < selected->text_offset - *release_wait_text_offset) {
+      result.patches.push_back(info);
+      removed_boundary = fence->mnemonic;
+    }
+    // RDNA4 release lowering commonly pairs a cache operation with an exact
+    // store wait. Once either is selected, remove the complete independently
+    // sufficient ordering boundary so staged reinventory cannot re-admit it.
+    if (release_wait_text_offset) {
+      const uint64_t wait_text_offset = *release_wait_text_offset;
+      if (wait_text_offset >= selected->text_offset ||
+          selected->file_offset < selected->text_offset - wait_text_offset) {
         result.errors.emplace_back(
             "ConSan atomic weaken-order mutation found malformed associated release wait");
         return;
       }
       const uint64_t wait_file_offset =
-          selected->file_offset - (selected->text_offset - *release_wait_text_offset);
+          selected->file_offset - (selected->text_offset - wait_text_offset);
       if (wait_file_offset > result.replacement.size() ||
           sizeof(uint32_t) > result.replacement.size() - wait_file_offset) {
         result.errors.emplace_back(
@@ -1719,24 +1663,25 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
       }
       uint32_t wait_word = 0;
       std::memcpy(&wait_word, result.replacement.data() + wait_file_offset, sizeof(wait_word));
-      if (wait_word != *expected_combined && wait_word != *expected_store) {
+      const ConSanWaitInstructionEncoding wait =
+          classify_consan_wait_instruction({}, wait_word, arch);
+      if (!wait.release_boundary) {
         result.errors.emplace_back(
             "ConSan atomic weaken-order release wait no longer has its admitted encoding");
         return;
       }
       std::memcpy(result.replacement.data() + wait_file_offset, &nop, sizeof(nop));
-      info.anchor_offset = *release_wait_text_offset;
-      info.trampoline_offset = *release_wait_text_offset;
-      info.original_size = sizeof(uint32_t);
-      const std::string_view wait_name =
-          wait_word == *expected_combined ? "s_wait_storecnt_dscnt" : "s_wait_storecnt";
-      result.warnings.emplace_back("ConSan atomic fault removed associated " +
-                                   std::string(wait_name) + " while preserving " +
-                                   selected->mnemonic);
+      ConSanPatchInfo wait_info = info;
+      wait_info.anchor_offset = wait_text_offset;
+      wait_info.trampoline_offset = wait_text_offset;
+      wait_info.original_size = sizeof(uint32_t);
+      result.patches.push_back(wait_info);
+      if (fence != nullptr)
+        removed_boundary += "/";
+      removed_boundary += wait.drains_lds ? "s_wait_storecnt_dscnt" : "s_wait_storecnt";
     }
-    result.patches.push_back(info);
-    if (release_wait_info)
-      result.patches.push_back(*release_wait_info);
+    result.warnings.emplace_back("ConSan atomic fault removed associated " + removed_boundary +
+                                 " while preserving " + selected->mnemonic);
   }
   if (scope_plan != nullptr) {
     const ConSanAtomicFaultRewriteResult rewrite =
