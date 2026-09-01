@@ -60,6 +60,7 @@ jobs:
       timeout_minutes: 240
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
+      # TheRock pinned ref committed 2026-08-26; bump when refreshing artifacts.
       therock_ref: ${{ inputs.therock_ref || 'b45a06045cbb29c85e221748e653ac2521c6e1bf' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
@@ -67,8 +68,8 @@ jobs:
   # the tuner example plugin, then runs test/ext-plugins pytest for the mixed and
   # CSV-tuner suites. Non-gating for now so a new suite cannot block merges while
   # it is validated on the runner.
-  ext-plugins:
-    name: ext-plugins
+  rccl-ext-plugins:
+    name: rccl-ext-plugins
     uses: ./.github/workflows/rccl-suite.yml
     permissions:
       contents: read
@@ -81,7 +82,8 @@ jobs:
       non_gating: true
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
-      therock_ref: ${{ inputs.therock_ref || '2e7c190b99caa226a8644eda6eca720b3db102d5' }}
+      # TheRock pinned ref committed 2026-08-26; bump when refreshing artifacts.
+      therock_ref: ${{ inputs.therock_ref || 'b45a06045cbb29c85e221748e653ac2521c6e1bf' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # GIN suite (WIP) on Tensorwave. Failures show red with logs on this job.
@@ -103,6 +105,7 @@ jobs:
       non_gating: true
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
+      # TheRock pinned ref committed 2026-08-26; bump when refreshing artifacts.
       therock_ref: ${{ inputs.therock_ref || 'b45a06045cbb29c85e221748e653ac2521c6e1bf' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
