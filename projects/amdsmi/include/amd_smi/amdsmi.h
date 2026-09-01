@@ -1130,7 +1130,8 @@ typedef struct {
   char vendor_name[AMDSMI_MAX_STRING_LENGTH];
   uint32_t subvendor_id;                      //!< The subsystem vendor ID
   uint64_t device_id;                         //!< The device ID of a GPU
-  uint32_t rev_id;                            //!< The revision ID of a GPU
+  uint32_t rev_id;                            //!< PCI config-space revision ID, 0xFFFFFFFF if
+                                              //!< not supported
   char asic_serial[AMDSMI_MAX_STRING_LENGTH]; /**< The socket's unique serial number, 0xFFFFFFFF if
                                                    not supported */
   uint32_t oam_id;                   //!< Corresponds to socket number, 0xFFFFFFFF if not supported

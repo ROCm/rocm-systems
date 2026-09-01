@@ -2447,20 +2447,6 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   uint16_t device_id = 0;
   uint16_t subsystem_id = 0;
   char temp_market_name[AMDSMI_MAX_STRING_LENGTH] = {0};
-  smi_clear_char_and_reinitialize(info->market_name, AMDSMI_MAX_STRING_LENGTH, temp_market_name);
-  info->market_name[0] = '\0';
-  info->vendor_id = std::numeric_limits<uint32_t>::max();
-  info->vendor_name[0] = '\0';
-  info->subvendor_id = std::numeric_limits<uint32_t>::max();
-  info->device_id = std::numeric_limits<uint64_t>::max();
-  info->rev_id = std::numeric_limits<uint16_t>::max();
-  info->asic_serial[0] = '\0';
-  info->oam_id = std::numeric_limits<uint32_t>::max();
-  info->num_of_compute_units = std::numeric_limits<uint32_t>::max();
-  info->target_graphics_version = std::numeric_limits<uint64_t>::max();
-  info->subsystem_id = std::numeric_limits<uint32_t>::max();
-  info->flags = 0;
-  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
 
   std::ostringstream ss;
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
@@ -2491,13 +2477,12 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
     }
   }
 
+  init_asic_info_defaults(info);
+
   /**
    * For other sysfs related information, get from rocm-smi
    */
 
-  // Ensure asic_serial defaults to an unsupported value
-  std::string max_uint64_str = "ffffffffffffffff";
-  smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, max_uint64_str);
   uint64_t asic_serial_id = 0;
   amdsmi_status_t status =
       rsmi_wrapper(rsmi_dev_asic_serial_get, processor_handle, 0, &asic_serial_id);
@@ -2560,7 +2545,6 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   if (status == AMDSMI_STATUS_SUCCESS) {
     info->device_id = static_cast<uint64_t>(device_id);
   }
-  info->rev_id = dev_info.pci_rev;
   status = rsmi_wrapper(rsmi_dev_vendor_id_get, processor_handle, 0, &vendor_id);
   if (status == AMDSMI_STATUS_SUCCESS) {
     info->vendor_id = vendor_id;
