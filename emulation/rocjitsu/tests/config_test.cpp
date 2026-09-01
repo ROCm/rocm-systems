@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
@@ -58,6 +59,92 @@ test::ScopedTempFile write_temp_config(std::string_view json) {
 std::vector<uint8_t> read_binary_file(const std::string &path) {
   std::ifstream stream(path, std::ios::binary);
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
+std::string fidelity_test_config(std::string_view fidelity_field = {},
+                                 std::string_view arch = "rdna4", uint32_t vgprs_per_wf = 256) {
+  return std::string(R"json({"max_ticks":1,"num_threads":1,)json") +
+         (fidelity_field.empty() ? "" : std::string(fidelity_field) + ",") + R"("vm":{"arch":")" +
+         std::string(arch) + R"("},
+            "topology":{"root":{"name":"soc","type":"soc","children":[
+              {"name":"vram","type":"gpu_memory"},
+              {"name":"xcd0","type":"xcd","children":[
+                {"name":"l2","type":"l2_cache"},
+                {"name":"cp","type":"command_processor"},
+                {"name":"se0","type":"shader_engine","children":[
+                  {"name":"cu0","type":"compute_unit","config":[
+                    {"key":"num_wf_slots","value":"1"},
+                    {"key":"sgprs_per_wf","value":"112"},
+                    {"key":"vgprs_per_wf","value":")" +
+         std::to_string(vgprs_per_wf) + R"("},
+                    {"key":"lds_size_kb","value":"64"}
+                  ]}
+                ]}
+              ]}
+            ]},"links":[]}})";
+}
+
+TEST(ConfigLoaderTest, FidelityModeDefaultsToPermissiveAndRejectsUnknownValues) {
+  auto loaded = config::load_config_from_string(fidelity_test_config(), rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  EXPECT_EQ(loaded.soc()->emulation_fidelity(), EmulationFidelity::Permissive);
+  EXPECT_EQ(cu->emulation_fidelity(), EmulationFidelity::Permissive);
+
+  EXPECT_THROW(
+      config::load_config_from_string(fidelity_test_config(R"("fidelity_mode":"aspirational")"),
+                                      rocjitsu::kEmbeddedSchema),
+      std::invalid_argument);
+}
+
+TEST(ConfigLoaderTest, StrictVgprViolationFailsPublicRunnerButPermissiveAccessRemainsCompatible) {
+  auto exercise = [](std::string config_json, bool strict) {
+    rj_vm_t *vm = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(config_json.c_str(), RJ_VM_MODE_DEFAULT, &vm),
+              ROCJITSU_STATUS_SUCCESS);
+    ASSERT_NE(vm, nullptr);
+    auto *cu = vm->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+    ASSERT_NE(cu, nullptr);
+    auto *wave = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*num_sgprs=*/16,
+                                 /*num_vgprs=*/8);
+    ASSERT_NE(wave, nullptr);
+
+    // Mirrors the motivating gfx1201 failure: instrumentation uses v24 while
+    // the descriptor only reserves v0:v7. The fixed backing block still has
+    // storage for v24, which permissive mode historically allowed.
+    const uint32_t undeclared_v24 = wave->vgpr_alloc().base + 24;
+    EXPECT_EQ(amdgpu::RegisterAccess(*wave).read_vgpr(undeclared_v24, /*lane=*/0), 0u);
+    EXPECT_EQ(cu->fidelity_violation_count(), strict ? 1u : 0u);
+
+    if (!strict)
+      rj_vm_request_exit(vm, "permissive compatibility test complete");
+    const rj_status_t run_status = rj_vm_run(vm, nullptr);
+    EXPECT_EQ(run_status, strict ? ROCJITSU_STATUS_ERROR : ROCJITSU_STATUS_SUCCESS);
+    rj_vm_destroy(vm);
+  };
+
+  exercise(fidelity_test_config(), false);
+  exercise(fidelity_test_config(R"("fidelity_mode":"strict")"), true);
+}
+
+TEST(ConfigLoaderTest, StrictOrdinaryVgprLimitDoesNotRejectAccVgprBank) {
+  rj_vm_t *vm = nullptr;
+  const std::string config_json = fidelity_test_config(R"("fidelity_mode":"strict")", "cdna4");
+  ASSERT_EQ(rj_vm_create_from_string(config_json.c_str(), RJ_VM_MODE_DEFAULT, &vm),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(vm, nullptr);
+  auto *cu = vm->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*num_sgprs=*/16, /*num_vgprs=*/8);
+  ASSERT_NE(wave, nullptr);
+
+  const uint32_t acc0 = wave->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET;
+  EXPECT_EQ(amdgpu::RegisterAccess(*wave).read_vgpr(acc0, /*lane=*/0), 0u);
+  EXPECT_EQ(cu->fidelity_violation_count(), 0u);
+
+  rj_vm_request_exit(vm, "strict AccVGPR address-space test complete");
+  EXPECT_EQ(rj_vm_run(vm, nullptr), ROCJITSU_STATUS_SUCCESS);
+  rj_vm_destroy(vm);
 }
 
 TEST(ConfigLoaderTest, LoadCdna2Config) {
@@ -1225,6 +1312,7 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
 
 TEST(CheckpointTest, SaveAndRestoreMemory) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,"exec_mode":"clocked",
+    "fidelity_mode":"strict",
     "vm":{"arch":"cdna3"},
     "topology":{
       "root":{
@@ -1271,6 +1359,9 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
   EXPECT_EQ(restored.memory()->read64(0x2000), 0x0123456789ABCDEFULL);
   EXPECT_EQ(restored.exec_mode, simdojo::ExecMode::CLOCKED);
   EXPECT_EQ(restored.soc()->exec_mode(), simdojo::ExecMode::CLOCKED);
+  EXPECT_EQ(restored.soc()->emulation_fidelity(), EmulationFidelity::Strict);
+  EXPECT_EQ(restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->emulation_fidelity(),
+            EmulationFidelity::Strict);
   EXPECT_TRUE(restored.soc()->xcd(0)->command_processor()->packed_tid());
 }
 
