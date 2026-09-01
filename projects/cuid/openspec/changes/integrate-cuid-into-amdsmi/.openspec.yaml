@@ -1,0 +1,8 @@
+schema: spec-driven
+created: 2026-08-20
+# partially-implemented: the AMD SMI identity API, CLI and seed provisioning are
+# in projects/amdsmi, but three obligations of this change are not yet met.
+# Task 2.3 (determine the answering stage) has only its driver half; the CLI's
+# seven field names are not all emitted; and the seed is reported once per GPU
+# rather than once per invocation. The last two are being corrected now.
+status: partially-implemented

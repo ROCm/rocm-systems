@@ -1,0 +1,45 @@
+schema: spec-driven
+
+source: https://github.com/ROCm/rocm-systems/tree/develop/projects/cuid
+
+context: |
+  CUID (Component Unified Identifier): a deterministic, per-component identity
+  for GPUs, CPUs, NICs, NPUs and platforms, so that tools which today each
+  invent their own device naming can correlate on one value. Sources live at
+  projects/cuid in the ROCm/rocm-systems monorepo; PRs target develop. Titles
+  use Conventional Commits: type(cuid): description.
+
+  What is built: amdcuid_static (aliased amdcuid::amdcuid) from
+  projects/cuid/lib, an amdcuid CLI tool, and a daemon. AMD SMI links the
+  library through find_package(amdcuid CONFIG QUIET) and exposes the identity
+  through its own API and CLI. That integration is specified in
+  changes/integrate-cuid-into-amdsmi and lands in projects/amdsmi.
+
+  A CUID is a 122-bit payload carried inside a UUIDv8 (RFC 9562). The payload
+  packs a 64-bit serial or fingerprint, UnitID split across two fields,
+  RevisionID, DeviceID, VendorID, an auxiliary-value flag at bit 117, and a
+  4-bit component type at bits 118:121. Two constructions exist and are
+  distinguished by the version nibble: constructed (always v8, decodable) and
+  adopted (a firmware UUID carried verbatim, opaque). A derived CUID is an
+  HMAC over the packed payload, so it is stable only while its salt is.
+
+  THE BASELINE IS NOT AN ENDORSEMENT. specs/cuid/ records the published
+  specification ("Persistent platform component identification for SW tools",
+  version 84) as it stands, including the places where it contradicts itself,
+  contradicts a standard it cites, or leaves a value an implementer must
+  invent. Those are marked "Recorded contradiction", "Recorded defect" and
+  "Recorded gap" and are deliberately NOT fixed in the baseline; a baseline
+  that quietly repaired its source would stop being a baseline. CONFLICTS.md
+  registers all of them and names where each is resolved.
+  check_conflict_register.py checks that bookkeeping (markers have rows, rows
+  have non-placeholder resolutions, a short list of named constants agrees
+  across the change dirs) and nothing about whether a resolution is correct
+  or implemented. Read README.md and CONFLICTS.md before proposing a change to
+  specs/cuid/.
+
+  Resolutions live in changes/. amend-published-cuid-spec resolves the register
+  against the published document; pin-cuid-cross-layer-contract pins the values
+  the kernel, the library and its consumers must agree on;
+  add-cuid-kernel-interface covers the sysfs surface, whose kernel side is not
+  in this repository; integrate-cuid-into-amdsmi covers the AMD SMI API, CLI
+  and seed provisioning.
