@@ -1,20 +1,4 @@
 [[nodiscard]] std::optional<uint16_t>
-operational_barrier_scratch_count(ConSanProbeIntentKind evidence, const ConSanRequest &request,
-                                  const BoundRuntimeResources &resources,
-                                  const ConSanMoiOperatingPoint &point) {
-  switch (evidence) {
-  case ConSanProbeIntentKind::BarrierRecord:
-    return 6u;
-  case ConSanProbeIntentKind::SampledBarrierEpoch:
-    return point.automatic_moi_private_epoch || point.moi_persistent_sgprs.complete() ? 9u : 7u;
-  case ConSanProbeIntentKind::ExactBarrierEpoch:
-    return inline_shadow_barrier_scratch_count(request, resources, point);
-  default:
-    return std::nullopt;
-  }
-}
-
-[[nodiscard]] std::optional<uint16_t>
 operational_atomic_scratch_count(ConSanProbeIntentKind evidence,
                                  const ConSanAtomicLoweringForm &form, rj_code_arch_t arch) {
   switch (evidence) {
@@ -44,8 +28,7 @@ void append_moi_operational_resource_plans(
     for (size_t index = 0; index < candidates.size(); ++index) {
       const MoiBarrierEvidenceSitePlan &candidate = candidates[index];
       const auto scratch_count_for = [&](const ConSanMoiOperatingPoint &site_point) {
-        return operational_barrier_scratch_count(evidence.barrier, request, bound_resources,
-                                                 site_point);
+        return operational_barrier_scratch_count(evidence.barrier, bound_resources, site_point);
       };
       ConSanMoiOperatingPoint site_point = point;
       const std::optional<uint16_t> scratch_count = scratch_count_for(site_point);

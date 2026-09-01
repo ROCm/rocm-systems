@@ -12,9 +12,10 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-[[nodiscard]] uint16_t inline_shadow_barrier_scratch_count(const ConSanRequest &request,
-                                                           const BoundRuntimeResources &resources,
-                                                           const ConSanMoiOperatingPoint &point);
+[[nodiscard]] std::optional<uint16_t>
+operational_barrier_scratch_count(ConSanProbeIntentKind evidence,
+                                  const BoundRuntimeResources &resources,
+                                  const ConSanMoiOperatingPoint &point);
 
 void try_apply_inline_shadow_barrier_patch(std::span<const uint8_t> bytes,
                                            const ConSanOptions &options,

@@ -4043,3 +4043,78 @@ not the material code-size evidence required by Section 14.8. Other reviewed
 common mode budgets, broad mutable products, remaining target locality, legacy
 harvesting, both complete extension exercises, and the independent completion
 audit remain open. The goal therefore remains active.
+
+### 16.45 Convergence checkpoint 44: operation-composed shared barriers
+
+The next deep read distinguished mode identity from evidence-operation identity
+inside the named shared barrier component. Its fifteen concrete mode references
+did not describe fifteen mode-owned algorithms. Record/Replay selects
+`BarrierRecord`, InlineShadow selects `ExactBarrierEpoch`, and Sampled selects
+`SampledBarrierEpoch`; the first two deliberately share the same difficult
+placement, relay, private-state, and relocation machinery, while Sampled owns a
+different synchronization implementation. The shared component was repeatedly
+rediscovering Record/Replay versus InlineShadow even though checkpoint 41 had
+already made the selected operation an explicit mode-owned contract.
+
+Shared exact-subset lowering now resolves that registered barrier operation
+once. Record emission, exact-epoch update, patch classification, dense-router
+eligibility, body construction, and relocated-guest bookkeeping compose from
+the operation rather than a concrete engine enumerator. An incompatible
+operation fails at this boundary instead of silently becoming InlineShadow.
+This does not move shared mechanics into mode packages: both production modes,
+and any future mode selecting either existing operation, still use the same
+placement and relay implementation.
+
+The migration also harvested two parallel mechanisms. Resource solving and
+barrier application previously maintained separate barrier scratch-width
+authorities, including a duplicated Record/Replay width. One
+`operational_barrier_scratch_count` now defines the Record, Sampled, and exact-
+shadow resource contracts for both consumers. Three copies of record-body
+guest-instruction lookup versus exact-epoch offset publication are now one
+typed helper. The old functions, branches, and duplicate relocation blocks are
+gone rather than retained as adapters.
+
+A new focused test exercises all three operation widths, Sampled's persistent-
+state width, InlineShadow's visible-evidence width, and invalid-operation
+rejection. The pre-existing hypothetical fifth-mode fixture already composes a
+`BarrierRecord` operation without editing a target or shared resource switch;
+the full barrier set exercises the resulting Record/Replay, Sampled, and
+InlineShadow behavior over the target matrix. The architecture gate replaces
+the barrier component's reviewed 17-reference budget with exact zero. It also
+replaces the already-stale 20-reference top-level coordinator budget with exact
+zero, preventing that forward-only coordinator from silently regaining mode
+dispatch.
+
+| Signal | Checkpoint 44 | Cumulative change | Slice change from checkpoint 43 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,409 | +434 | **-19** |
+| Nonblank production lines | 99,121 | +38 | **-19** |
+| Production implementation lines | 91,398 | **-52** | **-19** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 206 / 56 | **-70 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 206 / 28 | +6 / 0 | +1 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 360 / 63 | +70 / +12 | **-1 / 0** |
+| Direct mode references in shared barrier lowering | **0** | n/a | **-15** |
+| Shared barrier scratch-width authorities | **1** | n/a | **-1** |
+| Repeated barrier relocation decision blocks | **1** | n/a | **-2** |
+| Shared-barrier mode-switch gate | exact zero | n/a | strengthened from budget 17 |
+| Top-level coordinator mode-switch gate | exact zero | n/a | strengthened from stale budget 20 |
+| Test inventory | **5,380** | **+35** | **+1** |
+
+Validation includes a final-tree `-j16` build; all 164 focused barrier, dense-
+relay, operation-contract, hypothetical-mode, and architecture-boundary tests;
+all 4,745 nonphysical tests at `-j16`, including the unchanged 2,908 simulator
+rows over five targets; and all 635 physical gfx1201 tests serialized at `-j1`.
+No test was removed, renamed, disabled, or replaced; the direct operation-
+contract regression increases the inventory by one.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.4, 14.5, 14.6, 14.7,
+14.8, and 14.9. One shared exact-subset mechanism now composes mode-owned
+semantic operations, a new mode can reuse those operations without shared or
+target edits, two parallel authorities are harvested, enforcement is tighter,
+coverage grows, and production shrinks. The cumulative 52-line reduction is
+still not material for a 91-thousand-line implementation, however. Remaining
+target locality, broad mutable products, larger deletion opportunities, the
+target-side extension exercise, and the independent Section 14 completion
+audit remain open. The goal therefore remains active.

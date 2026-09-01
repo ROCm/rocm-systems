@@ -1343,13 +1343,13 @@ _consan_assert_reviewed_mode_switch_budget(
     consan_moi_placement.inc 0 "shared immutable resource constraint solver"
 )
 _consan_assert_reviewed_mode_switch_budget(
-    consan_moi.cpp 20 "top-level engine dispatch and result publication"
+    consan_moi.cpp 0 "mode-neutral forward-only MOI coordinator"
 )
 _consan_assert_reviewed_mode_switch_budget(
     consan_moi_report_plan.cpp 0 "mode-neutral report and evidence composition"
 )
 _consan_assert_reviewed_mode_switch_budget(
-    consan_moi_barrier.inc 17 "named RecordReplay/Sampled/Inline barrier component"
+    consan_moi_barrier.inc 0 "evidence-operation-driven shared barrier component"
 )
 _consan_assert_reviewed_mode_switch_budget(
     consan_moi_pipeline.inc 0 "semantic-operation resource-plan orchestration"
@@ -1364,7 +1364,7 @@ _consan_assert_reviewed_mode_switch_budget(
     consan_moi_prologue.cpp 0 "mode-neutral MOI entry-state construction"
 )
 _consan_assert_reviewed_mode_switch_budget(
-    consan_moi_model.cpp 4 "host model dispatch"
+    consan_moi_model.cpp 4 "mode-owned replay diagnostic provenance constants"
 )
 
 message(STATUS "ConSan architectural boundary checks passed")

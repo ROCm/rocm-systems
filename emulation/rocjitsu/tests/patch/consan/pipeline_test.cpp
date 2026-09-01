@@ -4,6 +4,7 @@
 #include "consan_test_support.h"
 #include "transform_result_test_access.h"
 
+#include "rocjitsu/code/patch/consan/consan_moi_barrier.h"
 #include "rocjitsu/code/patch/consan/consan_moi_pipeline.h"
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
 
@@ -121,6 +122,37 @@ concept IsMoiLoweringSummaryInventory = requires(T inventory) {
 static_assert(IsMoiLoweringSummaryInventory<std::span<const ConSanPatchKind>>);
 static_assert(!IsMoiLoweringSummaryInventory<std::span<const ConSanPatchInfo>>);
 static_assert(!IsMoiLoweringSummaryInventory<const ConSanTransformArtifacts &>);
+
+TEST(ConSanPipeline, BarrierScratchSizingFollowsRegisteredEvidenceOperation) {
+  BoundRuntimeResources resources;
+  ConSanMoiOperatingPoint point;
+
+  EXPECT_EQ(consan_moi_impl::operational_barrier_scratch_count(ConSanProbeIntentKind::BarrierRecord,
+                                                               resources, point),
+            6u);
+  EXPECT_EQ(consan_moi_impl::operational_barrier_scratch_count(
+                ConSanProbeIntentKind::SampledBarrierEpoch, resources, point),
+            7u);
+  EXPECT_EQ(consan_moi_impl::operational_barrier_scratch_count(
+                ConSanProbeIntentKind::ExactBarrierEpoch, resources, point),
+            1u);
+
+  resources.moi_report_buffer_address = 0x123456780000ull;
+  EXPECT_EQ(consan_moi_impl::operational_barrier_scratch_count(
+                ConSanProbeIntentKind::ExactBarrierEpoch, resources, point),
+            3u);
+  point.moi_inline_access_present = true;
+  EXPECT_EQ(consan_moi_impl::operational_barrier_scratch_count(
+                ConSanProbeIntentKind::ExactBarrierEpoch, resources, point),
+            1u);
+
+  point.moi_persistent_sgprs.set_owner_epoch(20u, 21u);
+  EXPECT_EQ(consan_moi_impl::operational_barrier_scratch_count(
+                ConSanProbeIntentKind::SampledBarrierEpoch, resources, point),
+            9u);
+  EXPECT_FALSE(consan_moi_impl::operational_barrier_scratch_count(ConSanProbeIntentKind::Count,
+                                                                  resources, point));
+}
 
 TEST(ConSanPipeline, MoiLoweringSummaryConsumesOnlyTypedPatchKindInventory) {
   const std::vector patches{
