@@ -190,7 +190,7 @@ rocDecStatus D3D12Interop::CreateSharedResources(rocDecVideoSurfaceFormat format
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_DEVICE_INVALID;
         }
-        hr = D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0,
+        HRESULT hr = D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0,
                                __uuidof(ID3D12Device), reinterpret_cast<void**>(&d3d12_device_));
         adapter->Release();
         if (FAILED(hr) || d3d12_device_ == nullptr) {
