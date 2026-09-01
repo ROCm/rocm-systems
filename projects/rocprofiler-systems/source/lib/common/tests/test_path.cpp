@@ -4,7 +4,6 @@
 #include "common/path.hpp"
 #include "filesystem.hpp"
 
-#include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
@@ -534,8 +533,9 @@ TEST_F(PathTest, CreateParentDirsAndOpenOfstream_ExistingDirectoryIsNotAnError)
 
 TEST_F(PathTest, CreateParentDirsAndOpenOfstream_BareFilenameCreatesNoDirectory)
 {
-    const auto previous_cwd = std::filesystem::current_path();
-    std::filesystem::current_path(m_test_dir);
+    char saved_cwd[PATH_MAX];
+    ASSERT_NE(getcwd(saved_cwd, sizeof(saved_cwd)), nullptr);
+    ASSERT_EQ(chdir(m_test_dir.c_str()), 0);
 
     std::ofstream out_fstream;
     EXPECT_TRUE(create_parent_dirs_and_open_ofstream(out_fstream, "bare.txt"));
@@ -544,7 +544,7 @@ TEST_F(PathTest, CreateParentDirsAndOpenOfstream_BareFilenameCreatesNoDirectory)
 
     EXPECT_TRUE(is_regular_file(m_test_dir + "/bare.txt"));
 
-    std::filesystem::current_path(previous_cwd);
+    ASSERT_EQ(chdir(saved_cwd), 0);
 }
 
 TEST_F(PathTest, CreateParentDirsAndOpenOfstream_UncreatableParentReturnsFalse)
@@ -552,16 +552,11 @@ TEST_F(PathTest, CreateParentDirsAndOpenOfstream_UncreatableParentReturnsFalse)
     // a regular file as an intermediate component makes create_directories fail
     const std::string blocker = create_file("blocker");
 
-    const auto previous_cwd = std::filesystem::current_path();
-    std::filesystem::current_path(m_test_dir);
-
     std::ofstream out_fstream;
     EXPECT_FALSE(
         create_parent_dirs_and_open_ofstream(out_fstream, blocker + "/sub/out.txt"));
     EXPECT_FALSE(out_fstream.is_open());
-    EXPECT_FALSE(is_regular_file(m_test_dir + "/out.txt"));
-
-    std::filesystem::current_path(previous_cwd);
+    EXPECT_FALSE(is_regular_file(blocker + "/sub/out.txt"));
 }
 
 TEST_F(PathTest, CreateParentDirsAndOpenOfstream_TargetIsDirectoryReturnsFalse)
