@@ -6,11 +6,12 @@
 namespace rocjitsu::consan_moi_detail {
 namespace {
 
-[[nodiscard]] uint8_t
-record_replay_entry_workgroup_capture_count(const ConSanMoiOperatingPoint &point) {
+[[nodiscard]] uint8_t record_replay_entry_workgroup_capture_count(
+    const ConSanMoiOperatingPoint &point,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
   return static_cast<uint8_t>(point.moi_persistent_sgprs.record_replay_workgroup.complete()) +
          static_cast<uint8_t>(point.moi_record_replay_workgroup_vgprs.complete()) +
-         static_cast<uint8_t>(point.moi_record_replay_workgroup_private_offsets.complete());
+         static_cast<uint8_t>(private_offsets && private_offsets->complete());
 }
 
 } // namespace
@@ -32,12 +33,16 @@ bool record_replay_requires_entry_workgroup_capture(ConSanMoiEngine engine) {
   return engine == ConSanMoiEngine::RecordReplay || engine == ConSanMoiEngine::Sampled;
 }
 
-bool record_replay_has_entry_workgroup_capture(const ConSanMoiOperatingPoint &point) {
-  return record_replay_entry_workgroup_capture_count(point) != 0u;
+bool record_replay_has_entry_workgroup_capture(
+    const ConSanMoiOperatingPoint &point,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
+  return record_replay_entry_workgroup_capture_count(point, private_offsets) != 0u;
 }
 
-bool record_replay_entry_workgroup_capture_is_unambiguous(const ConSanMoiOperatingPoint &point) {
-  return record_replay_entry_workgroup_capture_count(point) <= 1u;
+bool record_replay_entry_workgroup_capture_is_unambiguous(
+    const ConSanMoiOperatingPoint &point,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
+  return record_replay_entry_workgroup_capture_count(point, private_offsets) <= 1u;
 }
 
 bool moi_has_runtime_hardware_dispatch_id(const ConSanMoiOperatingPoint &point) {

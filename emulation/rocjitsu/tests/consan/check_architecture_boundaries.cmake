@@ -267,6 +267,11 @@ foreach(_file IN LISTS _consan_production_files)
     )
     _consan_assert_no_match(
         "${_file}"
+        "moi_record_replay_workgroup_private_offsets"
+        "site-local private workgroup capture must not return to the code-object-wide operating point"
+    )
+    _consan_assert_no_match(
+        "${_file}"
         "append_moi_(atomic|fence|barrier)_lowering_commit"
         "synchronization evidence plans must publish through one shared commit boundary"
     )

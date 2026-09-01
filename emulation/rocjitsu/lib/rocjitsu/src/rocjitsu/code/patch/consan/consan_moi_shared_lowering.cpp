@@ -544,6 +544,7 @@ bool apply_moi_descriptor_requirements(
     uint32_t record_index, uint32_t record_count, uint32_t logical_range_index,
     const ConSanMoiReportBufferLayout &layout, bool spill_overlaps_guest_operands,
     const VgprSpillSequence *spill, std::optional<uint32_t> private_epoch_offset,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_workgroup_offsets,
     const std::optional<MoiWorkitemOwnerDerivationPlan> &owner_derivation,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
     uint32_t *guest_instruction_word_count) {
@@ -656,8 +657,8 @@ bool apply_moi_descriptor_requirements(
     derived_owner_words = owner->words;
     derived_owner_words.insert(derived_owner_words.end(), owner_mask->begin(), owner_mask->end());
   }
-  const auto persistent_workgroup_sources =
-      record_replay_persistent_workgroup_sources(request.moi_engine, point);
+  const auto persistent_workgroup_sources = record_replay_persistent_workgroup_sources(
+      request.moi_engine, point, private_workgroup_offsets);
   if (!persistent_workgroup_sources) {
     errors.emplace_back(
         "ConSan MOI Record/Replay access requires one exact entry-captured workgroup tuple");

@@ -359,12 +359,12 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
 /// Record/Replay probes execute after arbitrary guest code. Capture the
 /// complete workgroup tuple at entry instead of depending on descriptor SGPRs
 /// or RDNA launch TTMPs retaining their entry values.
-[[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
-record_replay_persistent_workgroup_sources(ConSanMoiEngine engine,
-                                           const ConSanMoiOperatingPoint &point) {
+[[nodiscard]] std::optional<ConSanMoiWorkgroupSources> record_replay_persistent_workgroup_sources(
+    ConSanMoiEngine engine, const ConSanMoiOperatingPoint &point,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
   if (!record_replay_requires_entry_workgroup_capture(engine) ||
-      !record_replay_has_entry_workgroup_capture(point) ||
-      !record_replay_entry_workgroup_capture_is_unambiguous(point)) {
+      !record_replay_has_entry_workgroup_capture(point, private_offsets) ||
+      !record_replay_entry_workgroup_capture_is_unambiguous(point, private_offsets)) {
     return std::nullopt;
   }
   const auto scalar_source = [](uint16_t sgpr) { return ConSanMoiWorkgroupSource::scalar(sgpr); };
@@ -401,16 +401,14 @@ record_replay_persistent_workgroup_sources(ConSanMoiEngine engine,
         .cdna_guest_payload_mask = 0u,
     };
   }
-  if (point.moi_record_replay_workgroup_private_offsets.complete()) {
+  if (private_offsets && private_offsets->complete()) {
     return ConSanMoiWorkgroupSources{
-        .x = private_source(*point.moi_record_replay_workgroup_private_offsets.x()),
-        .y = private_source(*point.moi_record_replay_workgroup_private_offsets.y()),
-        .z = private_source(*point.moi_record_replay_workgroup_private_offsets.z()),
-        .cluster_workgroup_id =
-            point.moi_record_replay_workgroup_private_offsets.cluster_workgroup_id()
-                ? private_source(
-                      *point.moi_record_replay_workgroup_private_offsets.cluster_workgroup_id())
-                : ConSanMoiWorkgroupSource{},
+        .x = private_source(*private_offsets->x()),
+        .y = private_source(*private_offsets->y()),
+        .z = private_source(*private_offsets->z()),
+        .cluster_workgroup_id = private_offsets->cluster_workgroup_id()
+                                    ? private_source(*private_offsets->cluster_workgroup_id())
+                                    : ConSanMoiWorkgroupSource{},
         .cdna_full_payload_base = std::nullopt,
         .cdna_guest_payload_base = std::nullopt,
         .cdna_guest_payload_mask = 0u,
@@ -423,8 +421,10 @@ record_replay_persistent_workgroup_sources(ConSanMoiEngine engine,
 moi_persistent_or_descriptor_workgroup_sources(
     std::span<const uint8_t> image, uint64_t descriptor_file_offset, ConSanMoiEngine engine,
     const ConSanMoiOperatingPoint &point, rj_code_arch_t arch, std::vector<std::string> &errors,
-    bool uses_cluster_workgroup_id) {
-  if (const auto persistent = record_replay_persistent_workgroup_sources(engine, point))
+    bool uses_cluster_workgroup_id,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
+  if (const auto persistent =
+          record_replay_persistent_workgroup_sources(engine, point, private_offsets))
     return persistent;
   return moi_descriptor_workgroup_sources(image, descriptor_file_offset, arch, errors,
                                           uses_cluster_workgroup_id);

@@ -1019,7 +1019,6 @@ struct ConSanMoiOperatingPoint {
   /// different partial tuples.
   ConSanMoiPersistentSgprState moi_persistent_sgprs;
   ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_vgprs;
-  ConSanMoiPersistentWorkgroupPrivateOffsets moi_record_replay_workgroup_private_offsets;
   /// Persistent packed workgroup identity used only by Inline Shadow. Launch
   /// SGPRs or RDNA TTMPs are copied into this VGPR at entry because they are
   /// not stable after arbitrary guest code.

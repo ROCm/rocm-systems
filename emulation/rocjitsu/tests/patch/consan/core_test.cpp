@@ -3,6 +3,7 @@
 
 #include "consan_test_support.h"
 
+#include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_target_lds_ops.h"
@@ -175,6 +176,22 @@ TEST(ConSan, MoiPersistentSgprStateOwnsItsCompleteDescriptorExtent) {
   EXPECT_EQ(requirements.at(64u), 27u);
 }
 
+TEST(ConSan, MoiPrivateWorkgroupCaptureIsAnExplicitSiteBinding) {
+  ConSanMoiOperatingPoint point;
+  const ConSanMoiPersistentWorkgroupPrivateOffsets private_offsets{32u, 36u, 40u};
+
+  EXPECT_FALSE(consan_moi_detail::record_replay_has_entry_workgroup_capture(point));
+  EXPECT_TRUE(
+      consan_moi_detail::record_replay_has_entry_workgroup_capture(point, &private_offsets));
+  EXPECT_TRUE(consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(
+      point, &private_offsets));
+
+  point.moi_record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{26u, 27u, 28u};
+  EXPECT_TRUE(consan_moi_detail::record_replay_has_entry_workgroup_capture(point));
+  EXPECT_FALSE(consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(
+      point, &private_offsets));
+}
+
 TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   ConSanMoiOperatingPoint state{
       .moi_initialize_owner_epoch = true,
@@ -194,8 +211,6 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .moi_dispatch_identity = {},
       .moi_persistent_sgprs = {},
       .moi_record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{26u, 27u, 28u},
-      .moi_record_replay_workgroup_private_offsets =
-          ConSanMoiPersistentWorkgroupPrivateOffsets{32u, 36u, 40u},
       .moi_workgroup_key_vgpr = 29u,
       .owner_persistent_vgprs = {},
       .owner_transient_sgprs = {},
@@ -245,8 +260,6 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   expect_field_participates([](auto &value) { value.moi_dispatch_identity.set_vgpr(18u); });
   expect_field_participates([](auto &value) { value.moi_persistent_sgprs = {}; });
   expect_field_participates([](auto &value) { value.moi_record_replay_workgroup_vgprs = {}; });
-  expect_field_participates(
-      [](auto &value) { value.moi_record_replay_workgroup_private_offsets = {}; });
   expect_field_participates([](auto &value) { value.moi_workgroup_key_vgpr.reset(); });
 }
 

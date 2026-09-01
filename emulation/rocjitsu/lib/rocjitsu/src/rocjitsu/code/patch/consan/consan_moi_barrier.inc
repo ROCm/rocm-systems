@@ -947,18 +947,18 @@ void try_apply_inline_shadow_barrier_epoch_patch(
           continue;
         }
         ConSanMoiOperatingPoint candidate_point = std::move(owner_point);
-        candidate_point.moi_record_replay_workgroup_private_offsets =
-            access_patch->persistent_record_replay_workgroup_private_offsets;
         if (!apply_moi_transient_sgpr_assignment(options, candidate_point,
                                                  result.moi_operating_point, owners) ||
-            !apply_record_replay_entry_workgroup_assignment(options, candidate_point,
-                                                            result.moi_operating_point, owners)) {
+            !apply_record_replay_entry_workgroup_assignment(
+                options, candidate_point, result.moi_operating_point, owners,
+                &access_patch->persistent_record_replay_workgroup_private_offsets)) {
           result.warnings.emplace_back(
               "ConSan MOI Record/Replay dense barrier lost its private owner-local assignment");
           continue;
         }
         const auto record_emission = resolve_moi_record_event_emission_plan(
-            options, options, candidate_point, resources->base, arch);
+            options, options, candidate_point, resources->base, arch,
+            &access_patch->persistent_record_replay_workgroup_private_offsets);
         if (!record_emission) {
           result.warnings.emplace_back(
               "ConSan MOI Record/Replay dense barrier has an incomplete emission plan");

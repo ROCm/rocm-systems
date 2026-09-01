@@ -333,7 +333,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
   const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
       bytes, *candidate.kernel_descriptor_file_offset, request.moi_engine, point, arch, errors,
-      candidate.uses_cluster_workgroup_id);
+      candidate.uses_cluster_workgroup_id,
+      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr);
   if (!workgroup_sources || candidate.site.file_offset > bytes.size() ||
       candidate.site.size > bytes.size() - candidate.site.file_offset)
     return std::nullopt;
@@ -642,7 +643,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   }
   const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
       bytes, *candidate.kernel_descriptor_file_offset, request.moi_engine, point, arch, errors,
-      candidate.uses_cluster_workgroup_id);
+      candidate.uses_cluster_workgroup_id,
+      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr);
   if (!workgroup_sources)
     return std::nullopt;
   if (candidate.site.file_offset > bytes.size() ||

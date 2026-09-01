@@ -25,10 +25,13 @@ record_replay_uses_automatic_banked_capture(const ConSanRequest &request,
 
 [[nodiscard]] bool record_replay_requires_entry_workgroup_capture(ConSanMoiEngine engine);
 
-[[nodiscard]] bool record_replay_has_entry_workgroup_capture(const ConSanMoiOperatingPoint &point);
+[[nodiscard]] bool record_replay_has_entry_workgroup_capture(
+    const ConSanMoiOperatingPoint &point,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets = nullptr);
 
-[[nodiscard]] bool
-record_replay_entry_workgroup_capture_is_unambiguous(const ConSanMoiOperatingPoint &point);
+[[nodiscard]] bool record_replay_entry_workgroup_capture_is_unambiguous(
+    const ConSanMoiOperatingPoint &point,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets = nullptr);
 
 [[nodiscard]] bool moi_has_runtime_hardware_dispatch_id(const ConSanMoiOperatingPoint &point);
 

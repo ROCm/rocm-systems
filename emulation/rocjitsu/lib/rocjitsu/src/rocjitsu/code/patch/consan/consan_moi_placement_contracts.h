@@ -510,9 +510,9 @@ moi_descriptor_dispatch_id_preload_plan(const KD &descriptor, rj_code_arch_t arc
     std::vector<std::string> &errors, bool uses_cluster_workgroup_id = false,
     std::optional<uint16_t> cdna_full_payload_user_sgpr_count = std::nullopt);
 
-[[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
-record_replay_persistent_workgroup_sources(ConSanMoiEngine engine,
-                                           const ConSanMoiOperatingPoint &point);
+[[nodiscard]] std::optional<ConSanMoiWorkgroupSources> record_replay_persistent_workgroup_sources(
+    ConSanMoiEngine engine, const ConSanMoiOperatingPoint &point,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets = nullptr);
 
 [[nodiscard]] constexpr uint16_t moi_ordinary_sgpr_limit(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);

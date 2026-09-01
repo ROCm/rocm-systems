@@ -124,8 +124,6 @@ void try_apply_direct_sampled_watchpoint_patch(
       operating_point.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id()
           .has_value() ||
       operating_point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id().has_value() ||
-      operating_point.moi_record_replay_workgroup_private_offsets.cluster_workgroup_id()
-          .has_value() ||
       std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {
         return candidate->container.uses_cluster_workgroup_id;
       });
@@ -344,10 +342,6 @@ void try_apply_direct_sampled_watchpoint_patch(
       if (!private_layout || (private_layout->owner_offset && !owner_derivation))
         continue;
     }
-    if (private_layout) {
-      candidate_point.moi_record_replay_workgroup_private_offsets =
-          private_layout->record_replay_workgroup_offsets;
-    }
     auto probe = plan_moi_probe_resources(
         result.program_inventory, *resources, options, options, candidate_point, mode_semantics,
         spill_managers, arch, private_layout, candidate_point.has_compact_moi_scalar_spill(),
@@ -405,7 +399,7 @@ void try_apply_direct_sampled_watchpoint_patch(
           static_cast<uint16_t>(resources->base + resources->count),
           !private_layout || private_layout->owner_offset.has_value());
     const bool has_private_workgroup_sources =
-        candidate_point.moi_record_replay_workgroup_private_offsets.complete();
+        private_layout && private_layout->record_replay_workgroup_offsets.complete();
     const bool runtime_fast_gate = !candidate_point.has_compact_moi_scalar_spill() &&
                                    use_indirect_appended && !use_dense_call &&
                                    !uses_local_entry_island && !has_private_workgroup_sources &&
@@ -438,6 +432,7 @@ void try_apply_direct_sampled_watchpoint_patch(
                                                             layout.sampled_causal_window_capacity),
         spill_overlaps_guest_operands, spill_backed_operand_recovery, spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
+        private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr,
         owner_derivation, runtime_workgroup_gate_in_body, candidate_errors,
         &probe_guest_instruction_offset, &guest_instruction_word_count);
     if (!words) {
@@ -705,8 +700,6 @@ void try_apply_direct_sampled_watchpoint_patch(
             "ConSan MOI sampled probe lost its final persistent or transient assignment");
         return;
       }
-      candidate_point.moi_record_replay_workgroup_private_offsets =
-          planned_patch.private_workgroup_offsets;
       ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs =
           moi_owner_epoch_vgpr_sources(candidate_point.moi_owner_epoch_vgprs);
       if (planned_patch.private_epoch_offset || candidate_point.moi_persistent_sgprs.complete())
@@ -728,8 +721,8 @@ void try_apply_direct_sampled_watchpoint_patch(
               layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity),
           planned_patch.spill_overlaps_guest_operands, planned_patch.spill_backed_operand_recovery,
           planned_patch.spill ? &*planned_patch.spill : nullptr, planned_patch.private_epoch_offset,
-          planned_patch.owner_derivation, planned_patch.runtime_workgroup_gate_in_body,
-          result.errors);
+          &planned_patch.private_workgroup_offsets, planned_patch.owner_derivation,
+          planned_patch.runtime_workgroup_gate_in_body, result.errors);
       if (!words)
         return;
       const uint64_t spill_bytes =
@@ -1077,8 +1070,6 @@ void try_apply_direct_sampled_watchpoint_patch(
                   "ConSan MOI sampled probe lost its inline persistent or transient assignment");
               return std::optional<std::vector<uint32_t>>{};
             }
-            candidate_point.moi_record_replay_workgroup_private_offsets =
-                planned_patch.private_workgroup_offsets;
             ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs =
                 moi_owner_epoch_vgpr_sources(candidate_point.moi_owner_epoch_vgprs);
             if (planned_patch.private_epoch_offset ||
@@ -1103,8 +1094,9 @@ void try_apply_direct_sampled_watchpoint_patch(
                 planned_patch.spill_overlaps_guest_operands,
                 planned_patch.spill_backed_operand_recovery,
                 planned_patch.spill ? &*planned_patch.spill : nullptr,
-                planned_patch.private_epoch_offset, planned_patch.owner_derivation,
-                planned_patch.runtime_workgroup_gate_in_body, result.errors);
+                planned_patch.private_epoch_offset, &planned_patch.private_workgroup_offsets,
+                planned_patch.owner_derivation, planned_patch.runtime_workgroup_gate_in_body,
+                result.errors);
             if (words) {
               const size_t planned_words =
                   static_cast<size_t>(planned_patch.placement.body_size / sizeof(uint32_t));

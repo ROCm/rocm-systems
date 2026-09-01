@@ -32,16 +32,19 @@ using consan_moi_detail::moi_bound_dispatch_id_sources;
 
 [[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
     const ConSanRequest &request, ConSanMoiOperatingPoint &point,
-    const ConSanMoiOperatingPoint &allocation, std::span<const uint64_t> owner_descriptor_offsets) {
-  if (!consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(point))
+    const ConSanMoiOperatingPoint &allocation, std::span<const uint64_t> owner_descriptor_offsets,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
+  if (!consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(point,
+                                                                               private_offsets))
     return false;
   if (!consan_moi_detail::record_replay_requires_entry_workgroup_capture(request.moi_engine) ||
-      consan_moi_detail::record_replay_has_entry_workgroup_capture(point)) {
+      consan_moi_detail::record_replay_has_entry_workgroup_capture(point, private_offsets)) {
     return true;
   }
   return apply_moi_persistent_vgpr_assignment(point, allocation, owner_descriptor_offsets) &&
-         consan_moi_detail::record_replay_has_entry_workgroup_capture(point) &&
-         consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(point);
+         consan_moi_detail::record_replay_has_entry_workgroup_capture(point, private_offsets) &&
+         consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(point,
+                                                                                 private_offsets);
 }
 
 void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
@@ -56,9 +59,10 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 /// this function performs no mutation and cannot choose a different binding.
 [[nodiscard]] std::optional<MoiRecordEventEmissionPlan> resolve_moi_record_event_emission_plan(
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, rj_code_arch_t arch) {
+    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, rj_code_arch_t arch,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
   const auto workgroup_sources =
-      record_replay_persistent_workgroup_sources(request.moi_engine, point);
+      record_replay_persistent_workgroup_sources(request.moi_engine, point, private_offsets);
   const auto special_state = moi_special_state_sgprs(request, point);
   if (!point.moi_exec_save_sgpr || !bound_resources.moi_report_buffer_address ||
       !workgroup_sources || !special_state) {
@@ -133,18 +137,18 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
                                                     /*include_record_replay_workgroup=*/true);
     if (!private_layout)
       return std::nullopt;
-    event_point.moi_record_replay_workgroup_private_offsets =
-        private_layout->record_replay_workgroup_offsets;
   }
-  if (!apply_record_replay_entry_workgroup_assignment(request, event_point, allocation,
-                                                      resources.owner_descriptor_file_offsets)) {
+  if (!apply_record_replay_entry_workgroup_assignment(
+          request, event_point, allocation, resources.owner_descriptor_file_offsets,
+          private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr)) {
     warnings.emplace_back(std::string(warning_context) +
                           " found no common entry workgroup assignment");
     return std::nullopt;
   }
 
-  auto emission = resolve_moi_record_event_emission_plan(request, bound_resources, event_point,
-                                                         resources.base, arch);
+  auto emission = resolve_moi_record_event_emission_plan(
+      request, bound_resources, event_point, resources.base, arch,
+      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr);
   if (!emission) {
     warnings.emplace_back(std::string(warning_context) +
                           " has an incomplete Record/Replay emission plan");

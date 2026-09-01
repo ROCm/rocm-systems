@@ -29,7 +29,8 @@ using consan_detail::MoiWorkitemOwnerDerivationPlan;
 /// no owner-local VGPR assignment.
 [[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
     const ConSanRequest &request, ConSanMoiOperatingPoint &point,
-    const ConSanMoiOperatingPoint &allocation, std::span<const uint64_t> owner_descriptor_offsets);
+    const ConSanMoiOperatingPoint &allocation, std::span<const uint64_t> owner_descriptor_offsets,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets = nullptr);
 
 void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
                                 const ResolvedMoiScratchPlan &resources,
@@ -37,7 +38,8 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 
 [[nodiscard]] std::optional<MoiRecordEventEmissionPlan> resolve_moi_record_event_emission_plan(
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, rj_code_arch_t arch);
+    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, rj_code_arch_t arch,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets = nullptr);
 
 struct MoiPlannedRecordEvent : MoiPlannedProbeResources {
   MoiRecordEventEmissionPlan emission;

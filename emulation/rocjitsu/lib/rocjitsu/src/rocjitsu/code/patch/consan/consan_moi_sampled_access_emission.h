@@ -25,6 +25,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     uint32_t pending_acquire_owner_bank_count, bool spill_overlaps_guest_operands,
     bool spill_backed_operand_recovery, const VgprSpillSequence *spill,
     std::optional<uint32_t> private_epoch_offset,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_workgroup_offsets,
     const std::optional<consan_detail::MoiWorkitemOwnerDerivationPlan> &owner_derivation,
     bool runtime_workgroup_gate_in_body, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr, uint32_t *guest_instruction_word_count = nullptr);

@@ -4857,3 +4857,76 @@ shrinkage. Remaining target locality, broad operating-point and mutable-
 transaction surfaces, larger legacy harvesting, material Section 14.8
 evidence, and the independent Section 14 completion audit remain open. The
 goal therefore remains active.
+
+### 16.57 Convergence checkpoint 56: site-local private workgroup binding
+
+The operating-point deep read followed persistent workgroup identity from
+entry-state allocation through Record/Replay access and barrier planning,
+Sampled access, barrier and atomic planning, and final emission. Scalar and
+VGPR workgroup tuples are code-object-wide representation choices selected by
+the resource solver. The private tuple is different: its offsets belong to an
+owner-local private layout and can vary by site. Nevertheless, ten planning
+and application paths copied that site-local tuple into
+`ConSanMoiOperatingPoint`, making a broad accepted-allocation product also act
+as a temporary site-emission bus. Capture detection and source resolution then
+could not state whether private offsets were an accepted global choice or a
+binding for the current patch.
+
+The private tuple is now absent from `ConSanMoiOperatingPoint`. Private-layout
+and planned-patch products remain its owners, and the narrow Record/Replay and
+Sampled planning/emission boundaries accept an explicit optional binding.
+Code-object-wide capture checks therefore inspect only scalar and VGPR
+choices; a site that selected private state supplies its exact offsets when it
+validates or resolves emission sources. Ambiguity checking still rejects a
+private binding combined with a scalar or VGPR representation, but that proof
+no longer requires mutating or cloning the accepted operating point.
+
+The same trace exposed three independent assemblies of effective Sampled
+synchronization state for direct barriers, dense barriers, and atomics. One
+owner-local `SampledSyncProbeState` resolver now applies the selected transient
+assignment, selects scratch-materialized owner/epoch sources for scalar or
+private entry state, or applies the owner-local persistent VGPR assignment.
+All three paths consume that complete result. Direct Sampled access emission
+also resolves the exact workgroup-source product once per patched access and
+passes it to every address-range emitter instead of repeating descriptor or
+persistent-source resolution per range.
+
+A direct regression proves that private capture is invisible without an
+explicit site binding, becomes complete with the binding, and is rejected as
+ambiguous beside a code-object-wide VGPR tuple. Existing private-state,
+Record/Replay access/barrier, Sampled access/barrier/atomic, dense-route, and
+five-target tests exercise every migrated caller. The architecture gate
+rejects restoration of the deleted operating-point field across all
+production files.
+
+| Signal | Checkpoint 56 | Cumulative change | Slice change from checkpoint 55 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,323 | +348 | +5 |
+| Nonblank production lines | 99,021 | **-62** | +4 |
+| Production implementation lines | 91,290 | **-160** | +1 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **175 / 52** | **-101 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 30 | +10 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Site-local private workgroup fields in the operating point | **0** | n/a | **-1** |
+| Independent Sampled synchronization state-resolution paths | **1** | n/a | **-2** |
+| Per-range Sampled workgroup-source resolution | **0** | n/a | converged |
+| Test inventory | **5,388** | **+43** | **+1** |
+
+Validation includes a final-tree `-j16` build; 143 focused private-state,
+Record/Replay, Sampled, dense-route, and architecture-boundary tests; all
+4,753 nonphysical tests over the five emulated targets at `-j16`; and all 635
+physical gfx1201 tests serialized at `-j1`. No test was removed, renamed,
+disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.4, 14.5, 14.6, 14.7,
+14.9, and 14.10. A site-local representation no longer travels through the
+code-object-wide solver result, and three mode-local state assemblies converge
+on one forward product. The complete migration and sharing are effectively
+size-neutral at one added implementation line, however. They do not advance
+the material shrinkage requirement in Section 14.8, and the cumulative
+reduction remains only 160 lines. Remaining target locality, broader
+operating-point and mutable-transaction surfaces, larger legacy harvesting,
+material Section 14.8 evidence, and the independent Section 14 completion
+audit remain open. The goal therefore remains active.
