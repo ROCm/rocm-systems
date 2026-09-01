@@ -1082,7 +1082,7 @@ WriteInterceptor(const void* packets,
             }
 
             // Clean up our private signals (never the app's completion signal).
-            if(drain_signal.handle != 0) get_core_table()->hsa_signal_destroy_fn(drain_signal);
+            if(drain_signal != null_hsa_signal) get_core_table()->hsa_signal_destroy_fn(drain_signal);
             return;
         }
     }
