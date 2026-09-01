@@ -395,7 +395,7 @@ enum class WaitEventKind {
   Count,
 };
 
-enum class OrderedCounterDomain {
+enum class CompletionOrderClass {
   None,
   Vmem,
   Lds,
@@ -461,7 +461,7 @@ struct PartialRegisterAccess {
 struct PendingEvent {
   WaitCounterKind counter = WaitCounterKind::Load;
   WaitEventKind kind = WaitEventKind::Unknown;
-  OrderedCounterDomain ordered_domain = OrderedCounterDomain::None;
+  CompletionOrderClass completion_order = CompletionOrderClass::None;
   RegisterSet regs;
   RegisterSet old_value_regs;
   // LLVM tracks the low/high 16-bit physical subregisters used by D16 memory
@@ -1182,19 +1182,19 @@ private:
     return std::numeric_limits<uint32_t>::max();
   }
 
-  [[nodiscard]] static OrderedCounterDomain ordered_counter_domain(rj_code_arch_t arch,
+  [[nodiscard]] static CompletionOrderClass completion_order_class(rj_code_arch_t arch,
                                                                    const ClassifiedEvent &event,
                                                                    const Instruction &inst) {
     // CDNA prevents a wait counter from overflowing by stalling the issue of
     // the instruction that would overflow it. Keep completion order separate
     // from the counter itself: mixed event types need not complete in order.
     if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
-      return OrderedCounterDomain::None;
+      return CompletionOrderClass::None;
     if (event.counter == WaitCounterKind::Ds && event.kind == WaitEventKind::Ds &&
         inst.mnemonic().starts_with("ds_")) {
       // CDNA3/CDNA4 encode the DS GDS modifier in bit 16.
-      return (inst.raw_encoding()[0] & (1u << 16u)) == 0 ? OrderedCounterDomain::Lds
-                                                         : OrderedCounterDomain::None;
+      return (inst.raw_encoding()[0] & (1u << 16u)) == 0 ? CompletionOrderClass::Lds
+                                                         : CompletionOrderClass::None;
     }
     if (event.counter == WaitCounterKind::Load) {
       switch (event.kind) {
@@ -1207,73 +1207,87 @@ private:
       case WaitEventKind::LdsDirect:
         // CDNA has no separate VSCNT. Its non-FLAT VMEM events share one
         // in-order VMCNT stream.
-        return OrderedCounterDomain::Vmem;
+        return CompletionOrderClass::Vmem;
       default:
         break;
       }
     }
-    return OrderedCounterDomain::None;
+    return CompletionOrderClass::None;
   }
 
-  [[nodiscard]] static std::optional<uint32_t> ordered_counter_capacity(rj_code_arch_t arch,
-                                                                        const PendingEvent &event) {
+  [[nodiscard]] static std::optional<uint32_t> counter_capacity(rj_code_arch_t arch,
+                                                                WaitCounterKind counter) {
     if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
       return std::nullopt;
-    switch (event.ordered_domain) {
-    case OrderedCounterDomain::Vmem:
+    if (counter == WaitCounterKind::Load)
       return 63;
-    case OrderedCounterDomain::Lds:
+    if (counter == WaitCounterKind::Ds)
       return 15;
-    case OrderedCounterDomain::None:
-      return std::nullopt;
-    }
     return std::nullopt;
   }
 
-  [[nodiscard]] static bool same_ordered_capacity_domain(rj_code_arch_t arch,
-                                                         const PendingEvent &older,
-                                                         const PendingEvent &younger) {
-    const auto older_capacity = ordered_counter_capacity(arch, older);
-    return older_capacity && ordered_counter_capacity(arch, younger) == older_capacity &&
-           older.ordered_domain == younger.ordered_domain;
+  [[nodiscard]] static uint32_t counter_increment(const ClassifiedEvent &event,
+                                                  const Instruction &inst) {
+    if (event.kind != WaitEventKind::Smem || inst.num_dst_operands() == 0)
+      return 1;
+    const Operand *destination = inst.dst_operand(0);
+    if (destination == nullptr)
+      return 1;
+    return destination->size_bits() <= 32 ? 1 : 2;
   }
 
   static void apply_ordered_counter_backpressure(PendingState &state,
                                                  std::span<const ClassifiedEvent> current_events,
                                                  const Instruction &inst, rj_code_arch_t arch) {
-    for (const ClassifiedEvent &classification : current_events) {
-      PendingEvent current;
-      current.counter = classification.counter;
-      current.kind = classification.kind;
-      current.ordered_domain = ordered_counter_domain(arch, classification, inst);
+    std::array<bool, kCounterCount> increments_counter{};
+    std::array<uint32_t, kCounterCount> increments{};
+    std::array<CompletionOrderClass, kCounterCount> current_order{};
 
-      if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
-          current.ordered_domain == OrderedCounterDomain::Vmem) {
-        const auto capacity = ordered_counter_capacity(arch, current);
-        if (capacity) {
-          for (DtlVisibilityEvent &visibility : state.dtl_visibility) {
-            if (!visibility.active)
-              continue;
-            if (visibility.min_ordered_younger < *capacity)
-              ++visibility.min_ordered_younger;
-            if (visibility.min_ordered_younger >= *capacity)
-              visibility.active = false;
+    for (const ClassifiedEvent &classification : current_events) {
+      const size_t idx = counter_index(classification.counter);
+      if (!counter_capacity(arch, classification.counter))
+        continue;
+      const CompletionOrderClass order = completion_order_class(arch, classification, inst);
+      if (!increments_counter[idx]) {
+        increments_counter[idx] = true;
+        increments[idx] = counter_increment(classification, inst);
+        current_order[idx] = order;
+      } else if (current_order[idx] != order) {
+        current_order[idx] = CompletionOrderClass::None;
+      }
+    }
+
+    for (size_t idx = 0; idx < kCounterCount; ++idx) {
+      if (!increments_counter[idx])
+        continue;
+      const auto counter = static_cast<WaitCounterKind>(idx);
+      const uint32_t increment = increments[idx];
+      const uint32_t capacity = *counter_capacity(arch, counter);
+
+      if (arch == ROCJITSU_CODE_ARCH_CDNA4 && counter == WaitCounterKind::Load) {
+        for (DtlVisibilityEvent &visibility : state.dtl_visibility) {
+          if (!visibility.active)
+            continue;
+          if (visibility.min_ordered_younger + increment >= capacity) {
+            visibility.active = false;
+          } else if (current_order[idx] == CompletionOrderClass::Vmem) {
+            visibility.min_ordered_younger += increment;
           }
         }
       }
 
-      auto &pending = state.pending[counter_index(classification.counter)];
-      for (PendingEvent &older : pending) {
-        const auto capacity = ordered_counter_capacity(arch, older);
-        if (capacity && same_ordered_capacity_domain(arch, older, current) &&
-            older.min_ordered_younger < *capacity) {
-          ++older.min_ordered_younger;
-        }
-      }
+      auto &pending = state.pending[idx];
       retire_events(state, pending, [&](const PendingEvent &older) {
-        const auto capacity = ordered_counter_capacity(arch, older);
-        return capacity && older.min_ordered_younger >= *capacity;
+        return older.completion_order != CompletionOrderClass::None &&
+               older.min_ordered_younger + increment >= capacity;
       });
+      for (PendingEvent &older : pending) {
+        if (older.completion_order == CompletionOrderClass::None ||
+            older.completion_order != current_order[idx]) {
+          continue;
+        }
+        older.min_ordered_younger = std::min(older.min_ordered_younger + increment, capacity - 1);
+      }
     }
   }
 
@@ -1290,7 +1304,7 @@ private:
 
   [[nodiscard]] static bool same_event_identity(const PendingEvent &lhs, const PendingEvent &rhs) {
     return lhs.counter == rhs.counter && lhs.kind == rhs.kind &&
-           lhs.ordered_domain == rhs.ordered_domain && lhs.regs == rhs.regs &&
+           lhs.completion_order == rhs.completion_order && lhs.regs == rhs.regs &&
            lhs.partial_reg == rhs.partial_reg && lhs.partial_reg_mask == rhs.partial_reg_mask &&
            lhs.special_reg == rhs.special_reg && lhs.barrier_id == rhs.barrier_id &&
            lhs.produces_regs == rhs.produces_regs && lhs.check_uses == rhs.check_uses &&
@@ -1328,12 +1342,12 @@ private:
   [[nodiscard]] static bool event_identity_less(const PendingEvent &lhs, const PendingEvent &rhs) {
     const auto lhs_key =
         std::tie(lhs.section_name, lhs.section_offset, lhs.file_offset, lhs.instruction,
-                 lhs.counter, lhs.kind, lhs.ordered_domain, lhs.barrier_id, lhs.produces_regs,
+                 lhs.counter, lhs.kind, lhs.completion_order, lhs.barrier_id, lhs.produces_regs,
                  lhs.check_uses, lhs.check_defs, lhs.check_exec_defs, lhs.check_memory_order,
                  lhs.check_program_end, lhs.check_counter_parity_order);
     const auto rhs_key =
         std::tie(rhs.section_name, rhs.section_offset, rhs.file_offset, rhs.instruction,
-                 rhs.counter, rhs.kind, rhs.ordered_domain, rhs.barrier_id, rhs.produces_regs,
+                 rhs.counter, rhs.kind, rhs.completion_order, rhs.barrier_id, rhs.produces_regs,
                  rhs.check_uses, rhs.check_defs, rhs.check_exec_defs, rhs.check_memory_order,
                  rhs.check_program_end, rhs.check_counter_parity_order);
     if (lhs_key != rhs_key)
@@ -5626,7 +5640,7 @@ private:
     PendingEvent event;
     event.counter = classification.counter;
     event.kind = classification.kind;
-    event.ordered_domain = ordered_counter_domain(arch, classification, inst);
+    event.completion_order = completion_order_class(arch, classification, inst);
     event.regs = registers_for_event(inst, du, classification, state.vgpr_msb, arch);
     if (classification.registers == TrackedRegisterSource::Defs) {
       if (const auto partial = partial_d16_load_def(inst, arch);
