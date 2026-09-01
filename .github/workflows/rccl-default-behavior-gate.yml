@@ -1,0 +1,70 @@
+name: RCCL default-behavior gate
+
+# Blocks an RCCL PR that adds an environment variable, changes the default of an
+# existing one, or newly reads one, until projects/rccl/rcclDefaultBehaviorChanges.md
+# carries an entry for each variable detected. Those entries are what gets shared
+# with downstream consumers between releases and folded into the release notes.
+# JIRA ID: AICOMRCCL-1904
+#
+# GitHub does the plumbing: the path filter triggers it, `gh pr diff` supplies the
+# diff (no clone of the monorepo history), ::error annotations put each finding on
+# the diff, and $GITHUB_STEP_SUMMARY renders the report. Only the content analysis
+# is ours -- see projects/rccl/tools/ci/check_default_behavior_changes.py, which is
+# the single source of truth and runs identically on a developer's machine.
+#
+# TODO(AICOMRCCL-1904): once the false-positive rate is confirmed in practice, ask
+# the rocm-systems admins to mark this a required status check on develop. That is
+# a branch-protection setting and cannot be asserted from here.
+
+on:
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - 'projects/rccl/**'
+      - '.github/workflows/rccl-default-behavior-gate.yml'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  default-behavior-gate:
+    name: Default-behavior changes documented
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout rccl
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Only the head tree is needed: the param registry is built from the
+          # checked-out sources and the diff comes from the API, so no history.
+          sparse-checkout: projects/rccl
+          fetch-depth: 1
+
+      - name: Self-tests
+        # The checker gates other people's PRs, so it proves itself first.
+        run: python3 -m unittest discover -s projects/rccl/tools/ci -p 'test_check_*.py' -v
+
+      - name: Fetch the PR diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr diff "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" > pr.diff
+          wc -l pr.diff
+
+      - name: Check for undocumented default-behavior changes
+        env:
+          # Passed through the environment, never interpolated into the script:
+          # a PR description is untrusted input.
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python3 projects/rccl/tools/ci/check_default_behavior_changes.py \
+            --diff pr.diff \
+            --strip-prefix projects/rccl/ \
+            --format github
