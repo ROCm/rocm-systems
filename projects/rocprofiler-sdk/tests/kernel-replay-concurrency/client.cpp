@@ -69,7 +69,8 @@
 
 // Handshake block shared with the workload (resolved there via dlsym(RTLD_DEFAULT,
 // "kr_coord_get")).
-extern "C" {
+extern "C"
+{
 struct kr_coord_t
 {
     std::atomic<long> old_ready{0};      // victim -> tool/A: V=OLD ready for cycle k
@@ -101,7 +102,11 @@ std::atomic<long>        g_id_bad{0};     // records with a bad (zero or changed
 // (one at a time, synchronously in the WriteInterceptor), so a plain global is safe.
 rocprofiler_dispatch_id_t g_hog_dispatch_id{0};
 
-uint64_t hog_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t) { return 5; }
+uint64_t
+hog_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+{
+    return 5;
+}
 
 // A replay dispatch_id must be nonzero (0 is the "unset" sentinel that make_dispatch_info leaves)
 // and identical across the CONFIG and every PASS of one dispatch. A violation prints a [repro] FAIL
@@ -135,13 +140,13 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        if(!hog)  // victim: leave pass_count_cb NULL -> NOT replayed
+        if(!hog)  // victim: leave replay_pass_count NULL -> NOT replayed
         {
             g_victim_cfg.fetch_add(1, std::memory_order_relaxed);
             return;
         }
-        p->pass_count_cb  = hog_pass_count;
-        g_hog_dispatch_id = p->dispatch_info.dispatch_id;  // reused by every pass of this replay
+        p->replay_pass_count = hog_pass_count;
+        g_hog_dispatch_id    = p->dispatch_info.dispatch_id;  // reused by every pass of this replay
         g_hog_cfg.fetch_add(1, std::memory_order_relaxed);
         // snapshot happens right after this returns -> make sure V=OLD is already set
         while(c->old_ready.load() == 0)

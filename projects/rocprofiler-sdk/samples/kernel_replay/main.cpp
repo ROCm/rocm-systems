@@ -21,7 +21,7 @@
 
 // Replayed kernel: distinctive block size 67. Busy enough for host-trap PC sampling.
 constexpr int kReplayBlock = 67;
-// Opt-out kernel: distinctive block size 64. Tools leave pass_count_cb NULL for this dispatch.
+// Opt-out kernel: distinctive block size 64. Tools leave replay_pass_count NULL for this dispatch.
 constexpr int kOptOutBlock = 64;
 
 __global__ void

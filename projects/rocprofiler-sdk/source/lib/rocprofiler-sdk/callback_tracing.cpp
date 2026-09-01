@@ -164,10 +164,10 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
 
     // Kernel replay runs one replay loop per dispatch (a single pass count + plan), so only one
     // context may own it process-wide. Reject a second subscriber instead of silently sharing the
-    // planner -- otherwise pass_count_cb is last-writer-wins and one tool's user_data is delivered
-    // to another. Claimed atomically: an already-registered check followed by a later flag store
-    // would be a check-then-act pair that two concurrent configurations could both pass. Claimed
-    // before mutating ctx so a rejection leaves it unconfigured.
+    // planner -- otherwise replay_pass_count is last-writer-wins and one tool's user_data is
+    // delivered to another. Claimed atomically: an already-registered check followed by a later
+    // flag store would be a check-then-act pair that two concurrent configurations could both
+    // pass. Claimed before mutating ctx so a rejection leaves it unconfigured.
     bool claimed_replay = false;
     if(kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY)
     {

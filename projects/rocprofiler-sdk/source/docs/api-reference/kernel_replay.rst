@@ -20,7 +20,7 @@ device memory between those executions so each pass observes identical inputs. I
    single-packet, single-dispatch submissions; see :ref:`kernel-replay-limitations` and
    :ref:`kernel-replay-memory-snapshot`.
 
-For the configure / ``pass_count_cb`` / local-context how-to, see :ref:`using-kernel-replay`. For
+For the configure / ``replay_pass_count`` / local-context how-to, see :ref:`using-kernel-replay`. For
 pass-count semantics, localized context control, and source maps, see
 :ref:`kernel-replay-callback-api`.
 
@@ -65,7 +65,7 @@ Cast ``record.payload`` to ``rocprofiler_callback_tracing_kernel_replay_data_t*`
      - Tool responsibility
    * - ``ROCPROFILER_KERNEL_REPLAY_CONFIG``
      - ``PHASE_ENTER``
-     - Set ``pass_count_cb``. Optionally set ``replay_continue_cb``. May stash per-dispatch state
+     - Set ``replay_pass_count``. Optionally set ``replay_continue``. May stash per-dispatch state
        in ``user_data``.
    * - ``ROCPROFILER_KERNEL_REPLAY_CONFIG``
      - ``PHASE_EXIT``
@@ -73,10 +73,10 @@ Cast ``record.payload`` to ``rocprofiler_callback_tracing_kernel_replay_data_t*`
    * - ``ROCPROFILER_KERNEL_REPLAY_PASS``
      - ``PHASE_ENTER``
      - Read ``current_pass`` / ``total_passes``. Optionally call
-       ``replay_local_enable_context_cb`` / ``replay_local_disable_context_cb``.
+       ``replay_start_context`` / ``replay_stop_context``.
    * - ``ROCPROFILER_KERNEL_REPLAY_PASS``
      - ``PHASE_EXIT``
-     - Pass complete; ``replay_continue_cb`` (if set) runs after this.
+     - Pass complete; ``replay_continue`` (if set) runs after this.
 
 ``dispatch_info.dispatch_id`` is the same for CONFIG, every PASS, and every record those passes
 produce. Distinguish passes with ``current_pass``.
@@ -84,17 +84,17 @@ produce. Distinguish passes with ``current_pass``.
 Pass count
 ----------
 
-After CONFIG ``PHASE_ENTER`` returns, the SDK calls ``pass_count_cb`` if it is non-null:
+After CONFIG ``PHASE_ENTER`` returns, the SDK calls ``replay_pass_count`` if it is non-null:
 
 * ``NULL`` — dispatch is not replayed (no snapshot).
 * returns ``1`` — ordinary single execution (no snapshot).
-* returns ``N > 1`` — ``N`` passes; ``replay_continue_cb`` may still stop early (custom tools only;
+* returns ``N > 1`` — ``N`` passes; ``replay_continue`` may still stop early (custom tools only;
   ``rocprofv3`` never sets this callback).
-* returns ``0`` — indefinite loop; ``replay_continue_cb`` is required (custom tools only).
+* returns ``0`` — indefinite loop; ``replay_continue`` is required (custom tools only).
 
 ``rocprofv3`` (in the stacked tool PR) returns the number of ``--pmc`` groups collectable on
 ``dispatch_info.agent_id``. A custom tool can return any of the cases above and may set
-``replay_continue_cb`` for early exit or an indefinite loop.
+``replay_continue`` for early exit or an indefinite loop.
 
 Using replay with dispatch counting
 -----------------------------------
@@ -129,7 +129,7 @@ There is no separate ``kernel_replay_service`` Doxygen group.
 See also
 --------
 
-* :ref:`using-kernel-replay` — configure, ``pass_count_cb``, local context
+* :ref:`using-kernel-replay` — configure, ``replay_pass_count``, local context
 * :ref:`kernel-replay-callback-api` — API contract
 * :ref:`kernel-replay-concurrency` — isolation model
 * :ref:`kernel-replay-memory-snapshot` — what ``snap()`` / ``restore()`` actually do

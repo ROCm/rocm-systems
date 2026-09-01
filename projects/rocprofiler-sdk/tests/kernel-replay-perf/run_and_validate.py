@@ -6,7 +6,7 @@
 # Runs the kernel-replay perf workload under LD_PRELOAD for a baseline pass count and P=N and
 # checks that replay scales with the pass count rather than blowing up.
 #
-# The baseline defaults to P=2, not P=1, on purpose. A pass_count_cb returning 1 means the dispatch
+# The baseline defaults to P=2, not P=1, on purpose. A replay_pass_count returning 1 means the dispatch
 # is NOT replayed: it takes the ordinary single-dispatch path with no snapshot and no restore (see
 # experimental/kernel_replay.h). Timing P=1 therefore times a bare dispatch, and a P=N/P=1 ratio is
 # dominated by the one-time cost of turning replay on at all rather than by the pass count -- orders

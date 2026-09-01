@@ -38,8 +38,8 @@ deliberate:
 
 - **One flat struct, no unions.** CONFIG and PASS share
   `rocprofiler_callback_tracing_kernel_replay_data_t`; unused fields are zero.
-- **Tool-provided `pass_count_cb` during CONFIG `PHASE_ENTER`.** NULL means opt out of replay for
-  that dispatch. Returning 0 requires `replay_continue_cb` (indefinite loop). Returning 1 skips
+- **Tool-provided `replay_pass_count` during CONFIG `PHASE_ENTER`.** NULL means opt out of replay for
+  that dispatch. Returning 0 requires `replay_continue` (indefinite loop). Returning 1 skips
   snapshot because a single pass is the ordinary path.
 - **Localized start/stop as function pointers on the PASS payload**, mirroring
   `rocprofiler_start_context` / `rocprofiler_stop_context`, rather than a new public API.
@@ -54,7 +54,7 @@ deliberate:
 ## Localized context control
 
 The pointers are **wired**. During PASS `PHASE_ENTER` the SDK populates
-`replay_local_enable_context_cb` / `replay_local_disable_context_cb`. Semantics:
+`replay_start_context` / `replay_stop_context`. Semantics:
 
 - Only legal during PASS `PHASE_ENTER`.
 - Sticky across passes (avoids reprogramming PC sampling hardware on every pass).
@@ -63,7 +63,7 @@ The pointers are **wired**. During PASS `PHASE_ENTER` the SDK populates
 Routing of the downcalls uses a thread-scoped override map (`scoped_local_context_control` +
 `set_toggles_armed`) installed around the replay loop. That is SDK-internal. If a tool-facing handle
 parameter proves cleaner, the signature may gain one — that is the one shape decision still open.
-(`pass_count_cb` and `replay_continue_cb` are SDK→tool upcalls and need no such routing.)
+(`replay_pass_count` and `replay_continue` are SDK→tool upcalls and need no such routing.)
 
 Counter collection, SPM, and ATT consult the override at dispatch time. Kernel dispatch tracing
 drops disabled contexts from the pass's tracing data. PC sampling and device counting are agent-wide
@@ -77,11 +77,11 @@ without it.
 
 ```
 CONFIG PHASE_ENTER
-  tool sets: pass_count_cb (tool-provided), optionally replay_continue_cb
-  SDK calls pass_count_cb (if set) to get N
-    - pass_count_cb left null -> dispatch runs once, no replay (opt-out)
+  tool sets: replay_pass_count (tool-provided), optionally replay_continue
+  SDK calls replay_pass_count (if set) to get N
+    - replay_pass_count left null -> dispatch runs once, no replay (opt-out)
     - N == 1 -> ordinary path (no snapshot)
-  SDK validates: N==0 && replay_continue_cb==NULL -> error
+  SDK validates: N==0 && replay_continue==NULL -> error
 
   take per-agent writer lock
   drain queue; agent-wide sibling drain
@@ -92,7 +92,7 @@ CONFIG PHASE_ENTER
     submit kernel
     drain async completion handler
     PASS PHASE_EXIT
-    if replay_continue_cb provided and returns 0 -> break
+    if replay_continue provided and returns 0 -> break
     if not last pass -> restore device memory
 
 CONFIG PHASE_EXIT
