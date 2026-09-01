@@ -3,6 +3,7 @@
 
 #include "consan/consan_inline_model_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/consan_moi_dispatch_preload.h"
 
 #include <gtest/gtest.h>
 

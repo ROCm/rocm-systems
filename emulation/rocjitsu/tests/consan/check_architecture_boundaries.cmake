@@ -272,9 +272,9 @@ _consan_assert_no_match(
     "host-only InlineShadow reference oracles must not return to the production report contract"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_exact_shadow_model.h.inc"
-    "ConSanMoiInlineAcquiredEpochTokenPublishResult|consan_moi_inline_publish_acquired_epoch_token|consan_moi_inline_acquired_epoch_orders|consan_moi_inline_acquired_epoch_orders_pair|consan_moi_inline_stable_token_orders\\("
-    "host-only InlineShadow token reference oracles must not return to production shadow models"
+    "${_consan_dir}/consan_moi_inline_exact_model.h.inc"
+    "ConSanMoiInlineAcquiredEpochTokenPublishResult|consan_moi_inline_publish_acquired_epoch_token|consan_moi_inline_acquired_epoch_orders|consan_moi_inline_acquired_epoch_orders_pair|consan_moi_inline_stable_token_orders\\(|ConSanMoiInlineWorkgroupKey|consan_moi_inline_workgroup_key|consan_moi_exact_(byte_cells|shadow_entries)_conflict"
+    "host-only InlineShadow reference oracles must not return to the production InlineShadow contract"
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_sampled_model.cpp"
@@ -298,8 +298,28 @@ _consan_assert_no_match(
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_exact_shadow_model.h.inc"
-    "ConSanMoi(Sampled|RecordReplay)|consan_moi_(sampled|record_replay)"
-    "the exact-subset mechanism must not acquire Sampled or Record/Replay policy"
+    "ConSanMoi(Sampled|RecordReplay|Inline)|consan_moi_(sampled|record_replay|inline)|ConSanMoiDispatchId|consan_moi_(amdhsa_)?dispatch_id"
+    "the exact-subset mechanism must not acquire mode policy or dispatch-preload planning"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_inline_exact_model.h.inc"
+    "ConSanMoi(Sampled|RecordReplay)|consan_moi_(sampled|record_replay)|ConSanMoiDispatchId|consan_moi_(amdhsa_)?dispatch_id"
+    "the InlineShadow exact contract must not acquire other-mode policy or dispatch-preload planning"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_dispatch_preload.h"
+    "ConSanMoi(Sampled|RecordReplay|Inline|Report)|consan_moi_(sampled|record_replay|inline|report|shadow)|ConSanMoiShadow"
+    "dispatch-preload planning must remain independent of report models and mode policy"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi.h"
+    "consan_moi_dispatch_preload"
+    "the lowerer-private dispatch-preload contract must not leak through the public MOI entry point"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_report_contract.h"
+    "ConSanMoiDispatchIdPreload|consan_moi_(amdhsa_)?dispatch_id"
+    "the report contract must not acquire dispatch-preload planning"
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_sampled_model.h.inc"

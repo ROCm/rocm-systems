@@ -6626,3 +6626,70 @@ Those must be assigned honest owners in a later slice rather than treating the
 new filename as final. Broad placement and mutation buses, further target and
 mode locality, material whole-refactoring shrinkage, and the independent
 completion audit remain open. The goal therefore remains active.
+
+### 16.86 Convergence checkpoint 85: exact-subset, InlineShadow, and dispatch-preload ownership
+
+The follow-up deep read of the exact-subset fragment traced every declaration
+through production construction, runtime decoding, host replay, and tests. The
+735-line fragment still combined three independent responsibilities. Packed
+exact entries, byte provenance, sparse range replay, and conflict mechanics are
+shared by the exact mode subset. Stable exact snapshots and acquired-token
+filtering are InlineShadow runtime behavior. AMDHSA dispatch-ID preload
+planning is lowerer infrastructure used by placement and prologue emission; it
+does not consume report state or mode policy.
+
+Those responsibilities now have three physical owners. The shared
+`consan_moi_exact_shadow_model.h.inc` contains only exact-subset mechanics.
+`consan_moi_inline_exact_model.h.inc` contains only the production
+InlineShadow snapshot and deferred-token contract and is imported immediately
+after its shared exact dependency. `consan_moi_dispatch_preload.h` is a
+standalone target-neutral planning contract included by lowerer internals, not
+by the public MOI entry point or report contract. Record/Replay continues to
+consume the shared exact owner without acquiring InlineShadow declarations,
+and runtime InlineShadow decoding no longer makes generic preload planning
+visible to every report-contract consumer.
+
+The ownership trace also found three host reference oracles with no production
+caller: bounded Inline workgroup-key packing, packed-entry conflict, and
+packed-byte-cell conflict. They now live in
+`consan_inline_model_test_support.h`, beside the other InlineShadow GPU
+transaction oracles. Their existing focused tests continue to compare emitted
+semantics against those independent host models, but the models no longer
+inflate or broaden the production contract.
+
+The architecture gate rejects every mode and dispatch-preload identifier from
+the shared exact owner, rejects other-mode and preload planning from the
+InlineShadow exact owner, prevents the dispatch planner from acquiring report
+or mode knowledge, and prevents that lowerer-private planner from leaking
+through the public MOI entry point. It also prevents all three harvested
+oracles from returning to production.
+
+| Signal | Checkpoint 85 | Cumulative change | Slice change from checkpoint 84 |
+| --- | ---: | ---: | ---: |
+| Production files | 272 | +43 | +2 explicit owners |
+| Physical production lines | 103,024 | **-1,952** | **-58** |
+| Nonblank production lines | 96,783 | **-2,301** | **-59** |
+| Production implementation lines | 89,101 | **-2,349** | **-53** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 168 / 52 | **-108 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 326 / 60 | +36 / +9 | 0 / 0 |
+| Mode/preload identifiers in the shared exact owner | **0** | n/a | converged |
+| Host-only exact/Inline oracles in production | **0** | n/a | **-3** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and 126 focused dispatch-preload,
+Inline workgroup/snapshot/token, shared exact replay, Record/Replay, adversarial,
+and architecture-boundary tests. The immediately preceding checkpoint passed
+all 4,776 nonphysical tests, including all 2,918 simulator rows over the five
+targets; this slice changes ownership and test-oracle visibility without
+changing production definitions or generated GPU behavior. No test was
+removed, renamed, disabled, or replaced, and no physical gfx1201 test was run.
+
+This checkpoint strengthens Sections 14.1, 14.3, and 14.5 through 14.9. The
+report contract now exposes one shared exact mechanism followed by honest
+mode-owned contracts, while generic lowerer planning is outside that graph and
+three superseded production oracles are harvested. Broad placement and
+mutation buses, further target and mode locality, material whole-refactoring
+shrinkage, and the independent completion audit remain open. The goal
+therefore remains active.

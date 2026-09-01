@@ -15,6 +15,77 @@
 
 namespace rocjitsu {
 
+enum class ConSanMoiInlineWorkgroupKeyShape : uint8_t {
+  OneDimensional,
+  TwoDimensional,
+  ThreeDimensional,
+};
+
+struct ConSanMoiInlineWorkgroupKey {
+  bool valid = false;
+  uint32_t value = 0;
+};
+
+/// Test oracle for the exact nonzero workgroup identity encoded by the
+/// InlineShadow emitter. Each shape is injective inside its declared bounds;
+/// coordinates that do not fit are unsupported rather than truncated or
+/// hashed.
+[[nodiscard]] constexpr ConSanMoiInlineWorkgroupKey
+consan_moi_inline_workgroup_key(uint32_t x, uint32_t y, uint32_t z,
+                                ConSanMoiInlineWorkgroupKeyShape shape) {
+  uint32_t packed = 0;
+  switch (shape) {
+  case ConSanMoiInlineWorkgroupKeyShape::OneDimensional:
+    if (y != 0 || z != 0 || x >= consan_moi_exact_shadow::max_generation)
+      return {};
+    packed = x;
+    break;
+  case ConSanMoiInlineWorkgroupKeyShape::TwoDimensional:
+    if (z != 0 || x >= (1u << 10u) || y >= (1u << 10u))
+      return {};
+    packed = x | (y << 10u);
+    if (packed == consan_moi_exact_shadow::max_generation)
+      return {};
+    break;
+  case ConSanMoiInlineWorkgroupKeyShape::ThreeDimensional:
+    if (x >= (1u << 8u) || y >= (1u << 6u) || z >= (1u << 6u))
+      return {};
+    packed = x | (y << 8u) | (z << 14u);
+    if (packed == consan_moi_exact_shadow::max_generation)
+      return {};
+    break;
+  }
+  return {/*valid=*/true, /*value=*/packed + 1u};
+}
+
+/// Test oracle for the packed-cell predicate emitted by InlineShadow.
+[[nodiscard]] constexpr bool
+consan_moi_exact_byte_cells_conflict(const ConSanMoiExactShadowEntry &current_access,
+                                     const ConSanMoiExactByteCellProvenance &current_byte,
+                                     const ConSanMoiExactShadowEntry &prior_access,
+                                     const ConSanMoiExactByteCellProvenance &prior_byte) {
+  if (!current_byte.valid || !prior_byte.valid ||
+      (current_byte.byte_mask & prior_byte.byte_mask) == 0u ||
+      current_access.epoch != prior_access.epoch ||
+      current_access.generation != prior_access.generation ||
+      !consan_moi_shadow_kind_conflicts(current_access.kind, prior_access.kind)) {
+    return false;
+  }
+  if (current_access.owner_id != prior_access.owner_id)
+    return true;
+  return current_access.instruction_offset == prior_access.instruction_offset &&
+         current_byte.representative_lane != prior_byte.representative_lane;
+}
+
+/// Test oracle for the packed-entry predicate emitted by InlineShadow.
+[[nodiscard]] constexpr bool
+consan_moi_exact_shadow_entries_conflict(const ConSanMoiExactShadowEntry &current,
+                                         const ConSanMoiExactShadowEntry &prior) {
+  return !consan_moi_shadow_kind_is_empty(prior.kind) && current.epoch == prior.epoch &&
+         current.generation == prior.generation && current.owner_id != prior.owner_id &&
+         consan_moi_shadow_kind_conflicts(current.kind, prior.kind);
+}
+
 enum class ConSanMoiInlineReleaseClaim : uint8_t {
   Empty,
   ExactReady,

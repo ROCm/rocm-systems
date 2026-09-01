@@ -11,6 +11,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/consan_moi_dispatch_preload.h"
 #include "rocjitsu/code/patch/consan/consan_moi_target_ops.h"
 #include "rocjitsu/code/patch/spill_manager.h"
 

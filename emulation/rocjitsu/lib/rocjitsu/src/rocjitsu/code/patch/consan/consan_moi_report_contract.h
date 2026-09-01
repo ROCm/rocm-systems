@@ -43,6 +43,8 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_model.h.inc"
 
+#include "rocjitsu/code/patch/consan/consan_moi_inline_exact_model.h.inc"
+
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay_model.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_model.h.inc"
