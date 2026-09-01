@@ -62,8 +62,8 @@ if(NOT TARGET rocm-sha256)
     endif()
     add_subdirectory(${ROCPROFILER_SDK_ROCM_SHA256_DIR}
                      ${CMAKE_CURRENT_BINARY_DIR}/rocm-sha256)
-    # sha256.cpp got these through common_sources. Applied only when this project
-    # created the target, so another consumer is not given our flags.
+    # sha256.cpp got these through common_sources. Applied only when this project created
+    # the target, so another consumer is not given our flags.
     target_link_libraries(
         rocm-sha256
         PRIVATE $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-build-flags>
