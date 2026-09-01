@@ -554,6 +554,10 @@ static ncclResult_t symTeamObtain(struct ncclComm* comm, struct ncclTeam team, b
         goto fail; // silence unused label warning
       }
 #else
+      // No multicast object is created here, so t->mcBasePtr stays null and *outTeam is never
+      // written; report the failure instead of falling through to fail: with ret == ncclSuccess.
+      WARN("Multicast support requested for team but multicast object creation is unavailable in this build.");
+      ret = ncclInvalidUsage;
       goto fail; // silence unused label warning
 #endif
     }
@@ -2297,8 +2301,13 @@ ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm* comm, struct ncclDevrWindo
   }
 
   bool multimem = true;
-  struct ncclDevrTeam* tm;
+  struct ncclDevrTeam* tm = nullptr;
   NCCLCHECK(symTeamObtain(comm, lsaTeam, multimem, &tm));
+  if (tm == nullptr) {
+    // A success return that leaves tm unset would make the dereference below undefined.
+    WARN("symTeamObtain reported success but produced no team for the requested multimem mapping.");
+    return ncclInternalError;
+  }
 
   // Return the base multicast address for this team with offset
   *outPtr = (void*)((uintptr_t)tm->mcBasePtr + winHost->bigOffset + offset);
