@@ -801,6 +801,25 @@ foreach(_variant "" "-uncached" "-faultinj")
   elseif(_variant STREQUAL "-faultinj")
     target_compile_definitions(${_init_tgt} PRIVATE ENABLE_FAULT_INJECTION)
   endif()
+  # Apply HIP compile requirements without linking the runtime.
+  foreach(_hip_tgt hip::host hip::device)
+    if(TARGET ${_hip_tgt})
+      target_include_directories(${_init_tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+      target_compile_definitions(${_init_tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+      target_compile_options(${_init_tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+    endif()
+  endforeach()
+  target_compile_options(${_init_tgt} PRIVATE --offload-host-only)
+
+  target_link_options(${_init_tgt} PRIVATE -no-hip-rt -Wl,--gc-sections)
+  target_link_libraries(${_init_tgt} PRIVATE
+    GTest::GTest
+    Threads::Threads
+    fmt::fmt-header-only
+  )
 endforeach()
 
 # ---------------------------------------------------------------------------
