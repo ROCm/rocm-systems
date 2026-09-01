@@ -367,8 +367,7 @@ FILTER[gfx1250]=\
 "KFDRASTest.*:"\
 "KFDExceptionTest.AddressFault:"\
 "KFDQMTest.GpuMemCopyTest:"\
-"KFDDBGTest.HitTrapOnWaveStartEndEvent:"\
-"KFDNegativeTest.*"
+"KFDDBGTest.HitTrapOnWaveStartEndEvent"
 
 FILTER[RHEL9]=\
 "$BLACKLIST_ALL_ASICS:"\
