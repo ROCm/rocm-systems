@@ -244,9 +244,9 @@ run_vecscale(int n, int iters)
 // Restore-correctness mode (buffer AND module variable). Launch the in-place saxpy dispatch
 // (y = a*x + y with x=1, a=2, so each host-observed launch adds `step` to y) kLaunches times; the
 // kernel also bumps the __device__ counter g_saxpy_calls once per execution. Under
-// --replay-mode kernel --kernel-replay-beta-enabled each host-observed dispatch is re-executed N times (N counter
-// groups), with device memory AND module variables restored between passes, so BOTH quantities must
-// scale with the number of *launches*, never launches*passes:
+// --replay-mode kernel --kernel-replay-beta-enabled each host-observed dispatch is re-executed N
+// times (N counter groups), with device memory AND module variables restored between passes, so
+// BOTH quantities must scale with the number of *launches*, never launches*passes:
 //   restore WORKS  -> y == y0 + kLaunches*step   AND g_saxpy_calls == kLaunches      (e.g. 106 / 3)
 //   restore BROKEN -> y == y0 + kLaunches*N*step AND g_saxpy_calls == kLaunches*N    (e.g. 130 /
 //   15)
