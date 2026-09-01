@@ -122,11 +122,15 @@ CSV
 ---
 
 CSV ``counter_collection.csv`` uses the same columns as a non-replay run. There is **no**
-``Replay_Pass`` column in this design (an earlier prototype added one). Passes of a replayed
-dispatch share ``Dispatch_Id`` and are distinguished by ``Counter_Name``: each pass contributes
-the counters from its ``--pmc`` group.
+``Replay_Pass`` column in this design. Passes of a replayed dispatch share ``Dispatch_Id``, and each
+pass contributes the counters from its ``--pmc`` group, so a pass can be identified from
+``Counter_Name`` only when the groups request distinct counters -- as in the example above. When a
+counter is repeated across groups (a sanity counter such as ``SQ_WAVES`` in every group, which the
+kernel-replay integration test does deliberately), the rows for one dispatch share both
+``Dispatch_Id`` and ``Counter_Name``, and CSV alone cannot attribute them to a pass.
 
-To inspect pass identity, use ``--output-format json`` (or ``json`` together with ``csv``).
+To attribute those rows, use ``--output-format json`` (or ``json`` together with ``csv``), where
+``replay_pass`` is explicit.
 
 Default ``rocpd``
 -----------------
