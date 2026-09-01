@@ -839,6 +839,13 @@ def format_table_output(
             get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
         )
 
+    if table_id_str == "21.1":
+        content += (
+            "Stall reason definitions: https://rocm.docs.amd.com/projects/"
+            "rocprofiler-sdk/en/latest/how-to/"
+            "cdna3-cdna4-pc-sampling.html#stall-reasons\n"
+        )
+
     return content
 
 
