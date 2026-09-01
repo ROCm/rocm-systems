@@ -354,12 +354,9 @@ bit_extract(Integral x, int first, int last)
     return (x >> first) & bit_mask(0, last - first);
 }
 
-// stopped:    no monitor thread.
-// active:     monitor running and admitting new waits.
-// finalizing: global finalization has begun. Producers pass through and drains fall back to
-//             a short grace period, but the monitor is still running and still retiring
-//             completions. Distinct from the registration fini_status, which also goes -1
-//             transiently around a per-client finalizer while the SDK keeps running.
+// stopped: no monitor thread. active: monitor running and admitting new waits. finalizing: global
+// finalization has begun, so producers pass through and drains use the short grace period, but the
+// monitor still runs and still retires completions.
 enum class monitor_state : uint8_t
 {
     stopped = 0,
@@ -367,24 +364,18 @@ enum class monitor_state : uint8_t
     finalizing
 };
 
-// Longest a drain waits for outstanding completions to retire.
-//
-// Expiry on the runtime path loses no records -- the monitor keeps running and retires what
-// lands afterwards -- but it loses their ordering, and ordering is what these callers need:
-// records must reach the tool while the kernel symbols they name are still valid, and before
-// the tool's own finalizer runs. The shutdown bound is the last chance for in-flight work to
-// land before teardown force-retires the rest; it matches the bound Queue::sync uses.
+// Longest a drain waits for outstanding completions to retire. Expiry loses no records -- the
+// monitor keeps retiring what lands afterwards -- but it loses their ordering, and these callers
+// need records delivered while the kernel symbols they name are still valid.
 constexpr auto runtime_drain_timeout  = std::chrono::seconds{30};
 constexpr auto shutdown_drain_timeout = std::chrono::seconds{5};
 
 // How often a bounded wait re-tests the condition it is waiting on.
 constexpr auto poll_interval = std::chrono::milliseconds{1};
 
-// Shared state for the single completion-monitor thread. Producers push new waits onto
-// `incoming` (the only cross-thread field, so the only one wrapped) and bump `wake_signal`,
-// which occupies the last slot of the monitor's wait array so hsa_amd_signal_wait_any
-// returns and the monitor picks them up. `active` is the monitor's live watch set,
-// touched only by the monitor thread.
+// Shared state for the single completion-monitor thread. Producers push new waits onto `incoming`
+// -- the only cross-thread field -- and bump `wake_signal`, which sits in the last slot of the
+// monitor's wait array so hsa_amd_signal_wait_any returns.
 struct completion_monitor
 {
     common::Synchronized<std::vector<pending_completion>> incoming    = {};
@@ -392,30 +383,18 @@ struct completion_monitor
     hsa_signal_t                                          wake_signal = {};
     std::atomic<monitor_state>                            state       = {monitor_state::stopped};
 
-    // The thread handle, and the mutual exclusion start and stop need over each other:
-    // move-assigning onto a joinable handle calls std::terminate, so nothing may mutate this
-    // handle while another thread may join it.
-    //
-    // `state` is deliberately not under this lock. Stop holds it across the join, so a reader
-    // that had to take it would block until the join it is supposed to unblock completes.
-    //
-    // Lock order where both are held: this before `incoming`, in start and in stop alike.
+    // Guards the thread handle so start and stop exclude each other: move-assigning onto a joinable
+    // handle calls std::terminate. `state` is deliberately outside this lock, since stop holds it
+    // across the join. Lock order where both are held: this before `incoming`.
     common::Synchronized<std::thread> thread = {};
 
     // Registered but not yet retired (inbox + active). Lets other threads see whether
     // anything is outstanding without touching the monitor-private `active`.
     std::atomic<uint64_t> inflight = {0};
 
-    // Runs emit_dispatch_records, which calls into tool code, so the monitor thread only ever
-    // does bounded, non-reentrant work between waits. One thread, because records are emitted in
-    // retirement order and a wider pool would reorder them. Owned here rather than taken from
-    // get_task_groups(): a group from internal_threading::create_task_group never enters that
-    // vector, so no tool can name it and no LOSSLESS buffer flush can wait on the thread it is
-    // running on.
-    //
-    // Declared last: destroying it joins the emitter thread, and the tasks that run on the way
-    // out reach `inflight` and `thread`. Members are destroyed in reverse declaration order, so
-    // anything those tasks touch belongs above this one.
+    // Runs emit_dispatch_records, which calls into tool code, so the monitor thread only does
+    // bounded work between waits. One thread, because records are emitted in retirement order. Not
+    // in get_task_groups(), so no tool can name it. Declared last: destroying it joins it.
     std::unique_ptr<internal_threading::task_group_t> record_emitter = {};
 };
 
@@ -440,27 +419,16 @@ should_bypass_inline_intercept()
             registration::get_fini_status() != 0 ||
             // TODO: debug and enable queue interposition for attachment
             registration::supports_attachment() || !has_active_queue_interposition_consumers() ||
-            // Last, and the order matters: this is the only term that names a static_object
-            // whose destructor nulls it. Every test above is a namespace atomic or a
-            // registration free function, and interposition_fini stores s_intercept_active
-            // false during finalize -- which runs ahead of destroy_static_objects in the same
-            // atexit handler -- so a wrapper entered after that point stops before the monitor
-            // is named.
+            // Last, and the order matters: this is the only term that names a static_object whose
+            // destructor nulls it. interposition_fini stores s_intercept_active false during
+            // finalize, which runs ahead of destroy_static_objects.
             get_completion_monitor().state.load(std::memory_order_acquire) !=
                 monitor_state::active);
 }
 
-// Hand a completed-batch wait to the monitor: enqueue it on the shared inbox and bump the wake
-// signal so the monitor picks it up. Returns an entry with a null session once enqueued.
-//
-// The state test, the enqueue, the inflight increment and the wake store all happen under the
-// inbox lock, which teardown's final drain takes as well. That leaves a producer only two cases:
-// it runs before the final drain, which retires what it enqueued and finishes before the wake
-// signal is destroyed; or it runs after, reads `stopped`, and stores nothing. So a wake store
-// never reaches a destroyed signal and no entry is left in an inbox nobody drains.
-//
-// A batch arriving after the monitor stopped is handed back rather than retired here: teardown
-// cannot see it, and retiring runs tool code while the caller may still hold the gate lock.
+// Hand a completed-batch wait to the monitor: enqueue it on the inbox and bump the wake signal.
+// returning an entry with a null session. All of it runs under the inbox lock, which teardown's
+// final drain also takes, so a wake store never reaches a destroyed signal.
 pending_completion
 register_completion(pending_completion&& pending)
 {
@@ -483,11 +451,9 @@ register_completion(pending_completion&& pending)
     return declined;
 }
 
-// A batch is complete once its completion signal drops below the value it was enqueued at.
-// The load is acquire, not relaxed: a true result authorizes reading the start/end timestamps
-// the GPU wrote into that same signal, so the test must order those writes before the reads.
-// Callers on the monitor thread get that edge from hsa_amd_signal_wait_any, but
-// force_retire_all runs on the finalizing thread with no waiting call ahead of it.
+// A batch is complete once its completion signal drops below the value it was enqueued at. The load
+// is acquire so the GPU's timestamp writes into that same signal are ordered before the reads they
+// authorize; force_retire_all reaches this with no waiting call ahead of it.
 bool
 has_completed(const pending_completion& pending)
 {
@@ -495,26 +461,18 @@ has_completed(const pending_completion& pending)
            pending.starting_value;
 }
 
-// Retirement is split so the completion-monitor thread runs none of the tool code. This is what
-// release_completion_signals hands to emit_dispatch_records: the session, plus the dispatch
+// What release_completion_signals hands to emit_dispatch_records: the session, plus the dispatch
 // timestamps copied out of the completion signals before those signals were released.
-// `dispatch_times` is parallel to session->packet_data, and is empty for a batch whose timestamps
-// were never written -- that batch emits no records but still releases the correlation-id
-// references its packets hold. The session is held by shared_ptr rather than by reference, and
-// that ownership is what keeps the session, its correlation id and its packet_data alive across
-// the handoff, since the releasing caller does not outlive the emit.
+// `dispatch_times` is parallel to session->packet_data.
 struct retired_batch
 {
     std::shared_ptr<queue_info_session_t>        session        = {};
     std::vector<kernel_dispatch::profiling_time> dispatch_times = {};
 };
 
-// The only half of retirement that may run on the monitor thread: reads the dispatch timestamps
-// out of each completion signal and hands the signal back. Bounded, non-reentrant, and touches
-// no tool state. Everything emit_dispatch_records needs must be copied out here, because the
-// signal returns to the pool on the way out and another dispatch may borrow its timestamp slots
-// immediately. `read_timestamps` is false for a batch whose completion signal never dropped: an
-// unwritten signal still holds the values of whichever dispatch last borrowed it.
+// Reads the dispatch timestamps out of each completion signal and hands the signal back. everything
+// emit_dispatch_records needs is copied out first, because the signal returns to the pool.
+// `read_timestamps` is false for a batch whose signal never dropped.
 retired_batch
 release_completion_signals(const std::shared_ptr<queue_info_session_t>& session,
                            bool                                         read_timestamps)
@@ -545,10 +503,9 @@ release_completion_signals(const std::shared_ptr<queue_info_session_t>& session,
     return batch;
 }
 
-// Emits the batch's dispatch records and drops its correlation-id references. Calls into tool
-// code, so it runs on the record-emitter group rather than the monitor thread. The correlation
-// id is released here rather than alongside the signals because dispatch_complete reads its
-// internal and ancestor ids.
+// Emits the batch's dispatch records and drops its correlation-id references. Calls into tool code,
+// so it runs on the record-emitter group rather than the monitor thread. The correlation id is
+// released here because dispatch_complete reads its internal and ancestor ids.
 void
 emit_dispatch_records(retired_batch&& batch)
 {
@@ -654,18 +611,25 @@ complete_signal_less_dispatch(kfd::signal_less_hub_t::proven&& proven)
 bool
 submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
 {
-    // task_group_t::async takes a copy-constructible std::function but the payload
-    // is move-only, so it travels in a shared_ptr the wrapper keeps. On refusal
-    // (fork-stale or fini) the primitive returns before consuming the task, so the
-    // payload is restored intact and the caller defers it -- packaging it after a
-    // refusable call would strand a moved-from payload and never retire its id.
+    if(registration::get_fini_status() != 0) return false;
+
+    // The monitor's record emitter runs tool code off the calling thread, which is what the hub
+    // needs here. It is null until the monitor first starts; the hub answers a false return by
+    // deferring the completion for the teardown thread.
+    auto& mon = get_completion_monitor();
+    if(!mon.record_emitter) return false;
+
+    // task_group_t::async takes a std::function, which must be copy-constructible;
+    // the payload is move-only, so it travels in a shared_ptr.
     auto _held = std::make_shared<kfd::signal_less_hub_t::proven>(std::move(proven));
-    if(!submit_inline_async([_held]() { complete_signal_less_dispatch(std::move(*_held)); },
-                            /*refuse_during_fini=*/true))
-    {
-        proven = std::move(*_held);
-        return false;
-    }
+
+    // Counted before the submit, not inside the task: `inflight` is what every drain polls, so
+    // work that is queued but not yet counted is work a drain reports as absent.
+    mon.inflight.fetch_add(1, std::memory_order_relaxed);
+    mon.record_emitter->async([&mon, _held]() {
+        complete_signal_less_dispatch(std::move(*_held));
+        mon.inflight.fetch_sub(1, std::memory_order_release);
+    });
     return true;
 }
 
@@ -752,22 +716,18 @@ signal_less_batch_eligible(Queue*                                            que
     return _eligible;
 }
 
-// Move any newly-registered waits from the shared inbox into the monitor's private
-// active set. Called only by the monitor thread.
-// Complete a batch with both phases on the calling thread. Used where the monitor is already
-// stopped: teardown's final sweep, and a producer disposing of a batch the inbox declined. In
-// both cases there is no monitor thread left for tool code to starve, and posting would put
-// work into a group teardown is about to drain and reset.
+// Complete a batch on the calling thread. Used where the monitor is already stopped: teardown's
+// final sweep, and a producer disposing of a batch the inbox declined. No monitor thread is left
+// for tool code to starve, and posting would use a group about to be reset.
 void
 retire_completion_inline(const std::shared_ptr<queue_info_session_t>& session, bool emit_records)
 {
     emit_dispatch_records(release_completion_signals(session, emit_records));
 }
 
-// Complete a batch that the monitor observed finish, handing the record emit to the
-// record-emitter group so no tool code runs on the monitor thread. Monitor thread only: the
-// group is created before that thread is spawned and reset only after it is joined, so the
-// pointer is live for every call.
+// Complete a batch the monitor observed finish, handing the record emit to the record-emitter group
+// so no tool code runs on the monitor thread. Monitor thread only: the group is created before that
+// thread is spawned and reset only after it is joined.
 void
 retire_completion_async(completion_monitor&                          mon,
                         const std::shared_ptr<queue_info_session_t>& session)
@@ -777,12 +737,9 @@ retire_completion_async(completion_monitor&                          mon,
     ROCP_FATAL_IF(!mon.record_emitter)
         << "record-emitter group missing while the completion monitor is running";
 
-    // inflight drops after the records are delivered, not when the signals are released: a drain
-    // caller needs the records out, since a code object may be unloaded the moment the wait
-    // returns and records naming its kernels must already be delivered. A tool that synchronizes
-    // from inside a dispatch-complete callback therefore waits on its own batch -- one thread
-    // emits records, and this count drops after that callback returns -- so those waits carry a
-    // deadline. Only this path decrements; the teardown sweep drops its own count.
+    // inflight drops after the records are delivered, not when the signals are released: a code
+    // object may be unloaded the moment a drain returns, and records naming its kernels must
+    // already be out. Only this path decrements.
     mon.record_emitter->async([&mon, _batch = std::move(batch)]() mutable {
         emit_dispatch_records(std::move(_batch));
         mon.inflight.fetch_sub(1, std::memory_order_release);
@@ -828,10 +785,9 @@ retire_completed(completion_monitor& mon, pending_completion_vector_t& scratch)
     scratch.clear();
 }
 
-// Retire every entry, whether or not its signal dropped, discarding the profiling data of
-// the ones that did not. Teardown only: a batch the GPU never finished must still release
-// its pooled signal and correlation-id references, but it has no timestamps to report and
-// so produces no dispatch record.
+// Retire every entry, whether or not its signal dropped, discarding the profiling data of the ones
+// that did not. Teardown only: a batch the GPU never finished must still release its pooled signal
+// and correlation-id references, but produces no dispatch record.
 void
 force_retire_all(completion_monitor& mon)
 {
@@ -853,11 +809,9 @@ force_retire_all(completion_monitor& mon)
         incomplete);
 }
 
-// Body of the single completion-monitor thread. Waits on the whole set of in-flight
-// completion signals at once (plus a wake signal appended at the end) via
-// hsa_amd_signal_wait_any, so the number of signals watched is decoupled from the
-// number of threads. When any completion signal drops below its starting value, its
-// batch is retired; the wake signal lets producers add new waits or request shutdown.
+// Body of the single completion-monitor thread. Waits on every in-flight completion signal at once
+// via hsa_amd_signal_wait_any, plus a wake signal in the last slot, so the number of signals
+// watched is decoupled from the number of threads.
 void
 completion_monitor_loop(completion_monitor& mon)
 {
@@ -882,13 +836,9 @@ completion_monitor_loop(completion_monitor& mon)
         // One more drain closes the window between the pre-wait drain and the reset.
         move_incoming_to_active(mon);
 
-        // Break only when stop is requested. stop_completion_monitor moves the state to
-        // `stopped` AND bumps `wake_signal`, so the waits below always return and this check is
-        // reached even when in-flight completion signals never transition during teardown.
-        // `finalizing` does not break: the monitor keeps retiring completions until it is
-        // explicitly stopped. Do not break on get_fini_status() -- that flag is also set to -1
-        // around a per-client finalizer or detach and then restored while the SDK keeps running,
-        // so honoring it would make the monitor exit mid-life and never restart.
+        // Break only when stop is requested. stop_completion_monitor moves the state to `stopped`
+        // and bumps `wake_signal`, so the wait always returns even if no completion signal
+        // transitions. `finalizing` and get_fini_status() do not break.
         if(mon.state.load(std::memory_order_acquire) == monitor_state::stopped) break;
 
         if(mon.active.empty())
@@ -946,22 +896,15 @@ start_completion_monitor()
     // and its join while this runs. Without it, this move-assign can land on a handle a
     // concurrent stop has not yet joined, which is a std::terminate.
     mon.thread.wlock([&mon](auto& monitor_thread) {
-        // Join a previous cycle's record emitter before the reset below stores zero to
-        // `inflight`. Destroying the task group runs whatever it still had queued, and those
-        // tasks decrement that counter; running them afterwards would take it below zero,
-        // where it can never reach zero again and every later drain burns its whole timeout.
-        // Only start moves the state out of `stopped`, and start holds this lock, so the test
-        // is stable here.
+        // Join a previous cycle's record emitter before the reset below stores zero to `inflight`.
+        // Destroying the task group runs whatever it still had queued, and those tasks decrement
+        // that counter; running them afterwards takes it below zero, which no later drain can undo.
         if(mon.state.load(std::memory_order_acquire) != monitor_state::stopped) return;
         mon.record_emitter.reset();
 
         // Publishing `active` and creating the wake signal happen together under the inbox lock,
         // because a producer tests the state under that same lock and then stores to the wake
-        // signal. Split them and it can see `active` while `wake_signal` is still the
-        // default-constructed handle. The handle lock above does not cover this: producers do
-        // not take it. stop_completion_monitor holds the other half -- the signal is destroyed
-        // only after teardown's last acquisition of this lock, so every producer's store is
-        // ordered ahead of the destroy.
+        // signal. Split them and a producer can see `active` before `wake_signal` exists.
         const auto admitted = mon.incoming.wlock([&mon](auto& inbox) {
             auto expected = monitor_state::stopped;
             if(!mon.state.compare_exchange_strong(expected,
@@ -970,13 +913,9 @@ start_completion_monitor()
                                                   std::memory_order_relaxed))
                 return false;
 
-            // Nothing the monitor holds may describe work from a previous cycle once this
-            // returns. Inheriting the in-flight counter would make the new cycle's first
-            // drain_completion_monitor return without draining, and inheriting an inbox entry
-            // would have the new monitor read a signal its pool already destroyed. The members
-            // that can carry such work: `inflight` and `incoming` are reset here,
-            // `record_emitter` is joined above, and teardown clears `active` and recreates
-            // `wake_signal`. A member added to the struct belongs on one of those lists.
+            // Nothing the monitor holds may describe work from a previous cycle once this returns.
+            // `inflight` and `incoming` are reset here, `record_emitter` is joined above, and
+            // teardown clears `active` and recreates `wake_signal`.
             mon.inflight.store(0, std::memory_order_release);
 
             // Dropped, not retired: a stranded entry's pooled signal and correlation id belong
@@ -1013,11 +952,9 @@ start_completion_monitor()
     });
 }
 
-// Poll the in-flight counter down to zero, or to the deadline. Both waits in this file are this
-// loop. The counter falls without help from the monitor thread: the record emitter decrements it
-// from its own thread once a batch's records are out. The deadline is what makes this callable
-// from a thread that is itself emitting a record -- that thread's own batch is still counted and
-// cannot drop until it returns, so the wait expires instead of parking on itself.
+// Poll the in-flight counter down to zero, or to the deadline. The counter falls without the
+// monitor thread: the record emitter decrements it once a batch's records are out. The deadline is
+// what lets a thread that is itself emitting a record call this.
 void
 wait_for_inflight_drain(completion_monitor& mon, std::chrono::seconds timeout)
 {
@@ -1046,10 +983,9 @@ drain_completion_monitor()
     const auto state = mon.state.load(std::memory_order_acquire);
     if(state == monitor_state::stopped) return;
 
-    // Must not bump wake_signal. This runs on arbitrary tool threads and nothing serializes
-    // it against stop_completion_monitor, which destroys that signal -- writing it here is a
-    // use-after-destroy. Waking the monitor would also gain nothing: it is already waiting on
-    // the same completion signals being drained, so an extra pass advances none of them.
+    // Must not bump wake_signal. This runs on arbitrary tool threads with nothing serializing it
+    // against stop_completion_monitor, which destroys that signal. Waking the monitor would gain
+    // nothing: it already waits on the same completion signals being drained.
     const auto timeout =
         (state == monitor_state::finalizing) ? shutdown_drain_timeout : runtime_drain_timeout;
 
@@ -1685,14 +1621,9 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                              scan_pos,
                              scan_end);
 
-    // A tool's enqueue callback runs inside write_interceptor below and may itself dispatch,
-    // re-entering this function on the same thread for another queue. Save the outer frame's
-    // handoff record and put it back on the way out, so a nested frame cannot leave the outer
-    // one reading its indices. `tls.state != nullptr` on entry marks a nested frame, and only a
-    // restore keeps that true; at the outermost frame the saved record is the default, so the
-    // restore is also the clear. The record goes back below on the normal path and by the guard
-    // if a callback throws -- assigning it twice is harmless, and without the guard an unwind
-    // would leave `ring_doorbell` pointing at something that died with the frame.
+    // A tool's enqueue callback runs inside write_interceptor below and may dispatch again, re-
+    // entering this function on the same thread. Save the outer frame's handoff record and put it
+    // back on the way out, so a nested frame cannot corrupt the outer one.
     auto&      tls         = get_doorbell_tls();
     const auto outer_tls   = tls;
     auto restore_outer_tls = common::scope_destructor{[&tls, outer_tls]() { tls = outer_tls; }};
@@ -1705,13 +1636,9 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     uint64_t start_submit_pos     = tls.submit_pos;
 
     auto* qc = get_queue_controller();
-    // The bypass test is re-taken here, after the gate, because the wrapper's copy cannot cover a
-    // thread that passed it and then blocked. Waiting for the gate puts time between the two
-    // tests, and finalize can move the status on, or the monitor can go away, while that thread
-    // waits. Failing the test routes it to the un-instrumented arm below, the same arm taken by a
-    // queue the controller does not know about: ring_buffer_writer still translates virtual slots
-    // to real ones and the publish at the tail is unconditional, so the packets execute;
-    // write_interceptor -- the only thing here that takes a pooled signal -- never runs.
+    // The bypass test is re-taken after the gate, because a thread can pass the wrapper's copy and
+    // then block, and finalize can move the status on while it waits. Failing it routes to the un-
+    // instrumented arm, where the packets still execute but write_interceptor never runs.
     const Queue* queue = (qc && state_ptr->hsa_queue && !should_bypass_inline_intercept())
                              ? qc->get_queue(*state_ptr->hsa_queue)
                              : nullptr;
@@ -1766,11 +1693,9 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 
     publish_submitted_packets(state_ptr, state_ptr->next_submit_pos);
 
-    // Restore the outer value here rather than leaving it to restore_outer_tls: the emit loop
-    // below runs tool code, which can re-enter this function and take its own snapshot of
-    // `tls`. The scope destructor does not fire until this function returns, which is after
-    // that loop, so a re-entrant call would otherwise snapshot this call's state as its outer
-    // state.
+    // Restore the outer value here rather than leaving it to restore_outer_tls: the emit loop below
+    // runs tool code that can re-enter this function and take its own snapshot of `tls`. The scope
+    // destructor does not fire until after that loop.
     tls = outer_tls;
 
     // Batches the monitor declined because it had already stopped, retired across the gate lock
@@ -2010,15 +1935,9 @@ resync_all_queue_shadow_states()
 }
 }  // namespace
 
-// Catch the shadow indices up when the first tracing consumer arrives. Two things this does not
-// cover. Interception is also switched off while a client detaches or finalizes, and the
-// application keeps advancing its own write index throughout, so the shadow falls behind with no
-// arriving consumer to catch it up again. And this sweep takes only the registry read lock, so it
-// can run while another thread is inside the gate updating next_scan_pos. Queues created after
-// this point need nothing: create_queue_state copies the live write index into all three cursors.
-// The monitor's state, the other term in the bypass test, needs no catch-up: the monitor starts
-// just before interception is switched on and stops just before it is switched off, so it forces
-// bypass over a wider window than the active flag covers.
+// Catch the shadow indices up when the first tracing consumer arrives. Two gaps remain:
+// interception is also switched off while a client detaches or finalizes, with no arriving consumer
+// arriving to catch it up; and this sweep takes only the registry read lock.
 void
 notify_queue_interposition_consumer_context_started(const context::context* ctx)
 {
@@ -2055,11 +1974,9 @@ interposition_sync()
 void
 mark_completion_monitor_finalizing()
 {
-    // Drains use the short grace period once the state is finalizing, since at global shutdown
-    // an in-flight dependency may never resolve. should_bypass_inline_intercept treats any
-    // state other than active as bypass, so dispatches submitted from here on are not
-    // intercepted and produce no records. The monitor thread keeps running and retires what is
-    // already registered.
+    // Drains use the short grace period once the state is finalizing, since at global shutdown an
+    // in-flight dependency may never resolve. Dispatches submitted from here on are treated as
+    // bypass, while the monitor keeps retiring what is already registered.
     auto expected = monitor_state::active;
     get_completion_monitor().state.compare_exchange_strong(
         expected, monitor_state::finalizing, std::memory_order_seq_cst, std::memory_order_relaxed);
@@ -2074,11 +1991,8 @@ stop_completion_monitor()
     auto& mon = get_completion_monitor();
 
     // This exchange runs before the handle lock: it is the decision, and the lock below only
-    // serialises the body against a concurrent start. Closing the gate first means producers
-    // stop being admitted the moment stop is called rather than whenever it reaches the front of
-    // the lock queue -- a start holds that same lock while it spawns the thread, so the two are
-    // not the same instant. It also makes a second caller return here instead of blocking behind
-    // the join.
+    // serialises the body against a concurrent start. Closing the gate first stops producers being
+    // admitted at once, and makes a second caller return instead of blocking behind the join.
     if(mon.state.exchange(monitor_state::stopped, std::memory_order_seq_cst) ==
        monitor_state::stopped)
         return;
@@ -2087,20 +2001,15 @@ stop_completion_monitor()
         get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
         if(monitor_thread.joinable()) monitor_thread.join();
 
-        // The monitor retired what it could before exiting, but a producer that was already in
-        // the doorbell path may have enqueued since. This drain is the last one: a producer whose
-        // inbox lock precedes it is retired here, and one that follows it reads the `stopped`
-        // stored above and never touches the wake signal.
+        // The monitor retired what it could before exiting, but a producer already in the doorbell
+        // path may have enqueued since. This drain is the last one: a producer whose inbox lock
+        // precedes it is retired here, and one that follows never wakes the monitor.
         move_incoming_to_active(mon);
         force_retire_all(mon);
 
-        // Batches the monitor handed to the record emitter before the join can still be in it,
-        // and their records name correlation ids and code objects the finalizer destroys as soon
-        // as this returns, so wait for them. A tool can call the finalizer from a dispatch-complete
-        // callback, which reaches this function on one of the emitter's own threads; that thread's
-        // own batch stays counted until the callback returns, so the wait needs its deadline. The
-        // group itself is left running -- ~TaskGroup joins its threads, so destroying it here
-        // would be a self-join. It belongs to the monitor and goes away at static destruction.
+        // Batches handed to the record emitter before the join can still be in it, and their
+        // records name correlation ids the finalizer destroys as soon as this returns. The group is
+        // left running: destroying it here would self-join.
         wait_for_inflight_drain(mon, shutdown_drain_timeout);
 
         get_core_table()->hsa_signal_destroy_fn(mon.wake_signal);
@@ -2217,6 +2126,9 @@ drain_signal_less_interceptor()
     hsa::queue_interposition::fence_all_queue_gates();
 }
 
+// Waits on the completion monitor's in-flight counter, which counts signal-less completions
+// alongside interposed ones. The monitor must still be running for that wait to do anything:
+// signal-less teardown runs ahead of queue_controller_fini, which is what stops it.
 void
 drain_signal_less_queues_hw(uint64_t deadline_ns)
 {
