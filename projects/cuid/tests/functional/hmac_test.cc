@@ -18,6 +18,11 @@ TestHMAC::TestHMAC() {
 void TestHMAC::SetUp() {}
 
 void TestHMAC::Run() {
+  // This test provisions a real seed on the node it runs on, which changes
+  // every derived CUID the kernel does not answer for. Put the node's own seed
+  // back afterwards.
+  KeyStoreGuard key_guard;
+
   uint8_t generated_key[32] = {0};
   amdcuid_status_t status = amdcuid_generate_hash_key(generated_key);
   CHK_ERR_ASRT(status);
