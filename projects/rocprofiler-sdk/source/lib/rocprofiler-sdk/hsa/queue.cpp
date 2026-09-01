@@ -482,7 +482,17 @@ WriteInterceptor(const void* packets,
     // dispatch count and write the original packets without allocating signals or rewriting
     // packets. Large graph launches in summary-only mode would otherwise pay the full
     // tracing overhead and exhaust the HSA signal pool.
-    if(graph_launch_active && no_real_consumers)
+    //
+    // Excluded while a replay service is active. A graph's dispatches are never replayed, but they
+    // still write device memory, and this path neither takes the per-agent reader lock nor calls
+    // async_started(). A replay on another thread would therefore find the reader lock free and
+    // every queue reporting zero in-flight work, then snapshot underneath the running graph and
+    // restore over its writes -- corrupting application data, not just the counters. Falling
+    // through puts the graph on the ordinary instrumented path, which takes the reader lock to keep
+    // it out of the snapshot window and registers it with async_started() so the agent-wide drain
+    // can see it. process_packet_batch increments gls->dispatch_count per dispatch packet, so the
+    // graph summary is unaffected by which path runs.
+    if(graph_launch_active && no_real_consumers && !has_kernel_replay)
     {
         gls->dispatch_count += num_dispatch_packets;
         writer(packets, pkt_count);
