@@ -91,9 +91,10 @@ if(NOT TARGET rocm-sha256)
 endif()
 
 # PRIVATE so the OBJECT library's objects land in amdcuid_static and the
-# installed archive defines the SHA-256 symbols rather than importing them.
-# The headers stay public (hmac.h consumers include rocm/sha2/sha256.h), and
-# BUILD_INTERFACE because shared/sha256 is not installed.
+# installed archive defines SHA-256 symbols rather than importing.
+# Include dir is PUBLIC + BUILD_INTERFACE so in-tree targets that link
+# amdcuid_static and include rocm/sha2/sha256.h directly can find it;
+# shared/sha256 headers are never installed, and sha256.h is not part of the installed public API.
 target_link_libraries(amdcuid_static PRIVATE rocm-sha256)
 target_include_directories(amdcuid_static PUBLIC $<BUILD_INTERFACE:${CUID_ROCM_SHA256_DIR}/include>)
 
