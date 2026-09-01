@@ -294,12 +294,12 @@ def generate_broadcast_api():
  *                         heap.
  * @param[in] nelems       Size of the buffer to participate in the broadcast.
  * @param[in] PE_root      Zero-based ordinal of the PE, with respect to the
-                           active set, from which the data is copied
+ *                         active set, from which the data is copied
  * @param[in] PE_start     PE to start the reduction.
  * @param[in] logPE_stride Stride of PEs participating in the reduction.
  * @param[in] PE_size      Number PEs participating in the reduction.
  * @param[in] pSync        Temporary sync buffer provided to ROCSHMEM. Must
-                           be of size at least ROCSHMEM_REDUCE_SYNC_SIZE.
+ *                         be of size at least ROCSHMEM_REDUCE_SYNC_SIZE.
  *
  * @return void
  */\n"""
@@ -606,19 +606,19 @@ def generate_reducescatter_wave_api():
  * Only the wave (wavefront) participates. Returns ROCSHMEM_SUCCESS on success.
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
+    # int_types = [
+    #     ("short", "short"),
+    #     ("int", "int"),
+    #     ("long", "long"),
+    #     ("long long", "longlong")
+    # ]
 
-    float_types = [
-        ("float", "float"),
-        ("double", "double"),
-        ("__half", "half"),
-        ("__hip_bfloat16", "bfloat16")
-    ]
+    # float_types = [
+    #     ("float", "float"),
+    #     ("double", "double"),
+    #     ("__half", "half"),
+    #     ("__hip_bfloat16", "bfloat16")
+    # ]
 
     # int types
     for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
@@ -655,17 +655,17 @@ def generate_reducescatter_host_api():
  * of source[i*nreduce..(i+1)*nreduce-1] across all PEs.
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
+    # int_types = [
+    #     ("short", "short"),
+    #     ("int", "int"),
+    #     ("long", "long"),
+    #     ("long long", "longlong")
+    # ]
 
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
+    # float_types = [
+    #     ("float", "float"),
+    #     ("double", "double")
+    # ]
 
     # int types
     for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
@@ -715,19 +715,19 @@ def generate_reduction_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
+    # int_types = [
+    #     ("short", "short"),
+    #     ("int", "int"),
+    #     ("long", "long"),
+    #     ("long long", "longlong")
+    # ]
 
-    float_types = [
-        ("float", "float"),
-        ("double", "double"),
-        ("__half", "half"),
-        ("__hip_bfloat16", "bfloat16")
-    ]
+    # float_types = [
+    #     ("float", "float"),
+    #     ("double", "double"),
+    #     ("__half", "half"),
+    #     ("__hip_bfloat16", "bfloat16")
+    # ]
 
     # int types
     for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
@@ -759,19 +759,19 @@ def generate_reduce_on_stream_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
+    # int_types = [
+    #     ("short", "short"),
+    #     ("int", "int"),
+    #     ("long", "long"),
+    #     ("long long", "longlong")
+    # ]
 
-    float_types = [
-        ("float", "float"),
-        ("double", "double"),
-        ("__half", "half"),
-        ("__hip_bfloat16", "bfloat16")
-    ]
+    # float_types = [
+    #     ("float", "float"),
+    #     ("double", "double"),
+    #     ("__half", "half"),
+    #     ("__hip_bfloat16", "bfloat16")
+    # ]
 
     # int types
     for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
