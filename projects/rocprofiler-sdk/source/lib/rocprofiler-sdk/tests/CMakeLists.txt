@@ -19,9 +19,9 @@ set(rocprofiler_lib_sources
     hsa.cpp
     late_start.cpp
     naming.cpp
-    queue.cpp
     queue_controller.cpp
     queue_interposition.cpp
+    queue_test.cpp
     timestamp.cpp
     version.cpp
     hsa_barrier.cpp)
