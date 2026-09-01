@@ -16,12 +16,6 @@ typedef enum __hip_fp6_interpretation_t {
   __HIP_E3M2 = 0,
   __HIP_E2M3 = 1,
 } __hip_fp6_interpretation_t;
-typedef struct { __hip_fp6_storage_t __x; } __hip_fp6_e2m3;
-typedef struct { __hip_fp6_storage_t __x; } __hip_fp6_e3m2;
-typedef struct { __hip_fp6x2_storage_t __x; } __hip_fp6x2_e2m3;
-typedef struct { __hip_fp6x2_storage_t __x; } __hip_fp6x2_e3m2;
-typedef struct { __hip_fp6x4_storage_t __x; } __hip_fp6x4_e2m3;
-typedef struct { __hip_fp6x4_storage_t __x; } __hip_fp6x4_e3m2;
 #else  // !defined(__cplusplus)
 
 #if defined(__HIPCC_RTC__)
