@@ -39,9 +39,11 @@ void SoC::wire_backing(simdojo::Topology &topo) {
 
 SoC::SoC(std::string name, const Config &config)
     : simdojo::CompositeComponent(std::move(name)), arch_(config.arch),
-      exec_mode_(config.exec_mode) {
+      exec_mode_(config.exec_mode), fidelity_(config.fidelity) {
   set_weight(0); // Structural container, not a work-producing component.
   auto soc_name = this->name();
+  auto xcd_config = config.xcd;
+  xcd_config.shader_engine.compute_unit.fidelity = config.fidelity;
 
   // GPU memory is shared across all XCDs.
   auto mem = std::make_unique<amdgpu::GpuMemory>("vram");
@@ -62,7 +64,7 @@ SoC::SoC(std::string name, const Config &config)
     // Create XCDs, each assigned to its parent IOD.
     for (uint32_t i = 0; i < config.num_xcds; ++i) {
       auto xcd_ptr =
-          std::make_unique<amdgpu::Xcd>(soc_name + ".xcd" + std::to_string(i), config.xcd,
+          std::make_unique<amdgpu::Xcd>(soc_name + ".xcd" + std::to_string(i), xcd_config,
                                         config.arch, memory_, config.exec_mode);
       xcds_.push_back(xcd_ptr.get());
       add_child(std::move(xcd_ptr));
@@ -72,7 +74,7 @@ SoC::SoC(std::string name, const Config &config)
     hbm_standalone_ = std::make_unique<amdgpu::HbmController>(memory_);
     for (uint32_t i = 0; i < config.num_xcds; ++i) {
       auto xcd_ptr =
-          std::make_unique<amdgpu::Xcd>(soc_name + ".xcd" + std::to_string(i), config.xcd,
+          std::make_unique<amdgpu::Xcd>(soc_name + ".xcd" + std::to_string(i), xcd_config,
                                         config.arch, memory_, config.exec_mode);
       xcds_.push_back(xcd_ptr.get());
       add_child(std::move(xcd_ptr));
