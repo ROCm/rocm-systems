@@ -14,6 +14,10 @@
 
 namespace rocjitsu::consan_program_analysis_target_detail {
 
+ConSanCacheOperationEncoding classify_gfx1250_cache_operation(std::string_view mnemonic) {
+  return classify_gfx12_cache_operation(mnemonic, false);
+}
+
 std::optional<ConSanScratchComponentEncoding>
 decode_gfx1250_scratch_component(std::span<const uint8_t> instruction) {
   return decode_gfx12_scratch_component<cdna5::VscratchMachineInst>(instruction);
@@ -93,6 +97,8 @@ bool decode_gfx1250_atomic_site(ConSanAtomicSite &site, std::string_view mnemoni
 namespace rocjitsu {
 
 extern const ConSanProgramAnalysisTargetOperations kConSanGfx1250ProgramAnalysisOperations = {
+    .classify_cache_operation =
+        consan_program_analysis_target_detail::classify_gfx1250_cache_operation,
     .decode_scratch_component =
         consan_program_analysis_target_detail::decode_gfx1250_scratch_component,
     .decode_lane_transfer = consan_program_analysis_target_detail::decode_gfx1250_lane_transfer,

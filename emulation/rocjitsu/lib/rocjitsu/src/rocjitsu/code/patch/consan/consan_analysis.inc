@@ -1178,7 +1178,7 @@ void record_barrier_site(const Instruction &inst, ConSanKernelInfo &kernel,
 }
 
 void record_fence_site(const Instruction &inst, ConSanKernelInfo &kernel,
-                       uint64_t instruction_text_offset) {
+                       uint64_t instruction_text_offset, rj_code_arch_t arch) {
   if (!is_fence_like(inst.mnemonic()))
     return;
 
@@ -1187,6 +1187,9 @@ void record_fence_site(const Instruction &inst, ConSanKernelInfo &kernel,
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.size = static_cast<uint32_t>(inst.size());
   site.mnemonic = std::string(inst.mnemonic());
+  const ConSanCacheOperationEncoding cache = classify_consan_cache_operation(inst.mnemonic(), arch);
+  site.cache_operation = cache.operation;
+  site.ordinary_acquire_mutation_supported = cache.ordinary_acquire_mutation_supported;
   kernel.fence_sites.push_back(std::move(site));
 }
 
@@ -1581,7 +1584,8 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
                         instruction_bytes,
                         kernel.entry_text_offset + static_cast<uint64_t>(previous_offset),
                         previous_instruction_bytes, arch);
-    record_fence_site(*inst, kernel, kernel.entry_text_offset + static_cast<uint64_t>(offset));
+    record_fence_site(*inst, kernel, kernel.entry_text_offset + static_cast<uint64_t>(offset),
+                      arch);
     record_flat_site(*inst, flat_pointer_tracker, kernel, accesses,
                      kernel.entry_text_offset + static_cast<uint64_t>(offset), arch,
                      instruction_bytes);

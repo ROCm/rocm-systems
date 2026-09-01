@@ -292,6 +292,8 @@ struct ConSanSyncEvent {
   uint64_t file_offset = 0;
   uint32_t size = 0;
   uint32_t width_bits = 0;
+  ConSanCacheOperation cache_operation = ConSanCacheOperation::Unsupported;
+  bool ordinary_acquire_mutation_supported = false;
   std::string mnemonic;
   std::optional<int64_t> static_byte_offset;
   std::optional<uint32_t> raw_scope;

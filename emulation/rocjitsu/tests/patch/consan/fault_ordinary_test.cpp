@@ -402,6 +402,7 @@ TEST(ConSan, OrdinaryAcquireMetadataRejectsCorruption) {
   ConSanSyncEvent cache = load;
   cache.kind = ConSanSyncEventKind::Fence;
   cache.operation = ConSanSyncOperation::Fence;
+  cache.cache_operation = ConSanCacheOperation::Acquire;
   cache.mnemonic = "global_inv";
   ConSanSyncSequence load_sequence;
   load_sequence.kind = ConSanSyncSequenceKind::OrdinaryMemory;
@@ -590,6 +591,7 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
   ConSanSyncEvent cache;
   cache.kind = ConSanSyncEventKind::Fence;
   cache.operation = ConSanSyncOperation::Fence;
+  cache.cache_operation = ConSanCacheOperation::Release;
   cache.mnemonic = "global_wb";
   cache.confidence = ConSanSemanticConfidence::Conservative;
   cache.code_object_fingerprint = "fingerprint";
@@ -623,16 +625,13 @@ TEST(ConSan, OrdinaryReleaseMetadataRejectsCorruption) {
   EXPECT_FALSE(
       consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));
   store.raw_scope = 2u;
-  cache.mnemonic = "buffer_wb";
+  cache.mnemonic = "target-native-release";
   EXPECT_TRUE(
       consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));
-  cache.mnemonic = "buffer_wbl2";
-  EXPECT_TRUE(
-      consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));
-  cache.mnemonic = "buffer_inv";
+  cache.cache_operation = ConSanCacheOperation::Acquire;
   EXPECT_FALSE(
       consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));
-  cache.mnemonic = "global_wb";
+  cache.cache_operation = ConSanCacheOperation::Release;
   store.execution_owners.front().descriptor_file_offset = 128u;
   EXPECT_FALSE(
       consan_ordinary_release_metadata_compatible(cache, cache_sequence, store, store_sequence));

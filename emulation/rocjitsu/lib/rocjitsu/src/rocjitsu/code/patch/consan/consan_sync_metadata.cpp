@@ -23,16 +23,14 @@ namespace {
 } // namespace
 
 bool is_release_cache_event(const ConSanSyncEvent *event) {
-  return event != nullptr && (event->mnemonic == "global_wb" || event->mnemonic == "buffer_wb" ||
-                              event->mnemonic == "buffer_wbl2");
+  return event != nullptr && event->cache_operation == ConSanCacheOperation::Release;
 }
 
 bool is_acquire_cache_event(const ConSanSyncEvent *event) {
-  // gfx11 buffer_gl1_inv plus buffer_gl0_inv is admitted only by the exact
-  // ordered-pair matcher in semantic association. A lone gl0 operation is
-  // workgroup-local cache maintenance, not a complete addressed acquire.
-  return event != nullptr && (event->mnemonic == "global_inv" || event->mnemonic == "buffer_inv" ||
-                              event->mnemonic == "s_dcache_inv");
+  // A split cache acquire is admitted only by the exact ordered-pair matcher
+  // in semantic association. A lone completion operation is workgroup-local
+  // cache maintenance, not a complete addressed acquire.
+  return event != nullptr && event->cache_operation == ConSanCacheOperation::Acquire;
 }
 
 bool consan_ordinary_acquire_metadata_compatible(const ConSanSyncEvent &load,
@@ -42,20 +40,22 @@ bool consan_ordinary_acquire_metadata_compatible(const ConSanSyncEvent &load,
                                                  ConSanOrdinaryAcquireMetadataPolicy policy) {
   const bool require_same_block =
       policy == ConSanOrdinaryAcquireMetadataPolicy::SameBlockSingleFence ||
-      policy == ConSanOrdinaryAcquireMetadataPolicy::SameBlockRdna3CachePairMember;
-  const bool allow_rdna3_cache_pair_member =
-      policy == ConSanOrdinaryAcquireMetadataPolicy::SameBlockRdna3CachePairMember ||
-      policy == ConSanOrdinaryAcquireMetadataPolicy::BoundedPathRdna3CachePairMember;
+      policy == ConSanOrdinaryAcquireMetadataPolicy::SameBlockCachePairMember;
+  const bool allow_cache_pair_member =
+      policy == ConSanOrdinaryAcquireMetadataPolicy::SameBlockCachePairMember ||
+      policy == ConSanOrdinaryAcquireMetadataPolicy::BoundedPathCachePairMember;
   return load.kind == ConSanSyncEventKind::OrdinaryMemory &&
          load.operation == ConSanSyncOperation::OrdinaryLoad && load.width_bits == 32u &&
          load.confidence == ConSanSemanticConfidence::Conservative && load.raw_scope &&
          (*load.raw_scope >= 1u && *load.raw_scope <= 3u) &&
          cache.kind == ConSanSyncEventKind::Fence &&
          cache.operation == ConSanSyncOperation::Fence &&
-         (cache.mnemonic == "global_inv" || cache.mnemonic == "buffer_inv" ||
-          (*load.raw_scope == 1u && cache.mnemonic == "buffer_gl0_inv") ||
-          (allow_rdna3_cache_pair_member &&
-           (cache.mnemonic == "buffer_gl1_inv" || cache.mnemonic == "buffer_gl0_inv"))) &&
+         (cache.cache_operation == ConSanCacheOperation::Acquire ||
+          (*load.raw_scope == 1u &&
+           cache.cache_operation == ConSanCacheOperation::AcquirePairCompletion) ||
+          (allow_cache_pair_member &&
+           (cache.cache_operation == ConSanCacheOperation::AcquirePairPrefix ||
+            cache.cache_operation == ConSanCacheOperation::AcquirePairCompletion))) &&
          cache.confidence == ConSanSemanticConfidence::Conservative &&
          load.code_object_fingerprint == cache.code_object_fingerprint &&
          load.container_name == cache.container_name && load.in_kernel == cache.in_kernel &&
@@ -86,8 +86,7 @@ bool consan_ordinary_release_metadata_compatible(const ConSanSyncEvent &cache,
                                                  const ConSanSyncSequence &store_sequence) {
   return cache.kind == ConSanSyncEventKind::Fence &&
          cache.operation == ConSanSyncOperation::Fence &&
-         (cache.mnemonic == "global_wb" || cache.mnemonic == "buffer_wb" ||
-          cache.mnemonic == "buffer_wbl2") &&
+         cache.cache_operation == ConSanCacheOperation::Release &&
          cache.confidence == ConSanSemanticConfidence::Conservative &&
          store.kind == ConSanSyncEventKind::OrdinaryMemory &&
          store.operation == ConSanSyncOperation::OrdinaryStore && store.width_bits != 0u &&

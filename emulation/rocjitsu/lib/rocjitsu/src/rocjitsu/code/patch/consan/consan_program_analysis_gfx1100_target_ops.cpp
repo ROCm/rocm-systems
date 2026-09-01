@@ -11,6 +11,16 @@
 
 namespace rocjitsu::consan_program_analysis_target_detail {
 
+ConSanCacheOperationEncoding classify_gfx1100_cache_operation(std::string_view mnemonic) {
+  if (mnemonic == "s_dcache_inv")
+    return {.operation = ConSanCacheOperation::Acquire};
+  if (mnemonic == "buffer_gl1_inv")
+    return {.operation = ConSanCacheOperation::AcquirePairPrefix};
+  if (mnemonic == "buffer_gl0_inv")
+    return {.operation = ConSanCacheOperation::AcquirePairCompletion};
+  return {};
+}
+
 ConSanVectorMemoryDecode decode_gfx1100_flat_memory(std::span<const uint8_t> instruction) {
   return decode_pregfx12_vector_memory<rdna3::FlatMachineInst>(instruction, false, 0u);
 }
@@ -31,6 +41,8 @@ bool decode_gfx1100_atomic_site(ConSanAtomicSite &site, std::string_view mnemoni
 namespace rocjitsu {
 
 extern const ConSanProgramAnalysisTargetOperations kConSanGfx1100ProgramAnalysisOperations = {
+    .classify_cache_operation =
+        consan_program_analysis_target_detail::classify_gfx1100_cache_operation,
     .decode_flat_memory = consan_program_analysis_target_detail::decode_gfx1100_flat_memory,
     .decode_global_memory = consan_program_analysis_target_detail::decode_gfx1100_global_memory,
     .decode_atomic_site = consan_program_analysis_target_detail::decode_gfx1100_atomic_site,

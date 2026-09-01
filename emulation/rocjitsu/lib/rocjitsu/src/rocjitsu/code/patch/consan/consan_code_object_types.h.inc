@@ -253,6 +253,8 @@ struct ConSanFenceSite {
   uint64_t text_offset = 0;
   uint64_t file_offset = 0;
   uint32_t size = 0;
+  ConSanCacheOperation cache_operation = ConSanCacheOperation::Unsupported;
+  bool ordinary_acquire_mutation_supported = false;
   std::string mnemonic;
 };
 

@@ -20,6 +20,7 @@
 #include "rocjitsu/code/patch/consan/consan_perturbation_policy.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_placement.h"
+#include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
 #include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
 #include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
@@ -380,6 +381,8 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     event.text_offset = site.text_offset;
     event.file_offset = site.file_offset;
     event.size = site.size;
+    event.cache_operation = site.cache_operation;
+    event.ordinary_acquire_mutation_supported = site.ordinary_acquire_mutation_supported;
     event.mnemonic = site.mnemonic;
     finish_event(event, "fence");
   }
@@ -480,7 +483,8 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
   return std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
                   lhs.confidence, lhs.memory_role_confidence, lhs.confidence_reason,
                   lhs.code_object_fingerprint, lhs.in_kernel, lhs.occurrence, lhs.text_offset,
-                  lhs.file_offset, lhs.size, lhs.width_bits, lhs.mnemonic, lhs.static_byte_offset,
+                  lhs.file_offset, lhs.size, lhs.width_bits, lhs.cache_operation,
+                  lhs.ordinary_acquire_mutation_supported, lhs.mnemonic, lhs.static_byte_offset,
                   lhs.raw_scope, lhs.barrier_id, lhs.barrier_operand_source,
                   lhs.barrier_raw_operand_selector, lhs.barrier_literal_width_bits,
                   lhs.barrier_literal_value, lhs.barrier_raw_simm16, lhs.barrier_scope,
@@ -488,7 +492,8 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
          std::tie(rhs.kind, rhs.operation, rhs.address_source, rhs.memory_role, rhs.rmw_outcome,
                   rhs.confidence, rhs.memory_role_confidence, rhs.confidence_reason,
                   rhs.code_object_fingerprint, rhs.in_kernel, rhs.occurrence, rhs.text_offset,
-                  rhs.file_offset, rhs.size, rhs.width_bits, rhs.mnemonic, rhs.static_byte_offset,
+                  rhs.file_offset, rhs.size, rhs.width_bits, rhs.cache_operation,
+                  rhs.ordinary_acquire_mutation_supported, rhs.mnemonic, rhs.static_byte_offset,
                   rhs.raw_scope, rhs.barrier_id, rhs.barrier_operand_source,
                   rhs.barrier_raw_operand_selector, rhs.barrier_literal_width_bits,
                   rhs.barrier_literal_value, rhs.barrier_raw_simm16, rhs.barrier_scope,
@@ -1383,13 +1388,14 @@ exact_workgroup_acquire_wait_end(const ConSanSyncSequence &sequence,
 }
 
 [[nodiscard]] bool
-is_rdna3_acquire_cache_pair(const ConSanSyncSequence &first, const ConSanSyncSequence &second,
+is_exact_acquire_cache_pair(const ConSanSyncSequence &first, const ConSanSyncSequence &second,
                             const SyncEventSemanticIndex &events,
                             const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   const ConSanSyncEvent *first_event = first_sequence_event(events, first);
   const ConSanSyncEvent *second_event = first_sequence_event(events, second);
   return first_event != nullptr && second_event != nullptr &&
-         first_event->mnemonic == "buffer_gl1_inv" && second_event->mnemonic == "buffer_gl0_inv" &&
+         first_event->cache_operation == ConSanCacheOperation::AcquirePairPrefix &&
+         second_event->cache_operation == ConSanCacheOperation::AcquirePairCompletion &&
          has_only_waits_between(first, second, blocks);
 }
 
@@ -1656,11 +1662,11 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
               is_acquire_cache_event(first_sequence_event(events, candidate)) &&
               prove_bounded_acquire_path(atomic, candidate, blocks)) {
             acquire = &candidate;
-          } else if (consan_uses_gfx11_encoding(arch) && i + 3 < sync_sequences.size() &&
+          } else if (i + 3 < sync_sequences.size() &&
                      candidate.kind == ConSanSyncSequenceKind::Fence &&
                      sync_sequences[i + 3].kind == ConSanSyncSequenceKind::Fence &&
                      prove_bounded_acquire_path(atomic, candidate, blocks) &&
-                     is_rdna3_acquire_cache_pair(candidate, sync_sequences[i + 3], events,
+                     is_exact_acquire_cache_pair(candidate, sync_sequences[i + 3], events,
                                                  blocks)) {
             acquire = &candidate;
             acquire_tail = &sync_sequences[i + 3];
@@ -1681,11 +1687,10 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
         i += 2;
         continue;
       }
-      if (consan_uses_gfx11_encoding(arch) && i + 2 < sync_sequences.size() &&
-          acquire.kind == ConSanSyncSequenceKind::Fence &&
+      if (i + 2 < sync_sequences.size() && acquire.kind == ConSanSyncSequenceKind::Fence &&
           sync_sequences[i + 2].kind == ConSanSyncSequenceKind::Fence &&
           prove_bounded_acquire_path(current, acquire, blocks) &&
-          is_rdna3_acquire_cache_pair(acquire, sync_sequences[i + 2], events, blocks)) {
+          is_exact_acquire_cache_pair(acquire, sync_sequences[i + 2], events, blocks)) {
         associated.push_back(
             associate_atomic_cache_sequence(nullptr, current, &acquire, &sync_sequences[i + 2]));
         i += 3;
@@ -1699,7 +1704,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
 
   // gfx12 lowers the release half of an atomic to an immediately preceding
   // store-count-zero wait, either combined or inside a contiguous suffix of
-  // counter-specific waits, without a separate global_wb event. This applies
+  // counter-specific waits, without a separate release-cache event. This applies
   // both to release-only no-return atomics and to returning acquire-release
   // atomics followed by an acquire invalidate. Admit only that exact,
   // same-block encoding. The wait is a boundary of the addressed atomic
@@ -1838,28 +1843,31 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
       continue;
     }
 
-    const auto sequence_has_cache_member = [&](std::string_view mnemonic) {
-      return std::ranges::any_of(
-          sequence->member_event_identities, [&](const std::string &identity) {
-            const auto event = event_by_identity.find(identity);
-            return event != event_by_identity.end() && event->second.unique &&
-                   event->second.event != nullptr && event->second.event->mnemonic == mnemonic;
-          });
+    const auto sequence_has_cache_member = [&](ConSanCacheOperation operation) {
+      return std::ranges::any_of(sequence->member_event_identities,
+                                 [&](const std::string &identity) {
+                                   const auto event = event_by_identity.find(identity);
+                                   return event != event_by_identity.end() &&
+                                          event->second.unique && event->second.event != nullptr &&
+                                          event->second.event->cache_operation == operation;
+                                 });
     };
-    const bool rdna3_acquire_pair_head =
+    const bool acquire_pair_prefix =
         addressed_ordinary && sequence->memory_role == ConSanSyncMemoryRole::Acquire &&
-        fence.mnemonic == "buffer_gl1_inv" && sequence_has_cache_member("buffer_gl0_inv");
-    const bool rdna3_acquire_pair_tail =
+        fence.cache_operation == ConSanCacheOperation::AcquirePairPrefix &&
+        sequence_has_cache_member(ConSanCacheOperation::AcquirePairCompletion);
+    const bool acquire_pair_completion =
         addressed_ordinary && sequence->memory_role == ConSanSyncMemoryRole::Acquire &&
-        fence.mnemonic == "buffer_gl0_inv" && sequence_has_cache_member("buffer_gl1_inv");
-    if (rdna3_acquire_pair_head) {
+        fence.cache_operation == ConSanCacheOperation::AcquirePairCompletion &&
+        sequence_has_cache_member(ConSanCacheOperation::AcquirePairPrefix);
+    if (acquire_pair_prefix) {
       candidate.association = ConSanFenceAssociation::AcquirePairPrefixCoveredByTail;
       candidates.push_back(std::move(candidate));
       continue;
     }
     if (is_release_cache_event(&fence))
       candidate.memory_role = ConSanSyncMemoryRole::Release;
-    else if (is_acquire_cache_event(&fence) || rdna3_acquire_pair_tail)
+    else if (is_acquire_cache_event(&fence) || acquire_pair_completion)
       candidate.memory_role = ConSanSyncMemoryRole::Acquire;
     else {
       candidate.association = ConSanFenceAssociation::UnsupportedCacheOperation;
@@ -1930,14 +1938,16 @@ struct OrdinaryReleaseBoundaries {
   return mnemonic.starts_with("s_wait") || mnemonic == "s_delay_alu" || mnemonic == "s_nop";
 }
 
-[[nodiscard]] bool is_ordinary_release_cache_instruction(const Instruction &instruction) {
-  const std::string_view mnemonic = instruction.mnemonic();
-  return mnemonic == "global_wb" || mnemonic == "buffer_wb" || mnemonic == "buffer_wbl2";
+[[nodiscard]] bool is_ordinary_release_cache_instruction(const Instruction &instruction,
+                                                         rj_code_arch_t arch) {
+  return classify_consan_cache_operation(instruction.mnemonic(), arch).operation ==
+         ConSanCacheOperation::Release;
 }
 
 [[nodiscard]] OrdinaryReleaseBoundaries
 ordinary_release_cache_boundaries(const ConSanSyncSequence &store,
-                                  const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+                                  const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                  rj_code_arch_t arch) {
   OrdinaryReleaseBoundaries boundaries;
   if (!store.basic_block_index || *store.basic_block_index >= blocks.size())
     return boundaries;
@@ -1956,7 +1966,7 @@ ordinary_release_cache_boundaries(const ConSanSyncSequence &store,
       continue;
     }
     prior_end = offset + static_cast<uint64_t>(size);
-    if (is_ordinary_release_cache_instruction(instruction)) {
+    if (is_ordinary_release_cache_instruction(instruction, arch)) {
       boundaries.offsets.push_back(offset);
     } else if (!is_permitted_ordinary_release_bookkeeping(instruction)) {
       boundaries = {};
@@ -1971,7 +1981,8 @@ ordinary_release_cache_boundaries(const ConSanSyncSequence &store,
 
 [[nodiscard]] std::optional<uint64_t>
 ordinary_release_cache_after_store(const ConSanSyncSequence &store,
-                                   const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+                                   const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                   rj_code_arch_t arch) {
   if (!store.basic_block_index || *store.basic_block_index >= blocks.size())
     return std::nullopt;
   BasicBlock *block = blocks[*store.basic_block_index].get();
@@ -1987,7 +1998,7 @@ ordinary_release_cache_after_store(const ConSanSyncSequence &store,
     if (offset != expected || size <= 0)
       return std::nullopt;
     expected += static_cast<uint64_t>(size);
-    if (is_ordinary_release_cache_instruction(instruction))
+    if (is_ordinary_release_cache_instruction(instruction, arch))
       return saw_wait ? std::optional<uint64_t>(offset) : std::nullopt;
     if (!is_permitted_ordinary_release_bookkeeping(instruction))
       return std::nullopt;
@@ -2049,12 +2060,12 @@ void associate_ordinary_release_sync_sequences(
     if (store == nullptr)
       continue;
     const OrdinaryReleaseBoundaries boundaries =
-        ordinary_release_cache_boundaries(store_sequence, blocks);
+        ordinary_release_cache_boundaries(store_sequence, blocks, arch);
     std::optional<uint64_t> cache_offset;
     if (boundaries.saw_wait && boundaries.offsets.size() == 1u)
       cache_offset = boundaries.offsets.front();
     if (!cache_offset)
-      cache_offset = ordinary_release_cache_after_store(store_sequence, blocks);
+      cache_offset = ordinary_release_cache_after_store(store_sequence, blocks, arch);
     if (!cache_offset)
       continue;
     std::vector<size_t> cache_matches;
@@ -2175,7 +2186,7 @@ void associate_ordinary_acquire_sync_sequences(
       continue;
     std::vector<size_t> cache_matches;
     std::vector<size_t> bounded_metadata_matches;
-    std::vector<Association> rdna3_pair_matches;
+    std::vector<Association> cache_pair_matches;
     const uint64_t maximum_cache_offset = load_sequence.end_text_offset > UINT64_MAX - 64u
                                               ? UINT64_MAX
                                               : load_sequence.end_text_offset + 64u;
@@ -2227,11 +2238,11 @@ void associate_ordinary_acquire_sync_sequences(
         if (first_event == nullptr || tail_event == nullptr ||
             !consan_ordinary_acquire_metadata_compatible(
                 *load, load_sequence, *first_event, first,
-                ConSanOrdinaryAcquireMetadataPolicy::BoundedPathRdna3CachePairMember) ||
+                ConSanOrdinaryAcquireMetadataPolicy::BoundedPathCachePairMember) ||
             !consan_ordinary_acquire_metadata_compatible(
                 *load, load_sequence, *tail_event, tail,
-                ConSanOrdinaryAcquireMetadataPolicy::BoundedPathRdna3CachePairMember) ||
-            !is_rdna3_acquire_cache_pair(first, tail, events, blocks)) {
+                ConSanOrdinaryAcquireMetadataPolicy::BoundedPathCachePairMember) ||
+            !is_exact_acquire_cache_pair(first, tail, events, blocks)) {
           continue;
         }
         const auto path = prove_bounded_acquire_path(load_sequence, first, blocks,
@@ -2240,15 +2251,15 @@ void associate_ordinary_acquire_sync_sequences(
           continue;
         const bool same_block = *path == BoundedAcquirePathKind::SameBlock;
         const auto metadata_policy =
-            same_block ? ConSanOrdinaryAcquireMetadataPolicy::SameBlockRdna3CachePairMember
-                       : ConSanOrdinaryAcquireMetadataPolicy::BoundedPathRdna3CachePairMember;
+            same_block ? ConSanOrdinaryAcquireMetadataPolicy::SameBlockCachePairMember
+                       : ConSanOrdinaryAcquireMetadataPolicy::BoundedPathCachePairMember;
         if (!consan_ordinary_acquire_metadata_compatible(*load, load_sequence, *first_event, first,
                                                          metadata_policy) ||
             !consan_ordinary_acquire_metadata_compatible(*load, load_sequence, *tail_event, tail,
                                                          metadata_policy)) {
           continue;
         }
-        rdna3_pair_matches.push_back({first_index, tail_index});
+        cache_pair_matches.push_back({first_index, tail_index});
       }
     }
 
@@ -2256,8 +2267,8 @@ void associate_ordinary_acquire_sync_sequences(
     if (cache_matches.size() == 1u) {
       association = Association{cache_matches.front(), std::nullopt};
     } else if (bounded_metadata_matches.empty() && cache_matches.empty() &&
-               rdna3_pair_matches.size() == 1u) {
-      association = rdna3_pair_matches.front();
+               cache_pair_matches.size() == 1u) {
+      association = cache_pair_matches.front();
     }
     if (!association || claimed_cache_sequences.contains(association->cache_index) ||
         (association->cache_tail_index &&

@@ -18,6 +18,28 @@ namespace rocjitsu {
 
 struct ConSanAtomicSite;
 
+/// Target-neutral meaning of one decoded cache-maintenance instruction.
+///
+/// Pair members stay distinct because a complete acquire on targets with a
+/// split cache hierarchy requires both operations in this exact order. A
+/// completion operation can also be sufficient for a workgroup-scoped
+/// acquire; synchronization association owns that scope-dependent rule.
+enum class ConSanCacheOperation : uint8_t {
+  Unsupported,
+  Release,
+  Acquire,
+  AcquirePairPrefix,
+  AcquirePairCompletion,
+};
+
+struct ConSanCacheOperationEncoding {
+  ConSanCacheOperation operation = ConSanCacheOperation::Unsupported;
+  /// Whether fault lowering can remove this exact instruction to weaken an
+  /// ordinary acquire. Semantic acquire support alone does not imply that the
+  /// target mutation package represents its encoding.
+  bool ordinary_acquire_mutation_supported = false;
+};
+
 struct ConSanScratchComponentEncoding {
   uint16_t vector_address_vgpr = 0;
   uint16_t load_data_vgpr = 0;
@@ -118,6 +140,7 @@ struct ConSanDirectLdsTransferEncoding {
 /// operations remain null rather than requiring common dispatch code to know
 /// which concrete target implements which decoder.
 struct ConSanProgramAnalysisTargetOperations {
+  ConSanCacheOperationEncoding (*classify_cache_operation)(std::string_view) = nullptr;
   std::optional<ConSanScratchComponentEncoding> (*decode_scratch_component)(
       std::span<const uint8_t>) = nullptr;
   std::optional<ConSanPrivateComponentEncoding> (*decode_private_component)(
@@ -134,6 +157,12 @@ struct ConSanProgramAnalysisTargetOperations {
   bool (*decode_atomic_site)(ConSanAtomicSite &, std::string_view,
                              std::span<const uint8_t>) = nullptr;
 };
+
+/// Translate one target-native cache mnemonic into the common synchronization
+/// vocabulary. Unsupported targets and non-cache mnemonics return an
+/// unsupported operation.
+[[nodiscard]] ConSanCacheOperationEncoding
+classify_consan_cache_operation(std::string_view mnemonic, rj_code_arch_t arch);
 
 /// One additive target registration. Concrete packages supply an operations
 /// facet; the common registry supplies only the architecture key.

@@ -40,6 +40,12 @@ invoke_target_operation(rj_code_arch_t arch,
 
 } // namespace
 
+ConSanCacheOperationEncoding classify_consan_cache_operation(std::string_view mnemonic,
+                                                             rj_code_arch_t arch) {
+  return invoke_target_operation(
+      arch, &ConSanProgramAnalysisTargetOperations::classify_cache_operation, mnemonic);
+}
+
 std::optional<ConSanScratchComponentEncoding>
 decode_consan_scratch_component_encoding(std::span<const uint8_t> instruction,
                                          rj_code_arch_t arch) {

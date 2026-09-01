@@ -524,11 +524,27 @@ _consan_assert_no_match(
     "site->raw_(scope|th)|consan_uses_gfx9_cdna_encoding|consan_uses_gfx12_(cdna|rdna)_execution"
     "synchronization analysis must consume target-normalized workgroup-acquire ordering"
 )
+foreach(_cache_semantic_consumer IN ITEMS
+    consan_sync_analysis.inc
+    consan_sync_metadata.cpp
+    consan_fault_selection.cpp
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_cache_semantic_consumer}"
+        "global_(wb|inv)|buffer_(wb|wbl2|inv|gl0_inv|gl1_inv)|s_dcache_inv|consan_uses_gfx11_encoding"
+        "cache semantic consumers must use target-normalized cache operations"
+    )
+endforeach()
 file(READ "${_consan_dir}/consan_program_analysis_target_ops.h"
      _program_analysis_normalized_contract)
 if(NOT _program_analysis_normalized_contract MATCHES "workgroup_acquire_ordering")
     message(FATAL_ERROR
         "ConSan program-analysis target operations lost normalized workgroup-acquire ordering"
+    )
+endif()
+if(NOT _program_analysis_normalized_contract MATCHES "classify_cache_operation")
+    message(FATAL_ERROR
+        "ConSan program-analysis target operations lost normalized cache-operation classification"
     )
 endif()
 _consan_assert_no_match(

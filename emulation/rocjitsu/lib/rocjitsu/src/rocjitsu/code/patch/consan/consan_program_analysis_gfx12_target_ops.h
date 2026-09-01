@@ -14,6 +14,21 @@
 
 namespace rocjitsu::consan_program_analysis_target_detail {
 
+inline ConSanCacheOperationEncoding
+classify_gfx12_cache_operation(std::string_view mnemonic,
+                               bool ordinary_acquire_mutation_supported) {
+  if (mnemonic == "global_wb")
+    return {.operation = ConSanCacheOperation::Release};
+  if (mnemonic == "global_inv" || mnemonic == "s_dcache_inv") {
+    return {
+        .operation = ConSanCacheOperation::Acquire,
+        .ordinary_acquire_mutation_supported =
+            mnemonic == "global_inv" && ordinary_acquire_mutation_supported,
+    };
+  }
+  return {};
+}
+
 template <typename Raw>
 std::optional<ConSanScratchComponentEncoding>
 decode_gfx12_scratch_component(std::span<const uint8_t> instruction) {

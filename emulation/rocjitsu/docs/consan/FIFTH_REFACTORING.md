@@ -4686,3 +4686,81 @@ material shrinkage remains unproved. Remaining synchronization target
 peepholes, other target locality, operating-point and mutable-transaction
 breadth, larger legacy harvesting, material Section 14.8 evidence, and the
 independent completion audit remain open. The goal therefore remains active.
+
+### 16.55 Convergence checkpoint 54: target-normalized cache operations
+
+The synchronization deep read continued from acquire-ordering fields through
+cache-operation discovery, atomic and ordinary-memory association, fence
+qualification, and exact fault selection. Common semantic code repeatedly
+recognized `global_wb`/`global_inv`, CDNA's buffer operations, gfx1100's
+ordered two-invalidate sequence, and scalar-cache invalidation by mnemonic.
+Atomic association additionally asked whether the target used gfx11 encoding
+before admitting the pair. Ordinary acquire mutation selected the identically
+spelled gfx1201 operation in common code, even though gfx1250 decodes the same
+mnemonic but deliberately exposes synchronization-only ordinary memory. Thus
+one target addition or cache-vocabulary change crossed program analysis,
+association, metadata policy, fence selection, and fault selection.
+
+The program-analysis target facet now owns a `ConSanCacheOperation` vocabulary:
+release, complete acquire, acquire-pair prefix, acquire-pair completion, and
+unsupported. The gfx942/gfx950, gfx1100, gfx1201, and gfx1250 target/family
+packages translate only their native mnemonics into that vocabulary. Program
+analysis records the result on each fence site, synchronization inventory
+transports it, and every semantic consumer reads the normalized operation.
+The exact pair matcher consequently proves prefix, completion, ordering, and
+wait-only adjacency without naming gfx1100 or consulting an architecture
+predicate. The old architecture-independent acceptance of the nonexistent
+`buffer_wb` spelling is deleted.
+
+Ordinary-acquire mutation support remains deliberately narrower than semantic
+acquire support. The target result carries an independent mutation-supported
+fact: gfx1201's removable acquire publishes it, while gfx1250's same-spelled
+operation does not. Fault selection consumes that fact rather than treating a
+mnemonic as lowering authorization. Physical-alias equivalence also includes
+both normalized fields, so aliases cannot silently disagree about cache
+semantics or mutation capability.
+
+A direct five-target regression proves every supported native vocabulary,
+the gfx1100 pair roles, the gfx1201/gfx1250 mutation distinction, and negative
+cross-target spellings. Existing exact-pair tests prove that a missing,
+reversed, or intervened pair remains unassociated; the ordinary pair inventory
+test now also proves that both normalized roles survive into synchronization
+events. Metadata regressions construct typed operations and prove that changing
+a diagnostic mnemonic cannot change semantics. The architecture gate rejects
+all native cache spellings and the gfx11 encoding predicate from shared
+synchronization analysis, metadata, and fault selection, and requires the
+target normalization operation.
+
+| Signal | Checkpoint 54 | Cumulative change | Slice change from checkpoint 53 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,407 | +432 | +107 |
+| Nonblank production lines | 99,112 | +29 | +98 |
+| Production implementation lines | 91,375 | **-75** | +86 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **175 / 52** | **-101 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 30 | +10 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Native cache-mnemonic predicates in semantic consumers | **0** | n/a | converged |
+| Architecture predicates in cache-pair association | **0** | n/a | **-2** |
+| Target-normalized cache-operation authorities | **1 contract** | n/a | converged |
+| Test inventory | **5,386** | **+41** | **+1** |
+
+Validation includes a final-tree `-j16` build; five direct vocabulary, exact-
+pair, metadata, and architecture-boundary tests; 481 broad program-analysis
+and atomic/fence-policy unit tests; all 4,751 nonphysical tests over the five
+emulated targets at `-j16`; and all 635 physical gfx1201 tests serialized at
+`-j1`. No test was removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.2, 14.4, 14.5, 14.6, 14.7,
+14.9, and 14.10. A future cache vocabulary now extends through one target
+facet rather than edits to four common semantic regions, and the legacy
+parallel predicates are deleted. The explicit contract, transport fields,
+alias proof, and mutation distinction cost 86 implementation lines, however;
+the cumulative reduction retreats from 161 to 75 lines. This is bounded
+target-locality investment, not Section 14.8 progress, and the next convergence
+work must harvest enough superseded structure to repay it rather than adding a
+second layer. Remaining target locality, operating-point and mutable-
+transaction breadth, larger legacy harvesting, material shrinkage, and the
+independent Section 14 completion audit remain open. The goal therefore
+remains active.

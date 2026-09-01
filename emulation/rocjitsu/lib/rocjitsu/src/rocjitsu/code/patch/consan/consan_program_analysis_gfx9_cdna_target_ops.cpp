@@ -13,6 +13,14 @@
 
 namespace rocjitsu::consan_program_analysis_target_detail {
 
+ConSanCacheOperationEncoding classify_gfx9_cdna_cache_operation(std::string_view mnemonic) {
+  if (mnemonic == "buffer_wbl2")
+    return {.operation = ConSanCacheOperation::Release};
+  if (mnemonic == "buffer_inv" || mnemonic == "s_dcache_inv")
+    return {.operation = ConSanCacheOperation::Acquire};
+  return {};
+}
+
 std::optional<ConSanScratchComponentEncoding>
 decode_gfx9_cdna_scratch_component(std::span<const uint8_t> instruction) {
   if (instruction.size() != sizeof(cdna4::FlatScratchMachineInst))
@@ -109,6 +117,8 @@ bool decode_gfx9_cdna_atomic_site(ConSanAtomicSite &site, std::string_view mnemo
 namespace rocjitsu {
 
 extern const ConSanProgramAnalysisTargetOperations kConSanGfx9CdnaProgramAnalysisOperations = {
+    .classify_cache_operation =
+        consan_program_analysis_target_detail::classify_gfx9_cdna_cache_operation,
     .decode_scratch_component =
         consan_program_analysis_target_detail::decode_gfx9_cdna_scratch_component,
     .decode_private_component =

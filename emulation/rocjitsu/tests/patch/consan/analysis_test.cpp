@@ -84,6 +84,39 @@ TEST(ConSan, EveryTargetNormalizesItsWorkgroupAcquireOrdering) {
                    .encoding.workgroup_acquire_ordering);
 }
 
+TEST(ConSan, EveryTargetOwnsItsCacheOperationVocabulary) {
+  using Operation = ConSanCacheOperation;
+  const auto expect = [](rj_code_arch_t arch, std::string_view mnemonic, Operation operation,
+                         bool ordinary_mutation = false) {
+    const ConSanCacheOperationEncoding encoding = classify_consan_cache_operation(mnemonic, arch);
+    EXPECT_EQ(encoding.operation, operation) << arch << ": " << mnemonic;
+    EXPECT_EQ(encoding.ordinary_acquire_mutation_supported, ordinary_mutation)
+        << arch << ": " << mnemonic;
+  };
+
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    expect(arch, "buffer_wbl2", Operation::Release);
+    expect(arch, "buffer_inv", Operation::Acquire);
+    expect(arch, "s_dcache_inv", Operation::Acquire);
+    expect(arch, "global_inv", Operation::Unsupported);
+  }
+
+  expect(ROCJITSU_CODE_ARCH_RDNA3, "buffer_gl1_inv", Operation::AcquirePairPrefix);
+  expect(ROCJITSU_CODE_ARCH_RDNA3, "buffer_gl0_inv", Operation::AcquirePairCompletion);
+  expect(ROCJITSU_CODE_ARCH_RDNA3, "s_dcache_inv", Operation::Acquire);
+  expect(ROCJITSU_CODE_ARCH_RDNA3, "global_inv", Operation::Unsupported);
+
+  expect(ROCJITSU_CODE_ARCH_RDNA4, "global_wb", Operation::Release);
+  expect(ROCJITSU_CODE_ARCH_RDNA4, "global_inv", Operation::Acquire, true);
+  expect(ROCJITSU_CODE_ARCH_RDNA4, "s_dcache_inv", Operation::Acquire);
+  expect(ROCJITSU_CODE_ARCH_RDNA4, "buffer_gl0_inv", Operation::Unsupported);
+
+  expect(ROCJITSU_CODE_ARCH_CDNA5, "global_wb", Operation::Release);
+  expect(ROCJITSU_CODE_ARCH_CDNA5, "global_inv", Operation::Acquire);
+  expect(ROCJITSU_CODE_ARCH_CDNA5, "s_dcache_inv", Operation::Acquire);
+  expect(ROCJITSU_CODE_ARCH_CDNA5, "buffer_inv", Operation::Unsupported);
+}
+
 TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite) {
   constexpr auto async_b8 = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB8Vglobal,
                                                  {.saddr = 0, .vdst = 7, .vaddr = 8});
@@ -3615,6 +3648,10 @@ TEST(ConSan, AssociatesRdna3OrdinaryAcquireWithCompleteCachePair) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u)
       << testing::PrintToString(result.program_inventory.sync().sync_events);
+  EXPECT_EQ(result.program_inventory.sync().sync_events[1].cache_operation,
+            ConSanCacheOperation::AcquirePairPrefix);
+  EXPECT_EQ(result.program_inventory.sync().sync_events[2].cache_operation,
+            ConSanCacheOperation::AcquirePairCompletion);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u)
       << testing::PrintToString(result.program_inventory.sync().sync_sequences);
   const ConSanSyncSequence &sequence = result.program_inventory.sync().sync_sequences.front();

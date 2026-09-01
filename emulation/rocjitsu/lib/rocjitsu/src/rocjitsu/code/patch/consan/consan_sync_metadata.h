@@ -18,8 +18,8 @@ namespace rocjitsu {
 enum class ConSanOrdinaryAcquireMetadataPolicy : uint8_t {
   SameBlockSingleFence,
   BoundedPathSingleFence,
-  SameBlockRdna3CachePairMember,
-  BoundedPathRdna3CachePairMember,
+  SameBlockCachePairMember,
+  BoundedPathCachePairMember,
 };
 
 /// Classify the cache-maintenance endpoints that can carry an atomic or
