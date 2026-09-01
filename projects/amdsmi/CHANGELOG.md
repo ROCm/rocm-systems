@@ -27,6 +27,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Populated by `amdsmi_get_gpu_enumeration_info()`, UALoE-backed like the existing `physical_acc_id` field in `amdsmi_asic_info_t`.
   - CLI: `amd-smi list --enumeration` now includes `PHYSICAL_ACC_ID` next to `OAM_ID`.
 
+- **Added `chip_rev_id` and `external_rev_id` to `amdsmi_get_gpu_asic_info()`**.  
+  - Reports the amdgpu `chip_rev` and `external_rev` values from the `AMDGPU_INFO_DEV_INFO` DRM query. Both are distinct from `rev_id`, which is the PCI config-space revision.
+  - `chip_rev_id` is the internal chip revision, or stepping, numbered A0 = 0 and A1 = 1 by AMD convention. `external_rev_id` is family-scoped, so the same value can appear on unrelated ASIC families; interpret it alongside `device_id`.
+  - Exposed under the same names in the Python `amdsmi_get_gpu_asic_info()` dictionary and in `amd-smi static --asic`. Both report `0xFFFFFFFF` (`N/A`) when unsupported.
+  - ABI-preserving: the two fields consume two `uint32_t` slots from `amdsmi_asic_info_t.reserved`, so the structure size and the offsets of every pre-existing named field except `reserved` are unchanged. `reserved` moves by two slots and shrinks from 17 to 15 entries.
+
 ### Changed
 
 - **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  

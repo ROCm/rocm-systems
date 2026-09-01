@@ -1453,4 +1453,6 @@ void init_asic_info_defaults(amdsmi_asic_info_t* info) {
   info->target_graphics_version = std::numeric_limits<uint64_t>::max();
   info->subsystem_id = std::numeric_limits<uint32_t>::max();
   info->physical_acc_id = std::numeric_limits<uint32_t>::max();
+  info->chip_rev_id = std::numeric_limits<uint32_t>::max();
+  info->external_rev_id = std::numeric_limits<uint32_t>::max();
 }

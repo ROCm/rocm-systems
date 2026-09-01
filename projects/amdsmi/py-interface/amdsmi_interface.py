@@ -2870,6 +2870,10 @@ def amdsmi_get_gpu_asic_info(processor_handle: processor_handle_t) -> Dict[str, 
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     asic_info_struct = amdsmi_wrapper.amdsmi_asic_info_t()
+    # An older libamd_smi does not know these fields and leaves the reserved
+    # slots as the caller passed them, so seed N/A rather than the ctypes zero.
+    asic_info_struct.chip_rev_id = MaxUIntegerTypes.UINT32_T
+    asic_info_struct.external_rev_id = MaxUIntegerTypes.UINT32_T
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_asic_info(processor_handle, ctypes.byref(asic_info_struct))
     )
@@ -2879,12 +2883,20 @@ def amdsmi_get_gpu_asic_info(processor_handle: processor_handle_t) -> Dict[str, 
     subsystem_id = _validate_if_max_uint(asic_info_struct.subsystem_id, MaxUIntegerTypes.UINT32_T)
     subvendor_id = _validate_if_max_uint(asic_info_struct.subvendor_id, MaxUIntegerTypes.UINT32_T)
     rev_id = _validate_if_max_uint(asic_info_struct.rev_id, MaxUIntegerTypes.UINT32_T)
+    chip_rev_id = _validate_if_max_uint(asic_info_struct.chip_rev_id, MaxUIntegerTypes.UINT32_T)
+    external_rev_id = _validate_if_max_uint(
+        asic_info_struct.external_rev_id, MaxUIntegerTypes.UINT32_T
+    )
     if isinstance(subsystem_id, int):
         subsystem_id = _pad_hex_value(hex(subsystem_id), 4)
     if isinstance(subvendor_id, int):
         subvendor_id = _pad_hex_value(hex(subvendor_id), 4)
     if isinstance(rev_id, int):
         rev_id = _pad_hex_value(hex(rev_id), 2)
+    if isinstance(chip_rev_id, int):
+        chip_rev_id = _pad_hex_value(hex(chip_rev_id), 2)
+    if isinstance(external_rev_id, int):
+        external_rev_id = _pad_hex_value(hex(external_rev_id), 2)
     asic_info = {
         "market_name": market_name,
         "vendor_id": asic_info_struct.vendor_id,
@@ -2892,6 +2904,8 @@ def amdsmi_get_gpu_asic_info(processor_handle: processor_handle_t) -> Dict[str, 
         "subvendor_id": subvendor_id,
         "device_id": asic_info_struct.device_id,
         "rev_id": rev_id,
+        "chip_rev_id": chip_rev_id,
+        "external_rev_id": external_rev_id,
         "asic_serial": asic_info_struct.asic_serial.decode("utf-8"),
         "oam_id": _validate_if_max_uint(asic_info_struct.oam_id, MaxUIntegerTypes.UINT32_T),
         "physical_acc_id": _validate_if_max_uint(

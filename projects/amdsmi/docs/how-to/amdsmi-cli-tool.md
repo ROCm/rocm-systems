@@ -1222,6 +1222,8 @@ GPU: 0
         DEVICE_ID: 0x74a0
         SUBSYSTEM_ID: 0x74a0
         REV_ID: 0x00
+        CHIP_REV_ID: 0x01
+        EXTERNAL_REV_ID: 0x47
         ASIC_SERIAL: 0xXXXXXXXXXXXXXXXX
         OAM_ID: 0
         PHYSICAL_ACC_ID: N/A
