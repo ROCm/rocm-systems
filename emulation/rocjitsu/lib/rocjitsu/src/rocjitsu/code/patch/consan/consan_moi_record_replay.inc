@@ -14,14 +14,6 @@ void try_apply_first_light_access_record_patch(
   }
 
   const ConSanMoiReportBufferLayout &layout = mode_semantics.report_layout;
-  if (options.moi_runtime_sample_stride == 0 || options.moi_runtime_sample_stride > (1u << 24u) ||
-      (options.moi_runtime_sample_stride & (options.moi_runtime_sample_stride - 1u)) != 0u ||
-      options.moi_runtime_sample_offset >= options.moi_runtime_sample_stride) {
-    result.warnings.emplace_back(
-        "ConSan MOI Record/Replay runtime stride must be a power of two in 1..16777216 and "
-        "offset must be less than stride");
-    return;
-  }
   if (options.max_patches == 0 || layout.access_record_capacity == 0)
     return;
   if (!options.moi_dynamic_access_records && layout.record_replay_access_dispatch_bank_count > 1u &&

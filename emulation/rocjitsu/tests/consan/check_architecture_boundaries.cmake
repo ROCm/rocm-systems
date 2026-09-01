@@ -803,6 +803,13 @@ foreach(
         "Record/Replay components must separate immutable input from operating-point state"
     )
 endforeach()
+foreach(_sampling_mode_owner IN ITEMS consan_moi_record_replay.inc consan_moi_sampled_access.inc)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_sampling_mode_owner}"
+        "moi_(runtime_)?sample_stride[ \t]*==[ \t]*0|moi_(runtime_)?sample_offset[ \t]*>="
+        "sampling validity must remain owned by the typed configuration-stage contract"
+    )
+endforeach()
 foreach(
     _inline_shadow_owner
     IN ITEMS

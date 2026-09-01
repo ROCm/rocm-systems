@@ -4930,3 +4930,56 @@ reduction remains only 160 lines. Remaining target locality, broader
 operating-point and mutable-transaction surfaces, larger legacy harvesting,
 material Section 14.8 evidence, and the independent Section 14 completion
 audit remain open. The goal therefore remains active.
+
+### 16.58 Convergence checkpoint 57: single sampling-configuration authority
+
+The forward-pipeline deep read followed static and runtime sampling parameters
+from request construction through configuration validation and into
+Record/Replay and Sampled access lowering. The typed configuration contract
+already rejects a zero static or runtime stride, a runtime stride that is not
+a power of two or exceeds `2^24`, and either offset outside its stride. The
+pipeline records the typed issue and blocks inventory, resource solving, and
+lowering. Despite that boundary, both access-mode implementations repeated
+parts of the same validation, with different mode-local warning strings and
+slightly different predicates.
+
+Those unreachable post-contract checks are deleted. Mode implementations now
+consume an admitted sampling configuration and contain only mode behavior:
+candidate selection, bank sizing, runtime gating, placement, and emission.
+The request contract remains the single validity authority. The architecture
+gate rejects zero-stride or out-of-range-offset validation in both mode
+implementation owners so a later change cannot silently recreate parallel
+configuration semantics.
+
+| Signal | Checkpoint 57 | Cumulative change | Slice change from checkpoint 56 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,299 | +324 | **-24** |
+| Nonblank production lines | 98,997 | **-86** | **-24** |
+| Production implementation lines | 91,266 | **-184** | **-24** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **175 / 52** | **-101 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 30 | +10 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Sampling-validity authorities | **1 typed configuration contract** | n/a | converged |
+| Post-contract sampling-validity branches in mode implementation | **0** | n/a | **-5** |
+| Test inventory | **5,388** | **+43** | 0 |
+
+Validation includes a final-tree `-j16` build; 24 focused request-contract,
+pipeline-stop, five-target strided Record/Replay and Sampled, and architecture-
+boundary tests; and a clean final run of all 4,753 nonphysical tests over the
+five emulated targets at `-j16`. One unrelated gfx1250 SuperCollider simulator
+case failed in the first parallel run and passed immediately in 0.48 seconds
+when rerun serially; the complete repeated `-j16` gate passed. Checkpoint 56's
+immediately preceding complete 635-test serialized gfx1201 run remains the
+periodic physical baseline. No test was removed, renamed, disabled, or
+replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.7, 14.8, 14.9, and
+14.10. It restores a forward-only configuration boundary and harvests 24
+implementation lines without adding a replacement abstraction. The cumulative
+reduction reaches 184 lines, which is still not material whole-refactoring
+shrinkage. Remaining target locality, broader operating-point and mutable-
+transaction surfaces, larger legacy harvesting, material Section 14.8
+evidence, and the independent Section 14 completion audit remain open. The
+goal therefore remains active.

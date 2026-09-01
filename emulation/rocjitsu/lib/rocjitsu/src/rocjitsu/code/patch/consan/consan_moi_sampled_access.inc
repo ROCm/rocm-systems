@@ -36,22 +36,6 @@ void try_apply_direct_sampled_watchpoint_patch(
     }
     return;
   }
-  if (options.moi_sample_stride == 0) {
-    result.warnings.emplace_back("ConSan MOI sampled probe requires a nonzero sample stride");
-    return;
-  }
-  if (options.moi_sample_offset >= options.moi_sample_stride) {
-    result.warnings.emplace_back("ConSan MOI sampled probe sample offset must be less than stride");
-    return;
-  }
-  if (options.moi_runtime_sample_stride == 0 || options.moi_runtime_sample_stride > (1u << 24u) ||
-      (options.moi_runtime_sample_stride & (options.moi_runtime_sample_stride - 1u)) != 0 ||
-      options.moi_runtime_sample_offset >= options.moi_runtime_sample_stride) {
-    result.warnings.emplace_back(
-        "ConSan MOI runtime sample stride must be a power of two in 1..16777216 and offset must "
-        "be less than stride");
-    return;
-  }
   // Sampled atomic metadata wraps the relocated guest instruction in a
   // second text-growth pass. Keep dual-role access/ordering sites at the tail
   // so their one-word nested anchors remain branch-reachable in large images.
