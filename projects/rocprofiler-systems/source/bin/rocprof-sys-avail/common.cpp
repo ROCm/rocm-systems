@@ -322,18 +322,18 @@ process_categories(parser_t& p, const str_set_t& _category_options)
     // map
     for(const auto& itr : category_view)
     {
-        auto _matched = find_category(itr);
-        if(!_matched.empty())
+        auto matched = find_category(itr);
+        if(!matched.empty())
         {
             // Only create patch if the matched form differs from input (normalization
             // needed)
-            if(_matched != itr)
+            if(matched != itr)
             {
                 // Explicitly convert string_view to string for safe capture
-                const std::string _matched_str(_matched);
-                _shorthand_patches.emplace_back([itr, _matched_str]() {
+                const std::string matched_str(matched);
+                _shorthand_patches.emplace_back([itr, matched_str]() {
                     category_view.erase(itr);
-                    category_view.emplace(_matched_str);
+                    category_view.emplace(matched_str);
                 });
             }
         }

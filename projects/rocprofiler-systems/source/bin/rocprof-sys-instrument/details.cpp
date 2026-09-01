@@ -9,6 +9,8 @@
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 
+#include <Symbol.h>
+
 #include "common/path.hpp"
 #include "common/string_utility.hpp"
 #include "core/demangler.hpp"
@@ -16,6 +18,8 @@
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
+#include <array>
+#include <cstring>
 #include <link.h>
 #include <linux/limits.h>
 #include <string>
@@ -96,13 +100,13 @@ get_name(module_t* _module)
     auto itr = _v.find(_module);
     if(itr == _v.end())
     {
-        char _name[FUNCNAMELEN + 1];
-        memset(_name, '\0', FUNCNAMELEN + 1);
+        std::array<char, k_funcnamelen + 1> name{};
+        memset(name.data(), '\0', name.size());
 
         if(_module)
         {
-            _module->getFullName(_name, FUNCNAMELEN);
-            _v.emplace(_module, std::string{ _name });
+            _module->getFullName(name.data(), k_funcnamelen);
+            _v.emplace(_module, std::string{ name.data() });
         }
         else
         {
