@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_VRAM_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_VRAM_H_
@@ -36,11 +17,11 @@ struct KfdMemBank {
   uint64_t size_in_bytes;
 };
 
-// Sum only the public-framebuffer banks (HSA_HEAPTYPE_FB_PUBLIC). Private,
-// GDS/LDS, and scratch heaps are not user-visible VRAM and would over-report the
-// total on discrete GPUs that enumerate them. Falls back to summing every bank
-// when none is FB_PUBLIC, so a node that exposes its framebuffer under another
-// heap type still yields a non-zero total.
+// Sum only the public-framebuffer banks (HSA_HEAPTYPE_FB_PUBLIC), which are the
+// user-visible VRAM. Falls back to summing every bank when no bank is FB_PUBLIC:
+// amdkfd reports the whole framebuffer as a single FB_PRIVATE bank on small-BAR
+// GPUs, and as FB_PRIVATE on APUs, so the fallback is what keeps those nodes
+// from reporting zero.
 uint64_t sum_public_vram_bytes(const std::vector<KfdMemBank>& banks);
 
 // Decide whether the KFD topology total (mem_banks) should override the sysfs
