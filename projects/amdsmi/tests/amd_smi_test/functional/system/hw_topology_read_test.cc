@@ -201,8 +201,7 @@ void TestHWTopologyRead::Run(void) {
           }
         }
 
-        // Unified topology query: exercises amdsmi_get_link_topology on real
-        // hardware and cross-checks it against the individual queries above.
+        // Unified query: cross-check amdsmi_get_link_topology against the components.
         amdsmi_link_topology_t topology = {};
         DISPLAY_AMDSMI_API("amdsmi_get_link_topology",
                            "gpu=" + std::to_string(dv_ind_src) + "," + std::to_string(dv_ind_dst),
@@ -223,12 +222,11 @@ void TestHWTopologyRead::Run(void) {
           EXPECT_EQ(topology.link_type, link.link_type);
           EXPECT_EQ(topology.num_hops, link.hops > 255 ? 255 : static_cast<uint8_t>(link.hops));
           EXPECT_EQ(topology.fb_sharing, link.accessible ? 1 : 0);
-          if (topology.link_type == AMDSMI_LINK_TYPE_NOT_APPLICABLE ||
-              topology.link_type == AMDSMI_LINK_TYPE_UNKNOWN) {
-            EXPECT_EQ(topology.link_status, AMDSMI_LINK_STATUS_DISABLED);
-          } else {
-            EXPECT_EQ(topology.link_status, AMDSMI_LINK_STATUS_ENABLED);
-          }
+          // A successful query resolves PCIe or xGMI, so status must be ENABLED.
+          // This fires if the code ever resolves another type on success.
+          EXPECT_TRUE(topology.link_type == AMDSMI_LINK_TYPE_PCIE ||
+                      topology.link_type == AMDSMI_LINK_TYPE_XGMI);
+          EXPECT_EQ(topology.link_status, AMDSMI_LINK_STATUS_ENABLED);
         }
       }
     }
