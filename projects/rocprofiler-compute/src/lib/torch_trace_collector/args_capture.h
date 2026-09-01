@@ -3,7 +3,8 @@
 
 #pragma once
 
-#include <ATen/core/dispatch/Dispatcher.h>
+#include "schema_arg_names.h"
+
 #include <ATen/record_function.h>
 #include <c10/core/ScalarType.h>
 
@@ -206,48 +207,39 @@ inline std::string build_leaf_args(const at::RecordFunction& record_fn)
     std::string out;
     try
     {
-        std::vector<std::string> names;
-        const auto               op_name = record_fn.operator_name();
-        if (op_name.has_value())
+        std::vector<std::string> argument_names;
+        const auto               operator_name = record_fn.operator_name();
+        if (operator_name.has_value())
         {
-            const auto handle = c10::Dispatcher::singleton().findSchema(op_name.value());
-            if (handle.has_value())
-            {
-                const auto& schema_args = handle->schema().arguments();
-                names.reserve(schema_args.size());
-                for (const auto& arg : schema_args)
-                {
-                    names.push_back(arg.name());
-                }
-            }
+            argument_names = schema_arg_names(operator_name.value());
         }
 
-        const bool  values = args_values_enabled();
-        const auto& inputs = record_fn.inputs();
-        out                = "(";
-        std::size_t count  = 0;
-        for (const auto& iv : inputs)
+        const bool  values    = args_values_enabled();
+        const auto& inputs    = record_fn.inputs();
+        out                   = "(";
+        std::size_t arg_index = 0;
+        for (const auto& input : inputs)
         {
-            if (count >= kMaxArgItems)
+            if (arg_index >= kMaxArgItems)
             {
                 break;
             }
-            if (count > 0)
+            if (arg_index > 0)
             {
                 out += ", ";
             }
-            const std::string rendered = render_leaf_ivalue(iv, values);
-            if (count < names.size() && !names[count].empty())
+            const std::string rendered = render_leaf_ivalue(input, values);
+            if (arg_index < argument_names.size() && !argument_names[arg_index].empty())
             {
-                out += names[count] + "=" + rendered;
+                out += argument_names[arg_index] + "=" + rendered;
             }
             else
             {
                 out += rendered;
             }
-            ++count;
+            ++arg_index;
         }
-        if (count == 0)
+        if (arg_index == 0)
         {
             return "";
         }

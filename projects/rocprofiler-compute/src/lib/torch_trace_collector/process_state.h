@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "schema_arg_names.h"
 #include "snapshot_store.h"
 #include "stats.h"
 #include "synchronized.hpp"
@@ -26,6 +27,7 @@ struct ProcessState
     Stats                        stats;
     synchronized_t<InstallState> install;
     SnapshotStore                snapshots{stats};
+    SchemaArgNamesCache          schema_arg_names_cache;
 };
 
 ProcessState& process_state();

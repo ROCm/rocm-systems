@@ -7,6 +7,7 @@
 #include "process_state.h"
 #include "record_function_installation.h"
 #include "roctx_range_intercept.h"
+#include "schema_arg_names.h"
 #include "snapshot_store.h"
 #include "stack_entry.h"
 #include "stats.h"
@@ -71,6 +72,7 @@ void reset_state()
     thread_state().stack.clear();
     thread_state().guards.clear();
     snapshots().clear();
+    process_state().schema_arg_names_cache.clear();
     stats().pushes.store(0);
     stats().pops.store(0);
     stats().snapshots_saved.store(0);
@@ -228,7 +230,7 @@ std::vector<std::string> decode_marker_path(const std::string& wire)
     std::size_t              start = 0;
     while (true)
     {
-        const auto sep = path.find('/', start);
+        const auto        sep = path.find('/', start);
         const std::string raw = path.substr(start,
                                             sep == std::string::npos ? std::string::npos : sep - start);
 
@@ -430,6 +432,39 @@ TEST_F(TorchTraceCollectorTest, RecordedCatArgsIncludeDimValue)
 
     EXPECT_EQ(encoded_args_for_operator(recorded, "aten::cat"),
               encode_args("(tensors=[float32[2x3], float32[2x3]], dim=1)"));
+}
+
+TEST_F(TorchTraceCollectorTest, SchemaArgNamesForAtenMm)
+{
+    const c10::OperatorName        mm_operator{"aten::mm", ""};
+    const std::vector<std::string> first_names  = schema_arg_names(mm_operator);
+    const std::vector<std::string> second_names = schema_arg_names(mm_operator);
+    EXPECT_EQ(first_names, (std::vector<std::string>{"self", "mat2"}));
+    EXPECT_EQ(second_names, first_names);
+}
+
+TEST_F(TorchTraceCollectorTest, SchemaArgNamesUnknownOperatorIsEmpty)
+{
+    const c10::OperatorName unknown_operator{"aten::rocprof_compute_missing_op", ""};
+    EXPECT_TRUE(schema_arg_names(unknown_operator).empty());
+    EXPECT_TRUE(schema_arg_names(unknown_operator).empty());
+}
+
+TEST_F(TorchTraceCollectorTest, RecordedArgsForRepeatedMm)
+{
+    install(/*capture_args=*/true, /*capture_values=*/false);
+    const auto opts = at::TensorOptions().dtype(at::kFloat);
+    const auto a    = at::zeros({2, 3}, opts);
+    const auto b    = at::zeros({3, 4}, opts);
+
+    roctx_range_intercept::start_recording();
+    (void)at::mm(a, b);
+    (void)at::mm(a, b);
+    const auto recorded = roctx_range_intercept::stop_recording();
+    ASSERT_FALSE(recorded.empty());
+
+    EXPECT_EQ(encoded_args_for_operator(recorded, "aten::mm"),
+              encode_args("(self=float32[2x3], mat2=float32[3x4])"));
 }
 
 TEST_F(TorchTraceCollectorTest, PushUserScopeEmitsArgsSegmentBeforeBackend)

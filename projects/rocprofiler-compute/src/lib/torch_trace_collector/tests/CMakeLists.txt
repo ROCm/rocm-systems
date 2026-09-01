@@ -9,7 +9,7 @@ target_link_libraries(${target} PRIVATE torch-trace-collector gtest_main nlohman
 target_compile_definitions(
     ${target}
     PRIVATE
-        MARKER_ARGS_CODEC_PATH="${PROJECT_SOURCE_DIR}/tests/marker_args_codec.json"
+        MARKER_ARGS_CODEC_PATH="${CMAKE_SOURCE_DIR}/tests/marker_args_codec.json"
 )
 target_link_options(
     ${target}
