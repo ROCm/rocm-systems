@@ -61,8 +61,8 @@ DL::DL(const char* libpath)
     std::vector<std::string> lib_names;
     // Major defines ABI compatibility, so probe most-compatible first and narrow. The
     // unversioned name is last: it is a devel-only symlink to an unknown version.
-#if defined(ROCPROFILER_ATT_DECODER_SOVERSION_MAJOR) &&                                              \
-    defined(ROCPROFILER_ATT_DECODER_SOVERSION_MINOR) &&                                              \
+#if defined(ROCPROFILER_ATT_DECODER_SOVERSION_MAJOR) &&                                            \
+    defined(ROCPROFILER_ATT_DECODER_SOVERSION_MINOR) &&                                            \
     defined(ROCPROFILER_ATT_DECODER_SOVERSION_PATCH)
     const auto base  = std::string{kDecoderBaseName};
     const auto major = base + "." + std::to_string(ROCPROFILER_ATT_DECODER_SOVERSION_MAJOR);
@@ -91,8 +91,8 @@ DL::DL(const char* libpath)
 
     if(!handle)
     {
-        ROCP_ERROR << "Error loading trace decoder from directory '" << libpath << "':"
-                   << attempted;
+        ROCP_ERROR << "Error loading trace decoder from directory '" << libpath
+                   << "':" << attempted;
         return;
     }
 
