@@ -155,8 +155,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       result.program_inventory, result.resource_plans, options, operating_point, arch,
       resource_state, original_text, candidates, target->moi_dense_route_group_capacity,
       access_island_begin, access_relay_words, use_indirect_appended,
-      MoiDenseAccessRouteAbi::InlineShadow, local_entry_islands ? &*local_entry_islands : nullptr,
-      &branch_router);
+      local_entry_islands ? &*local_entry_islands : nullptr, &branch_router);
   const auto &dense_candidates = dense_routes.partition;
   const auto &candidate_indices = dense_candidates.index_by_candidate;
   auto &dense_entry_islands = dense_routes.entry_islands;
@@ -907,9 +906,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     const auto dense_groups = group_moi_dense_access_patches(planned_patches);
     if (!emit_moi_dense_access_groups(
             dense_groups, dense_entry_hosts, options, result.moi_operating_point,
-            access_relay_words,
-            /*collapse_spill_router_for_explicit_key=*/false, "inline-shadow probe", arch, new_text,
-            patches, result.errors,
+            access_relay_words, "inline-shadow probe", arch, new_text, patches, result.errors,
             [](const PlannedInlineShadowPatch &, const ConSanMoiOperatingPoint &) { return true; }))
       return;
     for (const PlannedInlineShadowPatch &planned_patch : planned_patches) {

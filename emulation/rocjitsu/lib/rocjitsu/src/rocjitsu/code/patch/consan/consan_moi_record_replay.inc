@@ -169,7 +169,7 @@ void try_apply_first_light_access_record_patch(
       result.program_inventory, result.resource_plans, options, operating_point, arch,
       resource_state, original_text, candidates, target.has_selectable_vgpr_bank ? 0u : 64u,
       access_island_begin, access_slot_words, use_indirect_appended,
-      MoiDenseAccessRouteAbi::RecordReplay, local_entry_islands ? &*local_entry_islands : nullptr);
+      local_entry_islands ? &*local_entry_islands : nullptr);
   const auto &dense_candidates = dense_routes.partition;
   const auto &candidate_indices = dense_candidates.index_by_candidate;
   auto &dense_entry_islands = dense_routes.entry_islands;
@@ -1131,8 +1131,7 @@ void try_apply_first_light_access_record_patch(
     const auto dense_groups = group_moi_dense_access_patches(planned_patches);
     if (!emit_moi_dense_access_groups(
             dense_groups, dense_entry_hosts, options, result.moi_operating_point, access_slot_words,
-            /*collapse_spill_router_for_explicit_key=*/false, "first-light probe", arch, new_text,
-            patches, result.errors,
+            "first-light probe", arch, new_text, patches, result.errors,
             [](const PlannedAccessRecordPatch &, const ConSanMoiOperatingPoint &point) {
               return point.moi_exec_save_sgpr.has_value();
             }))

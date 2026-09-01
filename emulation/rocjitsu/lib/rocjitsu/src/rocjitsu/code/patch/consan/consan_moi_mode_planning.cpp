@@ -118,6 +118,55 @@ MoiScalarAbiPlan plan_moi_scalar_abi(const ConSanRequest &request,
   return moi_mode_operations(request.moi_engine).scalar_abi(request, point);
 }
 
+std::optional<MoiDenseRouterPlan>
+make_recording_moi_dense_router_plan(const MoiScalarAbiPlan &scalar_abi,
+                                     const ConSanMoiOperatingPoint &point,
+                                     const ConSanTargetProfile &target) {
+  if (!point.moi_exec_save_sgpr || !scalar_abi.special_state || !scalar_abi.indirect_jump ||
+      point.moi_branch_only_spill) {
+    return std::nullopt;
+  }
+  const bool spill_backed = point.has_compact_moi_scalar_spill();
+  if (spill_backed && (!point.moi_router_jump || !point.moi_router_call))
+    return std::nullopt;
+
+  const uint16_t base = *point.moi_exec_save_sgpr;
+  const uint16_t dispatch_key_sgpr =
+      spill_backed ? point.moi_router_call->dispatch_key_sgpr : static_cast<uint16_t>(base + 5u);
+  const uint16_t call_return_sgpr =
+      spill_backed ? point.moi_router_call->call_return_sgpr : static_cast<uint16_t>(base + 6u);
+  const bool explicit_key = target.direct_call_form != ConSanDirectCallForm::SCallI64;
+  return MoiDenseRouterPlan{
+      .indirect_jump = *scalar_abi.indirect_jump,
+      .dispatch_key_sgpr = dispatch_key_sgpr,
+      .call_return_sgpr = call_return_sgpr,
+      .entry_island_words = moi_record_replay_entry_island_words(spill_backed),
+      .relocated_entry_return_words = kMoiRecordReplayIndirectIslandWords,
+      .explicit_key = explicit_key,
+      .collapse_spill_router =
+          spill_backed && call_return_sgpr == scalar_abi.indirect_jump->pc_sgpr && !explicit_key,
+      .restore_scc_before_route = explicit_key,
+  };
+}
+
+std::optional<MoiDenseRouterPlan> plan_moi_dense_router(const ConSanRequest &request,
+                                                        const ConSanMoiOperatingPoint &point,
+                                                        rj_code_arch_t arch) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  const MoiModeOperations &operations = moi_mode_operations(request.moi_engine);
+  if (target == nullptr || operations.dense_router == nullptr ||
+      (operations.dense_access_route.requires_target_dense_call_capability &&
+       target->direct_call_form != ConSanDirectCallForm::SCallI64 &&
+       !target->supports_moi_dense_s_call_b64)) {
+    return std::nullopt;
+  }
+  return operations.dense_router(request, point, *target);
+}
+
+MoiDenseAccessRouteTraits moi_dense_access_route_traits(ConSanMoiEngine engine) {
+  return moi_mode_operations(engine).dense_access_route;
+}
+
 ConSanEvidenceRequirements
 plan_moi_evidence_requirements(ConSanMoiEngine engine, const MoiEvidencePlanningContext &context) {
   return moi_mode_operations(engine).plan_evidence(context);

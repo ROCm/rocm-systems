@@ -253,6 +253,21 @@ make_moi_scalar_abi_plan(const ConSanMoiOperatingPoint &point,
 [[nodiscard]] MoiScalarAbiPlan plan_moi_scalar_abi(const ConSanRequest &request,
                                                    const ConSanMoiOperatingPoint &point);
 
+/// Compose the common Record/Replay + Sampled dense-router representation
+/// from a mode-owned scalar ABI and normalized target facts.
+[[nodiscard]] std::optional<MoiDenseRouterPlan>
+make_recording_moi_dense_router_plan(const MoiScalarAbiPlan &scalar_abi,
+                                     const ConSanMoiOperatingPoint &point,
+                                     const ConSanTargetProfile &target);
+
+/// Resolve the selected mode's dense-router mechanics at the narrow mode
+/// registry boundary. Consumers never branch on the engine themselves.
+[[nodiscard]] std::optional<MoiDenseRouterPlan>
+plan_moi_dense_router(const ConSanRequest &request, const ConSanMoiOperatingPoint &point,
+                      rj_code_arch_t arch);
+
+[[nodiscard]] MoiDenseAccessRouteTraits moi_dense_access_route_traits(ConSanMoiEngine engine);
+
 [[nodiscard]] ConSanEvidenceRequirements
 plan_moi_evidence_requirements(ConSanMoiEngine engine, const MoiEvidencePlanningContext &context);
 
@@ -289,6 +304,10 @@ struct MoiModeOperations {
   MoiDispatchIdentityPlan (*dispatch_identity)(const ConSanRequest &,
                                                const MoiDispatchIdentityFacts &);
   MoiScalarAbiPlan (*scalar_abi)(const ConSanRequest &, const ConSanMoiOperatingPoint &);
+  MoiDenseAccessRouteTraits dense_access_route;
+  std::optional<MoiDenseRouterPlan> (*dense_router)(const ConSanRequest &,
+                                                    const ConSanMoiOperatingPoint &,
+                                                    const ConSanTargetProfile &);
   ConSanEvidenceRequirements (*plan_evidence)(const MoiEvidencePlanningContext &);
   bool (*plan_report_layout)(const ConSanMoiAutoReportInventory &, ConSanMoiAutoReportPlan &,
                              uint64_t &cursor);

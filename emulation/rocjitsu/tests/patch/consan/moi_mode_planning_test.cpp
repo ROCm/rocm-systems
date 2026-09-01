@@ -12,6 +12,7 @@ using consan_moi_impl::moi_mode_operations;
 using consan_moi_impl::MoiCdnaPersistentOverflowStrategy;
 using consan_moi_impl::MoiObjectFacts;
 using consan_moi_impl::MoiPersistentStateFacts;
+using consan_moi_impl::plan_moi_dense_router;
 using consan_moi_impl::plan_moi_dispatch_identity;
 using consan_moi_impl::plan_moi_dynamic_stack_spill;
 using consan_moi_impl::plan_moi_object_mode;
@@ -271,6 +272,77 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsScalarAbiLayout) {
   ASSERT_TRUE(plan.indirect_jump);
   EXPECT_EQ(plan.indirect_jump->pc_sgpr, 40u);
   EXPECT_EQ(plan.indirect_jump->scc_save_sgpr, 42u);
+}
+
+TEST(ConSanMoiModePlanning, EachEnginePublishesItsDenseRouterTargetSupport) {
+  ConSanRequest request;
+  ConSanMoiOperatingPoint point;
+  point.moi_exec_save_sgpr = 20u;
+
+  request.moi_engine = ConSanMoiEngine::RecordReplay;
+  EXPECT_TRUE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_RDNA3));
+  EXPECT_TRUE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_TRUE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_TRUE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_TRUE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_CDNA5));
+
+  request.moi_engine = ConSanMoiEngine::Sampled;
+  EXPECT_FALSE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_RDNA3));
+  EXPECT_TRUE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_TRUE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_TRUE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_TRUE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_CDNA5));
+
+  request.moi_engine = ConSanMoiEngine::InlineShadow;
+  EXPECT_FALSE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_RDNA3));
+  EXPECT_TRUE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_TRUE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_TRUE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_TRUE(plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_CDNA5));
+}
+
+TEST(ConSanMoiModePlanning, DenseRouterPlanOwnsModeSpecificCallMechanics) {
+  ConSanRequest request;
+  ConSanMoiOperatingPoint point;
+  point.moi_exec_save_sgpr = 20u;
+  point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
+  point.moi_router_jump = ConSanMoiIndirectJumpSgprs{40u, 42u};
+  point.moi_router_call = ConSanMoiRouterCallSgprs{44u, 40u};
+
+  request.moi_engine = ConSanMoiEngine::RecordReplay;
+  auto plan = plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(plan);
+  EXPECT_TRUE(plan->explicit_key);
+  EXPECT_FALSE(plan->collapse_spill_router);
+  EXPECT_TRUE(plan->restore_scc_before_route);
+  EXPECT_FALSE(plan->requires_indirect_pc_wait);
+  EXPECT_FALSE(plan->publish_entry_island_offset);
+
+  request.moi_engine = ConSanMoiEngine::Sampled;
+  plan = plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(plan);
+  EXPECT_TRUE(plan->explicit_key);
+  EXPECT_TRUE(plan->collapse_spill_router);
+
+  request.moi_engine = ConSanMoiEngine::InlineShadow;
+  point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::None;
+  point.moi_router_jump.reset();
+  point.moi_router_call.reset();
+  plan = plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(plan);
+  EXPECT_EQ(plan->indirect_jump, (ConSanMoiIndirectJumpSgprs{32u, 30u}));
+  EXPECT_EQ(plan->dispatch_key_sgpr, 48u);
+  EXPECT_FALSE(plan->call_return_sgpr);
+  EXPECT_TRUE(plan->explicit_key);
+  EXPECT_TRUE(plan->restore_scc_before_route);
+  EXPECT_TRUE(plan->requires_indirect_pc_wait);
+  EXPECT_TRUE(plan->publish_entry_island_offset);
+
+  plan = plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(plan);
+  EXPECT_EQ(plan->dispatch_key_sgpr, plan->indirect_jump.pc_sgpr);
+  EXPECT_EQ(plan->call_return_sgpr, 48u);
+  EXPECT_FALSE(plan->explicit_key);
 }
 
 TEST(ConSanMoiModePlanning, RecordReplaySelectsDenseRoutingFromNormalizedTargetFacts) {

@@ -181,7 +181,7 @@ void try_apply_direct_sampled_watchpoint_patch(
       result.program_inventory, result.resource_plans, options, operating_point, arch,
       resource_state, original_text, candidates, target->has_selectable_vgpr_bank ? 0u : 64u,
       access_island_begin, access_relay_words, use_indirect_appended,
-      MoiDenseAccessRouteAbi::Sampled, local_entry_islands ? &*local_entry_islands : nullptr);
+      local_entry_islands ? &*local_entry_islands : nullptr);
   const auto &dense_candidates = dense_routes.partition;
   const auto &candidate_indices = dense_candidates.index_by_candidate;
   auto &dense_entry_islands = dense_routes.entry_islands;
@@ -659,9 +659,7 @@ void try_apply_direct_sampled_watchpoint_patch(
     const auto dense_groups = group_moi_dense_access_patches(planned_patches);
     if (!emit_moi_dense_access_groups(
             dense_groups, dense_entry_hosts, options, result.moi_operating_point,
-            access_relay_words,
-            /*collapse_spill_router_for_explicit_key=*/true, "sampled probe", arch, new_text,
-            patches, result.errors,
+            access_relay_words, "sampled probe", arch, new_text, patches, result.errors,
             [](const PlannedSampledPatch &planned, const ConSanMoiOperatingPoint &) {
               return planned.transient_exec_save_sgpr.has_value();
             }))

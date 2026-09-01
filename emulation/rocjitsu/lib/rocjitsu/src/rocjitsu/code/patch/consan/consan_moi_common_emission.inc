@@ -8,18 +8,13 @@
 /// `PlannedPatch` is deliberately structural: the engines retain distinct
 /// evidence-body plans, but expose the same `candidate`, `resources`,
 /// `placement`, and `entry_island_offset` facts to this routing mechanism.
-/// The boolean parameter preserves the Record/Replay-versus-Sampled policy for
-/// equal indirect-PC and call-return assignments on explicit-key targets.
-/// Inline Shadow selects its distinct scalar ABI through the request and
-/// owner-bound operating point; its
-/// SCC-tagged explicit key and indirect-PC dependency wait remain explicit
-/// branches of this shared routing mechanism. Evidence construction and
-/// per-site resource admission remain outside this function.
+/// The selected mode publishes its complete router mechanics before this
+/// boundary. Evidence construction and per-site resource admission remain
+/// outside this function.
 [[nodiscard]] bool emit_moi_dense_access_group(
     std::span<const MoiPlannedAccessPatch *const> group, uint64_t dispatcher_offset,
-    const std::map<uint64_t, MoiDenseEntryHost> &entry_hosts, const ConSanRequest &request,
-    const ConSanMoiOperatingPoint &point, rj_code_arch_t arch, uint64_t dispatcher_words_per_site,
-    bool collapse_spill_router_for_explicit_key, std::string_view diagnostic_subject,
+    const std::map<uint64_t, MoiDenseEntryHost> &entry_hosts, const MoiDenseRouterPlan &router,
+    rj_code_arch_t arch, uint64_t dispatcher_words_per_site, std::string_view diagnostic_subject,
     std::vector<uint8_t> &new_text, std::vector<ConSanPatchInfo> &patches,
     std::vector<std::string> &errors) {
   const auto fail = [&](std::string detail) {
@@ -33,52 +28,14 @@
   if (target == nullptr)
     return fail("has no target profile");
 
-  const bool inline_shadow_route = request.moi_engine == ConSanMoiEngine::InlineShadow;
-  uint16_t pc_sgpr = 0u;
-  uint16_t scc_save_sgpr = 0u;
-  uint16_t key_sgpr = 0u;
-  std::optional<uint16_t> call_return_sgpr;
-  bool explicit_key = false;
-  bool key_encodes_scc = false;
-  bool collapsed_spill_router = false;
-  uint32_t island_capacity_words = 0u;
-  uint32_t relocated_entry_return_words = 0u;
-
-  if (inline_shadow_route) {
-    const auto scalar_abi = moi_inline_dense_router_scalar_abi(request, point, arch);
-    if (!scalar_abi)
-      return fail("lost its inline-shadow dense scalar ABI");
-    pc_sgpr = scalar_abi->indirect_jump.pc_sgpr;
-    scc_save_sgpr = scalar_abi->indirect_jump.scc_save_sgpr;
-    key_sgpr = scalar_abi->dispatch_key_sgpr;
-    call_return_sgpr = scalar_abi->call_return_sgpr;
-    explicit_key = !call_return_sgpr.has_value();
-    key_encodes_scc = explicit_key && key_sgpr == scc_save_sgpr;
-    island_capacity_words = kMoiInlineShadowIndirectIslandWords;
-    relocated_entry_return_words = kMoiInlineShadowIndirectIslandWords;
-  } else {
-    const bool spill_backed = point.has_compact_moi_scalar_spill();
-    if (!point.moi_exec_save_sgpr ||
-        (spill_backed && (!point.moi_router_jump || !point.moi_router_call))) {
-      return fail("lost its recording dense scalar ABI");
-    }
-    const uint16_t base = *point.moi_exec_save_sgpr;
-    const std::optional<MoiSpecialStateSgprs> special_state =
-        moi_special_state_sgprs(request, point);
-    if (!special_state)
-      return fail("lost its dense special-state scalar ABI");
-    pc_sgpr = spill_backed ? point.moi_router_jump->pc_sgpr : base;
-    scc_save_sgpr = special_state->scc_save_sgpr;
-    key_sgpr =
-        spill_backed ? point.moi_router_call->dispatch_key_sgpr : static_cast<uint16_t>(base + 5u);
-    call_return_sgpr =
-        spill_backed ? point.moi_router_call->call_return_sgpr : static_cast<uint16_t>(base + 6u);
-    explicit_key = !consan_arch_has_s_call_i64(arch);
-    collapsed_spill_router = spill_backed && *call_return_sgpr == pc_sgpr &&
-                             (!explicit_key || collapse_spill_router_for_explicit_key);
-    island_capacity_words = moi_record_replay_entry_island_words(spill_backed);
-    relocated_entry_return_words = kMoiRecordReplayIndirectIslandWords;
-  }
+  const uint16_t pc_sgpr = router.indirect_jump.pc_sgpr;
+  const uint16_t scc_save_sgpr = router.indirect_jump.scc_save_sgpr;
+  const uint16_t key_sgpr = router.dispatch_key_sgpr;
+  const std::optional<uint16_t> call_return_sgpr = router.call_return_sgpr;
+  const bool explicit_key = router.explicit_key;
+  const bool key_encodes_scc = explicit_key && key_sgpr == scc_save_sgpr;
+  const bool collapsed_spill_router = router.collapse_spill_router;
+  const uint32_t island_capacity_words = router.entry_island_words;
   const uint16_t call_match_sgpr =
       collapsed_spill_router ? key_sgpr : call_return_sgpr.value_or(0u);
   const uint64_t island_offset = *group.front()->entry_island_offset;
@@ -101,7 +58,7 @@
       island_words.size() > island_capacity_words) {
     return fail("could not encode its dense entry island");
   }
-  if (inline_shadow_route) {
+  if (router.requires_indirect_pc_wait) {
     const auto wait_pc = instrumentation::build_s_wait_indirect_pc0(arch);
     if (!wait_pc || island_words.empty())
       return fail("could not encode its dense entry dependency wait");
@@ -126,7 +83,7 @@
         static_cast<uint32_t>(entry_host->second.displaced_words.size() * sizeof(uint32_t));
     island_info.trampoline_offset = entry_host->second.body_offset;
     island_info.trampoline_size = static_cast<uint32_t>(
-        (entry_host->second.displaced_words.size() + relocated_entry_return_words) *
+        (entry_host->second.displaced_words.size() + router.relocated_entry_return_words) *
         sizeof(uint32_t));
   } else {
     island_info.anchor_offset = group.front()->candidate->anchor();
@@ -174,7 +131,7 @@
     }
 
     std::vector<uint32_t> matched_words;
-    if ((inline_shadow_route || explicit_key) && !append_route_scc_restore(matched_words))
+    if (router.restore_scc_before_route && !append_route_scc_restore(matched_words))
       return fail("could not restore its dense entry-host SCC");
     const uint64_t matched_offset =
         dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
@@ -217,7 +174,7 @@
     }
 
     std::vector<uint32_t> matched_words;
-    if ((inline_shadow_route || explicit_key) && !append_route_scc_restore(matched_words))
+    if (router.restore_scc_before_route && !append_route_scc_restore(matched_words))
       return fail("could not restore its dense route SCC");
     if (!explicit_key && !collapsed_spill_router && candidate.size() > sizeof(uint32_t)) {
       const uint32_t adjustment = candidate.size() - sizeof(uint32_t);
@@ -269,7 +226,7 @@
   dispatcher_info.trampoline_offset = dispatcher_offset;
   dispatcher_info.trampoline_size =
       static_cast<uint32_t>(dispatcher_words.size() * sizeof(uint32_t));
-  if (inline_shadow_route)
+  if (router.publish_entry_island_offset)
     dispatcher_info.moi_dense_entry_island_offset = island_offset;
   dispatcher_info.owner_descriptor_file_offsets =
       group.front()->resources.owner_descriptor_file_offsets;

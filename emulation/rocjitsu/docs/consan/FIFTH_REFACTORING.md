@@ -5772,3 +5772,85 @@ material completion. Remaining architecture and mode locality, broader
 operating-point and mutable-transaction surfaces, larger legacy harvesting,
 material whole-refactoring shrinkage, and the independent Section 14
 completion audit remain open. The goal therefore remains active.
+
+### 16.72 Convergence checkpoint 71: mode-published dense-router mechanics
+
+The mode-locality deep read found one remaining three-engine cross-axis knot
+in dense access routing. Shared placement accepted a
+`MoiDenseAccessRouteAbi` enum and used it to distinguish Record/Replay replay-
+ordering constraints, InlineShadow island geometry, and gfx11 eligibility.
+Shared emission independently inspected `request.moi_engine`, reconstructed
+two scalar ABIs, and threaded a Record/Replay-versus-Sampled collapse Boolean
+through the common access-application template. An InlineShadow-only scalar-
+ABI helper lived in common placement and was also a peephole used by atomic
+and barrier routing. The mechanism was mechanically shared, but its common
+owners still knew every participating mode's representation.
+
+Each mode now publishes a complete `MoiDenseRouterPlan` through the mode
+registry. The plan resolves the indirect-jump state, dispatch key, optional
+call-return pair, entry and relocated-host geometry, spill-router collapse,
+SCC restoration, dependency wait, and patch-metadata publication. Record/
+Replay and Sampled compose their common recording representation through one
+shared factory; Sampled alone owns the explicit-key alias collapse that differs
+from Record/Replay. InlineShadow owns its fixed and spill-backed scalar
+representations in `consan_moi_inline_shadow.cpp`. A narrow route-traits
+product separately publishes the replay-ordering constraint needed before a
+group-specific scalar assignment exists.
+
+Common placement now asks the selected mode for the resolved group plan and
+uses only its island geometry plus the replay-ordering trait. Common emission
+accepts the resolved plan instead of a request, operating point, engine test,
+and mode-flavor Boolean. The atomic and barrier consumers use the same
+registry operation, so the former InlineShadow placement helper and its
+parallel eligibility authority are deleted. The three mode call sites no
+longer name an ABI enum or pass collapse policy through common templates.
+
+The final review also removed an incipient architecture peephole from the new
+registry boundary. Modes declare whether they require the target's general
+dense-call facility; target support is derived from the existing normalized
+`direct_call_form` and `supports_moi_dense_s_call_b64` profile facts. Common
+mode planning contains no encoding-family or architecture enumerator, and the
+five gfx-owned profiles remain the authority for that capability. Thus adding
+a compatible target extends the matrix through its target profile, while
+adding a mode extends it through one mode registration rather than a new
+common mode-by-architecture switch.
+
+Two direct tests pin the complete mode/target support matrix across gfx1100,
+gfx1201, gfx942, gfx950, and gfx1250 and the resolved call mechanics that
+intentionally differ among Record/Replay, Sampled, and InlineShadow. The
+architecture gate rejects the retired ABI enum, InlineShadow-only helper, and
+common emission branch; requires every participating mode to register its
+dense-router operation; and forbids common mode planning from regaining raw
+architecture or encoding-family selection.
+
+| Signal | Checkpoint 71 | Cumulative change | Slice change from checkpoint 70 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 105,177 | +201 | +46 |
+| Nonblank production lines | 98,837 | **-247** | +39 |
+| Production implementation lines | 91,082 | **-368** | +38 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **174 / 52** | **-102 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 358 / 61 | +68 / +10 | +4 / **-2** |
+| Common dense-route engine branches | **0** | n/a | enum and InlineShadow branch deleted |
+| Common dense-route architecture identities | **0** | n/a | normalized target capability only |
+| Test inventory | **5,408** | **+63** | **+2** |
+
+Validation includes a final-tree `-j16` build; all 16 mode-planning and
+architecture-boundary tests; and all 4,773 nonphysical tests over the five
+emulated targets at `-j16` in 205.34 seconds, including all 2,918 simulator
+tests. In accordance with the reduced physical-test cadence, no physical
+gfx1201 test was run for this slice. No test was removed, renamed, disabled,
+or replaced.
+
+This checkpoint strengthens Sections 14.1 through 14.7 and 14.9. Dense access
+routing now has one common mechanical consumer and mode-local policy
+publishers, while target eligibility flows from gfx-owned normalized facts.
+The explicit contract costs 38 implementation lines despite deleting the
+superseded enum, helper, common ABI reconstruction, and Boolean plumbing, so it
+does not strengthen Section 14.8; cumulative implementation shrinkage is 368
+lines and remains non-material. Remaining architecture and mode locality,
+broader operating-point and mutable-transaction surfaces, larger legacy
+harvesting, material whole-refactoring shrinkage, and the independent Section
+14 completion audit remain open. The goal therefore remains active.

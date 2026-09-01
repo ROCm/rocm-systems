@@ -1494,48 +1494,6 @@ plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
   return assignments;
 }
 
-[[nodiscard]] std::optional<MoiInlineDenseRouterScalarAbi>
-moi_inline_dense_router_scalar_abi(const ConSanRequest &request,
-                                   const ConSanMoiOperatingPoint &point, rj_code_arch_t arch) {
-  if (moi_mode_operations(request.moi_engine).transient_scalar_placement.spill_layout !=
-          ConSanMoiScalarSpillLayout::Inline ||
-      (!consan_uses_gfx9_cdna_encoding(arch) && !consan_uses_gfx12_encoding(arch))) {
-    return std::nullopt;
-  }
-  if (point.moi_branch_only_spill)
-    return std::nullopt;
-  const auto indirect_jump = moi_indirect_jump_sgprs(request, point);
-  if (!indirect_jump)
-    return std::nullopt;
-
-  if (point.has_inline_moi_scalar_spill()) {
-    if (!point.moi_router_call)
-      return std::nullopt;
-    return MoiInlineDenseRouterScalarAbi{
-        .indirect_jump = *indirect_jump,
-        .dispatch_key_sgpr = point.moi_router_call->dispatch_key_sgpr,
-        .call_return_sgpr = consan_arch_has_s_call_i64(arch)
-                                ? std::optional{point.moi_router_call->call_return_sgpr}
-                                : std::nullopt,
-    };
-  }
-
-  if (!point.moi_exec_save_sgpr)
-    return std::nullopt;
-  const uint16_t base = *point.moi_exec_save_sgpr;
-  return MoiInlineDenseRouterScalarAbi{
-      .indirect_jump = *indirect_jump,
-      // GFX1250 derives its key from the scalar-call return PC. CDNA3/4 and
-      // RDNA4 use an explicit key in the otherwise-unused return pair's low
-      // half.
-      .dispatch_key_sgpr = consan_arch_has_s_call_i64(arch) ? indirect_jump->pc_sgpr
-                                                            : static_cast<uint16_t>(base + 28u),
-      .call_return_sgpr = consan_arch_has_s_call_i64(arch)
-                              ? std::optional<uint16_t>(static_cast<uint16_t>(base + 28u))
-                              : std::nullopt,
-  };
-}
-
 [[nodiscard]] std::vector<MoiSgprRange> moi_relocatable_host_scalar_ranges(
     const ConSanRequest &request, const ConSanMoiOperatingPoint &point,
     MoiRelocatableHostScalarState scalar_state, rj_code_arch_t arch) {
@@ -1562,7 +1520,7 @@ moi_inline_dense_router_scalar_abi(const ConSanRequest &request,
         ranges.push_back({*point.moi_inline_visible_evidence_sgpr, 1u});
       return ranges;
     }
-    const auto abi = moi_inline_dense_router_scalar_abi(request, point, arch);
+    const auto abi = plan_moi_dense_router(request, point, arch);
     if (!abi)
       return {};
     std::vector<MoiSgprRange> ranges{{abi->indirect_jump.pc_sgpr, 2u},
@@ -1578,7 +1536,7 @@ moi_inline_dense_router_scalar_abi(const ConSanRequest &request,
   const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(request, point);
   if (scalar_abi.access_router_uses_dense_abi &&
       scalar_state == MoiRelocatableHostScalarState::AccessRouter) {
-    const auto abi = moi_inline_dense_router_scalar_abi(request, point, arch);
+    const auto abi = plan_moi_dense_router(request, point, arch);
     if (!abi)
       return {};
     std::vector<MoiSgprRange> ranges{{abi->indirect_jump.pc_sgpr, 2u},
@@ -1981,8 +1939,7 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
     MoiResourcePlanningState &resource_state, std::span<const uint8_t> original_text,
     std::span<const ConSanMoiCandidate *const> candidates, size_t max_candidates_per_group,
     uint64_t access_island_begin, uint64_t access_slot_words, bool use_indirect_appended,
-    MoiDenseAccessRouteAbi abi, MoiLocalNopIslandAllocator *local_entry_islands,
-    BranchOnlyRelayRouter *relay_ownership) {
+    MoiLocalNopIslandAllocator *local_entry_islands, BranchOnlyRelayRouter *relay_ownership) {
   MoiDenseAccessRoutePlan plan{
       .partition =
           consan_detail::partition_moi_dense_candidates(candidates, max_candidates_per_group),
@@ -1990,14 +1947,14 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
       .dispatchers = {},
       .entry_hosts = {},
   };
-  const bool is_record_replay = abi == MoiDenseAccessRouteAbi::RecordReplay;
-  if (!consan_is_capability_arch(arch) || (!is_record_replay && consan_uses_gfx11_encoding(arch)) ||
-      !use_indirect_appended || local_entry_islands == nullptr) {
+  const MoiDenseAccessRouteTraits route_traits = moi_dense_access_route_traits(request.moi_engine);
+  if (!consan_is_capability_arch(arch) || !use_indirect_appended ||
+      local_entry_islands == nullptr) {
     return plan;
   }
 
   std::vector<std::pair<uint64_t, uint64_t>> global_access_ranges;
-  if (is_record_replay) {
+  if (route_traits.preserves_replay_ordering) {
     global_access_ranges.reserve(candidates.size());
     for (const ConSanMoiCandidate *candidate : candidates) {
       if (candidate->size() != 0u)
@@ -2021,18 +1978,10 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
       (void)apply_moi_transient_sgpr_assignment(request, group_point, point,
                                                 group_resource->owner_descriptor_file_offsets);
 
-    uint32_t entry_island_words = kMoiInlineShadowIndirectIslandWords;
-    if (abi == MoiDenseAccessRouteAbi::InlineShadow) {
-      if (!moi_inline_dense_router_scalar_abi(request, group_point, arch))
-        continue;
-    } else {
-      if (group_resource != nullptr && moi_transient_sgpr_assignment_is_branch_only(
-                                           point, group_resource->owner_descriptor_file_offsets)) {
-        continue;
-      }
-      entry_island_words =
-          moi_record_replay_entry_island_words(group_point.has_compact_moi_scalar_spill());
-    }
+    const auto dense_router = plan_moi_dense_router(request, group_point, arch);
+    if (!dense_router)
+      continue;
+    const uint32_t entry_island_words = dense_router->entry_island_words;
 
     const bool has_dense_neighbors =
         group.has_overlapping_entries(entry_island_words * sizeof(uint32_t));
@@ -2049,7 +1998,7 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
         group.candidates.size() == 1u &&
         local_entry_islands->has_reachable(group.candidates.front()->anchor(), entry_island_words);
     const bool has_spill_backed_access =
-        is_record_replay &&
+        route_traits.preserves_replay_ordering &&
         std::ranges::any_of(group.candidates, [&](const ConSanMoiCandidate *candidate) {
           const ConSanCandidateResourcePlan *candidate_resource =
               resource_plan_for_candidate(site_plans, *candidate);
@@ -2078,7 +2027,8 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
       const ConSanFunctionInfo *function =
           !owner_is_kernel ? program_inventory.find_function_by_name(group.owner.name) : nullptr;
       const bool has_owner_range =
-          (kernel != nullptr && (!is_record_replay || kernel->has_text_range) &&
+          (kernel != nullptr &&
+           (!route_traits.preserves_replay_ordering || kernel->has_text_range) &&
            kernel->code_size != 0u) ||
           (function != nullptr && function->code_size != 0u);
       if (has_owner_range) {
@@ -2106,7 +2056,7 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
                   ? collect_moi_dense_owner_occupied_ranges(*kernel, owner_candidates)
                   : collect_moi_dense_owner_occupied_ranges(*function, owner_candidates);
           std::vector<std::pair<uint64_t, uint64_t>> ordering_ranges;
-          if (is_record_replay) {
+          if (route_traits.preserves_replay_ordering) {
             ordering_ranges.reserve(program_inventory.sync().sync_sequences.size());
             for (const ConSanSyncSequence &sequence : program_inventory.sync().sync_sequences) {
               if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
@@ -2139,8 +2089,9 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
               },
               [&](uint64_t begin, uint64_t end) {
                 return occupied_owner_sites.overlaps(begin, end) ||
-                       (is_record_replay && (occupied_accesses.overlaps(begin, end) ||
-                                             occupied_ordering_sequences.overlaps(begin, end)));
+                       (route_traits.preserves_replay_ordering &&
+                        (occupied_accesses.overlaps(begin, end) ||
+                         occupied_ordering_sequences.overlaps(begin, end)));
               });
           cached_candidates =
               dense_host_candidate_cache.emplace(std::move(cache_key), std::move(host_candidates))

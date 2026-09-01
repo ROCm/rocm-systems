@@ -11,6 +11,7 @@
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
 #include "rocjitsu/code/patch/consan/consan_moi_common_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
@@ -137,9 +138,8 @@ template <typename PlannedPatch, typename Eligible>
     const std::map<uint64_t, std::vector<const PlannedPatch *>> &groups,
     const std::map<uint64_t, MoiDenseEntryHost> &dense_entry_hosts, const ConSanRequest &request,
     const ConSanMoiOperatingPoint &operating_point, uint64_t access_slot_words,
-    bool collapse_spill_router_for_explicit_key, std::string_view probe_name, rj_code_arch_t arch,
-    std::vector<uint8_t> &new_text, std::vector<ConSanPatchInfo> &patches,
-    std::vector<std::string> &errors, Eligible eligible) {
+    std::string_view probe_name, rj_code_arch_t arch, std::vector<uint8_t> &new_text,
+    std::vector<ConSanPatchInfo> &patches, std::vector<std::string> &errors, Eligible eligible) {
   for (const auto &[dispatcher_offset, group] : groups) {
     if (group.empty() || !group.front()->entry_island_offset)
       continue;
@@ -150,10 +150,14 @@ template <typename PlannedPatch, typename Eligible>
         !eligible(*group.front(), group_point)) {
       continue;
     }
+    const auto dense_router = plan_moi_dense_router(request, group_point, arch);
+    if (!dense_router) {
+      errors.emplace_back("ConSan MOI " + std::string(probe_name) + " lost its dense router plan");
+      return false;
+    }
     std::vector<const MoiPlannedAccessPatch *> common_group(group.begin(), group.end());
-    if (!emit_moi_dense_access_group(common_group, dispatcher_offset, dense_entry_hosts, request,
-                                     group_point, arch, access_slot_words,
-                                     collapse_spill_router_for_explicit_key, probe_name, new_text,
+    if (!emit_moi_dense_access_group(common_group, dispatcher_offset, dense_entry_hosts,
+                                     *dense_router, arch, access_slot_words, probe_name, new_text,
                                      patches, errors)) {
       return false;
     }

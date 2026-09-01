@@ -221,6 +221,13 @@ MoiScalarAbiPlan plan_record_replay_scalar_abi(const ConSanRequest &,
   return make_moi_scalar_abi_plan(point, special_state, 0u, false);
 }
 
+std::optional<MoiDenseRouterPlan>
+plan_record_replay_dense_router(const ConSanRequest &request, const ConSanMoiOperatingPoint &point,
+                                const ConSanTargetProfile &target) {
+  return make_recording_moi_dense_router_plan(plan_record_replay_scalar_abi(request, point), point,
+                                              target);
+}
+
 uint16_t record_replay_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
                                             const MoiExecSaveTargetFacts &) {
   if (requirement.automatic_banked_record_capture)
@@ -255,6 +262,9 @@ const MoiModeOperations kRecordReplayModeOperations = {
     .access_spill_fallback = nullptr,
     .dispatch_identity = plan_record_replay_dispatch_identity,
     .scalar_abi = plan_record_replay_scalar_abi,
+    .dense_access_route = {.requires_target_dense_call_capability = false,
+                           .preserves_replay_ordering = true},
+    .dense_router = plan_record_replay_dense_router,
     .plan_evidence = plan_record_replay_evidence_requirements,
     .plan_report_layout = plan_record_replay_report_layout,
     .reconstruct_report_inventory = reconstruct_record_replay_report_inventory,

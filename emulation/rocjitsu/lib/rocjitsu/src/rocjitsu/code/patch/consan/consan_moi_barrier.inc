@@ -1391,7 +1391,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
       if (!island_offset) {
         const bool has_spill_backed_inline_router =
             candidate_point.has_inline_moi_scalar_spill() &&
-            moi_inline_dense_router_scalar_abi(options, candidate_point, arch).has_value();
+            plan_moi_dense_router(options, candidate_point, arch).has_value();
         const bool has_spill_backed_record_replay_router =
             candidate_point.has_compact_moi_scalar_spill() &&
             moi_indirect_jump_sgprs(options, candidate_point) && candidate_point.moi_router_call;
@@ -1597,7 +1597,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
             "ConSan MOI reused barrier relay lost its transient scalar assignment");
         return ReusedDenseRelayResult::Failed;
       }
-      const auto scalar_abi = moi_inline_dense_router_scalar_abi(options, group_point, arch);
+      const auto scalar_abi = plan_moi_dense_router(options, group_point, arch);
       if (!scalar_abi || !scalar_abi->call_return_sgpr) {
         result.errors.emplace_back("ConSan MOI reused barrier relay has no compatible scalar ABI");
         return ReusedDenseRelayResult::Failed;
@@ -1794,7 +1794,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
       }
       const auto special_state = moi_special_state_sgprs(options, group_point);
       const auto indirect_state = moi_indirect_jump_sgprs(options, group_point);
-      const auto inline_dense_abi = moi_inline_dense_router_scalar_abi(options, group_point, arch);
+      const auto inline_dense_abi = plan_moi_dense_router(options, group_point, arch);
       const bool spill_backed_inline_router = group_point.has_inline_moi_scalar_spill();
       const bool spill_backed_record_replay_router = group_point.has_compact_moi_scalar_spill();
       const bool spill_backed_router =

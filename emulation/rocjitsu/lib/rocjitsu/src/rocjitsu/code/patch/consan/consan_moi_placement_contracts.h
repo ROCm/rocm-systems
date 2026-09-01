@@ -125,21 +125,27 @@ struct MoiPlannedReplayAccessPatch : MoiPlannedAccessPatch {
   bool branch_only_scalar_spill = false;
 };
 
-enum class MoiDenseAccessRouteAbi {
-  RecordReplay,
-  Sampled,
-  InlineShadow,
-};
-
-struct MoiInlineDenseRouterScalarAbi {
+/// Resolved scalar ABI and mechanics for one mode's dense access router.
+/// Common placement and emission consume this product without inspecting the
+/// engine that produced it.
+struct MoiDenseRouterPlan {
   ConSanMoiIndirectJumpSgprs indirect_jump;
   uint16_t dispatch_key_sgpr = 0;
   std::optional<uint16_t> call_return_sgpr;
+  uint32_t entry_island_words = 0;
+  uint32_t relocated_entry_return_words = 0;
+  bool explicit_key = false;
+  bool collapse_spill_router = false;
+  bool restore_scc_before_route = false;
+  bool requires_indirect_pc_wait = false;
+  bool publish_entry_island_offset = false;
 };
 
-[[nodiscard]] std::optional<MoiInlineDenseRouterScalarAbi>
-moi_inline_dense_router_scalar_abi(const ConSanRequest &request,
-                                   const ConSanMoiOperatingPoint &point, rj_code_arch_t arch);
+/// Mode-local semantic traits used by common dense-route placement.
+struct MoiDenseAccessRouteTraits {
+  bool requires_target_dense_call_capability = true;
+  bool preserves_replay_ordering = false;
+};
 
 struct MoiDenseAccessRoutePlan {
   consan_detail::MoiDenseCandidatePartition partition;
@@ -352,7 +358,7 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
     MoiResourcePlanningState &resource_state, std::span<const uint8_t> original_text,
     std::span<const ConSanMoiCandidate *const> candidates, size_t max_candidates_per_group,
     uint64_t access_island_begin, uint64_t access_slot_words, bool use_indirect_appended,
-    MoiDenseAccessRouteAbi abi, MoiLocalNopIslandAllocator *local_entry_islands,
+    MoiLocalNopIslandAllocator *local_entry_islands,
     BranchOnlyRelayRouter *relay_ownership = nullptr);
 
 [[nodiscard]] std::optional<MoiAccessEntryIslandPlan> plan_moi_access_entry_island(

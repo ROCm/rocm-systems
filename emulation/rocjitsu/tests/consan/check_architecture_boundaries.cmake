@@ -1284,6 +1284,31 @@ foreach(_file IN LISTS _mode_sources)
     )
 endforeach()
 
+# Dense access routing resolves mode policy once at the registry boundary.
+# Shared placement and emission consume the resulting typed plan and may not
+# regain an engine enum or an InlineShadow-only scalar-ABI peephole.
+foreach(_file IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_file}"
+        "MoiDenseAccessRouteAbi|MoiInlineDenseRouterScalarAbi|moi_inline_dense_router_scalar_abi|inline_shadow_route"
+        "dense routing must consume the mode-published router plan"
+    )
+endforeach()
+foreach(_mode IN ITEMS record_replay sampled inline_shadow)
+    set(_mode_owner "${_consan_dir}/consan_moi_${_mode}.cpp")
+    file(READ "${_mode_owner}" _mode_owner_contents)
+    if(NOT _mode_owner_contents MATCHES "[.]dense_router[ 	]*=")
+        message(FATAL_ERROR
+            "ConSan ${_mode} lost its dense-router registry operation"
+        )
+    endif()
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_mode_planning.cpp"
+    "ConSanEncodingFamily::|ROCJITSU_CODE_ARCH_"
+    "common mode planning must consume normalized target capabilities"
+)
+
 # Generated ISA headers occur only in reviewed target normalization,
 # family/member lowering, program analysis, or independent validation owners.
 set(

@@ -221,6 +221,47 @@ MoiScalarAbiPlan plan_inline_shadow_scalar_abi(const ConSanRequest &,
   return make_moi_scalar_abi_plan(point, special_state, 12u, true);
 }
 
+std::optional<MoiDenseRouterPlan>
+plan_inline_shadow_dense_router(const ConSanRequest &request, const ConSanMoiOperatingPoint &point,
+                                const ConSanTargetProfile &target) {
+  if (point.moi_branch_only_spill)
+    return std::nullopt;
+  const MoiScalarAbiPlan scalar_abi = plan_inline_shadow_scalar_abi(request, point);
+  if (!scalar_abi.indirect_jump)
+    return std::nullopt;
+
+  uint16_t dispatch_key_sgpr = 0u;
+  std::optional<uint16_t> call_return_sgpr;
+  if (point.has_inline_moi_scalar_spill()) {
+    if (!point.moi_router_call)
+      return std::nullopt;
+    dispatch_key_sgpr = point.moi_router_call->dispatch_key_sgpr;
+    if (target.direct_call_form == ConSanDirectCallForm::SCallI64)
+      call_return_sgpr = point.moi_router_call->call_return_sgpr;
+  } else {
+    if (!point.moi_exec_save_sgpr)
+      return std::nullopt;
+    const uint16_t base = *point.moi_exec_save_sgpr;
+    dispatch_key_sgpr = target.direct_call_form == ConSanDirectCallForm::SCallI64
+                            ? scalar_abi.indirect_jump->pc_sgpr
+                            : static_cast<uint16_t>(base + 28u);
+    if (target.direct_call_form == ConSanDirectCallForm::SCallI64)
+      call_return_sgpr = static_cast<uint16_t>(base + 28u);
+  }
+
+  return MoiDenseRouterPlan{
+      .indirect_jump = *scalar_abi.indirect_jump,
+      .dispatch_key_sgpr = dispatch_key_sgpr,
+      .call_return_sgpr = call_return_sgpr,
+      .entry_island_words = kMoiInlineShadowIndirectIslandWords,
+      .relocated_entry_return_words = kMoiInlineShadowIndirectIslandWords,
+      .explicit_key = !call_return_sgpr.has_value(),
+      .restore_scc_before_route = true,
+      .requires_indirect_pc_wait = true,
+      .publish_entry_island_offset = true,
+  };
+}
+
 uint16_t inline_shadow_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
                                             const MoiExecSaveTargetFacts &) {
   if (!requirement.has_report_buffer)
@@ -253,6 +294,8 @@ const MoiModeOperations kInlineShadowModeOperations = {
     .access_spill_fallback = inline_shadow_access_spill_fallback,
     .dispatch_identity = plan_inline_shadow_dispatch_identity,
     .scalar_abi = plan_inline_shadow_scalar_abi,
+    .dense_access_route = {},
+    .dense_router = plan_inline_shadow_dense_router,
     .plan_evidence = plan_inline_shadow_evidence_requirements,
     .plan_report_layout = plan_inline_shadow_report_layout,
     .reconstruct_report_inventory = reconstruct_inline_shadow_report_inventory,

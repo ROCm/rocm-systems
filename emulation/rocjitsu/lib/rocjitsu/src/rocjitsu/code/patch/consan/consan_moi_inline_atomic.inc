@@ -389,7 +389,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
               "assignment");
           continue;
         }
-        const auto scalar_abi = moi_inline_dense_router_scalar_abi(options, group_point, arch);
+        const auto scalar_abi = plan_moi_dense_router(options, group_point, arch);
         if (!scalar_abi || scalar_abi->call_return_sgpr) {
           result.warnings.emplace_back(
               "ConSan MOI inline atomic dense relay has no explicit-key scalar ABI");

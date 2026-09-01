@@ -282,6 +282,18 @@ MoiScalarAbiPlan plan_sampled_scalar_abi(const ConSanRequest &request,
   return make_moi_scalar_abi_plan(point, special_state, 0u, false);
 }
 
+std::optional<MoiDenseRouterPlan> plan_sampled_dense_router(const ConSanRequest &request,
+                                                            const ConSanMoiOperatingPoint &point,
+                                                            const ConSanTargetProfile &target) {
+  auto plan =
+      make_recording_moi_dense_router_plan(plan_sampled_scalar_abi(request, point), point, target);
+  if (plan && point.has_compact_moi_scalar_spill() &&
+      plan->call_return_sgpr == plan->indirect_jump.pc_sgpr) {
+    plan->collapse_spill_router = true;
+  }
+  return plan;
+}
+
 uint16_t sampled_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
                                       const MoiExecSaveTargetFacts &target) {
   if (!requirement.has_report_buffer)
@@ -312,6 +324,8 @@ const MoiModeOperations kSampledModeOperations = {
     .access_spill_fallback = sampled_access_spill_fallback,
     .dispatch_identity = plan_sampled_dispatch_identity,
     .scalar_abi = plan_sampled_scalar_abi,
+    .dense_access_route = {},
+    .dense_router = plan_sampled_dense_router,
     .plan_evidence = plan_sampled_evidence_requirements,
     .plan_report_layout = plan_sampled_report_layout,
     .reconstruct_report_inventory = reconstruct_sampled_report_inventory,
