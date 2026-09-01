@@ -57,6 +57,7 @@ function(add_kernel_replay_sample NAME CLIENT_SRC)
     add_dependencies(${NAME} ${NAME}-client)
 
     rocprofiler_samples_get_preload_env(PRELOAD_ENV ${NAME}-client)
+    rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV ${NAME}-client)
     set(_env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV} ${arg_ENVIRONMENT})
     if(arg_PC_SAMPLING)
         list(APPEND _env "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=ON")
