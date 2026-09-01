@@ -85,7 +85,7 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     uint64_t size;  ///< Size of this struct minus @c reserved_padding (versioning)
     rocprofiler_kernel_dispatch_info_t dispatch_info;  ///< Kernel dispatch info (always set)
 
-    uint64_t (*pass_count_cb)(rocprofiler_kernel_dispatch_info_t dispatch_info,
+    uint64_t (*replay_pass_count)(rocprofiler_kernel_dispatch_info_t dispatch_info,
                               rocprofiler_user_data_t            user_data);
 
     int (*replay_continue_cb)(rocprofiler_kernel_dispatch_info_t dispatch_info,
