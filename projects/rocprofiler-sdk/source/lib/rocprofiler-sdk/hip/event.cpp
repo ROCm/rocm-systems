@@ -554,7 +554,7 @@ register_pending_wait(uint64_t signal_handle, pending_wait_t pw)
 {
     get_pending_wait_map()->wlock([&](auto& map) {
         map.emplace(signal_handle, std::move(pw));
-        g_pending_wait_count.fetch_add(1, std::memory_order_relaxed);
+        g_pending_wait_count.fetch_add(1, std::memory_order_release);
     });
 }
 

@@ -895,7 +895,7 @@ WriteInterceptor(const void* packets,
                     transformed_packets.emplace_back(_packets[i]);
                 }
 
-                if(is_barrier && hip::event::has_pending_waits())
+                if(is_barrier)
                 {
                     auto consume_if_pending = [&](uint64_t handle) {
                         if(handle == 0) return;
@@ -1208,7 +1208,7 @@ WriteInterceptor(const void* packets,
             // the kernel dispatch packet rather than on a preceding BARRIER_AND. Scan
             // it here so that deferred hipStreamWaitEvent dependencies are captured.
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
-            if(is_ext_kernel_dispatch && hip::event::has_pending_waits())
+            if(is_ext_kernel_dispatch)
             {
                 const auto dep = _packets[i].ext_kernel_dispatch.dep_signal;
                 if(dep.handle != 0)
