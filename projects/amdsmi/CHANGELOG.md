@@ -41,9 +41,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Added blocks: from `AMDSMI_GPU_BLOCK_MMSCH` to `AMDSMI_GPU_BLOCK_UCIE_PCS` at bit positions 19-38.
   - Updated `AMDSMI_GPU_BLOCK_LAST` to `AMDSMI_GPU_BLOCK_UCIE_PCS`.
 
-- **An empty nested section now renders as `N/A` in human-readable CLI output**.  
-  - Any `amd-smi` command whose output contains an empty sub-section printed a bare `SECTION:` header with nothing under it. It now prints `SECTION: N/A`, matching how empty lists are already rendered.
-  - This covers every subcommand that uses the standard human-readable renderer, not only the AI-NIC `RDMA_DEVICES` case that prompted it.
+- **A section with no entries now renders as `SECTION: N/A` in human-readable CLI output**.  
+  - Such a section previously printed a bare `SECTION:` header with nothing beneath it, which was indistinguishable from output that had been cut short. It now prints `SECTION: N/A`, matching how a section with an empty list already renders.
+  - This reaches the sections that list a variable number of entries: `PORTS` and `RDMA_DEVICES` for an AI-NIC, the per-block counters under `NIC_ERRORS` and `SWITCH_ERRORS` for Broadcom devices, and `FREQUENCY_LEVELS` in `amd-smi static --clock` when a clock domain reports no usable levels. Sections that report a fixed set of fields are unaffected, since they already print `N/A` per field.
+  - The `SWITCH_ERRORS` blocks are where this lost information rather than just looking odd: a block the driver reported as `N/A` became an empty header, so the `N/A` never reached the user.
+  - `--json` and `--csv` output is unchanged. JSON still represents a section with no entries as an empty object.
   - `monitor`, `partition`, `topology`, `xgmi`, and the default no-argument output print tables and are unchanged.
 
 ### Optimized
