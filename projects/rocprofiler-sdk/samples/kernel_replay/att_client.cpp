@@ -26,7 +26,7 @@ rocprofiler_kernel_id_t  g_target_kernel = UINT64_MAX;
 std::atomic<int> g_counter_records{0};
 std::atomic<int> g_att_records{0};
 
-uint64_t pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kPasses;
 }
@@ -41,8 +41,8 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        p->pass_count_cb = pass_count_cb;
-        g_target_kernel  = p->dispatch_info.kernel_id;
+        p->replay_pass_count = replay_pass_count;
+        g_target_kernel      = p->dispatch_info.kernel_id;
         return;
     }
 
@@ -51,10 +51,8 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
         return;
 
     const bool counters = p->current_pass != kAttPass;
-    KR_CHECK((counters ? p->replay_local_enable_context_cb
-                       : p->replay_local_disable_context_cb)(g_counters_ctx));
-    KR_CHECK((counters ? p->replay_local_disable_context_cb
-                       : p->replay_local_enable_context_cb)(g_att_ctx));
+    KR_CHECK((counters ? p->replay_start_context : p->replay_stop_context)(g_counters_ctx));
+    KR_CHECK((counters ? p->replay_stop_context : p->replay_start_context)(g_att_ctx));
 }
 
 void

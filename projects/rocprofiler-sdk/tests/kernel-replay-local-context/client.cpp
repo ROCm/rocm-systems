@@ -157,7 +157,7 @@ gpu_agents()
     return agents;
 }
 
-uint64_t pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return static_cast<uint64_t>(g_passes);
 }
@@ -172,9 +172,9 @@ maybe_local_toggle(rocprofiler_callback_tracing_kernel_replay_data_t* p,
 
     if(g_start_pass >= 0 && static_cast<int64_t>(p->current_pass) == g_start_pass)
     {
-        if(p->replay_local_enable_context_cb)
+        if(p->replay_start_context)
         {
-            auto st = p->replay_local_enable_context_cb(ctx);
+            auto st = p->replay_start_context(ctx);
             if(st == ROCPROFILER_STATUS_SUCCESS)
                 g_local_starts.fetch_add(1);
             else
@@ -187,9 +187,9 @@ maybe_local_toggle(rocprofiler_callback_tracing_kernel_replay_data_t* p,
 
     if(g_stop_pass >= 0 && static_cast<int64_t>(p->current_pass) == g_stop_pass)
     {
-        if(p->replay_local_disable_context_cb)
+        if(p->replay_stop_context)
         {
-            auto st = p->replay_local_disable_context_cb(ctx);
+            auto st = p->replay_stop_context(ctx);
             if(st == ROCPROFILER_STATUS_SUCCESS)
                 g_local_stops.fetch_add(1);
             else
@@ -211,8 +211,8 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        p->pass_count_cb = pass_count_cb;
-        g_target_kernel  = p->dispatch_info.kernel_id;
+        p->replay_pass_count = replay_pass_count;
+        g_target_kernel      = p->dispatch_info.kernel_id;
         g_replayed.fetch_add(1);
         return;
     }

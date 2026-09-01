@@ -28,7 +28,7 @@ std::atomic<int>         g_counter_records{0};
 std::atomic<int>         g_pcs_samples{0};
 bool                     g_pcs_available = false;
 
-uint64_t pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kPasses;
 }
@@ -43,7 +43,7 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        p->pass_count_cb = pass_count_cb;
+        p->replay_pass_count = replay_pass_count;
         return;
     }
 
@@ -56,14 +56,13 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     // agent-wide today). Never enable both services on one pass.
     if(p->current_pass == kPcsPass)
     {
-        if(g_counters_ctx.handle != 0 && p->replay_local_disable_context_cb)
-            KR_CHECK(p->replay_local_disable_context_cb(g_counters_ctx));
-        if(g_pcs_available && p->replay_local_enable_context_cb)
-            KR_CHECK(p->replay_local_enable_context_cb(g_pcs_ctx));
+        if(g_counters_ctx.handle != 0 && p->replay_stop_context)
+            KR_CHECK(p->replay_stop_context(g_counters_ctx));
+        if(g_pcs_available && p->replay_start_context) KR_CHECK(p->replay_start_context(g_pcs_ctx));
     }
-    else if(g_pcs_available && p->replay_local_disable_context_cb)
+    else if(g_pcs_available && p->replay_stop_context)
     {
-        KR_CHECK(p->replay_local_disable_context_cb(g_pcs_ctx));
+        KR_CHECK(p->replay_stop_context(g_pcs_ctx));
     }
 }
 

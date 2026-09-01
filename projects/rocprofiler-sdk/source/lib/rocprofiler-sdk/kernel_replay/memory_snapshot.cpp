@@ -82,21 +82,40 @@ struct module_variable_t
 // and exceeding it is reported rather than ignored (see collect_module_variable).
 constexpr uint64_t module_variable_size_cap = 1ULL << 30;  // 1 GiB
 
+// Result of enumerating module-scope variables. `incomplete` means HSA could not be asked about at
+// least one executable or symbol, so the set below may be missing a writable __device__ global.
+// Treated as a failed snapshot rather than a partial one: a variable we never captured is a
+// variable we never restore, and passes 2..N would silently read state accumulated by pass 1.
+struct module_variable_scan_t
+{
+    std::vector<module_variable_t> found{};
+    bool                           incomplete = false;
+};
+
 // hsa_executable_iterate_agent_symbols callback: collect HSA_SYMBOL_KIND_VARIABLE symbols
-// (device address + size) into the vector passed via `data`. The HSA callback cannot capture, so
-// state is threaded through the void* argument.
+// (device address + size) into the scan passed via `data`. The HSA callback cannot capture, so
+// state is threaded through the void* argument. A query failure marks the scan incomplete and
+// keeps iterating, so one bad symbol does not hide the rest.
 hsa_status_t
 collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t symbol, void* data)
 {
-    auto* out  = static_cast<std::vector<module_variable_t>*>(data);
+    auto* out  = static_cast<module_variable_scan_t*>(data);
     auto* core = hsa::get_core_table();
-    if(!core || !core->hsa_executable_symbol_get_info_fn) return HSA_STATUS_SUCCESS;
+    if(!core || !core->hsa_executable_symbol_get_info_fn)
+    {
+        out->incomplete = true;
+        return HSA_STATUS_SUCCESS;
+    }
 
     hsa_symbol_kind_t kind{};
     if(core->hsa_executable_symbol_get_info_fn(symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &kind) !=
-           HSA_STATUS_SUCCESS ||
-       kind != HSA_SYMBOL_KIND_VARIABLE)
+       HSA_STATUS_SUCCESS)
+    {
+        out->incomplete = true;
         return HSA_STATUS_SUCCESS;
+    }
+
+    if(kind != HSA_SYMBOL_KIND_VARIABLE) return HSA_STATUS_SUCCESS;
 
     uint64_t addr = 0;
     uint32_t size = 0;
@@ -104,7 +123,10 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
            symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, &addr) != HSA_STATUS_SUCCESS ||
        core->hsa_executable_symbol_get_info_fn(
            symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &size) != HSA_STATUS_SUCCESS)
+    {
+        out->incomplete = true;
         return HSA_STATUS_SUCCESS;
+    }
 
     if(addr == 0 || size == 0) return HSA_STATUS_SUCCESS;
 
@@ -127,7 +149,7 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
 
     // HSA reports the variable's device address as an integer; converting to a pointer is required.
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    out->push_back(module_variable_t{reinterpret_cast<void*>(addr), size});
+    out->found.push_back(module_variable_t{reinterpret_cast<void*>(addr), size});
     return HSA_STATUS_SUCCESS;
 }
 
@@ -135,21 +157,26 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
 // the executable's data segment -- not in the allocation tracker's inventory -- so a kernel that
 // mutates a __device__ global would otherwise leak that mutation across replay passes. Must run at
 // snap time (not executable-load time): constant memory may not be populated at load.
-std::vector<module_variable_t>
+module_variable_scan_t
 discover_module_variables(hsa_agent_t agent)
 {
-    std::vector<module_variable_t> found;
+    auto scan = module_variable_scan_t{};
 
     auto* core = hsa::get_core_table();
-    if(!core || !core->hsa_executable_iterate_agent_symbols_fn) return found;
+    if(!core || !core->hsa_executable_iterate_agent_symbols_fn)
+    {
+        scan.incomplete = true;
+        return scan;
+    }
 
     code_object::iterate_loaded_code_objects([&](const code_object::hsa::code_object& co) {
         // Iterating for `agent` naturally scopes to executables loaded on this agent (others yield
         // no symbols), matching snap()'s per-agent contract.
-        core->hsa_executable_iterate_agent_symbols_fn(
-            co.hsa_executable, agent, collect_module_variable, &found);
+        if(core->hsa_executable_iterate_agent_symbols_fn(
+               co.hsa_executable, agent, collect_module_variable, &scan) != HSA_STATUS_SUCCESS)
+            scan.incomplete = true;
     });
-    return found;
+    return scan;
 }
 }  // namespace
 
@@ -165,19 +192,38 @@ snap(hsa_agent_t agent)
     // omitted class for beta (documented in the public header). Direct-HSA apps that put ordinary
     // writable device data behind the flag observe the same omission.
 
-    const auto [inventory, module_vars] = [&]() {
-        try
-        {
-            auto inv   = memory_tracker::snap_inventory(agent);
-            auto mvars = discover_module_variables(agent);
+    // Host memory pressure while building the inventory is the same condition the per-region
+    // capture below reports through ok==false, and snap()'s contract is that the caller declines
+    // replay and runs the dispatch once. Aborting here instead would kill the application over an
+    // opt-in beta feature, and a large allocation inventory is exactly when it would happen.
+    auto inventory = memory_tracker::alloc_map_t{};
+    auto scan      = module_variable_scan_t{};
+    try
+    {
+        inventory = memory_tracker::snap_inventory(agent);
+        scan      = discover_module_variables(agent);
 
-            out.blocks.reserve(inv.size() + mvars.size());
-            return std::pair{std::move(inv), std::move(mvars)};
-        } catch(const std::bad_alloc&)
-        {
-            ROCP_FATAL << "kernel-replay snapshot: out of memory reserving metadata";
-        }
-    }();
+        out.blocks.reserve(inventory.size() + scan.found.size());
+    } catch(const std::bad_alloc&)
+    {
+        LOG_FIRST_N(WARNING, 1) << "kernel-replay snapshot: out of memory reserving metadata; "
+                                   "declining replay for this dispatch";
+        out.ok = false;
+        return out;
+    }
+
+    // An executable or symbol HSA would not tell us about may hold a writable __device__ global. We
+    // cannot restore what we did not capture, so the passes would not see identical inputs.
+    if(scan.incomplete)
+    {
+        LOG_FIRST_N(WARNING, 1) << "kernel-replay snapshot: could not enumerate module-scope "
+                                   "variables for every loaded executable; declining replay for "
+                                   "this dispatch";
+        out.ok = false;
+        return out;
+    }
+
+    const auto& module_vars = scan.found;
 
     /// @brief Capture one region (device->host) into the snapshot.
     /// @retval false The snapshot is incomplete because a host allocation or the DMA copy failed.
@@ -189,7 +235,7 @@ snap(hsa_agent_t agent)
         [&](void* gpu_addr, size_t size, std::string_view what, bool from_tracker) -> bool {
         if(size == 0) return true;
 
-        mem_block_t blk;
+        auto blk         = mem_block_t{};
         blk.gpu_addr     = gpu_addr;
         blk.from_tracker = from_tracker;
         try

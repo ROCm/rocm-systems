@@ -65,15 +65,15 @@ rocprofiler_test_c_replay_offset_dispatch_info(void)
 }
 
 size_t
-rocprofiler_test_c_replay_offset_pass_count_cb(void)
+rocprofiler_test_c_replay_offset_replay_pass_count(void)
 {
-    return offsetof(replay_data_c_t, pass_count_cb);
+    return offsetof(replay_data_c_t, replay_pass_count);
 }
 
 size_t
-rocprofiler_test_c_replay_offset_replay_continue_cb(void)
+rocprofiler_test_c_replay_offset_replay_continue(void)
 {
-    return offsetof(replay_data_c_t, replay_continue_cb);
+    return offsetof(replay_data_c_t, replay_continue);
 }
 
 size_t
@@ -89,21 +89,15 @@ rocprofiler_test_c_replay_offset_total_passes(void)
 }
 
 size_t
-rocprofiler_test_c_replay_offset_local_enable_cb(void)
+rocprofiler_test_c_replay_offset_replay_start_context(void)
 {
-    return offsetof(replay_data_c_t, replay_local_enable_context_cb);
+    return offsetof(replay_data_c_t, replay_start_context);
 }
 
 size_t
-rocprofiler_test_c_replay_offset_local_disable_cb(void)
+rocprofiler_test_c_replay_offset_replay_stop_context(void)
 {
-    return offsetof(replay_data_c_t, replay_local_disable_context_cb);
-}
-
-size_t
-rocprofiler_test_c_replay_offset_reserved_padding(void)
-{
-    return offsetof(replay_data_c_t, reserved_padding);
+    return offsetof(replay_data_c_t, replay_stop_context);
 }
 
 // Enum values as C sees them. An enum whose underlying type differs between the languages would
@@ -127,7 +121,7 @@ rocprofiler_test_c_replay_fill(void* record, uint64_t current_pass, uint64_t tot
 {
     replay_data_c_t* rec = (replay_data_c_t*) record;
 
-    rec->size         = offsetof(replay_data_c_t, reserved_padding);
+    rec->size         = sizeof(replay_data_c_t);
     rec->current_pass = current_pass;
     rec->total_passes = total_passes;
 }

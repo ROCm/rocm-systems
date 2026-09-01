@@ -18,7 +18,7 @@ rocprofiler_context_id_t g_replay_ctx{0};
 std::atomic<int>         g_replayed{0};
 std::atomic<int>         g_skipped{0};
 
-uint64_t pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kPasses;
 }
@@ -35,12 +35,12 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
 
     if(p->dispatch_info.workgroup_size.x == kReplayBlockX)
     {
-        p->pass_count_cb = pass_count_cb;
+        p->replay_pass_count = replay_pass_count;
         g_replayed.fetch_add(1);
         return;
     }
 
-    // Leave pass_count_cb NULL: this dispatch runs once with no snapshot.
+    // Leave replay_pass_count NULL: this dispatch runs once with no snapshot.
     g_skipped.fetch_add(1);
 }
 

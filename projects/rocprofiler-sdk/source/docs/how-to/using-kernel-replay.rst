@@ -1,6 +1,6 @@
 .. meta::
   :description: Using the ROCprofiler-SDK kernel replay callback tracing domain from a custom tool
-  :keywords: rocprofiler-sdk, kernel replay, callback tracing, KERNEL_REPLAY, pass_count_cb, local context
+  :keywords: rocprofiler-sdk, kernel replay, callback tracing, KERNEL_REPLAY, replay_pass_count, local context
 
 .. _using-kernel-replay:
 
@@ -51,7 +51,7 @@ Configuring the domain also enables the device-allocation tracker used for snaps
 A process that never configures the domain does not pay that tracking cost. Only one context may
 subscribe; a second configure call returns ``ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED``.
 
-Set ``pass_count_cb``
+Set ``replay_pass_count``
 =====================
 
 ``CONFIG`` ``PHASE_ENTER`` is where the tool installs the pass-count callback. The SDK calls
@@ -72,8 +72,8 @@ that callback after ``CONFIG`` ``PHASE_ENTER`` returns:
        if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
           record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
        {
-           payload->pass_count_cb = tool_pass_count_callback;
-           // optionally: payload->replay_continue_cb = tool_continue_callback;
+           payload->replay_pass_count = tool_pass_count_callback;
+           // optionally: payload->replay_continue = tool_continue_callback;
        }
        else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS &&
                record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
@@ -87,7 +87,7 @@ that callback after ``CONFIG`` ``PHASE_ENTER`` returns:
                             rocprofiler_user_data_t /* user_data */)
    {
        // Return 1 to skip replay for this dispatch (ordinary single execution, no snapshot).
-       // Return N > 1 for a fixed loop. Return 0 only with replay_continue_cb set.
+       // Return N > 1 for a fixed loop. Return 0 only with replay_continue set.
        return groups_for_agent(dispatch_info.agent_id);
    }
 
@@ -95,8 +95,8 @@ that callback after ``CONFIG`` ``PHASE_ENTER`` returns:
    :header-rows: 1
    :widths: 22 28 50
 
-   * - ``pass_count_cb``
-     - ``replay_continue_cb``
+   * - ``replay_pass_count``
+     - ``replay_continue``
      - Behavior
    * - left ``NULL``
      - ignored
@@ -123,11 +123,11 @@ exactly one kernel completion regardless of pass count.
 Localized context control
 =========================
 
-During ``PASS`` ``PHASE_ENTER`` the payload carries ``replay_local_enable_context_cb`` /
-``replay_local_disable_context_cb``. Use them to enable or disable other contexts for that pass
-(for example counters every pass, PC sampling once) without calling global
-``rocprofiler_start_context`` / ``rocprofiler_stop_context``, which would leak into non-replayed
-dispatches.
+During ``PASS`` ``PHASE_ENTER`` the payload carries ``replay_start_context`` /
+``replay_stop_context``. Use them to enable or disable override-aware contexts for that
+pass (for example counters on selected passes and thread trace once) without calling global
+``rocprofiler_start_context`` / ``rocprofiler_stop_context``. PC sampling is agent-wide and does
+not currently honor these callbacks, so it cannot be isolated to one replay pass.
 
 Overrides are sticky across passes and scoped to the replay loop. See
 :ref:`kernel-replay-callback-api` for the contract.
@@ -180,7 +180,8 @@ Limitations
 * **Async copies are not fenced.** ``hsa_amd_memory_async_copy`` (or HIP async memcpy) on another
   thread can mutate device memory during the replay window.
 * **Stuck drains abort the process** rather than hanging (roughly 60 s bounds inside the window).
-* **Host RAM duplication** of the tracked device footprint for the duration of the replay.
+* **Host RAM duplication** of the tracked device footprint for the duration of the replay. Under
+  host memory pressure the snapshot is declined and the dispatch runs once rather than aborting.
 
 See also
 ========

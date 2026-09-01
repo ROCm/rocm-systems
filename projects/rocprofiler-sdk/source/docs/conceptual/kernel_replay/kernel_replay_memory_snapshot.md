@@ -23,10 +23,10 @@ There is **no hashing, no dirty-page diffing, no chunking, and no disk backing**
 | Dirty detection | None — every byte of every region is written back | Host-side hashing (after a device-to-host read) and/or device-side hashing (hash on the GPU, restore only dirty pages) |
 | Host RAM | The **entire** tracked footprint is duplicated for the replay | Reduced if hashing restores only dirty bytes |
 
-Dirty-page hashing is **not** implemented. It is expected in a future version, on the host and/or
+Dirty-page hashing is **not** implemented, and snapshots are never spilled to disk. Every tracked
+region is copied in full, every time. Hashing is expected in a future version, on the host and/or
 the device, because snapshot and restore are bandwidth-bound and scale linearly with the tracked
-footprint. An earlier prototype hashed dirty pages and stored snapshots on disk; do not assume that
-behavior here.
+footprint.
 
 ## Allocation tracking
 
@@ -103,6 +103,13 @@ is not necessarily populated when the executable loads.
 Capture of a single region fails if the host allocation fails under memory pressure (a `std::bad_alloc`
 from the resize) or if the device-to-host copy fails. Either leaves the snapshot incomplete, and
 `snap()` returns with `ok == false`.
+
+Two whole-snapshot conditions produce the same result. Reserving the inventory metadata can itself
+run out of host memory, and HSA may refuse to enumerate the module-scope variables of a loaded
+executable. The second matters because a `__device__` global that was never discovered is one that
+is never restored, so passes 2..N would read state accumulated by pass 1 and report counters for
+inputs that differ from the first pass. Neither is fatal: both log which condition was hit and
+decline replay for that dispatch.
 
 The replay loop treats that as a decision point, not an error to push through: restoring a partial
 snapshot between passes would write back some regions and leave others carrying a later pass's

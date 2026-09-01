@@ -20,7 +20,18 @@ device memory between those executions so each pass observes identical inputs. I
    Replay is limited to single-packet, single-dispatch submissions; see
    :ref:`kernel-replay-limitations` and :ref:`kernel-replay-memory-snapshot`.
 
-For the configure / ``pass_count_cb`` / local-context how-to, see :ref:`using-kernel-replay`. For
+   Known failure behavior:
+
+   * A dispatch that cannot be replayed runs **once**, unreplayed, and warns. This covers a
+     multi-packet submission, a HIP graph launch, and a snapshot that could not be completed
+     because of host memory pressure or because HSA would not enumerate a loaded executable's
+     module-scope variables.
+   * A failed device-memory **restore** aborts the process. Once part of the snapshot has been
+     written back, continuing would leave the application's memory in a mixed state.
+   * A drain that does not complete within roughly 60 seconds aborts the process rather than
+     hanging.
+
+For the configure / ``replay_pass_count`` / local-context how-to, see :ref:`using-kernel-replay`. For
 pass-count semantics, localized context control, and source maps, see
 :ref:`kernel-replay-callback-api`.
 
@@ -30,8 +41,8 @@ subscribe, what the payload contains, and how replay interacts with dispatch cou
 Configure the domain
 --------------------
 
-There is no ``rocprofiler_configure_kernel_replay_counting_service()``. That entry point belonged to
-an earlier prototype and is not in this API.
+Replay has no dedicated counting-service entry point. It is configured as a callback tracing domain,
+like any other, and dispatch counting supplies the counter records.
 
 .. code-block:: cpp
 
@@ -65,7 +76,7 @@ Cast ``record.payload`` to ``rocprofiler_callback_tracing_kernel_replay_data_t*`
      - Tool responsibility
    * - ``ROCPROFILER_KERNEL_REPLAY_CONFIG``
      - ``PHASE_ENTER``
-     - Set ``pass_count_cb``. Optionally set ``replay_continue_cb``. May stash per-dispatch state
+     - Set ``replay_pass_count``. Optionally set ``replay_continue``. May stash per-dispatch state
        in ``user_data``.
    * - ``ROCPROFILER_KERNEL_REPLAY_CONFIG``
      - ``PHASE_EXIT``
@@ -73,10 +84,10 @@ Cast ``record.payload`` to ``rocprofiler_callback_tracing_kernel_replay_data_t*`
    * - ``ROCPROFILER_KERNEL_REPLAY_PASS``
      - ``PHASE_ENTER``
      - Read ``current_pass`` / ``total_passes``. Optionally call
-       ``replay_local_enable_context_cb`` / ``replay_local_disable_context_cb``.
+       ``replay_start_context`` / ``replay_stop_context``.
    * - ``ROCPROFILER_KERNEL_REPLAY_PASS``
      - ``PHASE_EXIT``
-     - Pass complete; ``replay_continue_cb`` (if set) runs after this.
+     - Pass complete; ``replay_continue`` (if set) runs after this.
 
 ``dispatch_info.dispatch_id`` is the same for CONFIG, every PASS, and every record those passes
 produce. Distinguish passes with ``current_pass``.
@@ -84,17 +95,17 @@ produce. Distinguish passes with ``current_pass``.
 Pass count
 ----------
 
-After CONFIG ``PHASE_ENTER`` returns, the SDK calls ``pass_count_cb`` if it is non-null:
+After CONFIG ``PHASE_ENTER`` returns, the SDK calls ``replay_pass_count`` if it is non-null:
 
 * ``NULL`` — dispatch is not replayed (no snapshot).
 * returns ``1`` — ordinary single execution (no snapshot).
-* returns ``N > 1`` — ``N`` passes; ``replay_continue_cb`` may still stop early (custom tools only;
+* returns ``N > 1`` — ``N`` passes; ``replay_continue`` may still stop early (custom tools only;
   ``rocprofv3`` never sets this callback).
-* returns ``0`` — indefinite loop; ``replay_continue_cb`` is required (custom tools only).
+* returns ``0`` — indefinite loop; ``replay_continue`` is required (custom tools only).
 
-``rocprofv3`` (in the stacked tool PR) returns the number of ``--pmc`` groups collectable on
+``rocprofv3`` returns the number of ``--pmc`` groups collectable on
 ``dispatch_info.agent_id``. A custom tool can return any of the cases above and may set
-``replay_continue_cb`` for early exit or an indefinite loop.
+``replay_continue`` for early exit or an indefinite loop.
 
 Using replay with dispatch counting
 -----------------------------------
@@ -108,11 +119,22 @@ Replay does **not** replace dispatch counting. Typical pattern:
 4. In the dispatch-counting callback, select the counter config for that pass.
 5. Clear the thread-local pass index on PASS ``PHASE_EXIT``.
 
-To run PC sampling, SPM, or thread trace on only some passes, put those services on their own
-contexts and stop or start them with the localized toggles during PASS ``PHASE_ENTER``. Counter
-collection and PC sampling cannot safely run on the same replay pass; use separate passes.
-``rocprofv3`` does not expose SPM or PC sampling together with kernel replay — that requires a
-custom tool. Do not call the global
+To run SPM or thread trace on only some passes, put those services on their own contexts and stop or
+start them with the localized toggles during PASS ``PHASE_ENTER``. Which services honor a toggle
+varies:
+
+* Dispatch counter collection and SPM consult the override on every dispatch, so they can be placed
+  on specific passes.
+* Kernel dispatch tracing and dispatch thread trace observe a local *stop* only: they skip a
+  dispatch whose context is forced off, but cannot be added to a context that is not already
+  collecting.
+* PC sampling is agent-wide and device counting is not dispatch-scoped, so neither consults the
+  override. A toggle naming such a context reports success and has no effect.
+
+Because PC sampling ignores the override, it cannot be isolated from dispatch counters by putting
+them on separate passes, and the two must not be combined under replay: on MI2xx and MI3xx,
+collecting them together hits the documented clock-gating conflict. ``rocprofv3`` does not expose
+SPM or PC sampling together with kernel replay — that requires a custom tool. Do not call the global
 ``rocprofiler_start_context`` / ``rocprofiler_stop_context`` from inside the replay loop: that would
 leak into non-replayed dispatches.
 

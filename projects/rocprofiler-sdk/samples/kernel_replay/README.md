@@ -16,8 +16,8 @@ Build with `-DROCPROFILER_BUILD_SAMPLES=ON`.
 | Run | `ctest -R '^kernel-replay-'` in the samples build dir | `ctest -R kernel-replay-local-context` in main build |
 
 For JSON output validation with the shared test harness, see `tests/counter-collection/`
-(`rocprofiler-sdk-json-tool`). Kernel replay JSON/tool wiring is planned for the stacked
-`rocprofv3` PR (#10439), not these SDK samples.
+(`rocprofiler-sdk-json-tool`). Kernel replay JSON/tool wiring belongs to `rocprofv3`, not to
+these SDK samples.
 
 ## What each sample shows
 
@@ -28,11 +28,11 @@ service (same idea as `samples/counter_collection/`).
 |---|---|---|
 | `kernel-replay-basic` | 4 | Replay only. The app still sees one kernel completion. |
 | `kernel-replay-counters` | 3 | Dispatch counters; each pass selects a different counter configuration. |
-| `kernel-replay-counters-then-pc-sampling` | 4 | Counters on passes 0–2, PC sampling on pass 3 only. |
+| `kernel-replay-counters-then-pc-sampling` | — | Not currently supported: PC sampling ignores localized pass overrides. |
 | `kernel-replay-att` | 2 | Counters on pass 0, ATT on pass 1. |
 | `kernel-replay-spm` | 2 | Counters on pass 0, SPM on pass 1. |
 | `kernel-replay-opt-out` | 3 / 1 | Replays the `bump` kernel (`block.x == 67`); leaves `nudge` unreplayed. |
-| `kernel-replay-early-exit` | 4 / 2 | Sets `replay_continue_cb` to stop after pass 1 even though `pass_count_cb` returns 4. |
+| `kernel-replay-early-exit` | 4 / 2 | Sets `replay_continue` to stop after pass 1 even though `replay_pass_count` returns 4. |
 
 ### Advanced: multi-service pass ordering
 

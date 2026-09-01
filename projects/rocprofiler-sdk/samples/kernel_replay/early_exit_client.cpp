@@ -20,16 +20,16 @@ rocprofiler_context_id_t g_replay_ctx{0};
 rocprofiler_context_id_t g_counters_ctx{0};
 std::atomic<int>         g_counter_records{0};
 
-uint64_t pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kMaxPasses;
 }
 
 int
-replay_continue_cb(rocprofiler_kernel_dispatch_info_t,
-                   uint64_t current_pass,
-                   uint64_t /* total_passes */,
-                   rocprofiler_user_data_t)
+replay_continue(rocprofiler_kernel_dispatch_info_t,
+                uint64_t current_pass,
+                uint64_t /* total_passes */,
+                rocprofiler_user_data_t)
 {
     return current_pass < kStopAfterPass ? 1 : 0;
 }
@@ -44,8 +44,8 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        p->pass_count_cb      = pass_count_cb;
-        p->replay_continue_cb = replay_continue_cb;
+        p->replay_pass_count = replay_pass_count;
+        p->replay_continue   = replay_continue;
     }
 }
 

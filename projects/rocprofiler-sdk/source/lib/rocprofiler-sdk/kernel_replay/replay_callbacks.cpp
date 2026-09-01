@@ -37,6 +37,7 @@
 #include <rocprofiler-sdk/experimental/kernel_replay.h>
 
 #include <atomic>
+#include <type_traits>
 
 namespace rocprofiler
 {
@@ -54,11 +55,19 @@ replay_service_configured_flag()
     return *_v;
 }
 
+// Extract bits [last:first] from x. Mirrors the helper in hsa/queue.cpp, including its guard for a
+// mask spanning the full width of Integral, where the shift below would otherwise be undefined.
 template <typename Integral>
 constexpr Integral
 bit_extract(Integral x, int first, int last)
 {
-    return (x >> first) & ((Integral{1} << (last - first + 1)) - 1);
+    static_assert(std::is_integral<Integral>::value, "Integral type required");
+
+    const auto num_bits = static_cast<size_t>(last - first + 1);
+    const auto mask     = (num_bits >= sizeof(Integral) * 8)
+                              ? ~Integral{0}
+                              : static_cast<Integral>((Integral{1} << num_bits) - 1);
+    return (x >> first) & mask;
 }
 
 bool
@@ -86,7 +95,7 @@ try_claim_replay_service()
     // Single atomic claim rather than "read has_registered_replay_context(), then set the flag
     // later". Those were two separate operations, so two threads configuring KERNEL_REPLAY could
     // both observe no owner and both register, which breaks the one-owner rule the replay planner
-    // depends on (pass_count_cb would be last-writer-wins across tools).
+    // depends on (replay_pass_count would be last-writer-wins across tools).
     bool expected = false;
     return replay_service_configured_flag().compare_exchange_strong(
         expected, true, std::memory_order_acq_rel, std::memory_order_acquire);
@@ -212,24 +221,24 @@ execute_config_phase_enter(const hsa::Queue&              queue,
                                            ROCPROFILER_KERNEL_REPLAY_CONFIG,
                                            plan.config_data);
 
-    plan.pass_count_cb            = plan.config_data.pass_count_cb;
-    plan.replay_continue_cb       = plan.config_data.replay_continue_cb;
+    plan.replay_pass_count        = plan.config_data.replay_pass_count;
+    plan.replay_continue          = plan.config_data.replay_continue;
     plan.config_contexts          = std::move(config_contexts);
     plan.external_correlation_ids = std::move(extern_corr_ids);
     plan.user_data                = plan.config_contexts.empty() ? tracing::empty_user_data
                                                                  : plan.config_contexts.front().user_data;
 
-    if(!plan.pass_count_cb)
+    if(!plan.replay_pass_count)
     {
         execute_config_phase_exit(plan, thr_id, internal_corr_id, ancestor_corr_id);
         return plan;
     }
 
-    plan.total_passes = plan.pass_count_cb(plan.config_data.dispatch_info, plan.user_data);
-    if(plan.total_passes == 0 && !plan.replay_continue_cb)
+    plan.total_passes = plan.replay_pass_count(plan.config_data.dispatch_info, plan.user_data);
+    if(plan.total_passes == 0 && !plan.replay_continue)
     {
-        ROCP_WARNING << "kernel replay: pass_count_cb returned 0 without replay_continue_cb; "
-                        "dispatch will not be replayed";
+        LOG_FIRST_N(WARNING, 1) << "kernel replay: replay_pass_count returned 0 without "
+                                   "replay_continue; dispatch will not be replayed";
         execute_config_phase_exit(plan, thr_id, internal_corr_id, ancestor_corr_id);
         return plan;
     }
@@ -288,8 +297,8 @@ execute_pass_phase_enter(const replay_plan_t&    plan,
     // Localized context control: the tool may call these from its PASS PHASE_ENTER callback to
     // enable/disable a context for the current replay loop (see kernel_replay/local_context.hpp).
     // They are only legal while armed, so bracket the tool callback with the arm window.
-    pass_data.replay_local_enable_context_cb  = &replay_local_enable_context;
-    pass_data.replay_local_disable_context_cb = &replay_local_disable_context;
+    pass_data.replay_start_context = &replay_local_enable_context;
+    pass_data.replay_stop_context  = &replay_local_disable_context;
 
     // Disarm through a scope guard: execute_phase_enter_callbacks can throw (std::out_of_range from
     // an .at() lookup, or a throwing tool callback), and the armed flag must not leak past this
@@ -331,20 +340,20 @@ execute_pass_phase_exit(const replay_plan_t&  plan,
 bool
 should_continue_replay(const replay_plan_t& plan, uint64_t current_pass, bool is_final_pass)
 {
-    // Fixed-count loops never exceed total_passes; replay_continue_cb may only break early, not
+    // Fixed-count loops never exceed total_passes; replay_continue may only break early, not
     // extend the loop past N passes.
     //
-    // TODO: optionally treat N (from pass_count_cb) as a *minimum* rather than a hard cap, so
-    // replay_continue_cb can extend the loop beyond N ("run at least 4 passes, but keep going if I
+    // TODO: optionally treat N (from replay_pass_count) as a *minimum* rather than a hard cap, so
+    // replay_continue can extend the loop beyond N ("run at least 4 passes, but keep going if I
     // still need more"). The app's completion signal is already fired once after the loop (see
     // WriteInterceptor), not at pass N-1, so lifting the cap below would be sufficient.
     if(!plan.indefinite && is_final_pass) return false;
 
-    if(plan.replay_continue_cb)
-        return plan.replay_continue_cb(plan.config_data.dispatch_info,
-                                       current_pass,
-                                       plan.indefinite ? 0 : plan.total_passes,
-                                       plan.user_data) != 0;
+    if(plan.replay_continue)
+        return plan.replay_continue(plan.config_data.dispatch_info,
+                                    current_pass,
+                                    plan.indefinite ? 0 : plan.total_passes,
+                                    plan.user_data) != 0;
 
     // No continue cb: indefinite loops require one (rejected at config), so this is a fixed loop
     // that has not yet reached its final pass.

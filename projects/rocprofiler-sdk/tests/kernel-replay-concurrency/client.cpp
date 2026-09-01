@@ -135,13 +135,13 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        if(!hog)  // victim: leave pass_count_cb NULL -> NOT replayed
+        if(!hog)  // victim: leave replay_pass_count NULL -> NOT replayed
         {
             g_victim_cfg.fetch_add(1, std::memory_order_relaxed);
             return;
         }
-        p->pass_count_cb  = hog_pass_count;
-        g_hog_dispatch_id = p->dispatch_info.dispatch_id;  // reused by every pass of this replay
+        p->replay_pass_count = hog_pass_count;
+        g_hog_dispatch_id    = p->dispatch_info.dispatch_id;  // reused by every pass of this replay
         g_hog_cfg.fetch_add(1, std::memory_order_relaxed);
         // snapshot happens right after this returns -> make sure V=OLD is already set
         while(c->old_ready.load() == 0)

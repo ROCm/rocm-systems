@@ -53,19 +53,17 @@ rocprofiler_test_c_replay_offset_size(void);
 size_t
 rocprofiler_test_c_replay_offset_dispatch_info(void);
 size_t
-rocprofiler_test_c_replay_offset_pass_count_cb(void);
+rocprofiler_test_c_replay_offset_replay_pass_count(void);
 size_t
-rocprofiler_test_c_replay_offset_replay_continue_cb(void);
+rocprofiler_test_c_replay_offset_replay_continue(void);
 size_t
 rocprofiler_test_c_replay_offset_current_pass(void);
 size_t
 rocprofiler_test_c_replay_offset_total_passes(void);
 size_t
-rocprofiler_test_c_replay_offset_local_enable_cb(void);
+rocprofiler_test_c_replay_offset_replay_start_context(void);
 size_t
-rocprofiler_test_c_replay_offset_local_disable_cb(void);
-size_t
-rocprofiler_test_c_replay_offset_reserved_padding(void);
+rocprofiler_test_c_replay_offset_replay_stop_context(void);
 int
 rocprofiler_test_c_replay_operation_last(void);
 int
@@ -120,16 +118,14 @@ TEST(kernel_replay_abi, dispatch_info_follows_size)
 TEST(kernel_replay_abi, members_are_in_declaration_order)
 {
     EXPECT_LT(offsetof(replay_data_t, size), offsetof(replay_data_t, dispatch_info));
-    EXPECT_LT(offsetof(replay_data_t, dispatch_info), offsetof(replay_data_t, pass_count_cb));
-    EXPECT_LT(offsetof(replay_data_t, pass_count_cb), offsetof(replay_data_t, replay_continue_cb));
-    EXPECT_LT(offsetof(replay_data_t, replay_continue_cb), offsetof(replay_data_t, current_pass));
+    EXPECT_LT(offsetof(replay_data_t, dispatch_info), offsetof(replay_data_t, replay_pass_count));
+    EXPECT_LT(offsetof(replay_data_t, replay_pass_count), offsetof(replay_data_t, replay_continue));
+    EXPECT_LT(offsetof(replay_data_t, replay_continue), offsetof(replay_data_t, current_pass));
     EXPECT_LT(offsetof(replay_data_t, current_pass), offsetof(replay_data_t, total_passes));
-    EXPECT_LT(offsetof(replay_data_t, total_passes),
-              offsetof(replay_data_t, replay_local_enable_context_cb));
-    EXPECT_LT(offsetof(replay_data_t, replay_local_enable_context_cb),
-              offsetof(replay_data_t, replay_local_disable_context_cb));
-    EXPECT_LT(offsetof(replay_data_t, replay_local_disable_context_cb),
-              offsetof(replay_data_t, reserved_padding));
+    EXPECT_LT(offsetof(replay_data_t, total_passes), offsetof(replay_data_t, replay_start_context));
+    EXPECT_LT(offsetof(replay_data_t, replay_start_context),
+              offsetof(replay_data_t, replay_stop_context));
+    EXPECT_LT(offsetof(replay_data_t, replay_stop_context), sizeof(replay_data_t));
 }
 
 // No member may overlap the one after it, and the last member must fit inside the struct. This
@@ -138,25 +134,23 @@ TEST(kernel_replay_abi, members_do_not_overlap_and_fit)
 {
     EXPECT_GE(offsetof(replay_data_t, dispatch_info),
               offsetof(replay_data_t, size) + sizeof(replay_data_t{}.size));
-    EXPECT_GE(offsetof(replay_data_t, pass_count_cb),
+    EXPECT_GE(offsetof(replay_data_t, replay_pass_count),
               offsetof(replay_data_t, dispatch_info) + sizeof(replay_data_t{}.dispatch_info));
-    EXPECT_GE(offsetof(replay_data_t, replay_continue_cb),
-              offsetof(replay_data_t, pass_count_cb) + sizeof(replay_data_t{}.pass_count_cb));
     EXPECT_GE(
-        offsetof(replay_data_t, current_pass),
-        offsetof(replay_data_t, replay_continue_cb) + sizeof(replay_data_t{}.replay_continue_cb));
+        offsetof(replay_data_t, replay_continue),
+        offsetof(replay_data_t, replay_pass_count) + sizeof(replay_data_t{}.replay_pass_count));
+    EXPECT_GE(offsetof(replay_data_t, current_pass),
+              offsetof(replay_data_t, replay_continue) + sizeof(replay_data_t{}.replay_continue));
     EXPECT_GE(offsetof(replay_data_t, total_passes),
               offsetof(replay_data_t, current_pass) + sizeof(replay_data_t{}.current_pass));
-    EXPECT_GE(offsetof(replay_data_t, replay_local_enable_context_cb),
+    EXPECT_GE(offsetof(replay_data_t, replay_start_context),
               offsetof(replay_data_t, total_passes) + sizeof(replay_data_t{}.total_passes));
-    EXPECT_GE(offsetof(replay_data_t, replay_local_disable_context_cb),
-              offsetof(replay_data_t, replay_local_enable_context_cb) +
-                  sizeof(replay_data_t{}.replay_local_enable_context_cb));
-    EXPECT_GE(offsetof(replay_data_t, reserved_padding),
-              offsetof(replay_data_t, replay_local_disable_context_cb) +
-                  sizeof(replay_data_t{}.replay_local_disable_context_cb));
-    EXPECT_GE(sizeof(replay_data_t),
-              offsetof(replay_data_t, reserved_padding) + sizeof(replay_data_t{}.reserved_padding));
+    EXPECT_GE(offsetof(replay_data_t, replay_stop_context),
+              offsetof(replay_data_t, replay_start_context) +
+                  sizeof(replay_data_t{}.replay_start_context));
+    EXPECT_GE(
+        sizeof(replay_data_t),
+        offsetof(replay_data_t, replay_stop_context) + sizeof(replay_data_t{}.replay_stop_context));
 }
 
 // Pass counters are documented as uint64_t. A tool reading them through the header's type must see
@@ -179,45 +173,36 @@ TEST(kernel_replay_abi, callback_signatures_are_pinned)
         int (*)(rocprofiler_kernel_dispatch_info_t, uint64_t, uint64_t, rocprofiler_user_data_t);
     using toggle_fn = rocprofiler_status_t (*)(rocprofiler_context_id_t);
 
-    EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.pass_count_cb), pass_count_fn>::value));
-    EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_continue_cb), continue_fn>::value));
-    EXPECT_TRUE(
-        (std::is_same<decltype(replay_data_t{}.replay_local_enable_context_cb), toggle_fn>::value));
-    EXPECT_TRUE((
-        std::is_same<decltype(replay_data_t{}.replay_local_disable_context_cb), toggle_fn>::value));
+    EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_pass_count), pass_count_fn>::value));
+    EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_continue), continue_fn>::value));
+    EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_start_context), toggle_fn>::value));
+    EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_stop_context), toggle_fn>::value));
 }
 
 // A zeroed record must mean "do not replay this dispatch". The header documents a NULL
-// pass_count_cb as the per-dispatch opt-out, so zero-initialization has to produce it: a tool that
-// ignores the CONFIG callback entirely gets the safe behaviour.
+// replay_pass_count as the per-dispatch opt-out, so zero-initialization has to produce it: a tool
+// that ignores the CONFIG callback entirely gets the safe behaviour.
 TEST(kernel_replay_abi, zero_initialized_record_opts_out_of_replay)
 {
     replay_data_t rec = {};
-    EXPECT_EQ(rec.pass_count_cb, nullptr);
-    EXPECT_EQ(rec.replay_continue_cb, nullptr);
-    EXPECT_EQ(rec.replay_local_enable_context_cb, nullptr);
-    EXPECT_EQ(rec.replay_local_disable_context_cb, nullptr);
+    EXPECT_EQ(rec.replay_pass_count, nullptr);
+    EXPECT_EQ(rec.replay_continue, nullptr);
+    EXPECT_EQ(rec.replay_start_context, nullptr);
+    EXPECT_EQ(rec.replay_stop_context, nullptr);
     EXPECT_EQ(rec.current_pass, 0u);
     EXPECT_EQ(rec.total_passes, 0u);
     EXPECT_EQ(rec.size, 0u);
 }
 
 // The versioning scheme compares the SDK-written size against the tool's compiled layout prefix.
-// With reserved_padding, size excludes the tail reservation (see fwd.h dispatch_info pattern).
+// The record carries no tail reservation, so size is the whole struct: a tool that finds a field's
+// offset below the size the SDK wrote knows the SDK populated that field.
 TEST(kernel_replay_abi, size_member_carries_the_layout_prefix)
 {
     replay_data_t rec = {};
-    rec.size          = offsetof(replay_data_t, reserved_padding);
-    EXPECT_EQ(rec.size, offsetof(replay_data_t, reserved_padding));
-    EXPECT_LT(rec.size, sizeof(replay_data_t));
-    EXPECT_GT(rec.size, offsetof(replay_data_t, replay_local_disable_context_cb));
-}
-
-TEST(kernel_replay_abi, reserved_padding_is_at_the_tail)
-{
-    EXPECT_EQ(offsetof(replay_data_t, reserved_padding) + sizeof(replay_data_t{}.reserved_padding),
-              sizeof(replay_data_t));
-    EXPECT_EQ(sizeof(replay_data_t{}.reserved_padding), 64u);
+    rec.size          = sizeof(replay_data_t);
+    EXPECT_EQ(rec.size, sizeof(replay_data_t));
+    EXPECT_GT(rec.size, offsetof(replay_data_t, replay_stop_context));
 }
 
 // A record is passed by pointer and read field-by-field; it must be aligned for its widest member
@@ -314,18 +299,18 @@ TEST(kernel_replay_abi, indefinite_loop_is_distinguishable_from_single_pass)
 TEST(kernel_replay_abi, writing_callbacks_does_not_disturb_pass_counters)
 {
     replay_data_t rec = {};
-    rec.size          = offsetof(replay_data_t, reserved_padding);
+    rec.size          = sizeof(replay_data_t);
     rec.current_pass  = 2;
     rec.total_passes  = 5;
 
-    rec.pass_count_cb = [](rocprofiler_kernel_dispatch_info_t,
-                           rocprofiler_user_data_t) -> uint64_t { return 7; };
+    rec.replay_pass_count = [](rocprofiler_kernel_dispatch_info_t,
+                               rocprofiler_user_data_t) -> uint64_t { return 7; };
 
     EXPECT_EQ(rec.current_pass, 2u);
     EXPECT_EQ(rec.total_passes, 5u);
-    EXPECT_EQ(rec.size, offsetof(replay_data_t, reserved_padding));
-    ASSERT_NE(rec.pass_count_cb, nullptr);
-    EXPECT_EQ(rec.pass_count_cb(rec.dispatch_info, rocprofiler_user_data_t{}), 7u);
+    EXPECT_EQ(rec.size, sizeof(replay_data_t));
+    ASSERT_NE(rec.replay_pass_count, nullptr);
+    EXPECT_EQ(rec.replay_pass_count(rec.dispatch_info, rocprofiler_user_data_t{}), 7u);
 }
 
 // A tool built against an older, shorter header memcpy's only the prefix it knows about. The bytes
@@ -333,7 +318,7 @@ TEST(kernel_replay_abi, writing_callbacks_does_not_disturb_pass_counters)
 TEST(kernel_replay_abi, truncated_copy_preserves_the_known_prefix)
 {
     replay_data_t src = {};
-    src.size          = offsetof(replay_data_t, reserved_padding);
+    src.size          = sizeof(replay_data_t);
     src.current_pass  = 11;
     src.total_passes  = 13;
 
@@ -368,20 +353,18 @@ TEST(kernel_replay_abi, c_and_cxx_agree_on_every_field_offset)
     EXPECT_EQ(rocprofiler_test_c_replay_offset_size(), offsetof(replay_data_t, size));
     EXPECT_EQ(rocprofiler_test_c_replay_offset_dispatch_info(),
               offsetof(replay_data_t, dispatch_info));
-    EXPECT_EQ(rocprofiler_test_c_replay_offset_pass_count_cb(),
-              offsetof(replay_data_t, pass_count_cb));
-    EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_continue_cb(),
-              offsetof(replay_data_t, replay_continue_cb));
+    EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_pass_count(),
+              offsetof(replay_data_t, replay_pass_count));
+    EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_continue(),
+              offsetof(replay_data_t, replay_continue));
     EXPECT_EQ(rocprofiler_test_c_replay_offset_current_pass(),
               offsetof(replay_data_t, current_pass));
     EXPECT_EQ(rocprofiler_test_c_replay_offset_total_passes(),
               offsetof(replay_data_t, total_passes));
-    EXPECT_EQ(rocprofiler_test_c_replay_offset_local_enable_cb(),
-              offsetof(replay_data_t, replay_local_enable_context_cb));
-    EXPECT_EQ(rocprofiler_test_c_replay_offset_local_disable_cb(),
-              offsetof(replay_data_t, replay_local_disable_context_cb));
-    EXPECT_EQ(rocprofiler_test_c_replay_offset_reserved_padding(),
-              offsetof(replay_data_t, reserved_padding));
+    EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_start_context(),
+              offsetof(replay_data_t, replay_start_context));
+    EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_stop_context(),
+              offsetof(replay_data_t, replay_stop_context));
 }
 
 TEST(kernel_replay_abi, c_and_cxx_agree_on_enum_values)
@@ -400,14 +383,14 @@ TEST(kernel_replay_abi, record_written_by_c_reads_back_in_cxx)
     replay_data_t rec = {};
     rocprofiler_test_c_replay_fill(&rec, 3, 9);
 
-    EXPECT_EQ(rec.size, offsetof(replay_data_t, reserved_padding));
+    EXPECT_EQ(rec.size, sizeof(replay_data_t));
     EXPECT_EQ(rec.current_pass, 3u);
     EXPECT_EQ(rec.total_passes, 9u);
 
     // Fields the C side did not write must still be zero: a layout disagreement would show up as
     // one of C's writes landing on top of a neighbouring member.
-    EXPECT_EQ(rec.pass_count_cb, nullptr);
-    EXPECT_EQ(rec.replay_continue_cb, nullptr);
-    EXPECT_EQ(rec.replay_local_enable_context_cb, nullptr);
-    EXPECT_EQ(rec.replay_local_disable_context_cb, nullptr);
+    EXPECT_EQ(rec.replay_pass_count, nullptr);
+    EXPECT_EQ(rec.replay_continue, nullptr);
+    EXPECT_EQ(rec.replay_start_context, nullptr);
+    EXPECT_EQ(rec.replay_stop_context, nullptr);
 }
