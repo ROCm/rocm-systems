@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/consan/consan_placement.h"
 
 #include <concepts>
 #include <set>
@@ -453,6 +454,44 @@ TEST(ConSanObservationPlan, CommittedLoweringRetainsEveryLocationInASequence) {
       record_replay_runtime_mapping_for(policy.plan, intent_ids));
   ASSERT_TRUE(commit);
   EXPECT_EQ(commit->locations, (std::vector(locations.begin(), locations.end())));
+}
+
+TEST(ConSanObservationPlan, InstrumentedPatchGeometryBuildsOneLocationPairPerOriginalSite) {
+  const ConSanAccessPolicyResult access = plan_consan_access_observation(
+      one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
+  ASSERT_TRUE(access.valid());
+  ConSanObservationPlan plan =
+      one_barrier_observation_plan(access.plan.probe_intents.front().physical_site);
+  const ConSanObservationPlan duplicate = plan;
+  ASSERT_TRUE(plan.append(duplicate));
+  ASSERT_EQ(plan.probe_intents.size(), 2u);
+
+  const std::array intent_ids = {ConSanProbeIntentId{0}, ConSanProbeIntentId{1}};
+  const ConSanCommittedPatchGeometry patch{
+      .anchor_offset = 0x200,
+      .trampoline_offset = 0x300,
+      .original_size = 4,
+      .trampoline_size = 12,
+      .relocated_guest_instruction_offset = 0x308,
+  };
+  const auto commit = make_consan_instrumented_patch_lowering(plan, intent_ids, patch);
+  ASSERT_TRUE(commit);
+  ASSERT_EQ(commit->original_physical_sites.size(), 1u);
+  ASSERT_EQ(commit->locations.size(), 2u);
+  EXPECT_EQ(commit->locations[0], (ConSanCommittedLoweringLocation{
+                                      .original_site = plan.probe_intents.front().physical_site,
+                                      .emitted_text_offset = 0x200,
+                                      .emitted_size = 4,
+                                      .relocated_guest_text_offset = std::nullopt,
+                                  }));
+  EXPECT_EQ(commit->locations[1], (ConSanCommittedLoweringLocation{
+                                      .original_site = plan.probe_intents.front().physical_site,
+                                      .emitted_text_offset = 0x300,
+                                      .emitted_size = 12,
+                                      .relocated_guest_text_offset = 0x308,
+                                  }));
+  const std::array stale_id = {ConSanProbeIntentId{2}};
+  EXPECT_FALSE(make_consan_instrumented_patch_lowering(plan, stale_id, patch));
 }
 
 TEST(ConSanObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransactionally) {

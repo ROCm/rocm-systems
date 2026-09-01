@@ -293,6 +293,31 @@ if(NOT _moi_sync_commit_contract MATCHES "append_moi_sync_lowering_commit" OR
         "ConSan synchronization commit boundary lost its plan-owned intent set"
     )
 endif()
+foreach(_patch_commit_client IN ITEMS
+    consan_moi_access_apply.cpp
+    consan_moi_sync_emission.cpp
+    consan_supercollider_common.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_patch_commit_client}"
+        "vector<ConSanCommittedLoweringLocation>[ \\t]+locations"
+        "patch geometry must become semantic locations in one contract-level owner"
+    )
+    _consan_assert_no_match(
+        "${_consan_dir}/${_patch_commit_client}"
+        "make_moi_sync_lowering_commit"
+        "MOI synchronization must use the shared patch-geometry commit owner"
+    )
+endforeach()
+file(READ "${_consan_dir}/consan_placement.inc" _committed_patch_location_owner)
+if(NOT _committed_patch_location_owner MATCHES
+       "make_consan_instrumented_patch_lowering" OR
+   NOT _committed_patch_location_owner MATCHES
+       "patch[.]trampoline_size == 0u")
+    message(FATAL_ERROR
+        "ConSan shared committed-patch location construction is missing"
+    )
+endif()
 
 # Object-wide mode semantics are selected once by their mode owners and then
 # consumed as one immutable product. Common resource and emission components

@@ -689,4 +689,42 @@ void append_consan_patch_words(std::vector<uint8_t> &bytes, std::span<const uint
   return true;
 }
 
+std::optional<ConSanCommittedLowering> make_consan_instrumented_patch_lowering(
+    const ConSanObservationPlan &plan, std::span<const ConSanProbeIntentId> intent_ids,
+    const ConSanCommittedPatchGeometry &patch, ConSanRuntimeStaticMapping runtime_mapping) {
+  std::vector<PhysicalSiteId> original_sites;
+  for (ConSanProbeIntentId id : intent_ids) {
+    const ConSanProbeIntent *intent = plan.intent(id);
+    if (intent == nullptr)
+      return std::nullopt;
+    if (std::ranges::find(original_sites, intent->physical_site) == original_sites.end())
+      original_sites.push_back(intent->physical_site);
+  }
+
+  std::vector<ConSanCommittedLoweringLocation> locations;
+  locations.reserve(original_sites.size() * (patch.trampoline_size == 0u ? 1u : 2u));
+  for (const PhysicalSiteId &site : original_sites) {
+    if (patch.original_size != 0u) {
+      locations.push_back({
+          .original_site = site,
+          .emitted_text_offset = patch.anchor_offset,
+          .emitted_size = patch.original_size,
+          .relocated_guest_text_offset =
+              patch.trampoline_size == 0u ? patch.relocated_guest_instruction_offset : std::nullopt,
+      });
+    }
+    if (patch.trampoline_size != 0u) {
+      locations.push_back({
+          .original_site = site,
+          .emitted_text_offset = patch.trampoline_offset,
+          .emitted_size = patch.trampoline_size,
+          .relocated_guest_text_offset = patch.relocated_guest_instruction_offset,
+      });
+    }
+  }
+  return make_consan_committed_lowering(plan, intent_ids, locations,
+                                        ConSanLoweringOutcomeKind::Instrumented, {},
+                                        std::move(runtime_mapping));
+}
+
 } // namespace rocjitsu

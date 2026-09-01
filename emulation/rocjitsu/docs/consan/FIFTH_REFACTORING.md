@@ -4367,3 +4367,65 @@ material. Remaining target locality, operating-point and transaction breadth,
 larger legacy harvesting, material whole-refactoring shrinkage, the target-side
 extension exercise, and the independent Section 14 completion audit remain
 open. The goal therefore remains active.
+
+### 16.50 Convergence checkpoint 49: shared instrumented-patch geometry
+
+Following the synchronization commit path into its neighboring access paths
+found three independent owners of the same transformation fact. MOI
+synchronization, MOI access, and SuperCollider access each reconstructed
+semantic anchor and trampoline locations from a committed patch geometry.
+Their implementations differed only in where intent identity came from and in
+the extra runtime attribution carried by MOI accesses. The copies crossed mode
+boundaries, and the SuperCollider copy accepted the complete mutable transform
+transaction even though it needed only the observation plan.
+
+Transformation placement now owns one
+`make_consan_instrumented_patch_lowering` operation. It resolves plan-owned
+intent identity, deduplicates original physical sites, converts one committed
+patch geometry into the corresponding semantic anchor/trampoline locations,
+and delegates validation to the existing semantic-commit authority. MOI
+synchronization, all three MOI access engines, and SuperCollider flat and LDS
+lowering use that operation. MOI access adds its mode-owned runtime attribution
+without rebuilding geometry; SuperCollider passes the narrow immutable
+observation plan and retains its single-physical-site precondition. The local
+MOI synchronization builder and the other two location reconstruction loops
+are deleted rather than wrapped.
+
+The architecture gate rejects local committed-location vectors and the retired
+MOI synchronization builder in all three former clients, and requires the
+shared construction to remain in the transformation-placement owner. A direct
+regression proves that two intents coalesced at one physical site produce
+exactly one anchor/trampoline pair and that a stale plan-local intent ID is
+rejected. The existing malformed-patch behavior remains fail-closed: MOI and
+SuperCollider access commits reject a zero-sized original patch, and
+SuperCollider rejects an empty or cross-site intent set.
+
+| Signal | Checkpoint 49 | Cumulative change | Slice change from checkpoint 48 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,395 | +420 | **-18** |
+| Nonblank production lines | 99,112 | +29 | **-19** |
+| Production implementation lines | 91,392 | **-58** | **-19** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 195 / 56 | **-81 / -1** | **-1 / 0** |
+| `ConSanPatchInfo` references / files | 206 / 28 | +6 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 357 / 63 | +67 / +12 | 0 / 0 |
+| Client-local patch-geometry location builders | **0** | n/a | **-3** |
+| Shared instrumented-patch geometry authorities | **1** | n/a | converged |
+| Test inventory | **5,382** | **+37** | **+1** |
+
+Validation includes a final-tree `-j16` build; the exact architecture-boundary
+test; all 1,492 focused MOI, SuperCollider, observation, and five-target
+emulation tests; all 4,747 nonphysical tests over the five emulated targets at
+`-j16`; and all 635 physical gfx1201 tests serialized at `-j1`. No test was
+removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, 14.8, and
+14.9. One transformation-level fact now has one owner, mode clients retain only
+their distinct attribution and applicability rules, a broad transaction input
+is narrowed, coverage grows, and production shrinks. The cumulative
+fifty-eight-line implementation reduction is still not material. Remaining
+target locality, operating-point and transaction breadth, larger legacy
+harvesting, material whole-refactoring shrinkage, the target-side extension
+exercise, and the independent Section 14 completion audit remain open. The
+goal therefore remains active.

@@ -118,4 +118,12 @@ void append_consan_patch_words(std::vector<uint8_t> &bytes, std::span<const uint
                                          uint32_t max_word_count, rj_code_arch_t arch);
 [[nodiscard]] bool has_only_rocclr_runtime_kernels(const ProgramInventory &program_inventory);
 
+/// Construct one instrumented semantic commit directly from plan-owned intent
+/// identity and the narrow geometry shared by every committed patch product.
+/// Anchor and trampoline locations are emitted once for every unique original
+/// physical site covered by the intent set; no patch kind is interpreted.
+[[nodiscard]] std::optional<ConSanCommittedLowering> make_consan_instrumented_patch_lowering(
+    const ConSanObservationPlan &plan, std::span<const ConSanProbeIntentId> intent_ids,
+    const ConSanCommittedPatchGeometry &patch, ConSanRuntimeStaticMapping runtime_mapping = {});
+
 } // namespace rocjitsu

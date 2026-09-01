@@ -7,6 +7,7 @@
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
+#include "rocjitsu/code/patch/consan/consan_placement.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
 
@@ -21,22 +22,8 @@ using consan_moi_detail::append_word_bytes;
 make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
                                 const ConSanMoiCandidate &candidate,
                                 const ConSanPatchLoweringProduct &patch) {
-  std::vector<ConSanCommittedLoweringLocation> locations;
-  locations.push_back({
-      .original_site = candidate.physical_id,
-      .emitted_text_offset = patch.anchor_offset,
-      .emitted_size = patch.original_size,
-      .relocated_guest_text_offset =
-          patch.trampoline_size == 0u ? patch.relocated_guest_instruction_offset : std::nullopt,
-  });
-  if (patch.trampoline_size != 0u) {
-    locations.push_back({
-        .original_site = candidate.physical_id,
-        .emitted_text_offset = patch.trampoline_offset,
-        .emitted_size = patch.trampoline_size,
-        .relocated_guest_text_offset = patch.relocated_guest_instruction_offset,
-    });
-  }
+  if (patch.original_size == 0u)
+    return std::nullopt;
   ConSanStaticAccessAttribution access{
       .intent_ids = candidate.intent_ids,
       .original_site = candidate.physical_id,
@@ -93,9 +80,8 @@ make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
   default:
     return std::nullopt;
   }
-  return make_consan_committed_lowering(observation, candidate.intent_ids, locations,
-                                        ConSanLoweringOutcomeKind::Instrumented, {},
-                                        std::move(runtime_mapping));
+  return make_consan_instrumented_patch_lowering(observation, candidate.intent_ids, patch,
+                                                 std::move(runtime_mapping));
 }
 
 /// Apply the descriptor growth shared by every appended MOI access engine.

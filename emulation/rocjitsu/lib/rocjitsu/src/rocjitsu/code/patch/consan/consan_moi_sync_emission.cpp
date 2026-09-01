@@ -18,6 +18,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
+#include "rocjitsu/code/patch/consan/consan_placement.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -54,53 +55,12 @@ using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 
 namespace consan_moi_impl {
-/// Prepare the semantic half of one synchronization byte-mutation
-/// transaction. Intent identity comes from the immutable lowering plan, while
-/// emitted geometry comes from the patch product being committed in the same
-/// transaction. No patch kind or anchor is interpreted to recover either.
-[[nodiscard]] std::optional<ConSanCommittedLowering>
-make_moi_sync_lowering_commit(const ConSanObservationPlan &observation,
-                              std::span<const ConSanProbeIntentId> intent_ids,
-                              const ConSanCommittedPatchGeometry &patch) {
-  std::vector<PhysicalSiteId> original_sites;
-  for (ConSanProbeIntentId id : intent_ids) {
-    const ConSanProbeIntent *intent = observation.intent(id);
-    if (intent == nullptr)
-      return std::nullopt;
-    if (std::ranges::find(original_sites, intent->physical_site) == original_sites.end())
-      original_sites.push_back(intent->physical_site);
-  }
-
-  std::vector<ConSanCommittedLoweringLocation> locations;
-  locations.reserve(original_sites.size() * (patch.trampoline_size == 0u ? 1u : 2u));
-  for (const PhysicalSiteId &site : original_sites) {
-    if (patch.original_size != 0u) {
-      locations.push_back({
-          .original_site = site,
-          .emitted_text_offset = patch.anchor_offset,
-          .emitted_size = patch.original_size,
-          .relocated_guest_text_offset =
-              patch.trampoline_size == 0u ? patch.relocated_guest_instruction_offset : std::nullopt,
-      });
-    }
-    if (patch.trampoline_size != 0u) {
-      locations.push_back({
-          .original_site = site,
-          .emitted_text_offset = patch.trampoline_offset,
-          .emitted_size = patch.trampoline_size,
-          .relocated_guest_text_offset = patch.relocated_guest_instruction_offset,
-      });
-    }
-  }
-  return make_consan_committed_lowering(observation, intent_ids, locations,
-                                        ConSanLoweringOutcomeKind::Instrumented);
-}
-
 [[nodiscard]] bool append_moi_sync_intent_lowering_commit(
     ConSanTransformArtifacts &result, std::span<const ConSanProbeIntentId> intent_ids,
     const ConSanCommittedPatchGeometry &patch, std::string_view probe_name,
     std::vector<ConSanCommittedLowering> &commits) {
-  auto commit = make_moi_sync_lowering_commit(result.observation_plan(), intent_ids, patch);
+  auto commit =
+      make_consan_instrumented_patch_lowering(result.observation_plan(), intent_ids, patch);
   if (!commit) {
     result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                                " produced an invalid intent-bound lowering");

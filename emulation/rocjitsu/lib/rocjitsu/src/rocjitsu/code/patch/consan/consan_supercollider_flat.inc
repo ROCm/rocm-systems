@@ -1847,8 +1847,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   std::vector<ConSanCommittedLowering> lowering_commits;
   lowering_commits.reserve(planned_patches.size());
   for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
-    auto commit =
-        make_sc_access_lowering_commit(result, planned.intent_ids, *planned.site, planned.info);
+    auto commit = make_sc_access_lowering_commit(result.observation_plan(), planned.intent_ids,
+                                                 *planned.site, planned.info);
     if (!commit) {
       result.errors.emplace_back(
           "ConSan flat check/trap proof produced an invalid intent-bound lowering");
