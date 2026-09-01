@@ -30,10 +30,11 @@ void RaceDetector::setProfiler(ProfilerInterface &p) {
 
 EventId RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
                                       std::vector<uint32_t> registers, uint64_t execMask,
-                                      uint8_t byteMask, IntervalSet ldsIntervals) {
+                                      uint8_t byteMask, IntervalSet ldsIntervals,
+                                      amdgpu::WaitCounterType waitCounterType) {
   bool hasLds = !ldsIntervals.empty();
   EventId eid = events_.add(waveId, pc, type, std::move(registers), execMask, byteMask,
-                            std::move(ldsIntervals));
+                            std::move(ldsIntervals), waitCounterType);
   if (hasLds) {
     const auto &ivs = events_.ldsIntervals(eid);
     if (isToLds(type)) {
@@ -77,8 +78,15 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes) con
   }
 
   for (EventId eventId : ldsWriteEvents) {
-    if (wave == events_.waveId(eventId) && events_.status(eventId) == EventStatus::WAVE_COMPLETE) {
-      continue;
+    if (wave == events_.waveId(eventId)) {
+      // Ordinary DS operations from one wave are ordered by the LDS pipeline,
+      // so a later DS read cannot overtake this wave's earlier DS write. A
+      // direct-to-LDS VMEM operation is different: a same-wave DS read of its
+      // destination bytes must wait for vmcnt.
+      if (events_.type(eventId) == MemoryEventType::VGPR_TO_LDS ||
+          events_.status(eventId) == EventStatus::WAVE_COMPLETE) {
+        continue;
+      }
     }
     if (events_.ldsIntervals(eventId).overlapsRange(addr, addr + nBytes)) {
       raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, false, workgroupId, eventId});
@@ -102,7 +110,11 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes) co
   }
 
   for (EventId eventId : ldsReadEvents) {
-    if (wave == events_.waveId(eventId) && events_.status(eventId) == EventStatus::WAVE_COMPLETE) {
+    // A later ordinary DS write from the same wave cannot overtake an earlier
+    // DS read. The read's destination VGPR remains independently protected by
+    // lgkmcnt until it is safe to consume or overwrite. This WAR check does
+    // not cover LDS write/write ordering, which is not currently checked.
+    if (wave == events_.waveId(eventId)) {
       continue;
     }
     if (events_.ldsIntervals(eventId).overlapsRange(addr, addr + nBytes)) {
@@ -187,6 +199,17 @@ RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc, int num
   if (e.space == RaceViolation::Space::SGPR) {
     std::ostringstream oss;
     oss << "\nSGPR race detected on line " << wavePc << " (wave " << e.wave << ") in workgroup ("
+        << workgroupId.x << "," << workgroupId.y << "," << workgroupId.z
+        << "). Conflicting events:\n\n";
+
+    std::vector<uint64_t> eventPcs{wavePc, events_.pc(e.conflictingEvent)};
+    printCodeBlocks(oss, std::move(eventPcs));
+    return oss.str();
+  }
+
+  if (e.space == RaceViolation::Space::TTMP) {
+    std::ostringstream oss;
+    oss << "\nTTMP race detected on line " << wavePc << " (wave " << e.wave << ") in workgroup ("
         << workgroupId.x << "," << workgroupId.y << "," << workgroupId.z
         << "). Conflicting events:\n\n";
 

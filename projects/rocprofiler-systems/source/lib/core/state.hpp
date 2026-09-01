@@ -7,7 +7,7 @@
 #include "logger/debug.hpp"
 #include "utility.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <atomic>
 #include <cstdint>
@@ -282,13 +282,19 @@ private:
         return current_state;
     }
 
+    struct alignas(64) padded_history_t
+    {
+        std::vector<State> entries;
+    };
+
     static std::vector<State>& history()
     {
         auto thread_index = utility::get_thread_index();
 
         static auto state_history_array =
-            utility::get_filled_array<ROCPROFSYS_MAX_THREADS>(
-                []() { return utility::get_reserved_vector<State>(32); });
+            utility::get_filled_array<ROCPROFSYS_MAX_THREADS>([]() {
+                return padded_history_t{ utility::get_reserved_vector<State>(32) };
+            });
 
         if(thread_index >= ROCPROFSYS_MAX_THREADS)
         {
@@ -297,7 +303,7 @@ private:
             return local_vector;
         }
 
-        return state_history_array.at(thread_index);
+        return state_history_array.at(thread_index).entries;
     }
 };
 }  // namespace rocprofsys::state

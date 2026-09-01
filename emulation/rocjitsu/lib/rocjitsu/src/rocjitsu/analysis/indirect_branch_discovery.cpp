@@ -5,6 +5,7 @@
 
 #include "rocjitsu/analysis/control_flow.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
@@ -180,6 +181,16 @@ enum class ScalarSop2Op {
 struct PcValue {
   int64_t offset = 0;
   uint64_t source_getpc_offset = 0;
+  /// @brief Low SGPR of the pair the producing `s_getpc_b64` wrote.
+  ///
+  /// @details Not always the pair the eventual consumer reads. A lane-banked dispatcher builds
+  /// the address in a scratch pair, stashes it through `v_writelane_b32`, and restores it into a
+  /// different pair before the transfer. patch_recovered_builder_fixups regenerates only the add
+  /// half and leaves the original getpc in place, so its replacement has to name this pair:
+  /// naming the consumer's would pair a fresh add against a getpc that writes something else and
+  /// materialize an address derived from an unrelated register. Fully determined by
+  /// source_getpc_offset, so carrying it splits no lattice value that was previously merged.
+  uint16_t source_sreg = 0;
   uint64_t source_recovery_begin_offset = 0;
   uint64_t source_recovery_end_offset = 0;
   /// @brief False once a non-chain instruction was observed inside the recovery
@@ -660,7 +671,7 @@ private:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return add_base(0x47);
   case ROCJITSU_CODE_ARCH_RV32I:
   case ROCJITSU_CODE_ARCH_RV64I:
@@ -697,7 +708,7 @@ private:
       return std::nullopt;
     }
     return std::nullopt;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     switch (op) {
     case ScalarSop2Op::AddU32:
       return 0;
@@ -1145,7 +1156,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   //
   // Match only the self-update literal forms. Register addends would require a
   // separate constant-propagation proof and must continue to fail closed.
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || inst.mnemonic() != "s_add_nc_u64" ||
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || inst.mnemonic() != "s_add_nc_u64" ||
       inst.num_dst_operands() != 1 || inst.num_src_operands() != 2)
     return false;
 
@@ -1197,6 +1208,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
       .source_call_offset = ctx.insts[inst_index]->src_loc(),
       .source_target_offset = static_cast<uint64_t>(value.offset),
       .source_call_sreg = pair_lo,
+      .source_builder_sreg = value.source_sreg,
       .source_is_call = ctx.facts[inst_index].swappc_sdst.has_value(),
       .source_return_sreg = ctx.facts[inst_index].swappc_sdst.value_or(0),
   };
@@ -1558,7 +1570,7 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     return std::nullopt;
 
   const auto is_gfx1250_padding = [&](size_t index) {
-    if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+    if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
       return false;
     const Instruction &inst = *ctx.insts[index];
     // The gfx1250 sequence drains XCNT before an instruction prefetch. The
@@ -1643,7 +1655,7 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
     return std::nullopt;
 
   const auto is_gfx1250_padding = [&](size_t index) {
-    if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+    if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
       return false;
     const Instruction &inst = *ctx.insts[index];
     if (inst.mnemonic() == "s_wait_xcnt" || inst.mnemonic() == "s_prefetch_inst_pc_rel")
@@ -1800,6 +1812,7 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
       seed_pc_builder(pc_builders, inst.src_loc(), pair_lo);
       state.set_builder(pair_lo, PcValue{.offset = static_cast<int64_t>(next_offset),
                                          .source_getpc_offset = inst.src_loc(),
+                                         .source_sreg = pair_lo,
                                          .source_recovery_begin_offset = next_offset,
                                          .source_recovery_end_offset = next_offset});
       continue;
@@ -1945,16 +1958,67 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   // that bounded set avoids repeatedly scanning every fact
   // to recover information that changes only when the corresponding vector does.
   std::vector<std::bitset<REGISTER_SET_MAX_SGPRS>> entry_pairs(blocks.size());
-  std::deque<size_t> worklist;
+
+  // Visit blocks in reverse postorder. The least fixed point of this monotone
+  // join does not depend on the visit order, but the order decides how many
+  // times it is recomputed. A recovered indirect call gives its shared callee
+  // block one predecessor per call site -- thousands of them on a large device
+  // library -- and popping in block-index order then re-evaluates that
+  // O(predecessors x pairs) join once for every predecessor that happens to be
+  // processed after it. Reverse postorder evaluates a predecessor before its
+  // successors wherever the graph is acyclic, so a block is normally recomputed
+  // only for its back edges. On the largest hipTensor object this is the
+  // difference between 84.8M block visits and 558k, and between 264 s and 0.7 s
+  // per round.
+  //
+  // The order is a pure function of the block graph: roots are tried in
+  // ascending block index, successors in their stored order, and the root loop
+  // covers every block, so blocks unreachable from any earlier root still
+  // receive a position and are still seeded onto the worklist below.
+  std::vector<size_t> rpo_order;
+  rpo_order.reserve(blocks.size());
+  {
+    std::vector<uint8_t> visited(blocks.size(), 0);
+    std::vector<std::pair<size_t, size_t>> stack;
+    for (size_t root = 0; root < blocks.size(); ++root) {
+      if (visited[root])
+        continue;
+      visited[root] = 1;
+      stack.emplace_back(root, 0);
+      while (!stack.empty()) {
+        const size_t node = stack.back().first;
+        size_t &next_successor = stack.back().second;
+        if (next_successor < blocks[node].successors.size()) {
+          const size_t successor = blocks[node].successors[next_successor++];
+          if (successor < blocks.size() && !visited[successor]) {
+            visited[successor] = 1;
+            stack.emplace_back(successor, 0);
+          }
+          continue;
+        }
+        rpo_order.push_back(node);
+        stack.pop_back();
+      }
+    }
+  }
+  std::ranges::reverse(rpo_order);
+  std::vector<size_t> rpo_position(blocks.size(), 0);
+  for (size_t position = 0; position < rpo_order.size(); ++position)
+    rpo_position[rpo_order[position]] = position;
+
+  // Keyed by reverse-postorder position so the lowest position is always popped
+  // next. Positions are unique, so this is a total order and the pop sequence is
+  // fully determined by the block graph.
+  std::set<size_t> worklist;
   std::vector<bool> on_worklist(blocks.size(), false);
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
-    worklist.push_back(block_index);
+    worklist.insert(rpo_position[block_index]);
     on_worklist[block_index] = true;
   }
 
   while (!worklist.empty()) {
-    const size_t block_index = worklist.front();
-    worklist.pop_front();
+    const size_t block_index = rpo_order[*worklist.begin()];
+    worklist.erase(worklist.begin());
     on_worklist[block_index] = false;
 
     LatticeFacts new_entry;
@@ -2040,7 +2104,7 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
     for (size_t successor : blocks[block_index].successors) {
       if (on_worklist[successor])
         continue;
-      worklist.push_back(successor);
+      worklist.insert(rpo_position[successor]);
       on_worklist[successor] = true;
     }
   }
@@ -2221,7 +2285,28 @@ private:
 // state even when their backing storage is shared, so the bound is
 // conservative. Recovery is optional and fails closed on exhaustion.
 constexpr size_t kRetainedAnalysisUnitBytes = 64;
-constexpr size_t kMaxRetainedAnalysisUnits = size_t{1} << 20;
+// The retained charge scales with block count, not with how many lane stashes an object actually
+// uses: hipTensor's contraction kernels reach ~2.9M units across ~55k blocks and exhausted a 1<<20
+// bound partway through, which abandons lane recovery for the WHOLE object and leaves every
+// s_swap_pc_i64 unrecovered for the by-construction gate to refuse. The charge is deliberately
+// conservative -- states share copy-on-write backing and are billed once per entry/exit/call even
+// when identical -- so the nominal figure overstates real memory several times over. Measured peak
+// RSS across the hipTensor objects this admits is 243 MB, 273 MB, 288 MB and 653 MB for a 3.4 MB
+// input, against the corpus per-object budget of 4096 MiB, and the slowest takes 4.4 s of a 30 s
+// budget. Exhaustion remains fail-closed, so a still larger object loses recovery rather than
+// memory.
+//
+// Sized to admit the objects real workloads dispatch rather than to leave headroom. hipTensor's
+// scale_contraction and trinary_scale_contraction tests dispatch 4.65 MB and 4.70 MB objects that
+// 1<<24 still refused; at this bound they translate in 7.6 s and 1.06 GB, against a 30 s and
+// 4096 MiB per-object budget.
+//
+// Raising it does NOT expose the loader to the multi-minute translations some very large objects
+// take. Those are pre-existing and not governed by this constant: the 8.3 MB hipTensor object costs
+// 510 s / 2.4 GB on unmodified develop at 1<<20, 541 s at 1<<24 and 552 s at 1<<26 -- about 6%
+// across a 64x change in the bound, because the time is spent outside lane recovery almost
+// entirely. Exhaustion stays fail-closed: an object that outgrows this loses recovery, not memory.
+constexpr size_t kMaxRetainedAnalysisUnits = size_t{1} << 26;
 constexpr size_t kMaxCalleeSummaryVariantsPerTarget = 8;
 constexpr size_t kCalleeSummaryCacheEntryUnits =
     1 + (sizeof(CalleeSummaryCacheKey) + sizeof(std::optional<CalleeSummary>) + 3 * sizeof(void *) -
@@ -2415,7 +2500,9 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, const Instruction &inst,
 }
 
 void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &inst,
-                            std::span<const uint8_t> text) {
+                            std::span<const uint8_t> text, rj_code_arch_t arch) {
+  if (!isa_properties(arch).mode_has_gpr_idx_en)
+    return;
   constexpr uint16_t kGprIdxEnableBit = 27;
   const std::string_view mnemonic = inst.mnemonic();
   if (mnemonic == "s_set_gpr_idx_on") {
@@ -2536,7 +2623,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
   // This pass only observes MODE; it never inserts or reorders
   // S_SETREG/S_SET_VGPR_MSB and therefore cannot violate the required co-issue
   // spacing.
-  if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+  if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
     return;
 
   if (blocks.empty())
@@ -2684,7 +2771,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
             }
           }
           update_vgpr_mode(mode, inst, ctx.text);
-          update_gpr_idx_enabled(gpr_idx_enabled, inst, ctx.text);
+          update_gpr_idx_enabled(gpr_idx_enabled, inst, ctx.text, ctx.arch);
         }
         if (unsupported)
           break;
@@ -2805,6 +2892,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
         builders.set_builder(*facts.getpc_sdst, PcValue{.offset = static_cast<int64_t>(next_offset),
                                                         .source_getpc_offset = inst.src_loc(),
+                                                        .source_sreg = *facts.getpc_sdst,
                                                         .source_recovery_begin_offset = next_offset,
                                                         .source_recovery_end_offset = next_offset});
         continue;
@@ -3063,7 +3151,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       }
 
       update_vgpr_mode(state.vgpr_msb_imm, inst, ctx.text);
-      update_gpr_idx_enabled(state.gpr_idx_enabled, inst, ctx.text);
+      update_gpr_idx_enabled(state.gpr_idx_enabled, inst, ctx.text, ctx.arch);
     }
     publish_builders();
     return state;
@@ -3365,6 +3453,7 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
         .offset = static_cast<int64_t>(getpc_next) +
                   static_cast<int64_t>(static_cast<int32_t>(literal)) + 4,
         .source_getpc_offset = getpc_inst.src_loc(),
+        .source_sreg = *pair_lo,
         .source_recovery_begin_offset = getpc_next,
         .source_recovery_end_offset = sub_consumer->recovery_end,
     };

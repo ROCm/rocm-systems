@@ -63,10 +63,25 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     return hipErrorUnknown;
   }
 
+  // A wave costs its granule-rounded SGPRs plus the trap handler's reserve;
+  // omitting the reserve over-reports SGPR-bound kernels by a wave per SIMD.
+  // Mirrors LLVM AMDGPUUtils::getOccupancyWithNumSGPRs().
+  constexpr size_t DefaultSgprAllocGranule = 16;
+  const size_t sgprAllocGranule = device.info().sgprAllocGranularity_ != 0
+      ? device.info().sgprAllocGranularity_
+      : DefaultSgprAllocGranule;
+  const size_t sgprsPerWave =
+      amd::alignUp(wrkGrpInfo->usedSGPRs_, sgprAllocGranule) +
+      device.info().sgprTrapHandlerReserve_;
   const size_t GprWaves = wrkGrpInfo->usedSGPRs_ > 0
-      ? std::min(VgprWaves, device.info().sgprsPerSimd_ /
-                            amd::alignUp(wrkGrpInfo->usedSGPRs_, 16))
+      ? std::min(VgprWaves, device.info().sgprsPerSimd_ / sgprsPerWave)
       : VgprWaves;
+
+  if (GprWaves == 0) {
+    // As above: a bad SGPR count would zero alu_limited_threads, and hence
+    // bestBlockSize, giving a divide by zero when bestBlocksPerCU is computed.
+    return hipErrorUnknown;
+  }
 
   // The table contains SIMD per CU, not per WGP, so when WGP mode is set
   // on kernel metadata, multiply the number of SIMDs by 2, to account for
@@ -323,9 +338,15 @@ void __hipUnregisterFatBinary(void** modules) {
   if (!HIP_SKIP_ABORT_ON_GPU_ERROR || !amd::Device::IsGPUInError()) {
     std::call_once(unregister_device_sync, []() {
       for (const auto& hipDevice : g_devices) {
-        // By synchronizing devices ensure that all HSA signal handlers
-        // complete before RemoveFatBinary
         hipDevice->SyncAllStreams(true);
+        // SyncAllStreams only guarantees the GPU finished and the host observed
+        // the completion signals — the HSA async-handler thread can still be
+        // inside a completion callback.  That callback reports kernel names that
+        // point into the Kernel objects RemoveFatBinary is about to destroy, so
+        // the handlers have to be drained too, not just the streams.
+        for (auto* device : hipDevice->devices()) {
+          device->WaitForHsaAsyncHandlersIdle();
+        }
       }
     });
   }
@@ -718,23 +739,21 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   const int deviceId = hip::Stream::DeviceId(stream);
 
   const auto [hip_error, func] = [&]() -> std::pair<hipError_t, hipFunction_t> {
-    hipFunction_t f;
+    hipFunction_t f = nullptr;
     const hipError_t err = PlatformState::Instance().StatCO().GetFunc(&f, hostFunction, deviceId);
 
-    // Propagate specific invalid code object errors
-    if (err == hipErrorInvalidKernelFile ||
-        err == hipErrorInvalidDeviceFunction ||
-        err == hipErrorInvalidImage ||
-        err == hipErrorNotSupported) {  // ROCM_KPACK_ENABLED=OFF
-      return {err, nullptr};
-    }
     // If successful lookup with valid function, use it
     if (err == hipSuccess && f) {
       return {hipSuccess, f};
     }
 
-    // Fallback: assume it's a hip function type
-    return {hipSuccess, reinterpret_cast<hipFunction_t>(const_cast<void*>(hostFunction))};
+    // Only take fallback for hipErrorInvalidSymbol (not in registered table)
+    if (err == hipErrorInvalidSymbol) {
+      return {hipSuccess, reinterpret_cast<hipFunction_t>(const_cast<void*>(hostFunction))};
+    }
+
+    // Propagate all other errors
+    return {err, nullptr};
   }();
 
   if (hip_error != hipSuccess) {

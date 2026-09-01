@@ -8,6 +8,7 @@
 #define ROCJITSU_CONFIG_CONFIG_COMMON_H_
 
 #include "rocjitsu/config/kfd_device_config.h"
+#include "rocjitsu/config/pci_device_config.h"
 
 #include "flatbuffers/idl.h"
 #include "simulation_config_generated.h"
@@ -16,6 +17,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace rocjitsu {
@@ -54,12 +56,32 @@ with_parsed_simulation_config_json(const std::string &json, const std::string &s
   return std::forward<Callback>(callback)(config);
 }
 
+/// @brief Convert a FlatBuffers PCI bus table into the runtime config form.
+///
+/// @details A config that says nothing about the bus gets the defaults, which
+/// describe a compute GPU with apertures big enough for the driver to work with.
+inline PciDeviceConfig pci_device_from_fb(const fb::PciDeviceInfo *pci) {
+  PciDeviceConfig config;
+  if (pci == nullptr)
+    return config;
+
+  config.class_code = pci->class_code();
+  config.subsystem_vendor_id = pci->subsystem_vendor_id();
+  config.subsystem_id = pci->subsystem_id();
+  config.vram_aperture_bytes = pci->vram_aperture_bytes();
+  config.doorbell_aperture_bytes = pci->doorbell_aperture_bytes();
+  config.register_aperture_bytes = pci->register_aperture_bytes();
+  return config;
+}
+
 /// @brief Convert a FlatBuffers KFD identity table into the runtime config form.
 ///
 /// @details This copies only scalar/string topology values. The resulting
 /// config owns its marketing-name string so it is safe after the FlatBuffers
 /// parser storage goes out of scope.
-inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device) {
+/// @param json_path JSON path of @p device, used in validation diagnostics.
+inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device,
+                                          std::string_view json_path) {
   KfdDeviceConfig config;
   if (device == nullptr)
     return config;
@@ -97,6 +119,11 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device) {
   config.l2_assoc = device->l2_assoc();
   config.num_sdma_engines = device->num_sdma_engines();
   config.num_sdma_xgmi_engines = device->num_sdma_xgmi_engines();
+  config.num_sdma_queues_per_engine = device->num_sdma_queues_per_engine();
+  if (config.num_sdma_engines != 0 && config.num_sdma_queues_per_engine == 0)
+    throw std::runtime_error(std::string(json_path) +
+                             ".num_sdma_queues_per_engine must be nonzero when " +
+                             std::string(json_path) + ".num_sdma_engines is nonzero");
   config.num_cp_queues = device->num_cp_queues();
   config.max_engine_clk_fcompute = device->max_engine_clk_fcompute();
   config.location_id = device->location_id();

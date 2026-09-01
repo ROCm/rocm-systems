@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
-"""Flatten the GIN test matrix JSON into tab-separated rows for bash.
+"""Flatten the GIN test matrix JSON into delimited rows for bash.
 
-`run-gin-ci.sh` reads the emitted rows with `IFS=$'\t' read`, so the column
-layout below is a stable contract:
+`run-gin-ci.sh` reads the emitted rows with `IFS=$'\x1f' read` (ASCII unit
+separator). Tabs are avoided because bash collapses adjacent empty tab fields,
+which breaks tests with `"env": []` and non-empty `"args"`.
 
-  mca\t<flags>
-  debug_env\t<-x flags>   (appended to every test only when RCCL_CI_DEBUG=1)
-  test\t<name>\t<kind>\t<bin>\t<-x env flags>\t<args>
+Column layout:
+
+  mca<SEP><flags>
+  debug_env<SEP><-x flags>   (appended to every test only when RCCL_CI_DEBUG=1)
+  test<SEP><name><SEP><kind><SEP><bin><SEP><-x env flags><SEP><args>
+    kind: rocshmem | rccl-tests | fixtures (fixtures: gtest binary, no mpirun)
 """
+
+# ASCII unit separator: distinct from whitespace and unlikely in flags/args.
+_FIELD_SEP = "\x1f"
 
 import argparse
 import json
@@ -64,14 +71,13 @@ def parse_config(path: Path) -> GinConfig:
 
 
 def format_rows(config: GinConfig) -> list[str]:
-    """Render the parsed config as tab-separated rows for the bash runner."""
-    rows = ["mca\t" + config.mca]
-    rows.append("debug_env\t" + " ".join("-x " + e for e in config.debug_env))
+    """Render the parsed config as delimited rows for the bash runner."""
+    sep = _FIELD_SEP
+    rows = [f"mca{sep}{config.mca}"]
+    rows.append(f"debug_env{sep}{' '.join('-x ' + e for e in config.debug_env)}")
     for test in config.tests:
         env_flags = " ".join("-x " + e for e in test.env)
-        rows.append(
-            "\t".join(["test", test.name, test.kind, test.bin, env_flags, test.args])
-        )
+        rows.append(sep.join(["test", test.name, test.kind, test.bin, env_flags, test.args]))
     return rows
 
 
