@@ -121,6 +121,24 @@ that callback after ``CONFIG`` ``PHASE_ENTER`` returns:
 One dispatch id is reserved before ``CONFIG`` and reused for every pass. The application observes
 exactly one kernel completion regardless of pass count.
 
+Carry state with ``user_data``
+==============================
+
+The tracing callback receives a ``rocprofiler_user_data_t*`` for the current dispatch. Set it
+during ``CONFIG PHASE_ENTER`` to carry state through the complete replay sequence:
+
+* Use ``user_data->value`` for a small scalar such as a pass count or policy identifier.
+* Use ``user_data->ptr`` for a state object that remains alive through ``CONFIG PHASE_EXIT``.
+
+The SDK copies the union value after ``CONFIG PHASE_ENTER`` and supplies it to
+``replay_pass_count``, ``replay_continue``, and every ``PASS`` callback. Replacing the union value
+during a ``PASS`` callback is not retained. When using ``ptr``, however, callbacks can mutate the
+pointed-to state and later callbacks can observe those changes.
+
+``samples/kernel_replay/basic_client_with_user_data.cpp`` demonstrates the pointer form. It stores
+tool state in ``user_data.ptr``, reads the requested maximum from ``replay_pass_count``, and lets a
+``PASS PHASE_EXIT`` update stop the loop through ``replay_continue``.
+
 Localized context control
 =========================
 
@@ -136,6 +154,8 @@ Overrides are sticky across passes and scoped to the replay loop. See
 In-tree examples
 ================
 
+* ``samples/kernel_replay/basic_client_with_user_data.cpp`` — threads mutable tool state through
+  ``user_data.ptr`` without a dispatch-id side table.
 * ``tests/kernel-replay-concurrency/`` — custom client that replays one kernel and opts another
   out, asserting concurrent non-replayed work is not corrupted by snapshot/restore.
 * ``tests/kernel-replay-local-context/`` — custom client that starts/stops per-service contexts

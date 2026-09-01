@@ -27,6 +27,7 @@ service (same idea as `samples/counter_collection/`).
 | Sample | Passes | Services |
 |---|---|---|
 | `kernel-replay-basic` | 4 | Replay only. The app still sees one kernel completion. |
+| `kernel-replay-basic-user-data` | 4 max / 2 actual | Carries tool state through `user_data.ptr`; PASS state stops replay through `replay_continue`. |
 | `kernel-replay-counters` | 3 | Dispatch counters; each pass selects a different counter configuration. |
 | `kernel-replay-counters-then-pc-sampling` | — | **Disabled in ctest:** PC sampling ignores localized pass overrides (see API docs). |
 | `kernel-replay-att` | 2 | Counters on pass 0, ATT on pass 1. |

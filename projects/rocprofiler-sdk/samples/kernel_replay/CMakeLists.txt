@@ -120,6 +120,7 @@ function(add_kernel_replay_sample NAME CLIENT_SRC)
 endfunction()
 
 add_kernel_replay_sample(kernel-replay-basic basic_client.cpp)
+add_kernel_replay_sample(kernel-replay-basic-user-data basic_client_with_user_data.cpp)
 add_kernel_replay_sample(kernel-replay-counters counters_client.cpp)
 add_kernel_replay_sample(kernel-replay-counters-then-pc-sampling
                          counters_then_pc_sampling_client.cpp PC_SAMPLING)
