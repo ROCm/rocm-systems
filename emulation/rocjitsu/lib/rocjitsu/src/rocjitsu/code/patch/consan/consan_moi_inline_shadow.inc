@@ -918,7 +918,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
     if (!apply_moi_appended_access_descriptor_requirements(
-            patcher, code_object, bytes, static_cast<const RuntimeCapabilities &>(options),
+            patcher, code_object, static_cast<const RuntimeCapabilities &>(options),
             descriptor_requirements, scalar_requirements, private_requirements, &lds_requirements,
             arch, result))
       return;
@@ -1356,7 +1356,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
 
   if (!apply_inline_moi_access_patches(
           bytes, planned_patches, descriptor_requirements, scalar_requirements,
-          "inline-shadow probe", arch,
+          private_requirements, &lds_requirements,
+          static_cast<const RuntimeCapabilities *>(&options), "inline-shadow probe", arch,
           [&](const PlannedInlineShadowPatch &planned_patch) {
             MoiOptions candidate_options = options;
             if (!apply_moi_transient_sgpr_assignment(
@@ -1419,11 +1420,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                   planned_patch.workgroup_shadow->required_group_segment_size;
             }
             return info;
-          },
-          [&](std::vector<uint8_t> &image, ConSanTransformArtifacts &current_result) {
-            return apply_lds_descriptor_requirements(
-                image, current_result, lds_requirements,
-                static_cast<const RuntimeCapabilities &>(options), arch, current_result.errors);
           },
           result))
     return;

@@ -486,246 +486,52 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
   return spill;
 }
 
-// Descriptor patches are applied after text growth, so the active descriptor
-// offset must be recovered by stable kernel name. Large generated libraries
-// have thousands of long, common-prefix names; indexing both sides once keeps
-// each descriptor requirement lookup constant-time.
-class MoiActiveKernelResolver {
-public:
-  MoiActiveKernelResolver(const ConSanTransformArtifacts &result,
-                          const AmdGpuCodeObject &code_object) {
-    result_kernels_by_descriptor_.reserve(result.program_inventory.kernels().size());
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-      result_kernels_by_descriptor_.emplace(kernel.descriptor_file_offset, &kernel);
-    active_kernels_by_name_.reserve(code_object.kernels().size());
-    for (const AmdGpuKernelInfo &kernel : code_object.kernels())
-      active_kernels_by_name_.emplace(kernel.name, &kernel);
-  }
+namespace {
 
-  [[nodiscard]] const ConSanKernelInfo *result_kernel(uint64_t descriptor_offset) const {
-    const auto it = result_kernels_by_descriptor_.find(descriptor_offset);
-    return it == result_kernels_by_descriptor_.end() ? nullptr : it->second;
-  }
+const MoiDescriptorLdsRequirements kNoMoiLdsRequirements;
 
-  [[nodiscard]] const AmdGpuKernelInfo *active_kernel(const ConSanKernelInfo &kernel) const {
-    const auto it = active_kernels_by_name_.find(kernel.name);
-    return it == active_kernels_by_name_.end() ? nullptr : it->second;
+[[nodiscard]] ConSanDescriptorMutationPolicy
+moi_descriptor_policy(const RuntimeCapabilities *capabilities, rj_code_arch_t arch) {
+  ConSanDescriptorMutationPolicy policy{
+      .maximum_ordinary_vgpr_count = kMaxVgprs,
+      .inventory_proves_empty_accumulator_bank = true,
+      .maximum_group_segment_bytes = std::nullopt,
+  };
+  if (capabilities != nullptr) {
+    policy.maximum_group_segment_bytes = consan_moi_max_workgroup_lds_bytes(*capabilities, arch);
   }
-
-private:
-  std::unordered_map<uint64_t, const ConSanKernelInfo *> result_kernels_by_descriptor_;
-  std::unordered_map<std::string_view, const AmdGpuKernelInfo *> active_kernels_by_name_;
-};
-
-[[nodiscard]] bool apply_descriptor_requirements(
-    CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object, std::span<const uint8_t> image,
-    const ConSanTransformArtifacts &result, const MoiDescriptorVgprRequirements &requirements,
-    rj_code_arch_t arch, std::vector<std::string> &errors) {
-  const MoiActiveKernelResolver kernel_resolver(result, code_object);
-  for (const auto &[descriptor_offset, required_count] : requirements) {
-    const ConSanKernelInfo *kernel = kernel_resolver.result_kernel(descriptor_offset);
-    if (kernel == nullptr) {
-      errors.emplace_back("ConSan MOI resource plan references an unknown kernel descriptor");
-      return false;
-    }
-    const AmdGpuKernelInfo *active_kernel = kernel_resolver.active_kernel(*kernel);
-    if (active_kernel == nullptr) {
-      errors.emplace_back("ConSan MOI resource plan could not resolve an active descriptor");
-      return false;
-    }
-    ConSanKernelInfo active = *kernel;
-    active.descriptor_file_offset = active_kernel->descriptor_file_offset;
-    if (!grow_moi_kernel_descriptor_vgprs(patcher, image, active, required_count, arch, errors))
-      return false;
-  }
-  return true;
+  return policy;
 }
 
-[[nodiscard]] bool apply_spill_descriptor_requirements(
-    CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object, std::span<const uint8_t> image,
-    const ConSanTransformArtifacts &result, const MoiDescriptorPrivateRequirements &requirements,
+} // namespace
+
+bool apply_moi_descriptor_requirements(
+    CodeObjectPatcher &patcher, const AmdGpuCodeObject &active_code_object,
+    const ConSanTransformArtifacts &result, const MoiDescriptorVgprRequirements &vgprs,
+    const MoiDescriptorSgprRequirements &sgprs,
+    const MoiDescriptorPrivateRequirements &private_segment_bytes,
+    const MoiDescriptorLdsRequirements *group_segment_bytes,
+    const RuntimeCapabilities *capabilities, rj_code_arch_t arch, std::string_view subject,
     std::vector<std::string> &errors) {
-  (void)image;
-  const MoiActiveKernelResolver kernel_resolver(result, code_object);
-  for (const auto &[descriptor_offset, required_private_bytes] : requirements) {
-    // A lane-backed fixed-stack scalar save needs no private-memory backing.
-    // Callers retain a uniform requirement map across lane and memory
-    // representations, so zero is an intentional no-op rather than an
-    // invalid request to the descriptor spill updater.
-    if (required_private_bytes == 0u)
-      continue;
-    const ConSanKernelInfo *kernel = kernel_resolver.result_kernel(descriptor_offset);
-    const AmdGpuKernelInfo *active_kernel =
-        kernel == nullptr ? nullptr : kernel_resolver.active_kernel(*kernel);
-    const std::span<const uint8_t> current_image = patcher.image_bytes();
-    if (kernel == nullptr || active_kernel == nullptr) {
-      errors.emplace_back("ConSan MOI spill descriptor exceeds ELF bytes or has no kernel owner");
-      return false;
-    }
-    auto descriptor = read_kernel_descriptor(current_image, active_kernel->descriptor_file_offset);
-    if (!descriptor) {
-      errors.emplace_back("ConSan MOI spill descriptor exceeds ELF bytes or has no kernel owner");
-      return false;
-    }
-    const SpillDescriptorUpdate update =
-        update_kernel_descriptor_for_spills(*descriptor, required_private_bytes);
-    if (update != SpillDescriptorUpdate::Updated && update != SpillDescriptorUpdate::Unchanged) {
-      errors.emplace_back("ConSan MOI could not grow the owning kernel's private spill segment");
-      return false;
-    }
-    if (!patcher.patch_kernel_descriptor(active_kernel->descriptor_file_offset, *descriptor)) {
-      errors.emplace_back("ConSan MOI could not patch the owning kernel spill descriptor");
-      return false;
-    }
-  }
-  return true;
+  return apply_consan_descriptor_mutations_to_patcher(
+      patcher, result.program_inventory, active_code_object,
+      {vgprs, sgprs, private_segment_bytes,
+       group_segment_bytes == nullptr ? kNoMoiLdsRequirements : *group_segment_bytes},
+      moi_descriptor_policy(capabilities, arch), arch, subject, errors);
 }
 
-[[nodiscard]] bool apply_sgpr_descriptor_requirements(
-    CodeObjectPatcher &patcher, const ConSanTransformArtifacts &result,
-    const AmdGpuCodeObject &code_object, const MoiDescriptorSgprRequirements &requirements,
-    std::vector<std::string> &errors) {
-  const MoiActiveKernelResolver kernel_resolver(result, code_object);
-  for (const auto &[descriptor_offset, required_count] : requirements) {
-    const ConSanKernelInfo *kernel = kernel_resolver.result_kernel(descriptor_offset);
-    const AmdGpuKernelInfo *active_kernel =
-        kernel == nullptr ? nullptr : kernel_resolver.active_kernel(*kernel);
-    if (active_kernel == nullptr) {
-      errors.emplace_back("ConSan MOI scalar plan could not resolve an active descriptor");
-      return false;
-    }
-    const uint64_t active_descriptor_offset = active_kernel->descriptor_file_offset;
-    const std::span<const uint8_t> current_image = patcher.image_bytes();
-    auto descriptor = read_kernel_descriptor(current_image, active_descriptor_offset);
-    if (!descriptor) {
-      errors.emplace_back("ConSan MOI scalar-plan descriptor exceeds ELF bytes");
-      return false;
-    }
-    if (!grow_descriptor_sgpr_allocation(*descriptor, required_count,
-                                         result.program_inventory.arch())) {
-      errors.emplace_back("ConSan MOI could not satisfy planned descriptor SGPR allocation");
-      return false;
-    }
-    if (!patcher.patch_kernel_descriptor(active_descriptor_offset, *descriptor)) {
-      errors.emplace_back("ConSan MOI could not patch the planned descriptor SGPR allocation");
-      return false;
-    }
-  }
-  return true;
-}
-
-[[nodiscard]] bool apply_lds_descriptor_requirements(
-    CodeObjectPatcher &patcher, const ConSanTransformArtifacts &result,
-    const AmdGpuCodeObject &code_object, const MoiDescriptorLdsRequirements &requirements,
-    const RuntimeCapabilities &capabilities, rj_code_arch_t arch,
-    std::vector<std::string> &errors) {
-  const MoiActiveKernelResolver kernel_resolver(result, code_object);
-  for (const auto &[descriptor_offset, required_bytes] : requirements) {
-    const ConSanKernelInfo *kernel = kernel_resolver.result_kernel(descriptor_offset);
-    const AmdGpuKernelInfo *active_kernel =
-        kernel == nullptr ? nullptr : kernel_resolver.active_kernel(*kernel);
-    if (active_kernel == nullptr) {
-      errors.emplace_back("ConSan MOI LDS plan could not resolve an active descriptor");
-      return false;
-    }
-    const uint64_t active_descriptor_offset = active_kernel->descriptor_file_offset;
-    const std::span<const uint8_t> current_image = patcher.image_bytes();
-    auto descriptor = read_kernel_descriptor(current_image, active_descriptor_offset);
-    if (!descriptor) {
-      errors.emplace_back("ConSan MOI LDS-plan descriptor exceeds ELF bytes");
-      return false;
-    }
-    if (required_bytes > consan_moi_max_workgroup_lds_bytes(capabilities, arch) ||
-        descriptor->group_segment_fixed_size > required_bytes) {
-      errors.emplace_back("ConSan MOI LDS-plan descriptor has an incompatible fixed-LDS size");
-      return false;
-    }
-    descriptor->group_segment_fixed_size = required_bytes;
-    if (!patcher.patch_kernel_descriptor(active_descriptor_offset, *descriptor)) {
-      errors.emplace_back("ConSan MOI could not patch the planned fixed-LDS reservation");
-      return false;
-    }
-  }
-  return true;
-}
-
-[[nodiscard]] bool apply_descriptor_requirements(std::vector<uint8_t> &image,
-                                                 const ConSanTransformArtifacts &result,
-                                                 const MoiDescriptorVgprRequirements &requirements,
-                                                 rj_code_arch_t arch,
-                                                 std::vector<std::string> &errors) {
-  for (const auto &[descriptor_offset, required_count] : requirements) {
-    auto descriptor = read_kernel_descriptor(image, descriptor_offset);
-    if (!descriptor) {
-      errors.emplace_back("ConSan MOI resource-plan descriptor exceeds ELF bytes");
-      return false;
-    }
-    const ConSanKernelInfo *kernel =
-        result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
-    if (kernel == nullptr) {
-      errors.emplace_back("ConSan MOI resource plan references an unknown kernel descriptor");
-      return false;
-    }
-    if (!grow_descriptor_vgpr_allocation(
-            *descriptor,
-            {.required_ordinary_count = required_count,
-             .maximum_ordinary_count = kMaxVgprs,
-             .accumulator_bank_is_proven_empty = kernel->agpr_count == 0u},
-            arch)) {
-      errors.emplace_back("ConSan MOI could not satisfy planned descriptor VGPR allocation");
-      return false;
-    }
-    if (!write_kernel_descriptor(image, descriptor_offset, *descriptor))
-      return false;
-  }
-  return true;
-}
-
-[[nodiscard]] bool apply_sgpr_descriptor_requirements(
+bool apply_moi_descriptor_requirements(
     std::vector<uint8_t> &image, const ConSanTransformArtifacts &result,
-    const MoiDescriptorSgprRequirements &requirements, std::vector<std::string> &errors) {
-  for (const auto &[descriptor_offset, required_count] : requirements) {
-    auto descriptor = read_kernel_descriptor(image, descriptor_offset);
-    if (!descriptor) {
-      errors.emplace_back("ConSan MOI scalar-plan descriptor exceeds ELF bytes");
-      return false;
-    }
-    if (result.program_inventory.find_kernel_by_descriptor(descriptor_offset) == nullptr) {
-      errors.emplace_back("ConSan MOI scalar plan references an unknown kernel descriptor");
-      return false;
-    }
-    if (!grow_descriptor_sgpr_allocation(*descriptor, required_count,
-                                         result.program_inventory.arch())) {
-      errors.emplace_back("ConSan MOI could not satisfy planned descriptor SGPR allocation");
-      return false;
-    }
-    if (!write_kernel_descriptor(image, descriptor_offset, *descriptor))
-      return false;
-  }
-  return true;
-}
-
-[[nodiscard]] bool apply_lds_descriptor_requirements(
-    std::vector<uint8_t> &image, const ConSanTransformArtifacts &result,
-    const MoiDescriptorLdsRequirements &requirements, const RuntimeCapabilities &capabilities,
-    rj_code_arch_t arch, std::vector<std::string> &errors) {
-  for (const auto &[descriptor_offset, required_bytes] : requirements) {
-    auto descriptor = read_kernel_descriptor(image, descriptor_offset);
-    if (!descriptor ||
-        result.program_inventory.find_kernel_by_descriptor(descriptor_offset) == nullptr) {
-      errors.emplace_back("ConSan MOI LDS-plan descriptor exceeds ELF bytes or has no owner");
-      return false;
-    }
-    if (required_bytes > consan_moi_max_workgroup_lds_bytes(capabilities, arch) ||
-        descriptor->group_segment_fixed_size > required_bytes) {
-      errors.emplace_back("ConSan MOI LDS-plan descriptor has an incompatible fixed-LDS size");
-      return false;
-    }
-    descriptor->group_segment_fixed_size = required_bytes;
-    if (!write_kernel_descriptor(image, descriptor_offset, *descriptor))
-      return false;
-  }
-  return true;
+    const MoiDescriptorVgprRequirements &vgprs, const MoiDescriptorSgprRequirements &sgprs,
+    const MoiDescriptorPrivateRequirements &private_segment_bytes,
+    const MoiDescriptorLdsRequirements *group_segment_bytes,
+    const RuntimeCapabilities *capabilities, rj_code_arch_t arch, std::string_view subject,
+    std::vector<std::string> &errors) {
+  return apply_consan_descriptor_mutations_to_bytes(
+      image, result.program_inventory,
+      {vgprs, sgprs, private_segment_bytes,
+       group_segment_bytes == nullptr ? kNoMoiLdsRequirements : *group_segment_bytes},
+      moi_descriptor_policy(capabilities, arch), arch, subject, errors);
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_first_light_access_record_words(

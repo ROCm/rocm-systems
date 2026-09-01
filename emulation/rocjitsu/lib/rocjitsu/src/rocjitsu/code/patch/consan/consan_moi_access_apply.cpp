@@ -104,22 +104,17 @@ make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
 /// plan. InlineShadow may additionally supply an LDS requirement for its
 /// workgroup-local shadow; replay-style engines pass no LDS requirement.
 [[nodiscard]] bool apply_moi_appended_access_descriptor_requirements(
-    CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object, std::span<const uint8_t> bytes,
+    CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object,
     const RuntimeCapabilities &capabilities,
     const MoiDescriptorVgprRequirements &descriptor_requirements,
     const MoiDescriptorSgprRequirements &scalar_requirements,
     const MoiDescriptorPrivateRequirements &private_requirements,
     const MoiDescriptorLdsRequirements *lds_requirements, rj_code_arch_t arch,
     ConSanTransformArtifacts &result) {
-  return apply_descriptor_requirements(patcher, code_object, bytes, result, descriptor_requirements,
-                                       arch, result.errors) &&
-         apply_spill_descriptor_requirements(patcher, code_object, bytes, result,
-                                             private_requirements, result.errors) &&
-         apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
-                                            result.errors) &&
-         (lds_requirements == nullptr ||
-          apply_lds_descriptor_requirements(patcher, result, code_object, *lds_requirements,
-                                            capabilities, arch, result.errors));
+  return apply_moi_descriptor_requirements(patcher, code_object, result, descriptor_requirements,
+                                           scalar_requirements, private_requirements,
+                                           lds_requirements, &capabilities, arch,
+                                           "ConSan MOI access", result.errors);
 }
 
 /// Initialize one appended MOI access image and materialize its shared direct

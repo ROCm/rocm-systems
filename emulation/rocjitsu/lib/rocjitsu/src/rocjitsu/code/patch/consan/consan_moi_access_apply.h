@@ -38,14 +38,15 @@ make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
                                 const ConSanMoiCandidate &candidate,
                                 const ConSanPatchLoweringProduct &patch);
 
-template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
-          typename ApplyExtraRequirements>
+template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo>
 [[nodiscard]] bool apply_inline_moi_access_patches(
     std::span<const uint8_t> bytes, const std::vector<PlannedPatch> &planned_patches,
     const MoiDescriptorVgprRequirements &descriptor_requirements,
-    const MoiDescriptorSgprRequirements &scalar_requirements, std::string_view probe_name,
-    rj_code_arch_t arch, BuildWords build_words, MakePatchInfo make_patch_info,
-    ApplyExtraRequirements apply_extra_requirements, ConSanTransformArtifacts &result) {
+    const MoiDescriptorSgprRequirements &scalar_requirements,
+    const MoiDescriptorPrivateRequirements &private_requirements,
+    const MoiDescriptorLdsRequirements *lds_requirements, const RuntimeCapabilities *capabilities,
+    std::string_view probe_name, rj_code_arch_t arch, BuildWords build_words,
+    MakePatchInfo make_patch_info, ConSanTransformArtifacts &result) {
   std::vector<uint8_t> replacement(bytes.begin(), bytes.end());
   for (const PlannedPatch &planned_patch : planned_patches) {
     const ConSanMoiCandidate &candidate = *planned_patch.candidate;
@@ -68,11 +69,10 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
                 static_cast<size_t>(patch_bytes));
   }
 
-  if (!apply_descriptor_requirements(replacement, result, descriptor_requirements, arch,
-                                     result.errors) ||
-      !apply_sgpr_descriptor_requirements(replacement, result, scalar_requirements,
-                                          result.errors) ||
-      !apply_extra_requirements(replacement, result)) {
+  if (!apply_moi_descriptor_requirements(replacement, result, descriptor_requirements,
+                                         scalar_requirements, private_requirements,
+                                         lds_requirements, capabilities, arch,
+                                         "ConSan MOI " + std::string(probe_name), result.errors)) {
     return false;
   }
 
@@ -98,7 +98,7 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
 }
 
 [[nodiscard]] bool apply_moi_appended_access_descriptor_requirements(
-    CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object, std::span<const uint8_t> bytes,
+    CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object,
     const RuntimeCapabilities &capabilities,
     const MoiDescriptorVgprRequirements &descriptor_requirements,
     const MoiDescriptorSgprRequirements &scalar_requirements,

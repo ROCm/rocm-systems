@@ -1136,7 +1136,7 @@ void try_apply_first_light_access_record_patch(
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
     if (!apply_moi_appended_access_descriptor_requirements(
-            patcher, code_object, bytes, static_cast<const RuntimeCapabilities &>(options),
+            patcher, code_object, static_cast<const RuntimeCapabilities &>(options),
             descriptor_requirements, scalar_requirements, private_requirements, nullptr, arch,
             result))
       return;
@@ -1534,8 +1534,8 @@ void try_apply_first_light_access_record_patch(
   }
 
   if (!apply_inline_moi_access_patches(
-          bytes, planned_patches, descriptor_requirements, scalar_requirements, "first-light probe",
-          arch,
+          bytes, planned_patches, descriptor_requirements, scalar_requirements,
+          private_requirements, nullptr, nullptr, "first-light probe", arch,
           [&](const PlannedAccessRecordPatch &planned_patch) {
             MoiOptions candidate_options = options;
             candidate_options.scratch_vgpr = planned_patch.resources.base;
@@ -1568,6 +1568,6 @@ void try_apply_first_light_access_record_patch(
                 candidate.anchor() + planned_patch.probe_guest_instruction_offset;
             return info;
           },
-          [](std::vector<uint8_t> &, ConSanTransformArtifacts &) { return true; }, result))
+          result))
     return;
 }

@@ -257,12 +257,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, candidate_options,
                                candidate_options, candidate_options, arch);
   }
-  if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                     descriptor_requirements, arch, result.errors) ||
-      !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                           private_requirements, result.errors) ||
-      !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
-                                          result.errors)) {
+  if (!apply_moi_descriptor_requirements(patcher, code_object, result, descriptor_requirements,
+                                         scalar_requirements, private_requirements, nullptr,
+                                         nullptr, arch, "ConSan MOI inline atomic patch",
+                                         result.errors)) {
     return;
   }
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());

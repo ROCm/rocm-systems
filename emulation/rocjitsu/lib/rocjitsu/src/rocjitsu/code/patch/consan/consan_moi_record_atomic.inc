@@ -156,12 +156,10 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
     note_descriptor_requirements(descriptor_requirements, planned.resources);
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, planned.emission, arch);
   }
-  if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                     descriptor_requirements, arch, result.errors) ||
-      !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
-                                          result.errors) ||
-      !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                           private_requirements, result.errors)) {
+  if (!apply_moi_descriptor_requirements(patcher, code_object, result, descriptor_requirements,
+                                         scalar_requirements, private_requirements, nullptr,
+                                         nullptr, arch, "ConSan MOI atomic record patch",
+                                         result.errors)) {
     return;
   }
 

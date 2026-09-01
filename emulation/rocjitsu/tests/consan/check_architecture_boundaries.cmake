@@ -152,6 +152,50 @@ foreach(_file IN LISTS _transform_component_sources)
         "transformation may not depend on validation or orchestration"
     )
 endforeach()
+
+# Descriptor resource mutation has one mechanical owner. MOI contributes its
+# narrow policy adapter; SuperCollider's two access regions submit batches
+# directly. Retired per-field and mode-local mutation APIs must not reappear.
+set(
+    _descriptor_mutation_clients
+    "${_consan_dir}/consan_descriptor_growth.cpp"
+    "${_consan_dir}/consan_moi_shared_lowering.cpp"
+    "${_consan_dir}/consan_supercollider_flat.inc"
+    "${_consan_dir}/consan_supercollider_lds.inc"
+)
+foreach(_file IN LISTS _consan_sources)
+    if(_file IN_LIST _descriptor_mutation_clients)
+        continue()
+    endif()
+    _consan_assert_no_match(
+        "${_file}"
+        "apply_consan_descriptor_mutations_to_(patcher|bytes)"
+        "descriptor resource mutation must cross its declared owner boundary"
+    )
+endforeach()
+set(
+    _descriptor_primitive_owners
+    "${_consan_dir}/consan_descriptor.h"
+    "${_consan_dir}/consan_descriptor_growth.cpp"
+    "${_consan_dir}/consan_validation.inc"
+)
+foreach(_file IN LISTS _consan_sources)
+    if(_file IN_LIST _descriptor_primitive_owners)
+        continue()
+    endif()
+    _consan_assert_no_match(
+        "${_file}"
+        "grow_descriptor_(vgpr|sgpr)_allocation|update_kernel_descriptor_for_spills"
+        "descriptor resource primitives are private to the mutation owner and validation probe"
+    )
+endforeach()
+foreach(_file IN LISTS _consan_sources)
+    _consan_assert_no_match(
+        "${_file}"
+        "apply_consan_descriptor_(sgpr|vgpr)_growths|merge_consan_descriptor_register_growths|ConSanDescriptorRegisterGrowth|MoiActiveKernelResolver|grow_moi_kernel_descriptor_vgprs"
+        "retired parallel descriptor-growth authority must not return"
+    )
+endforeach()
 foreach(_source IN ITEMS consan_final_validation.cpp consan_validation_inventory.cpp)
     _consan_assert_no_match(
         "${_consan_dir}/${_source}"

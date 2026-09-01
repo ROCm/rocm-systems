@@ -430,34 +430,6 @@ moi_persistent_or_descriptor_workgroup_sources(
                                           uses_cluster_workgroup_id);
 }
 
-[[nodiscard]] bool grow_moi_kernel_descriptor_vgprs(CodeObjectPatcher &patcher,
-                                                    std::span<const uint8_t> image,
-                                                    const ConSanKernelInfo &kernel,
-                                                    uint32_t required_count, rj_code_arch_t arch,
-                                                    std::vector<std::string> &errors) {
-  auto descriptor = read_kernel_descriptor(image, kernel.descriptor_file_offset);
-  if (!descriptor) {
-    errors.emplace_back("ConSan MOI descriptor VGPR growth exceeds ELF bytes");
-    return false;
-  }
-
-  if (!grow_descriptor_vgpr_allocation(
-          *descriptor,
-          {.required_ordinary_count = required_count,
-           .maximum_ordinary_count = kMaxVgprs,
-           .accumulator_bank_is_proven_empty = kernel.agpr_count == 0u},
-          arch)) {
-    errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation to " +
-                        std::to_string(required_count) + " registers");
-    return false;
-  }
-  if (!patcher.patch_kernel_descriptor(kernel.descriptor_file_offset, *descriptor)) {
-    errors.emplace_back("ConSan MOI could not patch descriptor VGPR allocation");
-    return false;
-  }
-  return true;
-}
-
 struct MoiKernelResourceContext {
   const ConSanKernelInfo *kernel = nullptr;
   KernelCfgScope scope;

@@ -21,6 +21,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
+#include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -37,6 +38,7 @@
 #include <limits>
 #include <ranges>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace rocjitsu::consan_moi_impl {
@@ -1621,7 +1623,7 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
     return true;
   }
 
-  std::unordered_set<std::string_view> owner_names;
+  std::unordered_map<std::string_view, uint64_t> owners_by_name;
   for (const ConSanPatchLoweringProduct &patch : result.patches) {
     if (!consan_detail::patch_requires_full_workgroup_id_payload(result.observation_plan().engine,
                                                                  arch, patch))
@@ -1634,10 +1636,16 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
             "ConSan MOI could not resolve an owner before enabling workgroup IDs");
         return false;
       }
-      owner_names.insert(owner->name);
+      const auto [it, inserted] =
+          owners_by_name.emplace(owner->name, owner->descriptor_file_offset);
+      if (!inserted && it->second != owner->descriptor_file_offset) {
+        result.errors.emplace_back(
+            "ConSan MOI found duplicate owner names while enabling workgroup IDs");
+        return false;
+      }
     }
   }
-  if (owner_names.empty())
+  if (owners_by_name.empty())
     return true;
 
   AmdGpuCodeObject code_object(result.replacement.data(), result.replacement.size());
@@ -1648,8 +1656,10 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
   }
   CodeObjectPatcher patcher(code_object);
   std::unordered_set<std::string_view> patched_owner_names;
+  MoiDescriptorSgprRequirements scalar_requirements;
   for (const AmdGpuKernelInfo &kernel : code_object.kernels()) {
-    if (!owner_names.contains(kernel.name))
+    const auto owner = owners_by_name.find(kernel.name);
+    if (owner == owners_by_name.end())
       continue;
     if (!patched_owner_names.insert(kernel.name).second) {
       result.errors.emplace_back(
@@ -1672,11 +1682,8 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
                            kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO) != 0
                ? 1u
                : 0u);
-      if (!grow_descriptor_sgpr_allocation(descriptor, required_sgpr_count, arch)) {
-        result.errors.emplace_back(
-            "ConSan MOI could not allocate the full AMDHSA workgroup-ID payload");
-        return false;
-      }
+      note_maximum_descriptor_extent(scalar_requirements, owner->second,
+                                     static_cast<uint16_t>(required_sgpr_count));
     }
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
                     1u);
@@ -1689,45 +1696,17 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
       return false;
     }
   }
-  if (patched_owner_names.size() != owner_names.size()) {
+  if (patched_owner_names.size() != owners_by_name.size()) {
     result.errors.emplace_back(
         "ConSan MOI could not resolve every replacement owner while enabling workgroup IDs");
     return false;
   }
+  if (!apply_moi_descriptor_requirements(patcher, code_object, result,
+                                         MoiDescriptorVgprRequirements{}, scalar_requirements,
+                                         MoiDescriptorPrivateRequirements{}, nullptr, nullptr, arch,
+                                         "ConSan MOI full workgroup-ID payload", result.errors))
+    return false;
   result.replacement = std::move(patcher).emit();
-  return true;
-}
-
-[[nodiscard]] bool
-grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKernelInfo &kernel,
-                                     uint32_t required_vgpr_count, uint32_t required_sgpr_count,
-                                     rj_code_arch_t arch, std::vector<std::string> &errors) {
-  const std::span<const uint8_t> current_image = patcher.image_bytes();
-  auto descriptor = read_kernel_descriptor(current_image, kernel.descriptor_file_offset);
-  if (!descriptor) {
-    errors.emplace_back("ConSan MOI descriptor register growth exceeds ELF bytes");
-    return false;
-  }
-
-  if (!grow_descriptor_vgpr_allocation(
-          *descriptor,
-          {.required_ordinary_count = required_vgpr_count,
-           .maximum_ordinary_count = kMaxVgprs,
-           .accumulator_bank_is_proven_empty = kernel.agpr_count == 0u},
-          arch)) {
-    errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation to " +
-                        std::to_string(required_vgpr_count) + " registers");
-    return false;
-  }
-  if (required_sgpr_count != 0 &&
-      !grow_descriptor_sgpr_allocation(*descriptor, required_sgpr_count, arch)) {
-    errors.emplace_back("ConSan MOI could not grow descriptor SGPR allocation");
-    return false;
-  }
-  if (!patcher.patch_kernel_descriptor(kernel.descriptor_file_offset, *descriptor)) {
-    errors.emplace_back("ConSan MOI could not patch descriptor register allocation");
-    return false;
-  }
   return true;
 }
 
@@ -1770,14 +1749,6 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
       AMDHSA_BITS_SET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH,
                       plan.replacement_kernarg_preload_length);
     }
-  }
-  const uint32_t required_sgpr_count =
-      capture.sgpr() ? std::max<uint32_t>(plan.required_sgpr_count,
-                                          static_cast<uint32_t>(*capture.sgpr()) + 2u)
-                     : plan.required_sgpr_count;
-  if (!grow_descriptor_sgpr_allocation(desc, required_sgpr_count, arch)) {
-    errors.emplace_back("ConSan MOI could not grow dispatch-ID descriptor SGPR allocation");
-    return false;
   }
   if (!patcher.patch_kernel_descriptor(descriptor_file_offset, desc)) {
     errors.emplace_back("ConSan MOI could not patch dispatch-ID descriptor state");
@@ -2147,8 +2118,20 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
     result.warnings.emplace_back("ConSan MOI private-epoch prologue found no patchable kernels");
     return;
   }
-  if (!apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                           private_requirements, result.errors))
+  MoiDescriptorSgprRequirements dispatch_sgpr_requirements;
+  for (const PlannedPrivateEpochPrologue &item : planned) {
+    if (!item.emission.dispatch_plan || !item.emission.dispatch_capture.present())
+      continue;
+    uint32_t required = item.emission.dispatch_plan->required_sgpr_count;
+    if (const auto capture = item.emission.dispatch_capture.sgpr())
+      required = std::max<uint32_t>(required, static_cast<uint32_t>(*capture) + 2u);
+    note_maximum_descriptor_extent(dispatch_sgpr_requirements, item.kernel->descriptor_file_offset,
+                                   static_cast<uint16_t>(required));
+  }
+  if (!apply_moi_descriptor_requirements(
+          patcher, code_object, result, MoiDescriptorVgprRequirements{}, dispatch_sgpr_requirements,
+          private_requirements, nullptr, nullptr, arch, "ConSan MOI private-epoch prologue",
+          result.errors))
     return;
   for (const PlannedPrivateEpochPrologue &item : planned) {
     if (item.emission.dispatch_capture.present() &&
@@ -2799,6 +2782,8 @@ void try_apply_owner_epoch_prologue_patch(
         .required_sgpr_count = static_cast<uint16_t>(required_sgpr_count),
     });
   }
+  MoiDescriptorVgprRequirements prologue_vgpr_requirements;
+  MoiDescriptorSgprRequirements prologue_sgpr_requirements;
   for (const PlannedOwnerEpochPrologue &item : target_kernels) {
     if (item.emission.dispatch_plan && item.emission.dispatch_capture.present() &&
         !apply_moi_dispatch_id_descriptor(patcher, item.kernel.descriptor_file_offset,
@@ -2806,11 +2791,22 @@ void try_apply_owner_epoch_prologue_patch(
                                           item.emission.dispatch_capture, arch, result.errors)) {
       return;
     }
-    if (!grow_moi_kernel_descriptor_registers(patcher, item.kernel, item.required_vgpr_count,
-                                              item.required_sgpr_count, arch, result.errors)) {
+    const ConSanKernelInfo *canonical =
+        result.program_inventory.find_kernel_by_name(item.kernel.name);
+    if (canonical == nullptr) {
+      result.errors.emplace_back("ConSan MOI owner/epoch prologue lost its descriptor owner");
       return;
     }
+    note_maximum_descriptor_extent(prologue_vgpr_requirements, canonical->descriptor_file_offset,
+                                   static_cast<uint16_t>(item.required_vgpr_count));
+    note_maximum_descriptor_extent(prologue_sgpr_requirements, canonical->descriptor_file_offset,
+                                   item.required_sgpr_count);
   }
+  if (!apply_moi_descriptor_requirements(patcher, code_object, result, prologue_vgpr_requirements,
+                                         prologue_sgpr_requirements,
+                                         MoiDescriptorPrivateRequirements{}, nullptr, nullptr, arch,
+                                         "ConSan MOI owner/epoch prologue", result.errors))
+    return;
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
   std::vector<ConSanPatchInfo> patches;

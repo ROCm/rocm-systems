@@ -2782,3 +2782,88 @@ not eliminate the remaining broad artifact/operating-point surfaces, prove
 architecture and mode locality across every production facet, produce material
 net shrinkage, or replace the required independent whole-codebase audit.
 Section 14.4 remains complete through the checkpoint-17 extension fixtures.
+
+### 16.27 Convergence checkpoint 26: owner-resolved descriptor mutation
+
+A lifecycle read of descriptor requirements found parallel mutation authorities
+below otherwise-converged access and prologue planning. MOI had separate VGPR,
+SGPR, private-segment, and LDS applicators for patcher and byte images plus a
+mode-private active-kernel resolver. Its owner/epoch and dispatch prologues had
+additional direct register-growth helpers. SuperCollider separately aggregated
+register-growth vectors, applied four register/image variants, repeated private-
+segment loops, and reconstructed moved descriptor offsets in its flat lowerer.
+These were not distinct mode semantics: all translated immutable
+`ProgramInventory` descriptor identities to the current image by stable kernel
+name, took maximum resource extents, and grew fields monotonically.
+
+`ConSanDescriptorMutationBatch` now carries owner-keyed VGPR, SGPR, private-
+segment, and group-segment requirements through one descriptor owner. That
+owner indexes the immutable and active images once, resolves a descriptor once
+even after text growth moved it, reads it once, applies every requested field,
+and commits it once. The patcher and byte entry points share that implementation.
+Zero extents remain intentional no-ops. The genuinely different policies stay
+outside the mechanism: MOI supplies its ordinary-VGPR limit, inventory-backed
+empty-accumulator proof, and optional target capability for maximum LDS;
+SuperCollider supplies its own VGPR limit and does not claim the accumulator
+proof. Low-level target-normalized VGPR/SGPR encoding remains in the descriptor
+primitive rather than moving into either engine.
+
+All MOI access engines, synchronization paths, barriers, atomics, fences, and
+private and owner/epoch prologues now submit complete batches through one narrow
+MOI policy adapter. The inline access template receives private and LDS
+requirements as ordinary inputs instead of an open-ended extra-mutation
+callback. SuperCollider flat and LDS paths submit the same common batch for
+both appended and byte-image strategies. The old MOI resolver and eight
+field/image applicators, the prologue register-growth helpers, SuperCollider's
+register-growth merge representation, both duplicated private loops, and the
+flat-specific moved-descriptor resolver are deleted. No behavior defect was
+established during this slice; the change makes all already-required resource
+fields participate in the same owner transaction and removes divergent future
+growth paths.
+
+The structural gate confines direct use of the transaction to its descriptor
+owner, the MOI policy adapter, and the two SuperCollider consumers. It rejects
+all retired APIs and types, and confines low-level descriptor register/spill
+mutation to the descriptor owner and its validation probe. An owner-level
+regression grows `.text` so the descriptor moves, submits all four resource
+requirements using the pristine owner identity, and proves that every field is
+published at the moved descriptor.
+
+| Signal | Checkpoint 26 | Cumulative change | Slice change from checkpoint 25 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,388 | +413 | **-284** |
+| Nonblank production lines | 99,124 | +41 | **-273** |
+| Production implementation lines | 91,420 | **-30** | **-269** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 227 / 57 | **-49 / 0** | **-14 / -1** |
+| `ConSanPatchInfo` references / files | 202 / 28 | +2 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| Independent descriptor resource-mutation owners | 1 | n/a | converged |
+| Test inventory | 5,374 | +29 | **+1** |
+
+The physical-line row uses an exact-tree recount and corrects checkpoint 25's
+printed value from 105,673 to 105,672. The slice delta is therefore the exact
+284-line change.
+
+This is the first checkpoint in the latest convergence sequence to return the
+implementation count below the fifth-refactoring baseline. It repays all 239
+lines still above baseline after checkpoint 25 and deletes another 30. That is
+real harvested implementation, but 30 lines is not yet a material whole-
+refactoring reduction, so it is directional evidence for Section 14.8 rather
+than completion of that requirement.
+
+Validation includes a regenerated build, the dedicated descriptor-owner and
+architecture-boundary regressions, and an 882-test descriptor, MOI, and
+SuperCollider focused gate. The complete exact-tree 4,739-test nonphysical
+matrix, including all 2,908 simulator rows over five targets, passed at `-j16`
+in 201.53 seconds. All 635 physical gfx1201 tests passed on the same tree,
+serialized at `-j1`, in 108.69 seconds. No test was removed, renamed, or
+disabled; the one added test is the moved-owner transaction regression.
+
+The checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, and the
+direction required by 14.8. It does not prove architecture and mode locality
+across every remaining production facet, materially shrink the whole codebase,
+eliminate the other broad artifact and operating-point surfaces, or replace the
+required independent whole-codebase deep-read audit. Section 14.4 remains
+complete through the checkpoint-17 extension fixtures.

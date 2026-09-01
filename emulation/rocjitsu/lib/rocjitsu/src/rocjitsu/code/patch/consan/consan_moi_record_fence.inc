@@ -160,12 +160,10 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     result.warnings.emplace_back("ConSan MOI fence record patch found no patchable fences");
     return;
   }
-  if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                     descriptor_requirements, arch, result.errors) ||
-      !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
-                                          result.errors) ||
-      !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                           private_requirements, result.errors))
+  if (!apply_moi_descriptor_requirements(patcher, code_object, result, descriptor_requirements,
+                                         scalar_requirements, private_requirements, nullptr,
+                                         nullptr, arch, "ConSan MOI fence record patch",
+                                         result.errors))
     return;
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());

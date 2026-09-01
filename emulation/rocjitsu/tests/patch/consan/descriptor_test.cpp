@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
+#include "rocjitsu/code/patch/consan/consan_descriptor_growth.h"
 
 #include <array>
 #include <unordered_map>
@@ -29,6 +31,59 @@ TEST(ConSanDescriptor, MaximumExtentAggregationIsOrderIndependentAndOwnerComplet
   EXPECT_EQ(requirements.at(64u), 16u);
   EXPECT_EQ(requirements.at(128u), 10u);
   EXPECT_EQ(requirements.at(192u), 6u);
+}
+
+TEST(ConSanDescriptor, MutationTransactionResolvesMovedOwnerAndPublishesEveryFieldOnce) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::array<uint32_t, 2> words = {
+      0xd81a0004u,
+      build_s_endpgm(kArch),
+  };
+  const std::vector<uint8_t> original_bytes =
+      make_cdna4_lds_code_object(words, "moved_descriptor", /*vgpr_granulated=*/0u);
+  MoiOptions options = moi_options();
+  const ConSanTransformArtifacts inventory = test_semantic_inventory(original_bytes, options);
+  ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
+  ASSERT_EQ(inventory.program_inventory.kernels().size(), 1u);
+  const uint64_t original_owner =
+      inventory.program_inventory.kernels().front().descriptor_file_offset;
+
+  const AmdGpuCodeObject original(original_bytes.data(), original_bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  CodeObjectPatcher mover(original);
+  std::vector<uint8_t> grown_text(mover.text_bytes().begin(), mover.text_bytes().end());
+  const uint32_t nop = build_s_nop(0, kArch);
+  const auto *nop_bytes = reinterpret_cast<const uint8_t *>(&nop);
+  grown_text.insert(grown_text.end(), nop_bytes, nop_bytes + sizeof(nop));
+  ASSERT_TRUE(mover.replace_text(grown_text, /*max_file_growth=*/4096u));
+  std::vector<uint8_t> moved_bytes = std::move(mover).emit();
+  AmdGpuCodeObject moved(moved_bytes.data(), moved_bytes.size());
+  ASSERT_TRUE(moved.is_valid());
+  ASSERT_EQ(moved.kernels().size(), 1u);
+  ASSERT_NE(moved.kernels().front().descriptor_file_offset, original_owner);
+
+  const ConSanDescriptorRegisterRequirements vgprs = {{original_owner, 20u}};
+  const ConSanDescriptorRegisterRequirements sgprs = {{original_owner, 20u}};
+  const ConSanDescriptorMemoryRequirements private_bytes = {{original_owner, 96u}};
+  const ConSanDescriptorMemoryRequirements lds_bytes = {{original_owner, 128u}};
+  std::vector<std::string> errors;
+  ASSERT_TRUE(apply_consan_descriptor_mutations_to_bytes(
+      moved_bytes, inventory.program_inventory, {vgprs, sgprs, private_bytes, lds_bytes},
+      {.maximum_ordinary_vgpr_count = 256u,
+       .inventory_proves_empty_accumulator_bank = true,
+       .maximum_group_segment_bytes = 64u * 1024u},
+      kArch, "ConSan descriptor transaction test", errors))
+      << testing::PrintToString(errors);
+
+  AmdGpuCodeObject patched(moved_bytes.data(), moved_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  KD descriptor{};
+  std::memcpy(&descriptor, moved_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  EXPECT_GE(descriptor_ordinary_vgpr_allocation_count(descriptor, kArch), 20u);
+  EXPECT_GE(descriptor_sgpr_allocation_count(descriptor, kArch), 20u);
+  EXPECT_EQ(descriptor.private_segment_fixed_size, 96u);
+  EXPECT_EQ(descriptor.group_segment_fixed_size, 128u);
 }
 
 TEST(ConSanDescriptor, ResourceFactsShareTargetWaveAndAccumulatorSemantics) {

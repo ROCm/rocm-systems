@@ -8,6 +8,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
+#include "rocjitsu/code/patch/consan/consan_descriptor_growth.h"
 #include "rocjitsu/code/patch/consan/consan_moi_candidate_projection.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
@@ -68,10 +69,10 @@ inline constexpr uint32_t kMoiRecordReplayBorrowedEntryIslandWords = 20u;
   return derive_key_at_entry ? 6u + (key_encodes_scc ? 1u : 0u) + (7u - 1u) : 7u;
 }
 
-using MoiDescriptorVgprRequirements = std::unordered_map<uint64_t, uint16_t>;
-using MoiDescriptorSgprRequirements = std::unordered_map<uint64_t, uint16_t>;
-using MoiDescriptorPrivateRequirements = std::unordered_map<uint64_t, uint32_t>;
-using MoiDescriptorLdsRequirements = std::unordered_map<uint64_t, uint32_t>;
+using MoiDescriptorVgprRequirements = ConSanDescriptorRegisterRequirements;
+using MoiDescriptorSgprRequirements = ConSanDescriptorRegisterRequirements;
+using MoiDescriptorPrivateRequirements = ConSanDescriptorMemoryRequirements;
+using MoiDescriptorLdsRequirements = ConSanDescriptorMemoryRequirements;
 using MoiSpillManagers = std::unordered_map<uint64_t, SpillManager>;
 
 /// Owner-complete scratch allocation consumed by shared MOI lowering.
@@ -482,12 +483,6 @@ moi_descriptor_dispatch_id_preload_plan(const KD &descriptor, rj_code_arch_t arc
 record_replay_persistent_workgroup_sources(ConSanMoiEngine engine,
                                            const ConSanMoiOperatingPoint &point);
 
-[[nodiscard]] bool grow_moi_kernel_descriptor_vgprs(CodeObjectPatcher &patcher,
-                                                    std::span<const uint8_t> image,
-                                                    const ConSanKernelInfo &kernel,
-                                                    uint32_t required_count, rj_code_arch_t arch,
-                                                    std::vector<std::string> &errors);
-
 [[nodiscard]] constexpr uint16_t moi_ordinary_sgpr_limit(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile ? profile->ordinary_sgpr_limit : kMaxSgprs;
@@ -529,10 +524,5 @@ void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t align
 
 void note_dynamic_stack_private_requirement(ConSanPatchAbiEffects &effects,
                                             const VgprSpillSequence *spill);
-
-[[nodiscard]] bool apply_spill_descriptor_requirements(
-    CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object, std::span<const uint8_t> image,
-    const ConSanTransformArtifacts &result, const MoiDescriptorPrivateRequirements &requirements,
-    std::vector<std::string> &errors);
 
 } // namespace rocjitsu::consan_moi_impl

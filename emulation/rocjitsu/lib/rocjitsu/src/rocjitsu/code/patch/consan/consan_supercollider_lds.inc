@@ -3699,29 +3699,32 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                                         return patch.use_appended_cave;
                                                       }) ||
                                   !selected_relay_reservoirs.empty();
-  std::vector<ConSanDescriptorRegisterGrowth> descriptor_growths;
+  ConSanDescriptorRegisterRequirements descriptor_growths;
   for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
     if (planned.required_vgpr_allocation_count) {
       for (uint64_t owner : planned.info.owner_descriptor_file_offsets)
-        descriptor_growths.push_back({owner, *planned.required_vgpr_allocation_count});
+        note_maximum_descriptor_extent(descriptor_growths, owner,
+                                       *planned.required_vgpr_allocation_count);
     }
   }
-  std::vector<ConSanDescriptorRegisterGrowth> descriptor_sgpr_growths;
+  ConSanDescriptorRegisterRequirements descriptor_sgpr_growths;
   for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
     const uint16_t required =
         std::max(planned.info.required_sgpr_count, planned.info.indirect_required_sgpr_count);
     if (required != 0)
       for (uint64_t owner : planned.info.owner_descriptor_file_offsets)
-        descriptor_sgpr_growths.push_back({owner, required});
+        note_maximum_descriptor_extent(descriptor_sgpr_growths, owner, required);
   }
   for (const ScRelayReservoir &reservoir : selected_relay_reservoirs) {
     if (!reservoir.used)
       continue;
     for (uint64_t descriptor_file_offset : reservoir.owner_descriptor_file_offsets) {
-      descriptor_sgpr_growths.push_back({descriptor_file_offset, reservoir.required_sgpr_count});
+      note_maximum_descriptor_extent(descriptor_sgpr_growths, descriptor_file_offset,
+                                     reservoir.required_sgpr_count);
     }
   }
   std::unordered_map<uint64_t, uint32_t> descriptor_private_requirements;
+  const ConSanDescriptorMemoryRequirements no_group_segment_requirements;
   for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
     if (planned.info.required_private_segment_size != 0) {
       for (uint64_t owner : planned.info.owner_descriptor_file_offsets) {
@@ -3746,31 +3749,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   std::vector<uint8_t> replacement;
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
-    if (!apply_consan_descriptor_vgpr_growths_to_patcher(patcher, original_bytes,
-                                                         descriptor_growths, arch, result.errors)) {
+    if (!apply_consan_descriptor_mutations_to_patcher(
+            patcher, result.program_inventory, code_object,
+            {descriptor_growths, descriptor_sgpr_growths, descriptor_private_requirements,
+             no_group_segment_requirements},
+            {.maximum_ordinary_vgpr_count = REGISTER_SET_MAX_VGPRS,
+             .inventory_proves_empty_accumulator_bank = false,
+             .maximum_group_segment_bytes = std::nullopt},
+            arch, "ConSan LDS check/trap proof", result.errors))
       return;
-    }
-    if (!apply_consan_descriptor_sgpr_growths_to_patcher(patcher, descriptor_sgpr_growths, arch,
-                                                         result.errors)) {
-      return;
-    }
-    for (const auto &[descriptor_offset, required_private_bytes] :
-         descriptor_private_requirements) {
-      const std::span<const uint8_t> image = patcher.image_bytes();
-      auto descriptor = read_kernel_descriptor(image, descriptor_offset);
-      if (!descriptor) {
-        result.errors.emplace_back("ConSan LDS check/trap spill descriptor exceeds ELF bytes");
-        return;
-      }
-      const SpillDescriptorUpdate update =
-          update_kernel_descriptor_for_spills(*descriptor, required_private_bytes);
-      if ((update != SpillDescriptorUpdate::Updated &&
-           update != SpillDescriptorUpdate::Unchanged) ||
-          !patcher.patch_kernel_descriptor(descriptor_offset, *descriptor)) {
-        result.errors.emplace_back("ConSan LDS check/trap could not grow its spill descriptor");
-        return;
-      }
-    }
     std::span<const uint8_t> text_bytes = patcher.text_bytes();
     std::vector<uint8_t> new_text(text_bytes.begin(), text_bytes.end());
     if (new_text.size() != appended_cave_offset ||
@@ -4251,10 +4238,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
             "ConSan LDS check/trap text replacement lost a spill owner descriptor");
         return;
       }
-      std::vector<uint8_t> descriptor_probe(patched_image.begin(), patched_image.end());
-      const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-          descriptor_probe, moved_kernel->descriptor_file_offset, required_private_bytes);
-      if (update != SpillDescriptorUpdate::Unchanged) {
+      const auto descriptor =
+          read_kernel_descriptor(patched_image, moved_kernel->descriptor_file_offset);
+      if (!descriptor || descriptor->private_segment_fixed_size < required_private_bytes ||
+          AMDHSA_BITS_GET(descriptor->compute_pgm_rsrc2,
+                          rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT) == 0u) {
         result.errors.emplace_back(
             "ConSan LDS check/trap text replacement lost its spill descriptor update at offset " +
             std::to_string(descriptor_offset));
@@ -4264,23 +4252,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     replacement = std::move(patcher).emit();
   } else {
     replacement.assign(original_bytes.begin(), original_bytes.end());
-    if (!apply_consan_descriptor_vgpr_growths_to_bytes(replacement, descriptor_growths, arch,
-                                                       result.errors)) {
+    if (!apply_consan_descriptor_mutations_to_bytes(
+            replacement, result.program_inventory,
+            {descriptor_growths, descriptor_sgpr_growths, descriptor_private_requirements,
+             no_group_segment_requirements},
+            {.maximum_ordinary_vgpr_count = REGISTER_SET_MAX_VGPRS,
+             .inventory_proves_empty_accumulator_bank = false,
+             .maximum_group_segment_bytes = std::nullopt},
+            arch, "ConSan LDS check/trap proof", result.errors))
       return;
-    }
-    if (!apply_consan_descriptor_sgpr_growths_to_bytes(replacement, descriptor_sgpr_growths, arch,
-                                                       result.errors)) {
-      return;
-    }
-    for (const auto &[descriptor_offset, required_private_bytes] :
-         descriptor_private_requirements) {
-      const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-          replacement, descriptor_offset, required_private_bytes);
-      if (update != SpillDescriptorUpdate::Updated && update != SpillDescriptorUpdate::Unchanged) {
-        result.errors.emplace_back("ConSan LDS check/trap could not grow its spill descriptor");
-        return;
-      }
-    }
     for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
       const ConSanAccessInventorySite &site = *planned.site;
       if (planned.use_local_cave) {

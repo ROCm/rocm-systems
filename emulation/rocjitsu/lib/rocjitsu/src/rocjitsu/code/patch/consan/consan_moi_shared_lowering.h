@@ -51,35 +51,22 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     const ConSanMoiOperatingPoint &point, MoiSpillManagers &managers, rj_code_arch_t arch,
     std::vector<std::string> &warnings, std::optional<uint32_t> private_layout_base = std::nullopt);
 
-[[nodiscard]] bool apply_descriptor_requirements(
-    CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object, std::span<const uint8_t> image,
-    const ConSanTransformArtifacts &result, const MoiDescriptorVgprRequirements &requirements,
-    rj_code_arch_t arch, std::vector<std::string> &errors);
-
-[[nodiscard]] bool apply_sgpr_descriptor_requirements(
-    CodeObjectPatcher &patcher, const ConSanTransformArtifacts &result,
-    const AmdGpuCodeObject &code_object, const MoiDescriptorSgprRequirements &requirements,
+[[nodiscard]] bool apply_moi_descriptor_requirements(
+    CodeObjectPatcher &patcher, const AmdGpuCodeObject &active_code_object,
+    const ConSanTransformArtifacts &result, const MoiDescriptorVgprRequirements &vgprs,
+    const MoiDescriptorSgprRequirements &sgprs,
+    const MoiDescriptorPrivateRequirements &private_segment_bytes,
+    const MoiDescriptorLdsRequirements *group_segment_bytes,
+    const RuntimeCapabilities *capabilities, rj_code_arch_t arch, std::string_view subject,
     std::vector<std::string> &errors);
 
-[[nodiscard]] bool apply_lds_descriptor_requirements(
-    CodeObjectPatcher &patcher, const ConSanTransformArtifacts &result,
-    const AmdGpuCodeObject &code_object, const MoiDescriptorLdsRequirements &requirements,
-    const RuntimeCapabilities &capabilities, rj_code_arch_t arch, std::vector<std::string> &errors);
-
-[[nodiscard]] bool apply_descriptor_requirements(std::vector<uint8_t> &image,
-                                                 const ConSanTransformArtifacts &result,
-                                                 const MoiDescriptorVgprRequirements &requirements,
-                                                 rj_code_arch_t arch,
-                                                 std::vector<std::string> &errors);
-
-[[nodiscard]] bool apply_sgpr_descriptor_requirements(
+[[nodiscard]] bool apply_moi_descriptor_requirements(
     std::vector<uint8_t> &image, const ConSanTransformArtifacts &result,
-    const MoiDescriptorSgprRequirements &requirements, std::vector<std::string> &errors);
-
-[[nodiscard]] bool apply_lds_descriptor_requirements(
-    std::vector<uint8_t> &image, const ConSanTransformArtifacts &result,
-    const MoiDescriptorLdsRequirements &requirements, const RuntimeCapabilities &capabilities,
-    rj_code_arch_t arch, std::vector<std::string> &errors);
+    const MoiDescriptorVgprRequirements &vgprs, const MoiDescriptorSgprRequirements &sgprs,
+    const MoiDescriptorPrivateRequirements &private_segment_bytes,
+    const MoiDescriptorLdsRequirements *group_segment_bytes,
+    const RuntimeCapabilities *capabilities, rj_code_arch_t arch, std::string_view subject,
+    std::vector<std::string> &errors);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_first_light_access_record_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,

@@ -2143,12 +2143,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   retain_emitted_owners(visible_evidence_vgpr_requirements);
   retain_emitted_owners(visible_evidence_private_requirements);
   retain_emitted_owners(visible_evidence_sgpr_requirements);
-  if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                     visible_evidence_vgpr_requirements, arch, result.errors) ||
-      !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                           visible_evidence_private_requirements, result.errors) ||
-      !apply_sgpr_descriptor_requirements(patcher, result, code_object,
-                                          visible_evidence_sgpr_requirements, result.errors)) {
+  if (!apply_moi_descriptor_requirements(
+          patcher, code_object, result, visible_evidence_vgpr_requirements,
+          visible_evidence_sgpr_requirements, visible_evidence_private_requirements, nullptr,
+          nullptr, arch, "ConSan MOI inline-shadow barrier epoch patch", result.errors)) {
     return;
   }
   (void)publish_moi_sync_patch(result, patcher, new_text, options.patched_image_growth_limit,
@@ -2763,12 +2761,10 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     }
     return;
   }
-  if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                     descriptor_requirements, arch, result.errors) ||
-      !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                           private_requirements, result.errors) ||
-      !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
-                                          result.errors)) {
+  if (!apply_moi_descriptor_requirements(patcher, code_object, result, descriptor_requirements,
+                                         scalar_requirements, private_requirements, nullptr,
+                                         nullptr, arch, "ConSan MOI barrier record patch",
+                                         result.errors)) {
     return;
   }
   (void)publish_moi_sync_patch(result, patcher, new_text, options.patched_image_growth_limit,
