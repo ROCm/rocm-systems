@@ -180,7 +180,8 @@ public:
       if (wgp_index != std::numeric_limits<size_t>::max() &&
           wgps_[wgp_index]->active_workgroups != 0)
         continue;
-      if (!cu->can_accept_workgroup(entry.wfs_per_workgroup, entry.group_segment_fixed_size))
+      if (!cu->can_accept_workgroup(entry.wfs_per_workgroup, entry.sgprs_per_wf, entry.vgprs_per_wf,
+                                    entry.kernel_wave_size, entry.group_segment_fixed_size))
         continue;
       next_cu_ = (idx + 1) % cus_.size();
       return cu;
@@ -220,7 +221,8 @@ public:
       ComputeUnitCore *selected = nullptr;
       for (uint32_t half = 0; half < 2; ++half) {
         auto *candidate = ((next_wgp_half_ + half) & 1u) == 0 ? wgp.cu0 : wgp.cu1;
-        if (candidate->can_accept_workgroup(entry.wfs_per_workgroup, 0)) {
+        if (candidate->can_accept_workgroup(entry.wfs_per_workgroup, entry.sgprs_per_wf,
+                                            entry.vgprs_per_wf, entry.kernel_wave_size, 0)) {
           selected = candidate;
           next_wgp_half_ = (next_wgp_half_ + half + 1) & 1u;
           break;

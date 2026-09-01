@@ -10,8 +10,8 @@
 /// @details Under the hardware-accurate model a wavefront frees its SGPR/VGPR
 /// allocations the instant it reaches s_endpgm, so its register file is no longer
 /// readable through the (now-free) slot after a kernel finishes. Tests that need to
-/// observe a wave's final state install this plugin, which snapshots the full
-/// register file from `onAmdgpuWavefrontHalted` — fired while the registers are
+/// observe a wave's final state install this plugin, which snapshots the allocated
+/// register state from `onAmdgpuWavefrontHalted` — fired while the registers are
 /// still live, before they are freed.
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -22,6 +22,7 @@
 
 #include "simdojo/sim/component.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -50,7 +51,7 @@ struct WavefrontSnapshot {
   simdojo::ComponentID cu_id = 0;   ///< Originating CU component id (for per-CU grouping).
   std::vector<uint32_t> sgprs;      ///< Full physical SGPR block (sgprs_per_wf).
   std::array<uint32_t, 16> ttmps{}; ///< Trap-temporary file (TTMP0-15).
-  std::vector<uint32_t> vgprs;      ///< [vgpr_block * wf_size], row-major by physical reg.
+  std::vector<uint32_t> vgprs; ///< [vgpr_block * wf_size], with unallocated ordinary VGPRs zero.
 
   /// @brief Read a captured SGPR by architectural index.
   uint32_t sgpr(uint32_t idx) const { return sgprs.at(idx); }
@@ -145,14 +146,21 @@ public:
     for (uint32_t i = 0; i < s.ttmps.size(); ++i)
       s.ttmps[i] = wf.ttmp(i);
 
-    // Capture the full physical VGPR block (normal + AccVGPR bank) so tests can
-    // inspect accumulator registers as well as ordinary VGPRs.
+    // Capture the descriptor-allocated ordinary prefix and the separate AccVGPR
+    // bank. Leave the unallocated ordinary tail zero: observing it through the
+    // instruction-facing API would itself be an invalid descriptor access.
     s.vgpr_block = wf.cu().vgpr_allocation_block_size();
     const uint32_t vbase = wf.vgpr_alloc().base;
-    s.vgprs.reserve(static_cast<size_t>(s.vgpr_block) * s.wf_size);
-    for (uint32_t r = 0; r < s.vgpr_block; ++r)
+    s.vgprs.resize(static_cast<size_t>(s.vgpr_block) * s.wf_size, 0);
+    const uint32_t ordinary_end = std::min(s.num_vgprs, s.vgpr_block);
+    const uint32_t acc_begin =
+        std::min(isa_properties(wf.cu().arch()).max_addressable_vgprs_per_wf, s.vgpr_block);
+    for (uint32_t r = 0; r < s.vgpr_block; ++r) {
+      if (r >= ordinary_end && r < acc_begin)
+        continue;
       for (uint32_t lane = 0; lane < s.wf_size; ++lane)
-        s.vgprs.push_back(regs.read_vgpr(vbase + r, lane));
+        s.vgprs[static_cast<size_t>(r) * s.wf_size + lane] = regs.read_vgpr(vbase + r, lane);
+    }
 
     // Serialize the append: concurrent halts from different partition threads
     // would otherwise race the vector.
