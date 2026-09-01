@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/cdna_isa_base.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 
@@ -31,6 +31,7 @@ inline constexpr size_t REGISTER_SET_MAX_SGPRS =
     std::max<size_t>(amdgpu::CdnaIsaBase::MAX_SGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF);
 inline constexpr size_t REGISTER_SET_MAX_VGPRS = MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF;
 inline constexpr size_t REGISTER_SET_MAX_ACC_VGPRS = REGISTER_SET_MAX_VGPRS;
+inline constexpr size_t REGISTER_SET_MAX_TTMPS = 16;
 
 /// @brief Normal SGPRs safe for scratch allocation across supported families.
 ///

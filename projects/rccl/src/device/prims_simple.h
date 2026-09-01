@@ -17,10 +17,11 @@ enum primsMode {
 };
 
 template <typename T, typename RedOp, typename Fan, int Direct, int SlicePerChunk, int StepPerSlice, int Unroll,
-          int P2p, int MultimemSrcs, int MultimemDsts, bool isNetOffload, int Metadata, int Pipeline, int useAcc>
+          int P2p, int MultimemSrcs, int MultimemDsts, bool isNetOffload, int Metadata, int Pipeline, int useAcc,
+          int UserRegMode>
 class Primitives<T, RedOp, Fan, Direct,
                  ProtoSimple<SlicePerChunk, StepPerSlice, useAcc, Unroll, MultimemSrcs, MultimemDsts>, P2p,
-                 isNetOffload, Metadata, Pipeline, useAcc> {
+                 isNetOffload, Metadata, Pipeline, useAcc, UserRegMode> {
   static constexpr int MaxRecv = Fan::MaxRecv, MaxSend = Fan::MaxSend;
   static constexpr int Input = 0, Output = 1;
   static constexpr int RoleInput = 0x01, RoleOutput = 0x02, RoleWaitRecv = 0x04, RoleWaitSend = 0x08,
@@ -738,8 +739,10 @@ public:
     if (tid < 32 && ((1UL << tid) < nranks)) {
       int rank = ncclShmem.comm.rank;
       uint32_t delta = 1 << tid;
+      // When sharing, RS and AG both recv from rank-delta and send to rank+delta; otherwise AG mirrors RS.
+      const bool shared = ncclShmem.comm.patSharedQps != 0;
       // Load recv peer
-      int recvPeer = mode == primsModePatRs ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
+      int recvPeer = (shared || mode == primsModePatRs) ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
       struct ncclPatPeer* peer = ((struct ncclPatPeer*)recvPeers) + tid;
       struct ncclConnInfo* conn = peer->conn = channel->peers[recvPeer]->recv + connIndexRecv;
       peer->step = conn->step;
@@ -749,7 +752,7 @@ public:
       peer->accSize = 0;
       peer->connStepSize = conn->stepSize / sizeof(T);
       // Load send peer
-      int sendPeer = mode == primsModePatAg ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
+      int sendPeer = (!shared && mode == primsModePatAg) ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
       peer = ((struct ncclPatPeer*)sendPeers) + tid;
       conn = peer->conn = channel->peers[sendPeer]->send + connIndexSend;
       peer->step = conn->step;

@@ -1,5 +1,69 @@
 # Changelog for rocSHMEM
-## Unreleased - rocSHMEM 3.6.0 for ROCm x.x.x
+## Unreleased - rocSHMEM 3.8.0 for ROCm 10.x
+
+## rocSHMEM 3.7.0 for ROCm 10.1
+
+### Added
+* Added new APIs:
+    * `rocshmem_tile_{min, max, sum}_reduce{_wave}{_wg}` variants for the IPC backend
+    * `rocshmem_ctx_tile_{min, max, sum}_reduce{_wave}{_wg}` variants for the IPC backend
+* Added `--num_wf` argument to functional test harness for runtime wavefront size detection on architectures with wave size 32 (gfx1100, gfx1201, gfx1250) (#9312)
+* Added LTO inline-remarks comparison toolset and interactive resource-usage dashboards under `scripts/analysis/` (#10872)
+* Optimized device API wrappers to remove double-indirection in cross-TU calls, enabling more reliable LTO inlining (#9729)
+* Reduced IPC RMA latency by caching symmetric heap base/size in device constant memory, removing hot-path heap metadata loads in `ipcPeerPtr()` (#9872)
+
+### Changed
+* **Breaking build-system change**: The five compile-time CMake options
+  `USE_HEAP_DEVICE_FINEGRAIN`, `USE_HEAP_DEVICE_UNCACHED`,
+  `USE_HEAP_DEVICE_COARSEGRAIN`, `USE_HEAP_DEVICE_VMM_POSIX`, and
+  `USE_HEAP_DEVICE_VMM_FABRIC` have been removed. Heap allocator
+  selection is now a runtime decision via the environment variable:
+  ```
+  ROCSHMEM_HEAP_ALLOCATOR_TYPE=<uncached|finegrained|coarsegrained|vmm_posix|vmm_fabric>
+  ```
+  The default is architecture-dependent: `finegrained` for gfx1100/gfx1201,
+  `uncached` for all other targets. The VMM allocator sources are now compiled
+  unconditionally (when ROCm ≥ 7.2 / AMD SMI fabric handle support is
+  detected) rather than behind build flags. (#9432)
+
+### Resolved Issues
+* Fixed `reduce_wg` and `reduce_wave` operations producing incorrect results for some scenarios
+* Fixed compilation of rocSHMEM when using clang++ instead of hipcc
+* Fixed team-relative PE rank computation in GDA alltoallv
+* Fixed `USE_SDMA=ON` builds failing for GDA+IPC with messages >128B
+* Fixed libverbs/libmlx5 discovery using `.so.1` versioned symlinks in GDA backend
+* Fixed Broadcom NIC (bnxt) dmabuf CQ/SQ creation (#9465)
+* Fixed ASAN build: correct string size for socket, exclude libhsa (#10507)
+
+## rocSHMEM 3.6.0 for ROCm 10.0
+
+### Added
+* Added new APIs:
+   * `rocshmem_broadcast_wave`
+   * `rocshmem_fcollect_wave`
+   * `rocshmem_alltoall_wave`
+   * `rocshmem_reduce_wave`
+   * `rocshmem_reducescatter_wave`
+* Added support for some tile-granular collectives for the IPC backend:
+   * `rocshmem_tile_broadcast`
+   * `rocshmem_tile_broadcast_wave`
+   * `rocshmem_tile_broadcast_wg`
+   * `rocshmem_ctx_tile_broadcast`
+   * `rocshmem_ctx_tile_broadcast_wave`
+   * `rocshmem_ctx_tile_broadcast_wg`
+   * `rocshmem_tile_allgather`
+   * `rocshmem_tile_allgather_wave`
+   * `rocshmem_tile_allgather_wg`
+   * `rocshmem_ctx_tile_allgather`
+   * `rocshmem_ctx_tile_allgather_wave`
+   * `rocshmem_ctx_tile_allgather_wg`
+* Added single node support for gfx1250 / MI455X
+* Added support for HIP Fabric Handles
+
+### Changed
+* Drop LLC dependency when compiling HSCO objects
+
+
 ## rocSHMEM 3.5.0 for ROCm 7.14
 
 ### Added

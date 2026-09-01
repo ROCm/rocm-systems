@@ -42,7 +42,14 @@ and tweak the default sampling values.
    # ...
    ROCPROFSYS_SAMPLING_FREQ        = 50
    ROCPROFSYS_SAMPLING_CPUS        = all
-   ROCPROFSYS_SAMPLING_GPUS        = $env:HIP_VISIBLE_DEVICES
+   ROCPROFSYS_SAMPLING_GPUS        = all
+
+.. note::
+
+   * ``ROCPROFSYS_SAMPLING_GPUS`` is further restricted to the GPUs that the ROCm runtime
+     exposes, as controlled by ``ROCR_VISIBLE_DEVICES`` and ``HIP_VISIBLE_DEVICES``.
+   * ``ROCPROFSYS_SAMPLING_GPUS`` accepts only ``all`` or numeric indices and ranges, not
+     GPU UUIDs.
 
 Use the configuration file
 -----------------------------------
@@ -1485,7 +1492,7 @@ but do not override an existing value for the environment variable.
    ROCPROFSYS_SAMPLING_FREQ         = 50
    ROCPROFSYS_SAMPLING_DELAY        = 0.1
    ROCPROFSYS_SAMPLING_CPUS         = 0-3
-   ROCPROFSYS_SAMPLING_GPUS         = $env:HIP_VISIBLE_DEVICES
+   ROCPROFSYS_SAMPLING_GPUS         = all
 
    # misc env variables (see metadata JSON file after run)
    $env:ROCPROFSYS_SAMPLING_KEEP_DYNINST_SUFFIX  = OFF

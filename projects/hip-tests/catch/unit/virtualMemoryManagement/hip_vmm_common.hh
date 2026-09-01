@@ -38,6 +38,15 @@
       HIP_SKIP_TEST("DMA-BUF is not supported for this test on this device.");                     \
     }                                                                                              \
   }
+#define checkHostAllocDmaBufSupported(device)                                                      \
+  {                                                                                                \
+    int value = 0;                                                                                 \
+    hipDeviceAttribute_t attr = hipDeviceAttributeHostAllocDmaBufSupported;                        \
+    HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
+    if (value == 0) {                                                                              \
+      HIP_SKIP_TEST("Host-alloc DMA-BUF is not supported for this test on this device.");          \
+    }                                                                                              \
+  }
 #define checkFabricHandleSupported(device)                                                         \
   {                                                                                                \
     int value = 0;                                                                                 \

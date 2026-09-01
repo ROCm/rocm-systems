@@ -7,11 +7,14 @@
  ************************************************************************/
 
 #include "rccl_ptr.h"
+// UserRegMode is accepted only to match the Primitives primary template (which
+// carries it for LL128, see primitives.h/prims_ll128.h). The LL protocol path is
+// unchanged from the baseline and ignores it.
 template <typename T, typename RedOp, typename Fan, int Direct, int P2p, bool isNetOffload, int Metadata, int Pipeline,
-          int useAcc>
-class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc>
+          int useAcc, int UserRegMode>
+class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>
   : public PrimitivesWithoutDirect<
-      Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc>> {
+      Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>> {
   // In the case of Fan::MaxRecv == 0, we need to force MaxRecv to 1 for this to compile
   // This is because of a recv buffer which is allocated to MaxRecv length in send-only cases.
   static constexpr int MaxRecv = Fan::MaxRecv > 1 ? Fan::MaxRecv : 1;
@@ -64,6 +67,24 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
   inline __device__ uint32_t sendFlag(int i) {
     return NCCL_LL_FLAG(sendStep[i] + 1);
   }
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#if RCCL_LL_FIFO_SYS_SCOPE_LOAD
+  // System-scope FIFO line read, required when the FIFO comes from cuMem/VMM.
+  // See RCCL_LL_FIFO_SYS_SCOPE_LOAD in rccl_ptr.h.
+  __device__ __forceinline__ void loadLLLineB128(union ncclLLFifoLine* src, union ncclLLFifoLine& line) {
+    union {
+      v4u v;
+      uint32_t w[4];
+    } value;
+    value.v = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+    line.data1 = value.w[0];
+    line.flag1 = value.w[1];
+    line.data2 = value.w[2];
+    line.flag2 = value.w[3];
+  }
+#endif
+#endif
 
   uint64_t* barriers;
   uint64_t barrier_next = 0;
@@ -148,7 +169,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     union ncclLLFifoLine i4;
     do {
-#ifdef __GFX11__
+#if RCCL_LL_FIFO_SYS_SCOPE_LOAD
+      loadLLLineB128(src, i4);
+#elif defined(__GFX11__)
       asm volatile("global_load_b128 %0, %1, off glc slc dlc\n"
                    "s_waitcnt vmcnt(0)\n"
                    : "=v"(i4.i4)
@@ -156,6 +179,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 #elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
       // Comm FIFO buffers are uncached; use non-temporal loads so the flag poll
       // never observes a stale cache line (no system-scope cache-bypass needed).
+      // Holds for the legacy IPC allocator only. See loadLLLineB128.
       *((u64_gptr)i4.v) = __builtin_nontemporal_load((u64_gptr)src->v);
       *((u64_gptr)i4.v + 1) = __builtin_nontemporal_load((u64_gptr)src->v + 1);
 #else
@@ -188,13 +212,16 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       if (i < fan.nrecv()) {
         union ncclLLFifoLine* src = recvPtr(i) + offset;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-#ifdef __GFX11__
+#if RCCL_LL_FIFO_SYS_SCOPE_LOAD
+        loadLLLineB128(src, line[i]);
+#elif defined(__GFX11__)
         asm volatile("global_load_b128 %0, %1, off glc slc dlc\n"
                      "s_waitcnt vmcnt(0)\n"
                      : "=v"(line[i].i4)
                      : "v"(&src->i4));
 #elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
         // Comm FIFO buffers are uncached; use non-temporal loads (no bypass).
+        // Holds for the legacy IPC allocator only. See loadLLLineB128.
         line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
         line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
 #else
@@ -217,13 +244,16 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 
     do {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-#ifdef __GFX11__
+#if RCCL_LL_FIFO_SYS_SCOPE_LOAD
+      loadLLLineB128(src, line[i]);
+#elif defined(__GFX11__)
       asm volatile("global_load_b128 %0, %1, off glc slc dlc\n"
                    "s_waitcnt vmcnt(0)\n"
                    : "=v"(line[i].i4)
                    : "v"(&src->i4));
 #elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
       // Comm FIFO buffers are uncached; use non-temporal loads (no bypass).
+      // Holds for the legacy IPC allocator only. See loadLLLineB128.
       line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
       line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
 #else
@@ -253,6 +283,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     // Comm FIFO buffers are uncached; use plain stores (no system-scope cache
     // bypass) for higher store throughput and lower register pressure.
+    // Plain is correct on cuMem too, only the reader's poll needs bypass.
     *((u64_gptr)dst->v) = *((u64_gptr)i4.v);
     *((u64_gptr)dst->v + 1) = *((u64_gptr)i4.v + 1);
 #else

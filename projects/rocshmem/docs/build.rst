@@ -172,7 +172,7 @@ Profiling and tracing support
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 rocSHMEM can register its host-side API tables with
-`rocprofiler-register <https://rocm.docs.amd.com/projects/rocprofiler-register/en/latest/>`_
+`rocprofiler-register <https://github.com/ROCm/rocprofiler-register>`_
 so that rocprofiler-sdk tools, such as ``rocprofv3``, can trace rocSHMEM
 host-stream API calls. This is controlled by the ``USE_ROCPROFILER_REGISTER``
 build option, which is enabled (``ON``) by default.
@@ -336,6 +336,15 @@ and looking for the ``Name:`` field under each agent, for example
   is configured with ``xnack+`` (unified memory), specifying ``xnack-`` in ``GPU_TARGETS``
   may cause device bitcode load failures at runtime. Match the suffix to the actual
   configuration of the target system.
+
+.. note::
+
+  Requesting more than one feature variant of the same base architecture (for example
+  ``-DGPU_TARGETS="gfx90a:xnack+;gfx90a:xnack-"``) builds a fat binary containing both
+  variants into the main library. However, the installed device bitcode
+  (``librocshmem_device_gfx90a.bc``) is a single file and can only embed one variant's
+  feature metadata. The chosen variant is reported at configure time, for example:
+  ``Multiple feature variants requested for gfx90a (...); device bitcode will embed gfx90a:xnack+``.
 
 Installation prefix
 ^^^^^^^^^^^^^^^^^^^

@@ -1,25 +1,8 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <cstdlib>
 
@@ -63,6 +46,7 @@
 #include "functional/gpu/xgmi/xgmi_read_write.h"
 #include "functional/ifoe/fabric/fabric_read.h"
 #include "functional/ifoe/identity/ifoe_info_read.h"
+#include "functional/ifoe/tray/tray_info_read.h"
 #include "functional/system/cross_process_serialization.h"
 #include "functional/system/hw_topology_read.h"
 #include "functional/system/init_shutdown_refcount.h"
@@ -200,7 +184,8 @@ TEST(GpuFunctionalReadOnly, TestGPUBusyRead) {
   RunGenericTest(&tst);
 }
 TEST(GpuFunctionalReadOnly, TestPowerRead) {
-  if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  // Skip on non-DXG VMs (KVM, etc.); WSL/DXG has a backend for power cap.
+  if (amd::smi::is_vm_guest() && access("/dev/dxg", F_OK) != 0) GTEST_SKIP();
   TestPowerRead tst;
   RunGenericTest(&tst);
 }
@@ -285,6 +270,9 @@ TEST(GpuFunctionalReadOnly, TestMemPageInfoRead) {
 }
 
 TEST(SystemFunctionalReadOnly, TestMutualExclusion) {
+  // Cross-process device mutex doesn't apply to the DXG backend on WSL.
+  if (access("/dev/dxg", F_OK) == 0)
+    GTEST_SKIP() << "Skipped on WSL: cross-process mutex not applicable to DXG backend";
   TestMutualExclusion tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();
@@ -339,16 +327,29 @@ TEST(SystemFunctionalReadOnly, TestKfdAtforkRead) {
 }
 
 TEST(IfoeFunctionalReadOnly, TestFabricRead) {
+  // Fabric/UALoE sysfs is not available on WSL.
+  if (access("/dev/dxg", F_OK) == 0)
+    GTEST_SKIP() << "Skipped on WSL: UALoE/fabric sysfs not available on DXG backend";
   TestFabricRead tst;
   RunGenericTest(&tst);
 }
 
 TEST(IfoeFunctionalReadOnly, TestIfoeInfoRead) {
+  if (access("/dev/dxg", F_OK) == 0)
+    GTEST_SKIP() << "Skipped on WSL: iFoE NIC not available on DXG backend";
   TestIfoeInfoRead tst;
   RunGenericTest(&tst);
 }
 
+TEST(IfoeFunctionalReadOnly, TestTrayInfoRead) {
+  TestTrayInfoRead tst;
+  RunGenericTest(&tst);
+}
+
 TEST(SystemFunctionalReadOnly, TestCrossProcessSerialization) {
+  // Cross-process device mutex doesn't apply to the DXG backend on WSL.
+  if (access("/dev/dxg", F_OK) == 0)
+    GTEST_SKIP() << "Skipped on WSL: cross-process mutex not applicable to DXG backend";
   TestCrossProcessSerialization tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();
