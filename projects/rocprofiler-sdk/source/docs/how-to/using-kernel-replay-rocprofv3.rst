@@ -1,6 +1,6 @@
 .. meta::
   :description: Using kernel replay with rocprofv3 to collect multiple counter groups in a single application run
-  :keywords: rocprofv3, kernel replay, kernel-replay-beta-enabled, multi-pass counters, application replay, snapshot restore
+  :keywords: rocprofv3, kernel replay, replay-mode, kernel-replay-beta-enabled, multi-pass counters, application replay, snapshot restore
 
 .. _using-kernel-replay-rocprofv3:
 
@@ -8,26 +8,27 @@
 Using kernel replay with rocprofv3
 ======================================
 
-``rocprofv3 --kernel-replay-beta-enabled`` collects several hardware-counter groups in **one
-application run**. For each kernel dispatch, the profiler snapshots every tracked coarse-grained
-allocation owned by that dispatch's agent -- not only the memory the kernel itself can reach --
-re-executes that dispatch once per ``--pmc`` group, and restores the snapshot between passes so
-every group observes identical inputs. Host RAM use and copy time therefore scale with the agent's
-whole tracked footprint rather than with the kernel's working set, as `What is snapshotted`_
-describes.
+``rocprofv3 --replay-mode kernel --kernel-replay-beta-enabled`` collects several hardware-counter
+groups in **one application run**. For each kernel dispatch, the profiler snapshots every tracked
+coarse-grained allocation owned by that dispatch's agent -- not only the memory the kernel itself
+can reach -- re-executes that dispatch once per ``--pmc`` group, and restores the snapshot between
+passes so every group observes identical inputs. Host RAM use and copy time therefore scale with
+the agent's whole tracked footprint rather than with the kernel's working set, as
+`What is snapshotted`_ describes.
 
-Without the flag, multiple ``--pmc`` groups use *application replay*: the whole application is
-re-run from start to finish once per group. Kernel replay is useful when those full re-runs are
-expensive or non-deterministic.
+Without ``--replay-mode kernel``, multiple ``--pmc`` groups use *application replay*: the whole
+application is re-run from start to finish once per group. Kernel replay is useful when those full
+re-runs are expensive or non-deterministic.
 
 This page is the command-line how-to. The SDK callback domain, ``replay_pass_count``, and localized
 context control are documented in :ref:`using-kernel-replay`.
 
 .. warning::
 
-   Kernel replay is **experimental**. The ``rocprofv3`` flag is ``--kernel-replay-beta-enabled``
-   and the SDK header lives under ``rocprofiler-sdk/experimental/``. Both are expected to change
-   before a stable release. Use it when you understand the limitations below.
+   Kernel replay is **experimental**. Use ``--replay-mode kernel`` together with
+   ``--kernel-replay-beta-enabled`` to acknowledge that the behaviour may change in a future
+   release. The SDK header lives under ``rocprofiler-sdk/experimental/``. Use it when you
+   understand the limitations below.
 
 How it compares
 ===============
@@ -47,7 +48,7 @@ fit in one hardware pass, ``rocprofv3`` has three ways to collect them:
      - Whole application, re-run once per group
      - None; each run is a fresh process
      - ``O(N × application runtime)``
-   * - **Kernel replay** (``--kernel-replay-beta-enabled``)
+   * - **Kernel replay** (``--replay-mode kernel --kernel-replay-beta-enabled``)
      - One dispatch, re-executed in place
      - Device memory snapshot and restore between passes
      - ``O(N × kernel time + N × snap/restore)``
@@ -63,14 +64,14 @@ counter group against the same inputs.
 Collecting counters with kernel replay
 ======================================
 
-``--kernel-replay-beta-enabled`` requires counter collection (``--pmc``, input-file ``pmc``, or
-``pmc_groups``). The number of replay passes is the number of counter groups (one pass per group).
-There is no separate pass-count flag. ``rocprofv3`` uses callback dispatch counting for counter
-records; ``replay_pass`` is emitted on that path.
+``--replay-mode kernel`` requires counter collection (``--pmc``, input-file ``pmc``, or
+``pmc_groups``) and ``--kernel-replay-beta-enabled``. The number of replay passes is the number of
+counter groups (one pass per group). There is no separate pass-count flag. ``rocprofv3`` uses
+callback dispatch counting for counter records; ``replay_pass`` is emitted on that path.
 
 .. code-block:: bash
 
-   rocprofv3 --pmc SQ_WAVES GRBM_COUNT --pmc GRBM_GUI_ACTIVE --kernel-replay-beta-enabled -- <application_path>
+   rocprofv3 --pmc SQ_WAVES GRBM_COUNT --pmc GRBM_GUI_ACTIVE --replay-mode kernel --kernel-replay-beta-enabled -- <application_path>
 
 The preceding command collects both counter groups in a **single** run of ``<application_path>``.
 Each targeted dispatch is replayed twice: pass 0 collects ``SQ_WAVES`` and ``GRBM_COUNT``; pass 1
@@ -81,11 +82,11 @@ not snapshot or restore — the dispatch takes the ordinary path.
 
 .. code-block:: bash
 
-   rocprofv3 --pmc SQ_WAVES GRBM_COUNT --kernel-replay-beta-enabled -- <application_path>
+   rocprofv3 --pmc SQ_WAVES GRBM_COUNT --replay-mode kernel --kernel-replay-beta-enabled -- <application_path>
 
 Input files are unaffected by the flag. An input file's jobs each describe a run of their own --
 their own output configuration, kernel filters and ranges -- so ``rocprofv3`` runs them exactly as
-it would without ``--kernel-replay-beta-enabled``, and replay applies within each job to the
+it would without ``--replay-mode kernel``, and replay applies within each job to the
 counter groups that job asks for.
 
 List counters first with ``rocprofv3 --list-avail`` or ``rocprofv3-avail list --pmc``. Each
@@ -160,7 +161,7 @@ Limitations (CLI)
 * **Fixed pass count** equal to the number of collectable groups on that agent. No
   ``replay_continue`` and no per-pass local-context toggles from the CLI.
 * **Counters only.** ``--att``, PC sampling, and ``--spm`` are rejected alongside
-  ``--kernel-replay-beta-enabled``. Because the CLI has no per-pass toggles, any other service
+  ``--replay-mode kernel``. Because the CLI has no per-pass toggles, any other service
   would remain enabled for every pass and report each kernel once per pass, all under the single
   dispatch ID that replay reuses. The SDK itself is not restricted this way -- a custom tool can
   enable and disable services per pass through the local-context API (see

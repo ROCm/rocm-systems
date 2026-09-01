@@ -31,7 +31,7 @@ def pytest_addoption(parser):
         "--json-input",
         action="store",
         required=True,
-        help="rocprofv3 results JSON produced by a --kernel-replay-beta-enabled run",
+        help="rocprofv3 results JSON produced by a --replay-mode kernel --kernel-replay-beta-enabled run",
     )
     parser.addoption(
         "--passes",

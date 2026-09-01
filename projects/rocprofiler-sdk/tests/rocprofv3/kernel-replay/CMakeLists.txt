@@ -54,7 +54,7 @@ add_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT
         --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --pmc SQ_WAVES SQ_INSTS_VALU
         SQ_INSTS_SALU --pmc SQ_WAVES SQ_INSTS_VALU SQ_INSTS_SMEM --pmc SQ_WAVES
-        SQ_INSTS_VALU SQ_INSTS_LDS --kernel-replay-beta-enabled --output-format csv json
+        SQ_INSTS_VALU SQ_INSTS_LDS --replay-mode kernel --kernel-replay-beta-enabled --output-format csv json
         -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay -o out --
         $<TARGET_FILE:kernel-replay> 1048576 1)
 
@@ -106,7 +106,7 @@ add_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT
         --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --pmc SQ_WAVES SQ_INSTS_VALU
         SQ_INSTS_SALU --pmc SQ_WAVES SQ_INSTS_VALU SQ_INSTS_SMEM --pmc SQ_WAVES
-        SQ_INSTS_VALU SQ_INSTS_LDS --kernel-replay-beta-enabled --output-format csv json
+        SQ_INSTS_VALU SQ_INSTS_LDS --replay-mode kernel --kernel-replay-beta-enabled --output-format csv json
         -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval -o out --
         $<TARGET_FILE:kernel-replay> 1048576 1)
 
@@ -150,7 +150,7 @@ add_test(
     NAME rocprofv3-test-kernel-replay-baseline-generate
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU
-        --kernel-replay-beta-enabled --output-format json -d
+        --replay-mode kernel --kernel-replay-beta-enabled --output-format json -d
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-baseline -o out --
         $<TARGET_FILE:kernel-replay> 1048576 1)
 

@@ -155,7 +155,7 @@ See also
 --------
 
 * :ref:`using-kernel-replay` — configure, ``replay_pass_count``, local context
-* :ref:`using-kernel-replay-rocprofv3` — ``rocprofv3 --kernel-replay-beta-enabled``
+* :ref:`using-kernel-replay-rocprofv3` — ``rocprofv3 --replay-mode kernel --kernel-replay-beta-enabled``
 * :ref:`kernel-replay-callback-api` — API contract
 * :ref:`kernel-replay-concurrency` — isolation model
 * :ref:`kernel-replay-memory-snapshot` — what ``snap()`` / ``restore()`` actually do

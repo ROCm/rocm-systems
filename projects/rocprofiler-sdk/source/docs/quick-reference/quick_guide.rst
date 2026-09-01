@@ -120,7 +120,7 @@ is snapshotted and restored between passes):
 
 .. code-block:: bash
 
-   rocprofv3 --pmc SQ_WAVES GRBM_COUNT --pmc GRBM_GUI_ACTIVE --kernel-replay-beta-enabled -- ./your_app
+   rocprofv3 --pmc SQ_WAVES GRBM_COUNT --pmc GRBM_GUI_ACTIVE --replay-mode kernel --kernel-replay-beta-enabled -- ./your_app
 
 **Documentation:** :ref:`using-kernel-replay-rocprofv3`
 

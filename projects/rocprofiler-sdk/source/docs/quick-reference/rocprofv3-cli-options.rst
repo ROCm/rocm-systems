@@ -185,8 +185,12 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Specifies performance monitoring counters to be collected. Use comma or space to specify more than one counter. For multi-pass collection, use multiple --pmc flags where each flag defines a separate counter group. The job fails if a counter group can't be collected in a single pass. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#counter-collection-using-command-line">Read more...</a></td>
                 </tr>
                 <tr>
+                    <td>--replay-mode {kernel,application}</td>
+                    <td>(beta) Select the counter-collection replay strategy. 'kernel' collects all --pmc groups in a single application run by replaying each dispatch once per group with device-memory snapshot/restore between passes, instead of re-running the whole application per group. Requires --pmc and --kernel-replay-beta-enabled. 'application' (default) re-runs the whole application once per counter group. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-kernel-replay-rocprofv3.html">Read more...</a></td>
+                </tr>
+                <tr>
                     <td>--kernel-replay-beta-enabled [BOOL]</td>
-                    <td>(beta) Collect all --pmc groups in a single application run by replaying each dispatch once per group with device-memory snapshot/restore between passes, instead of re-running the whole application per group. Requires --pmc. There is no --kernel-replay-passes flag; the pass count is the number of --pmc groups. CSV does not add a Replay_Pass column; JSON records include replay_pass. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-kernel-replay-rocprofv3.html">Read more...</a></td>
+                    <td>(beta) Acknowledge that --replay-mode kernel is a beta feature. Required when --replay-mode kernel is specified. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-kernel-replay-rocprofv3.html">Read more...</a></td>
                 </tr>
                 <tr>
                     <th rowspan="4">Post-processing tracing</th>

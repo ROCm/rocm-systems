@@ -93,7 +93,7 @@ def test_each_input_file_job_is_a_run_of_its_own():
     """An input file's jobs are independent configurations, so replay must not fold them
     together and leave the later ones' settings behind."""
     runs = launched_runs(
-        "--kernel-replay-beta-enabled",
+        "--replay-mode", "kernel", "--kernel-replay-beta-enabled",
         jobs=[
             {"pmc": ["SQ_WAVES"], "output_directory": "/tmp/a"},
             {"pmc": ["GRBM_COUNT"], "output_directory": "/tmp/b"},
@@ -123,7 +123,7 @@ def test_replay_does_not_change_how_input_file_jobs_are_run():
     def shape(runs):
         return [tuple(getattr(itr, key) for key in keys) for itr in runs]
 
-    assert shape(launched_runs("--kernel-replay-beta-enabled", jobs=jobs)) == shape(
+    assert shape(launched_runs("--replay-mode", "kernel", "--kernel-replay-beta-enabled", jobs=jobs)) == shape(
         launched_runs(jobs=jobs)
     )
 
@@ -132,7 +132,7 @@ def test_jobs_that_disagree_are_all_run():
     """Jobs are free to differ in whatever they like. None of these differences may cost a job
     its run or its settings."""
     runs = launched_runs(
-        "--kernel-replay-beta-enabled",
+        "--replay-mode", "kernel", "--kernel-replay-beta-enabled",
         jobs=[
             {"pmc": ["A"], "output_format": ["csv"], "kernel_iteration_range": "1-2"},
             {"pmc": ["B"], "output_format": ["json"], "kernel_iteration_range": "3-4"},
@@ -147,7 +147,7 @@ def test_many_jobs_all_run():
     """Input files with one job per counter group are the normal way to reach replay, and a
     realistic counter list runs to dozens of groups."""
     jobs = [{"pmc": [f"COUNTER_{idx}"]} for idx in range(32)]
-    runs = launched_runs("--kernel-replay-beta-enabled", jobs=jobs)
+    runs = launched_runs("--replay-mode", "kernel", "--kernel-replay-beta-enabled", jobs=jobs)
     assert [itr.pmc for itr in runs] == [job["pmc"] for job in jobs]
 
 
@@ -155,7 +155,7 @@ def test_command_line_groups_are_passes_of_one_run():
     """Replay's reason for existing: several groups collected without re-running the
     application."""
     runs = launched_runs(
-        "--pmc", "SQ_WAVES", "--pmc", "GRBM_COUNT", "--kernel-replay-beta-enabled"
+        "--pmc", "SQ_WAVES", "--pmc", "GRBM_COUNT", "--replay-mode", "kernel", "--kernel-replay-beta-enabled"
     )
     assert len(runs) == 1
     assert runs[0].pmc == [["SQ_WAVES"], ["GRBM_COUNT"]]
@@ -169,7 +169,7 @@ def test_command_line_groups_are_separate_runs_without_replay():
 
 def test_one_command_line_group_is_one_run():
     runs = launched_runs(
-        "--pmc", "SQ_WAVES", "GRBM_COUNT", "--kernel-replay-beta-enabled"
+        "--pmc", "SQ_WAVES", "GRBM_COUNT", "--replay-mode", "kernel", "--kernel-replay-beta-enabled"
     )
     assert len(runs) == 1
     assert runs[0].pmc == ["SQ_WAVES", "GRBM_COUNT"]
@@ -181,7 +181,7 @@ def test_command_line_groups_stay_one_run_alongside_input_file_jobs():
         "A",
         "--pmc",
         "B",
-        "--kernel-replay-beta-enabled",
+        "--replay-mode", "kernel", "--kernel-replay-beta-enabled",
         jobs=[{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}],
     )
     assert [itr.pmc for itr in runs] == [[["A"], ["B"]], ["SQ_WAVES"], ["GRBM_COUNT"]]
@@ -191,16 +191,27 @@ def test_input_file_pmc_groups_are_counter_collection():
     """pmc_groups never arrives on the command line, so a check that only looks at cmd_args
     would reject this input file for having no counters."""
     runs = launched_runs(
-        "--kernel-replay-beta-enabled",
+        "--replay-mode", "kernel", "--kernel-replay-beta-enabled",
         jobs=[{"pmc_groups": [["SQ_WAVES"], ["GRBM_COUNT"]]}],
     )
     assert len(runs) == 1
     assert runs[0].pmc_groups == [["SQ_WAVES"], ["GRBM_COUNT"]]
 
 
+def test_replay_without_beta_acknowledgement_is_rejected():
+    try:
+        launched_runs("--pmc", "SQ_WAVES", "--replay-mode", "kernel")
+    except SystemExit as exc:
+        assert exc.code != 0
+    else:
+        raise AssertionError(
+            "--replay-mode kernel without --kernel-replay-beta-enabled should have been rejected"
+        )
+
+
 def test_replay_without_counter_collection_is_rejected():
     try:
-        launched_runs("--kernel-replay-beta-enabled")
+        launched_runs("--replay-mode", "kernel", "--kernel-replay-beta-enabled")
     except SystemExit as exc:
         assert exc.code != 0
     else:

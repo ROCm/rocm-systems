@@ -138,7 +138,7 @@ dispatch, and per-pass context toggling — which is precisely the machinery lit
 avoid. Supporting it would mean linking the whole `kernel_replay/` subsystem, relaxing every service
 block that defines the mode, and disabling the fast path for any dispatch that gets replayed. At
 that point the mode is no longer lite, and the user is better served by the full SDK with
-`--kernel-replay-beta-enabled`.
+`--replay-mode kernel --kernel-replay-beta-enabled`.
 
 The one thing that *will* be needed when lite trace merges is a guard. The fast path's entry
 condition is currently a check on notifiers:

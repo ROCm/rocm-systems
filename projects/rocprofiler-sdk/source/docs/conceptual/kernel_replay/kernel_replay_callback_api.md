@@ -290,8 +290,7 @@ separate kernel replay Doxygen group. A walkthrough for tool authors is
 rocprofv3 --pmc <counters...> --replay-mode kernel --kernel-replay-beta-enabled -- <app>
 ```
 
-- `--kernel-replay-beta-enabled` requires `--pmc`, and the CLI fails with a diagnostic if it is used
-  without it.
+- `--replay-mode kernel` requires `--pmc` and `--kernel-replay-beta-enabled`, and the CLI fails with a diagnostic if either is missing.
 - The tool library creates the kernel replay context when the flag is given, and not otherwise.
 - There is no pass-count knob. The tool derives the pass count from the number of counter groups
   collectable on the dispatch's agent and returns it from `replay_pass_count`.
@@ -321,5 +320,5 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Replay loop and dispatch-id reservation | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `WriteInterceptor` |
 | Tool-side subscription | `source/lib/rocprofiler-sdk-tool/tool.cpp` | `kernel_replay_callback()`, `kernel_replay_pass_count_callback()` |
 | Tool-side flag | `source/lib/rocprofiler-sdk-tool/config.hpp` | `kernel_replay` |
-| CLI flag | `source/bin/rocprofv3.py` | `--kernel-replay-beta-enabled` |
+| CLI flags | `source/bin/rocprofv3.py` | `--replay-mode kernel`, `--kernel-replay-beta-enabled` |
 | Tests | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `local_context.cpp` |

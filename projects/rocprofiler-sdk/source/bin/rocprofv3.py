@@ -760,15 +760,27 @@ For attachment profiling of running processes:
 
     kernel_replay_options = parser.add_argument_group("Kernel replay options (beta)")
 
+    kernel_replay_options.add_argument(
+        "--replay-mode",
+        help=(
+            "Select the counter-collection replay strategy. "
+            "'kernel' collects all counter groups within a single application run via in-process "
+            "kernel replay: each dispatch is replayed once per counter group, with device-memory "
+            "snapshot/restore between passes, instead of re-running the whole application per "
+            "group. Requires --pmc and --kernel-replay-beta-enabled. "
+            "'application' (default) re-runs the whole application once per counter group."
+        ),
+        choices=("kernel", "application"),
+        default=None,
+    )
+
     add_parser_bool_argument(
         kernel_replay_options,
         "--kernel-replay-beta-enabled",
         help=(
-            "Collect all counter groups within a single application run via in-process kernel "
-            "replay: each dispatch is replayed once per counter group, with device-memory "
-            "snapshot/restore between passes, instead of re-running the whole application per "
-            "group. Requires counter collection (--pmc, input-file pmc, or pmc_groups). This is "
-            "not a general performance switch. (beta)"
+            "Acknowledge that kernel replay (--replay-mode kernel) is a beta feature and its "
+            "behaviour may change in a future release. Required when --replay-mode kernel is "
+            "specified."
         ),
     )
 
@@ -2190,21 +2202,23 @@ def run(app_args, args, **kwargs):
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
 
-    if (
-        getattr(args, "kernel_replay", None)
-        and not args.pmc
-        and not args.pmc_groups
-    ):
-        fatal_error(
-            "--kernel-replay-beta-enabled requires counter collection "
-            "(--pmc or pmc_groups)"
-        )
+    kernel_replay_mode = getattr(args, "replay_mode", None) == "kernel"
 
-    if getattr(args, "kernel_replay_beta_enabled", None):
+    if kernel_replay_mode:
+        if not getattr(args, "kernel_replay_beta_enabled", None):
+            fatal_error(
+                "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
+                "feature via --kernel-replay-beta-enabled"
+            )
+        if not args.pmc and not args.pmc_groups:
+            fatal_error(
+                "--replay-mode kernel requires counter collection "
+                "(--pmc or pmc_groups)"
+            )
         replay_conflicts = services_conflicting_with_kernel_replay(args)
         if replay_conflicts:
             fatal_error(
-                "--kernel-replay-beta-enabled cannot be combined with "
+                "--replay-mode kernel cannot be combined with "
                 + " or ".join(replay_conflicts)
                 + ". Kernel replay only varies counter groups from one pass to the next; "
                 "every other service stays on for all of the passes and would report each "
@@ -2564,10 +2578,15 @@ def main(argv=None):
         has_set_attr(inp, "pmc") or has_set_attr(inp, "pmc_groups") for inp in inp_args
     )
 
-    replay_enabled = bool(getattr(cmd_args, "kernel_replay_beta_enabled", None))
+    replay_enabled = getattr(cmd_args, "replay_mode", None) == "kernel"
+    if replay_enabled and not getattr(cmd_args, "kernel_replay_beta_enabled", None):
+        fatal_error(
+            "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
+            "feature via --kernel-replay-beta-enabled"
+        )
     if replay_enabled and not (cli_has_pmc or input_has_counters):
         fatal_error(
-            "--kernel-replay-beta-enabled requires counter collection "
+            "--replay-mode kernel requires counter collection "
             "(--pmc, input-file pmc, or pmc_groups)"
         )
 

@@ -22,7 +22,7 @@
 # THE SOFTWARE.
 
 # Validates multi-pass kernel-replay counter collection (JSON output) produced by:
-#   rocprofv3 --pmc <grp0> --pmc <grp1> ... --kernel-replay-beta-enabled -- kernel-replay
+#   rocprofv3 --pmc <grp0> --pmc <grp1> ... --replay-mode kernel --kernel-replay-beta-enabled -- kernel-replay
 # where each --pmc group shares the same sanity counters (SQ_WAVES, SQ_INSTS_VALU) plus one unique
 # counter. The number of groups drives the number of replay passes.
 #
