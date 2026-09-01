@@ -185,7 +185,7 @@ replay_drain_agent_or_fatal(hsa_agent_t agent)
     {
         int64_t in_flight = 0;
         queue_controller->iterate_queues([&](const Queue* sibling) {
-            if(sibling != nullptr && sibling->get_agent().get_hsa_agent().handle == agent.handle)
+            if(sibling != nullptr && sibling->get_agent().get_hsa_agent() == agent)
                 in_flight += sibling->active_async_packets();
         });
 
@@ -1399,7 +1399,7 @@ Queue::destroy_signal(pooled_signal_t* signal)
 bool
 Queue::sync() const
 {
-    if(_active_kernels.handle == 0u) return true;
+    if(_active_kernels == null_hsa_signal) return true;
 
     const auto _value =
         _core_api.hsa_signal_wait_relaxed_fn(_active_kernels,
