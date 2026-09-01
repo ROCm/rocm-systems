@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -39,11 +40,6 @@
 namespace
 {
 namespace fs = std::filesystem;
-
-constexpr auto sdk_soname         = std::string_view{ "librocprofiler-sdk.so.1" };
-constexpr auto attach_soname      = std::string_view{ "librocprofiler-sdk-attach.so.1" };
-constexpr auto sdk_unversioned    = std::string_view{ "librocprofiler-sdk.so" };
-constexpr auto attach_unversioned = std::string_view{ "librocprofiler-sdk-attach.so" };
 
 struct remove_directory
 {
@@ -100,7 +96,7 @@ verify_loaded_library(const char* symbol_name, const fs::path& expected_library)
     if(!fs::equivalent(fs::path{ info.dli_fname }, expected_library, ec) || ec)
     {
         std::cerr << "Test FAILED: " << symbol_name << " was loaded from "
-                  << info.dli_fname << " instead of the SONAME-only runtime directory at "
+                  << info.dli_fname << " instead of the expected runtime library at "
                   << expected_library << '\n';
         return false;
     }
@@ -111,17 +107,9 @@ verify_loaded_library(const char* symbol_name, const fs::path& expected_library)
 
 int
 run_child(std::string_view mode,
-          const fs::path&  runtime_directory,
-          const fs::path&  register_library)
+          const fs::path&  register_library,
+          const fs::path&  expected_library)
 {
-    if(fs::exists(runtime_directory / sdk_unversioned) ||
-       fs::exists(runtime_directory / attach_unversioned))
-    {
-        std::cerr << "Test FAILED: runtime directory contains an unversioned development "
-                     "symlink\n";
-        return 1;
-    }
-
     if(!verify_loaded_library("rocprofiler_register_library_api_table", register_library))
         return 1;
 
@@ -129,14 +117,12 @@ run_child(std::string_view mode,
 
     if(mode == "sdk")
     {
-        if(!verify_loaded_library("rocprofiler_set_api_table",
-                                  runtime_directory / sdk_soname))
+        if(!verify_loaded_library("rocprofiler_set_api_table", expected_library))
             return 1;
     }
     else if(mode == "attach")
     {
-        if(!verify_loaded_library("rocprofiler_attach_set_api_table",
-                                  runtime_directory / attach_soname))
+        if(!verify_loaded_library("rocprofiler_attach_set_api_table", expected_library))
             return 1;
     }
     else
@@ -151,7 +137,9 @@ run_child(std::string_view mode,
 bool
 set_child_environment(const char*     mode,
                       const fs::path& runtime_directory,
-                      const fs::path& register_library)
+                      const fs::path& register_library,
+                      const fs::path& additional_library_directory,
+                      const fs::path& register_library_override)
 {
     unsetenv("ROCP_TOOL_ATTACH");
     unsetenv("ROCP_TOOL_LIBRARIES");
@@ -167,20 +155,33 @@ set_child_environment(const char*     mode,
         return false;
 
     auto library_path = runtime_directory.string();
-    auto preload      = register_library.string();
+    if(!additional_library_directory.empty())
+        library_path =
+            additional_library_directory.string() + ":" + std::move(library_path);
+
+    auto preload = register_library.string();
     if(auto* current = std::getenv("LD_PRELOAD"); current != nullptr && *current != '\0')
         preload = std::string{ current } + ":" + preload;
 
-    return status == 0 && setenv("LD_LIBRARY_PATH", library_path.c_str(), 1) == 0 &&
-           setenv("LD_PRELOAD", preload.c_str(), 1) == 0 &&
-           setenv("ROCPROFILER_REGISTER_LOG_LEVEL", "info", 1) == 0;
+    if(status != 0 || setenv("LD_LIBRARY_PATH", library_path.c_str(), 1) != 0 ||
+       setenv("LD_PRELOAD", preload.c_str(), 1) != 0 ||
+       setenv("ROCPROFILER_REGISTER_LOG_LEVEL", "info", 1) != 0)
+        return false;
+
+    return register_library_override.empty() ||
+           setenv("ROCPROFILER_REGISTER_LIBRARY", register_library_override.c_str(), 1) ==
+               0;
 }
 
 bool
 execute_child(const fs::path& executable,
               const char*     mode,
               const fs::path& runtime_directory,
-              const fs::path& register_library)
+              const fs::path& register_library,
+              const fs::path& expected_library,
+              const fs::path& additional_library_directory = {},
+              const fs::path& register_library_override    = {},
+              bool            expect_success               = true)
 {
     auto child_pid = fork();
     if(child_pid < 0)
@@ -191,7 +192,11 @@ execute_child(const fs::path& executable,
 
     if(child_pid == 0)
     {
-        if(!set_child_environment(mode, runtime_directory, register_library))
+        if(!set_child_environment(mode,
+                                  runtime_directory,
+                                  register_library,
+                                  additional_library_directory,
+                                  register_library_override))
         {
             std::fprintf(stderr, "Test FAILED: could not configure child environment\n");
             _exit(127);
@@ -201,8 +206,8 @@ execute_child(const fs::path& executable,
               executable.c_str(),
               "--child",
               mode,
-              runtime_directory.c_str(),
               register_library.c_str(),
+              expected_library.c_str(),
               nullptr);
         std::fprintf(stderr, "Test FAILED: exec failed: %s\n", std::strerror(errno));
         _exit(127);
@@ -215,9 +220,18 @@ execute_child(const fs::path& executable,
         return false;
     }
 
-    if(!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    if(expect_success && (!WIFEXITED(status) || WEXITSTATUS(status) != 0))
     {
         std::cerr << "Test FAILED: " << mode << " child did not exit successfully";
+        if(WIFSIGNALED(status)) std::cerr << " (signal " << WTERMSIG(status) << ')';
+        std::cerr << '\n';
+        return false;
+    }
+    if(!expect_success && (!WIFSIGNALED(status) || WTERMSIG(status) != SIGABRT))
+    {
+        std::cerr << "Test FAILED: " << mode
+                  << " child did not abort after the invalid explicit override";
+        if(WIFEXITED(status)) std::cerr << " (exit code " << WEXITSTATUS(status) << ')';
         if(WIFSIGNALED(status)) std::cerr << " (signal " << WTERMSIG(status) << ')';
         std::cerr << '\n';
         return false;
@@ -232,20 +246,17 @@ main(int argc, char** argv)
     if(argc == 5 && std::string_view{ argv[1] } == "--child")
         return run_child(argv[2], argv[3], argv[4]);
 
-    if(argc != 7)
+    if(argc != 12)
     {
         std::cerr << "Usage: " << argv[0]
-                  << " <register-library> <register-soname> <sdk-library> <sdk-soname> "
-                     "<attach-library> <attach-soname>\n";
+                  << " <layout> <register-library> <register-soname> <sdk-v1-library> "
+                     "<sdk-v1-soname> <sdk-unversioned> <sdk-v0-library> "
+                     "<sdk-v0-soname> <attach-library> <attach-soname> "
+                     "<attach-unversioned>\n";
         return 1;
     }
 
-    if(std::string_view{ argv[4] } != sdk_soname ||
-       std::string_view{ argv[6] } != attach_soname)
-    {
-        std::cerr << "Test FAILED: fixtures do not use the expected SDK ABI 1 SONAMEs\n";
-        return 1;
-    }
+    auto layout = std::string_view{ argv[1] };
 
     auto ec = std::error_code{};
     auto runtime_directory_template =
@@ -268,11 +279,92 @@ main(int argc, char** argv)
     auto runtime_directory = fs::path{ runtime_directory_value };
     auto cleanup           = remove_directory{ runtime_directory };
 
-    auto register_library = runtime_directory / argv[2];
-    if(!copy_library(argv[1], register_library) ||
-       !copy_library(argv[3], runtime_directory / argv[4]) ||
-       !copy_library(argv[5], runtime_directory / argv[6]))
+    auto register_library = runtime_directory / argv[3];
+    if(!copy_library(argv[2], register_library)) return 1;
+
+    auto sdk_expected                 = fs::path{};
+    auto attach_expected              = fs::path{};
+    auto run_sdk                      = false;
+    auto run_attach                   = false;
+    auto additional_library_directory = fs::path{};
+    auto register_library_override    = fs::path{};
+    auto expect_sdk_success           = true;
+
+    if(layout == "soname-v1")
+    {
+        sdk_expected    = runtime_directory / argv[5];
+        attach_expected = runtime_directory / argv[10];
+        run_sdk         = true;
+        run_attach      = true;
+        if(!copy_library(argv[4], sdk_expected) ||
+           !copy_library(argv[9], attach_expected))
+            return 1;
+    }
+    else if(layout == "unversioned")
+    {
+        sdk_expected    = runtime_directory / argv[6];
+        attach_expected = runtime_directory / argv[11];
+        run_sdk         = true;
+        run_attach      = true;
+        if(!copy_library(argv[4], sdk_expected) ||
+           !copy_library(argv[9], attach_expected))
+            return 1;
+    }
+    else if(layout == "sdk-soversion-zero")
+    {
+        sdk_expected = runtime_directory / argv[8];
+        run_sdk      = true;
+        if(!copy_library(argv[7], sdk_expected)) return 1;
+    }
+    else if(layout == "sdk-soversion-precedence")
+    {
+        sdk_expected = runtime_directory / argv[5];
+        run_sdk      = true;
+        if(!copy_library(argv[7], runtime_directory / argv[8]) ||
+           !copy_library(argv[4], sdk_expected))
+            return 1;
+    }
+    else if(layout == "sdk-entrypoint-fallback")
+    {
+        sdk_expected = runtime_directory / argv[5];
+        run_sdk      = true;
+        if(!copy_library(argv[9], runtime_directory / argv[6]) ||
+           !copy_library(argv[4], sdk_expected))
+            return 1;
+    }
+    else if(layout == "sdk-colocated-precedence")
+    {
+        sdk_expected                 = runtime_directory / argv[5];
+        additional_library_directory = runtime_directory / "global";
+        run_sdk                      = true;
+
+        fs::create_directory(additional_library_directory, ec);
+        if(ec)
+        {
+            std::cerr << "Test FAILED: could not create conflicting library directory: "
+                      << ec.message() << '\n';
+            return 1;
+        }
+
+        if(!copy_library(argv[7], additional_library_directory / argv[6]) ||
+           !copy_library(argv[4], sdk_expected))
+            return 1;
+    }
+    else if(layout == "sdk-explicit-override-no-fallback")
+    {
+        sdk_expected              = runtime_directory / argv[5];
+        register_library_override = runtime_directory / "invalid-sdk-library";
+        expect_sdk_success        = false;
+        run_sdk                   = true;
+        if(!copy_library(argv[9], register_library_override) ||
+           !copy_library(argv[4], sdk_expected))
+            return 1;
+    }
+    else
+    {
+        std::cerr << "Test FAILED: unknown layout " << layout << '\n';
         return 1;
+    }
 
     auto executable = fs::canonical("/proc/self/exe", ec);
     if(ec)
@@ -282,11 +374,20 @@ main(int argc, char** argv)
         return 1;
     }
 
-    if(!execute_child(executable, "sdk", runtime_directory, register_library) ||
-       !execute_child(executable, "attach", runtime_directory, register_library))
+    if(run_sdk && !execute_child(executable,
+                                 "sdk",
+                                 runtime_directory,
+                                 register_library,
+                                 sdk_expected,
+                                 additional_library_directory,
+                                 register_library_override,
+                                 expect_sdk_success))
+        return 1;
+    if(run_attach &&
+       !execute_child(
+           executable, "attach", runtime_directory, register_library, attach_expected))
         return 1;
 
-    std::cout << "Test PASSED: SDK and attach libraries loaded from SONAME-only runtime "
-                 "directory\n";
+    std::cout << "Test PASSED: " << layout << '\n';
     return 0;
 }
