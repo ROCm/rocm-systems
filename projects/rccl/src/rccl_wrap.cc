@@ -1266,10 +1266,6 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 
   // (5) Enqueue-bound backends: CE registered (Branch B) vs symmetric vs kernel.
   // Reproduce taskAppend()'s AllReduce CE decision exactly so both agree.
-  // NOTE: CE registered wins over the symmetric kernel when both are eligible,
-  // matching taskAppend (its CE branch is not gated on symEligible; symmetric
-  // extraction only sees tasks that fall through to collTaskAppend).
-  //
   // develop's taskAppend appends CE for AllReduce iff !hasSysmemSegment && ceAvailable
   // && ((CTAPolicy & ZERO) || force): ceAvailable starts from ncclCeAvailable(op) then
   // is cleared unless graph-allowed, op-supported, count-divisible and RCCL_CE_ALLREDUCE.
