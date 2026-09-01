@@ -184,4 +184,3 @@ The current implementation achieves ABI independence by avoiding `std::regex` en
 ## SHA-256
 
 `sha256.hpp` is a shim over `shared/sha256`, which `projects/cuid` compiles too, so there is one implementation rather than two kept in step by hand.
-
