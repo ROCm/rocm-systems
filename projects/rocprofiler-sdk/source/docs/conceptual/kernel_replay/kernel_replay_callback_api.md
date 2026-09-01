@@ -287,7 +287,7 @@ separate kernel replay Doxygen group. A walkthrough for tool authors is
 `rocprofv3` exposes replay through one flag:
 
 ```bash
-rocprofv3 --pmc <counters...> --kernel-replay-beta-enabled -- <app>
+rocprofv3 --pmc <counters...> --replay-mode kernel --kernel-replay-beta-enabled -- <app>
 ```
 
 - `--kernel-replay-beta-enabled` requires `--pmc`, and the CLI fails with a diagnostic if it is used
