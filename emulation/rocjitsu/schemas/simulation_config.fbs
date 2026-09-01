@@ -300,6 +300,7 @@ table SimulationConfig {
   // Shared async helpers across this VM. -1 selects the table; zero disables.
   // Append after thread_allocations to preserve existing checkpoint field IDs.
   async_helper_threads: int32 = -1;
+  fidelity_mode: string;         // "permissive" (default) or fail-closed "strict" checks.
 }
 
 root_type SimulationConfig;
