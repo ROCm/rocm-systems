@@ -20,16 +20,11 @@ void publish_pending_moi_lowering_rejections(
     std::optional<ConSanRegisterPlanReason> whole_transform_resource_failure = std::nullopt);
 
 [[nodiscard]] ConSanMoiResourcePlanningResult solve_automatic_moi_exec_save_resources(
-    MoiResourcePlanningState &state, const ConSanOptions &input,
-    const ConSanMoiOperatingPoint &base, const MoiResourceProblem &problem,
-    std::span<const ConSanMoiCandidate> candidates, const ConSanTransformArtifacts &artifacts);
+    MoiResourcePlanningState &state, const ConSanDebugOverrides &debug,
+    const ConSanMoiOperatingPoint &base, const MoiResourceProblem &problem);
 
-void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequest &request,
-                                const BoundRuntimeResources &bound_resources,
-                                const ConSanDebugOverrides &debug,
-                                const ConSanMoiOperatingPoint &point,
-                                const MoiObjectModeSemantics &mode_semantics,
-                                std::span<const ConSanMoiCandidate> candidates,
-                                ConSanTransformArtifacts &result);
+[[nodiscard]] ConSanMoiResourcePlanningResult
+plan_moi_resources(MoiResourcePlanningState &state, const ConSanDebugOverrides &debug,
+                   const ConSanMoiOperatingPoint &point, const MoiResourceProblem &problem);
 
 } // namespace rocjitsu::consan_moi_impl

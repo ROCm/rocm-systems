@@ -128,9 +128,11 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
       make_moi_resource_planning_state(resource_problem, effective_point, result.resource_plans);
   MoiResourcePlanningState &resource_planning_state = *resource_planning_state_owner;
   const auto rebuild_resource_plans = [&] {
-    rebuild_moi_resource_plans(resource_planning_state, effective_options, effective_options,
-                               effective_options, effective_point, mode_plan.semantics,
-                               moi_candidates, result);
+    ConSanMoiResourcePlanningResult planning = plan_moi_resources(
+        resource_planning_state, effective_options, effective_point, resource_problem);
+    result.resource_plans = std::move(planning.plans);
+    result.errors.insert(result.errors.end(), std::make_move_iterator(planning.errors.begin()),
+                         std::make_move_iterator(planning.errors.end()));
   };
   rebuild_resource_plans();
   const MoiDynamicStackSpillPolicy dynamic_stack_spill =
@@ -168,8 +170,7 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
       rebuild_resource_plans();
   }
   ConSanMoiResourcePlanningResult exec_planning = solve_automatic_moi_exec_save_resources(
-      resource_planning_state, effective_options, effective_point, resource_problem, moi_candidates,
-      result);
+      resource_planning_state, effective_options, effective_point, resource_problem);
   if (!exec_planning.success()) {
     result.errors.insert(result.errors.end(), std::make_move_iterator(exec_planning.errors.begin()),
                          std::make_move_iterator(exec_planning.errors.end()));

@@ -4246,3 +4246,65 @@ broad mutable products and transactions, larger legacy harvesting, material
 whole-refactoring shrinkage, the target-side extension exercise, and the
 independent Section 14 completion audit remain open. The goal therefore remains
 active.
+
+### 16.48 Convergence checkpoint 47: immutable resource-planning input
+
+A deep read of the remaining operating-point provenance flags found that they
+encode real lifetime proofs and cannot safely be inferred from register
+presence. The same trace exposed a more immediate parallel input authority in
+the shared MOI resource pipeline. `MoiResourceProblem` already owned the exact
+immutable request, runtime binding, target, inventory, observation plan,
+candidate span, and object-mode semantics for one solving run. Resource
+planning nevertheless also accepted the complete mutable
+`ConSanTransformArtifacts` transaction to retrieve its inventory and
+observation plan, and separately accepted the same candidate span. Its public
+rebuild helper then mutated the broad transaction merely to publish a typed
+planning result.
+
+All access and operational resource planning now consume the one immutable
+problem. There is no alternate transaction path and no duplicate candidate
+input. Operational barrier, atomic, and fence planning read the problem's
+inventory and observation plan directly. Automatic transient-scalar retries
+call the same `plan_moi_resources` operation and receive a complete
+`ConSanMoiResourcePlanningResult`; intermediate attempts cannot publish plans,
+errors, or operating points. The coordinator is the sole publisher of the
+selected typed result into its transaction. The old
+`rebuild_moi_resource_plans` mutation wrapper is deleted rather than retained
+as a compatibility API.
+
+The architecture gate rejects a const transform-artifact input in both the
+resource-pipeline contract and implementation and rejects the retired rebuild
+entry point. No behavior defect was established in this slice, so the existing
+cross-mode resource tests remain the behavioral regression. The structural
+test is extended to make the newly closed input and publication boundaries
+durable.
+
+| Signal | Checkpoint 47 | Cumulative change | Slice change from checkpoint 46 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,434 | +459 | **-19** |
+| Nonblank production lines | 99,148 | +65 | **-18** |
+| Production implementation lines | 91,428 | **-22** | **-18** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 200 / 56 | **-76 / -1** | **-6 / 0** |
+| `ConSanPatchInfo` references / files | 206 / 28 | +6 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 357 / 63 | +67 / +12 | **-1 / 0** |
+| Resource-planning broad-transaction references | **0** | n/a | **-6** |
+| Duplicate resource-planning candidate inputs | **0** | n/a | **-1** |
+| Mutable resource-plan rebuild wrappers | **0** | n/a | **-1** |
+| Test inventory | **5,381** | **+36** | 0 |
+
+Validation includes a final-tree `-j16` build; the exact architecture-boundary
+test; 907 focused MOI and pipeline tests, of which 905 passed and the two
+external benchmark-object cases skipped as designed; all 4,746 nonphysical
+tests over the five emulated targets at `-j16`; and all 635 physical gfx1201
+tests serialized at `-j1`. No test was removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.5, 14.6, 14.7, 14.8, and 14.9.
+The main resource solver now has one immutable input authority and a typed
+forward result, while production shrinks by another eighteen implementation
+lines. The cumulative twenty-two-line reduction is still not material.
+Remaining target locality, operating-point and transaction breadth, larger
+legacy harvesting, material whole-refactoring shrinkage, the target-side
+extension exercise, and the independent Section 14 completion audit remain
+open. The goal therefore remains active.

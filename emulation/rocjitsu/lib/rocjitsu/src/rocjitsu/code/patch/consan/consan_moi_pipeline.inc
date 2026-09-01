@@ -13,17 +13,20 @@ operational_atomic_scratch_count(ConSanProbeIntentKind evidence,
   }
 }
 
-void append_moi_operational_resource_plans(
-    MoiResourcePlanningState &state, const ConSanRequest &request,
-    const BoundRuntimeResources &bound_resources, const ConSanDebugOverrides &debug,
-    const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &mode_semantics,
-    const ConSanTransformArtifacts &result, std::vector<std::string> &errors,
-    std::vector<ConSanCandidateResourcePlan> &plans) {
+void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
+                                           const ConSanDebugOverrides &debug,
+                                           const ConSanMoiOperatingPoint &point,
+                                           const MoiResourceProblem &problem,
+                                           std::vector<std::string> &errors,
+                                           std::vector<ConSanCandidateResourcePlan> &plans) {
+  const ConSanRequest &request = problem.request();
+  const BoundRuntimeResources &bound_resources = problem.resources();
+  const MoiObjectModeSemantics &mode_semantics = problem.mode_semantics();
   const MoiOperationalEvidenceKinds &evidence =
       moi_mode_operations(request.moi_engine).operational_evidence;
   if (request.moi_track_barriers) {
     std::vector<MoiBarrierEvidenceSitePlan> candidates = build_moi_barrier_evidence_site_plans(
-        result.program_inventory, result.observation_plan(), evidence.barrier, errors);
+        problem.inventory(), problem.observation_plan(), evidence.barrier, errors);
     if (!errors.empty())
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
@@ -62,7 +65,7 @@ void append_moi_operational_resource_plans(
   }
   if (request.moi_track_atomics) {
     std::vector<MoiAtomicEvidenceSitePlan> candidates = build_moi_atomic_evidence_site_plans(
-        result.program_inventory, result.observation_plan(), evidence.atomic, errors);
+        problem.inventory(), problem.observation_plan(), evidence.atomic, errors);
     if (!errors.empty())
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
@@ -83,7 +86,7 @@ void append_moi_operational_resource_plans(
   }
   if (request.moi_track_atomics && evidence.fence) {
     std::vector<MoiFenceEvidenceSitePlan> candidates = build_moi_fence_evidence_site_plans(
-        result.program_inventory, result.observation_plan(), errors);
+        problem.inventory(), problem.observation_plan(), errors);
     if (!errors.empty())
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
@@ -161,20 +164,20 @@ void publish_pending_moi_lowering_rejections(
 /// Derive one complete resource-plan set for the current MOI operating-point
 /// attempt. The returned vector is private until every access and operational
 /// site has been planned and refined, so a retry cannot expose a half-cleared
-/// or half-rebuilt plan set through the transform artifacts.
-[[nodiscard]] ConSanMoiResourcePlanningResult build_moi_resource_plans(
-    MoiResourcePlanningState &state, const ConSanRequest &request,
-    const BoundRuntimeResources &bound_resources, const ConSanDebugOverrides &debug,
-    const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &mode_semantics,
-    std::span<const ConSanMoiCandidate> candidates, const ConSanTransformArtifacts &result) {
+/// or half-rebuilt plan set through the coordinator transaction.
+[[nodiscard]] ConSanMoiResourcePlanningResult
+plan_moi_resources(MoiResourcePlanningState &state, const ConSanDebugOverrides &debug,
+                   const ConSanMoiOperatingPoint &point, const MoiResourceProblem &problem) {
   ConSanMoiResourcePlanningResult planning;
   const ConSanMoiOperatingPoint &attempted_point = point;
   const rj_code_arch_t arch = moi_resource_arch(state);
+  const ConSanRequest &request = problem.request();
+  const BoundRuntimeResources &bound_resources = problem.resources();
   planning.attempted_operating_point = attempted_point;
-  append_moi_resource_plans(state, request, bound_resources, debug, point, candidates,
+  append_moi_resource_plans(state, request, bound_resources, debug, point, problem.candidates(),
                             planning.plans);
-  append_moi_operational_resource_plans(state, request, bound_resources, debug, point,
-                                        mode_semantics, result, planning.errors, planning.plans);
+  append_moi_operational_resource_plans(state, debug, point, problem, planning.errors,
+                                        planning.plans);
   if (consan_arch_is_cdna(arch) && point.moi_dispatch_identity.automatic_sgpr() &&
       point.moi_dispatch_identity.sgpr()) {
     for (ConSanCandidateResourcePlan &plan : planning.plans) {
@@ -217,8 +220,10 @@ void publish_pending_moi_lowering_rejections(
   if (consan_is_capability_arch(arch) && point.automatic_moi_partial_exec_save_sgprs &&
       point.moi_exec_save_sgpr) {
     const uint16_t exec_base = *point.moi_exec_save_sgpr;
-    const uint16_t exec_count = moi_exec_save_sgpr_count(
-        resolve_moi_exec_save_requirement(request, bound_resources, point, mode_semantics), arch);
+    const uint16_t exec_count =
+        moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(request, bound_resources, point,
+                                                                   problem.mode_semantics()),
+                                 arch);
     for (ConSanCandidateResourcePlan &plan : planning.plans) {
       const bool has_owner_override =
           std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
@@ -248,21 +253,16 @@ void publish_pending_moi_lowering_rejections(
 /// retry each own a complete point/plan pair; only the selected attempt is
 /// returned to orchestration.
 [[nodiscard]] ConSanMoiResourcePlanningResult solve_automatic_moi_exec_save_resources(
-    MoiResourcePlanningState &state, const ConSanOptions &input,
-    const ConSanMoiOperatingPoint &base, const MoiResourceProblem &problem,
-    std::span<const ConSanMoiCandidate> candidates, const ConSanTransformArtifacts &artifacts) {
+    MoiResourcePlanningState &state, const ConSanDebugOverrides &debug,
+    const ConSanMoiOperatingPoint &base, const MoiResourceProblem &problem) {
   struct ExecAttempt {
     ConSanMoiResourcePlanningResult planning;
     bool needs_dynamic_stack_retry = false;
   };
-  const ConSanRequest &request = input;
-  const BoundRuntimeResources &bound_resources = input;
-  const ConSanDebugOverrides &debug = input;
   const auto attempt = [&](ConSanMoiOperatingPoint point,
                            std::optional<ConSanMoiFallbackKind> fallback) {
     ExecAttempt exec;
-    exec.planning = build_moi_resource_plans(state, request, bound_resources, debug, point,
-                                             problem.mode_semantics(), candidates, artifacts);
+    exec.planning = plan_moi_resources(state, debug, point, problem);
     if (!exec.planning.success())
       return exec;
 
@@ -273,8 +273,7 @@ void publish_pending_moi_lowering_rejections(
         !point.moi_dynamic_stack_spill && automatic_moi_scalar_spill_needs_dynamic_stack_planning(
                                               point, problem.inventory(), exec.planning.plans);
     if (changed)
-      exec.planning = build_moi_resource_plans(state, request, bound_resources, debug, point,
-                                               problem.mode_semantics(), candidates, artifacts);
+      exec.planning = plan_moi_resources(state, debug, point, problem);
     exec.planning.attempted_operating_point = point;
     exec.planning.selected_fallback = fallback;
     exec.planning.diagnostics = std::move(diagnostics);
@@ -290,18 +289,4 @@ void publish_pending_moi_lowering_rejections(
   return std::move(
       attempt(std::move(dynamic_stack_point), ConSanMoiFallbackKind::DynamicStackScalarSpill)
           .planning);
-}
-
-void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequest &request,
-                                const BoundRuntimeResources &bound_resources,
-                                const ConSanDebugOverrides &debug,
-                                const ConSanMoiOperatingPoint &point,
-                                const MoiObjectModeSemantics &mode_semantics,
-                                std::span<const ConSanMoiCandidate> candidates,
-                                ConSanTransformArtifacts &result) {
-  ConSanMoiResourcePlanningResult planning = build_moi_resource_plans(
-      state, request, bound_resources, debug, point, mode_semantics, candidates, result);
-  result.resource_plans = std::move(planning.plans);
-  result.errors.insert(result.errors.end(), std::make_move_iterator(planning.errors.begin()),
-                       std::make_move_iterator(planning.errors.end()));
 }

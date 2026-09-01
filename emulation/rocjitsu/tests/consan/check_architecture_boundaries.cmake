@@ -719,6 +719,18 @@ _consan_assert_no_match(
     "ConSanTransformArtifacts"
     "evidence planning must consume immutable forward products, not the mutable transaction bus"
 )
+foreach(_resource_planning_owner IN ITEMS consan_moi_pipeline.h consan_moi_pipeline.inc)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_resource_planning_owner}"
+        "const[ \\t]+ConSanTransformArtifacts"
+        "resource planning must consume its immutable problem, not the mutable transaction bus"
+    )
+    _consan_assert_no_match(
+        "${_consan_dir}/${_resource_planning_owner}"
+        "rebuild_moi_resource_plans"
+        "resource planning must return a typed result for coordinator publication"
+    )
+endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_pipeline.cpp"
     "plan_consan_(record_replay|sampled|inline_shadow)_evidence"
