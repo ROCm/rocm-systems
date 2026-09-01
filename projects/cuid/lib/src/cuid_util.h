@@ -35,14 +35,38 @@ class Logger {
   LogLevel level_;
 };
 
-#define LOG(level, msg)                                \
-  do {                                                 \
-    std::ostringstream _log_stream_;                   \
-    _log_stream_ << msg;                               \
-    Logger::instance().log(level, _log_stream_.str()); \
+// NOLINTBEGIN(bugprone-macro-parentheses)
+// `msg` is deliberately left unparenthesised. Callers pass a stream-
+// continuation fragment such as `"failed: " << path`, which is only valid
+// glued onto the left of `_log_stream_ <<`. Wrapping it would evaluate
+// `const char[] << std::string` as an expression of its own, which does not
+// compile. clang-tidy cannot see that, so the check is suppressed here rather
+// than obeyed.
+#define LOG(level, msg)                                  \
+  do {                                                   \
+    std::ostringstream _log_stream_;                     \
+    _log_stream_ << msg;                                 \
+    Logger::instance().log((level), _log_stream_.str()); \
   } while (0)
+// NOLINTEND(bugprone-macro-parentheses)
 
 namespace CuidUtilities {
+// Thread-safe replacement for strerror(). strerror() returns a pointer into a
+// static buffer, so two threads reporting errors at once can read a torn or
+// wrong message. libamdcuid is linked into multithreaded hosts -- amd_smi and
+// libhsa-runtime64.so among them -- so it must not use it.
+std::string errno_string(int err);
+
+// A zero hardware fingerprint is the absence of an identity, not an identity.
+// Unprogrammed DSN capabilities and unconfigured MAC addresses both read back
+// as all-zero, and reporting that as a successful fingerprint gives every such
+// device on every machine the same primary CUID. Callers use this to convert
+// "read succeeded, value is meaningless" into HW_FINGERPRINT_NOT_FOUND, which
+// routes the device onto the temporary-CUID path it should have been on.
+inline amdcuid_status_t validate_fingerprint(uint64_t fingerprint) {
+  return (fingerprint == 0) ? AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND : AMDCUID_STATUS_SUCCESS;
+}
+
 std::string read_sysfs_file(const std::string& path);
 std::string readlink_bdf(const std::string& device_path);
 std::string bdf_to_device_path(const std::string& bdf, amdcuid_device_type_t device_type);

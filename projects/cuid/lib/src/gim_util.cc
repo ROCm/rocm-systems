@@ -207,7 +207,8 @@ amdcuid_status_t GimClient::init() {
     int fd = ::open(kGimSmiDevicePath, O_RDWR | O_CLOEXEC);
     if (fd < 0) {
       const int err = errno;
-      LOG(DEBUG, "GIM: open(" << kGimSmiDevicePath << ") failed: " << std::strerror(err));
+      LOG(DEBUG,
+          "GIM: open(" << kGimSmiDevicePath << ") failed: " << CuidUtilities::errno_string(err));
       if (err == EACCES || err == EPERM) {
         return AMDCUID_STATUS_PERMISSION_DENIED;
       }
@@ -254,7 +255,8 @@ amdcuid_status_t GimClient::do_ioctl(uint32_t cmd_code, const void* in, size_t i
 
   if (::ioctl(fd_, kSmiIoctlCmd, &cmd) != 0) {
     const int err = errno;
-    LOG(DEBUG, "GIM: ioctl(cmd=0x" << std::hex << cmd_code << ") failed: " << std::strerror(err));
+    LOG(DEBUG, "GIM: ioctl(cmd=0x" << std::hex << cmd_code
+                                   << ") failed: " << CuidUtilities::errno_string(err));
     if (err == EACCES || err == EPERM) {
       return AMDCUID_STATUS_PERMISSION_DENIED;
     }
@@ -395,7 +397,11 @@ std::string GimClient::format_bdf(uint64_t packed_bdf) {
   const uint32_t device = static_cast<uint32_t>((packed_bdf >> 3) & 0x1Fu);
   const uint32_t bus = static_cast<uint32_t>((packed_bdf >> 8) & 0xFFu);
   const uint32_t domain = static_cast<uint32_t>((packed_bdf >> 16) & 0xFFFFu);
+  // Bounded by construction: domain is masked to 16 bits (4 hex digits), bus to
+  // 8 (2), device to 5 (2) and function to 3 (1 decimal digit), so the longest
+  // output is 4+1+2+1+2+1+1 = 12 characters plus the NUL. It cannot truncate.
   char buf[16];
+  // NOLINTNEXTLINE(cert-err33-c)
   std::snprintf(buf, sizeof(buf), "%04x:%02x:%02x.%u", domain, bus, device, function);
   return std::string(buf);
 }
