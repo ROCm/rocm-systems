@@ -43,19 +43,16 @@ source ../../tests/amd_smi_test/detect_asic_filter.sh
 
 ## Python Tests
 
-### Unit Tests
+### Unit / Integration / CLI
+
+Run the suite files directly (each `sys.exit(0/1)`):
 
 ```bash
-cd tests/python_unittest
-python3 -m pytest -v
+cd tests/python
+python3 unit_tests.py -v
+python3 integration_test.py -v
+python3 cli_unit_test.py -v
 ```
-
-<!-- ### CLI Tests
-
-```bash
-cd amdsmi_cli
-python3 -m pytest -v
-``` -->
 
 ### Import Verification
 
@@ -76,15 +73,19 @@ Tests must work in **both** install contexts:
 |---------|--------------|
 | System install (RPM/DEB) | Default after `amdsmi-build-install` |
 
-## Running All Tests (One-Shot)
+## Running All Tests to Logs (One-Shot)
+
+`run-all-tests.sh` (this skill's directory) runs the C++ GTest, Python unit,
+integration, and CLI suites, tees each to a timestamped log dir, and prints a
+pass/fail summary. It derives the project root, so run it from anywhere in the tree:
 
 ```bash
-cd build/tests && \
-source ../../tests/amd_smi_test/amdsmitst.exclude && \
-source ../../tests/amd_smi_test/detect_asic_filter.sh && \
-./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" && \
-cd ../../tests/python_unittest && python3 -m pytest -v
+.claude/skills/amdsmi-test-runner/run-all-tests.sh          # logs under $TMPDIR/amdsmi-tests-<stamp>/
+.claude/skills/amdsmi-test-runner/run-all-tests.sh -o ./ci-logs
 ```
+
+Each suite's full output is in `<logdir>/<suite>.log`; the exit code is non-zero
+if any suite failed.
 
 ## Output
 
