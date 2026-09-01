@@ -1,7 +1,7 @@
 
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -357,7 +357,7 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
 
   if (args->proc == 0 && args->thread == 0 && devUs > 0.0) {
     int nRanksGlobal = args->nProcs * args->nThreads * args->nGpus;
-    const size_t totalBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type)) * (size_t)nRanksGlobal;
+    const size_t totalBytes = chunkBytes * (size_t)nRanksGlobal;
     double sec = devUs * 1.0e-6;
     double algBw = 0.0, busBw = 0.0;
     gin_sdma_allgather::bandwidthGBps(count, (size_t)wordSize(type), sec, nRanksGlobal, &algBw, &busBw);
@@ -419,7 +419,7 @@ NCCL_WEAK struct testEngine ncclTestEngine = {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
   /* .initCommConfig = */ nullptr,
 #endif
-#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) || (defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0))
   /* .getDevCommRequirements = */ AllGatherGetDevCommRequirements,
 #endif
 };

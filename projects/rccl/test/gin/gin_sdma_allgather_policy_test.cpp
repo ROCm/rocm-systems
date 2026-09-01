@@ -231,6 +231,10 @@ TEST(AllGatherPolicyEnv, ParseAllGatherCtasEnv) {
   EXPECT_EQ(parseAllGatherCtasEnv(), 4u);
 
   unsetenv("NCCL_GIN_ANVIL_AG_CTAS");
+
+  setenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS", "8foo", 1);
+  EXPECT_EQ(parseAllGatherCtasEnv(), kAllGatherCtasUnset);
+  unsetenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS");
 }
 
 }  // namespace

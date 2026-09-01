@@ -518,6 +518,7 @@ if(BUILD_TESTS)
     # comm). Requires a visible GPU at run time (skips cleanly otherwise), so it
     # carries a "gpu" label alongside "unit".
     add_executable(rccl-UnitTestsGinSdmaAllGatherGpu gin/gin_sdma_allgather_gpu_test.cpp)
+    set_source_files_properties(gin/gin_sdma_allgather_gpu_test.cpp PROPERTIES LANGUAGE CXX)
     target_include_directories(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE
       "${_gin_sdma_ag_hdr_dir}")
     # Offload for the configured GPU arch(s); hipcc (the CXX compiler) handles the

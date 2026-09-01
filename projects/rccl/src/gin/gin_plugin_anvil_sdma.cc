@@ -20,21 +20,15 @@
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
 #include <gin_anvil/sdma_factory.h>
 #include <hip/hip_runtime.h>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <mutex>
-#include <set>
 
 static std::map<void*, int> bufferRegRefcount;
 static std::mutex pluginMutex;
-
-// [GIN-CONN-CHECK] Device connectivity self-test launchers (gin_anvil_sdma_oss7_device.cc).
-extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank, unsigned long long stamp);
-extern "C" int ginAnvilConnCheck(void* localSignals, int nRanks, unsigned long long stamp, int* missingDev);
-
-// Comms whose LSA-signal peer connectivity has already been validated (once per comm).
-static std::set<void*> ginAnvilConnCheckedComms;
 
 struct ginAnvilInitCtx {
   struct ncclComm* comm;
@@ -194,17 +188,18 @@ static int ginAnvilEnvInt(const char* name, int defaultVal) {
   return defaultVal;
 }
 
-static int ginAnvilSdmaThresholdFromEnv() {
-  // Unlike ginAnvilEnvInt (which treats 0 as "unset" and falls back to the
-  // default), an explicit NCCL_GIN_ANVIL_SDMA_THRESHOLD=0 must propagate as 0 so
-  // the AllGather hybrid kernel (-D 3) can be forced onto the all-SDMA put tier
-  // (chunkBytes <= 0 is never true) for the all-SDMA gate.
+// Backend gin.put inline-vs-copy-engine threshold. Parsed as 64-bit so a value
+// >= 2 GiB does not wrap through int (atoi) and silently fall back to the
+// compiled default. Explicit 0 is honored. The GPU context field is uint32_t, so
+// values above UINT32_MAX saturate rather than wrapping.
+static size_t ginAnvilSdmaThresholdFromEnv() {
   const char* e = getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD");
-  if (e && e[0]) {
-    int v = atoi(e);
-    if (v >= 0) return v;
+  if (e && e[0] && *e != '-') {
+    char* end = nullptr;
+    unsigned long long v = strtoull(e, &end, 10);
+    if (end != e && *end == '\0') return (size_t)v;
   }
-  return (int)NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
+  return (size_t)NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
 }
 
 static int ginAnvilSdmaNumChannels() {
@@ -289,12 +284,7 @@ static ncclResult_t ginAnvilCloseColl(void* collComm) {
 }
 
 static ncclResult_t ginAnvilFinalize(void* ctx) {
-  ginAnvilInitCtx* ictx = (ginAnvilInitCtx*)ctx;
-  if (ictx) {
-    std::lock_guard<std::mutex> lock(pluginMutex);
-    ginAnvilConnCheckedComms.erase((void*)ictx->comm);
-  }
-  delete ictx;
+  delete (ginAnvilInitCtx*)ctx;
   return ncclSuccess;
 }
 
@@ -403,133 +393,6 @@ static bool ginAnvilSignalDebugEnabled() {
   return v && atoi(v) != 0;
 }
 
-// [GIN-CONN-CHECK] Validate that every peer can actually reach this rank's LSA
-// signal buffer (and vice versa) over the coherent fabric, using the same store
-// path as the real SignalInc. On gfx950 the force-enabled cuMem VMM peer mapping
-// intermittently comes back silently wrong for one rank, which otherwise turns
-// into a first-collective hang (~1 run in 6). Detect it here and fail loudly.
-// The pass/fail decision is made collectively (bootstrap allgather) so all ranks
-// abort together rather than one rank aborting while the rest hang.
-static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* lsaSelf) {
-  const char* off = getenv("NCCL_GIN_ANVIL_SDMA_CONN_CHECK");
-  if (off && atoi(off) == 0) return ncclSuccess;
-
-  struct ncclComm* comm = ctx->comm;
-  const int nRanks = ctx->nRanks;
-  const int rank = ctx->rank;
-  if (nRanks < 2) return ncclSuccess;
-  if (ctx->signal_remote_addrs_dev == nullptr || lsaSelf == nullptr) return ncclSuccess;
-
-  int* missingDev = nullptr;
-  if (hipMalloc(&missingDev, sizeof(int) * (size_t)nRanks) != hipSuccess) {
-    WARN("GIN anvil-sdma: conn-check hipMalloc failed (rank %d)", rank);
-    return ncclSystemError;
-  }
-  int* missingHost = (int*)calloc((size_t)nRanks, sizeof(int));
-  int* gathered = (int*)calloc((size_t)nRanks, sizeof(int));
-  if (!missingHost || !gathered) {
-    free(missingHost);
-    free(gathered);
-    CUDACHECKIGNORE(hipFree(missingDev));
-    return ncclSystemError;
-  }
-
-  // [GIN-CONN-CHECK][TEST] Optional fault injection: force the named rank's
-  // cross-fabric signal stores to go nowhere, reproducing the gfx950 cuMem-VMM
-  // peer-map fault deterministically so the fail-loud abort path can be exercised.
-  const char* injEnv = getenv("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK");
-  const int injRank = injEnv ? atoi(injEnv) : -1;
-
-  const int MAX_ATTEMPTS = 3;
-  ncclResult_t ret = ncclSuccess;
-  bool ok = false;
-  int localMissing = 0;
-  for (int attempt = 0; attempt < MAX_ATTEMPTS && !ok; attempt++) {
-    unsigned long long stamp = 0xC0FFEE00ULL + (unsigned long long)(attempt + 1);
-    // A per-rank infra error (write/verify kernel, D2H copy, reset memset) must NOT
-    // bail this rank early: the other ranks would then block forever on the shared
-    // bootstrapBarrier/allgather below. Instead we record it locally and fold it
-    // into the collective decision as "everything missing", so every rank sees a
-    // non-zero global count and aborts together (the same guarantee the gate makes
-    // for a real connectivity miss). Only a failure of a collective op itself
-    // (barrier/allgather) -- which fails on all ranks together -- bails via goto.
-    bool localFail = false;
-
-    // 1) Store my stamp into every peer's test slot [rank].
-    if (rank == injRank) {
-      WARN("GIN anvil-sdma: [TEST] injecting connectivity fault on rank %d (skipping signal writes)", rank);
-    } else if (ginAnvilConnWrite(ctx->signal_remote_addrs_dev, nRanks, rank, stamp) != 0) {
-      WARN("GIN anvil-sdma: conn-check write kernel failed (rank %d)", rank);
-      localFail = true;
-    }
-    // 2) All ranks finished writing (or recorded a local failure). This barrier
-    //    keeps every rank in lock-step so a failing rank never leaves peers hung.
-    NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, rank, nRanks, 0x51611), ret, cleanup);
-    // 3) Verify each source x reached my local slot x (skip if already failed).
-    localMissing = 0;
-    if (!localFail) {
-      if (ginAnvilConnCheck(lsaSelf, nRanks, stamp, missingDev) != 0) {
-        WARN("GIN anvil-sdma: conn-check verify kernel failed (rank %d)", rank);
-        localFail = true;
-      } else if (hipMemcpy(missingHost, missingDev, sizeof(int) * (size_t)nRanks,
-                           hipMemcpyDeviceToHost) != hipSuccess) {
-        WARN("GIN anvil-sdma: conn-check D2H copy failed (rank %d)", rank);
-        localFail = true;
-      } else {
-        for (int x = 0; x < nRanks; x++) localMissing += missingHost[x];
-        // 4) Reset the touched slots so the first real collective starts from zero.
-        if (hipMemset(lsaSelf, 0, sizeof(uint64_t) * (size_t)nRanks) != hipSuccess) {
-          WARN("GIN anvil-sdma: conn-check slot reset failed (rank %d)", rank);
-          localFail = true;
-        }
-      }
-    }
-    // A local infra failure counts as "all peers missing" so the collective sum
-    // trips on every rank and we abort together instead of hanging.
-    if (localFail) localMissing = nRanks;
-    // 5) Make the decision collective: sum missing counts across all ranks.
-    memset(gathered, 0, sizeof(int) * (size_t)nRanks);
-    gathered[rank] = localMissing;
-    if (ginAnvilBootstrapAllgather(comm->bootstrap, gathered, sizeof(int)) != 0) {
-      WARN("GIN anvil-sdma: conn-check allgather failed (rank %d)", rank);
-      ret = ncclSystemError;
-      goto cleanup;
-    }
-    int globalMissing = 0;
-    for (int r = 0; r < nRanks; r++) globalMissing += gathered[r];
-    NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, rank, nRanks, 0x51612), ret, cleanup);
-    if (globalMissing == 0) {
-      ok = true;
-      break;
-    }
-    if (rank == 0)
-      WARN("GIN anvil-sdma: LSA signal connectivity attempt %d/%d incomplete (global missing increments=%d); retrying",
-           attempt + 1, MAX_ATTEMPTS, globalMissing);
-  }
-
-  if (!ok) {
-    for (int x = 0; x < nRanks; x++) {
-      if (missingHost[x])
-        WARN("GIN anvil-sdma: LSA signal connectivity FAILED: rank %d cannot receive from src %d "
-             "(cuMem VMM peer mapping broken)",
-             rank, x);
-    }
-    WARN("GIN anvil-sdma: LSA signal connectivity gate failed after %d attempts on rank %d (local missing=%d). "
-         "This is the intermittent gfx950 cuMem-VMM peer-map fault; aborting instead of hanging. "
-         "Re-launch the job, or set NCCL_GIN_ANVIL_SDMA_CONN_CHECK=0 to bypass.",
-         MAX_ATTEMPTS, rank, localMissing);
-    ret = ncclSystemError;
-  } else {
-    INFO(NCCL_INIT, "GIN anvil-sdma: LSA signal connectivity OK (rank %d, nRanks %d)", rank, nRanks);
-  }
-
-cleanup:
-  free(missingHost);
-  free(gathered);
-  if (missingDev) CUDACHECKIGNORE(hipFree(missingDev));
-  return ret;
-}
-
 static ncclResult_t ginAnvilRegisterLsaSignals(ginAnvilGinCtx* ctx, void* lsaSelf, size_t bytes) {
   struct ncclDevrState* devr = &ctx->comm->devrState;
   struct ncclComm* comm = ctx->comm;
@@ -605,16 +468,6 @@ static ncclResult_t ginAnvilRegisterLsaSignals(ginAnvilGinCtx* ctx, void* lsaSel
        "stride=%zu remote[0]=%#lx remote[self]=%#lx",
        ctx->signalSlot, lsaSelf, bytes, ctx->rank, devr->lsaSelf, devr->lsaSize, (size_t)devr->bigSize,
        (unsigned long)remote0, (unsigned long)remoteSelf);
-
-  // [GIN-CONN-CHECK] Validate peer signal connectivity once per comm (on the first
-  // signal bind). Detects the intermittent gfx950 cuMem-VMM peer-map fault and
-  // fails loudly here instead of letting the first collective hang forever.
-  bool doConnCheck = false;
-  {
-    std::lock_guard<std::mutex> lock(pluginMutex);
-    if (ginAnvilConnCheckedComms.insert((void*)comm).second) doConnCheck = true;
-  }
-  if (doConnCheck) NCCLCHECK(ginAnvilCheckSignalConnectivity(ctx, lsaSelf));
 
   return ncclSuccess;
 }
@@ -700,7 +553,12 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   ctx->gpuCtxHost.sdmaChannelStride = ctx->sdmaChannelStride;
   ctx->gpuCtxHost.queueHandles = ctx->gpu_queue_handles;
   ctx->gpuCtxHost.sdmaDirty = ctx->sdma_dirty_d;
-  ctx->gpuCtxHost.sdmaThreshold = (uint32_t)ginAnvilSdmaThresholdFromEnv();
+  {
+    const size_t thr = ginAnvilSdmaThresholdFromEnv();
+    ctx->gpuCtxHost.sdmaThreshold =
+        (thr > (size_t)std::numeric_limits<uint32_t>::max()) ? std::numeric_limits<uint32_t>::max()
+                                                             : (uint32_t)thr;
+  }
   ctx->gpuCtxHost.fusedSdmaSignal = ginAnvilFusedSignalFromEnv();
   ctx->gpuCtxHost.ipcAgentFence = ginAnvilIpcAgentFenceFromEnv();
   ctx->gpuCtxHost.ipcSignalPeer = ginAnvilIpcSignalPeerFromEnv();
