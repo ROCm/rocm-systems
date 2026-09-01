@@ -332,6 +332,14 @@ public:
   /// Record/Replay and Sampled instrumentation.
   ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup;
 
+  template <typename Visitor> void for_each_range(Visitor &&visit) const {
+    visit(owner(), 1u);
+    visit(epoch(), 1u);
+    visit(workgroup_key, 1u);
+    for (std::optional<uint16_t> reg : record_replay_workgroup.values())
+      visit(reg, 1u);
+  }
+
   auto operator<=>(const ConSanMoiPersistentSgprState &) const = default;
 };
 

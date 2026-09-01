@@ -2280,15 +2280,10 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanMoiOperatingPoi
       point.moi_owner_sgpr.automatic() && point.moi_owner_sgpr.base() &&
       sgpr_base == *point.moi_owner_sgpr.base() && sgpr_count == 1u;
   bool conflict = (point.moi_exec_save_sgprs_persistent && !backs_up_only_automatic_owner) ||
-                  overlaps(point.moi_persistent_sgprs.owner()) ||
-                  overlaps(point.moi_persistent_sgprs.epoch()) ||
-                  overlaps(point.moi_persistent_sgprs.workgroup_key) ||
                   overlaps(point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount) ||
                   overlaps(point.moi_inline_visible_evidence_sgpr);
-  for (const std::optional<uint16_t> reg :
-       point.moi_persistent_sgprs.record_replay_workgroup.values()) {
-    conflict |= overlaps(reg);
-  }
+  point.moi_persistent_sgprs.for_each_range(
+      [&](std::optional<uint16_t> reg, uint16_t width) { conflict |= overlaps(reg, width); });
   return !conflict;
 }
 
@@ -2755,26 +2750,11 @@ void try_apply_owner_epoch_prologue_patch(
           required_sgpr_count, static_cast<uint32_t>(*kernel_point.moi_dispatch_identity.sgpr()) +
                                    kMoiDispatchStateSgprCount);
     }
-    if (kernel_point.moi_persistent_sgprs.owner()) {
-      required_sgpr_count = std::max<uint32_t>(
-          required_sgpr_count,
-          static_cast<uint32_t>(*kernel_point.moi_persistent_sgprs.owner()) + 1u);
-    }
-    if (kernel_point.moi_persistent_sgprs.epoch()) {
-      required_sgpr_count = std::max<uint32_t>(
-          required_sgpr_count,
-          static_cast<uint32_t>(*kernel_point.moi_persistent_sgprs.epoch()) + 1u);
-    }
-    if (kernel_point.moi_persistent_sgprs.workgroup_key) {
-      required_sgpr_count = std::max<uint32_t>(
-          required_sgpr_count,
-          static_cast<uint32_t>(*kernel_point.moi_persistent_sgprs.workgroup_key) + 1u);
-    }
-    for (const std::optional<uint16_t> reg :
-         kernel_point.moi_persistent_sgprs.record_replay_workgroup.values()) {
-      if (reg)
-        required_sgpr_count = std::max<uint32_t>(required_sgpr_count, *reg + 1u);
-    }
+    kernel_point.moi_persistent_sgprs.for_each_range(
+        [&](std::optional<uint16_t> base, uint16_t width) {
+          if (base)
+            required_sgpr_count = std::max<uint32_t>(required_sgpr_count, *base + width);
+        });
     target_kernels.push_back(PlannedOwnerEpochPrologue{
         .kernel = std::move(active),
         .emission = std::move(emission),

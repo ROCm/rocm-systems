@@ -157,6 +157,24 @@ TEST(ConSan, MoiPersistentVgprStateHasOneProjectionForEveryAllocationScope) {
                         {3u, 1u}, {4u, 1u}, {5u, 1u}, {8u, 1u}, {9u, 1u}, {10u, 1u}, {11u, 1u}}));
 }
 
+TEST(ConSan, MoiPersistentSgprStateOwnsItsCompleteDescriptorExtent) {
+  ConSanMoiOperatingPoint point;
+  point.moi_persistent_sgprs.set_owner_epoch(20u, 21u);
+  point.moi_persistent_sgprs.workgroup_key = 22u;
+  point.moi_persistent_sgprs.record_replay_workgroup =
+      ConSanMoiPersistentWorkgroupRegisters(23u, 24u, 25u, 26u);
+  consan_moi_impl::ResolvedMoiScratchPlan resources;
+  resources.owner_descriptor_file_offsets = {64u};
+  consan_moi_impl::MoiDescriptorSgprRequirements requirements;
+
+  consan_moi_impl::note_moi_sgpr_requirements(
+      requirements, resources, ConSanRequest{}, BoundRuntimeResources{}, point,
+      consan_moi_impl::MoiObjectModeSemantics{}, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_EQ(requirements.size(), 1u);
+  EXPECT_EQ(requirements.at(64u), 27u);
+}
+
 TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   ConSanMoiOperatingPoint state{
       .moi_initialize_owner_epoch = true,

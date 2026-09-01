@@ -2277,14 +2277,11 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         bool overlaps =
             persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
             overlaps_optional(group_point.moi_owner_sgpr.base()) ||
-            overlaps_optional(group_point.moi_persistent_sgprs.owner()) ||
-            overlaps_optional(group_point.moi_persistent_sgprs.epoch()) ||
-            overlaps_optional(group_point.moi_persistent_sgprs.workgroup_key) ||
             overlaps_optional(group_point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
-        for (const std::optional<uint16_t> reg :
-             group_point.moi_persistent_sgprs.record_replay_workgroup.values()) {
-          overlaps |= overlaps_optional(reg);
-        }
+        group_point.moi_persistent_sgprs.for_each_range(
+            [&](std::optional<uint16_t> reg, uint16_t reg_width) {
+              overlaps |= overlaps_optional(reg, reg_width);
+            });
         if (options.delay_mode == ConSanDelayMode::SleepVar)
           overlaps |= range_overlaps(base, width, options.delay_var_ssrc, 1u);
         return overlaps;
@@ -2584,14 +2581,11 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         bool overlaps =
             persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
             overlaps_optional(route_point.moi_owner_sgpr.base()) ||
-            overlaps_optional(route_point.moi_persistent_sgprs.owner()) ||
-            overlaps_optional(route_point.moi_persistent_sgprs.epoch()) ||
-            overlaps_optional(route_point.moi_persistent_sgprs.workgroup_key) ||
             overlaps_optional(route_point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
-        for (const std::optional<uint16_t> reg :
-             route_point.moi_persistent_sgprs.record_replay_workgroup.values()) {
-          overlaps |= overlaps_optional(reg);
-        }
+        route_point.moi_persistent_sgprs.for_each_range(
+            [&](std::optional<uint16_t> reg, uint16_t reg_width) {
+              overlaps |= overlaps_optional(reg, reg_width);
+            });
         if (options.delay_mode == ConSanDelayMode::SleepVar)
           overlaps |= range_overlaps(base, width, options.delay_var_ssrc, 1u);
         return overlaps;

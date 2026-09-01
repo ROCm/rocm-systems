@@ -4557,3 +4557,67 @@ remain complete and enforced. Remaining target locality, other operating-point
 and mutable-transaction breadth, larger legacy harvesting, material whole-
 refactoring shrinkage, and the independent Section 14 completion audit remain
 open. The goal therefore remains active.
+
+### 16.53 Convergence checkpoint 52: persistent-SGPR state-owned ranges
+
+The persistent-scalar-state deep read followed the accepted ordinary-SGPR ABI
+through placement exclusion, architectural validation, dynamic-stack
+bootstrap validation, descriptor sizing, entry-prologue backup validation,
+prologue descriptor growth, and Sampled synchronization routing. Those
+consumers independently enumerated owner, epoch, InlineShadow's compact
+workgroup key, and Record/Replay/Sampled's exact workgroup tuple. The repeated
+enumerations were already drifting: `note_moi_sgpr_requirements` stopped after
+the compact key and omitted every exact-workgroup register. The later prologue
+pass happened to grow the descriptor again, masking the incomplete earlier
+contract in end-to-end transformations and making correctness depend on a
+second authority repairing it.
+
+`ConSanMoiPersistentSgprState` now owns one width-aware `for_each_range`
+projection over its complete ABI. Placement-window exclusion, ordinary-state
+validation, dynamic-stack bootstrap exclusion, descriptor sizing, prologue
+backup validation, prologue descriptor growth, and Sampled synchronization
+route exclusion all consume it. The seven hand-written traversals are deleted
+rather than retained behind adapters. This common mechanism does not merge
+mode semantics: InlineShadow still selects only its compact key, while
+Record/Replay and Sampled still select their exact tuple; the shared state
+owner merely makes every selected persistent range visible to generic register
+mechanisms.
+
+A direct regression constructs a descriptor whose exact tuple extends beyond
+every other persistent scalar and proves that the descriptor-requirement
+authority includes the final register. It failed against the pre-checkpoint
+helper, which reported only the compact-key extent. The architecture gate
+requires the state-owned traversal and rejects direct exact-tuple enumeration
+from the three migrated production consumers, preventing a partial local
+enumeration from returning.
+
+| Signal | Checkpoint 52 | Cumulative change | Slice change from checkpoint 51 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,297 | +322 | **-57** |
+| Nonblank production lines | 99,011 | **-72** | **-58** |
+| Production implementation lines | 91,290 | **-160** | **-58** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **175 / 52** | **-101 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 30 | +10 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Hand-written complete persistent-SGPR traversals in consumers | **0** | n/a | **-7** |
+| Persistent-SGPR range authorities | **1** | n/a | converged |
+| Test inventory | **5,384** | **+39** | **+1** |
+
+Validation includes a final-tree `-j16` build; seven direct descriptor,
+workgroup, Sampled, and architecture-boundary tests; all 909 focused MOI and
+pipeline tests; all 4,749 nonphysical tests over the five emulated targets at
+`-j16`; and all 635 physical gfx1201 tests serialized at `-j1`. No test was
+removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, 14.8,
+14.9, and 14.10. One complete persistent-register fact now has one owner, the
+partial descriptor contract is fixed with a regression at that boundary, and
+the superseded traversals are harvested for a 58-line implementation
+reduction. The cumulative 160-line reduction is measurable but remains too
+small to establish material whole-refactoring shrinkage. Section 14.4's
+extension fixtures remain complete and enforced. Remaining target locality,
+other operating-point and mutable-transaction breadth, larger legacy
+harvesting, material Section 14.8 evidence, and the independent Section 14
+completion audit remain open. The goal therefore remains active.

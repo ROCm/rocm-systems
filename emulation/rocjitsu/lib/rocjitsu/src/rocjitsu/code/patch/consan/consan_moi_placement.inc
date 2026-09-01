@@ -3478,16 +3478,13 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
               architecturally_reserved(base, width) ||
               moi_sgpr_range_overlaps_dynamic_stack_state(base, width) ||
               persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
-              overlaps_optional(base, width, options.moi_persistent_sgprs.owner()) ||
-              overlaps_optional(base, width, options.moi_persistent_sgprs.epoch()) ||
-              overlaps_optional(base, width, options.moi_persistent_sgprs.workgroup_key) ||
               overlaps_optional(base, width, options.moi_dispatch_identity.sgpr(),
                                 kMoiDispatchStateSgprCount) ||
               overlaps_optional(base, width, options.moi_inline_visible_evidence_sgpr);
-          for (const std::optional<uint16_t> reg :
-               options.moi_persistent_sgprs.record_replay_workgroup.values()) {
-            overlaps |= overlaps_optional(base, width, reg);
-          }
+          options.moi_persistent_sgprs.for_each_range(
+              [&](std::optional<uint16_t> reg, uint16_t reg_width) {
+                overlaps |= overlaps_optional(base, width, reg, reg_width);
+              });
           return overlaps;
         };
 
@@ -3617,18 +3614,14 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
         return reg && range_overlaps(base, width, *reg, reg_width);
       };
       const auto overlaps_instrumentation_state = [&](uint16_t base, uint16_t width) {
-        bool overlaps =
-            moi_sgpr_range_overlaps_dynamic_stack_state(base, width) ||
-            persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
-            overlaps_optional(base, width, options.moi_persistent_sgprs.owner()) ||
-            overlaps_optional(base, width, options.moi_persistent_sgprs.epoch()) ||
-            overlaps_optional(base, width, options.moi_persistent_sgprs.workgroup_key) ||
-            overlaps_optional(base, width, options.moi_dispatch_identity.sgpr(),
-                              kMoiDispatchStateSgprCount);
-        for (const std::optional<uint16_t> reg :
-             options.moi_persistent_sgprs.record_replay_workgroup.values()) {
-          overlaps |= overlaps_optional(base, width, reg);
-        }
+        bool overlaps = moi_sgpr_range_overlaps_dynamic_stack_state(base, width) ||
+                        persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
+                        overlaps_optional(base, width, options.moi_dispatch_identity.sgpr(),
+                                          kMoiDispatchStateSgprCount);
+        options.moi_persistent_sgprs.for_each_range(
+            [&](std::optional<uint16_t> reg, uint16_t reg_width) {
+              overlaps |= overlaps_optional(base, width, reg, reg_width);
+            });
         return overlaps;
       };
       const auto spill_window =
@@ -4765,31 +4758,12 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
   const bool owner_invalid = options.moi_owner_sgpr.base() &&
                              (*options.moi_owner_sgpr.base() >= limit ||
                               overlaps_architectural_state(options.moi_owner_sgpr.base(), 1u));
-  const auto persistent_workgroup_tuple_invalid = [&] {
-    for (const std::optional<uint16_t> reg :
-         options.moi_persistent_sgprs.record_replay_workgroup.values()) {
-      if (reg && (*reg >= limit ||
-                  persistent_sgpr_range_overlaps_reserved_ordinary_range(*reg, 1u, arch))) {
-        return true;
-      }
-    }
-    return false;
-  }();
-  const bool persistent_invalid =
-      (options.moi_persistent_sgprs.owner() && *options.moi_persistent_sgprs.owner() >= limit) ||
-      (options.moi_persistent_sgprs.epoch() && *options.moi_persistent_sgprs.epoch() >= limit) ||
-      (options.moi_persistent_sgprs.workgroup_key &&
-       *options.moi_persistent_sgprs.workgroup_key >= limit) ||
-      (options.moi_persistent_sgprs.owner() &&
-       persistent_sgpr_range_overlaps_reserved_ordinary_range(*options.moi_persistent_sgprs.owner(),
-                                                              1u, arch)) ||
-      (options.moi_persistent_sgprs.epoch() &&
-       persistent_sgpr_range_overlaps_reserved_ordinary_range(*options.moi_persistent_sgprs.epoch(),
-                                                              1u, arch)) ||
-      (options.moi_persistent_sgprs.workgroup_key &&
-       persistent_sgpr_range_overlaps_reserved_ordinary_range(
-           *options.moi_persistent_sgprs.workgroup_key, 1u, arch)) ||
-      persistent_workgroup_tuple_invalid;
+  bool persistent_invalid = false;
+  options.moi_persistent_sgprs.for_each_range([&](std::optional<uint16_t> base, uint16_t width) {
+    persistent_invalid |=
+        base && (static_cast<uint32_t>(*base) + width > limit ||
+                 persistent_sgpr_range_overlaps_reserved_ordinary_range(*base, width, arch));
+  });
   bool auxiliary_invalid = false;
   options.for_each_auxiliary_sgpr_range([&](std::optional<uint16_t> base, uint16_t width) {
     auxiliary_invalid |= base && (static_cast<uint32_t>(*base) + width > limit ||
@@ -4807,26 +4781,17 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
     const uint16_t base = *options.moi_branch_only_spill->dynamic_stack_borrowed_sgpr;
     const uint16_t exec_count = moi_exec_save_sgpr_count(
         resolve_moi_exec_save_requirement(request, resources, point, mode_semantics), arch);
-    const bool overlaps_persistent =
-        (options.moi_persistent_sgprs.owner() &&
-         range_overlaps(base, 2u, *options.moi_persistent_sgprs.owner(), 1u)) ||
-        (options.moi_persistent_sgprs.epoch() &&
-         range_overlaps(base, 2u, *options.moi_persistent_sgprs.epoch(), 1u)) ||
-        (options.moi_persistent_sgprs.workgroup_key &&
-         range_overlaps(base, 2u, *options.moi_persistent_sgprs.workgroup_key, 1u));
-    bool overlaps_workgroup_tuple = false;
-    for (const std::optional<uint16_t> reg :
-         options.moi_persistent_sgprs.record_replay_workgroup.values()) {
-      overlaps_workgroup_tuple |= reg && range_overlaps(base, 2u, *reg, 1u);
-    }
+    bool overlaps_persistent = false;
+    options.moi_persistent_sgprs.for_each_range([&](std::optional<uint16_t> reg, uint16_t width) {
+      overlaps_persistent |= reg && range_overlaps(base, 2u, *reg, width);
+    });
     return !inline_layout || !options.has_inline_moi_scalar_spill() ||
            !options.moi_branch_only_spill || !options.moi_dynamic_stack_spill ||
            !consan_uses_gfx12_encoding(arch) || base % 2u != 0u ||
            moi_sgpr_range_overlaps_dynamic_stack_state(base, 2u) ||
            (options.moi_exec_save_sgpr &&
             range_overlaps(base, 2u, *options.moi_exec_save_sgpr, exec_count)) ||
-           options.moi_router_jump || options.moi_router_call || overlaps_persistent ||
-           overlaps_workgroup_tuple;
+           options.moi_router_jump || options.moi_router_call || overlaps_persistent;
   }();
   if (!exec_invalid && !owner_invalid && !persistent_invalid && !auxiliary_invalid &&
       !branch_only_scalar_invalid && !dynamic_bootstrap_invalid)
@@ -5838,15 +5803,11 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
         required_count,
         static_cast<uint16_t>(*point.moi_dispatch_identity.sgpr() + kMoiDispatchStateSgprCount));
   }
-  if (point.moi_persistent_sgprs.owner())
-    required_count = std::max<uint16_t>(
-        required_count, static_cast<uint16_t>(*point.moi_persistent_sgprs.owner() + 1u));
-  if (point.moi_persistent_sgprs.epoch())
-    required_count = std::max<uint16_t>(
-        required_count, static_cast<uint16_t>(*point.moi_persistent_sgprs.epoch() + 1u));
-  if (point.moi_persistent_sgprs.workgroup_key)
-    required_count = std::max<uint16_t>(
-        required_count, static_cast<uint16_t>(*point.moi_persistent_sgprs.workgroup_key + 1u));
+  point.moi_persistent_sgprs.for_each_range([&](std::optional<uint16_t> base, uint16_t width) {
+    if (base) {
+      required_count = std::max<uint16_t>(required_count, static_cast<uint16_t>(*base + width));
+    }
+  });
   point.for_each_auxiliary_sgpr_range([&](std::optional<uint16_t> base, uint16_t width) {
     if (base)
       required_count = std::max<uint16_t>(required_count, static_cast<uint16_t>(*base + width));

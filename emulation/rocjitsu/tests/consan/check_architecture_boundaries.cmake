@@ -472,6 +472,24 @@ if(NOT _persistent_vgpr_view_contract MATCHES
         "ConSan placement lost its shared persistent-VGPR state projection"
     )
 endif()
+foreach(_persistent_sgpr_consumer IN ITEMS
+    consan_moi_placement.inc
+    consan_moi_prologue.cpp
+    consan_moi_sampled_sync.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_persistent_sgpr_consumer}"
+        "moi_persistent_sgprs[.]record_replay_workgroup[.]values[(][)]"
+        "persistent-SGPR consumers must use the state-owned width-aware traversal"
+    )
+endforeach()
+file(READ "${_consan_dir}/consan_options.h.inc" _persistent_sgpr_state_contract)
+if(NOT _persistent_sgpr_state_contract MATCHES
+       "class ConSanMoiPersistentSgprState[^}]*for_each_range")
+    message(FATAL_ERROR
+        "ConSan persistent-SGPR state lost its complete range traversal"
+    )
+endif()
 
 # Semantic policy owns meaning, never an ISA recipe or product identity.
 set(
