@@ -1,10 +1,13 @@
 # Generated from users/victzhan/AIRUNTIME-28-nt-blit by remote/clr_patch.sh.
 # Do not hand-edit: regenerate instead, or the branch and this file will drift.
-# base:   8a43c008e9090f47038ccac33adff130beb853f1
-# commit: 81e65d6bbb4a7b6a12667936b044a22e07841af5
+# base:   20b7fff0fd709826c82efbd6662c0e5045272a3b
+# tip:    3703847710f1f775a7363411ebc64f3faa157190
+#
+# The tip may be a merge of develop; the base is the merge-base with
+# develop, so this patch is what the PR adds and nothing else.
 #
 diff --git a/projects/clr/rocclr/device/blitcl.cpp b/projects/clr/rocclr/device/blitcl.cpp
-index 4db67804845..fd717925a25 100644
+index 4db6780484..fd717925a2 100644
 --- a/projects/clr/rocclr/device/blitcl.cpp
 +++ b/projects/clr/rocclr/device/blitcl.cpp
 @@ -128,6 +128,51 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
@@ -60,7 +63,7 @@ index 4db67804845..fd717925a25 100644
        ulong source_address;
        ulong destination_address;
 diff --git a/projects/clr/rocclr/device/pal/palblit.cpp b/projects/clr/rocclr/device/pal/palblit.cpp
-index 39eb0a157fb..67990912dbf 100644
+index 39eb0a157f..67990912db 100644
 --- a/projects/clr/rocclr/device/pal/palblit.cpp
 +++ b/projects/clr/rocclr/device/pal/palblit.cpp
 @@ -10,6 +10,7 @@
@@ -81,7 +84,7 @@ index 39eb0a157fb..67990912dbf 100644
      amd::Coord3D size(sizeIn[0]);
  
 diff --git a/projects/clr/rocclr/device/pal/palblit.hpp b/projects/clr/rocclr/device/pal/palblit.hpp
-index 4feb9d8af3a..9ed84e350b0 100644
+index 4feb9d8af3..9ed84e350b 100644
 --- a/projects/clr/rocclr/device/pal/palblit.hpp
 +++ b/projects/clr/rocclr/device/pal/palblit.hpp
 @@ -261,6 +261,7 @@ class KernelBlitManager : public DmaBlitManager {
@@ -103,7 +106,7 @@ index 4feb9d8af3a..9ed84e350b0 100644
      "__amd_rocclr_scheduler",           "__amd_rocclr_gwsInit",
      "__amd_rocclr_streamOpsWrite",      "__amd_rocclr_streamOpsWait",
 diff --git a/projects/clr/rocclr/device/rocm/rocblit.cpp b/projects/clr/rocclr/device/rocm/rocblit.cpp
-index 5a3d575552b..bbbaf40b125 100644
+index 5a3d575552..bbbaf40b12 100644
 --- a/projects/clr/rocclr/device/rocm/rocblit.cpp
 +++ b/projects/clr/rocclr/device/rocm/rocblit.cpp
 @@ -11,6 +11,7 @@
@@ -126,7 +129,7 @@ index 5a3d575552b..bbbaf40b125 100644
    amd::Coord3D size(sizeIn[0]);
  
 diff --git a/projects/clr/rocclr/device/rocm/rocblit.hpp b/projects/clr/rocclr/device/rocm/rocblit.hpp
-index 257e58dfdca..cbf4a4adb15 100644
+index 257e58dfdc..cbf4a4adb1 100644
 --- a/projects/clr/rocclr/device/rocm/rocblit.hpp
 +++ b/projects/clr/rocclr/device/rocm/rocblit.hpp
 @@ -291,6 +291,7 @@ class KernelBlitManager : public DmaBlitManager {
@@ -148,7 +151,7 @@ index 257e58dfdca..cbf4a4adb15 100644
      "__amd_rocclr_streamOpsWrite",     "__amd_rocclr_streamOpsWait",
      "__amd_rocclr_scheduler",          "__amd_rocclr_gwsInit",
 diff --git a/projects/clr/rocclr/utils/flags.hpp b/projects/clr/rocclr/utils/flags.hpp
-index 5caf9d7a1da..bf56b76e2cb 100644
+index 5caf9d7a1d..bf56b76e2c 100644
 --- a/projects/clr/rocclr/utils/flags.hpp
 +++ b/projects/clr/rocclr/utils/flags.hpp
 @@ -219,6 +219,8 @@ release(uint, DEBUG_CLR_LIMIT_BLIT_WG, 16,                                    \

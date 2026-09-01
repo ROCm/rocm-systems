@@ -21,17 +21,31 @@ if [ "$head" != "$BRANCH" ]; then
   exit 1
 fi
 
-base=$(git rev-parse HEAD^)
+# The base is the merge-base with develop, not HEAD^.
+#
+# HEAD^ was right while the branch was a single commit on a fixed base, and wrong
+# the moment anyone pressed "Update branch" on the PR: that lands a merge commit
+# whose first parent is our change, so HEAD^ would have made the patch contain
+# everything develop had gained instead of what we added. The merge-base is what
+# a PR diffs against and stays correct however the branch is updated.
+git fetch -q "$(git config --get branch."$BRANCH".remote || echo origin)" develop 2>/dev/null || true
+base=$(git merge-base origin/develop HEAD)
 {
   echo "# Generated from $BRANCH by remote/clr_patch.sh."
   echo "# Do not hand-edit: regenerate instead, or the branch and this file will drift."
   echo "# base:   $base"
-  echo "# commit: $(git rev-parse HEAD)"
+  echo "# tip:    $(git rev-parse HEAD)"
   echo "#"
-  git diff HEAD^ HEAD
+  echo "# The tip may be a merge of develop; the base is the merge-base with"
+  echo "# develop, so this patch is what the PR adds and nothing else."
+  echo "#"
+  git diff "$base" HEAD
 } > "$PATCH"
 echo "wrote $PATCH ($(wc -l < "$PATCH") lines)"
-git show --stat --oneline HEAD | sed 's/^/  /'
+# The patch's own stat, not `git show HEAD` - on a merge commit that would print
+# the combined diff, i.e. everything develop brought in, which looks alarming and
+# says nothing about the change.
+git diff --stat "$base" HEAD | sed 's/^/  /'
 
 # Applying it to a clean tree at the base must reproduce the commit exactly.
 # Without this the patch could be stale and nobody would find out until a build
@@ -44,9 +58,9 @@ trap 'cd /tmp; git -C "$UPSTREAM" worktree remove --force "$TEST" >/dev/null 2>&
 cd "$TEST"
 git apply --check "$PATCH"
 git apply "$PATCH"
-if diff <(git diff) <(git -C "$WT" diff HEAD^ HEAD) >/dev/null; then
-  echo "verified: the patch applies to $base and reproduces the commit exactly"
+if diff <(git diff) <(git -C "$WT" diff "$base" HEAD) >/dev/null; then
+  echo "verified: the patch applies to $base and reproduces the branch's change exactly"
 else
-  echo "MISMATCH: the patch does not reproduce the commit"
+  echo "MISMATCH: the patch does not reproduce the branch's change"
   exit 1
 fi
