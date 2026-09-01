@@ -82,8 +82,8 @@ if(WIN32)
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib) # Import libs
 endif()
 
-# No third-party dependencies. SHA-256 and HMAC-SHA-256 are built from
-# lib/src/sha256.cc; random key material comes from the platform CSPRNG
+# No third-party dependencies. SHA-256 and HMAC-SHA-256 are built from source
+# out of shared/sha256; random key material comes from the platform CSPRNG
 # (bcrypt on Windows, getrandom(2)//dev/urandom elsewhere).
 
 message("Build Configuration:")

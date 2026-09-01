@@ -1,4 +1,4 @@
-// Copyright Advanced Micro Devices, Inc.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 #include "rocm/sha2/sha256.h"
