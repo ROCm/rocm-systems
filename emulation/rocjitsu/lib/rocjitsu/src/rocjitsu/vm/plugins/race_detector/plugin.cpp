@@ -43,7 +43,124 @@ uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state,
   return ExecutionPlugin::kFullByteMask;
 }
 
+int lgkmcnt_no_wait_value(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return 15;
+  default:
+    return 63;
+  }
+}
+
+bool models_cdna_counter_backpressure(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
+bool has_in_order_vmem_writeback(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return true;
+  default:
+    return false;
+  }
+}
+
+MemoryOrdering memory_ordering_for(const Instruction &inst, rj_code_arch_t arch) {
+  if (!inst.is_memory_op())
+    return {};
+
+  const std::string_view mnemonic = inst.mnemonic();
+  if (mnemonic.starts_with("ds_")) {
+    // GDS shares a counter with LDS but is a different completion-order class.
+    return inst.disassemble().find(" gds") == std::string::npos
+               ? MemoryOrdering{MemoryOrderClass::LDS, MemoryOrderClass::LDS}
+               : MemoryOrdering{};
+  }
+
+  // Generic FLAT operations can complete out of order with each other.
+  if (mnemonic.starts_with("flat_"))
+    return {};
+
+  // CDNA has one ordered non-FLAT VMEM stream, including loads, stores,
+  // atomics, image operations, and direct-to-LDS loads.
+  if (models_cdna_counter_backpressure(arch) &&
+      (mnemonic.starts_with("global_") || mnemonic.starts_with("scratch_") ||
+       mnemonic.starts_with("buffer_") || mnemonic.starts_with("tbuffer_") ||
+       mnemonic.starts_with("image_"))) {
+    return {MemoryOrderClass::VMEM, MemoryOrderClass::VMEM};
+  }
+
+  // Ordinary load-counter retirement remains ordered on newer targets. GFX12+
+  // can nevertheless write load data to VGPRs out of order, so keep the two
+  // guarantees distinct.
+  if (mnemonic.starts_with("global_load") || mnemonic.starts_with("scratch_load") ||
+      mnemonic.starts_with("buffer_load") || mnemonic.starts_with("tbuffer_load") ||
+      mnemonic.starts_with("image_load")) {
+    return {MemoryOrderClass::VMEM, has_in_order_vmem_writeback(arch)
+                                        ? MemoryOrderClass::VMEM
+                                        : MemoryOrderClass::UNORDERED};
+  }
+
+  return {};
+}
+
+int scalar_counter_increment(const Instruction &inst) {
+  if (inst.num_dst_operands() == 0)
+    return 1;
+  const Operand *destination = inst.dst_operand(0);
+  if (destination == nullptr)
+    return 1;
+  return destination->size_bits() <= 32 ? 1 : 2;
+}
+
+void apply_issue_backpressure(const Instruction &inst, amdgpu::Wavefront &wavefront,
+                              WaveRaceState &state) {
+  if (!models_cdna_counter_backpressure(wavefront.cu().arch()))
+    return;
+
+  const std::string_view mnemonic = inst.mnemonic();
+  if (mnemonic.starts_with("s_sendmsg")) {
+    state.prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT);
+    return;
+  }
+  if (!inst.is_memory_op())
+    return;
+
+  if (mnemonic.starts_with("s_")) {
+    state.prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT,
+                                     scalar_counter_increment(inst));
+    return;
+  }
+  if (wavefront.exec() == 0)
+    return;
+  if (mnemonic.starts_with("ds_")) {
+    state.prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT);
+    return;
+  }
+  if (mnemonic.starts_with("flat_")) {
+    state.prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT);
+    state.prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT);
+    return;
+  }
+  state.prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT);
+}
+
 } // namespace
+
+MemoryOrdering memoryOrderingForRaceDetector(const Instruction &inst, rj_code_arch_t arch) {
+  return memory_ordering_for(inst, arch);
+}
 
 // Declared in plugin.h (used by formatTrace tests in execution_plugin_test.cpp).
 MarkedPc findConflict(const RaceViolation &v, RaceDetector &detector) {
@@ -249,7 +366,9 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
   std::lock_guard<std::mutex> lock(dispatch_mutex_);
   detectors_[key] = std::make_unique<RaceDetector>(
       static_cast<int>(num_waves), static_cast<int>(physical_vgpr_count),
-      static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)), std::move(handler));
+      static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)), std::move(handler),
+      /*vmcntNoWait=*/63, lgkmcnt_no_wait_value(wavefronts.front()->cu().arch()),
+      models_cdna_counter_backpressure(wavefronts.front()->cu().arch()));
 
   auto &det = *detectors_[key];
   auto &dc = dispatch_disasm_[dispatch_id];
@@ -273,7 +392,10 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
 
   if (inst.data()->tag() == amdgpu::LOCAL_MEM) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
+    if (wf.exec() == 0)
+      return;
     auto type = d.is_load ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS;
+    const MemoryOrdering ordering = memoryOrderingForRaceDetector(inst, wf.cu().arch());
 
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(wf.exec() & (1ULL << lane)))
@@ -289,16 +411,19 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
       laneAddrs[lane] = static_cast<uint32_t>(d.per_lane_addr[lane]);
     std::vector<uint32_t> registers;
+    uint8_t byte_mask = vector_memory_byte_mask(d, wf);
     if (d.is_load) {
       uint32_t logicalBase = d.dst_reg_base - wf.vgpr_alloc().base;
       registers.resize(d.num_elems);
-      for (uint32_t i = 0; i < d.num_elems; ++i)
+      for (uint32_t i = 0; i < d.num_elems; ++i) {
         registers[i] = logicalBase + i;
+        rs->checkVgprWrite(static_cast<int>(logicalBase + i), wf.exec(), byte_mask,
+                           ordering.writeback);
+      }
     }
-    uint8_t byte_mask = vector_memory_byte_mask(d, wf);
     rs->registerLdsEvent(wf.pc, type, std::move(registers), wf.exec(), wf.wf_size(),
                          std::span<const uint32_t>(laneAddrs, wf.wf_size()), d.elem_size, byte_mask,
-                         d.wait_counter_type);
+                         d.wait_counter_type, ordering);
   }
 
   if (inst.data()->tag() == amdgpu::GLOBAL_MEM) {
@@ -306,6 +431,7 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
     if (d.exec_mask == 0)
       return;
     if (d.lds_dst) {
+      const MemoryOrdering ordering = memoryOrderingForRaceDetector(inst, wf.cu().arch());
       uint32_t perLaneBytes = d.num_elems * d.elem_size;
       if (d.cluster_multicast && d.cluster_mcast_mask != 0) {
         uint32_t selfMask = amdgpu::cluster_multicast_rank_mask(wf.cluster_rank());
@@ -325,18 +451,22 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
       }
       rs->registerLdsEvent(wf.pc, MemoryEventType::GLOBAL_TO_LDS, {}, validLaneMask, wf.wf_size(),
                            std::span<const uint32_t>(ldsAddrs, wf.wf_size()), perLaneBytes, 0xF,
-                           d.wait_counter_type);
+                           d.wait_counter_type, ordering);
     } else if (d.is_load && d.dst_reg_base >= wf.vgpr_alloc().base) {
+      const MemoryOrdering ordering = memoryOrderingForRaceDetector(inst, wf.cu().arch());
       uint32_t logicalBase = d.dst_reg_base - wf.vgpr_alloc().base;
       std::vector<uint32_t> registers(d.num_elems);
-      for (uint32_t i = 0; i < d.num_elems; ++i)
+      const uint8_t byte_mask = vector_memory_byte_mask(d, wf);
+      for (uint32_t i = 0; i < d.num_elems; ++i) {
         registers[i] = logicalBase + i;
-      uint8_t byte_mask = vector_memory_byte_mask(d, wf);
+        rs->checkVgprWrite(static_cast<int>(logicalBase + i), d.exec_mask, byte_mask,
+                           ordering.writeback);
+      }
       rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers), d.exec_mask,
-                        byte_mask, d.wait_counter_type);
+                        byte_mask, d.wait_counter_type, ordering);
     } else if (!d.is_load) {
       rs->registerEvent(wf.pc, MemoryEventType::VGPR_TO_GLOBAL, {}, d.exec_mask, 0xF,
-                        d.wait_counter_type);
+                        d.wait_counter_type, memoryOrderingForRaceDetector(inst, wf.cu().arch()));
     }
   }
 
@@ -381,7 +511,8 @@ void RaceDetectorPlugin::onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf,
 void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                                           amdgpu::Wavefront &wf) {
   auto *s = get_state(wf);
-  assert(s);
+  assert(s && s->race_state);
+  apply_issue_backpressure(inst, wf, *s->race_state);
   s->trace.push(pc);
   s->disasm->record(pc, inst);
 }

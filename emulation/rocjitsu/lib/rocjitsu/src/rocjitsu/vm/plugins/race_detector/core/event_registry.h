@@ -36,6 +36,7 @@ class EventRegistry {
     uint64_t pc;
     MemoryEventType type;
     amdgpu::WaitCounterType waitCounterType;
+    MemoryOrdering ordering;
     EventStatus status;
     uint8_t byteMask;
     uint64_t execMask;
@@ -47,10 +48,10 @@ public:
   /// Allocate a new event. Returns a unique EventId.
   EventId add(WaveId waveId, uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
               uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
-              amdgpu::WaitCounterType waitCounterType) {
+              amdgpu::WaitCounterType waitCounterType, MemoryOrdering ordering = {}) {
     int id = base_offset_ + static_cast<int>(entries_.size());
-    entries_.push_back({waveId, pc, type, waitCounterType, EventStatus::ACTIVE, byteMask, execMask,
-                        std::move(registers), std::move(ldsIntervals)});
+    entries_.push_back({waveId, pc, type, waitCounterType, ordering, EventStatus::ACTIVE, byteMask,
+                        execMask, std::move(registers), std::move(ldsIntervals)});
 
     // To prevent the number of events recorded growing indefinitely, we try to
     // remove retired events from time to time.
@@ -74,6 +75,7 @@ public:
   amdgpu::WaitCounterType waitCounterType(EventId id) const {
     return entries_[index(id)].waitCounterType;
   }
+  MemoryOrdering ordering(EventId id) const { return entries_[index(id)].ordering; }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }
   bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
   uint64_t pc(EventId id) const { return entries_[index(id)].pc; }

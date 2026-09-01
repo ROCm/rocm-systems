@@ -35,6 +35,25 @@ enum class MemoryEventType {
   N
 };
 
+/// Hardware ordering class. This is deliberately separate from
+/// MemoryEventType and WaitCounterType: operations can share a race-event type
+/// or hardware counter without sharing a completion order.
+enum class MemoryOrderClass {
+  UNORDERED, ///< No usable completion-order guarantee.
+  VMEM,      ///< Non-FLAT VMEM operations sharing an ordered counter stream.
+  LDS,       ///< Native local-DS operations.
+};
+
+/// Ordering guarantees relevant to counter retirement and destination WAW
+/// checks are separate. In particular, newer targets can retire load-counter
+/// entries in order while writing their VGPR results out of order.
+struct MemoryOrdering {
+  MemoryOrderClass counter = MemoryOrderClass::UNORDERED;
+  MemoryOrderClass writeback = MemoryOrderClass::UNORDERED;
+
+  bool operator==(const MemoryOrdering &) const = default;
+};
+
 /// Event direction helpers: "to VGPR" means a load writing into a VGPR,
 /// "from VGPR" means a store reading out of a VGPR.
 inline bool isToVgpr(MemoryEventType t) {
@@ -70,6 +89,17 @@ inline amdgpu::WaitCounterType defaultWaitCounterType(MemoryEventType t) {
       t == MemoryEventType::GLOBAL_TO_LDS)
     return amdgpu::WaitCounterType::VMCNT;
   return amdgpu::WaitCounterType::LGKMCNT;
+}
+
+/// Ordering used by architecture-neutral unit-test helpers. Runtime callers
+/// pass instruction-specific ordering explicitly.
+inline MemoryOrdering defaultMemoryOrdering(MemoryEventType t) {
+  if (t == MemoryEventType::GLOBAL_TO_VGPR || t == MemoryEventType::VGPR_TO_GLOBAL ||
+      t == MemoryEventType::GLOBAL_TO_LDS)
+    return {MemoryOrderClass::VMEM, MemoryOrderClass::VMEM};
+  if (t == MemoryEventType::LDS_TO_VGPR || t == MemoryEventType::VGPR_TO_LDS)
+    return {MemoryOrderClass::LDS, MemoryOrderClass::LDS};
+  return {};
 }
 
 /// A register reference (type + index).

@@ -178,6 +178,32 @@ following lifecycle:
    retired and, from the perspective of all threads in all wavefronts, the
    operation is complete.
 
+An all-ones wait-count field is the architectural “do not wait” value. CDNA's
+four-bit `lgkmcnt(15)` and six-bit `vmcnt(63)` therefore retire no events;
+`lgkmcnt(14)` and `vmcnt(62)` are the largest values that can impose an
+explicit wait. Hardware also prevents counter overflow by stalling issue.
+
+The physical LGKMCNT capacity is shared by every event accounted to LGKMCNT,
+including LDS, GDS, scalar-memory, and message operations. Sharing that counter
+does not mean those event classes complete in order with each other. The
+detector therefore retires only the oldest prefix that is provably complete in
+an ordered class. For example, a new LGKM-counted instruction issued after 15
+pending local-LDS operations proves that the oldest LDS operation completed,
+even when the new instruction is scalar memory or GDS. Mixed-class pressure
+that does not identify a completed event remains conservatively pending. VMCNT
+is handled the same way for its 63-entry ordered non-FLAT VMEM class.
+
+The detector records the target-specific wait-counter family on every event.
+It handles combined and standalone legacy waits as well as the supported split
+counter instructions. Counter-capacity backpressure is currently modeled for
+CDNA's legacy VMCNT and LGKMCNT domains.
+
+The same completion-order distinction is used for nonzero partial waits; a
+zero wait still completes every event on the selected counter. Counter
+retirement order is tracked separately from destination writeback order because
+newer architectures may decrement a load counter in order while writing load
+data to VGPRs out of order.
+
 The plugin keeps track, for all registers and LDS memory bytes, of which memory
 operations are in flight. When an instruction in the emulator accesses an LDS
 byte, there is a check to see what memory events are still in flight that
