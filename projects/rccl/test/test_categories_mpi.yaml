@@ -195,10 +195,11 @@ test_categories:
       - "NCCL_LAUNCH_MODE=GROUP"
       - "RCCL_PAT_SHARED_QPS=0"
   standard:
-    description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture / revoke-shrink lifecycle suites (same patterns as comprehensive; lighter env)."
+    description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture / revoke-shrink / grow lifecycle suites (same patterns as comprehensive; lighter env)."
     test_patterns: &mpi_all_patterns
       - "RevokeMPITest.*"
       - "RevokeNonBlockingMPITest.*"
+      - "GrowMPITest.*"
       - "P2pMPITest.*"
       - "NetTransportMPITest.*"
       - "ShmMPITest.*"
