@@ -9,6 +9,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the `LDS Utilization` metric to the gfx115x Memory Chart.
 
+* A failed profile that prints a two-ROCm-installations abort now also prints
+  how to install torch and the profiler from one ROCm stack.
+
 ### Changed
 
 * gfx115x Memory Chart improvements.
