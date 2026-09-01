@@ -1465,11 +1465,11 @@ configure_settings(bool _init)
     // prefix so NIC profiling works without requiring perf_event_paranoid <= 2.
     if(_paranoid > 2 && !_has_perf_cap)
     {
-        constexpr std::string_view papi_net_component_prefix = "net:::";
+        constexpr std::string_view k_papi_net_component_prefix = "net:::";
         const auto papi_events = rocprofsys::delimit(_config->get_papi_events(), " ,\t;");
         const bool all_events_network_related =
-            std::ranges::all_of(papi_events, [](const std::string& event) {
-                return event.starts_with(papi_net_component_prefix);
+            std::ranges::all_of(papi_events, [k_papi_net_component_prefix](const std::string& event) {
+                return event.starts_with(k_papi_net_component_prefix);
             });
         if(!all_events_network_related)
         {
