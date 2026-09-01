@@ -45,7 +45,7 @@ def validate_barrier_instructions_issued(all_samples, barrier_samples):
 
 def validate_barrier_instructions_stalled(barrier_samples):
     barrier_samples_stalled = barrier_samples[
-        barrier_samples["Wave_Issued_Instruction"] == False
+        barrier_samples["Wave_Issued_Instruction"] is False
     ]
     assert (
         barrier_samples_stalled["Stall_Reason"]

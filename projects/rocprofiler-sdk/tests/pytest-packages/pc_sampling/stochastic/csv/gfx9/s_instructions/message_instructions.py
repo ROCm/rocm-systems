@@ -46,7 +46,7 @@ def validate_message_instructions_issued(all_samples, message_samples):
 
 def validate_message_instructions_stalled(message_samples):
     message_samples_stalled = message_samples[
-        message_samples["Wave_Issued_Instruction"] == False
+        message_samples["Wave_Issued_Instruction"] is False
     ]
     assert (
         message_samples_stalled["Stall_Reason"]

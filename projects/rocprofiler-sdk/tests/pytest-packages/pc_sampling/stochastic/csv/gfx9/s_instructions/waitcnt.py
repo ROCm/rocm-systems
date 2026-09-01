@@ -32,7 +32,7 @@ def validate_waitcnt(all_samples, waitcnt_samples):
     assert len(s_waitcnt_samples) == len(waitcnt_samples)
 
     # `s_waitcnt` instructions are never issued on GFX9
-    assert (waitcnt_samples["Wave_Issued_Instruction"] == False).all()
+    assert (waitcnt_samples["Wave_Issued_Instruction"] is False).all()
     # accepted stall reasons are
     assert (
         waitcnt_samples["Stall_Reason"]
