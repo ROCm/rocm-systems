@@ -241,9 +241,10 @@ bool
 is_stream_capturing(hipStream_t stream)
 {
     if(!get_stream_is_capturing_fn()) return false;
-    // Normalize nullptr to hipStreamPerThread: _spt variants resolve nullptr to the
-    // per-thread default stream at the CLR level, which may itself be in capture mode.
-    auto* resolved = (stream == nullptr) ? hipStreamPerThread : stream;
+    // Normalize nullptr and hipStreamLegacy to hipStreamPerThread: _spt variants
+    // resolve both via PER_THREAD_DEFAULT_STREAM, and the per-thread stream may
+    // itself be in capture mode.
+    auto* resolved = (stream == nullptr || stream == hipStreamLegacy) ? hipStreamPerThread : stream;
     auto  status   = hipStreamCaptureStatusNone;
     auto  err      = get_stream_is_capturing_fn()(resolved, &status);
     return (err == hipSuccess && status == hipStreamCaptureStatusActive);
