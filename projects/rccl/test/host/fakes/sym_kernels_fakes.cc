@@ -8,11 +8,7 @@
 
 #include "sym_kernels_fakes.h"
 
-#include <cstdlib>
-
-#include "comm.h"
-
-struct ncclDevrWindow;
+#include "comm.h"  // also declares ncclDevrWindow, so no forward declaration here
 
 ncclSymRegType_t g_symRegType = ncclSymSendNonregRecvNonreg;
 ncclResult_t g_getSymRegTypeResult = ncclSuccess;

@@ -11,12 +11,15 @@
 // collective LAUNCH pipeline (ncclLaunchKernel and friends) and therefore
 // cannot link into a target whose unit under test defines those.
 //
-// Real names rather than placeholders: production logs through these, and a test
-// asserting on a log line should see what production would print.
+// Real names rather than placeholders for the two tables and the three switches
+// below: production logs through those, and a test asserting on a log line should
+// see what production would print. ncclDatatypeToString and ncclDevRedOpToString
+// are the deliberate exceptions -- no test asserts on a datatype or redop in a
+// log line, so they return a fixed token rather than a transcribed table.
 
-#include "nccl.h"
 #include "device.h"
 #include "info.h"
+#include "nccl.h"
 
 // Algorithm/protocol name tables. Passed to the RCCL tuning override hooks and
 // logged through.
@@ -64,5 +67,16 @@ const char* ncclProtoToString(int proto) {
   }
 }
 
+// Same failure mode as ncclAlgoToString: a new enumerator silently logs as the
+// default arm. Protocols get the same guard.
+static_assert(NCCL_NUM_PROTOCOLS == 3,
+              "ncclProtoToString above must name every protocol; add the new case");
+// ncclFuncToString gets NO count guard on purpose. ncclNumFuncs is 19
+// (nccl_common.h:95) and includes the alltoallv/scatter/gather family; the switch
+// names the 8 that enqueue.cc logs and lets the rest fall to "Invalid", which
+// mirrors what production's own table does. A guard here would fire on an
+// enumerator this fake never needed to name.
+
+// Deliberate placeholders; see the exception noted in the file header.
 const char* ncclDatatypeToString(ncclDataType_t) { return "dtype"; }
 const char* ncclDevRedOpToString(ncclDevRedOp_t) { return "redop"; }

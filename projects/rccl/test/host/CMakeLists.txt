@@ -254,9 +254,16 @@ if(BUILD_TESTS)
   # UNIT UNDER TEST defines; a target that needs a real value where the floor
   # aborts gets a seam in the owning TU's fakes file instead.
   # ---------------------------------------------------------------------------
-  # The four *_stubs.cc below read control globals only init_fakes.cc defines; this
-  # target links solely because --gc-sections drops them. Dropping that flag needs
-  # each global rehomed to its owning TU's fakes file, not init_fakes.cc added here.
+  # LINKS ONLY BECAUSE OF --gc-sections. Relinking without it leaves 78 undefined
+  # symbols: 42 control globals that only init_fakes.cc defines (referenced from
+  # the four *_stubs.cc below, never from enqueue-test.cc), and 36 ordinary
+  # externals of enqueue.cc that nothing in fakes/ defines at all -- among them
+  # hipFuncGetAttributes, netTransport, ncclGroupStartInternal and the
+  # ncclProfiler* set. So a new test reaching one of those paths fails at LINK
+  # time, not as an assertion: e.g. ncclInitKernelsForDevice (enqueue.cc:110)
+  # needs a hipFuncGetAttributes fake before it can be called at all.
+  # Rehoming the 42 globals to their owning TUs' fakes files addresses under half
+  # of this; the other 36 need fakes written.
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
     enqueue-test.cc
     fakes/enqueue_fakes.cc               # ResetEnqueueFakes chain only
@@ -752,7 +759,7 @@ endforeach()
 # rccl-UnitTestsMicroEnqueue (standalone mode) -- see the in-build block for the
 # rationale behind the separate binary and the RCCL_STUBS_OMIT_* macros.
 # ---------------------------------------------------------------------------
-# Same --gc-sections link-order coupling as the in-build list; see the comment there.
+# Same --gc-sections coupling as the in-build list; see the comment there.
 set(TEST_MICRO_ENQUEUE_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/enqueue-test.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_fakes.cc
@@ -782,48 +789,65 @@ set(TEST_MICRO_ENQUEUE_SOURCE_FILES
   ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
 )
 
-add_executable(rccl-UnitTestsMicroEnqueue ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
+# Two binaries, for the same reason the init pair above exists: enqueue.cc gates
+# rcclShmemDynamicSize (:72-88) at the PREPROCESSOR on RCCL_DEVICE_LINKER, so each
+# arm's code is absent from the object unless its macro matches and a single
+# compile can only ever reach one side.
+#
+# ENABLE_DEVICE_LINKER defaults ON, so the arm that SHIPS is the device-linker one.
+# The in-RCCL-build path picks that up automatically (the rccl target's
+# COMPILE_DEFINITIONS flow into RCCL_COMMON_COMPILE_DEFS), but this standalone
+# project has no rccl target to read, and run_host_tests.sh -- the only in-repo
+# workflow that runs these binaries -- uses this path. Without the second target
+# the shipping arm would go untested by that workflow entirely.
+foreach(_enq_variant "" "-devlinker")
+  set(_enq_tgt "rccl-UnitTestsMicroEnqueue${_enq_variant}")
+  add_executable(${_enq_tgt} ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
 
-target_compile_options(rccl-UnitTestsMicroEnqueue PRIVATE
-  -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
+  target_compile_options(${_enq_tgt} PRIVATE
+    -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
 
-target_include_directories(rccl-UnitTestsMicroEnqueue PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  ${RCCL_INCLUDE_DIRS}
-  ${RCCL_HIPIFY_DIR}/src/device                # device/common.h (neutered)
-  ${RCCL_HIPIFY_DIR}/src/include/nccl_device
-)
+  target_include_directories(${_enq_tgt} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${RCCL_INCLUDE_DIRS}
+    ${RCCL_HIPIFY_DIR}/src/device                # device/common.h (neutered)
+    ${RCCL_HIPIFY_DIR}/src/include/nccl_device
+  )
 
-target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE
-  __HIP_PLATFORM_AMD__
-  NCCL_OS_LINUX
-  ROCM_VERSION=70000
-  USE_AMDSMI
-  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
-  RCCL_STUBS_OMIT_ncclInitKernelsForDevice
-  RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
-  ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue.cc"
-)
+  target_compile_definitions(${_enq_tgt} PRIVATE
+    __HIP_PLATFORM_AMD__
+    NCCL_OS_LINUX
+    ROCM_VERSION=70000
+    USE_AMDSMI
+    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+    RCCL_STUBS_OMIT_ncclInitKernelsForDevice
+    RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
+    ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue.cc"
+  )
+  if(_enq_variant STREQUAL "-devlinker")
+    target_compile_definitions(${_enq_tgt} PRIVATE RCCL_DEVICE_LINKER)
+  endif()
 
-target_link_options(rccl-UnitTestsMicroEnqueue PRIVATE -no-hip-rt -Wl,--gc-sections)
-target_link_libraries(rccl-UnitTestsMicroEnqueue PRIVATE
-  GTest::GTest
-  Threads::Threads
-  fmt::fmt-header-only
-)
+  target_link_options(${_enq_tgt} PRIVATE -no-hip-rt -Wl,--gc-sections)
+  target_link_libraries(${_enq_tgt} PRIVATE
+    GTest::GTest
+    Threads::Threads
+    fmt::fmt-header-only
+  )
 
-if(MICRO_COVERAGE)
-  target_compile_options(rccl-UnitTestsMicroEnqueue PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsMicroEnqueue PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
-endif()
+  if(MICRO_COVERAGE)
+    target_compile_options(${_enq_tgt} PRIVATE
+      -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(${_enq_tgt} PRIVATE
+      -fprofile-instr-generate -fcoverage-mapping)
+  endif()
+endforeach()
 
 # NOTE: the standalone project intentionally does not register these binaries
 # with CTest (matching test/host from #9320); run them directly, e.g.
 #   ./build/rccl-UnitTestsMicro   or   ./build/rccl-HostUnitTests
 #   ./build/rccl-UnitTestsMicroInit   ./build/rccl-UnitTestsMicroInit-uncached
-#   ./build/rccl-UnitTestsMicroEnqueue
+#   ./build/rccl-UnitTestsMicroEnqueue  ./build/rccl-UnitTestsMicroEnqueue-devlinker
 # The in-RCCL-build path registers the micro/init/enqueue binaries via CTest
 # categories.

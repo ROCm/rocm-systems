@@ -475,16 +475,13 @@ hipError_t hipMemPoolSetAttribute(hipMemPool_t, hipMemPoolAttr, void*) { return 
 //
 // Aborting rather than returning hipErrorInvalidValue: a host-only microtest
 // that reaches a kernel launch or module load is broken, not merely unexercised.
-namespace {
-[[noreturn]] void UnreachedHipEntry(const char* fn) { FailLoud("hip_fakes", fn); }
-}  // namespace
 
 // extern "C" is stated rather than inherited from the HIP declaration: if a
 // future SDK drops one of these, the definition still emits the C symbol the
 // linker needs instead of silently emitting a mangled one.
 extern "C" {
 #define RCCL_DEFINE_HIP_STUB(name, params) \
-  hipError_t name params { UnreachedHipEntry(#name); }
+  hipError_t name params { FailLoudUnfaked("hip_fakes", #name); }
 RCCL_HIP_PROFILE_INTERCEPTORS(RCCL_DEFINE_HIP_STUB)
 #undef RCCL_DEFINE_HIP_STUB
 }  // extern "C"

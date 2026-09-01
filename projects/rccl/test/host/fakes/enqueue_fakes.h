@@ -39,10 +39,11 @@
 // rather than proven order-independence. The first test to script NCCL_PROTO
 // inherits a seed-dependent flake and should add process isolation.
 //
-// topoGetAlgoInfo:2686 reads NCCL_PROTO/NCCL_ALGO through raw libc getenv() and
-// not ncclGetEnv. env_fakes.cc interposes getenv itself, so both routes are
-// covered by the same map; that was NOT true when this target had its own
-// map-only env fake.
+// topoGetAlgoInfo:2687-2688 read NCCL_PROTO/NCCL_ALGO through raw libc getenv()
+// and not ncclGetEnv. env_fakes.cc interposes getenv itself, and
+// ResetEnqueueFakes() maps both names ABSENT, so both routes are covered. The
+// mapping is the load-bearing half: the interposer falls through to the real
+// environment for any name the map does not know.
 
 // waitWorkFifoAvailable escapes its spin loop via ncclCommPollEventCallbacks,
 // which is INLINE in comm.h and cannot be faked. Its only observable action on an

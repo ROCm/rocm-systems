@@ -84,6 +84,13 @@ void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage) {}
 
 class EnqueueMicrotest : public ::testing::Test {
  protected:
+  // Reset in BOTH, not just TearDown. TearDown alone leaves the first test
+  // executed running against static-initialiser state rather than reset state --
+  // which test that is depends on --gtest_shuffle. Those two states happen to be
+  // identical for every global in the reset closure today, but nothing enforces
+  // that, and SetUp costs one line to stop relying on it. It also means a future
+  // second fixture in this binary cannot inherit a dirty process.
+  void SetUp() override { ResetEnqueueFakes(); }
   void TearDown() override { ResetEnqueueFakes(); }
 };
 
@@ -304,11 +311,17 @@ TEST_F(EnqueueMicrotest, ShmemDynamicSize_DeviceLinker_IsAlwaysZero) {
   // (device/common.h), so asking for the same bytes as DYNAMIC shmem would
   // double-count and overflow the per-block LDS budget. enqueue.cc:73-78
   // therefore returns 0 for every input, with both parameters cast to void.
+  // HONEST SCOPE: on this arm the preprocessor has DELETED the arch gate and the
+  // gfx950 ternary, so the inputs below do not exercise them -- they are not
+  // evaluated at all. Varying the inputs proves only that the arm ignores them,
+  // which is exactly what `(void)cudaArch; (void)WarpSize;` promises. What this
+  // test actually guards is REMOVAL of the guard: mutating the arm's body to the
+  // non-linker formula fails here and nowhere else in the suite.
   EXPECT_EQ(0, rcclShmemDynamicSize(600, 32));
-  EXPECT_EQ(0, rcclShmemDynamicSize(700, 32)) << "the arch gate is inert on this arm";
+  EXPECT_EQ(0, rcclShmemDynamicSize(700, 32));
   EXPECT_EQ(0, rcclShmemDynamicSize(942, 32));
-  EXPECT_EQ(0, rcclShmemDynamicSize(950, 32)) << "the gfx950 ternary is inert on this arm";
-  EXPECT_EQ(0, rcclShmemDynamicSize(950, 64)) << "WarpSize is unread on this arm";
+  EXPECT_EQ(0, rcclShmemDynamicSize(950, 32));
+  EXPECT_EQ(0, rcclShmemDynamicSize(950, 64));
 }
 #endif
 
@@ -1939,10 +1952,11 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeGfx950_IsEnabled) {
 }
 
 TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_Gfx950WithAinic_IsDisabled) {
-  // The `!rcclUseAinic()` conjunct -- the reason fakes/enqueue_stub_overrides.cc
-  // exists at all. Without this the flag stays false in every test and dropping
-  // the conjunct survives. Differential with MultiNodeGfx950_IsEnabled, which is
-  // identical but for the AINIC flag.
+  // The `!rcclUseAinic()` conjunct -- the reason g_rcclUseAinic is a seam in
+  // fakes/transport_stubs.cc rather than the fail-loud stub it used to be.
+  // Without it the flag stays false in every test and dropping the conjunct
+  // survives. Differential with MultiNodeGfx950_IsEnabled, which is identical
+  // but for the AINIC flag.
   BatchComm bc(/*nNodes=*/2, "gfx950");
   SetBatchParam(-1);
   g_rcclUseAinic = true;
@@ -2370,7 +2384,7 @@ struct FinishComm {
   }
   std::vector<uint64_t> mergedOpCounts() {
     std::vector<uint64_t> out;
-    // The intrusive link for proxyOpQueue is `enqNext` (comm.h:387), not `next`.
+    // The intrusive link for proxyOpQueue is `enqNext` (comm.h:386), not `next`.
     for (auto* op = ncclIntruQueueHead(&p()->proxyOpQueue); op != nullptr; op = op->enqNext) {
       out.push_back(op->opCount);
     }
@@ -3021,10 +3035,16 @@ namespace {
 struct AlgoInfoComm {
   // Holds a CostComm for the comm/topo pair, the rank counts and the XGMI_ALL
   // stamp; adds only what topoGetAlgoInfo needs beyond updateCollCostTable.
-  // Parameterised like CostComm rather than hardcoding 8/1, since
-  // topoGetAlgoInfo reads both nRanks and nNodes.
-  CostComm base;
-  AlgoInfoComm(int nRanks = 8, int nNodes = 1) : base(nRanks, nNodes) {
+  //
+  // NOT parameterised, deliberately, even though topoGetAlgoInfo reads nRanks and
+  // nNodes. CostComm hardcodes maxLocalRanks and localRanks to 8 regardless of
+  // nRanks (:1387-1392), so CostComm(64, 8) would describe 64 ranks over 8 nodes
+  // with 8 local ranks and one GPU node -- a comm that cannot exist. Exposing a
+  // pair of parameters that produce an incoherent fixture is worse than the fixed
+  // 8/1 here. Varying either one needs CostComm to derive the local counts first,
+  // and that changes what the existing CostComm tests cover (e.g. :1582).
+  CostComm base{8, 1};
+  AlgoInfoComm() {
     ncclComm* comm = base.get();
     comm->WarpSize = 32;
     SetSingleGpuArch(&base.topo(), "gfx942");
@@ -3035,7 +3055,6 @@ struct AlgoInfoComm {
     }
   }
   ncclComm* get() { return base.get(); }
-  ncclTopoSystem& topo() { return base.topo(); }
 };
 }  // namespace
 
@@ -3104,6 +3123,41 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_OverrideChannelsCanChangeTheChannelCoun
   ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(),
                                          /*simInfo=*/nullptr));
   EXPECT_EQ(3, task.nMaxChannels) << "the override's channel count must reach the task";
+}
+
+// The NCCL_MIN_NCHANNELS floor at :2652-2656. Left undriven, g_paramMinNchannels
+// defaults to 0 and the whole clamp degenerates: `nc > minNChannels` becomes
+// `nc > 0` and `std::max(minNChannels, X)` becomes `X`, so mutating both
+// ncclParamMinNchannels() call sites to a constant left the suite green. Driving
+// it is what makes the floor observable.
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_MinNchannelsIsAFloorOnTheShrink) {
+  // The shrink is guarded by `nBytes < nc * nt * threadThreshold && nc > minNChannels`,
+  // so BOTH conjuncts have to be armed or the branch never runs: nc starts at
+  // comm->nChannels (:2613) and threadThreshold at comm->threadThresholds, and the
+  // fixture leaves both zero, which makes the product zero and the comparison false.
+  AlgoInfoComm cc;
+  cc.get()->nChannels = 8;
+  for (int a = 0; a < NCCL_NUM_ALGORITHMS; ++a) {
+    for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p) {
+      cc.get()->threadThresholds[a][p] = 64;
+    }
+  }
+
+  auto task = CostTask(ncclFuncAllReduce);
+  CostTable tbl;  // left empty: the RING/SIMPLE fallback is taken
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, /*nBytes=*/1, tbl.ptr(),
+                                         /*simInfo=*/nullptr));
+  const int unclamped = task.nMaxChannels;
+  ASSERT_LT(unclamped, 4)
+      << "the shrink must actually collapse nc, or the floor below proves nothing";
+
+  auto task2 = CostTask(ncclFuncAllReduce);
+  CostTable tbl2;
+  g_paramMinNchannels = 4;
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task2, /*nBytes=*/1, tbl2.ptr(),
+                                         /*simInfo=*/nullptr));
+  EXPECT_EQ(4, task2.nMaxChannels)
+      << "NCCL_MIN_NCHANNELS must floor the shrink; unclamped was " << unclamped;
 }
 
 // Guards the fix for the &tablePtr defect: topoGetAlgoInfo must read the cost

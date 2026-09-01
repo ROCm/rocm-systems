@@ -10,12 +10,12 @@
 // (abort-on-call, except benign teardown returning ncclSuccess). A test that
 // needs to drive one of these replaces that individual entry with a real fake.
 
+#include "transport_stubs.h"
+
 #include <cstdlib>
 #include <functional>
 
 #include "nccl.h"
-
-#include "transport_stubs.h"
 
 struct ncclComm;
 struct ncclTopoGraph;

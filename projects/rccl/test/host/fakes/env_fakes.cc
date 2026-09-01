@@ -60,4 +60,6 @@ void SetMicroEnvAbsent(const char* name) { SetMicroEnv(name, nullptr); }
 
 void ClearMicroEnv() { microEnvMap().clear(); }
 
+void ResetEnvFakes() { ClearMicroEnv(); }
+
 const char* ncclGetEnv(const char* name) { return micro_getenv(name); }

@@ -285,8 +285,10 @@ void ResetInitFakes() {
   ResetHipFakes();
   ResetNcclFakes();
   ResetRecorderFakes();
+  ResetRcclWrapFakes();
+  ResetTransportStubs();
   ResetTuningFakes();
-  ClearMicroEnv();
+  ResetEnvFakes();
   g_ginHasError = false;
   g_bootstrapNetInitFail = false;
   g_validHsaScratch = true;

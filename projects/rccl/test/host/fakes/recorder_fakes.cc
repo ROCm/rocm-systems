@@ -10,9 +10,9 @@
 // include guard, so including it again re-declares the whole rcclCall_t
 // enumerator list ("redefinition of enumerator rrBroadcast").
 
-#include "comm.h"
-
 #include "recorder_fakes.h"
+
+#include "comm.h"
 
 ncclResult_t g_recorderResult = ncclSuccess;
 

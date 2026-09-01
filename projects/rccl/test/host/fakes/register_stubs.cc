@@ -14,30 +14,26 @@
 
 #include "fail_loud.h"
 
-namespace {
-[[noreturn]] void Unreached(const char* fn) { FailLoud("register_stubs", fn); }
-}  // namespace
-
 ncclResult_t ncclRegisterCollBuffers(struct ncclComm*, struct ncclTaskColl*, void**, void**,
                                      struct ncclIntruQueue<struct ncclCommCallback,
                                                            &ncclCommCallback::next>*,
                                      bool*) {
-  Unreached("ncclRegisterCollBuffers");
+  FailLoudUnfaked("register_stubs", "ncclRegisterCollBuffers");
 }
 ncclResult_t ncclRegisterCollNvlsBuffers(struct ncclComm*, struct ncclTaskColl*, void**, void**,
                                          struct ncclIntruQueue<struct ncclCommCallback,
                                                                &ncclCommCallback::next>*,
                                          bool*) {
-  Unreached("ncclRegisterCollNvlsBuffers");
+  FailLoudUnfaked("register_stubs", "ncclRegisterCollNvlsBuffers");
 }
 ncclResult_t ncclRegisterP2pIpcBuffer(struct ncclComm*, void*, size_t, int, int*, void**,
                                       struct ncclIntruQueue<struct ncclCommCallback,
                                                             &ncclCommCallback::next>*) {
-  Unreached("ncclRegisterP2pIpcBuffer");
+  FailLoudUnfaked("register_stubs", "ncclRegisterP2pIpcBuffer");
 }
 ncclResult_t ncclRegisterP2pNetBuffer(struct ncclComm*, void*, size_t, struct ncclConnector*,
                                       int*, void**,
                                       struct ncclIntruQueue<struct ncclCommCallback,
                                                             &ncclCommCallback::next>*) {
-  Unreached("ncclRegisterP2pNetBuffer");
+  FailLoudUnfaked("register_stubs", "ncclRegisterP2pNetBuffer");
 }

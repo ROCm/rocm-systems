@@ -22,5 +22,14 @@ void ResetEnqueueFakes() {
   ResetSymKernelsFakes();
   ResetTransportStubs();
   ResetTuningFakes();
-  ClearMicroEnv();
+  ResetEnvFakes();
+
+  // enqueue.cc has raw libc getenv() call sites, not just ncclGetEnv ones
+  // (topoGetAlgoInfo:2687-2688 reads NCCL_PROTO and NCCL_ALGO that way). The
+  // interposer in env_fakes.cc only intercepts names the map KNOWS; an unmapped
+  // name falls through to the real environment. Mapping them absent is what
+  // makes the suite hermetic against the CI machine's ambient environment
+  // rather than merely capable of being made so.
+  SetMicroEnvAbsent("NCCL_PROTO");
+  SetMicroEnvAbsent("NCCL_ALGO");
 }

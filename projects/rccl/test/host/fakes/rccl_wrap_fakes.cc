@@ -9,9 +9,8 @@
 
 #include "rccl_wrap_fakes.h"
 
-#include <cstdlib>
-
 #include "comm.h"
+#include "fail_loud.h"
 #include "info.h"
 
 // ===========================================================================
@@ -112,12 +111,25 @@ void ResetRcclWrapFakes() {
 
 // ===========================================================================
 // Fail-loud floor -- rccl_wrap.cc entry points no host-only microtest executes.
-// Reaching one aborts, which is the point: an unfaked path must be loud.
+// Reaching one aborts AND names itself on stderr, which is the point: an unfaked
+// path must be loud. A bare ::abort() here would print nothing.
 // ===========================================================================
 
-size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceScatter) { ::abort(); }
-bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) { ::abort(); }
-ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) { ::abort(); }
-int64_t rcclParamWarpSpeedForceEnable() { ::abort(); }         // rccl_wrap.cc:78
-int64_t rcclParamHierarchicalAllGather() { ::abort(); }        // rccl_wrap.cc:704
-int64_t rcclParamHierarchicalReduceScatter() { ::abort(); }    // rccl_wrap.cc:1357
+size_t rcclHierarchicalTempBufferSize(int, bool, bool) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclHierarchicalTempBufferSize");
+}
+bool rcclCanUseWarpSpeedAuto(struct ncclComm*, int) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCanUseWarpSpeedAuto");
+}
+ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCommSetP2pShiftSize");
+}
+int64_t rcclParamWarpSpeedForceEnable() {                      // rccl_wrap.cc:78
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclParamWarpSpeedForceEnable");
+}
+int64_t rcclParamHierarchicalAllGather() {                     // rccl_wrap.cc:704
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclParamHierarchicalAllGather");
+}
+int64_t rcclParamHierarchicalReduceScatter() {                 // rccl_wrap.cc:1357
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclParamHierarchicalReduceScatter");
+}

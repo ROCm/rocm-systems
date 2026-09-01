@@ -191,7 +191,20 @@ had become before this map existed.
 | reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
 | HIP runtime | `fakes/hip_fakes.cc` |
 
-Two things do NOT follow the rule, deliberately:
+**`_fakes.cc` versus `_stubs.cc`.** The suffix records what the file mostly *is*, not a rule the
+build enforces: `_fakes` for a file whose point is controllable seams, `_stubs` for one whose point
+is a fail-loud floor. Several files are honestly both — `transport_stubs.cc` is a floor that also
+owns one driven seam, and `os_fakes.cc` holds working implementations with no seam at all. Do not
+read the suffix as a guarantee; read the file's header comment, which states what it owns. If you
+add a file, pick the suffix matching its majority content and say so at the top.
+
+**`// UNDRIVEN`.** A seam carrying this marker is declared so the binary links and so an accidental
+call is visible, NOT because its path is covered. It is a link-floor entry with a chosen default,
+and that default silently selects which production arm runs. Driving a seam means deleting its
+marker. The marker travels with the declaration rather than a block comment so it cannot drift from
+what it describes. Call *counters* do not take the marker unless the counter itself is unread.
+
+Three things do NOT follow the TU-per-file rule, deliberately:
 
 - `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
   pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
@@ -199,6 +212,11 @@ Two things do NOT follow the rule, deliberately:
 - `ncclStrongStreamAcquire` / `Release` stay in `nccl_fakes.cc` rather than
   `strongstream_stubs.cc`: they carry `ASSERT_HOOK_MATCHES_PROD` drift
   assertions and moving those is a larger change.
+- `src/os/*.cc` is only partly consolidated. `os_fakes.cc` owns the `linux.cc`
+  allocation shims, but `ncclOsCpuCount`, `ncclOsSetAffinity` and
+  `ncclOsTopoGetStrFromSys` are still split between `collective_stubs.cc` and
+  `nccl_stubs.cc`. That predates this map; the row below is where they *should*
+  live, not where all of them do.
 
 `<uut>_fakes.h` (e.g. `enqueue_fakes.h`) is an aggregation header: it includes
 the per-TU headers that unit's tests use and declares the `Reset<Uut>Fakes()`
@@ -479,9 +497,20 @@ make -j $(nproc) rccl-UnitTestsMicro
 
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
-can be configured **directly** to build the host binaries — `rccl-HostUnitTests`
-and `rccl-UnitTestsMicro` — **without configuring/building all of librccl**. It
-compiles just the tests + fakes + the hipified unit-under-test sources.
+can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
+`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroInit[-uncached]` and
+`rccl-UnitTestsMicroEnqueue[-devlinker]` — **without configuring/building all of
+librccl**. It compiles just the tests + fakes + the hipified unit-under-test
+sources.
+
+Two of those names are preprocessor variants, not duplicates. `init.cc` gates
+part of its allocation path on `HIP_*_UNCACHED_MEMORY` and `enqueue.cc` gates
+`rcclShmemDynamicSize` on `RCCL_DEVICE_LINKER`, both at the **preprocessor**, so
+one compile can only ever reach one arm. The in-RCCL-build path inherits
+`RCCL_DEVICE_LINKER` from the `rccl` target's compile definitions
+(`ENABLE_DEVICE_LINKER` defaults ON, so the device-linker arm is the one that
+ships); this standalone project has no `rccl` target to inherit from, which is
+why it builds the `-devlinker` variant explicitly.
 
 **ROCm is a prerequisite.** Per epic AICOMRCCL-1661 ("ROCm toolchain is
 available"), this build uses `hipcc` in host-only mode (`--offload-host-only`)
@@ -498,6 +527,8 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicro          # p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
 ./build/rccl-UnitTestsMicroInit      # init.cc tests
 ./build/rccl-UnitTestsMicroInit-uncached
+./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
+./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-HostUnitTests
 ```
 

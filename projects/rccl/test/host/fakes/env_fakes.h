@@ -9,9 +9,14 @@
 //
 // Hoisted out of init_fakes.cc so there is exactly ONE env implementation. A
 // second, map-only copy cannot intercept the raw getenv() call sites that
-// production still has (e.g. enqueue.cc:2686 reads NCCL_PROTO/NCCL_ALGO through
-// libc getenv, not ncclGetEnv), which leaves results dependent on the ambient
-// environment of the machine running the suite.
+// production still has (e.g. enqueue.cc:2687-2688 read NCCL_PROTO/NCCL_ALGO
+// through libc getenv, not ncclGetEnv), which leaves results dependent on the
+// ambient environment of the machine running the suite.
+//
+// Note the interposer is strict only for names the map KNOWS: an unmapped name
+// falls through to the real getenv, deliberately, so gtest and libstdc++ still
+// see the real environment. A fixture that wants hermeticity for a given name
+// must map it, with SetMicroEnvAbsent if the wanted value is "unset".
 
 #ifndef RCCL_TEST_HOST_ENV_FAKES_H_
 #define RCCL_TEST_HOST_ENV_FAKES_H_
@@ -25,5 +30,9 @@ const char* micro_getenv(const char* name);
 void SetMicroEnv(const char* name, const char* value);
 void SetMicroEnvAbsent(const char* name);
 void ClearMicroEnv();
+
+// Named like every other per-TU reset so a Reset*Fakes() chain reads as one list
+// and "did I add mine?" is checkable by pattern. Currently just ClearMicroEnv().
+void ResetEnvFakes();
 
 #endif  // RCCL_TEST_HOST_ENV_FAKES_H_

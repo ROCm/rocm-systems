@@ -19,42 +19,38 @@
 
 #include "fail_loud.h"
 
-namespace {
-[[noreturn]] void Unreached(const char* fn) { FailLoud("sched_stubs", fn); }
-}  // namespace
-
 // scheduler/symmetric_sched.cc
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm*, struct ncclTaskColl*,
                                        struct ncclIntruQueue<struct ncclTaskColl,
                                                              &ncclTaskColl::next>*,
                                        struct ncclTaskColl**) {
-  Unreached("ncclMakeSymmetricTaskList");
+  FailLoudUnfaked("sched_stubs", "ncclMakeSymmetricTaskList");
 }
 ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm*,
                                         struct ncclIntruQueue<struct ncclTaskColl,
                                                               &ncclTaskColl::next>*,
                                         struct ncclKernelPlan*) {
-  Unreached("ncclSymmetricTaskScheduler");
+  FailLoudUnfaked("sched_stubs", "ncclSymmetricTaskScheduler");
 }
 
 // scheduler/allgatherv_sched.cc
 ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm*, struct ncclKernelPlan*,
                                           struct ncclKernelPlanBudget*) {
-  Unreached("ncclScheduleBcastTasksToPlan");
+  FailLoudUnfaked("sched_stubs", "ncclScheduleBcastTasksToPlan");
 }
 
 // rma/rma_proxy_launch.cc
 ncclResult_t ncclRmaProxyReclaimPlan(struct ncclComm*, struct ncclKernelPlan*) {
-  Unreached("ncclRmaProxyReclaimPlan");
+  FailLoudUnfaked("sched_stubs", "ncclRmaProxyReclaimPlan");
 }
 
 // device/onerank.cu
 ncclResult_t ncclLaunchOneRank(void*, void const*, size_t, struct ncclDevRedOpFull,
                                ncclDataType_t, hipStream_t, void const*) {
-  Unreached("ncclLaunchOneRank");
+  FailLoudUnfaked("sched_stubs", "ncclLaunchOneRank");
 }
 
 // allocator.cc
 ncclResult_t ncclShadowPoolToHost(struct ncclShadowPool*, void*, void**) {
-  Unreached("ncclShadowPoolToHost");
+  FailLoudUnfaked("sched_stubs", "ncclShadowPoolToHost");
 }

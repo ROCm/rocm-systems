@@ -17,22 +17,18 @@
 
 #include "fail_loud.h"
 
-namespace {
-[[noreturn]] void Unreached(const char* fn) { FailLoud("strongstream_stubs", fn); }
-}  // namespace
-
 ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph*, hipStream_t, int) {
-  Unreached("ncclCudaGetCapturingGraph");
+  FailLoudUnfaked("strongstream_stubs", "ncclCudaGetCapturingGraph");
 }
 ncclResult_t ncclCudaGraphAddDestructor(struct ncclCudaGraph, hipHostFn_t, void*) {
-  Unreached("ncclCudaGraphAddDestructor");
+  FailLoudUnfaked("strongstream_stubs", "ncclCudaGraphAddDestructor");
 }
 ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph, hipStream_t, hipEvent_t) {
-  Unreached("ncclStreamAdvanceToEvent");
+  FailLoudUnfaked("strongstream_stubs", "ncclStreamAdvanceToEvent");
 }
 ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph, struct ncclStrongStream*,
                                                 bool, hipStream_t*) {
-  Unreached("ncclStrongStreamAcquiredWorkStream");
+  FailLoudUnfaked("strongstream_stubs", "ncclStrongStreamAcquiredWorkStream");
 }
 // Benign teardown: commFree reaches this on a happy-path destroy.
 ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream*) { return ncclSuccess; }
