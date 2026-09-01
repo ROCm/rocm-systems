@@ -247,10 +247,10 @@ bool rcclNcclAlgoEnvIsSet();
 // else arch table ceRegMax[AR]; 0 means no upper bound.
 size_t rcclCeArRegisteredMax(const ncclComm* comm);
 // Decides whether ncclAllReduce_impl takes the DDA path for this call. Mirrors the guard in
-// collectives.cc exactly: DDA runs when the buffers are not symmetric-kernel eligible, CE AllReduce
-// will not service the call per the caller-computed `ceAllReduceAllowed` (non-gfx1250 only; gfx1250
-// always keeps the DDA fabric path), and DDA is enabled for this arch/size. Host-side and GPU-free so
-// the dispatch decision can be unit tested.
+// collectives.cc exactly: DDA requires !symEligible on every arch (gfx1250 fabric included).
+// Non-gfx1250 also requires CE AllReduce not to service the call (`ceAllReduceAllowed`);
+// gfx1250 may still take fabric DDA when CE is eligible. DDA must also be enabled for this
+// arch/size. Host-side and GPU-free so the dispatch decision can be unit tested.
 bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t datatype,
                                     bool symEligible, bool ceAllReduceAllowed);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
