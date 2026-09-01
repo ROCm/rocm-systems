@@ -1580,7 +1580,7 @@ get_device_counting_service(rocprofiler_agent_id_t agent_id)
 // pass are packed together because user_data is a single 64-bit slot -- Linux tids are pid_t
 // (32-bit) and pass counts are small, so this is lossless and preserves the thread id the record
 // still carries.
-thread_local std::optional<uint64_t> tl_current_replay_pass;
+thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
 
 // The two 32-bit fields that share the single 64-bit user_data slot: the enqueuing thread id (a
 // Linux tid, i.e. 32-bit pid_t) and the replay pass index. Modeled as a struct so pack/unpack is a
@@ -1588,14 +1588,14 @@ thread_local std::optional<uint64_t> tl_current_replay_pass;
 // below rather than assumed.
 struct replay_user_data_t
 {
-    uint32_t tid;
-    uint32_t pass;
+    uint32_t tid  = 0;
+    uint32_t pass = 0;
 };
 
 static_assert(sizeof(replay_user_data_t) == sizeof(uint64_t),
               "replay_user_data_t must exactly fill the 64-bit user_data slot");
-static_assert(std::is_trivial<replay_user_data_t>::value,
-              "replay_user_data_t must remain trivial for memcpy pack/unpack");
+static_assert(std::is_trivially_copyable<replay_user_data_t>::value,
+              "replay_user_data_t must remain trivially copyable for memcpy pack/unpack");
 // The tid half of the slot cannot truncate: common::get_tid() returns gettid(), whose value is a
 // kernel pid_t. Asserting the width here makes that a compile-time guarantee rather than something
 // the pack path has to test for and report on every dispatch.
@@ -1625,7 +1625,10 @@ inline replay_user_data_t
 unpack_replay_user_data(uint64_t value)
 {
     auto fields = replay_user_data_t{};
-    std::memcpy(&fields, &value, sizeof(fields));
+    // Cast to void* so -Wclass-memaccess does not fire: the member initializers above make the
+    // struct non-trivial, which the warning treats as unsafe to memcpy into. Trivially copyable is
+    // the property this actually needs, and it is asserted above.
+    std::memcpy(static_cast<void*>(&fields), &value, sizeof(fields));
     return fields;
 }
 
