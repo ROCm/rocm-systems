@@ -83,7 +83,7 @@ void prepend_stage_diagnostics(ConSanTransformArtifacts &result, ConSanFaultTran
 }
 
 [[nodiscard]] std::optional<std::vector<CarriedPerturbationPlan>>
-carry_perturbation_plans_across_mutation(const ConSanTransformArtifacts &pristine_plan,
+carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_inventory,
                                          const ConSanPerturbationPlanningState &planning,
                                          const ConSanFaultTransformStage &mutation_stage,
                                          std::string *error) {
@@ -107,7 +107,7 @@ carry_perturbation_plans_across_mutation(const ConSanTransformArtifacts &pristin
     std::optional<uint64_t> source_owner_descriptor_file_offset;
     if (candidate->in_kernel) {
       const ConSanKernelInfo *owner =
-          pristine_plan.program_inventory.find_kernel_by_name(candidate->container_name);
+          pristine_inventory.find_kernel_by_name(candidate->container_name);
       if (owner == nullptr) {
         *error = "selected perturbation edge lost its pristine kernel owner";
         return std::nullopt;
@@ -158,13 +158,13 @@ carry_perturbation_plans_across_mutation(const ConSanTransformArtifacts &pristin
     for (const ConSanPatchMutationProduct &patch : mutation_stage.patches) {
       if (patch.phase == ConSanPatchPhase::Mutation &&
           patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite) {
-        const auto event = std::ranges::find_if(
-            pristine_plan.program_inventory.sync().sync_events, [&](const auto &item) {
+        const auto event =
+            std::ranges::find_if(pristine_inventory.sync().sync_events, [&](const auto &item) {
               return item.container_name == candidate->container_name &&
                      item.in_kernel == candidate->in_kernel &&
                      item.text_offset == patch.anchor_offset && item.size == patch.original_size;
             });
-        if (event != pristine_plan.program_inventory.sync().sync_events.end() &&
+        if (event != pristine_inventory.sync().sync_events.end() &&
             std::ranges::find(candidate->ordered_member_identities, event->identity) !=
                 candidate->ordered_member_identities.end()) {
           sequence_semantics_weakened = true;
@@ -225,20 +225,6 @@ carry_perturbation_plans_across_mutation(const ConSanTransformArtifacts &pristin
 
 namespace {
 
-void reset_inventory_for_fault_planning(const ConSanOptions &options,
-                                        ConSanTransformArtifacts &result) {
-  // The mutation stage must observe the reused result exactly as if semantic
-  // analysis and fault planning had run, without inheriting a MOI lowering
-  // outcome or any mutation-stage state from the sizing pass.
-  result.warnings.clear();
-  result.outcome = ConSanTransformOutcome::Unchanged;
-  result.mutation.fault.requested = options.fault_mutation_count();
-  result.mutation.fault.planned = 0;
-  result.mutation.fault.applied = 0;
-  result.mutation.applied_fault_logical_identity.reset();
-  result.fault_plans.clear();
-}
-
 [[nodiscard]] ConSanFaultPlanningInput
 fault_planning_input(const ConSanTransformArtifacts &result) {
   return {
@@ -286,7 +272,6 @@ void clear_fault_mutation_kinds(MutationRequest &request) {
 try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
                       const ConSanMoiOperatingPoint &initial_operating_point,
                       std::span<const CarriedPerturbationPlan> carried_plans = {},
-                      std::optional<ConSanTransformArtifacts> pristine_inventory = std::nullopt,
                       ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
                       const ConSanPreappliedMutationLayout &preapplied_mutation = {},
                       bool require_applicable_fault_plan = false,
@@ -331,24 +316,10 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     planning_options.fault_dry_run = true;
     if (!has_perturbation)
       planning_options.fault_require_exactly_one = false;
-    ConSanTransformArtifacts pristine_mutation_plan;
     ConSanPerturbationPlanningState pristine_perturbation;
-    if (pristine_inventory) {
-      pristine_mutation_plan = std::move(*pristine_inventory);
-      reset_inventory_for_fault_planning(planning_options, pristine_mutation_plan);
-      build_perturbation_candidate_inventory(pristine_mutation_plan.program_inventory,
-                                             pristine_perturbation);
-      publish_fault_planning_result(
-          build_fault_mutation_plan(planning_options,
-                                    pristine_mutation_plan.program_inventory.arch(),
-                                    fault_planning_input(pristine_mutation_plan), true),
-          pristine_mutation_plan);
-      build_perturbation_plan(planning_options, pristine_perturbation, pristine_mutation_plan);
-    } else {
-      pristine_mutation_plan =
-          try_patch_consan_impl(code_object_bytes, planning_options, initial_operating_point, {},
-                                std::nullopt, &pristine_perturbation, {}, true, execution);
-    }
+    ConSanTransformArtifacts pristine_mutation_plan =
+        try_patch_consan_impl(code_object_bytes, planning_options, initial_operating_point, {},
+                              &pristine_perturbation, {}, true, execution);
     const size_t retained_planned_faults = pristine_mutation_plan.mutation.fault.planned;
     const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
         pristine_mutation_plan.fault_plans;
@@ -443,7 +414,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     if (has_perturbation) {
       std::string carry_error;
       auto carried = carry_perturbation_plans_across_mutation(
-          pristine_mutation_plan, pristine_perturbation, mutation_stage, &carry_error);
+          pristine_mutation_plan.program_inventory, pristine_perturbation, mutation_stage,
+          &carry_error);
       if (!carried)
         return rollback_composite_mutation(std::move(fault_result), std::move(carry_error));
       instrument_options.sc_perturb_identity.clear();
@@ -453,7 +425,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     const std::span<const CarriedPerturbationPlan> instrument_carried = staged_carried;
     ConSanTransformArtifacts instrument_result = finalize_consan_result(
         try_patch_consan_impl(mutation_stage.image, instrument_options, initial_operating_point,
-                              instrument_carried, {}, &perturbation, instrument_preapplied, false,
+                              instrument_carried, &perturbation, instrument_preapplied, false,
                               execution),
         mutation_stage.image, instrument_options.moi_report_dispatch_id,
         /*validating_carried_composite_stage=*/!instrument_carried.empty(), &perturbation,

@@ -7317,3 +7317,52 @@ repaid by later deletion and consolidation. Remaining broad lowering mutation
 surfaces, target and mode locality, larger legacy harvesting, material
 whole-refactoring shrinkage, and the independent completion audit remain open.
 The goal therefore remains active.
+
+### 16.100 Convergence checkpoint 99: one live composite-planning path
+
+The fault/perturbation composition trace followed every call to the recursive
+native lowerer. Its signature retained an optional full “pristine inventory”
+transaction and a branch that reset and replanned that supplied transaction.
+No caller supplied one: the public entry, recursive dry-run planner, and
+post-mutation instrumentation pass all passed an empty optional. The live path
+always constructs the pristine dry-run result through the same recursive
+analysis and planning authority. The optional transaction, its reset helper,
+and its alternate branch were therefore unreachable legacy implementation.
+
+The dead parameter, reset helper, and reuse branch are deleted. Recursive
+planning now has one path and one state transition. Separately, carried
+perturbation translation now receives only the immutable `ProgramInventory`
+that it uses for kernel ownership and synchronization-event lookup, rather
+than a read-only transform transaction. The architecture gate caps
+`consan_composition.inc` at twelve reviewed transaction sites so neither the
+dead alternate ingress nor the broad read helper can return.
+
+| Signal | Checkpoint 99 | Cumulative change | Slice change from checkpoint 98 |
+| --- | ---: | ---: | ---: |
+| Production files | 274 | +45 | 0 |
+| Physical production lines | 102,906 | **-2,070** | **-28** |
+| Nonblank production lines | 96,667 | **-2,417** | **-27** |
+| Production implementation lines | 88,977 | **-2,473** | **-24** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **123 / 48** | **-153 / -9** | **-3 / 0** |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Whole-transaction mentions in composition implementation | **12** | n/a | **-3** |
+| Dead optional pristine-transaction paths | **0** | n/a | **-1** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and all **145/145** composition,
+fault, perturbation, retry, mutation, and architecture-boundary tests. These
+exercise the recursive dry-run path, carried-plan translation, staged mutation
+instrumentation, rollback, and late retry behavior. Checkpoint 98 passed all
+1,295 host/component tests, and checkpoint 91 passed all 4,776 nonphysical
+tests across the five-target simulator matrix. No test was added, removed,
+renamed, disabled, or replaced, and no physical gfx1201 test was run.
+
+This deletion-bearing slice strengthens Sections 14.1, 14.5, 14.7, and 14.8:
+the composite coordinator has one fewer parallel architecture, and immutable
+translation no longer sees the mutation bus. The cumulative reduction remains
+non-material relative to the 91,450-line baseline. Remaining broad lowering
+mutation surfaces, target and mode locality, larger legacy harvesting,
+material whole-refactoring shrinkage, and the independent completion audit
+remain open. The goal therefore remains active.

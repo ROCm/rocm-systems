@@ -91,8 +91,8 @@ compose_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSan
                         ConSanLoweringExecution *execution, ConSanLoweringExtent extent,
                         const ConSanLoweringObservation *observation) {
   return try_patch_consan_impl(code_object_bytes, options, initial_operating_point, {},
-                               std::nullopt, inspected_perturbation, preapplied_mutation, false,
-                               execution, extent, observation);
+                               inspected_perturbation, preapplied_mutation, false, execution,
+                               extent, observation);
 }
 
 bool compose_consan_observation(const ConSanOptions &options, ConSanTransformArtifacts &result,
