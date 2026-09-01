@@ -8,6 +8,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added per-API Python test coverage under `tests/python/integration/`**.
+  - Every public API is driven with one deliberately invalid argument at a time and must reject it, and every getter is additionally called with valid arguments, printed, payload-checked, and required to return `AMDSMI_STATUS_SUCCESS`.
+  - A coverage guard (`tests/python/integration/test_api_coverage.py`) fails when a public API has no test, so new APIs cannot land untested.
+
 - **Exposed `BOOT_FIRMWARE` field in `amd-smi static --ifwi` output**.  
   - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section (`--vbios` remains available as a legacy alias).
 
@@ -54,22 +58,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Both functions the header declares are C++ symbols, which the version script's `amdsmi_*` export glob does not match, so including the header only ever led to a link error. It joins the `_test` and WSL impl headers that are already build-only.
   - The example is the one shipped file that included that header, so it went with it rather than being left unbuildable against an install tree.
 
-- **Added per-API Python test coverage under `tests/python/integration/`**.
-  - Every public API is driven with one deliberately invalid argument at a time and must reject it, and every getter is additionally called with valid arguments, printed, payload-checked, and required to return `AMDSMI_STATUS_SUCCESS`.
-  - A coverage guard (`tests/python/integration/test_api_coverage.py`) fails when a public API has no test, so new APIs cannot land untested.
-
-- **Reorganized the Python test tree into unit, integration and functional tiers**.
-  - `tests/python/unit/` is now hardware-free: the per-API suites that drive a live device moved to `tests/python/integration/`.
-  - Added `tests/python/run_tests.py`, which takes `--unit`, `--integration`, `--functional` and `--cli` and runs any combination in one report; naming no tier runs them all.
-  - `integration_tests.py` now discovers `integration/` rather than `functional/`, and the new `functional_tests.py` discovers `functional/`.
-
-- **The per-API suites require a live device**.
-  - Suites for a processor kind the platform lacks skip their read path but still verify argument rejection.
-  - Positive getter coverage moved from `tests/python/functional/` into `tests/python/integration/`; 88 duplicated functional getter tests were removed. Any CI filter naming those test IDs needs updating.
-
 ### Optimized
 
 ### Resolved Issues
+
+- **Fixed `amdsmi_get_temp_metric()` returning `AMDSMI_STATUS_INTERNAL_EXCEPTION` for a sensor the device does not expose**.  
+  - `Monitor::getTempSensorIndex()` resolved the sensor with `std::map::at`, which threw `std::out_of_range` before the caller could test the result for `RSMI_TEMP_TYPE_INVALID`. The intended `AMDSMI_STATUS_NOT_SUPPORTED` path was therefore unreachable, and the throw surfaced as `Exception caught: map::at` on stderr.
+  - `getVoltSensorIndex()` carried the same unguarded lookup and now returns its invalid sentinel instead of throwing.
+  - Both getters now reject an unrecognized `metric` with `AMDSMI_STATUS_INVAL` up front. The support check happened to catch it first, but the invalid monitor type it left behind has no `Monitor::MakeMonitorPath()` entry, so the rejection no longer depends on that ordering.
 
 - **Fixed `rsmi_dev_reg_table_get()` failing on register-state images that contain no SMN entries**.  
   - The loop-back test ran before the SMN and instance counters reached zero, so an image with no SMN entries re-entered the loop and read past the end of the image; the call then returned an error for a well-formed file.
@@ -98,10 +94,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi metric --usage` reporting APU IPU read/write bandwidth without a unit**.  
   - `APU_AVERAGE_IPU_READS` and `APU_AVERAGE_IPU_WRITES` printed bare numbers while the adjacent DRAM counters carried `MB/s`. All four bandwidth counters now report `MB/s`, and the header documents the unit for each.
-
-- **Fixed `amdsmi_get_temp_metric()` returning `AMDSMI_STATUS_INTERNAL_EXCEPTION` for a sensor the device does not expose**.  
-  - `Monitor::getTempSensorIndex()` resolved the sensor with `std::map::at`, which threw `std::out_of_range` before the caller could test the result for `RSMI_TEMP_TYPE_INVALID`. The intended `AMDSMI_STATUS_NOT_SUPPORTED` path was therefore unreachable, and the throw surfaced as `Exception caught: map::at` on stderr.
-  - `getVoltSensorIndex()` carried the same unguarded lookup and now returns its invalid sentinel instead of throwing.
 
 - **Fixed `amd-smi static --vram` reporting `GDDR7` for LPDDR5 unified memory on APUs (e.g. gfx117x)**.  
   - `AMDSMI_VRAM_TYPE__MAX` aliases the highest real memory type (`LPDDR5`), so a genuine LPDDR5 reading was matched by the `__MAX` special case and mislabeled `GDDR7`. It is now correctly reported as `LPDDR5`.

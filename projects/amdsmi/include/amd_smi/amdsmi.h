@@ -4689,7 +4689,9 @@ amdsmi_status_t amdsmi_get_gpu_cache_info(amdsmi_processor_handle processor_hand
  *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
  *  provided arguments.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ *  ::AMDSMI_STATUS_NOT_SUPPORTED if the device does not expose @p sensor_type,
+ *  ::AMDSMI_STATUS_INVAL if @p metric is not a recognized ::amdsmi_voltage_metric_t
  */
 amdsmi_status_t amdsmi_get_gpu_volt_metric(amdsmi_processor_handle processor_handle,
                                            amdsmi_voltage_type_t sensor_type,
@@ -8112,7 +8114,9 @@ amdsmi_status_t amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_hand
  *  is supported with the provided, arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not
  *  supported with the provided arguments.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ *  ::AMDSMI_STATUS_NOT_SUPPORTED if the device does not expose @p sensor_type,
+ *  ::AMDSMI_STATUS_INVAL if @p metric is not a recognized ::amdsmi_temperature_metric_t
  */
 amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
                                        amdsmi_temperature_type_t sensor_type,
