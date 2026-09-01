@@ -165,6 +165,54 @@ TEST_F(NetIbMPITest, NullCommClose) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// E3b. NullCommCastDataPath — the IB-CAST data-path entry points must reject a
+//      NULL comm with ncclInvalidArgument rather than reading the device list,
+//      the ready flag or the flush flag straight off it. All five faulted
+//      before their guards went in -- regMr and deregMr got theirs in #10484,
+//      isend, irecv and iflush get theirs here -- which is how a failed
+//      connection setup surfaced as a SIGSEGV inside librccl instead of as a
+//      test failure.
+//
+//      Calls netIbCast directly rather than through net_: the guards live in
+//      net_ib_cast, while net_ defaults to the plain net_ib plugin, which has
+//      no such guards. Going through net_ here would test the wrong plugin.
+//
+//      No connection is established on purpose -- each guard returns before it
+//      touches any state, so the argument check is all that is exercised.
+//      Every call is rank-symmetric and non-fatal, and there is no allocation
+//      to check, so both ranks reach the barrier whatever happens.
+TEST_F(NetIbMPITest, NullCommCastDataPath) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+
+    // A fixed buffer rather than an allocation: every guard returns before it
+    // touches the data, so nothing needs a heap, and checking a malloc here
+    // would be a rank-local fatal assertion in front of the barrier below --
+    // the very shape this change exists to remove.
+    char   buf[kSmallBufferSize];
+    const size_t sz = sizeof(buf);
+
+    void*  mhandle     = nullptr;
+    void*  request     = nullptr;
+    void*  bufs[1]     = {buf};
+    size_t sizes64[1]  = {sz};
+    int    sizes32[1]  = {static_cast<int>(sz)};
+    int    tags[1]     = {0};
+    void*  mhandles[1] = {nullptr};
+    void*  phandles[1] = {nullptr};
+
+    EXPECT_EQ(netIbCast.regMr(nullptr, buf, sz, NCCL_PTR_HOST, &mhandle), ncclInvalidArgument);
+    EXPECT_EQ(netIbCast.deregMr(nullptr, &mhandle), ncclInvalidArgument);
+    EXPECT_EQ(netIbCast.isend(nullptr, buf, sz, /*tag=*/0, /*mhandle=*/nullptr,
+                              /*phandle=*/nullptr, &request),
+              ncclInvalidArgument);
+    EXPECT_EQ(netIbCast.irecv(nullptr, 1, bufs, sizes64, tags, mhandles, phandles, &request),
+              ncclInvalidArgument);
+    EXPECT_EQ(netIbCast.iflush(nullptr, 1, bufs, sizes32, mhandles, &request), ncclInvalidArgument);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // E4.  TagZeroReuse — 50 messages all sent with tag=0.
 //      Verifies FIFO ordering: messages arrive in send order because
 //      the FIFO is a strict ring (slot = fifoHead % MAX_REQUESTS).

@@ -353,6 +353,13 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
 
 ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle,
                          void** request) {
+  // Same reasoning as regMr/deregMr in reg.cc: a caller whose connection was
+  // never established arrives here with a null comm, and the next line reads
+  // through it. Report that instead of faulting inside the plugin.
+  if (sendComm == NULL) {
+    WARN("NET/IB-CAST: isend called with a null comm");
+    return ncclInvalidArgument;
+  }
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
   bool useWriteOp = (comm->useCtsOffload && (*request == (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION)) ? true : false;
   if (comm->base.ready == 0) {
@@ -578,6 +585,11 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
 
 ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles,
                          void** request) {
+  // See IbCastIsend above.
+  if (recvComm == NULL) {
+    WARN("NET/IB-CAST: irecv called with a null comm");
+    return ncclInvalidArgument;
+  }
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   uint16_t rxReqIndex = 0;
   ncclResult_t res = ncclSuccess;
@@ -708,6 +720,11 @@ err:
 }
 
 ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void** mhandles, void** request) {
+  // See IbCastIsend above.
+  if (recvComm == NULL) {
+    WARN("NET/IB-CAST: iflush called with a null comm");
+    return ncclInvalidArgument;
+  }
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   int last = -1;
   for (int i = 0; i < n; i++)
