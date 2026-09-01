@@ -2017,6 +2017,7 @@ WAIT_GEN(__hip_bfloat16)
 
 INT_REDUCTION_DEF_GEN(int, int)
 INT_REDUCTION_DEF_GEN(short, short)
+INT_REDUCTION_DEF_GEN(long, long)
 INT_REDUCTION_DEF_GEN(long long, longlong)
 INT_REDUCTION_DEF_GEN(char, char)
 INT_REDUCTION_DEF_GEN(signed char, schar)
