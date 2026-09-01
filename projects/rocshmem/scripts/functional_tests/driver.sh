@@ -1252,7 +1252,7 @@ case $TEST in
     TestColl
     TestOther
     TestOnStream
-    # Tile tests are only supported on IPC backend
+    # Tile tests are only supported on IPC and GDA backend
     if [[ ! "$TEST" =~ ^(ro) ]]; then
       TestTiles
     fi
