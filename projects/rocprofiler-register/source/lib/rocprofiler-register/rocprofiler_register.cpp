@@ -187,7 +187,7 @@ get_versioned_library_name(std::string_view base_name, uint32_t soversion)
     return get_versioned_library_name(base_name, std::to_string(soversion));
 }
 
-enum class load_library_kind
+enum class load_library_kind : uint8_t
 {
     sdk,
     attach,
@@ -445,7 +445,7 @@ loaded_library
 load_library(const std::vector<std::string>&, const char*, bool = false);
 
 rocp_set_api_table_data_t
-rocp_load_rocprofiler_lib(std::string _rocp_reg_lib);
+rocp_load_rocprofiler_lib(const std::string& _rocp_reg_lib);
 
 struct rocp_scan_data
 {
@@ -513,13 +513,8 @@ open_library_local(std::string_view _rocp_reg_lib)
 
     if(_rocp_reg_lib.empty()) return {};
 
-    auto _rocp_reg_lib_path       = fs::path{ _rocp_reg_lib };
-    auto _rocp_reg_lib_has_parent = _rocp_reg_lib_path.has_parent_path();
-    auto _rocp_reg_lib_path_fname = _rocp_reg_lib_path.filename();
-    auto _rocp_reg_lib_path_abs =
-        (_rocp_reg_lib_path.is_absolute())
-            ? _rocp_reg_lib_path
-            : (fs::path{ get_this_library_path() } / _rocp_reg_lib_path);
+    auto _rocp_reg_lib_path        = fs::path{ _rocp_reg_lib };
+    auto _rocp_reg_lib_is_absolute = _rocp_reg_lib_path.is_absolute();
 
     // check to see if the rocprofiler library is already loaded
     rocprofiler_lib_handle =
@@ -548,18 +543,10 @@ open_library_local(std::string_view _rocp_reg_lib)
         }
     }
 
-    // try to load with the absolute path
-    if(!rocprofiler_lib_handle)
+    // Try the same relative path from the rocprofiler-register installation.
+    if(!rocprofiler_lib_handle && !_rocp_reg_lib_is_absolute)
     {
-        _rocp_reg_lib_path = _rocp_reg_lib_path_abs;
-        rocprofiler_lib_handle =
-            dlopen(_rocp_reg_lib_path.c_str(), RTLD_LOCAL | RTLD_LAZY);
-    }
-
-    // try to load with the basename path
-    if(!rocprofiler_lib_handle && !_rocp_reg_lib_has_parent)
-    {
-        _rocp_reg_lib_path = _rocp_reg_lib_path_fname;
+        _rocp_reg_lib_path = fs::path{ get_this_library_path() } / _rocp_reg_lib_path;
         rocprofiler_lib_handle =
             dlopen(_rocp_reg_lib_path.c_str(), RTLD_LOCAL | RTLD_LAZY);
     }
@@ -629,8 +616,8 @@ load_library(const std::vector<std::string>& candidates,
                 dlopen(opened.path.c_str(), RTLD_NOLOAD | RTLD_GLOBAL | RTLD_LAZY);
             if(!handle) handle = dlopen(opened.path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
 
-            auto* promoted_entrypoint = static_cast<void*>(nullptr);
-            auto* promotion_error     = static_cast<const char*>(nullptr);
+            void*       promoted_entrypoint = nullptr;
+            const char* promotion_error     = nullptr;
             if(handle)
             {
                 dlerror();
@@ -659,7 +646,7 @@ load_library(const std::vector<std::string>& candidates,
 }
 
 rocp_set_api_table_data_t
-rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
+rocp_load_rocprofiler_lib(const std::string& _rocp_reg_lib)
 {
     void*                       rocprofiler_lib_handle    = nullptr;
     rocprofiler_set_api_table_t rocprofiler_lib_config_fn = nullptr;
