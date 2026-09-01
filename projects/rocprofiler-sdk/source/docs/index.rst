@@ -34,6 +34,7 @@ The documentation is structured as follows:
 
    .. grid-item-card:: Quick Reference
 
+      * :ref:`rocprofiler-sdk-at-a-glance`
       * :ref:`quick-guide`
       * :ref:`cli-options`
 

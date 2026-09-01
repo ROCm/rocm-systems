@@ -26,6 +26,8 @@ namespace amd::smi {
 
 static const char* kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
 static const char* kKFDLinkPath[] = {"io_links", "p2p_links"};
+static_assert(sizeof(kKFDLinkPath) / sizeof(kKFDLinkPath[0]) == P2P_LINK_DIRECTORY + 1,
+              "kKFDLinkPath needs one entry per LINK_DIRECTORY_TYPE");
 
 // IO Link Property strings
 static const char* kIOLinkPropTYPEStr = "type";
@@ -51,11 +53,7 @@ static std::string LinkPathRoot(uint32_t node_indx, LINK_DIRECTORY_TYPE director
   link_path_root += '/';
   link_path_root += std::to_string(node_indx);
   link_path_root += '/';
-  if (directory < sizeof(kKFDLinkPath) / sizeof(kKFDLinkPath[0])) {
-    link_path_root += kKFDLinkPath[directory];
-  } else {
-    link_path_root = "";
-  }
+  link_path_root += kKFDLinkPath[directory];
   return link_path_root;
 }
 
@@ -396,7 +394,7 @@ int IOLink::UpdateP2pCapability(void) {
       (flags_ & CRAT_IOLINK_FLAGS_NO_ATOMICS_64_BIT) ? cap_false : cap_true;
 
   link_cap_.is_iolink_bi_directional =
-      (flags_ & CRAT_IOLINK_FLAGS_BI_DIRECTIONAL) ? cap_true : cap_false;
+      (flags_ & static_cast<uint32_t>(CRAT_IOLINK_FLAGS_BI_DIRECTIONAL)) ? cap_true : cap_false;
 
   link_cap_.is_iolink_dma = (flags_ & CRAT_IOLINK_FLAGS_NO_PEER_TO_PEER_DMA) ? cap_false : cap_true;
 
