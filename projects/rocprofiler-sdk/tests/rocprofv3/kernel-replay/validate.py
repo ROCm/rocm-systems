@@ -294,16 +294,24 @@ def test_common_counters_constant_across_passes(json_data, common_counters):
 
 
 def test_each_pass_collects_distinct_batch(json_data, expected_passes, common_counters):
-    # Metric 3: ignoring the shared counters, each pass contributes a distinct unique counter.
+    # Metric 3: each pass collects exactly one unique (non-common) counter, and those per-pass
+    # counters differ — proving real multi-pass batch rotation rather than one pass carrying
+    # every unique counter while the rest collect none.
     table = _records_by_dispatch(_sdk(json_data))
     common = set(common_counters)
     for dispatch_id, entry in table.items():
-        unique_per_pass = set()
-        for batch in entry["passes"].values():
-            unique_per_pass.update(c for c in batch if c not in common)
-        assert len(unique_per_pass) == expected_passes, (
-            f"dispatch {dispatch_id} ({entry['kernel']}) expected {expected_passes} distinct "
-            f"per-pass counters, got {sorted(unique_per_pass)}"
+        unique_by_pass = {}
+        for pass_index, batch in entry["passes"].items():
+            unique = {c for c in batch if c not in common}
+            assert len(unique) == 1, (
+                f"dispatch {dispatch_id} ({entry['kernel']}) replay_pass {pass_index} "
+                f"expected exactly one non-common counter, got {sorted(unique)} "
+                f"(full batch {sorted(batch)})"
+            )
+            unique_by_pass[pass_index] = next(iter(unique))
+        assert len(set(unique_by_pass.values())) == expected_passes, (
+            f"dispatch {dispatch_id} ({entry['kernel']}) expected {expected_passes} "
+            f"distinct per-pass unique counters, got {unique_by_pass}"
         )
 
 
