@@ -77,6 +77,15 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-dw
             rocprofiler-sdk::rocprofiler-sdk-elf)
 
+# Compile against sqlite3.h without linking libsqlite3. Shared-library consumers
+# (rocprofiler-sdk-tool) still link rocprofiler-sdk-sqlite3. Python bindings must not, or
+# they collide with Python's _sqlite3.
+target_include_directories(
+    rocprofiler-sdk-output-library SYSTEM
+    PRIVATE
+        $<TARGET_PROPERTY:rocprofiler-sdk::rocprofiler-sdk-sqlite3,INTERFACE_INCLUDE_DIRECTORIES>
+    )
+
 target_compile_definitions(rocprofiler-sdk-output-library
                            PRIVATE PROJECT_BINARY_DIR="${PROJECT_BINARY_DIR}")
 

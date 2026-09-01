@@ -228,6 +228,11 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
                 $<TARGET_OBJECTS:rocprofiler-sdk::rocprofiler-sdk-object-library>)
     target_include_directories(rocprofiler-sdk-rocpd-python-bindings-${_VERSION} SYSTEM
                                PRIVATE ${Python3_INCLUDE_DIRS})
+    target_include_directories(
+        rocprofiler-sdk-rocpd-python-bindings-${_VERSION} SYSTEM
+        PRIVATE
+            $<TARGET_PROPERTY:rocprofiler-sdk::rocprofiler-sdk-sqlite3,INTERFACE_INCLUDE_DIRECTORIES>
+        )
 
     # do not link to sqlite3 library here. Python will import the _sqlite3 extension
     # module which links to sqlite3, and we want to avoid mixed-lib symbol collisions by
