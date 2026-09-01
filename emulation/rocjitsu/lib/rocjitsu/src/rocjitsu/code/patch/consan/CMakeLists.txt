@@ -113,6 +113,7 @@ rj_add_object_library(
         consan_supercollider.cpp
         consan_supercollider_report_plan.cpp
         consan_supercollider_support.cpp
+        consan_unmatched_barrier_abort.cpp
 )
 target_link_libraries(
     rocjitsu_consan_transform

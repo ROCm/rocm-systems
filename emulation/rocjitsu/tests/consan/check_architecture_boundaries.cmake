@@ -275,9 +275,21 @@ endif()
 _consan_assert_match_count_at_most(
     "${_consan_dir}/consan_validation.inc"
     "ConSanTransformArtifacts"
-    9
-    "whole lowering transaction may appear only at finalization and mutation adapters"
+    6
+    "whole lowering transaction may appear only at finalization and test adapters"
 )
+foreach(_source IN ITEMS consan_final_validation.h consan_final_validation.cpp consan_validation.inc)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_source}"
+        "try_apply_unmatched_barrier_wait_abort|UnmatchedBarrierWait"
+        "independent validation may not own lowering mutations"
+    )
+endforeach()
+file(READ "${_consan_dir}/consan_unmatched_barrier_abort.cpp" _unmatched_barrier_abort_owner)
+if(NOT _unmatched_barrier_abort_owner MATCHES "try_apply_unmatched_barrier_wait_abort" OR
+   NOT _consan_build_graph MATCHES "consan_unmatched_barrier_abort[.]cpp")
+    message(FATAL_ERROR "ConSan transform lost unmatched-barrier abort ownership")
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_result.h.inc"
     "validate_consan_modified_elf"

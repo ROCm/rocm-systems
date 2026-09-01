@@ -15,13 +15,6 @@ namespace rocjitsu {
 
 struct ConSanLoweringExecution;
 
-/// Apply the opt-in fail-closed abort rewrite for unmatched barrier waits.
-/// This remains adjacent to final proof because its patch records are
-/// immediately validated by the same transaction.
-void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_bytes,
-                                            const ConSanOptions &options,
-                                            ConSanTransformArtifacts &result);
-
 /// Convert a staged transformation into its terminal result after independent
 /// structural, semantic, resource, ABI, and mutation proof validation.
 [[nodiscard]] ConSanTransformArtifacts

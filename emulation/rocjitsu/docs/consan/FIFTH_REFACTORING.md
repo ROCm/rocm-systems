@@ -7035,3 +7035,52 @@ the real validator and every adversarial test. Its size payoff is deliberately
 small; broader lowering-side mutation surfaces, remaining target and mode
 locality, material whole-refactoring shrinkage, and the independent completion
 audit remain open. The goal therefore remains active.
+
+### 16.94 Convergence checkpoint 93: validation is not a mutation owner
+
+The narrowed final-proof trace exposed one remaining reverse responsibility in
+the validation translation unit. The opt-in unmatched-barrier policy discovers
+statically unpaired immediate waits, rewrites their instruction words to
+`s_endpgm`, emits patch proof, and marks the candidate modified. Although final
+validation immediately proves that mutation, the operation itself is lowering,
+not validation. Its former placement made a component described as independent
+and read-only directly mutate the broad transaction.
+
+The policy and implementation now live in
+`consan_unmatched_barrier_abort.{h,cpp}`, owned by the transformation build
+component. Orchestration invokes that explicit transform before calling the
+terminal finalizer. `consan_final_validation.h`, its translation unit, and
+`consan_validation.inc` no longer mention the operation or its private
+`UnmatchedBarrierWait` state. The architecture gate enforces the direction,
+requires the transformation owner in the component manifest, and reduces the
+whole-transaction ceiling in final validation from nine mentions to six.
+
+| Signal | Checkpoint 93 | Cumulative change | Slice change from checkpoint 92 |
+| --- | ---: | ---: | ---: |
+| Production files | 274 | +45 | +2 |
+| Physical production lines | 102,945 | **-2,031** | +37 |
+| Nonblank production lines | 96,704 | **-2,380** | +26 |
+| Production implementation lines | 89,011 | **-2,439** | +20 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **137 / 49** | **-139 / -8** | **-1 / +2** |
+| `ConSanPatchInfo` references / files | 210 / 31 | +10 / +3 | 0 / +1 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Whole-transaction mentions in final validation | **6** | n/a | **-3** |
+| Validation-owned byte mutations | **0** | n/a | **-1** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and all 22 unmatched-barrier,
+final-validation, final-structural-validation, transform-memory, and
+architecture-boundary tests. Checkpoint 92 immediately before this move passed
+all 1,295 host/component tests, and checkpoint 91 passed all 4,776 nonphysical
+tests across the five-target simulator matrix. No test was added, removed,
+renamed, disabled, or replaced, and no physical gfx1201 test was run.
+
+This checkpoint strengthens Sections 14.1 and 14.5: the build graph now makes
+the promised transformation-to-validation direction true for this policy
+rather than relying on a comment inside the validation component. Its 20-line
+implementation investment is the cost of a separately enforceable component
+boundary and does not strengthen Section 14.8. The next checkpoint must reap
+deletion or consolidation. Remaining broad lowering mutation surfaces, target
+and mode locality, material whole-refactoring shrinkage, and the independent
+completion audit remain open. The goal therefore remains active.

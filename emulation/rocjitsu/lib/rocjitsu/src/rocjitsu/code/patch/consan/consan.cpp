@@ -9,6 +9,7 @@
 #include "rocjitsu/code/patch/consan/consan_final_validation.h"
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/consan_unmatched_barrier_abort.h"
 
 #include <exception>
 #include <string>
