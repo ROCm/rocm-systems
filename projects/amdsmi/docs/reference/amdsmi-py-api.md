@@ -2912,8 +2912,8 @@ Description: Get the fan speed for the specified device as a value relative to
 the maximum fan speed. The value is the hwmon pwm1 duty cycle, whose maximum is
 AMDSMI_MAX_FAN_SPEED (255). On GPUs exposing the gpu_od sysfs interface, the range
 accepted by `amdsmi_set_gpu_fan_speed()` is the gpu_od OD_RANGE and is NOT derivable
-from this value or from `amdsmi_get_gpu_fan_speed_max()`.
-It is not supported on virtual machine guest
+from this value or from `amdsmi_get_gpu_fan_speed_max()`. It is not supported on
+virtual machine guest
 
 Input parameters:
 

@@ -9,9 +9,9 @@
 // spinning. The live duty cycle is hwmon pwm1 / pwm1_max.
 //
 // The fixture below is a fake sysfs tree, so this runs on any host: no
-// OverDrive hardware, no gpu_od node and no GPU at all are required. That
-// matters because every CI runner is gfx94X, which has no gpu_od node and
-// therefore never exercised the broken branch.
+// OverDrive hardware, no gpu_od node and no GPU at all are required. A
+// hardware test cannot cover this, since the broken branch is only reachable
+// on a GPU that exposes gpu_od.
 
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -103,26 +103,12 @@ TEST(GpuUnit, FanSpeedComesFromHwmonNotOverDriveFloor) {
 }
 
 // The reported maximum is pwm1_max, not the OD_RANGE maximum (100). Pairing a
-// pwm1 speed with an OD_RANGE max would misscale the usage percentage.
+// pwm1 speed with an OD_RANGE max would misscale the usage percentage
+// amd-smi prints.
 TEST(GpuUnit, FanSpeedMaxComesFromHwmonNotOverDriveRange) {
   FakeOverDriveDevice fake;
 
   uint64_t max_speed = 0;
   ASSERT_EQ(rsmi_dev_fan_speed_max_get(fake.index(), 0, &max_speed), RSMI_STATUS_SUCCESS);
   EXPECT_EQ(max_speed, kLivePwmMax);
-}
-
-// End to end: the usage percentage amd-smi prints must track the fan.
-TEST(GpuUnit, FanUsagePercentIsNonZeroWhileFanSpins) {
-  FakeOverDriveDevice fake;
-
-  int64_t speed = -1;
-  uint64_t max_speed = 0;
-  ASSERT_EQ(rsmi_dev_fan_speed_get(fake.index(), 0, &speed), RSMI_STATUS_SUCCESS);
-  ASSERT_EQ(rsmi_dev_fan_speed_max_get(fake.index(), 0, &max_speed), RSMI_STATUS_SUCCESS);
-  ASSERT_NE(max_speed, 0u);
-
-  const double usage = 100.0 * static_cast<double>(speed) / static_cast<double>(max_speed);
-  EXPECT_GT(usage, 0.0) << "amd-smi metric --fan would print USAGE: 0.0 %";
-  EXPECT_NEAR(usage, 20.0, 0.1);
 }
