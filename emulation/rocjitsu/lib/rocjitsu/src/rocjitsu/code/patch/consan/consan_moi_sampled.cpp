@@ -150,7 +150,6 @@ MoiObjectModePlan plan_sampled_object_mode(const ConSanRequest &request,
         "ConSan MOI sampled engine skipped atomic ordering in a code object with no selected "
         "LDS access candidates");
   }
-  plan.atomic_or_fence_relevant = plan.track_atomics && facts.has_admitted_atomic;
   return plan;
 }
 

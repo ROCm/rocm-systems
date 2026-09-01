@@ -277,38 +277,4 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   return finish(std::move(form), address_reason);
 }
 
-std::string_view consan_atomic_classifier_reason_name(ConSanAtomicClassifierReason reason) {
-  switch (reason) {
-  case Reason::None:
-    return "supported";
-  case Reason::UnsupportedAddressSource:
-    return "non-flat-address";
-  case Reason::InvalidAccessWidth:
-    return "unsupported-width";
-  case Reason::UnsupportedEncoding:
-    return "unsupported-encoding";
-  case Reason::NonzeroImmediateOffset:
-    return "nonzero-offset";
-  case Reason::MissingOperands:
-    return "missing-operands";
-  case Reason::UnsupportedInputWidth:
-    return "unsupported-input-width";
-  case Reason::UnsupportedOffset:
-    return "unsupported-offset";
-  case Reason::ResultAddressAlias:
-    return "result-address-alias";
-  case Reason::CompareExchangeOutcomeUnavailable:
-    return "compare-exchange-outcome-unavailable";
-  case Reason::MissingOrderingMetadata:
-    return "missing-ordering-metadata";
-  case Reason::UnsupportedScope:
-    return "unsupported-scope";
-  case Reason::TargetUnavailable:
-    return "target-unavailable";
-  case Reason::Count:
-    break;
-  }
-  return "unknown";
-}
-
 } // namespace rocjitsu

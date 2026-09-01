@@ -42,7 +42,6 @@ struct MoiObjectModePlan {
   bool dense_barrier_router = false;
   bool inline_access_present = false;
   bool inline_atomic_without_access = false;
-  bool atomic_or_fence_relevant = false;
   bool reserve_dynamic_stack_prologue_entry = false;
   bool prologue_requires_consumer = false;
   std::vector<std::string> warnings;

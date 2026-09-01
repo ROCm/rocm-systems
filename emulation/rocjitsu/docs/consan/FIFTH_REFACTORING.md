@@ -3767,3 +3767,68 @@ declared solved from the zero aggregate count. Material whole-refactoring
 shrinkage, remaining target locality, the extension exercises, and the
 independent Section 14 completion audit also remain open. The goal therefore
 remains active.
+
+### 16.41 Convergence checkpoint 40: harvest dead convergence state
+
+The post-attempt audit traced the remaining mode-planning fields from each
+producer through dispatch, coordination, emission, diagnostics, tests, and
+runtime use. `MoiObjectModePlan::atomic_or_fence_relevant` was not a contract:
+Record/Replay read its own value only inside the planner that computed it,
+Sampled wrote it solely for tests, InlineShadow used it only to derive another
+mode-local result, and no coordinator or emitter consumed it. The field is now
+gone. Record/Replay keeps the predicate as a local planning fact, InlineShadow
+derives its result from admitted object facts, and the focused tests assert the
+actual plan outputs and warnings rather than dead observability. No mode
+contract, mechanism, or behavior was duplicated.
+
+The same definition-to-runtime trace found four further remnants. The public
+`consan_atomic_classifier_reason_name` formatter had no caller; the owning
+policy and inventory boundaries already render their different semantic
+diagnostics. Sampled access planning assigned `runtime_sample_index` but never
+read it. SuperCollider's candidate carried an `appended_cave_text_offset` that
+was never read and an `entry_island_is_appended` flag that was never assigned;
+its only branch therefore always selected `reserve_existing_range`, which is
+now stated directly. All seven positional candidate constructions shed the two
+arguments, preserving the existing reservation behavior for both local and
+generated islands. Finally, borrowed-entry VGPR selection no longer constructs
+a private duck-typed adapter: both call paths consume the already-declared
+`MoiPersistentVgprStateView`, and the operating-point entry explicitly projects
+that canonical view.
+
+This slice deliberately adds no replacement abstraction. It removes an unused
+API, cross-mode telemetry, never-consumed candidate state, redundant writes,
+and a parallel structural adapter from their complete production surfaces.
+Final-tree searches find none of the deleted API, fields, or adapter. The
+compiler also checked every aggregate construction after the candidate layout
+shrank.
+
+| Signal | Checkpoint 40 | Cumulative change | Slice change from checkpoint 39 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,367 | +392 | **-70** |
+| Nonblank production lines | 99,087 | +4 | **-68** |
+| Production implementation lines | 91,377 | **-73** | **-68** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 206 / 56 | **-70 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 205 / 28 | +5 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 350 / 63 | +60 / +12 | 0 / 0 |
+| Dead mode-plan telemetry fields | **0** | n/a | **-1** |
+| Dead atomic-classifier public formatters | **0** | n/a | **-1** |
+| Dead Sampled/SuperCollider candidate fields | **0** | n/a | **-3** |
+| Borrowed-entry private state adapters | **0** | n/a | **-1** |
+| Test inventory | 5,379 | +34 | 0 |
+
+Validation includes a clean final-tree `-j16` rebuild; all 1,375 affected-path
+mode-planning, atomic-classifier, Sampled, and SuperCollider tests; all 4,744
+nonphysical tests at `-j16`, including the unchanged 2,908 simulator rows over
+five targets; and all 635 physical gfx1201 tests serialized at `-j1`. No test
+was removed, renamed, disabled, added, or replaced.
+
+This checkpoint strengthens Sections 14.5, 14.7, 14.8, and 14.9: named products
+carry fewer facts that have no downstream semantic consumer; one canonical
+state view replaces an opportunistic adapter; and the migrated production
+surface is 68 implementation lines smaller without reducing behavior or test
+inventory. The cumulative 73-line reduction is real but not yet material for a
+91-thousand-line implementation. The operating-point field audit, transform
+transaction audit, remaining target/mode interactions, and independent
+Section 14 completion audit therefore remain open, and the goal remains active.

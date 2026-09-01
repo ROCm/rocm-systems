@@ -2885,10 +2885,9 @@ bool moi_resource_owner_ranges_conflict_with_physical_vcc(MoiResourcePlanningSta
 /// that bank's base unconditionally would corrupt a live guest operand. A
 /// single dead register is a materially weaker requirement than the probe's
 /// contiguous scratch tuple and is proven against every owning kernel scope.
-template <typename PersistentVgprState>
 [[nodiscard]] std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr(
     MoiResourcePlanningState &state, std::span<const uint64_t> owners, uint64_t text_offset,
-    uint16_t allocated_vgpr_count, const PersistentVgprState &options) {
+    uint16_t allocated_vgpr_count, const MoiPersistentVgprStateView &persistent_state) {
   if (owners.empty() || allocated_vgpr_count == 0u)
     return std::nullopt;
 
@@ -2897,11 +2896,11 @@ template <typename PersistentVgprState>
     if (reg)
       forbidden.expand({RegClass::VGPR, *reg, count});
   };
-  forbid(options.moi_owner_epoch_vgprs.owner());
-  forbid(options.moi_owner_epoch_vgprs.epoch());
-  forbid(options.moi_workgroup_key_vgpr);
-  forbid(options.moi_dispatch_identity.vgpr(), 2u);
-  for (std::optional<uint16_t> reg : options.moi_record_replay_workgroup_vgprs.values()) {
+  forbid(persistent_state.moi_owner_epoch_vgprs.owner());
+  forbid(persistent_state.moi_owner_epoch_vgprs.epoch());
+  forbid(persistent_state.workgroup_key);
+  forbid(persistent_state.dispatch_id, 2u);
+  for (std::optional<uint16_t> reg : persistent_state.record_replay_workgroup.values()) {
     forbid(reg);
   }
 
@@ -2955,28 +2954,19 @@ template <typename PersistentVgprState>
 std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr_for_point(
     MoiResourcePlanningState &state, std::span<const uint64_t> owners, uint64_t text_offset,
     uint16_t allocated_vgpr_count, const ConSanMoiOperatingPoint &point) {
-  return find_moi_borrowed_entry_backup_vgpr(state, owners, text_offset, allocated_vgpr_count,
-                                             point);
+  return find_moi_borrowed_entry_backup_vgpr(
+      state, owners, text_offset, allocated_vgpr_count,
+      {.moi_owner_epoch_vgprs = point.moi_owner_epoch_vgprs,
+       .workgroup_key = point.moi_workgroup_key_vgpr,
+       .dispatch_id = point.moi_dispatch_identity.vgpr(),
+       .record_replay_workgroup = point.moi_record_replay_workgroup_vgprs});
 }
 
 std::optional<uint16_t> find_moi_borrowed_entry_backup_vgpr_for_state(
     MoiResourcePlanningState &state, std::span<const uint64_t> owners, uint64_t text_offset,
     uint16_t allocated_vgpr_count, const MoiPersistentVgprStateView &persistent_state) {
-  struct PersistentStateAdapter {
-    ConSanMoiOwnerEpochRegisterState moi_owner_epoch_vgprs;
-    std::optional<uint16_t> moi_workgroup_key_vgpr;
-    ConSanMoiDispatchIdentityAllocation moi_dispatch_identity;
-    ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_vgprs;
-  };
-  PersistentStateAdapter adapter{
-      .moi_owner_epoch_vgprs = persistent_state.moi_owner_epoch_vgprs,
-      .moi_workgroup_key_vgpr = persistent_state.workgroup_key,
-      .moi_dispatch_identity = {},
-      .moi_record_replay_workgroup_vgprs = persistent_state.record_replay_workgroup,
-  };
-  adapter.moi_dispatch_identity.set_vgpr(persistent_state.dispatch_id);
   return find_moi_borrowed_entry_backup_vgpr(state, owners, text_offset, allocated_vgpr_count,
-                                             adapter);
+                                             persistent_state);
 }
 
 [[nodiscard]] const ConSanCandidateResourcePlan *

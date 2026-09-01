@@ -10,7 +10,6 @@
 
 #include <cstdint>
 #include <optional>
-#include <string_view>
 
 namespace rocjitsu {
 
@@ -110,8 +109,5 @@ struct ConSanAtomicLoweringClassification {
 [[nodiscard]] ConSanAtomicLoweringClassification
 classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arch,
                                 bool is_rmw = true);
-
-[[nodiscard]] std::string_view
-consan_atomic_classifier_reason_name(ConSanAtomicClassifierReason reason);
 
 } // namespace rocjitsu

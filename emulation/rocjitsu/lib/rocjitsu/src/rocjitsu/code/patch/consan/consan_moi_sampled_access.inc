@@ -122,7 +122,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     uint32_t access_range_count = 0;
     std::optional<uint32_t> prior_first_record_index;
     uint32_t prior_access_range_count = 0;
-    uint32_t runtime_sample_index = 0;
     uint64_t workgroup_descriptor_file_offset = 0;
     bool runtime_fast_gate = false;
     bool dense_runtime_fast_gate = false;
@@ -605,7 +604,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     planned.access_range_count = range_count;
     planned.prior_first_record_index = prior_first_record_index;
     planned.prior_access_range_count = prior_access_range_count;
-    planned.runtime_sample_index = current_sample_index;
     planned.placement = *placement;
     planned.entry_island_offset = entry_island_offset;
     planned.entry_island_word_count =

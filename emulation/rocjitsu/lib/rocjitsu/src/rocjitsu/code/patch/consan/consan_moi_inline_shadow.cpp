@@ -104,8 +104,7 @@ MoiObjectModePlan plan_inline_shadow_object_mode(const ConSanRequest &request,
     plan.warnings.emplace_back(
         "ConSan MOI skipped barrier tracking for a code object with no admitted barrier sites");
   }
-  plan.atomic_or_fence_relevant = plan.track_atomics && facts.has_admitted_atomic;
-  if (plan.track_atomics && !plan.atomic_or_fence_relevant) {
+  if (plan.track_atomics && !facts.has_admitted_atomic) {
     for (const ConSanAtomicSiteDecision &decision : observation_plan.atomic_site_decisions) {
       if (decision.kind != ConSanSiteDecisionKind::Unsupported)
         continue;
@@ -122,7 +121,7 @@ MoiObjectModePlan plan_inline_shadow_object_mode(const ConSanRequest &request,
   }
   plan.inline_access_present = facts.has_access_candidate;
   plan.inline_atomic_without_access =
-      !facts.has_access_candidate && plan.track_atomics && plan.atomic_or_fence_relevant;
+      !facts.has_access_candidate && plan.track_atomics && facts.has_admitted_atomic;
   return plan;
 }
 

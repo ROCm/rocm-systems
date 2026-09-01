@@ -60,7 +60,7 @@ MoiObjectModePlan plan_record_replay_object_mode(const ConSanRequest &request,
                                                  const ConSanObservationPlan &) {
   MoiObjectModePlan plan =
       make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::WorkitemId);
-  plan.atomic_or_fence_relevant =
+  const bool atomic_or_fence_relevant =
       plan.track_atomics && (facts.has_admitted_atomic || facts.has_admitted_fence);
   // A bufferless automatic pass only sizes the report. Do not perturb its
   // semantic inventory with a prologue before the allocated-buffer retry can
@@ -76,7 +76,7 @@ MoiObjectModePlan plan_record_replay_object_mode(const ConSanRequest &request,
                                      facts.has_stranded_admitted_barrier));
 
   if (!facts.has_access_candidate && !facts.has_explicit_persistent_state &&
-      !facts.has_admitted_barrier && !plan.atomic_or_fence_relevant) {
+      !facts.has_admitted_barrier && !atomic_or_fence_relevant) {
     plan.initialize_owner_epoch = false;
     plan.track_barriers = false;
     plan.warnings.emplace_back(

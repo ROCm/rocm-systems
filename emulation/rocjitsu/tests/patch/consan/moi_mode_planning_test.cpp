@@ -241,7 +241,7 @@ TEST(ConSanMoiModePlanning, RecordReplayDropsAutomaticStateOnlyWithoutConsumers)
   const auto consumed = plan_moi_object_mode(request, point, atomic, observation);
   EXPECT_EQ(consumed.initialize_owner_epoch, true);
   EXPECT_TRUE(consumed.track_barriers);
-  EXPECT_TRUE(consumed.atomic_or_fence_relevant);
+  EXPECT_TRUE(consumed.warnings.empty());
 }
 
 TEST(ConSanMoiModePlanning, SampledRequiresAnAccessConsumerForAtomicMetadata) {
@@ -254,13 +254,11 @@ TEST(ConSanMoiModePlanning, SampledRequiresAnAccessConsumerForAtomicMetadata) {
   const auto no_access =
       plan_moi_object_mode(request, point, {.has_admitted_atomic = true}, observation);
   EXPECT_FALSE(no_access.track_atomics);
-  EXPECT_FALSE(no_access.atomic_or_fence_relevant);
   ASSERT_EQ(no_access.warnings.size(), 1u);
 
   const auto access = plan_moi_object_mode(
       request, point, {.has_access_candidate = true, .has_admitted_atomic = true}, observation);
   EXPECT_TRUE(access.track_atomics);
-  EXPECT_TRUE(access.atomic_or_fence_relevant);
   EXPECT_TRUE(access.warnings.empty());
 }
 
