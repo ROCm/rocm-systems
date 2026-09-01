@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 
 #include <gtest/gtest.h>
 
@@ -29,11 +30,14 @@
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -440,6 +444,150 @@ TEST(queue_interposition, doorbell_out_of_order_does_not_hang)
     EXPECT_EQ(state->next_scan_pos, 2u);
     EXPECT_EQ(get_pkt(ring, 0, 255)->kernel_object, static_cast<uint64_t>(0xB0));
     EXPECT_EQ(get_pkt(ring, 1, 255)->kernel_object, static_cast<uint64_t>(0xB1));
+}
+
+// Regression test for the Queue use-after-free: destroy_queue() takes
+// queue_lifetime_mutex() exclusively around the erase that runs ~Queue(), so the doorbell
+// path must not reach the Queue until that lock is released.
+TEST(queue_interposition, doorbell_blocks_while_queue_lifetime_lock_is_held)
+{
+    auto             state = std::make_shared<QueueState>();
+    alignas(64) char ring[64 * 256];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_wdid = 0;
+    uint64_t real_rdid = 0;
+
+    state->ring_buf  = ring;
+    state->ring_size = 256;
+    state->ring_mask = 255;
+    state->real_wdid = &real_wdid;
+    state->real_rdid = &real_rdid;
+
+    state->virtual_wptr.store(1);
+    auto* pkt          = get_pkt(ring, 0, 255);
+    pkt->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    pkt->kernel_object = 0xFEEDFACE;
+
+    auto _destroying = std::unique_lock{queue_lifetime_mutex()};
+
+    std::atomic<bool> done{false};
+    std::thread       worker([&]() {
+        process_doorbell_impl(state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
+        done.store(true, std::memory_order_release);
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds{200});
+    EXPECT_FALSE(done.load(std::memory_order_acquire))
+        << "process_doorbell_impl reached the Queue while queue_lifetime_mutex() was held "
+           "exclusively; a concurrent ~Queue() could free the Queue mid-call";
+
+    _destroying.unlock();
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{3};
+    while(!done.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    const bool completed = done.load(std::memory_order_acquire);
+    worker.join();
+
+    ASSERT_TRUE(completed) << "process_doorbell_impl did not resume after the exclusive "
+                              "queue_lifetime_mutex() was released";
+    EXPECT_EQ(real_wdid, 1u);
+    EXPECT_EQ(state->next_submit_pos, 1u);
+    EXPECT_EQ(get_pkt(ring, 0, 255)->kernel_object, static_cast<uint64_t>(0xFEEDFACE));
+}
+
+// Dispatch-storm stress: one thread per queue ringing doorbells continuously while
+// destroy_queue()'s exclusive section repeatedly cuts in. gate_lock is per-queue, so these
+// really do run concurrently. Every packet must still be published exactly once and in
+// order, and the run must not deadlock against the exclusive holder.
+TEST(queue_interposition, doorbell_stress_many_queues_concurrent_destroy)
+{
+    const auto num_queues =
+        std::max<size_t>(1, common::get_env("ROCPROFILER_TEST_STRESS_THREADS", size_t{8}));
+    const auto dispatches_per_queue =
+        std::max<size_t>(1, common::get_env("ROCPROFILER_TEST_STRESS_DISPATCHES", size_t{20000}));
+    constexpr auto ring_slots = uint64_t{256};
+
+    struct fake_queue_ring
+    {
+        std::shared_ptr<QueueState> state     = std::make_shared<QueueState>();
+        std::vector<char>           ring      = std::vector<char>(64 * ring_slots, 0);
+        uint64_t                    real_wdid = 0;
+        uint64_t                    real_rdid = 0;
+    };
+
+    auto queues = std::vector<std::unique_ptr<fake_queue_ring>>{};
+    queues.reserve(num_queues);
+    for(size_t q = 0; q < num_queues; ++q)
+    {
+        auto _v              = std::make_unique<fake_queue_ring>();
+        _v->state->ring_buf  = _v->ring.data();
+        _v->state->ring_size = ring_slots;
+        _v->state->ring_mask = ring_slots - 1;
+        _v->state->real_wdid = &_v->real_wdid;
+        _v->state->real_rdid = &_v->real_rdid;
+        queues.emplace_back(std::move(_v));
+    }
+
+    std::atomic<bool> stop_destroyer{false};
+    std::atomic<int>  exclusive_acquisitions{0};
+
+    std::thread destroyer([&]() {
+        while(!stop_destroyer.load(std::memory_order_acquire))
+        {
+            auto _lifetime = std::unique_lock{queue_lifetime_mutex()};
+            exclusive_acquisitions.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
+        }
+    });
+
+    auto workers = std::vector<std::thread>{};
+    workers.reserve(num_queues);
+    for(size_t q = 0; q < num_queues; ++q)
+    {
+        workers.emplace_back([&, q]() {
+            auto* fq = queues[q].get();
+            for(uint64_t n = 0; n < dispatches_per_queue; ++n)
+            {
+                auto* pkt          = get_pkt(fq->ring.data(), n, ring_slots - 1);
+                pkt->kernel_object = 0xD000 + n;
+                __atomic_store_n(&pkt->header,
+                                 static_cast<uint16_t>(HSA_PACKET_TYPE_KERNEL_DISPATCH
+                                                       << HSA_PACKET_HEADER_TYPE),
+                                 __ATOMIC_RELEASE);
+                fq->state->virtual_wptr.store(n + 1, std::memory_order_release);
+
+                process_doorbell_impl(fq->state, n, [](hsa_signal_t, hsa_signal_value_t) {});
+
+                // simulate the GPU draining so the ring never backs up
+                __atomic_store_n(&fq->real_rdid, n + 1, __ATOMIC_RELEASE);
+            }
+        });
+    }
+
+    for(auto& itr : workers)
+        itr.join();
+    stop_destroyer.store(true, std::memory_order_release);
+    destroyer.join();
+
+    EXPECT_GT(exclusive_acquisitions.load(), 0)
+        << "the destroyer never acquired the exclusive lock, so nothing was contended";
+
+    GTEST_LOG_(INFO) << "\n"
+                     << "  queues                 = " << num_queues << "\n"
+                     << "  dispatches/queue       = " << dispatches_per_queue << "\n"
+                     << "  dispatches total       = " << num_queues * dispatches_per_queue << "\n"
+                     << "  exclusive_acquisitions = " << exclusive_acquisitions.load();
+
+    for(size_t q = 0; q < num_queues; ++q)
+    {
+        const auto* fq = queues[q].get();
+        EXPECT_EQ(fq->real_wdid, dispatches_per_queue) << "queue " << q
+                                                       << " published the wrong "
+                                                          "number of packets";
+        EXPECT_EQ(fq->state->next_scan_pos, dispatches_per_queue) << "queue " << q;
+        EXPECT_EQ(fq->state->next_submit_pos, dispatches_per_queue) << "queue " << q;
+    }
 }
 }  // namespace
 }  // namespace queue_interposition

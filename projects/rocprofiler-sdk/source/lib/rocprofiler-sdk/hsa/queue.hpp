@@ -47,6 +47,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <shared_mutex>
 #include <unordered_map>
 
 namespace rocprofiler
@@ -97,6 +98,13 @@ struct queue_callbacks_t
     queue_write_callback_t         write_interceptor = {};
     queue_completion_callback_t    signal_completion = {};
 };
+
+// Guards Queue lifetime against in-flight WriteInterceptor calls. Held shared for the
+// duration of an interceptor call, and exclusively while a Queue is destroyed, so a Queue
+// cannot be freed while the interceptor is still using it. Queue destruction is rare, so a
+// single mutex for all queues is sufficient and avoids any per-queue lifetime plumbing.
+std::shared_mutex&
+queue_lifetime_mutex();
 
 // Interceptor for a single specific queue
 class Queue

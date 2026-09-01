@@ -21,6 +21,7 @@ set(rocprofiler_lib_sources
     naming.cpp
     queue_controller.cpp
     queue_interposition.cpp
+    queue_test.cpp
     timestamp.cpp
     version.cpp
     hsa_barrier.cpp)

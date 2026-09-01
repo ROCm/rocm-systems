@@ -53,6 +53,7 @@
 
 #include <atomic>
 #include <memory>
+#include <shared_mutex>
 #include <utility>
 
 // static assert for rocprofiler_packet ABI compatibility
@@ -256,6 +257,17 @@ bit_extract(Integral x, int first, int last)
     return (x >> first) & bit_mask(0, last - first);
 }
 
+}  // namespace
+
+std::shared_mutex&
+queue_lifetime_mutex()
+{
+    static auto _v = std::shared_mutex{};
+    return _v;
+}
+
+namespace
+{
 /**
  * @brief This function is a queue write interceptor. It intercepts the
  * packet write function. Creates an instance of packet class with the raw
@@ -298,7 +310,12 @@ WriteInterceptor(const void* packets,
 
     ROCP_FATAL_IF(data == nullptr) << "WriteInterceptor was not passed a pointer to the queue";
 
-    auto& queue = *static_cast<Queue*>(data);
+    // Hold the lifetime lock for this whole call. QueueController::destroy_queue() takes it
+    // exclusively around the erase that runs ~Queue(), so the object cannot be freed while
+    // we are using it. Every dispatch is still fully instrumented: nothing is turned away,
+    // and the destructor simply waits for calls already in progress.
+    auto  _queue_lifetime = std::shared_lock{queue_lifetime_mutex()};
+    auto& queue           = *static_cast<Queue*>(data);
 
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);

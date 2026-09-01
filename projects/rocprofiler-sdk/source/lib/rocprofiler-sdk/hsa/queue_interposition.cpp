@@ -63,6 +63,7 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <shared_mutex>
 #include <thread>
 #include <vector>
 
@@ -1207,24 +1208,31 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     tls.last_published_submit_pos = state_ptr->next_submit_pos;
     uint64_t start_submit_pos     = tls.submit_pos;
 
-    auto*        qc = get_queue_controller();
-    const Queue* queue =
-        (qc && state_ptr->hsa_queue) ? qc->get_queue(*state_ptr->hsa_queue) : nullptr;
+    auto* qc = get_queue_controller();
 
-    if(queue)
     {
-        // call local write_interceptor directly instead of heavyweight
-        // Queue::invoke_write_interceptor
-        write_interceptor(const_cast<Queue*>(queue),
-                          source_snapshot,
-                          pkt_count,
-                          ring_buffer_writer,
-                          &deferred_async_tasks,
-                          start_submit_pos);
-    }
-    else
-    {
-        ring_buffer_writer(source_snapshot, pkt_count);
+        // get_queue() returns a raw pointer into the QueueController map, so hold the lifetime
+        // lock across the lookup and the interceptor call; destroy_queue() takes it exclusively
+        // around the erase that runs ~Queue(). Nests inside gate_lock without inversion.
+        auto         _queue_lifetime = std::shared_lock{queue_lifetime_mutex()};
+        const Queue* queue =
+            (qc && state_ptr->hsa_queue) ? qc->get_queue(*state_ptr->hsa_queue) : nullptr;
+
+        if(queue)
+        {
+            // call local write_interceptor directly instead of heavyweight
+            // Queue::invoke_write_interceptor
+            write_interceptor(const_cast<Queue*>(queue),
+                              source_snapshot,
+                              pkt_count,
+                              ring_buffer_writer,
+                              &deferred_async_tasks,
+                              start_submit_pos);
+        }
+        else
+        {
+            ring_buffer_writer(source_snapshot, pkt_count);
+        }
     }
 
     uint64_t written = tls.submit_pos - start_submit_pos;
