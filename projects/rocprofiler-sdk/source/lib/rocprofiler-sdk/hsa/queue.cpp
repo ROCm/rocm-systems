@@ -113,17 +113,12 @@ agent_replay_mutex(rocprofiler_agent_id_t agent_id)
     // No get_fini_status() guard is needed here. Every caller reaches this only when
     // has_active_replay_contexts() is true, and that returns false during finalization, so the
     // static lock map below is never touched after teardown.
-    using lock_map_t    = std::unordered_map<uint64_t, std::unique_ptr<std::shared_mutex>>;
+    using lock_map_t    = std::unordered_map<rocprofiler_agent_id_t, std::shared_mutex>;
     static auto*& locks = common::static_object<common::Synchronized<lock_map_t>>::construct();
 
-    std::shared_mutex* mtx = nullptr;
-    locks->wlock([&](lock_map_t& _map) {
-        auto& slot = _map[agent_id.handle];
-        if(!slot) slot = std::make_unique<std::shared_mutex>();
-        mtx = slot.get();
-    });
-    return *mtx;
-}
+    return locks->wlock([](lock_map_t& _map, auto _id) -> std::shared_mutex& { return _map[_id]; },
+                        agent_id);
+}```
 
 template <typename TryDrainFn>
 void
