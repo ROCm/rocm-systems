@@ -4366,6 +4366,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // CTAPolicy=ZERO to flip the whole comm to CE mode. Same predicate the
       // rcclSelectAllGather Branch #3 reports, so selection and dispatch agree.
       bool ceAgSymRegistered =
+        !rcclNcclAlgoEnvIsSet() &&
         info->coll == ncclFuncAllGather && ceAvailable && !hasSysmemSegment &&
         rcclAllGatherCeRegisteredWindow(comm, recvBytes, winRegType, ceCapturing);
       if (info->coll == ncclFuncAllReduce && info->decisionValid) {
@@ -4403,13 +4404,16 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           INFO(NCCL_INIT, "Taking kernel-based collective path for AllGather");
           NCCLCHECK(collTaskAppend(comm, info, opDev));
         }
-      } else if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable) && !hasSysmemSegment) ||
+      } else if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
+                   !(rcclNcclAlgoEnvIsSet() && (info->coll == ncclFuncAllGather || info->coll == ncclFuncReduceScatter)) &&
+                   (ceAvailable || hierCeAvailable) && !hasSysmemSegment) ||
                  ceArSymRegistered || ceAgSymRegistered) {
         INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                    opDev));
 
-      } else if (rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg &&
+      } else if (!rcclNcclAlgoEnvIsSet() &&
+                 rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg &&
                  winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr &&
                  recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
