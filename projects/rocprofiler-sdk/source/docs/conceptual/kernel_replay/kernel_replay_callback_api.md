@@ -169,11 +169,11 @@ Semantics:
 on MI2xx/MI3xx when both would run on the **same** replay pass (clock gating). ATT and SPM cannot
 safely share one pass because both inject AQL instrumentation. Use separate passes and separate
 contexts — locally stop one service before starting another. Kernel dispatch tracing honors the
-overrides by dropping disabled contexts from the pass's tracing data. Counter collection, SPM, and
-thread trace consult the override map at dispatch time and skip building AQL packets for disabled
-contexts. PC sampling and device counting are agent-wide today: the toggle is recorded but
-collection continues regardless, so separate passes are still required to avoid running counters and
-PC sampling together.
+contexts. Counter collection, SPM, and thread trace consult the override map at dispatch time and
+skip building AQL packets for disabled contexts. PC sampling and device counting are agent-wide
+today and continue collecting regardless of the recorded toggle. PC sampling therefore cannot
+currently be isolated from dispatch counters by assigning them to separate replay passes; do not
+combine those services until PC sampling honors localized overrides.
 
 See
 [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#localized-context-control-and-thread-scope)
