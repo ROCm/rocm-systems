@@ -255,9 +255,10 @@ struct rcclArchThresholds {
   size_t ddaVmmMax[RCCL_DDA_FUNC_COUNT];    // DDA VMM/IPC cap: ddaLL128Max[func]+1 .. ddaVmmMax[func]
 
   // R2 variant: DDA VMM cap when recv buffer is registered (winRegType !=
-  // ncclSymSendNonregRecvNonreg).  On gfx1250, RS fires DDA even when
-  // symEligible=true; lowering this cap for R2 lets CE win at smaller sizes.
-  // 0 means "use ddaVmmMax" (same as R0 behavior) -- only RS needs an override.
+  // ncclSymSendNonregRecvNonreg). Selectors still require !symEligible (AR:
+  // !symkRequested) before DDA; registered sum/avg windows never reach this
+  // cap. It only shortens DDA when recv is registered and DDA is still
+  // eligible (e.g. a non-sum RS). 0 means "use ddaVmmMax".
   size_t ddaVmmMaxR2[RCCL_DDA_FUNC_COUNT];
 
   // Graph-mode variant: DDA VMM cap to use when the comm is inside a graph

@@ -1799,9 +1799,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     1ULL*1024*1024,      // [8] AlltoAll        -- 2 MiB (LL tiers cover <=2M; Ring/Simple wins 2M-4M; DDA/VMM above)
   },
   // ddaVmmMaxR2: DDA VMM cap when recv buffer is registered (R2 mode).
-  // RS fires DDA even when symEligible=true on gfx1250 (!symEligible || ddaFabricArch).
-  // Lowering this for RS lets CE win at smaller sizes for registered buffers.
-  // 0 means use ddaVmmMax (no R2-specific override for that collective).
+  // DDA is gated on !symEligible (AR: !symkRequested) on every arch, including
+  // gfx1250 fabric; R2 sum/avg never takes DDA. A non-zero entry only shortens
+  // DDA when recv is registered and that gate still passes. 0 means use ddaVmmMax.
   .ddaVmmMaxR2 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used

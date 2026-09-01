@@ -1277,11 +1277,12 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     return ncclSuccess;
   }
 
-  // (4) DDA fast paths. develop's shared gate: !symkRequested, and either gfx1250
-  // (fabric, full range) or CE is not going to service this call (!ceAllReduceAllowed),
-  // subject to rcclDdaEnabled thresholds -- all folded into the helper. Passes the raw
-  // symk signal for the same reason as (3): symMaxR2 chooses between symk and
-  // CE-registered, it does not hand registered operands to DDA.
+  // (4) DDA fast paths. Shared gate: !symkRequested on every arch, and either
+  // gfx1250 (fabric may run even if CE is also eligible) or CE is not going to
+  // service this call (!ceAllReduceAllowed), subject to rcclDdaEnabled -- all
+  // folded into the helper. Passes the raw symk signal for the same reason as
+  // (3): symMaxR2 chooses between symk and CE-registered, it does not hand
+  // registered operands to DDA.
   //
   // GIN AllReduce is selected first in this function and requires symmetric
   // windows. By default it only claims messages >= 256 MiB, so DDA must still be
@@ -1675,7 +1676,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     return ncclSuccess;
   }
 
-  // (1) Symmetric eligibility (sum/avg). Reported last but gates DDA IPC / Direct here.
+  // (1) Symmetric eligibility (sum/avg). Reported last but gates DDA / hierarchical / Direct here.
   const bool symEligible =
     (op == ncclSum || op == ncclAvg) &&
     isSymmetricKernelRequested(comm, ncclFuncReduceScatter, (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
