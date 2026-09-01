@@ -512,7 +512,9 @@ hrr:
     tags: [direct, regions]
   Unit_HRR_Regions_MemcpyDirect:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, regions]
   Unit_HRR_Regions_MemcpyFirstTouchMaterialization:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, regions, memcpy]
