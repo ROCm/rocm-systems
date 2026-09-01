@@ -2300,29 +2300,6 @@ moi_workgroup_key_register_plan(const ConSanMoiOperatingPoint &point) {
   };
 }
 
-[[nodiscard]] bool
-append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgroupSources &sources,
-                            const MoiWorkgroupKeyRegisterPlan &registers, uint16_t key_vgpr,
-                            uint16_t coordinate_vgpr, uint16_t value_vgpr,
-                            uint16_t original_exec_save_offset, rj_code_arch_t arch);
-
-[[nodiscard]] bool append_inline_acquired_token_slot_address(
-    std::vector<uint32_t> &words, uint64_t table_base, uint32_t table_capacity,
-    uint16_t workgroup_key_vgpr, uint16_t consumer_owner_vgpr, uint16_t producer_owner_vgpr,
-    uint16_t consumer_epoch_vgpr, uint16_t slot_address_vgpr, uint16_t hash_vgpr,
-    uint16_t temporary_vgpr, bool release_sequence, rj_code_arch_t arch);
-
-[[nodiscard]] bool append_inline_atomic_slot_address(std::vector<uint32_t> &words,
-                                                     uint64_t table_base, uint32_t table_capacity,
-                                                     uint16_t atomic_address_vgpr,
-                                                     uint16_t scratch_vgpr, rj_code_arch_t arch);
-
-[[nodiscard]] bool
-append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t table_base,
-                                      uint32_t table_capacity, uint16_t atomic_address_vgpr,
-                                      uint16_t snapshot_address_vgpr, uint16_t hash_vgpr,
-                                      uint16_t temporary_vgpr, rj_code_arch_t arch);
-
 /// Emit a call-return comparison whose expected PC is rebuilt from a
 /// canonical get-PC sequence. Revision translation can then relocate the
 /// expected caller independently of the dispatcher and its in-kernel entry

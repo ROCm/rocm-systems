@@ -385,6 +385,33 @@ _consan_assert_no_match(
     "consan_uses_gfx9_cdna_encoding|ConSanMoiLiteralDispatchIdPolicy|moi_report_dispatch_id_source_permitted"
     "shared synchronization emission must consume normalized target facts and authorized dispatch sources"
 )
+# InlineShadow atomic tables share one private address-hash implementation;
+# their ABI entry types select only the distinct 32- and 40-byte strides.
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sync_emission.h"
+    "append_inline_(atomic|causal).*address"
+    "InlineShadow atomic-table address emission must remain private to its implementation owner"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_shared_lowering.cpp"
+    "append_inline_(workgroup_key|acquired_token_slot_address|atomic.*address|causal.*address)"
+    "shared lowering must not redeclare unrelated emission-owner helpers"
+)
+_consan_assert_match_count_at_most(
+    "${_consan_dir}/consan_moi_sync_emission.cpp"
+    "0x85ebca6bu"
+    1
+    "InlineShadow atomic release and causal-snapshot tables must share one address hash"
+)
+file(READ "${_consan_dir}/consan_moi_sync_emission.cpp" _moi_sync_emission_owner)
+if(NOT _moi_sync_emission_owner MATCHES
+       "append_inline_atomic_table_address<ConSanMoiInlineAtomicReleaseSlot>" OR
+   NOT _moi_sync_emission_owner MATCHES
+       "append_inline_atomic_table_address<ConSanMoiInlineCausalSnapshot>")
+    message(FATAL_ERROR
+        "ConSan InlineShadow atomic tables lost their one ABI-typed address mechanism"
+    )
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
     "GFX90A_ACCUM_OFFSET"

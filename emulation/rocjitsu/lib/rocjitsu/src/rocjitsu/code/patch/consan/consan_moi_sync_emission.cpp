@@ -34,6 +34,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace rocjitsu {
@@ -693,55 +694,14 @@ moi_atomic_event_kind(ConSanSyncMemoryRole role) {
   return true;
 }
 
-[[nodiscard]] bool append_inline_atomic_slot_address(std::vector<uint32_t> &words,
-                                                     uint64_t table_base, uint32_t table_capacity,
-                                                     uint16_t atomic_address_vgpr,
-                                                     uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  if (table_capacity == 0 || (table_capacity & (table_capacity - 1u)) != 0)
-    return false;
-  const uint16_t slot_address_vgpr = scratch_vgpr;
-  const uint16_t hash_vgpr = static_cast<uint16_t>(scratch_vgpr + 2u);
-  const auto shifted = instrumentation::build_v_lshrrev_b32(
-      hash_vgpr, scalar_positive_inline_u32(2), atomic_address_vgpr, arch);
-  const auto mixed = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(static_cast<uint16_t>(atomic_address_vgpr + 1u)), hash_vgpr,
-      arch);
-  const auto folded = instrumentation::build_v_lshrrev_b32(
-      slot_address_vgpr, scalar_positive_inline_u32(16), hash_vgpr, arch);
-  const auto mix_fold = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(slot_address_vgpr), hash_vgpr, arch);
-  const auto folded_again = instrumentation::build_v_lshrrev_b32(
-      slot_address_vgpr, scalar_positive_inline_u32(8), hash_vgpr, arch);
-  const auto mix_fold_again = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(slot_address_vgpr), hash_vgpr, arch);
-  const auto folded_final = instrumentation::build_v_lshrrev_b32(
-      slot_address_vgpr, scalar_positive_inline_u32(4), hash_vgpr, arch);
-  const auto mix_fold_final = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(slot_address_vgpr), hash_vgpr, arch);
-  const auto multiply = instrumentation::build_v_mul_lo_u32_literal(hash_vgpr, slot_address_vgpr,
-                                                                    0x85ebca6bu, hash_vgpr, arch);
-  const auto masked =
-      instrumentation::build_v_and_b32_literal(hash_vgpr, table_capacity - 1u, hash_vgpr, arch);
-  const auto times_slot_size = instrumentation::build_v_lshlrev_b32(
-      hash_vgpr, scalar_positive_inline_u32(5), hash_vgpr, arch);
-  const auto base_lo = instrumentation::build_v_mov_b32_literal(
-      slot_address_vgpr, static_cast<uint32_t>(table_base), arch);
-  const auto base_hi =
-      instrumentation::build_v_mov_b32_literal(static_cast<uint16_t>(slot_address_vgpr + 1u),
-                                               static_cast<uint32_t>(table_base >> 32u), arch);
-  const auto add_offset =
-      instrumentation::build_v_add_u64_vgpr_offset(slot_address_vgpr, hash_vgpr, arch);
-  InstructionSequence sequence(words);
-  return sequence.emit_all(shifted, mixed, folded, mix_fold, folded_again, mix_fold_again,
-                           folded_final, mix_fold_final, multiply, masked, times_slot_size, base_lo,
-                           base_hi, add_offset);
-}
-
-[[nodiscard]] bool
-append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t table_base,
-                                      uint32_t table_capacity, uint16_t atomic_address_vgpr,
-                                      uint16_t snapshot_address_vgpr, uint16_t hash_vgpr,
-                                      uint16_t temporary_vgpr, rj_code_arch_t arch) {
+template <typename Entry>
+[[nodiscard]] static bool
+append_inline_atomic_table_address(std::vector<uint32_t> &words, uint64_t table_base,
+                                   uint32_t table_capacity, uint16_t atomic_address_vgpr,
+                                   uint16_t entry_address_vgpr, uint16_t hash_vgpr,
+                                   uint16_t temporary_vgpr, rj_code_arch_t arch) {
+  static_assert(std::is_same_v<Entry, ConSanMoiInlineAtomicReleaseSlot> ||
+                std::is_same_v<Entry, ConSanMoiInlineCausalSnapshot>);
   if (table_capacity == 0 || (table_capacity & (table_capacity - 1u)) != 0)
     return false;
   const auto shifted = instrumentation::build_v_lshrrev_b32(
@@ -765,23 +725,52 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                                                     0x85ebca6bu, hash_vgpr, arch);
   const auto masked =
       instrumentation::build_v_and_b32_literal(hash_vgpr, table_capacity - 1u, hash_vgpr, arch);
-  const auto times_eight = instrumentation::build_v_lshlrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(3), hash_vgpr, arch);
-  const auto times_thirty_two = instrumentation::build_v_lshlrev_b32(
-      hash_vgpr, scalar_positive_inline_u32(5), hash_vgpr, arch);
-  const auto times_forty = instrumentation::build_v_add_u32(
-      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
   const auto base_lo = instrumentation::build_v_mov_b32_literal(
-      snapshot_address_vgpr, static_cast<uint32_t>(table_base), arch);
+      entry_address_vgpr, static_cast<uint32_t>(table_base), arch);
   const auto base_hi =
-      instrumentation::build_v_mov_b32_literal(static_cast<uint16_t>(snapshot_address_vgpr + 1u),
+      instrumentation::build_v_mov_b32_literal(static_cast<uint16_t>(entry_address_vgpr + 1u),
                                                static_cast<uint32_t>(table_base >> 32u), arch);
   const auto add_offset =
-      instrumentation::build_v_add_u64_vgpr_offset(snapshot_address_vgpr, hash_vgpr, arch);
+      instrumentation::build_v_add_u64_vgpr_offset(entry_address_vgpr, hash_vgpr, arch);
   InstructionSequence sequence(words);
-  return sequence.emit_all(shifted, mixed, folded, mix_fold, folded_again, mix_fold_again,
-                           folded_final, mix_fold_final, multiply, masked, times_eight,
-                           times_thirty_two, times_forty, base_lo, base_hi, add_offset);
+  if constexpr (std::is_same_v<Entry, ConSanMoiInlineAtomicReleaseSlot>) {
+    static_assert(sizeof(Entry) == 32u);
+    const auto times_entry_size = instrumentation::build_v_lshlrev_b32(
+        hash_vgpr, scalar_positive_inline_u32(5), hash_vgpr, arch);
+    return sequence.emit_all(shifted, mixed, folded, mix_fold, folded_again, mix_fold_again,
+                             folded_final, mix_fold_final, multiply, masked, times_entry_size,
+                             base_lo, base_hi, add_offset);
+  } else {
+    static_assert(sizeof(Entry) == 40u);
+    const auto times_eight = instrumentation::build_v_lshlrev_b32(
+        temporary_vgpr, scalar_positive_inline_u32(3), hash_vgpr, arch);
+    const auto times_thirty_two = instrumentation::build_v_lshlrev_b32(
+        hash_vgpr, scalar_positive_inline_u32(5), hash_vgpr, arch);
+    const auto times_entry_size = instrumentation::build_v_add_u32(
+        hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
+    return sequence.emit_all(shifted, mixed, folded, mix_fold, folded_again, mix_fold_again,
+                             folded_final, mix_fold_final, multiply, masked, times_eight,
+                             times_thirty_two, times_entry_size, base_lo, base_hi, add_offset);
+  }
+}
+
+[[nodiscard]] static bool
+append_inline_atomic_release_slot_address(std::vector<uint32_t> &words, uint64_t table_base,
+                                          uint32_t table_capacity, uint16_t atomic_address_vgpr,
+                                          uint16_t scratch_vgpr, rj_code_arch_t arch) {
+  return append_inline_atomic_table_address<ConSanMoiInlineAtomicReleaseSlot>(
+      words, table_base, table_capacity, atomic_address_vgpr, scratch_vgpr,
+      static_cast<uint16_t>(scratch_vgpr + 2u), scratch_vgpr, arch);
+}
+
+[[nodiscard]] static bool
+append_inline_causal_snapshot_address(std::vector<uint32_t> &words, uint64_t table_base,
+                                      uint32_t table_capacity, uint16_t atomic_address_vgpr,
+                                      uint16_t snapshot_address_vgpr, uint16_t hash_vgpr,
+                                      uint16_t temporary_vgpr, rj_code_arch_t arch) {
+  return append_inline_atomic_table_address<ConSanMoiInlineCausalSnapshot>(
+      words, table_base, table_capacity, atomic_address_vgpr, snapshot_address_vgpr, hash_vgpr,
+      temporary_vgpr, arch);
 }
 
 [[nodiscard]] bool append_inline_workgroup_source_vgpr(std::vector<uint32_t> &words,
@@ -1790,7 +1779,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   // this immediate flags check and is overwritten below, so use it instead.
   const uint16_t snapshot_flags =
       source_slot_claimed ? value_vgpr : static_cast<uint16_t>(scratch_vgpr + 8u);
-  if (!append_inline_atomic_snapshot_address(words, snapshot_table_base, snapshot_table_capacity,
+  if (!append_inline_causal_snapshot_address(words, snapshot_table_base, snapshot_table_capacity,
                                              address_vgpr, snapshot_address, snapshot_temporary,
                                              snapshot_hash, arch) ||
       !append_load_u32_vgpr_at_offset(words, snapshot_address,
@@ -2464,7 +2453,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   words.push_back(*loop);
 
   if (!restore_exec(scan_exec) ||
-      !append_inline_atomic_snapshot_address(words, snapshot_table_base, snapshot_table_capacity,
+      !append_inline_causal_snapshot_address(words, snapshot_table_base, snapshot_table_capacity,
                                              atomic_address_vgpr, snapshot_address, temporary,
                                              loop_index, arch) ||
       !append_store_u32_vgpr_at_offset(words, snapshot_address,
@@ -2661,8 +2650,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   }
   failure.stage = "release-slot addressing";
   if (!save_exec(eligible_exec) ||
-      !append_inline_atomic_slot_address(words, release_table_base, release_capacity,
-                                         stable_guest_address, slot_address, arch)) {
+      !append_inline_atomic_release_slot_address(words, release_table_base, release_capacity,
+                                                 stable_guest_address, slot_address, arch)) {
     errors.emplace_back("ConSan MOI inline release could not initialize its version transaction");
     return false;
   }
@@ -2877,8 +2866,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       words.push_back(*successful_claims);
       words.push_back(*failed_comparisons);
       if (!restore_exec(ready_exec) ||
-          !append_inline_atomic_slot_address(words, release_table_base, release_capacity,
-                                             stable_guest_address, slot_address, arch))
+          !append_inline_atomic_release_slot_address(words, release_table_base, release_capacity,
+                                                     stable_guest_address, slot_address, arch))
         return false;
       words.push_back(build_v_mov_b32_e32(
           prior_version, vector_source_vgpr(static_cast<uint16_t>(base + 8u)), arch));
@@ -2922,8 +2911,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         return false;
       words.push_back(*rebuild_failed);
       if (!save_exec(failed_exec) || !restore_exec(claimed_exec) ||
-          !append_inline_atomic_slot_address(words, release_table_base, release_capacity,
-                                             stable_guest_address, slot_address, arch))
+          !append_inline_atomic_release_slot_address(words, release_table_base, release_capacity,
+                                                     stable_guest_address, slot_address, arch))
         return false;
     } else {
       if (!restore_exec(failed_exec) || !save_exec(claimed_exec))
@@ -2934,8 +2923,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         return false;
       words.push_back(*rebuild_failed);
       if (!save_exec(failed_exec) || !restore_exec(claimed_exec) ||
-          !append_inline_atomic_slot_address(words, release_table_base, release_capacity,
-                                             stable_guest_address, slot_address, arch))
+          !append_inline_atomic_release_slot_address(words, release_table_base, release_capacity,
+                                                     stable_guest_address, slot_address, arch))
         return false;
     }
     words.push_back(build_v_mov_b32_e32(
@@ -3550,8 +3539,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
                                      moi_workgroup_key_register_plan(point), workgroup_key_vgpr,
                                      temporary_vgpr, value_vgpr,
                                      /*original_exec_save_offset=*/12u, arch) ||
-        !append_inline_atomic_slot_address(words, slot_base, inline_atomic_release_capacity,
-                                           address_vgpr, scratch_vgpr, arch)) {
+        !append_inline_atomic_release_slot_address(words, slot_base, inline_atomic_release_capacity,
+                                                   address_vgpr, scratch_vgpr, arch)) {
       errors.emplace_back("ConSan MOI inline acquire could not snapshot release version");
       return std::nullopt;
     }
@@ -3649,8 +3638,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
                                    moi_workgroup_key_register_plan(point), workgroup_key_vgpr,
                                    temporary_vgpr, value_vgpr,
                                    /*original_exec_save_offset=*/12u, arch) ||
-      !append_inline_atomic_slot_address(words, slot_base, inline_atomic_release_capacity,
-                                         address_vgpr, scratch_vgpr, arch)) {
+      !append_inline_atomic_release_slot_address(words, slot_base, inline_atomic_release_capacity,
+                                                 address_vgpr, scratch_vgpr, arch)) {
     errors.emplace_back("ConSan MOI inline atomic patch could not derive an address-indexed slot");
     return std::nullopt;
   }

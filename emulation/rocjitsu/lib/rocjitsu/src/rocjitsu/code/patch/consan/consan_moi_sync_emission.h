@@ -78,17 +78,6 @@ sampled_atomic_semantics_reason_name(SampledAtomicSemanticsReason reason);
 [[nodiscard]] bool validate_inline_atomic_exec_save_sgpr(const ConSanMoiOperatingPoint &point,
                                                          std::vector<std::string> &errors);
 
-[[nodiscard]] bool append_inline_atomic_slot_address(std::vector<uint32_t> &words,
-                                                     uint64_t table_base, uint32_t table_capacity,
-                                                     uint16_t atomic_address_vgpr,
-                                                     uint16_t scratch_vgpr, rj_code_arch_t arch);
-
-[[nodiscard]] bool
-append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t table_base,
-                                      uint32_t table_capacity, uint16_t atomic_address_vgpr,
-                                      uint16_t snapshot_address_vgpr, uint16_t hash_vgpr,
-                                      uint16_t temporary_vgpr, rj_code_arch_t arch);
-
 [[nodiscard]] bool
 inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPlan &address_plan,
                                                  uint16_t scalar_base, uint16_t scalar_count);

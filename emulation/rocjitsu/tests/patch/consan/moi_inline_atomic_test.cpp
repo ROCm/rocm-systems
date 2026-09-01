@@ -329,6 +329,68 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquireOutwaitsCausalSnapshotPublica
   }
 }
 
+TEST(ConSanMoi, SupportedTargetsInlineAtomicTablesUseTheirAbiEntryStrides) {
+  constexpr std::array targets = {
+      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_RDNA3, "gfx1100/rdna3", 13u, 27u},
+      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_CDNA3, "gfx942/cdna3", 12u, 26u},
+      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4", 12u, 26u},
+      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_RDNA4, "gfx1201/rdna4", 13u, 27u},
+      InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", 13u, 27u},
+  };
+
+  for (const InlineReleaseSequenceTarget &target : targets) {
+    SCOPED_TRACE(target.label);
+    std::vector<uint32_t> atomic_words;
+    const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(
+        target, atomic_words, {}, InlineAtomicSequenceKind::Acquire);
+    ASSERT_FALSE(bytes.empty());
+    MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    options.moi_track_atomics = true;
+    options.scratch_vgpr = 8u;
+    options.moi_exec_save_sgpr = 80u;
+    options.set_moi_owner_epoch_vgprs(40u, 41u);
+    options.moi_dispatch_identity.set_sgpr(20u);
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+    options.max_patches = 1u;
+
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    const auto patch = std::ranges::find(
+        result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
+    ASSERT_NE(patch, result.patches.end());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+    ASSERT_TRUE(patched.is_valid());
+    const std::vector<uint32_t> cave_words =
+        text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+
+    const auto release_stride = instrumentation::build_v_lshlrev_b32(
+        /*vdst=*/10u, scalar_positive_inline_u32(5), /*vsrc1=*/10u, target.arch);
+    ASSERT_TRUE(release_stride);
+    EXPECT_GT(count_subsequence(cave_words, std::array{*release_stride}), 0u)
+        << "the 32-byte release-slot ABI must determine its address stride";
+
+    const bool aligned_cas_pair =
+        consan_arch_requires_aligned_flat_compare_swap_data_pair(target.arch);
+    const uint16_t snapshot_hash = static_cast<uint16_t>(8u + (aligned_cas_pair ? 17u : 19u));
+    constexpr uint16_t kSnapshotTemporary = 8u + 21u;
+    const auto snapshot_times_eight = instrumentation::build_v_lshlrev_b32(
+        kSnapshotTemporary, scalar_positive_inline_u32(3), snapshot_hash, target.arch);
+    const auto snapshot_times_thirty_two = instrumentation::build_v_lshlrev_b32(
+        snapshot_hash, scalar_positive_inline_u32(5), snapshot_hash, target.arch);
+    const auto snapshot_stride = instrumentation::build_v_add_u32(
+        snapshot_hash, vector_source_vgpr(kSnapshotTemporary), snapshot_hash, target.arch);
+    ASSERT_TRUE(snapshot_times_eight && snapshot_times_thirty_two && snapshot_stride);
+    std::vector<uint32_t> expected_snapshot_stride = {*snapshot_times_eight,
+                                                      *snapshot_times_thirty_two};
+    expected_snapshot_stride.insert(expected_snapshot_stride.end(), snapshot_stride->begin(),
+                                    snapshot_stride->end());
+    EXPECT_GT(count_subsequence(cave_words, expected_snapshot_stride), 0u)
+        << "the 40-byte causal-snapshot ABI must determine its address stride";
+  }
+}
+
 TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquirePersistsEpochBeforeGuestReturn) {
   constexpr std::array targets = {
       InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_RDNA3, "gfx1100/rdna3", 13u, 27u},

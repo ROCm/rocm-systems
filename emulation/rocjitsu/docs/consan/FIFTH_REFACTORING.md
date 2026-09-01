@@ -3029,3 +3029,78 @@ The broad operating point and transform transaction, remaining placement and
 validation concentrations, architecture and mode locality across the complete
 surface, and the independent deep-read completion audit remain open. The goal
 therefore remains active.
+
+### 16.30 Convergence checkpoint 29: one private InlineShadow atomic-table address mechanism
+
+The post-checkpoint deep read followed InlineShadow atomic-table addressing
+from its release-slot and causal-snapshot definitions through every native
+emission call, the report-buffer layout, host lookup models, exact instruction
+tests, and the physical atomic handoff matrix. The release table has 32-byte
+entries and the causal-snapshot table has 40-byte entries, but their device
+address builders independently emitted the same ten-instruction hash of the
+64-bit atomic address. The only semantic difference after that hash was the
+entry stride. Despite having no caller outside `consan_moi_sync_emission.cpp`,
+both builders were also declared in the shared synchronization-emission
+header. A separate shared-lowering translation unit retained redundant forward
+declarations for those two functions and two exact-shadow helpers that its
+implementation did not call.
+
+The two copies are now one private ABI-typed
+`append_inline_atomic_table_address<Entry>` mechanism. Its accepted entry
+types are exactly `ConSanMoiInlineAtomicReleaseSlot` and
+`ConSanMoiInlineCausalSnapshot`; compile-time size assertions tie the emitted
+32- and 40-byte strides to those runtime ABI types. Two small private adapters
+retain the distinct register-lifetime plans at their existing call sites. The
+common hash, capacity proof, base materialization, and offset addition exist
+once. Each specialization still constructs its complete instruction sequence
+before one `InstructionSequence::emit_all` transaction, preserving the former
+failure atomicity and exact instruction order.
+
+The two public declarations and all four unrelated shared-lowering forward
+declarations are deleted. The architecture-boundary gate now rejects any
+atomic-table address helper in the public synchronization header, rejects the
+four emission-owner helper names in shared lowering, limits the hash constant
+to one occurrence, and requires both ABI entry types to instantiate the one
+private mechanism. A direct emitted-code regression lowers an InlineShadow
+atomic acquire on gfx1100, gfx1201, gfx942, gfx950, and gfx1250 and proves that
+the release and causal-snapshot address paths retain their exact 32- and
+40-byte stride sequences on every target.
+
+This is a genuine shared-mechanism consolidation within one mode, not a
+cross-mode abstraction. It removes duplication and leaked surface without
+copying common work into mode packages. The surrounding synchronization
+translation unit still contains several engines and remains physically broad;
+therefore this slice is deletion and boundary evidence for InlineShadow, not a
+claim that Section 14.3 mode locality is complete.
+
+| Signal | Checkpoint 29 | Cumulative change | Slice change from checkpoint 28 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,383 | +408 | **-45** |
+| Nonblank production lines | 99,110 | +27 | **-40** |
+| Production implementation lines | 91,400 | **-50** | **-40** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 207 / 56 | **-69 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 206 / 28 | +6 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| Atomic-table address-hash implementations | 1 | n/a | **-1** |
+| Public atomic-table address declarations | 0 | n/a | **-2** |
+| Redundant emission-helper declarations in shared lowering | 0 | n/a | **-4** |
+| Test inventory | 5,378 | +33 | **+1** |
+
+Validation includes a full final-tree `-j16` rebuild; all 34 focused
+InlineAtomic and architecture-boundary tests; all 4,743 nonphysical tests at
+`-j16` in 197.61 seconds, including the unchanged 2,908 simulator rows over
+five targets; and all 635 physical gfx1201 tests serialized at `-j1` in 108.62
+seconds. No test was removed, renamed, or disabled. The inventory grew by the
+one five-target ABI-stride regression.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.7, 14.8, and 14.9:
+one duplicate mode-local mechanism and six leaked or redundant declarations
+are gone, the surviving operation is private and type-bound, and production
+implementation shrinks by forty lines. A cumulative fifty-line reduction is
+still not the material whole-refactoring shrinkage required by Section 14.8.
+The broad operating point and transform transaction, remaining placement and
+validation concentrations, physical locality of the complete architecture and
+mode surfaces, surviving mode/target interactions, and the independent
+deep-read completion audit remain open. The goal therefore remains active.
