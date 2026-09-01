@@ -6940,3 +6940,54 @@ input instead of manufacturing an implicit empty product. Broad pipeline and
 validation transactions, further target and mode locality, material
 whole-refactoring shrinkage, and the independent completion audit remain open.
 The goal therefore remains active.
+
+### 16.92 Convergence checkpoint 91: one immutable final-proof input
+
+The final-validation deep trace followed all structural, byte-accounting,
+relay, mutation, resource, metadata, dispatch, and mode-specific semantic
+proofs. Those proofs accepted the complete mutable lowerer transaction even
+though they read only seven immutable facets: program inventory, semantic
+coverage, mutation outcome, resource plans, the accepted MOI operating point,
+patch proof, and candidate bytes. This allowed an independent validator to
+acquire incidental visibility of planning candidates, diagnostics, and the
+terminal outcome it was meant only to inform.
+
+`ConSanFinalValidationInput` is now the sole input to every final-proof helper.
+It borrows precisely those seven immutable facets and exposes the observation
+plan only through the coverage authority. The terminal finalizer remains the
+single owner that may mutate outcome, diagnostics, failure cause, or discard a
+candidate. The unmatched-barrier abort remains a separately visible mutation
+adapter rather than being disguised as validation. The architecture gate pins
+the narrow input and caps whole-transaction mentions in the validation owner
+at the nine reviewed construction, finalization, mutation, and test-adapter
+sites, down from 24.
+
+| Signal | Checkpoint 91 | Cumulative change | Slice change from checkpoint 90 |
+| --- | ---: | ---: | ---: |
+| Production files | 272 | +43 | 0 |
+| Physical production lines | 102,918 | **-2,058** | +25 |
+| Nonblank production lines | 96,687 | **-2,397** | +22 |
+| Production implementation lines | 88,995 | **-2,455** | +16 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **139 / 47** | **-137 / -10** | **-15 / 0** |
+| `ConSanPatchInfo` references / files | 210 / 30 | +10 / +2 | +1 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | +1 / +1 |
+| Whole-transaction mentions in final validation | **9** | n/a | **-15** |
+| Final-proof helpers consuming the narrow input | **15** | n/a | **+15** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild; all 20 named final-validation,
+final-structural-validation, transform-memory, and architecture-boundary tests;
+and all **4,776/4,776 nonphysical tests** in 202.67 seconds. The full gate
+includes all 2,918 simulator rows over gfx942, gfx950, gfx1250, gfx1100, and
+gfx1201. No test was added, removed, renamed, disabled, or replaced, and no
+physical gfx1201 test was run.
+
+This checkpoint strengthens Sections 14.1 and 14.5: independent proof now has
+a compiler-enforced read boundary rather than a convention around a broad
+mutable bus. Its 16-line implementation investment removes 15 broad-transaction
+references but does not strengthen Section 14.8; the next checkpoint must reap
+deletion or consolidation from a newly exposed boundary rather than add
+another contract. Lowering-side mutation surfaces, remaining target and mode
+locality, material whole-refactoring shrinkage, and the independent completion
+audit remain open. The goal therefore remains active.

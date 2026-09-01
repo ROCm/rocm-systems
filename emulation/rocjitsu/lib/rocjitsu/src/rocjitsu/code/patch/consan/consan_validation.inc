@@ -1,5 +1,31 @@
 namespace {
 
+/// Immutable proof facets consumed by final validation.
+///
+/// The terminal finalizer still owns the mutable lowering transaction, but
+/// validation itself may only inspect the facts needed to prove the candidate
+/// image. This prevents proof helpers from acquiring incidental dependencies
+/// on planning state, diagnostics, or terminal outcome mutation.
+struct ConSanFinalValidationInput {
+  explicit ConSanFinalValidationInput(const ConSanTransformArtifacts &artifacts)
+      : program_inventory(artifacts.program_inventory), coverage_ledger(artifacts.coverage_ledger),
+        mutation(artifacts.mutation), resource_plans(artifacts.resource_plans),
+        moi_operating_point(artifacts.moi_operating_point), patches(artifacts.patches),
+        replacement(artifacts.replacement) {}
+
+  const ProgramInventory &program_inventory;
+  const ConSanCoverageLedger &coverage_ledger;
+  const ConSanMutationOutcome &mutation;
+  std::span<const ConSanCandidateResourcePlan> resource_plans;
+  const ConSanMoiOperatingPoint &moi_operating_point;
+  std::span<const ConSanPatchInfo> patches;
+  std::span<const uint8_t> replacement;
+
+  [[nodiscard]] const ConSanObservationPlan &observation_plan() const {
+    return coverage_ledger.observation_plan();
+  }
+};
+
 struct ValidationByteRange {
   uint64_t begin = 0;
   uint64_t end = 0;
@@ -272,11 +298,10 @@ void try_apply_unmatched_barrier_wait_abort_impl(std::span<const uint8_t> origin
                                " statically unmatched barrier wait(s)");
 }
 
-[[nodiscard]] bool has_blocked_kernel(const ConSanTransformArtifacts &result) {
-  return std::ranges::any_of(result.program_inventory.kernels(),
-                             [](const ConSanKernelInfo &kernel) {
-                               return kernel.preflight_action == ConSanPreflightAction::Blocked;
-                             });
+[[nodiscard]] bool has_blocked_kernel(const ProgramInventory &inventory) {
+  return std::ranges::any_of(inventory.kernels(), [](const ConSanKernelInfo &kernel) {
+    return kernel.preflight_action == ConSanPreflightAction::Blocked;
+  });
 }
 
 template <typename Entity>
@@ -387,7 +412,7 @@ struct InventoryRange {
 };
 
 void validate_patch_byte_accounting(const FinalValidationEnvironment &environment,
-                                    const ConSanTransformArtifacts &result,
+                                    const ConSanFinalValidationInput &result,
                                     std::vector<std::string> &errors,
                                     std::optional<ConSanTransformFailureCause> *failure_cause) {
   const size_t initial_error_count = errors.size();
@@ -660,7 +685,7 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
 }
 
 void validate_patch_decoding(const FinalValidationEnvironment &environment,
-                             const ConSanTransformArtifacts &result,
+                             const ConSanFinalValidationInput &result,
                              std::vector<std::string> &errors) {
   if (!environment.replacement_text.available)
     return;
@@ -689,7 +714,7 @@ void validate_patch_decoding(const FinalValidationEnvironment &environment,
 }
 
 void validate_sc_indirect_island_semantics(const FinalValidationEnvironment &environment,
-                                           const ConSanTransformArtifacts &result,
+                                           const ConSanFinalValidationInput &result,
                                            std::vector<std::string> &errors) {
   if (!environment.replacement_text.available)
     return;
@@ -752,7 +777,7 @@ void validate_sc_indirect_island_semantics(const FinalValidationEnvironment &env
 }
 
 void validate_branch_only_continuation_semantics(const FinalValidationEnvironment &environment,
-                                                 const ConSanTransformArtifacts &result,
+                                                 const ConSanFinalValidationInput &result,
                                                  const BranchRelayValidationInventory &inventory,
                                                  std::vector<std::string> &errors) {
   const bool has_branch_only = std::ranges::any_of(
@@ -954,7 +979,7 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
 }
 
 void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environment,
-                                      const ConSanTransformArtifacts &result,
+                                      const ConSanFinalValidationInput &result,
                                       std::vector<std::string> &errors) {
   const bool has_dense = std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineScDenseCallDispatcher ||
@@ -1330,7 +1355,7 @@ void validate_branch_relay_donor_semantics(const FinalValidationEnvironment &env
 }
 
 void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment &environment,
-                                               const ConSanTransformArtifacts &result,
+                                               const ConSanFinalValidationInput &result,
                                                const BranchRelayValidationInventory &inventory,
                                                std::vector<std::string> &errors) {
   for (const ConSanPatchInfo &patch : result.patches) {
@@ -1606,13 +1631,13 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
          is_barrier_instruction(*instruction);
 }
 
-[[nodiscard]] bool has_consan_patch_phase(const ConSanTransformArtifacts &result,
+[[nodiscard]] bool has_consan_patch_phase(const ConSanFinalValidationInput &result,
                                           ConSanPatchPhase phase) {
   return std::ranges::find(result.patches, phase, &ConSanPatchInfo::phase) != result.patches.end();
 }
 
 void validate_mutation_semantics(const FinalValidationEnvironment &environment,
-                                 const ConSanTransformArtifacts &result,
+                                 const ConSanFinalValidationInput &result,
                                  std::vector<std::string> &errors) {
   // Instrumentation-only transforms have no mutation semantics to rederive.
   // Avoid rebuilding the entire pristine synchronization/CFG inventory here:
@@ -2543,7 +2568,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
 
 void validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
                                         const FinalValidationEnvironment &environment,
-                                        const ConSanTransformArtifacts &result,
+                                        const ConSanFinalValidationInput &result,
                                         bool validating_carried_composite_stage,
                                         const ConSanPerturbationPlanningState *carried_perturbation,
                                         std::vector<std::string> &errors) {
@@ -2821,7 +2846,7 @@ struct DescriptorRequirement {
 };
 
 void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &environment,
-                                            const ConSanTransformArtifacts &result,
+                                            const ConSanFinalValidationInput &result,
                                             std::vector<std::string> &errors) {
   if (!environment.original_text.available || !environment.replacement_text.available)
     return;
@@ -2933,7 +2958,7 @@ void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &en
 }
 
 void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &environment,
-                                             const ConSanTransformArtifacts &result,
+                                             const ConSanFinalValidationInput &result,
                                              std::vector<std::string> &errors) {
   if (!environment.original_text.available || !environment.replacement_text.available)
     return;
@@ -3131,7 +3156,7 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
 }
 
 void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &environment,
-                                            const ConSanTransformArtifacts &result,
+                                            const ConSanFinalValidationInput &result,
                                             uint64_t expected_moi_report_dispatch_id,
                                             std::vector<std::string> &errors) {
   const auto is_exact_patch = [](const ConSanPatchInfo &patch) {
@@ -3500,7 +3525,7 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
 }
 
 void validate_inline_release_transaction_semantics(const FinalValidationEnvironment &environment,
-                                                   const ConSanTransformArtifacts &result,
+                                                   const ConSanFinalValidationInput &result,
                                                    std::vector<std::string> &errors) {
   constexpr uint16_t kVccLo = 106u;
   const auto is_release_transaction = [&](const ConSanPatchInfo &patch) {
@@ -3776,7 +3801,7 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
 }
 
 void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &environment,
-                                           const ConSanTransformArtifacts &result,
+                                           const ConSanFinalValidationInput &result,
                                            std::vector<std::string> &errors) {
   using KernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
   const size_t initial_error_count = errors.size();
@@ -4270,7 +4295,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
 }
 
 [[nodiscard]] std::vector<std::string> validate_final_consan_elf(
-    std::span<const uint8_t> original_bytes, const ConSanTransformArtifacts &result,
+    std::span<const uint8_t> original_bytes, const ConSanFinalValidationInput &result,
     uint64_t expected_moi_report_dispatch_id, bool validating_carried_composite_stage = false,
     const ConSanPerturbationPlanningState *carried_perturbation = nullptr,
     std::optional<ConSanTransformFailureCause> *failure_cause = nullptr) {
@@ -4369,7 +4394,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
     ProgramInventoryBuilder inventory_builder(original_bytes);
     result.program_inventory = inventory_builder.view();
   }
-  if (has_blocked_kernel(result)) {
+  if (has_blocked_kernel(result.program_inventory)) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.discard_candidate_modification();
     result.mutation.applied_fault_logical_identity.reset();
@@ -4396,10 +4421,10 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
       result.outcome = ConSanTransformOutcome::Invalid;
       result.mutation.applied_fault_logical_identity.reset();
     } else {
-      std::vector<std::string> validation_errors =
-          validate_final_consan_elf(original_bytes, result, expected_moi_report_dispatch_id,
-                                    validating_carried_composite_stage, carried_perturbation,
-                                    &result.transform_failure_cause);
+      std::vector<std::string> validation_errors = validate_final_consan_elf(
+          original_bytes, ConSanFinalValidationInput(result), expected_moi_report_dispatch_id,
+          validating_carried_composite_stage, carried_perturbation,
+          &result.transform_failure_cause);
       result.errors.insert(result.errors.end(), std::make_move_iterator(validation_errors.begin()),
                            std::make_move_iterator(validation_errors.end()));
       if (result.errors.empty()) {
@@ -4445,6 +4470,6 @@ std::vector<std::string>
 validate_consan_modified_elf(std::span<const uint8_t> original_bytes,
                              const ConSanTransformArtifacts &modified_result,
                              uint64_t expected_moi_report_dispatch_id) {
-  return validate_final_consan_elf(original_bytes, modified_result,
+  return validate_final_consan_elf(original_bytes, ConSanFinalValidationInput(modified_result),
                                    expected_moi_report_dispatch_id);
 }

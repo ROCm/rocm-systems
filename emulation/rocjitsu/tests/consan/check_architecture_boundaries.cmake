@@ -269,6 +269,15 @@ if(NOT _consan_validation MATCHES "struct BranchRelayValidationInventory" OR
    NOT _consan_validation MATCHES "make_branch_relay_validation_inventory")
     message(FATAL_ERROR "ConSan relay validation lost its shared typed inventory")
 endif()
+if(NOT _consan_validation MATCHES "struct ConSanFinalValidationInput")
+    message(FATAL_ERROR "ConSan final proof lost its narrow immutable input")
+endif()
+_consan_assert_match_count_at_most(
+    "${_consan_dir}/consan_validation.inc"
+    "ConSanTransformArtifacts"
+    9
+    "whole lowering transaction may appear only at finalization and mutation adapters"
+)
 _consan_assert_no_match(
     "${_consan_dir}/consan_validation.inc"
     "(relay|island)_vertices|branch_only_relay_targets"
