@@ -17,6 +17,15 @@
 #   SKIP=ruff-format git commit
 #   SKIP=gersemi git commit
 
+# Scope every hook to this project, the way projects/cuid's config does.
+# Without this, a commit touching two projects hands these hooks the other
+# project's files as well. That is not hypothetical: it reformats
+# projects/cuid/tests/vectors/cuid_vectors.py, which has to stay byte-identical
+# to the copy in the kernel tree for the conformance vectors to mean anything.
+# pre-commit ANDs this with each hook's own `files`, so the per-hook patterns
+# below still apply on top of it.
+files: '^projects/amdsmi/'
+
 exclude: |
   (?x)
     docs/
@@ -41,9 +50,9 @@ repos:
     rev: v6.0.0
     hooks:
     -   id: trailing-whitespace
-        exclude: ^py-interface/amdsmi_wrapper\.py$
+        exclude: ^projects/amdsmi/py-interface/amdsmi_wrapper\.py$
     -   id: end-of-file-fixer
-        exclude: ^py-interface/amdsmi_wrapper\.py$
+        exclude: ^projects/amdsmi/py-interface/amdsmi_wrapper\.py$
     -   id: check-yaml
     -   id: check-json
     -   id: check-merge-conflict
@@ -60,7 +69,7 @@ repos:
     rev: v0.15.4
     hooks:
     -   id: ruff-format
-        exclude: ^py-interface/amdsmi_wrapper\.py$
+        exclude: ^projects/amdsmi/py-interface/amdsmi_wrapper\.py$
 
 -   repo: https://github.com/BlankSpruce/gersemi
     rev: 0.26.0
