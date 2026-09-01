@@ -28,8 +28,7 @@ std::atomic<int>         g_counter_records{0};
 std::atomic<int>         g_pcs_samples{0};
 bool                     g_pcs_available = false;
 
-uint64_t
-replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kPasses;
 }

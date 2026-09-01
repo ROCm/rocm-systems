@@ -159,17 +159,17 @@ make_dispatch_info(const hsa::Queue&              queue,
             info.private_segment_size = ext_packet.private_segment_size;
             info.group_segment_size   = ext_packet.group_segment_size;
             info.workgroup_size       = {ext_packet.workgroup_size_x,
-                                         ext_packet.workgroup_size_y,
-                                         ext_packet.workgroup_size_z};
+                                   ext_packet.workgroup_size_y,
+                                   ext_packet.workgroup_size_z};
             info.grid_size            = {static_cast<uint32_t>(ext_packet.cluster_count_x) *
-                                             static_cast<uint32_t>(ext_packet.cluster_size_x) *
-                                             static_cast<uint32_t>(ext_packet.workgroup_size_x),
-                                         static_cast<uint32_t>(ext_packet.cluster_count_y) *
-                                             static_cast<uint32_t>(ext_packet.cluster_size_y) *
-                                             static_cast<uint32_t>(ext_packet.workgroup_size_y),
-                                         static_cast<uint32_t>(ext_packet.cluster_count_z) *
-                                             static_cast<uint32_t>(ext_packet.cluster_size_z) *
-                                             static_cast<uint32_t>(ext_packet.workgroup_size_z)};
+                                  static_cast<uint32_t>(ext_packet.cluster_size_x) *
+                                  static_cast<uint32_t>(ext_packet.workgroup_size_x),
+                              static_cast<uint32_t>(ext_packet.cluster_count_y) *
+                                  static_cast<uint32_t>(ext_packet.cluster_size_y) *
+                                  static_cast<uint32_t>(ext_packet.workgroup_size_y),
+                              static_cast<uint32_t>(ext_packet.cluster_count_z) *
+                                  static_cast<uint32_t>(ext_packet.cluster_size_z) *
+                                  static_cast<uint32_t>(ext_packet.workgroup_size_z)};
             return info;
         }
     }

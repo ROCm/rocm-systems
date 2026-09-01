@@ -544,7 +544,7 @@ WriteInterceptor(const void* packets,
         }
     }};
 
-    using packet_writer_fn_t = std::function<void(packet_vector_t&&)>;
+    using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
 
     auto process_packet_batch = [&queue, &corr_id, tracing_data_v, has_kernel_replay](
                                     const rocprofiler_packet* _packets,

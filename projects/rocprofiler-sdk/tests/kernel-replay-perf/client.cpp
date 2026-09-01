@@ -90,8 +90,7 @@ config_for_pass(rocprofiler_agent_id_t agent, uint64_t pass)
     return cfg;
 }
 
-uint64_t
-replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kPasses;
 }
