@@ -23,11 +23,18 @@ DOMAIN_FILTER_RULES = frozenset(
     {
         "gpu-metrics-selected",
         "gpu-metrics-busy-mem",
+        "gpu-metrics-busy-only",
         "rocm-hip-kernel",
         "rocm-hip-api",
         "sampling-target-gpu0",
     }
 )
+
+# trace-hpc disables sampling in the preset JSON; re-enable for GPU metric collection.
+_PRESET_SAMPLING_ENV = {
+    "ROCPROFSYS_USE_SAMPLING": "ON",
+    "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
+}
 
 _ROCPD_OFF = {"ROCPROFSYS_USE_ROCPD": "OFF"}
 _CPU_TARGET_ENV = {
@@ -148,7 +155,7 @@ DOMAIN_ARTIFACT_CASES = [
         None,
         None,
         True,
-        ["gpu-metrics-busy-mem"],
+        ["gpu-metrics-busy-only"],
         id="gpu_busy_only",
     ),
     pytest.param(
@@ -282,6 +289,7 @@ PRESET_ARTIFACT_CASES = [
             r"ROCPROFSYS_AMD_SMI_METRICS=.*temp",
             r"ROCPROFSYS_AMD_SMI_METRICS=.*power",
         ],
+        _PRESET_SAMPLING_ENV,
         ["hip_runtime_api", "kernel_dispatch"],
         True,
         ["sampling-target-gpu0"],
@@ -290,6 +298,7 @@ PRESET_ARTIFACT_CASES = [
     pytest.param(
         ["--preset=trace-gpu"],
         [r"Preset:\s+trace-gpu", "ROCPROFSYS_USE_AMD_SMI=true"],
+        None,
         ["hip_runtime_api"],
         True,
         [],
@@ -302,6 +311,7 @@ PRESET_ARTIFACT_CASES = [
             "ROCPROFSYS_SAMPLING_GPUS=0",
             "ROCPROFSYS_USE_AMD_SMI=true",
         ],
+        None,
         ["hip_runtime_api"],
         True,
         ["sampling-target-gpu0"],
@@ -314,6 +324,7 @@ PRESET_ARTIFACT_CASES = [
             "ROCPROFSYS_USE_OMPT=true",
             "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch",
         ],
+        None,
         ["hip_runtime_api"],
         False,
         ["rocm-hip-kernel"],
@@ -385,7 +396,7 @@ class TestDomainFlagsArtifactsOnWorkload(RocprofsysTest):
         )
 
     @pytest.mark.parametrize(
-        "flag_args, pass_regex, perfetto_categories, with_amd_smi, filter_profiles",
+        "flag_args, pass_regex, seed_env, perfetto_categories, with_amd_smi, filter_profiles",
         PRESET_ARTIFACT_CASES,
     )
     def test_preset_on_transpose(
@@ -396,16 +407,18 @@ class TestDomainFlagsArtifactsOnWorkload(RocprofsysTest):
         domain_rules,
         flag_args,
         pass_regex,
+        seed_env,
         perfetto_categories,
         with_amd_smi,
         filter_profiles,
     ):
-        result = _run_transpose_sample(self, domain_flag_env, flag_args)
+        env = {**domain_flag_env, **(seed_env or {})}
+        result = _run_transpose_sample(self, env, flag_args)
         self.assert_regex(result, pass_regex=pass_regex)
         _assert_workload_artifacts(
             self,
             result,
-            env=domain_flag_env,
+            env=env,
             validation_rules_dir=validation_rules_dir,
             transpose_baseline_rules=transpose_baseline_rules,
             domain_rules=domain_rules,

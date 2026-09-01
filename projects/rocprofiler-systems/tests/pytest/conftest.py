@@ -18,7 +18,7 @@ import json
 import re
 import shutil
 import signal
-import sys
+import subprocess
 import traceback
 from functools import lru_cache
 from pathlib import Path
@@ -281,6 +281,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "shmem",
         "nic",
         "ainic_required",
+        "backend_include_ompt",
     ]
 
     # Informational markers, only used for test labeling
@@ -492,6 +493,10 @@ def pytest_collection_modifyitems(config, items) -> None:
             item.add_marker(pytest.mark.skip(reason="UCX not available"))
         if "mpi" in item.keywords:
             _msg = mpi_unavailable_reason(rocprof_config, config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "backend_include_ompt" in item.keywords:
+            _msg = backend_include_ompt_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
         if "mpi_implementation" in item.keywords:
@@ -973,6 +978,25 @@ def mpi_unavailable_reason(
     if rocprof_config.capabilities.mpiexec_exec is None:
         return "MPI not available"
     return None
+
+
+def backend_include_ompt_unavailable_reason(
+    rocprof_config: RocprofsysConfig,
+) -> str | None:
+    """Skip ``-I ompt`` tests when this build omits ompt from backend choices."""
+    try:
+        result = subprocess.run(
+            [str(rocprof_config.rocprofsys_run), "-I", "ompt", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        combined = (result.stdout or "") + (result.stderr or "")
+        if "Invalid choice: 'ompt'" in combined:
+            return "Backend include choice 'ompt' not available in this build"
+        return None
+    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+        return "Could not query backend include choice 'ompt'"
 
 
 def python_base_unavailable_reason(rocprof_config: RocprofsysConfig) -> str | None:
