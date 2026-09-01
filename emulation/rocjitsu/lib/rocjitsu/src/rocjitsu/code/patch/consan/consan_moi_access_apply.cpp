@@ -96,11 +96,10 @@ make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
     const MoiDescriptorSgprRequirements &scalar_requirements,
     const MoiDescriptorPrivateRequirements &private_requirements,
     const MoiDescriptorLdsRequirements *lds_requirements, rj_code_arch_t arch,
-    ConSanTransformArtifacts &result) {
-  return apply_moi_descriptor_requirements(patcher, code_object, result.program_inventory,
-                                           descriptor_requirements, scalar_requirements,
-                                           private_requirements, lds_requirements, &capabilities,
-                                           arch, "ConSan MOI access", result.errors);
+    const ProgramInventory &program_inventory, std::vector<std::string> &errors) {
+  return apply_moi_descriptor_requirements(
+      patcher, code_object, program_inventory, descriptor_requirements, scalar_requirements,
+      private_requirements, lds_requirements, &capabilities, arch, "ConSan MOI access", errors);
 }
 
 /// Initialize one appended MOI access image and materialize its shared direct
@@ -113,10 +112,10 @@ make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
     CodeObjectPatcher &patcher, bool use_indirect_appended, uint64_t indirect_body_begin,
     const BranchOnlyDirectRelayReservoirSet &direct_reservoirs, std::string_view probe_name,
     rj_code_arch_t arch, std::vector<uint8_t> &new_text, std::vector<ConSanPatchInfo> &patches,
-    ConSanTransformArtifacts &result) {
+    std::vector<std::string> &errors) {
   const std::span<const uint8_t> old_text = patcher.text_bytes();
   if (old_text.empty()) {
-    result.errors.emplace_back("ConSan MOI " + std::string(probe_name) + " found no .text section");
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) + " found no .text section");
     return false;
   }
   new_text.assign(old_text.begin(), old_text.end());
@@ -128,7 +127,7 @@ make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
     std::string relay_error;
     if (!BranchOnlyRelayRouter::emit_direct_reservoir(new_text, reservoir, arch, patches,
                                                       &relay_error)) {
-      result.errors.emplace_back("ConSan MOI " + std::string(probe_name) + " " + relay_error);
+      errors.emplace_back("ConSan MOI " + std::string(probe_name) + " " + relay_error);
       return false;
     }
   }

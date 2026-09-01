@@ -1119,7 +1119,7 @@ void try_apply_first_light_access_record_patch(
     CodeObjectPatcher patcher(code_object);
     if (!apply_moi_appended_access_descriptor_requirements(
             patcher, code_object, options, descriptor_requirements, scalar_requirements,
-            private_requirements, nullptr, arch, result))
+            private_requirements, nullptr, arch, result.program_inventory, result.errors))
       return;
     std::vector<uint8_t> new_text;
     std::vector<ConSanPatchInfo> patches;
@@ -1128,7 +1128,7 @@ void try_apply_first_light_access_record_patch(
     lowering_commits.reserve(planned_patches.size());
     if (!initialize_moi_appended_access_text(patcher, use_indirect_appended, indirect_body_begin,
                                              direct_branch_reservoirs, "first-light probe", arch,
-                                             new_text, patches, result))
+                                             new_text, patches, result.errors))
       return;
     const auto dense_groups = group_moi_dense_access_patches(planned_patches);
     if (!emit_moi_dense_access_groups(

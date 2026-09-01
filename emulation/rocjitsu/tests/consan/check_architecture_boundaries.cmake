@@ -1419,6 +1419,11 @@ _consan_assert_no_match(
     "common access application must consume typed target facts"
 )
 _consan_assert_no_match(
+    "${_consan_dir}/consan_moi_access_apply.cpp"
+    "ConSanTransformArtifacts"
+    "shared access mechanics must consume exact inventory and diagnostic products"
+)
+_consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
     "ROCJITSU_CODE_ARCH_"
     "common placement must consume typed target facts"

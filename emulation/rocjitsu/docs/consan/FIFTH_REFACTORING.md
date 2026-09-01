@@ -7221,3 +7221,51 @@ and mutation capability with an exact product boundary. It deliberately does
 not treat a one-line reduction as material shrinkage. Remaining broad lowering
 mutation surfaces, target and mode locality, larger legacy harvesting, and the
 independent completion audit remain open. The goal therefore remains active.
+
+### 16.98 Convergence checkpoint 97: bus-free shared access mechanics
+
+The shared access-application trace covered all three consumers:
+InlineShadow, Record/Replay, and Sampled. Descriptor application reads only the
+immutable program inventory and appends diagnostics. Appended-text
+initialization reads the patcher's text, materializes planned relay reservoirs
+into caller-owned byte and patch products, and appends diagnostics. Neither
+operation publishes or otherwise consumes the transform transaction. Their
+shared translation unit nevertheless received that transaction through both
+interfaces.
+
+Those interfaces now receive the immutable `ProgramInventory` and the exact
+diagnostic sink, or the diagnostic sink alone. All three mode owners pass those
+products explicitly. `consan_moi_access_apply.cpp` consequently has no
+`ConSanTransformArtifacts` dependency, enforced by the architecture gate. The
+only remaining broad-transaction reference in the shared access-application
+interface is the inline publication template that atomically commits bytes,
+semantic lowerings, and patch products; it is a genuine transaction boundary
+rather than common mechanics acquiring ambient visibility.
+
+| Signal | Checkpoint 97 | Cumulative change | Slice change from checkpoint 96 |
+| --- | ---: | ---: | ---: |
+| Production files | 274 | +45 | 0 |
+| Physical production lines | 102,928 | **-2,048** | **-1** |
+| Nonblank production lines | 96,688 | **-2,396** | **-1** |
+| Production implementation lines | 88,995 | **-2,455** | **-1** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **129 / 48** | **-147 / -9** | **-4 / -1** |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Whole-transaction mentions in shared access application | **1** | n/a | **-4** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and all **60/60** appended-cave,
+descriptor, dense/direct access-relay, and architecture-boundary tests. The
+selection crosses the InlineShadow, Record/Replay, and Sampled consumers and
+the five target families represented by their focused fixtures. Checkpoint 92
+passed all 1,295 host/component tests, and checkpoint 91 passed all 4,776
+nonphysical tests across the five-target simulator matrix. No test was added,
+removed, renamed, disabled, or replaced, and no physical gfx1201 test was run.
+
+This slice strengthens Sections 14.1, 14.3, and 14.5: shared mechanics are
+mode-neutral without gaining a common mutable bus, while each mode retains its
+policy and publication ownership. Remaining broad lowering mutation surfaces,
+target and mode locality, larger legacy harvesting, material whole-refactoring
+shrinkage, and the independent completion audit remain open. The goal therefore
+remains active.

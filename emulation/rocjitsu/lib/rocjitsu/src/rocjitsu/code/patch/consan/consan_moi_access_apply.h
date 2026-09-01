@@ -105,13 +105,13 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo>
     const MoiDescriptorSgprRequirements &scalar_requirements,
     const MoiDescriptorPrivateRequirements &private_requirements,
     const MoiDescriptorLdsRequirements *lds_requirements, rj_code_arch_t arch,
-    ConSanTransformArtifacts &result);
+    const ProgramInventory &program_inventory, std::vector<std::string> &errors);
 
 [[nodiscard]] bool initialize_moi_appended_access_text(
     CodeObjectPatcher &patcher, bool use_indirect_appended, uint64_t indirect_body_begin,
     const BranchOnlyDirectRelayReservoirSet &direct_reservoirs, std::string_view probe_name,
     rj_code_arch_t arch, std::vector<uint8_t> &new_text, std::vector<ConSanPatchInfo> &patches,
-    ConSanTransformArtifacts &result);
+    std::vector<std::string> &errors);
 
 /// Group planned access patches by the dense dispatcher selected during
 /// placement. The map preserves dispatcher order so generated bodies retain
