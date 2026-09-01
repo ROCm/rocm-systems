@@ -36,7 +36,7 @@ from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import Cdna5Profile, Rdna3Profile, Rdna4Profile
 
 
-def test_cls_i32_codegen_uses_gfx1250_count_convention():
+def test_cls_i32_codegen():
     scalar = gen_vector_unary(['vdst'], ['src0'], 'cls_i32', None)
     semantic = _INLINE_UNARY_OPS['cls_i32']
     simd = SIMD_VOP1_UNARY['v_cls_i32_vop1'][2]

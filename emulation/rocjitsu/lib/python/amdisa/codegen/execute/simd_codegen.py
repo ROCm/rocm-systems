@@ -407,7 +407,7 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     # --- bit-scan (SWAR, no stdx primitive) -----------------------------------
     # All return uint32_t. Most special-case the zero input to 0xFFFFFFFF,
     # matching the scalar bodies (std::countl_zero / countr_zero / popcount);
-    # cls_i32 instead maps the all-zero/all-one case to 31. The VOP3
+    # cls_i32, like signed FFBH, returns 0xFFFFFFFF for an all-zero. The VOP3
     # twins share these (modifier-free integer bodies, auto-routed below). f16<->
     # f32 round-trip not involved -> not in _VOP3_UNARY_SKIP.
     #
