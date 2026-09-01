@@ -316,6 +316,10 @@ bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes, nc
 // folded in. With no table, the same pre-table DDA defaults the selectors
 // use are folded in so scratch is not smaller than the VMM/LL/LL128 window.
 // ReduceScatter table values are per-rank and scaled by nRanks.
+//
+// Graph VMM (ddaVmmMaxGraph) is part of that max even for comms that never
+// capture: scratch is allocated once at init so a later capture can still
+// fit. On gfx1250 that is AllReduce 256 MiB whenever it is the largest entry.
 size_t rcclDdaScratchPayloadCap(const ncclComm* comm);
 
 // Returns true when the DDA fast path should be attempted for this arch/size.

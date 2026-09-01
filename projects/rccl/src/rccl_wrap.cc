@@ -871,6 +871,8 @@ size_t rcclDdaScratchPayloadCap(const ncclComm* comm) {
     bump(scaleRs(table->ddaLL128Max[i], i));
     bump(scaleRs(table->ddaVmmMax[i], i));
     bump(scaleRs(table->ddaVmmMaxR2[i], i));
+    // Graph VMM is included even for eager-only processes: one buffer must
+    // fit a later capture (gfx1250 AR graph cap is 256 MiB).
     bump(scaleRs(table->ddaVmmMaxGraph[i], i));
     // AG CE-Scratch (and any other non-AR CE-scratch) copies the receive into
     // ddaScratch, so that window must fit. AR 2-shot uses ceARTmpBuf.
