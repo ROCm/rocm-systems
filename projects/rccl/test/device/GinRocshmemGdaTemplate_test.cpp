@@ -24,6 +24,11 @@
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h"
 
 #if NCCL_GIN_ROCSHMEM_GDA_ENABLE
+// Count invocations of the Put/PutValue system-scope fence seam (gin_device_common.h).
+// Override must precede gin_rocshmem_gda.h so the templates expand our counter.
+__device__ unsigned long long g_gdaStubThreadfenceCount = 0;
+#undef NCCL_GIN_THREADFENCE_SYSTEM
+#define NCCL_GIN_THREADFENCE_SYSTEM() atomicAdd(&g_gdaStubThreadfenceCount, 1ULL)
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h"
 #endif
 
@@ -170,6 +175,17 @@ static unsigned long long readPutNbiCount() {
   unsigned long long n = 0;
   HIP_EXPECT(hipMemcpyFromSymbol(&n, HIP_SYMBOL(g_gdaStubPutNbiCount), sizeof(n)));
   return n;
+}
+
+static void resetThreadfenceCount() {
+  unsigned long long z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_gdaStubThreadfenceCount), &z, sizeof(z)));
+}
+
+static unsigned long long readThreadfenceCount() {
+  unsigned long long c = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(g_gdaStubThreadfenceCount), sizeof(c)));
+  return c;
 }
 
 // G1: Put with data (no signal) copies src -> peer's remote buffer.
@@ -336,12 +352,7 @@ TEST_F(GinRocshmemGdaTemplateTest, Put_SignalAndCounter) {
   EXPECT_EQ(ctr[1], 1ULL);
 }
 
-// G7: weaker-given-scope path (required=system, given=block) still completes the
-// put. NOTE: the template's fence guard is `(required==system && given>required)`;
-// since `system` is the maximum cuda::thread_scope, that branch is never taken
-// (here or anywhere). This guard is a pre-existing convention shared by all GIN
-// backends (anvil_sdma, gdaki, rocshmem_gda) and is tracked for a separate,
-// coordinated fix -- so this case only asserts the data lands, not that a fence ran.
+// G7: required=system, given=block -> HIP guard fires (given < required) and put completes.
 __global__ void kernelPutScopeFence(GdaHarness* h) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
@@ -354,7 +365,7 @@ __global__ void kernelPutScopeFence(GdaHarness* h) {
       false, nullptr, cuda::thread_scope_system, cuda::thread_scope_block);
 }
 
-TEST_F(GinRocshmemGdaTemplateTest, Put_WeakerGivenScopeStillPuts) {
+TEST_F(GinRocshmemGdaTemplateTest, Put_WeakerGivenScopeFencesAndPuts) {
   constexpr int kN = 8;
   std::vector<uint8_t> pat(kN);
   for (int i = 0; i < kN; ++i) pat[static_cast<size_t>(i)] = static_cast<uint8_t>(0x11 * (i + 1));
@@ -362,8 +373,27 @@ TEST_F(GinRocshmemGdaTemplateTest, Put_WeakerGivenScopeStillPuts) {
   env.src.copyFrom(pat);
   env.dst.zero();
   env.build();
+  resetThreadfenceCount();
   kernelPutScopeFence<<<1, 1>>>(env.dHarness.ptr);
   syncAndCheck();
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
+  auto got = env.dst.copyTo();
+  for (int i = 0; i < kN; ++i) EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
+}
+
+// G7b: required=given=system -> guard does not fire (given < required is false) and put completes.
+TEST_F(GinRocshmemGdaTemplateTest, Put_EqualScopeTakesNoFence) {
+  constexpr int kN = 8;
+  std::vector<uint8_t> pat(kN);
+  for (int i = 0; i < kN; ++i) pat[static_cast<size_t>(i)] = static_cast<uint8_t>(0x22 + i);
+  GdaEnv env(kN);
+  env.src.copyFrom(pat);
+  env.dst.zero();
+  env.build();
+  resetThreadfenceCount();
+  kernelPutData<<<1, 1>>>(env.dHarness.ptr, kN);
+  syncAndCheck();
+  EXPECT_EQ(readThreadfenceCount(), 0ULL);
   auto got = env.dst.copyTo();
   for (int i = 0; i < kN; ++i) EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
 }

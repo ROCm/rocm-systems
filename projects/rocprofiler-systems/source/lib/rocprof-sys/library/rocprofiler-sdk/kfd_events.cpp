@@ -19,7 +19,7 @@
 #    include <rocprofiler-sdk/buffer_tracing.h>
 #    include <rocprofiler-sdk/kfd/kfd_id.h>
 
-#    include <spdlog/fmt/fmt.h>
+#    include <fmt/format.h>
 #    include <unistd.h>
 
 namespace rocprofsys
