@@ -461,9 +461,7 @@ WriteInterceptor(const void* packets,
     {
         if(graph_launch_active)
         {
-            static std::atomic<bool> _warned_graph_replay{false};
-            if(!_warned_graph_replay.exchange(true, std::memory_order_relaxed))
-                ROCP_WARNING << "kernel replay: HIP graph launches are not supported";
+            LOG_FIRST_N(WARNING, 1) << "kernel replay: HIP graph launches are not supported";
         }
         else if(pkt_count != 1)
         {
