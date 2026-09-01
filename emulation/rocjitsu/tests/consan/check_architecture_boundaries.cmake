@@ -204,6 +204,20 @@ foreach(_source IN ITEMS consan_final_validation.cpp consan_validation_inventory
     )
 endforeach()
 
+# Relay proofs consume one independently derived patch-inventory product. The
+# continuation, donor, and reservoir facets stay distinct so sharing the scan
+# cannot broaden any validator's accepted graph.
+file(READ "${_consan_dir}/consan_validation.inc" _consan_validation)
+if(NOT _consan_validation MATCHES "struct BranchRelayValidationInventory" OR
+   NOT _consan_validation MATCHES "make_branch_relay_validation_inventory")
+    message(FATAL_ERROR "ConSan relay validation lost its shared typed inventory")
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_validation.inc"
+    "(relay|island)_vertices|branch_only_relay_targets"
+    "relay validators must not rebuild parallel patch-inventory views"
+)
+
 file(
     GLOB _extension_mode_sources
     "${_consan_dir}/consan_moi_record*.cpp"

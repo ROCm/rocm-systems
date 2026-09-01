@@ -5104,3 +5104,61 @@ whole-refactoring shrinkage. Remaining architecture locality, broader
 operating-point and mutable-transaction surfaces, larger legacy harvesting,
 material Section 14.8 evidence, and the independent Section 14 completion
 audit remain open. The goal therefore remains active.
+
+### 16.61 Convergence checkpoint 60: one independent relay-proof inventory
+
+The final-validation deep read traced branch-relay provenance from the patch
+inventory into the branch-only continuation, wide donor, and instruction-
+reservoir proofs. Each validator independently scanned every patch and rebuilt
+a relay graph. The scans overlapped substantially, but were not identical:
+continuation ownership includes local FLAT tails, exact-shadow tails, and
+validated original NOPs; donor payloads accept only active indirect-reservoir
+slots; reservoir payloads accept every indirect-reservoir slot; and both
+payload validators separately recognize indirect islands. Reservoir validation
+also reconstructed branch-only route targets a second time.
+
+`BranchRelayValidationInventory` now derives those facts once from the
+published patch inventory. It deliberately exposes separate continuation,
+donor-target, reservoir-target, indirect-island, branch-only-target, NOP,
+donor, and reservoir facets. The validators share the traversal without
+sharing an over-broad accepted-vertex set. Original-byte NOP qualification,
+donor geometry, pristine-instruction decoding, payload decoding, route
+integrity, and reservoir geometry remain independently checked by their owning
+proofs; only the repeated inventory reconstruction is gone.
+
+The inventory is built once at the final-validation composition boundary and
+passed read-only to all three proofs. The structural gate requires that typed
+product and rejects restoration of the old parallel relay/island graph locals.
+Existing negative tests corrupt routes, displaced bodies, payload use,
+provenance, NOP ownership, direct reservoirs, indirect reservoirs, donor
+paths, and recursively routed Record/Replay reservoirs.
+
+| Signal | Checkpoint 60 | Cumulative change | Slice change from checkpoint 59 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,208 | +233 | **-50** |
+| Nonblank production lines | 98,898 | **-185** | **-51** |
+| Production implementation lines | 91,170 | **-280** | **-48** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **174 / 52** | **-102 / -5** | **-1 / 0** |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | **-1 / 0** |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Relay patch-inventory traversals in final proof | **1 typed traversal** | n/a | **-2** |
+| Per-validator relay/island graph reconstructions | **0** | n/a | **-3** |
+| Test inventory | **5,388** | **+43** | 0 |
+
+Validation includes a final-tree `-j16` build; 10 focused NOP, continuation,
+donor, direct-reservoir, indirect-reservoir, recursive-route, corruption, and
+architecture-boundary tests; all 4,753 nonphysical tests over the five
+emulated targets at `-j16`; and all 635 physical gfx1201 tests serialized at
+`-j1`. No test was removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.5, 14.6, 14.7, 14.8, and 14.9.
+Independent validation now has one narrow forward product for relay topology
+while retaining distinct proof authorities and accepted graphs. The slice
+harvests 48 implementation lines, bringing cumulative reduction to 280 lines;
+that remains insufficient material whole-refactoring shrinkage. Remaining
+architecture locality, broader operating-point and mutable-transaction
+surfaces, larger legacy harvesting, material Section 14.8 evidence, and the
+independent Section 14 completion audit remain open. The goal therefore remains
+active.

@@ -48,6 +48,115 @@ enum class BranchRelayReservoirShape : uint8_t {
   return BranchRelayReservoirShape::Invalid;
 }
 
+/// Independently derived relay-graph facets shared by the three relay proofs.
+/// The sets deliberately remain distinct: a word owned by a continuation is
+/// not necessarily a legal donor or reservoir payload target.
+struct BranchRelayValidationInventory {
+  std::unordered_set<uint64_t> continuation_slots;
+  std::unordered_set<uint64_t> donor_target_vertices;
+  std::unordered_set<uint64_t> reservoir_target_vertices;
+  std::unordered_set<uint64_t> indirect_islands;
+  std::unordered_map<uint64_t, uint64_t> branch_only_targets;
+  std::vector<const ConSanPatchInfo *> nop_relays;
+  std::vector<const ConSanPatchInfo *> donors;
+  std::vector<const ConSanPatchInfo *> reservoirs;
+};
+
+[[nodiscard]] BranchRelayValidationInventory
+make_branch_relay_validation_inventory(std::span<const ConSanPatchInfo> patches) {
+  BranchRelayValidationInventory inventory;
+  const auto insert_words = [](std::unordered_set<uint64_t> &slots, uint64_t begin, uint64_t end) {
+    for (uint64_t offset = begin; offset < end; offset += sizeof(uint32_t))
+      slots.insert(offset);
+  };
+  const auto insert_shared_slot = [&](uint64_t offset) {
+    inventory.continuation_slots.insert(offset);
+    inventory.donor_target_vertices.insert(offset);
+    inventory.reservoir_target_vertices.insert(offset);
+  };
+  const auto insert_shared_words = [&](uint64_t begin, uint64_t end) {
+    for (uint64_t offset = begin; offset < end; offset += sizeof(uint32_t))
+      insert_shared_slot(offset);
+  };
+  for (const ConSanPatchInfo &patch : patches) {
+    for (uint64_t offset : patch.branch_relay_offsets)
+      insert_shared_slot(offset);
+    const bool local_lds = (patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
+                            patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap) &&
+                           patch.original_size == 2u * sizeof(uint32_t);
+    if (local_lds)
+      insert_shared_slot(patch.anchor_offset + sizeof(uint32_t));
+    if ((patch.kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
+         patch.kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap) &&
+        (patch.original_size == 2u * sizeof(uint32_t) ||
+         patch.original_size == 3u * sizeof(uint32_t))) {
+      insert_words(inventory.continuation_slots, patch.anchor_offset + sizeof(uint32_t),
+                   patch.anchor_offset + patch.original_size);
+    }
+    if (patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
+        patch.branch_only_continuation && patch.original_size > sizeof(uint32_t)) {
+      insert_words(inventory.continuation_slots, patch.anchor_offset + sizeof(uint32_t),
+                   patch.anchor_offset + patch.original_size);
+    }
+    if (patch.kind == ConSanPatchKind::TrampolineScIndirectBranchIsland)
+      inventory.indirect_islands.insert(patch.trampoline_offset);
+    if (patch.kind == ConSanPatchKind::TrampolineScBranchRelayDonor) {
+      inventory.donors.push_back(&patch);
+      if (patch.original_size == 2u * sizeof(uint32_t))
+        insert_shared_slot(patch.anchor_offset + sizeof(uint32_t));
+      if (patch.original_size >= 6u * sizeof(uint32_t))
+        insert_shared_words(patch.anchor_offset + 4u * sizeof(uint32_t),
+                            patch.anchor_offset + patch.original_size);
+    }
+    if (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir) {
+      inventory.reservoirs.push_back(&patch);
+      switch (branch_relay_reservoir_shape(patch)) {
+      case BranchRelayReservoirShape::GeneratedBank:
+        insert_shared_words(patch.trampoline_offset,
+                            patch.trampoline_offset + patch.trampoline_size);
+        break;
+      case BranchRelayReservoirShape::DirectInstruction:
+        insert_shared_words(patch.anchor_offset + sizeof(uint32_t),
+                            patch.anchor_offset + patch.original_size);
+        break;
+      case BranchRelayReservoirShape::IndirectInstruction: {
+        const std::vector<uint64_t> continuation =
+            sc_relay_reservoir_all_slot_offsets(patch.anchor_offset, patch.original_size);
+        inventory.continuation_slots.insert(continuation.begin(), continuation.end());
+        inventory.reservoir_target_vertices.insert(continuation.begin(), continuation.end());
+        const std::vector<uint64_t> donor_targets =
+            sc_relay_reservoir_slot_offsets(patch.anchor_offset, patch.original_size);
+        inventory.donor_target_vertices.insert(donor_targets.begin(), donor_targets.end());
+        break;
+      }
+      case BranchRelayReservoirShape::Invalid:
+        break;
+      }
+    }
+    if (patch.kind == ConSanPatchKind::TrampolineNopBranchRelay) {
+      inventory.nop_relays.push_back(&patch);
+      inventory.continuation_slots.insert(patch.anchor_offset);
+    }
+    if (patch.branch_only_continuation) {
+      for (size_t index = 0; index < patch.branch_only_entry_relay_offsets.size(); ++index) {
+        inventory.branch_only_targets.emplace(
+            patch.branch_only_entry_relay_offsets[index],
+            index + 1u < patch.branch_only_entry_relay_offsets.size()
+                ? patch.branch_only_entry_relay_offsets[index + 1u]
+                : patch.trampoline_offset);
+      }
+      for (size_t index = 0; index < patch.branch_only_return_relay_offsets.size(); ++index) {
+        inventory.branch_only_targets.emplace(
+            patch.branch_only_return_relay_offsets[index],
+            index + 1u < patch.branch_only_return_relay_offsets.size()
+                ? patch.branch_only_return_relay_offsets[index + 1u]
+                : patch.anchor_offset + patch.original_size);
+      }
+    }
+  }
+  return inventory;
+}
+
 struct UnmatchedBarrierWait {
   const ConSanBarrierSite *site = nullptr;
   std::optional<uint64_t> owner_descriptor_file_offset;
@@ -641,6 +750,7 @@ void validate_sc_indirect_island_semantics(const FinalValidationEnvironment &env
 
 void validate_branch_only_continuation_semantics(const FinalValidationEnvironment &environment,
                                                  const ConSanTransformArtifacts &result,
+                                                 const BranchRelayValidationInventory &inventory,
                                                  std::vector<std::string> &errors) {
   const bool has_branch_only = std::ranges::any_of(
       result.patches, [](const ConSanPatchInfo &patch) { return patch.branch_only_continuation; });
@@ -656,73 +766,17 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
     return;
   const rj_code_arch_t arch = environment.arch();
 
-  std::unordered_set<uint64_t> owned_relay_slots;
   std::unordered_set<uint64_t> nop_relay_slots;
-  for (const ConSanPatchInfo &patch : result.patches) {
-    owned_relay_slots.insert(patch.branch_relay_offsets.begin(), patch.branch_relay_offsets.end());
-    if ((patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
-         patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap) &&
-        patch.original_size == 2u * sizeof(uint32_t))
-      owned_relay_slots.insert(patch.anchor_offset + sizeof(uint32_t));
-    if ((patch.kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
-         patch.kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap) &&
-        (patch.original_size == 2u * sizeof(uint32_t) ||
-         patch.original_size == 3u * sizeof(uint32_t))) {
-      for (uint64_t offset = patch.anchor_offset + sizeof(uint32_t);
-           offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t))
-        owned_relay_slots.insert(offset);
-    }
-    if (patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
-        patch.branch_only_continuation && patch.original_size > sizeof(uint32_t)) {
-      for (uint64_t offset = patch.anchor_offset + sizeof(uint32_t);
-           offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t))
-        owned_relay_slots.insert(offset);
-    }
-    if (patch.kind == ConSanPatchKind::TrampolineScBranchRelayDonor) {
-      if (patch.original_size == 2u * sizeof(uint32_t))
-        owned_relay_slots.insert(patch.anchor_offset + sizeof(uint32_t));
-      if (patch.original_size >= 6u * sizeof(uint32_t)) {
-        for (uint64_t offset = patch.anchor_offset + 4u * sizeof(uint32_t);
-             offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t))
-          owned_relay_slots.insert(offset);
-      }
-    }
-    if (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir) {
-      switch (branch_relay_reservoir_shape(patch)) {
-      case BranchRelayReservoirShape::GeneratedBank:
-        for (uint64_t offset = patch.trampoline_offset;
-             offset < patch.trampoline_offset + patch.trampoline_size; offset += sizeof(uint32_t))
-          owned_relay_slots.insert(offset);
-        break;
-      case BranchRelayReservoirShape::DirectInstruction:
-        for (uint64_t offset = patch.anchor_offset + sizeof(uint32_t);
-             offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t))
-          owned_relay_slots.insert(offset);
-        break;
-      case BranchRelayReservoirShape::IndirectInstruction: {
-        const auto slots =
-            sc_relay_reservoir_all_slot_offsets(patch.anchor_offset, patch.original_size);
-        owned_relay_slots.insert(slots.begin(), slots.end());
-        break;
-      }
-      case BranchRelayReservoirShape::Invalid:
-        // The reservoir semantics proof below is the sole owner of rejecting
-        // malformed shapes; they must not contribute ownership here.
-        break;
-      }
-    }
-    if (patch.kind == ConSanPatchKind::TrampolineNopBranchRelay) {
-      const auto pristine_word = environment.original_text.word(patch.anchor_offset);
-      if (patch.phase != ConSanPatchPhase::Instrumentation ||
-          patch.anchor_offset != patch.trampoline_offset ||
-          patch.original_size != sizeof(uint32_t) || patch.trampoline_size != sizeof(uint32_t) ||
-          !pristine_word || *pristine_word != build_s_nop(0, arch) ||
-          !nop_relay_slots.insert(patch.anchor_offset).second) {
-        errors.emplace_back(
-            "ConSan branch-only continuation proof found invalid original-NOP relay provenance");
-        return;
-      }
-      owned_relay_slots.insert(patch.anchor_offset);
+  for (const ConSanPatchInfo *patch : inventory.nop_relays) {
+    const auto pristine_word = environment.original_text.word(patch->anchor_offset);
+    if (patch->phase != ConSanPatchPhase::Instrumentation ||
+        patch->anchor_offset != patch->trampoline_offset ||
+        patch->original_size != sizeof(uint32_t) || patch->trampoline_size != sizeof(uint32_t) ||
+        !pristine_word || *pristine_word != build_s_nop(0, arch) ||
+        !nop_relay_slots.insert(patch->anchor_offset).second) {
+      errors.emplace_back(
+          "ConSan branch-only continuation proof found invalid original-NOP relay provenance");
+      return;
     }
   }
   std::unordered_set<uint64_t> used_relay_slots;
@@ -854,8 +908,8 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
                                     uint64_t target) {
       uint64_t cursor = source;
       for (uint64_t relay : relays) {
-        if (!owned_relay_slots.contains(relay) || !used_relay_slots.insert(relay).second ||
-            !validate_hop(cursor, relay))
+        if (!inventory.continuation_slots.contains(relay) ||
+            !used_relay_slots.insert(relay).second || !validate_hop(cursor, relay))
           return false;
         cursor = relay;
       }
@@ -1086,24 +1140,22 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
 }
 
 void validate_branch_relay_donor_semantics(const FinalValidationEnvironment &environment,
-                                           const ConSanTransformArtifacts &result,
+                                           const BranchRelayValidationInventory &inventory,
                                            std::vector<std::string> &errors) {
   std::vector<const ConSanPatchInfo *> anchors;
   std::vector<const ConSanPatchInfo *> hosts;
-  for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.kind != ConSanPatchKind::TrampolineScBranchRelayDonor)
-      continue;
-    if (patch.phase != ConSanPatchPhase::Instrumentation) {
+  for (const ConSanPatchInfo *patch : inventory.donors) {
+    if (patch->phase != ConSanPatchPhase::Instrumentation) {
       errors.emplace_back("ConSan relay donor proof found a non-instrumentation donor");
       return;
     }
-    if (patch.original_size == 2u * sizeof(uint32_t) &&
-        patch.trampoline_size == 3u * sizeof(uint32_t)) {
-      anchors.push_back(&patch);
-    } else if (patch.original_size >= 6u * sizeof(uint32_t) &&
-               patch.original_size % sizeof(uint32_t) == 0 &&
-               patch.trampoline_size == patch.original_size + sizeof(uint32_t)) {
-      hosts.push_back(&patch);
+    if (patch->original_size == 2u * sizeof(uint32_t) &&
+        patch->trampoline_size == 3u * sizeof(uint32_t)) {
+      anchors.push_back(patch);
+    } else if (patch->original_size >= 6u * sizeof(uint32_t) &&
+               patch->original_size % sizeof(uint32_t) == 0 &&
+               patch->trampoline_size == patch->original_size + sizeof(uint32_t)) {
+      hosts.push_back(patch);
     } else {
       errors.emplace_back("ConSan relay donor proof found an unknown donor geometry");
       return;
@@ -1125,49 +1177,6 @@ void validate_branch_relay_donor_semantics(const FinalValidationEnvironment &env
   const uint32_t nop = build_s_nop(0, arch);
   const uint32_t branch_opcode = build_s_branch(0, arch) & 0xffff0000u;
 
-  std::unordered_set<uint64_t> relay_vertices;
-  std::unordered_set<uint64_t> island_vertices;
-  for (const ConSanPatchInfo &patch : result.patches) {
-    relay_vertices.insert(patch.branch_relay_offsets.begin(), patch.branch_relay_offsets.end());
-    if ((patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
-         patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap) &&
-        patch.original_size == 2u * sizeof(uint32_t))
-      relay_vertices.insert(patch.anchor_offset + sizeof(uint32_t));
-    if (patch.kind == ConSanPatchKind::TrampolineScIndirectBranchIsland)
-      island_vertices.insert(patch.trampoline_offset);
-  }
-  for (const ConSanPatchInfo *anchor : anchors)
-    relay_vertices.insert(anchor->anchor_offset + sizeof(uint32_t));
-  for (const ConSanPatchInfo *host : hosts) {
-    for (uint64_t offset = host->anchor_offset + 4u * sizeof(uint32_t);
-         offset < host->anchor_offset + host->original_size; offset += sizeof(uint32_t))
-      relay_vertices.insert(offset);
-  }
-  for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.kind != ConSanPatchKind::TrampolineBranchRelayReservoir)
-      continue;
-    switch (branch_relay_reservoir_shape(patch)) {
-    case BranchRelayReservoirShape::GeneratedBank:
-      for (uint64_t offset = patch.trampoline_offset;
-           offset < patch.trampoline_offset + patch.trampoline_size; offset += sizeof(uint32_t))
-        relay_vertices.insert(offset);
-      break;
-    case BranchRelayReservoirShape::DirectInstruction:
-      for (uint64_t offset = patch.anchor_offset + sizeof(uint32_t);
-           offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t))
-        relay_vertices.insert(offset);
-      break;
-    case BranchRelayReservoirShape::IndirectInstruction:
-      for (uint64_t offset :
-           sc_relay_reservoir_slot_offsets(patch.anchor_offset, patch.original_size))
-        relay_vertices.insert(offset);
-      break;
-    case BranchRelayReservoirShape::Invalid:
-      // The reservoir semantics proof is the sole owner of rejecting malformed
-      // shapes; they must not contribute continuation vertices here.
-      break;
-    }
-  }
   const auto valid_relay_payload = [&](uint64_t offset) {
     const auto word = environment.replacement_text.word(offset);
     if (!word)
@@ -1182,7 +1191,8 @@ void validate_branch_relay_donor_semantics(const FinalValidationEnvironment &env
     if (target <= static_cast<int64_t>(offset) || target < 0)
       return false;
     const uint64_t target_offset = static_cast<uint64_t>(target);
-    return relay_vertices.contains(target_offset) || island_vertices.contains(target_offset);
+    return inventory.donor_target_vertices.contains(target_offset) ||
+           inventory.indirect_islands.contains(target_offset);
   };
 
   std::unordered_set<const ConSanPatchInfo *> paired_hosts;
@@ -1318,8 +1328,8 @@ void validate_branch_relay_donor_semantics(const FinalValidationEnvironment &env
 
 void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment &environment,
                                                const ConSanTransformArtifacts &result,
+                                               const BranchRelayValidationInventory &inventory,
                                                std::vector<std::string> &errors) {
-  std::vector<const ConSanPatchInfo *> reservoirs;
   for (const ConSanPatchInfo &patch : result.patches) {
     for (uint64_t offset : patch.branch_relay_offsets) {
       const bool in_anchor =
@@ -1331,10 +1341,8 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
         return;
       }
     }
-    if (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir)
-      reservoirs.push_back(&patch);
   }
-  if (reservoirs.empty())
+  if (inventory.reservoirs.empty())
     return;
   if (!environment.original_text.available || !environment.replacement_text.available) {
     errors.emplace_back("ConSan relay reservoir proof requires one executable text section");
@@ -1365,75 +1373,15 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
   const uint32_t nop = build_s_nop(0, arch);
   const uint32_t branch_opcode = build_s_branch(0, arch) & 0xffff0000u;
 
-  std::unordered_set<uint64_t> relay_vertices;
-  std::unordered_set<uint64_t> island_vertices;
-  std::unordered_map<uint64_t, uint64_t> branch_only_relay_targets;
-  for (const ConSanPatchInfo &patch : result.patches) {
-    relay_vertices.insert(patch.branch_relay_offsets.begin(), patch.branch_relay_offsets.end());
-    if (patch.kind == ConSanPatchKind::TrampolineScIndirectBranchIsland)
-      island_vertices.insert(patch.trampoline_offset);
-    if ((patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
-         patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap) &&
-        patch.original_size == 2u * sizeof(uint32_t))
-      relay_vertices.insert(patch.anchor_offset + sizeof(uint32_t));
-    if (patch.kind == ConSanPatchKind::TrampolineScBranchRelayDonor) {
-      if (patch.original_size == 2u * sizeof(uint32_t))
-        relay_vertices.insert(patch.anchor_offset + sizeof(uint32_t));
-      if (patch.original_size >= 6u * sizeof(uint32_t))
-        for (uint64_t offset = patch.anchor_offset + 4u * sizeof(uint32_t);
-             offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t))
-          relay_vertices.insert(offset);
-    }
-    if (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir) {
-      switch (branch_relay_reservoir_shape(patch)) {
-      case BranchRelayReservoirShape::GeneratedBank:
-        for (uint64_t offset = patch.trampoline_offset;
-             offset < patch.trampoline_offset + patch.trampoline_size; offset += sizeof(uint32_t))
-          relay_vertices.insert(offset);
-        break;
-      case BranchRelayReservoirShape::DirectInstruction:
-        for (uint64_t offset = patch.anchor_offset + sizeof(uint32_t);
-             offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t))
-          relay_vertices.insert(offset);
-        break;
-      case BranchRelayReservoirShape::IndirectInstruction:
-        for (uint64_t offset :
-             sc_relay_reservoir_all_slot_offsets(patch.anchor_offset, patch.original_size))
-          relay_vertices.insert(offset);
-        break;
-      case BranchRelayReservoirShape::Invalid:
-        // The reservoir semantics proof is the sole owner of rejecting
-        // malformed shapes; they must not contribute donor vertices here.
-        break;
-      }
-    }
-    if (patch.branch_only_continuation) {
-      for (size_t index = 0; index < patch.branch_only_entry_relay_offsets.size(); ++index) {
-        const uint64_t source = patch.branch_only_entry_relay_offsets[index];
-        const uint64_t target = index + 1u < patch.branch_only_entry_relay_offsets.size()
-                                    ? patch.branch_only_entry_relay_offsets[index + 1u]
-                                    : patch.trampoline_offset;
-        branch_only_relay_targets.emplace(source, target);
-      }
-      for (size_t index = 0; index < patch.branch_only_return_relay_offsets.size(); ++index) {
-        const uint64_t source = patch.branch_only_return_relay_offsets[index];
-        const uint64_t target = index + 1u < patch.branch_only_return_relay_offsets.size()
-                                    ? patch.branch_only_return_relay_offsets[index + 1u]
-                                    : patch.anchor_offset + patch.original_size;
-        branch_only_relay_targets.emplace(source, target);
-      }
-    }
-  }
-
   const auto valid_relay_target = [&](uint64_t source, int64_t target) {
     if (target < 0)
       return false;
-    if (const auto branch_only = branch_only_relay_targets.find(source);
-        branch_only != branch_only_relay_targets.end())
+    if (const auto branch_only = inventory.branch_only_targets.find(source);
+        branch_only != inventory.branch_only_targets.end())
       return static_cast<uint64_t>(target) == branch_only->second;
     return target > static_cast<int64_t>(source) &&
-           (relay_vertices.contains(static_cast<uint64_t>(target)) ||
-            island_vertices.contains(static_cast<uint64_t>(target)));
+           (inventory.reservoir_target_vertices.contains(static_cast<uint64_t>(target)) ||
+            inventory.indirect_islands.contains(static_cast<uint64_t>(target)));
   };
   const auto validate_relay_payload = [&](uint64_t begin, uint64_t end, std::string_view shape_name,
                                           uint64_t report_offset, uint64_t report_size) {
@@ -1469,7 +1417,7 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
     return true;
   };
 
-  for (const ConSanPatchInfo *patch : reservoirs) {
+  for (const ConSanPatchInfo *patch : inventory.reservoirs) {
     const BranchRelayReservoirShape shape = branch_relay_reservoir_shape(*patch);
     if (shape == BranchRelayReservoirShape::GeneratedBank) {
       if (patch->phase != ConSanPatchPhase::Instrumentation || patch->trampoline_size == 0 ||
@@ -4382,13 +4330,15 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   if (result.patches.empty())
     errors.emplace_back("ConSan final validation found no patch inventory for a modified result");
   FinalValidationEnvironment environment(original, replacement);
+  const BranchRelayValidationInventory relay_inventory =
+      make_branch_relay_validation_inventory(result.patches);
   validate_patch_byte_accounting(environment, result, errors);
   validate_patch_decoding(environment, result, errors);
   validate_sc_indirect_island_semantics(environment, result, errors);
-  validate_branch_only_continuation_semantics(environment, result, errors);
+  validate_branch_only_continuation_semantics(environment, result, relay_inventory, errors);
   validate_sc_dense_call_semantics(environment, result, errors);
-  validate_branch_relay_donor_semantics(environment, result, errors);
-  validate_branch_relay_reservoir_semantics(environment, result, errors);
+  validate_branch_relay_donor_semantics(environment, relay_inventory, errors);
+  validate_branch_relay_reservoir_semantics(environment, result, relay_inventory, errors);
   validate_mutation_semantics(environment, result, errors);
   validate_sc_perturbation_semantics(original_bytes, environment, result,
                                      validating_carried_composite_stage, carried_perturbation,
