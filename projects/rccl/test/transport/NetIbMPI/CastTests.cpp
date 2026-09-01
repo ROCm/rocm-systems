@@ -31,7 +31,7 @@ TEST_F(NetIbMPITest, CastEqualWeightsTwoQPsTokenCounts) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 1024;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -93,7 +93,7 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr int    kTotTokens = 100;
     constexpr size_t kMsgSz     = 64;
@@ -203,7 +203,7 @@ TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 128;
     constexpr int    kNMsgs   = 10;
@@ -257,7 +257,7 @@ TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 256;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -311,7 +311,7 @@ TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 64;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -358,7 +358,7 @@ TEST_F(NetIbMPITest, CastCursorWrapsAtNqpsBoundary) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 128;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -418,7 +418,7 @@ TEST_F(NetIbMPITest, CastMaxQPCount128) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSz  = 32;
     constexpr size_t kBufSz  = (NCCL_IB_MAX_QPS + 1)  * kMsgSz;
@@ -493,7 +493,7 @@ TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr int    kNMsgs  = 100;
     constexpr size_t kMsgSz  = 32;
@@ -593,7 +593,7 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     void* comm = (rank == 0) ? recvComm : sendComm;
 
@@ -689,7 +689,7 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr int    kPhase  = 10;
     constexpr size_t kMsgSz  = 64;
@@ -820,7 +820,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     void* comm = (rank == 0) ? recvComm : sendComm;
 
@@ -929,7 +929,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     // Must be strictly below splitDataMin so dataPerQp < splitDataMin for any nqps,
     // ensuring messages take the WRR path (not the split path).
@@ -1032,7 +1032,7 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kBufSz = 524288; // 512 KB — fits all test sizes
     std::vector<char> sendBuf(kBufSz);
@@ -1143,7 +1143,7 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSz = kLargeBufferSize; // 16 MB
     std::vector<char> sendBuf(kMsgSz);
@@ -1209,7 +1209,7 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kRegSz = 64;
     char buf[kRegSz];
@@ -1285,7 +1285,7 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     std::vector<void*> sendComms(kNConns, nullptr);
     std::vector<void*> recvComms(kNConns, nullptr);
     for (int c = 0; c < kNConns; c++)
-        ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComms[c], &sendComms[c], &recvComms[c]));
+        ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComms[c], &sendComms[c], &recvComms[c]);
 
     // Scale msgs per connection inversely with connection count so total work stays constant.
     constexpr int kNMsgsTotal = 10000;

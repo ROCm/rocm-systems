@@ -689,6 +689,21 @@ if(BUILD_TESTS)
       "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
       "LINKER:--export-dynamic-symbol=ncclRmaPlugin_v13")
 
+    # The NetIbMPI connection-setup helpers are [[nodiscard]] so that dropping
+    # their result is caught rather than reviewed for. On its own that is only a
+    # warning, and WERROR defaults to OFF, so a bare SetupConnection(...) would
+    # still build and carry on with the comms the helper just closed. Promote it
+    # to an error -- the guard under test/netibmpi-guards checks helper
+    # definitions, not call sites, so this is what covers the call sites.
+    #
+    # Scoped to the NetIbMPI sources rather than the whole target: other MPI
+    # tests discard [[nodiscard]] results of their own, and reworking those is
+    # not this change's business.
+    set(NETIBMPI_TEST_SOURCE_FILES ${MPI_TEST_SOURCE_FILES})
+    list(FILTER NETIBMPI_TEST_SOURCE_FILES INCLUDE REGEX "transport/NetIbMPI/")
+    set_source_files_properties(${NETIBMPI_TEST_SOURCE_FILES}
+      PROPERTIES COMPILE_OPTIONS -Werror=unused-result)
+
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
 
     # Hand the in-tree Inspector plugin to InspectorPromP2pMPITests so it can
