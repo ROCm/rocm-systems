@@ -99,8 +99,12 @@ def compute_build_stages(
 
     # Import TheRock's build topology from the checkout. TheRock is the source of
     # truth for the build graph; we only read it.
-    therock_build_tools = Path(therock_path) / "build_tools"
-    sys.path.insert(0, os.fspath(therock_build_tools))
+    therock_build_tools = (Path(therock_path) / "build_tools").resolve()
+    therock_build_tools_str = os.fspath(therock_build_tools)
+
+    if therock_build_tools_str not in sys.path:
+        sys.path.insert(0, therock_build_tools_str)
+
     try:
         from _therock_utils.build_topology import get_topology
 
