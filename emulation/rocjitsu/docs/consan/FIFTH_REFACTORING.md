@@ -2958,3 +2958,74 @@ production surface, eliminate the broad operating-point and transform buses,
 achieve material code shrinkage, or replace the required independent deep-read
 completion audit. Section 14.4 remains complete through the checkpoint-17
 extension fixtures, and the goal remains active.
+
+### 16.29 Convergence checkpoint 28: pipeline-owned lowering summaries
+
+The MOI coordinator formerly ended lowering with fourteen patch-kind searches
+and mode-aware diagnostic branches. That block was neither orchestration nor
+mode policy: it reconstructed a presentation summary from the already
+committed lowering products. Its location made the coordinator know the
+diagnostic vocabulary of Record/Replay, Sampled, and InlineShadow, repeated
+the same whole-patch scan for every message, and obscured the pipeline's
+forward-only terminal path.
+
+The common MOI pipeline now owns one declarative lowering-summary table and
+renderer. This is intentionally shared infrastructure, not one copy per mode:
+common first-light, prologue, barrier, atomic, synchronization, and fence
+products retain one rendering mechanism, while each mode-specific product is
+represented by one table row. Adding a new mode does not require copying the
+renderer or adding branches to the coordinator. The coordinator projects the
+joined private patch proof to a `ConSanPatchKind` inventory, passes the active
+engine, modification state, and that inventory across the boundary, and only
+appends the returned diagnostics.
+
+The contract is narrower than the initial extraction suggested by the source
+shape. A contiguous vector of the private joined `ConSanPatchInfo` cannot be
+viewed as a span of its `ConSanPatchLoweringProduct` base because the element
+stride differs. Rather than expose the joined proof, the final API consumes
+only `span<const ConSanPatchKind>`. Compile-time negative checks reject both a
+patch-info span and the broad transform artifact as summary inputs. The direct
+owner test supplies every summarized patch kind, duplicates one counted kind,
+and proves exact message ordering, active-mode naming, count rendering,
+modified-without-summary behavior, and the inventory-only case. Existing
+end-to-end InlineShadow and Sampled diagnostic tests continue to exercise the
+same production messages.
+
+The superseded coordinator block is deleted in the same slice. The coordinator
+contains none of its fourteen presentation cases, no summary diagnostic text,
+and no explicit concrete mode-enum reference. The pipeline summary contract
+contains no `MoiOptions`, `ConSanOptions`, `ConSanTransformArtifacts`,
+`ConSanPatchInfo`, or `ConSanPatchLoweringProduct`. This keeps a genuinely
+shared mechanism shared while making its one extension point explicit and
+preventing presentation from reopening the broad mutable bus.
+
+| Signal | Checkpoint 28 | Cumulative change | Slice change from checkpoint 27 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,428 | +453 | **-6** |
+| Nonblank production lines | 99,150 | +67 | **-14** |
+| Production implementation lines | 91,440 | **-10** | **-15** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 207 / 56 | **-69 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 206 / 28 | +6 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| Concrete summary cases in the MOI coordinator | 0 | n/a | **-14** |
+| Broad types in the lowering-summary contract | 0 | n/a | converged |
+| Test inventory | 5,377 | +32 | **+1** |
+
+Validation includes a full final-tree `-j16` rebuild; 34 focused pipeline and
+existing end-to-end summary tests; all 4,742 nonphysical tests at `-j16` in
+197.06 seconds, including the unchanged 2,908 simulator rows over five
+targets; and all 635 physical gfx1201 tests serialized at `-j1` in 108.60
+seconds. No test was removed, renamed, or disabled. The inventory grew by the
+one direct summary-owner regression.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.7, 14.8, and 14.9:
+it removes a mode-aware coordinator peephole, enforces a narrow forward-only
+product, deletes the replaced implementation, and reverses checkpoint 27's
+temporary size growth. A cumulative ten-line implementation reduction is not
+the material whole-refactoring shrinkage required by Section 14.8, however.
+The broad operating point and transform transaction, remaining placement and
+validation concentrations, architecture and mode locality across the complete
+surface, and the independent deep-read completion audit remain open. The goal
+therefore remains active.

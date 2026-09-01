@@ -11,6 +11,10 @@
 
 namespace rocjitsu::consan_moi_impl {
 
+[[nodiscard]] std::vector<std::string>
+summarize_moi_lowering(ConSanMoiEngine engine, bool modified,
+                       std::span<const ConSanPatchKind> patch_kinds);
+
 void publish_pending_moi_lowering_rejections(
     ConSanTransformArtifacts &result,
     std::optional<ConSanRegisterPlanReason> whole_transform_resource_failure = std::nullopt);

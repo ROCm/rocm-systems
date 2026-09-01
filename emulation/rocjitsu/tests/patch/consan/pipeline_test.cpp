@@ -4,6 +4,7 @@
 #include "consan_test_support.h"
 #include "transform_result_test_access.h"
 
+#include "rocjitsu/code/patch/consan/consan_moi_pipeline.h"
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
 
 #include <gtest/gtest.h>
@@ -111,6 +112,60 @@ static_assert(!HasCommittedPatchGeometry<ConSanPatchPlacementEffects>);
 static_assert(!HasPatchEvidenceEffect<ConSanPatchPlacementEffects>);
 static_assert(!HasPatchMutationProof<ConSanPatchPlacementEffects>);
 static_assert(!HasPatchFaultProof<ConSanPatchPlacementEffects>);
+
+template <typename T>
+concept IsMoiLoweringSummaryInventory = requires(T inventory) {
+  consan_moi_impl::summarize_moi_lowering(ConSanMoiEngine::RecordReplay, true, inventory);
+};
+
+static_assert(IsMoiLoweringSummaryInventory<std::span<const ConSanPatchKind>>);
+static_assert(!IsMoiLoweringSummaryInventory<std::span<const ConSanPatchInfo>>);
+static_assert(!IsMoiLoweringSummaryInventory<const ConSanTransformArtifacts &>);
+
+TEST(ConSanPipeline, MoiLoweringSummaryConsumesOnlyTypedPatchKindInventory) {
+  const std::vector patches{
+      ConSanPatchKind::InlineMoiAccessRecordStore,
+      ConSanPatchKind::TrampolineMoiAccessRecordStore,
+      ConSanPatchKind::InlineMoiExactShadowStore,
+      ConSanPatchKind::TrampolineMoiExactShadowStore,
+      ConSanPatchKind::InlineMoiSampledWatchpointStore,
+      ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
+      ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
+      ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
+      ConSanPatchKind::TrampolineMoiBarrierRecord,
+      ConSanPatchKind::TrampolineMoiBarrierRecord,
+      ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+      ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
+      ConSanPatchKind::TrampolineMoiAtomicRecord,
+      ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+      ConSanPatchKind::TrampolineMoiFenceRecord,
+  };
+
+  EXPECT_EQ(consan_moi_impl::summarize_moi_lowering(ConSanMoiEngine::RecordReplay, true, patches),
+            (std::vector<std::string>{
+                "ConSan MOI record_replay engine emitted a first-light access record probe",
+                "ConSan MOI record_replay engine emitted an appended-cave first-light access "
+                "record probe",
+                "ConSan MOI inline-shadow engine emitted an exact-shadow publish probe",
+                "ConSan MOI inline-shadow engine emitted an appended-cave exact-shadow publish "
+                "probe",
+                "ConSan MOI sampled engine emitted a direct sampled watchpoint probe",
+                "ConSan MOI sampled engine emitted an appended-cave direct sampled watchpoint "
+                "probe",
+                "ConSan MOI initialized owner/epoch VGPRs with a kernel-entry prologue",
+                "ConSan MOI initialized private epoch state with a kernel-entry prologue",
+                "ConSan MOI emitted 2 barrier record probe(s)",
+                "ConSan MOI record_replay engine emitted 1 barrier epoch probe(s)",
+                "ConSan MOI inline-shadow engine emitted 1 inline atomic ordering probe(s)",
+                "ConSan MOI emitted 1 atomic record probe(s)",
+                "ConSan MOI sampled engine emitted 1 typed synchronization probe(s)",
+                "ConSan MOI emitted 1 fence record probe(s)",
+            }));
+  EXPECT_TRUE(
+      consan_moi_impl::summarize_moi_lowering(ConSanMoiEngine::InlineShadow, true, {}).empty());
+  EXPECT_EQ(consan_moi_impl::summarize_moi_lowering(ConSanMoiEngine::Sampled, false, {}),
+            (std::vector<std::string>{"ConSan MOI sampled engine is an inventory-only stub"}));
+}
 
 [[nodiscard]] RuntimeCapabilities complete_runtime_capabilities() {
   return {

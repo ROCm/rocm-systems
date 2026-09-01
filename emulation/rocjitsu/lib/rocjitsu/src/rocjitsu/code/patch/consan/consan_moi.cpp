@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <ranges>
@@ -310,88 +311,14 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   if (result.errors.empty())
     (void)enable_moi_full_workgroup_id_payload(arch, result);
   publish_pending_moi_lowering_rejections(result);
-  if (result.modified()) {
-    const auto patch_count = [&result](ConSanPatchKind kind) {
-      return static_cast<uint32_t>(std::count_if(
-          result.patches.begin(), result.patches.end(),
-          [kind](const ConSanPatchLoweringProduct &patch) { return patch.kind == kind; }));
-    };
-    if (patch_count(ConSanPatchKind::InlineMoiAccessRecordStore) != 0) {
-      result.warnings.emplace_back(std::string("ConSan MOI ") +
-                                   consan_moi_engine_name(effective_options.moi_engine) +
-                                   " engine emitted a first-light access record probe");
-    }
-    if (patch_count(ConSanPatchKind::TrampolineMoiAccessRecordStore) != 0) {
-      result.warnings.emplace_back(std::string("ConSan MOI ") +
-                                   consan_moi_engine_name(effective_options.moi_engine) +
-                                   " engine emitted an appended-cave first-light access record "
-                                   "probe");
-    }
-    if (patch_count(ConSanPatchKind::InlineMoiExactShadowStore) != 0) {
-      result.warnings.emplace_back("ConSan MOI inline-shadow engine emitted an exact-shadow "
-                                   "publish probe");
-    }
-    if (patch_count(ConSanPatchKind::TrampolineMoiExactShadowStore) != 0) {
-      result.warnings.emplace_back("ConSan MOI inline-shadow engine emitted an appended-cave "
-                                   "exact-shadow publish probe");
-    }
-    if (patch_count(ConSanPatchKind::InlineMoiSampledWatchpointStore) != 0) {
-      result.warnings.emplace_back("ConSan MOI sampled engine emitted a direct sampled "
-                                   "watchpoint probe");
-    }
-    if (patch_count(ConSanPatchKind::TrampolineMoiSampledWatchpointStore) != 0) {
-      result.warnings.emplace_back("ConSan MOI sampled engine emitted an appended-cave direct "
-                                   "sampled watchpoint probe");
-    }
-    if (patch_count(ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue) != 0) {
-      result.warnings.emplace_back(
-          "ConSan MOI initialized owner/epoch VGPRs with a kernel-entry prologue");
-    }
-    if (patch_count(ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue) != 0) {
-      result.warnings.emplace_back(
-          "ConSan MOI initialized private epoch state with a kernel-entry prologue");
-    }
-    if (const uint32_t barrier_patches = patch_count(ConSanPatchKind::TrampolineMoiBarrierRecord);
-        barrier_patches != 0) {
-      result.warnings.emplace_back("ConSan MOI emitted " + std::to_string(barrier_patches) +
-                                   " barrier record probe(s)");
-    }
-    if (const uint32_t inline_epoch_barriers =
-            patch_count(ConSanPatchKind::TrampolineMoiInlineEpochBarrier);
-        inline_epoch_barriers != 0) {
-      result.warnings.emplace_back(
-          std::string("ConSan MOI ") + consan_moi_engine_name(effective_options.moi_engine) +
-          " engine emitted " + std::to_string(inline_epoch_barriers) + " barrier epoch probe(s)");
-    }
-    if (const uint32_t inline_atomic_patches =
-            patch_count(ConSanPatchKind::TrampolineMoiInlineAtomicOrdering);
-        inline_atomic_patches != 0) {
-      result.warnings.emplace_back("ConSan MOI inline-shadow engine emitted " +
-                                   std::to_string(inline_atomic_patches) +
-                                   " inline atomic ordering probe(s)");
-    }
-    if (const uint32_t atomic_patches = patch_count(ConSanPatchKind::TrampolineMoiAtomicRecord);
-        atomic_patches != 0) {
-      result.warnings.emplace_back("ConSan MOI emitted " + std::to_string(atomic_patches) +
-                                   " atomic record probe(s)");
-    }
-    if (const uint32_t sampled_sync_patches =
-            patch_count(ConSanPatchKind::TrampolineMoiSampledSyncMetadata);
-        sampled_sync_patches != 0) {
-      result.warnings.emplace_back("ConSan MOI sampled engine emitted " +
-                                   std::to_string(sampled_sync_patches) +
-                                   " typed synchronization probe(s)");
-    }
-    if (const uint32_t fence_patches = patch_count(ConSanPatchKind::TrampolineMoiFenceRecord);
-        fence_patches != 0) {
-      result.warnings.emplace_back("ConSan MOI emitted " + std::to_string(fence_patches) +
-                                   " fence record probe(s)");
-    }
-  } else {
-    result.warnings.emplace_back(std::string("ConSan MOI ") +
-                                 consan_moi_engine_name(effective_options.moi_engine) +
-                                 " engine is an inventory-only stub");
-  }
+  std::vector<ConSanPatchKind> patch_kinds;
+  patch_kinds.reserve(result.patches.size());
+  std::ranges::transform(result.patches, std::back_inserter(patch_kinds),
+                         [](const auto &patch) { return patch.kind; });
+  std::vector<std::string> lowering_summary =
+      summarize_moi_lowering(effective_options.moi_engine, result.modified(), patch_kinds);
+  result.warnings.insert(result.warnings.end(), std::make_move_iterator(lowering_summary.begin()),
+                         std::make_move_iterator(lowering_summary.end()));
   return result;
 }
 
