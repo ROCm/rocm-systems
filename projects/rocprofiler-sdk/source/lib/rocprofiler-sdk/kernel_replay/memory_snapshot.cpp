@@ -206,8 +206,8 @@ snap(hsa_agent_t agent)
         out.blocks.reserve(inventory.size() + scan.found.size());
     } catch(const std::bad_alloc&)
     {
-        ROCP_WARNING << "kernel-replay snapshot: out of memory reserving metadata; declining "
-                        "replay for this dispatch";
+        LOG_FIRST_N(WARNING, 1) << "kernel-replay snapshot: out of memory reserving metadata; "
+                                   "declining replay for this dispatch";
         out.ok = false;
         return out;
     }
@@ -216,8 +216,9 @@ snap(hsa_agent_t agent)
     // cannot restore what we did not capture, so the passes would not see identical inputs.
     if(scan.incomplete)
     {
-        ROCP_WARNING << "kernel-replay snapshot: could not enumerate module-scope variables for "
-                        "every loaded executable; declining replay for this dispatch";
+        LOG_FIRST_N(WARNING, 1) << "kernel-replay snapshot: could not enumerate module-scope "
+                                   "variables for every loaded executable; declining replay for "
+                                   "this dispatch";
         out.ok = false;
         return out;
     }

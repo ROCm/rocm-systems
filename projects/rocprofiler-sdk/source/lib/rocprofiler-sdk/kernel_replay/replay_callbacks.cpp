@@ -228,8 +228,8 @@ execute_config_phase_enter(const hsa::Queue&              queue,
     plan.total_passes = plan.replay_pass_count(plan.config_data.dispatch_info, plan.user_data);
     if(plan.total_passes == 0 && !plan.replay_continue)
     {
-        ROCP_WARNING << "kernel replay: replay_pass_count returned 0 without replay_continue; "
-                        "dispatch will not be replayed";
+        LOG_FIRST_N(WARNING, 1) << "kernel replay: replay_pass_count returned 0 without "
+                                   "replay_continue; dispatch will not be replayed";
         execute_config_phase_exit(plan, thr_id, internal_corr_id, ancestor_corr_id);
         return plan;
     }

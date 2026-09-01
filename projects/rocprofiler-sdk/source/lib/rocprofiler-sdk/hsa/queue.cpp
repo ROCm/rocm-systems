@@ -1011,8 +1011,8 @@ WriteInterceptor(const void* packets,
             // completion signal, then return.
             if(!snapshot.ok)
             {
-                ROCP_WARNING << "kernel replay: snapshot capture incomplete; running this "
-                                "dispatch once without replay";
+                LOG_FIRST_N(WARNING, 1) << "kernel replay: snapshot capture incomplete; running "
+                                           "this dispatch once without replay";
                 kernel_replay::execute_config_phase_exit(
                     replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
                 if(drain_signal != null_hsa_signal)
