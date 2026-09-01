@@ -7,6 +7,23 @@
 #ifndef _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP6_H_
 #define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP6_H_
 
+#if !defined(__cplusplus)
+#include "amd_hip_fp8.h"  // storage typedefs (C fallback)
+typedef __hip_fp8_storage_t __hip_fp6_storage_t;
+typedef __hip_fp8x2_storage_t __hip_fp6x2_storage_t;
+typedef __hip_fp8x4_storage_t __hip_fp6x4_storage_t;
+typedef enum __hip_fp6_interpretation_t {
+  __HIP_E3M2 = 0,
+  __HIP_E2M3 = 1,
+} __hip_fp6_interpretation_t;
+typedef struct { __hip_fp6_storage_t __x; } __hip_fp6_e2m3;
+typedef struct { __hip_fp6_storage_t __x; } __hip_fp6_e3m2;
+typedef struct { __hip_fp6x2_storage_t __x; } __hip_fp6x2_e2m3;
+typedef struct { __hip_fp6x2_storage_t __x; } __hip_fp6x2_e3m2;
+typedef struct { __hip_fp6x4_storage_t __x; } __hip_fp6x4_e2m3;
+typedef struct { __hip_fp6x4_storage_t __x; } __hip_fp6x4_e3m2;
+#else  // !defined(__cplusplus)
+
 #if defined(__HIPCC_RTC__)
 #define __FP6_HOST_DEVICE__ __device__
 #define __FP6_HOST_DEVICE_STATIC__ __FP6_HOST_DEVICE__ static
@@ -941,4 +958,5 @@ struct __hip_fp6x4_e3m2 {
 #endif  // !defined(__HIP_NO_FP6_CONVERSION_OPERATORS__)
 };
 
+#endif  // !defined(__cplusplus)
 #endif  // _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP6_H_
