@@ -42,10 +42,7 @@ def test_valid_config_with_wildcards(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     allreduce_log_dir = os.path.join(paths.LOGDIR, "allreduce_csv_plugin_test_logs")
@@ -98,10 +95,7 @@ def test_valid_config_without_wildcards(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     allreduce_log_dir = os.path.join(paths.LOGDIR, "allreduce_csv_plugin_test_logs")
@@ -156,10 +150,7 @@ def test_no_matching_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     allreduce_log_dir = os.path.join(paths.LOGDIR, "allreduce_csv_plugin_test_logs")
@@ -212,10 +203,7 @@ def test_incorrect_values_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     allreduce_log_dir = os.path.join(paths.LOGDIR, "allreduce_csv_plugin_test_logs")
@@ -269,10 +257,7 @@ def test_unsupported_algo_proto_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     allreduce_log_dir = os.path.join(paths.LOGDIR, "allreduce_csv_plugin_test_logs")
@@ -327,10 +312,7 @@ def test_singlenode_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     allreduce_log_dir = os.path.join(paths.LOGDIR, "allreduce_csv_plugin_test_logs")
@@ -407,10 +389,7 @@ def test_multinode_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
-        "-b", "8",       
-        "-e", "128M",      
-        "-f", "2",        
-        "-g", "1",        
+        *paths.TUNER_PERF_ARGS,
     ]
 
     allreduce_log_dir = os.path.join(paths.LOGDIR, "allreduce_csv_plugin_test_logs")
