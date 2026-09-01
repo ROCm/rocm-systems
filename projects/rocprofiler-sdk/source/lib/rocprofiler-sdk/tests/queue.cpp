@@ -232,8 +232,11 @@ TEST(queue, write_interceptor_stress_under_concurrent_destroy)
     EXPECT_GT(exclusive_acquisitions.load(), 0)
         << "the destroyer never acquired the exclusive lock, so nothing was contended";
 
-    GTEST_LOG_(INFO) << "dispatches=" << dispatch_count.load()
-                     << " exclusive_acquisitions=" << exclusive_acquisitions.load();
+    GTEST_LOG_(INFO) << "\n"
+                     << "  dispatch threads       = " << num_dispatch_threads << "\n"
+                     << "  dispatches/thread      = " << dispatches_per_thread << "\n"
+                     << "  dispatches total       = " << dispatch_count.load() << "\n"
+                     << "  exclusive_acquisitions = " << exclusive_acquisitions.load();
 }
 
 // A real QueueController::destroy_queue() -- which runs the real ~Queue() under the
@@ -341,9 +344,12 @@ TEST(queue, real_destroy_queue_races_doorbell_lookup)
         EXPECT_EQ(producers[p]->state->next_submit_pos, dispatches_per_queue) << "producer " << p;
     }
 
-    GTEST_LOG_(INFO) << "producers=" << num_producers
-                     << " dispatches/producer=" << dispatches_per_queue
-                     << " destroy_cycles=" << destroy_cycles.load();
+    GTEST_LOG_(INFO) << "\n"
+                     << "  producers              = " << num_producers << "\n"
+                     << "  dispatches/producer    = " << dispatches_per_queue << "\n"
+                     << "  dispatches total       = " << num_producers * dispatches_per_queue
+                     << "\n"
+                     << "  destroy_cycles         = " << destroy_cycles.load();
 }
 }  // namespace hsa
 }  // namespace rocprofiler

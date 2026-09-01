@@ -573,8 +573,11 @@ TEST(queue_interposition, doorbell_stress_many_queues_concurrent_destroy)
     EXPECT_GT(exclusive_acquisitions.load(), 0)
         << "the destroyer never acquired the exclusive lock, so nothing was contended";
 
-    GTEST_LOG_(INFO) << "queues=" << num_queues << " dispatches/queue=" << dispatches_per_queue
-                     << " exclusive_acquisitions=" << exclusive_acquisitions.load();
+    GTEST_LOG_(INFO) << "\n"
+                     << "  queues                 = " << num_queues << "\n"
+                     << "  dispatches/queue       = " << dispatches_per_queue << "\n"
+                     << "  dispatches total       = " << num_queues * dispatches_per_queue << "\n"
+                     << "  exclusive_acquisitions = " << exclusive_acquisitions.load();
 
     for(size_t q = 0; q < num_queues; ++q)
     {
