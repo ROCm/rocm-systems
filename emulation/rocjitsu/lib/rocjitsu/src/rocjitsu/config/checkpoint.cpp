@@ -16,7 +16,6 @@
 #include <cstddef>
 #include <fstream>
 #include <stdexcept>
-#include <string_view>
 #include <vector>
 
 namespace rocjitsu {
@@ -97,7 +96,6 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
   auto arch_str = builder.CreateString(arch_to_string(soc.arch()));
   auto exec_mode_str = builder.CreateString(
       soc.exec_mode() == simdojo::ExecMode::CLOCKED ? "clocked" : "functional");
-  auto fidelity_mode_str = builder.CreateString(emulation_fidelity_name(soc.emulation_fidelity()));
 
   // Extract configuration from the live component tree.
   uint32_t num_xcds = soc.num_xcds();
@@ -144,7 +142,7 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
   builder.ForceDefaults(true);
   auto result = fb::CreateSimulationConfig(
       builder, engine_config.max_ticks, engine_config.num_threads, exec_mode_str, fb_vm, 0, 0,
-      cpu_dispatch_threads, cpu_thread_budget, fb_choices, async_helper_threads, fidelity_mode_str);
+      cpu_dispatch_threads, cpu_thread_budget, fb_choices, async_helper_threads);
   builder.ForceDefaults(false);
   return result;
 }
@@ -163,8 +161,6 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
     throw std::runtime_error("Checkpoint has missing or invalid architecture");
   vm_config.soc.exec_mode =
       parse_exec_mode(fb_config->exec_mode() ? fb_config->exec_mode()->str() : "");
-  vm_config.soc.fidelity = parse_emulation_fidelity(
-      fb_config->fidelity_mode() ? fb_config->fidelity_mode()->string_view() : std::string_view{});
 
   if (auto *gpu = vm->gpu()) {
     vm_config.soc.num_xcds = gpu->num_xcds();
