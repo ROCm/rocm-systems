@@ -62,7 +62,7 @@ typedef struct amdcuid_primary_id {
 } amdcuid_primary_id;
 
 typedef struct amdcuid_derived_id {
-  uint8_t hash[14];                    // 110 LSB bits of HMAC hash
+  uint8_t hash[14];                    // 14 octets carrying 109 (64 + 45) LSB bits of HMAC hash
   uint8_t raw_bits[16];                // 122 bits which adds back the unit id bits
   amdcuid_id_t UUIDv8_representation;  // UUIDv8 representation of the derived CUID which adds in
                                        // the UUIDv8 required bits

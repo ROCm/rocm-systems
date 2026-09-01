@@ -38,6 +38,86 @@ struct HmacWiring {
   HmacWiring() { mgr.set_hmac(&global_hmac); }
 } hmac_wiring;
 
+// The key to hand a derivation, for a caller of this privilege. Root gets it;
+// generate_derived_cuid() rejects a null key, so without this a privileged
+// lookup of a device the record names but holds no derived entry for returns
+// INVALID_ARGUMENT. An unprivileged caller does not get it, the same rule
+// AMDCUID_QUERY_DERIVED_CUID applies below: it cannot read a hardware
+// fingerprint, so deriving would build every device's CUID from an all-zero
+// primary. It must be answered from the driver or the record, or not at all.
+cuid_hmac* derivation_key() { return geteuid() == 0 ? &global_hmac : nullptr; }
+
+// Push the new seed into the driver for one PCI device.
+//
+// The kernel accepts exactly 32 raw bytes, not at most 32 (amdgpu_cuid.c:
+// `if (count != sizeof(cuid->seed)) return -EINVAL;`), so this is one write()
+// of exactly key_length, with no retry of a short write and no trailing
+// newline.
+//
+// Returns SUCCESS when the seed was accepted, UNSUPPORTED when the attribute is
+// absent, so there is no kernel-published value to go stale, and
+// PERMISSION_DENIED or FILE_ERROR when it exists and the write did not land.
+amdcuid_status_t write_driver_seed(const std::string& bdf, const uint8_t key[key_length]) {
+  const std::string path = "/sys/bus/pci/devices/" + bdf + "/cuid_seed";
+
+  const int fd = open(path.c_str(), O_WRONLY | O_CLOEXEC);
+  if (fd < 0) {
+    if (errno == ENOENT) return AMDCUID_STATUS_UNSUPPORTED;
+    const int err = errno;
+    LOG(ERROR,
+        "amdcuid_set_hash_key: cannot open " << path << ": " << CuidUtilities::errno_string(err));
+    return (err == EACCES || err == EPERM) ? AMDCUID_STATUS_PERMISSION_DENIED
+                                           : AMDCUID_STATUS_FILE_ERROR;
+  }
+
+  const ssize_t written = write(fd, key, key_length);
+  const int err = errno;
+  close(fd);
+
+  if (written == static_cast<ssize_t>(key_length)) return AMDCUID_STATUS_SUCCESS;
+
+  LOG(ERROR,
+      "amdcuid_set_hash_key: cannot write " << path << ": " << CuidUtilities::errno_string(err));
+  return (err == EACCES || err == EPERM) ? AMDCUID_STATUS_PERMISSION_DENIED
+                                         : AMDCUID_STATUS_FILE_ERROR;
+}
+
+// Re-key every driver that publishes a CUID of its own.
+//
+// CuidDevice::get_derived_cuid() answers from the driver's cuid_secondary
+// first, and that value is keyed by the per-device sysfs cuid_seed, not by this
+// library's key file, so rewriting the key file alone leaves every such GPU on
+// its old derived CUID.
+//
+// A device with no cuid_seed attribute is not a failure, since nothing of the
+// caller's is left stale; a device that has the attribute and will not take the
+// write is. There is no status meaning "partially re-keyed", so the first real
+// failure is returned: PERMISSION_DENIED where the write was refused, FILE_ERROR
+// otherwise. The key file and the in-memory key are already replaced by the time
+// this runs, so a non-SUCCESS return means those devices are still on the old
+// seed.
+amdcuid_status_t publish_seed_to_drivers(const uint8_t key[key_length]) {
+  if (mgr.devices().empty()) {
+    (void)mgr.discover_devices();
+  }
+
+  amdcuid_status_t first_failure = AMDCUID_STATUS_SUCCESS;
+  for (const auto& device : mgr.devices()) {
+    if (!device) continue;
+
+    std::string bdf;
+    if (device->get_bdf(bdf) != AMDCUID_STATUS_SUCCESS || bdf.empty()) {
+      continue;  // CPU, platform: nothing in sysfs to re-key
+    }
+
+    const amdcuid_status_t status = write_driver_seed(bdf, key);
+    if (status == AMDCUID_STATUS_SUCCESS || status == AMDCUID_STATUS_UNSUPPORTED) continue;
+    if (first_failure == AMDCUID_STATUS_SUCCESS) first_failure = status;
+  }
+
+  return first_failure;
+}
+
 }  // namespace
 
 void amdcuid_get_library_version(uint32_t* major, uint32_t* minor, uint32_t* patch) {
@@ -280,7 +360,7 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
          (!device_real_path.empty() && device_real_path == real_dev_path)) &&
         device->type() == device_type) {
       amdcuid_derived_id derived;
-      status = device->get_derived_cuid(derived);
+      status = device->get_derived_cuid(derived, derivation_key());
       if (status != AMDCUID_STATUS_SUCCESS) {
         return status;
       }
@@ -297,7 +377,7 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
   }
   if (status == AMDCUID_STATUS_SUCCESS) {
     amdcuid_derived_id derived;
-    status = device->get_derived_cuid(derived);
+    status = device->get_derived_cuid(derived, derivation_key());
     if (status != AMDCUID_STATUS_SUCCESS) {
       return status;
     }
@@ -347,7 +427,7 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_
     }
     if (device_bdf == bdf && device->type() == device_type) {
       amdcuid_derived_id derived;
-      status = device->get_derived_cuid(derived);
+      status = device->get_derived_cuid(derived, derivation_key());
       if (status != AMDCUID_STATUS_SUCCESS) {
         return status;
       }
@@ -361,7 +441,7 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_
   amdcuid_status_t status = mgr.get_device_from_file_by_bdf(bdf, device);
   if (status == AMDCUID_STATUS_SUCCESS) {
     amdcuid_derived_id derived;
-    status = device->get_derived_cuid(derived);
+    status = device->get_derived_cuid(derived, derivation_key());
     if (status != AMDCUID_STATUS_SUCCESS) {
       return status;
     }
@@ -699,7 +779,47 @@ amdcuid_status_t amdcuid_set_hash_key(const uint8_t key[32]) {
     return status;
   }
 
-  return global_hmac.set_hmac_key(key);
+  status = global_hmac.set_hmac_key(key);
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    return status;
+  }
+
+  // Before the records are rebuilt, not after: get_derived_cuid() prefers the
+  // driver's cuid_secondary, so re-recording first would write the pre-re-key
+  // kernel values straight back into the new record.
+  const amdcuid_status_t seed_status = publish_seed_to_drivers(key);
+
+  // The values recorded under the old seed go too: get_derived_cuid() consults
+  // the record before it derives, so leaving them in place means a node with an
+  // existing record serves its pre-re-key derived CUIDs indefinitely.
+  status = mgr.invalidate_derived_cuids(key);
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    return status;
+  }
+
+  // A device the driver would not re-key is still serving its old derived CUID.
+  // See publish_seed_to_drivers() for why that is reported rather than folded
+  // into SUCCESS.
+  return seed_status;
+}
+
+amdcuid_status_t amdcuid_get_key_info(amdcuid_key_info_t* info) {
+  if (!info) return AMDCUID_STATUS_INVALID_ARGUMENT;
+
+  std::memset(info, 0, sizeof(*info));
+
+  // Three outcomes, three statuses. Unprovisioned is a success: the node is
+  // keyed with the public fallback seed and info reports that. A key store
+  // present but unreadable is PERMISSION_DENIED, because the answer an
+  // unprivileged caller would otherwise get on a provisioned node ("not
+  // provisioned", with the fallback fingerprint) is wrong, not unavailable.
+  // Only a store that exists and is not a key is KEY_ERROR.
+  const amdcuid_status_t store = global_hmac.key_store_status();
+  if (store != AMDCUID_STATUS_SUCCESS) return store;
+  if (!global_hmac.is_valid()) return AMDCUID_STATUS_KEY_ERROR;
+
+  info->provisioned = global_hmac.is_using_default_key() ? 0 : 1;
+  return global_hmac.key_fingerprint(info->fingerprint);
 }
 
 amdcuid_status_t amdcuid_generate_hash_key(uint8_t key[32]) {

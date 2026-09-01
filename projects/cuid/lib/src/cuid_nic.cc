@@ -144,9 +144,7 @@ amdcuid_status_t CuidNic::get_hardware_fingerprint(uint64_t& fingerprint) const 
     status =
         PciUtil::read_pci_config_space(m_info.bdf, fingerprint_bytes, fingerprint_size, offset);
     if (status == AMDCUID_STATUS_SUCCESS) {
-      uint64_t fingerprint_value = 0;
-      std::memcpy(&fingerprint_value, fingerprint_bytes, sizeof(fingerprint_bytes));
-      fingerprint = PciUtil::le64_to_be64(fingerprint_value);
+      fingerprint = PciUtil::load_le64(fingerprint_bytes);
       if (CuidUtilities::validate_fingerprint(fingerprint) == AMDCUID_STATUS_SUCCESS) {
         return AMDCUID_STATUS_SUCCESS;
       }
@@ -161,6 +159,12 @@ amdcuid_status_t CuidNic::get_hardware_fingerprint(uint64_t& fingerprint) const 
   std::string mac_address;
   status = get_mac_address(mac_address);
   if (status != AMDCUID_STATUS_SUCCESS) {
+    // No DSN, no VSEC and no MAC leaves the device with no serial to report,
+    // which is the auxiliary case. Any other failure is the caller's problem
+    // and is returned, so a device is never called auxiliary on a bad read.
+    if (status == AMDCUID_STATUS_UNSUPPORTED) {
+      return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
+    }
     return status;
   }
   if (!mac_address.empty()) {
@@ -179,8 +183,12 @@ amdcuid_status_t CuidNic::get_hardware_fingerprint(uint64_t& fingerprint) const 
       fingerprint = 0;
       return AMDCUID_STATUS_INVALID_FORMAT;
     }
+    // Octet 0 of the address occupies payload bits 0:7, the same orientation
+    // as every other little-endian field, and not the host's byte order.
     uint64_t mac_fingerprint = 0;
-    std::memcpy(&mac_fingerprint, mac_bytes, sizeof(mac_bytes));
+    for (size_t i = 0; i < sizeof(mac_bytes); ++i) {
+      mac_fingerprint |= static_cast<uint64_t>(mac_bytes[i]) << (8 * i);
+    }
     fingerprint = mac_fingerprint;
     // An all-zero MAC is an unconfigured interface, not an identity.
     return CuidUtilities::validate_fingerprint(fingerprint);
@@ -190,6 +198,15 @@ amdcuid_status_t CuidNic::get_hardware_fingerprint(uint64_t& fingerprint) const 
 }
 
 amdcuid_status_t CuidNic::get_primary_cuid(amdcuid_primary_id& id) const {
+  // Stage 1: the driver, where it publishes a CUID for this device. The
+  // library reports what the kernel says rather than computing a rival value.
+  {
+    const amdcuid_status_t drv = driver_primary_cuid(id);
+    if (drv != AMDCUID_STATUS_UNSUPPORTED) {
+      return drv;
+    }
+  }
+
   bool temp = false;
   uint64_t fingerprint = 0;
   amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
@@ -208,17 +225,29 @@ amdcuid_status_t CuidNic::get_primary_cuid(amdcuid_primary_id& id) const {
       CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
       return AMDCUID_STATUS_SUCCESS;
     }
-
-    status = get_hardware_fingerprint(fingerprint);
   }
 
-  if (geteuid() != 0 || status != AMDCUID_STATUS_SUCCESS) {
+  // A device with no serial gets an auxiliary identity; a serial this caller
+  // may not read is returned as that error, since the identity a device
+  // presents must not depend on the privilege of the caller asking.
+  status = get_hardware_fingerprint(fingerprint);
+  if (status != AMDCUID_STATUS_SUCCESS && status != AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) {
+    return status;
+  }
+  if (status == AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) {
     std::string bdf;
     status = this->get_bdf(bdf);
     if (status != AMDCUID_STATUS_SUCCESS) {
       return status;
     }
-    status = CuidUtilities::make_fallback_fingerprint(bdf, fingerprint);
+    CuidUtilities::AuxiliaryInput aux;
+    aux.format = CuidUtilities::kAuxFormatPcie;
+    aux.routing_id = CuidUtilities::routing_id_from_bdf(bdf);
+    aux.revision_id = m_info.header.fields.nic.revision_id;
+    aux.device_id = m_info.header.fields.nic.device_id;
+    aux.vendor_id = m_info.header.fields.nic.vendor_id;
+    aux.component_type = static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_NIC);
+    status = CuidUtilities::make_fallback_fingerprint(aux, fingerprint);
     if (status != AMDCUID_STATUS_SUCCESS) {
       return status;
     }
@@ -227,7 +256,7 @@ amdcuid_status_t CuidNic::get_primary_cuid(amdcuid_primary_id& id) const {
 
   status = CuidUtilities::generate_primary_cuid(
       fingerprint, 0, m_info.header.fields.nic.revision_id, m_info.header.fields.nic.device_id,
-      m_info.header.fields.nic.vendor_id, static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_NIC), &id, temp);
+      m_info.header.fields.nic.vendor_id, AMDCUID_DEVICE_TYPE_NIC, &id, temp);
   if (status != AMDCUID_STATUS_SUCCESS) {
     std::memset(&id, 0, sizeof(id));
     return status;

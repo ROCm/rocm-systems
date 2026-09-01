@@ -142,10 +142,10 @@ void TestSha256Kat::Run() {
   {
     uint8_t out[32];
     EXPECT_EQ(AMDCUID_STATUS_SUCCESS,
-              sha256_unkeyed(reinterpret_cast<const uint8_t*>("abc"), 3, out));
+              CuidUtilities::sha256_unkeyed(reinterpret_cast<const uint8_t*>("abc"), 3, out));
     EXPECT_EQ(to_hex(out, sizeof(out)),
               "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-    EXPECT_EQ(AMDCUID_STATUS_INVALID_ARGUMENT, sha256_unkeyed(nullptr, 4, out));
+    EXPECT_EQ(AMDCUID_STATUS_INVALID_ARGUMENT, CuidUtilities::sha256_unkeyed(nullptr, 4, out));
   }
 
   IF_VERB(1) { printf("  SHA-256 vectors verified\n"); }
