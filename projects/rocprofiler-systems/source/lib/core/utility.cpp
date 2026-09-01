@@ -8,6 +8,7 @@
 #include "logger/debug.hpp"
 
 #include <cstdint>
+#include <string>
 
 namespace rocprofsys
 {
