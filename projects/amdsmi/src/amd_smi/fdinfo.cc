@@ -159,17 +159,17 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
 
           for (std::string line; getline(fdinfo, line);) {
             if (line.find("drm-memory-gtt:") != std::string::npos) {
-              unsigned long mem;
+              uint64_t mem;
               if (sscanf(line.c_str(), "drm-memory-gtt:  %" PRIu64, &mem) != 1) continue;
               info.mem += mem * 1000;
               info.memory_usage.gtt_mem += mem * 1000;
             } else if (line.find("drm-memory-cpu:") != std::string::npos) {
-              unsigned long mem;
+              uint64_t mem;
               if (sscanf(line.c_str(), "drm-memory-cpu:  %" PRIu64, &mem) != 1) continue;
               info.mem += mem * 1000;
               info.memory_usage.cpu_mem += mem * 1000;
             } else if (line.find("drm-memory-vram:") != std::string::npos) {
-              unsigned long mem;
+              uint64_t mem;
               if (sscanf(line.c_str(), "drm-memory-vram:  %" PRIu64, &mem) != 1) continue;
               info.mem += mem * 1000;
               info.memory_usage.vram_mem += mem * 1000;
@@ -204,12 +204,15 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
     std::ifstream cgroup_info(cgroup_path.c_str());
     std::string container_id;
     for (std::string line; getline(cgroup_info, line);) {
-      if (line.find(container_type_name[i]) != std::string::npos) {
-        container_id =
-            line.substr(line.find(container_type_name[i]) + strlen(container_type_name[i]) + 1, 16);
-        snprintf(info.container_name, sizeof(info.container_name), "%s", container_id.c_str());
-        break;
-      }
+      const size_t match = line.find(container_type_name[i]);
+      if (match == std::string::npos) continue;
+      const size_t id_start = match + strlen(container_type_name[i]) + 1;
+      // A cgroup line may end right at the container type name (e.g. "0::/lxc"),
+      // leaving no id to read; substr() would throw out of an extern "C" frame.
+      if (id_start > line.size()) continue;
+      container_id = line.substr(id_start, 16);
+      snprintf(info.container_name, sizeof(info.container_name), "%s", container_id.c_str());
+      break;
     }
     if (strlen(info.container_name) > 0) break;
   }

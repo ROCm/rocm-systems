@@ -77,7 +77,7 @@ amdsmi_status_t AMDSmiNoDrmNIC::init() {
       struct dirent* dentry = nullptr;
       while ((dentry = readdir(nic_dev_dir)) != nullptr) {
         if ((strcmp(dentry->d_name, ".") == 0) || (strcmp(dentry->d_name, "..") == 0)) continue;
-        if (memcmp(dentry->d_name, "hwmon", strlen("hwmon")) == 0) {
+        if (strncmp(dentry->d_name, "hwmon", strlen("hwmon")) == 0) {
           const std::string nic_hw_folder =
               nic_dev_folder + "/hwmon/" + std::string(dentry->d_name);
           hwmon_paths_.push_back(nic_hw_folder);
