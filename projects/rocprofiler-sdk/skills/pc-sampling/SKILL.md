@@ -1,6 +1,6 @@
 ---
 name: pc-sampling
-description: Profiles a target application using rocprofv3 with program counter sampling enabled and then analyzes the results. Use when the user has Ga program that runs on an AMD PU and asks to perform PC sampling, to determine the runtime performance characteristics of their application, to determine stall reasons, or to determine hotspots in the code.
+description: Profiles a target application using rocprofv3 with program counter sampling enabled and then analyzes the results. Use when the user has a program that runs on an AMD GPU and asks to perform PC sampling, to determine the runtime performance characteristics of their application, to determine stall reasons, or to determine hotspots in the code.
 ---
 
 # PC Sampling
