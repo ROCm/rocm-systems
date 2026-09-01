@@ -20,6 +20,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/except.h"
 #include "util/log.h"
 
@@ -226,7 +227,7 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   wf->trace_inst_count_ = 0;
 
   sgpr_block_owners_[static_cast<uint32_t>(sgpr_base) / config_.sgprs_per_wf] = {
-      wf, static_cast<uint32_t>(sgpr_base) + num_sgprs};
+      wf, static_cast<uint32_t>(sgpr_base) + config_.sgprs_per_wf};
   set_vgpr_block_owner(static_cast<uint32_t>(vgpr_base), wf);
 
   util::Logger::cp([&](auto &os) {
@@ -848,10 +849,9 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     auto mn = std::string_view(inst->mnemonic());
     if (mn.find("s_setpc") != std::string_view::npos ||
         mn.find("s_swappc") != std::string_view::npos) {
-      uint32_t ssrc0_idx = words[0] & 0x7F;
-      uint32_t sb = active->sgpr_alloc().base;
-      uint64_t target = static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx)) |
-                        (static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx + 1)) << 32);
+      const Operand *target_operand = inst->src_operand(0);
+      assert(target_operand && "indirect PC instruction must have a target operand");
+      uint64_t target = RegisterAccess(*active).read_scalar64(*target_operand);
       if (target == 0) {
         active->halt();
         delete inst;
@@ -1000,11 +1000,19 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     return;
   }
   if (inst->is_memory_op()) {
-    if (inst->data() && inst->data()->tag() == GLOBAL_MEM) {
-      auto *d = inst->data_as<VectorMemState>();
-      d->issue_pc = active->pc;
+    if (!inst->data()) {
+      // A memory execute path can intentionally reject an invalid complete
+      // register operand before constructing pipeline state. Treat that as a
+      // fully suppressed instruction: no route callback, wait-counter update,
+      // or memory transaction is permitted.
+      delete inst;
+    } else {
+      if (inst->data()->tag() == GLOBAL_MEM) {
+        auto *d = inst->data_as<VectorMemState>();
+        d->issue_pc = active->pc;
+      }
+      route_memory_inst(inst, *active);
     }
-    route_memory_inst(inst, *active);
   } else
     delete inst;
 
