@@ -43,7 +43,7 @@ std::atomic<int> g_pcs_samples{0};
 std::atomic<int> g_att_records{0};
 std::atomic<int> g_spm_records{0};
 
-bool g_services_first = true;
+bool g_services_first    = true;
 bool g_fully_initialized = false;
 
 const char*

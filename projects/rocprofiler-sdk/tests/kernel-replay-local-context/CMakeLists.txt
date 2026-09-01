@@ -131,10 +131,8 @@ add_kr_lc_test(
 # PC sampling: local stop must succeed. Collection is agent-wide and currently ignores the
 # override (documented no-op).
 add_kr_lc_test(
-    test-kernel-replay-local-context-pc-sampling-stop-after-0
-    ENVIRONMENT
-    "KR_LC_SERVICES=pc-sampling;KR_LC_PASSES=4;KR_LC_STOP_PASS=1"
-    DISABLED
+    test-kernel-replay-local-context-pc-sampling-stop-after-0 ENVIRONMENT
+    "KR_LC_SERVICES=pc-sampling;KR_LC_PASSES=4;KR_LC_STOP_PASS=1" DISABLED
     ${IS_PC_SAMPLING_DISABLED})
 
 # Design example: counters every pass, ATT pass 0 only.
