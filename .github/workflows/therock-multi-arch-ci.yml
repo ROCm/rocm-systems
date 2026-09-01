@@ -101,9 +101,12 @@ jobs:
           # build_tools/project_mappings.json are needed to map changed projects
           # to build stages. Keep this ref in sync with the setup job's ref.
           sparse-checkout: |
+            BUILD_TOPOLOGY.toml
             build_tools/github_actions
             build_tools/_therock_utils
-          sparse-checkout-cone-mode: true
+            build_tools/project_mappings.json
+            build_tools/artifact_subprojects.json
+          sparse-checkout-cone-mode: false
 
       - name: Configure CI
         id: configure
