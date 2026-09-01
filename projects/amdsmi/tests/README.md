@@ -91,30 +91,34 @@ Suite names are the only selection mechanism — `<Component><Type>[<Operation>]
                      WslFunctionalReadOnly   (gated)
 ```
 
-## Python — three runners over one shared engine
+## Python — four tier runners over one shared engine
 
 ```text
 tests/python/
 │
-├── unit_tests.py ───────┐
-├── integration_test.py ─┼──► common/common.py :: run_test_dir()
-├── cli_unit_test.py ────┘        │
-│                                 ├─ parse -v/-q/-b/-k/-x/-l/-h
-├── common/                       ├─ resolve amdsmi via
-│   ├── common.py                 │    AMDSMI_PATH → ROCM_HOME → ROCM_PATH → /opt/rocm
-│   └── runcmd.py                 ├─ unittest.discover("test_*.py") in own subtree
-│                                 ├─ apply -k include / -x exclude on dotted id
-│                                 ├─ require geteuid()==0
+├── run_tests.py ────────┐   any combination of tiers, one report
+├── unit_tests.py ───────┤
+├── integration_tests.py ┼──► common/common.py :: run_test_dir()
+├── functional_tests.py ─┤        │
+├── cli_tests.py ────────┘        ├─ parse -v/-q/-b/-k/-x/-l/-h
+│                                 ├─ resolve amdsmi via
+├── common/                       │    AMDSMI_PATH → ROCM_HOME → ROCM_PATH → /opt/rocm
+│   ├── common.py                 ├─ unittest.discover("test_*.py") in own subtree
+│   ├── api_test.py               ├─ apply -k include / -x exclude on dotted id
+│   └── runcmd.py                 ├─ require geteuid()==0 for the device tiers
 │                                 └─ GTestSummaryRunner → exit 0/1
 │
 ├── unit/          ◄── unit_tests.py         no hardware
 │   ├── gpu/       test_apu_metrics, test_cli_set_clk_limit, ...
 │   └── system/    test_bdf, test_check_res, test_output_file_stdin
 │
-├── functional/    ◄── integration_test.py   live device + root
+├── integration/   ◄── integration_tests.py  per-API getters, live device
+│   └── gpu/ cpu/ nic/ system/         test_<feature>.py
+│
+├── functional/    ◄── functional_tests.py   setters, lifecycles, benchmarks
 │   └── gpu/ cpu/ nic/ ifoe/ system/   test_<feature>.py
 │
-└── cli/           ◄── cli_unit_test.py      drives the installed amd-smi binary
+└── cli/           ◄── cli_tests.py          drives the installed amd-smi binary
     ├── base.py    TestCliBase — cached setUpClass, one --json baseline
     └── test_<command>.py   one module per CLI command (command-first)
 ```
@@ -123,8 +127,10 @@ Discovery is subtree-scoped, so each runner sees only its own tests:
 
 ```text
  unit_tests.py ──discovers──► unit/**/test_*.py
- integration_test.py ────────► functional/**/test_*.py
- cli_unit_test.py ───────────► cli/test_*.py
+ integration_tests.py ───────► integration/**/test_*.py
+ functional_tests.py ────────► functional/**/test_*.py
+ cli_tests.py ───────────────► cli/test_*.py
+ run_tests.py ───────────────► any combination of the four
 ```
 
 Leaf `test_*.py` files are **not** directly runnable — they have no `sys.path`
@@ -154,10 +160,11 @@ The install target remaps the tree to the historical path:
   ───────────────────────┼──────────────────────────────┼──────────────────────────
   list tests             │ <runner> -l                  │ --gtest_list_tests
   unit only              │ unit_tests.py                │ --gtest_filter="*Unit*"
-  all functional         │ integration_test.py          │ "*Functional*"
+  per-API getters        │ integration_tests.py         │ "*Integration*"
+  all functional         │ functional_tests.py          │ "*Functional*"
   read-only / read-write │ ── not distinguished ──      │ "*FunctionalReadOnly*" /
                          │                              │ "*FunctionalReadWrite*"
-  CLI                    │ cli_unit_test.py             │ ── none ──
+  CLI                    │ cli_tests.py                 │ ── none ──
   by feature             │ -k power                     │ "*.*Power*"
   exclude                │ -x partition                 │ "-*.*Partition*"
   ASIC exclusions        │ ── n/a ──                    │ source amdsmitst.exclude
@@ -188,8 +195,7 @@ tests/
    amdsmi-build.yml ──► run_amdsmi_build.py → build+install
                         └─► source amdsmitst.exclude; detect_asic_filter.sh
                             ./amdsmitst --gtest_filter="-$GTEST_EXCLUDE"
-                            ./integration_test.py -v
-                            ./unit_tests.py -v
+                            ./run_tests.py --unit --integration --functional -v
                         └─► run_amdsmi_build.py summarize
    abi-compliance-check.yml ──► abi_check.py (major, then minor)
    amdsmi-python-versions.yml ─► run_amdsmi_python_versions_test.py (3.6.8 → latest)

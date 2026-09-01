@@ -50,8 +50,8 @@ Run the suite files directly (each `sys.exit(0/1)`):
 ```bash
 cd tests/python
 python3 unit_tests.py -v
-python3 integration_test.py -v
-python3 cli_unit_test.py -v
+python3 integration_tests.py -v
+python3 cli_tests.py -v
 ```
 
 ### Import Verification
