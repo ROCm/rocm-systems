@@ -662,7 +662,7 @@ exit:
     castGlobalQpSchedParms.enable = false;
   }
   if (ret == ncclSuccess && IbCastQpSharingEnabled() && rcclParamIbCastCommNGroups() < 1) {
-    WARN("NET/IB : QP sharing enabled (NCCL_IB_QP_SHARING_ENABLE=1) but NCCL_IB_COMM_NGROUPS=%ld is invalid "
+    WARN("NET/IB : QP sharing enabled (RCCL_IB_QP_SHARING_ENABLE=1) but RCCL_IB_COMM_NGROUPS=%ld is invalid "
          "(must be >= 1). Disabling QP sharing.",
          rcclParamIbCastCommNGroups());
     IbCastQpSharingGlobalEnable = false;
