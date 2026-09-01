@@ -80,9 +80,61 @@ public:
   EventType type() const { return type_; }
 
 private:
+  friend class SimulationEngine;
+
+  /// @brief Record a wake at @p tick in @p epoch and return its generation.
+  ///
+  /// @details The generation is what tells a live queue entry from one a later,
+  /// earlier wake superseded. Identity rather than tick equality, so an event
+  /// re-armed at a tick it was already armed for is still distinguishable from
+  /// the stale entry left behind.
+  /// @param tick Tick the wake will fire at.
+  /// @param epoch The engine generation doing the arming.
+  /// @returns The generation stamped into the queue entry.
+  uint64_t arm_wake(Tick tick, uint64_t epoch) {
+    wake_tick_ = tick;
+    wake_epoch_ = epoch;
+    return ++wake_generation_;
+  }
+
+  /// @brief Clear the outstanding wake.
+  void consume_wake() { wake_tick_ = TICK_MAX; }
+
+  /// @brief Whether a wake armed in @p epoch is still outstanding.
+  ///
+  /// @details An Event outlives the engine generation that armed it -- it is
+  /// owned by a component, and shutdown() destroys the queues rather than the
+  /// components. Without the epoch, a wake armed in one generation and thrown
+  /// away with that generation's queue would refuse the identical wake the
+  /// next generation's startup asks for, and the component would never be
+  /// scheduled again.
+  /// @param epoch The engine generation asking.
+  /// @retval true A wake from this generation is armed.
+  /// @retval false No wake is armed, or the armed one belongs to a dead
+  ///         generation.
+  bool wake_pending(uint64_t epoch) const { return wake_tick_ != TICK_MAX && wake_epoch_ == epoch; }
+
+  /// @brief The tick the outstanding wake will fire at.
+  Tick wake_tick() const { return wake_tick_; }
+
+  /// @brief Whether @p generation names the wake that is currently armed.
+  /// @param generation Generation stamped into a queue entry.
+  /// @retval true The entry is the live wake.
+  /// @retval false The entry was superseded or has already fired.
+  bool is_current_wake(uint64_t generation) const {
+    return wake_tick_ != TICK_MAX && generation == wake_generation_;
+  }
+
   Component *const target_; ///< Component that processes this event.
   EventType type_;          ///< Event category / priority class.
   EventHandler handler_;    ///< Callback invoked on execute().
+  /// @brief Tick of the outstanding collapsing wake; TICK_MAX when none.
+  Tick wake_tick_ = TICK_MAX;
+  /// @brief Engine generation the outstanding wake was armed in.
+  uint64_t wake_epoch_ = 0;
+  /// @brief Monotonic wake identity. Never reused, so a superseded entry can
+  /// never be mistaken for a later one; starts at 0, which no entry carries.
+  uint64_t wake_generation_ = 0;
 };
 
 /// @brief A single entry in the event priority queue.
@@ -95,6 +147,13 @@ public:
   uint64_t sequence = 0;            ///< Tie-breaking sequence number.
   Event *event = nullptr;           ///< Reusable event descriptor.
   std::unique_ptr<Message> message; ///< Optional message payload for this firing.
+  /// @brief Wake identity for an entry pushed by schedule_wake(); 0 otherwise.
+  ///
+  /// @details Nonzero marks this entry as one of an event's collapsing wakes,
+  /// and the engine drops it if the event has since been armed for an earlier
+  /// tick. Last so that positional initialisation of the four fields above,
+  /// which is how every schedule_event() path builds an entry, keeps working.
+  uint64_t wake_generation = 0;
 
   /// @brief Greater-than for min-heap ordering: smallest timestamp first,
   /// then event type priority, then sequence number.

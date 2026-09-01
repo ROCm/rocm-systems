@@ -9,7 +9,9 @@
 
 #include "simdojo/sim/sim_types.h"
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -176,6 +178,33 @@ public:
   /// @param ticks Duration in simulation ticks.
   /// @returns Number of complete cycles in @p ticks.
   uint64_t ticks_to_cycles(Tick ticks) const { return ticks / period_; }
+
+  /// @brief Cycles to move @p units of work at @p units_per_cycle, rounding up.
+  ///
+  /// @details The other rounding direction from ticks_to_cycles(), and the one
+  /// a component costing work wants: a cache asked for eight lines at two
+  /// lines per cycle is busy for four. Never zero, even for an empty request,
+  /// because a component handed work has looked at it and a rate high enough
+  /// to round the work away would otherwise make it infinitely fast out of a
+  /// rounding mode.
+  ///
+  /// Static because a rate is not a property of a clock domain; it is here
+  /// because this is where cycle arithmetic lives.
+  /// @param units Amount of work, in whatever unit the rate is expressed in.
+  /// @param units_per_cycle Service rate; a non-positive rate means one unit
+  ///        per cycle.
+  /// @returns Service duration in cycles, at least one.
+  static uint64_t service_cycles(uint64_t units, double units_per_cycle) {
+    constexpr uint64_t kMaxCycles = std::numeric_limits<uint64_t>::max();
+    if (!(units_per_cycle > 0.0))
+      return units == 0 ? 1 : units;
+    const double cycles = std::ceil(static_cast<double>(units) / units_per_cycle);
+    if (!(cycles > 1.0))
+      return 1;
+    if (cycles >= static_cast<double>(kMaxCycles))
+      return kMaxCycles;
+    return static_cast<uint64_t>(cycles);
+  }
 
 private:
   /// @brief Construct with an already-computed period.

@@ -11,6 +11,18 @@ void Component::schedule_event(Event *event, Tick timestamp, std::unique_ptr<Mes
   engine_->schedule_event(event, timestamp, std::move(message));
 }
 
+bool Component::schedule_wake(Event *event, Tick timestamp) {
+  return engine_->schedule_wake(event, timestamp);
+}
+
+bool Component::wake_pending(const Event &event) const {
+  return engine_ != nullptr && engine_->wake_pending(event);
+}
+
+Tick Component::current_tick() const {
+  return engine_ == nullptr ? 0 : engine_->context(partition_id_).current_tick();
+}
+
 Port *Component::add_port(std::unique_ptr<Port> port) {
   Port *raw = port.get();
   ports_.push_back(std::move(port));

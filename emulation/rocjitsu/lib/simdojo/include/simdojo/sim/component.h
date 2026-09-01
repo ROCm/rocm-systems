@@ -186,6 +186,34 @@ protected:
   /// thread during event processing.
   void schedule_event(Event *event, Tick timestamp, std::unique_ptr<Message> message = nullptr);
 
+  /// @brief The current simulation tick of the partition that owns this
+  ///        component.
+  ///
+  /// @details What a component needs to know whether a tick it has been handed
+  /// is in the past. Only meaningful while the owning partition is processing
+  /// events; before the engine starts it is zero.
+  /// @returns The owning partition's current tick.
+  Tick current_tick() const;
+
+  /// @brief Schedule a collapsing wake for @p event.
+  ///
+  /// @details Convenience method for subclasses. Delegates to
+  /// SimulationEngine::schedule_wake(): the event keeps at most one
+  /// outstanding entry, an earlier ask supersedes a later one, and a wake into
+  /// the past is clamped forward rather than refused. Same owner-thread-only
+  /// contract as schedule_event().
+  /// @param event Event to wake.
+  /// @param timestamp Requested wake tick.
+  /// @retval true The wake was armed, superseding any pending one.
+  /// @retval false An earlier or equal wake was already pending.
+  bool schedule_wake(Event *event, Tick timestamp);
+
+  /// @brief Whether @p event still has a wake outstanding.
+  /// @param event Event to query.
+  /// @retval true A wake is queued for it in this create() generation.
+  /// @retval false Nothing is queued for it.
+  bool wake_pending(const Event &event) const;
+
 private:
   std::vector<std::unique_ptr<Port>> ports_;        ///< Owned ports.
   PartitionID partition_id_ = INVALID_PARTITION_ID; ///< Assigned partition.
