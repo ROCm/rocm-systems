@@ -65,8 +65,9 @@ Routing of the downcalls uses a thread-scoped override map (`scoped_local_contex
 parameter proves cleaner, the signature may gain one — that is the one shape decision still open.
 (`pass_count_cb` and `replay_continue_cb` are SDK→tool upcalls and need no such routing.)
 
-Counter collection, PC sampling, SPM, and ATT consult the override at dispatch time. Kernel dispatch
-tracing drops disabled contexts from the pass's tracing data.
+Counter collection, SPM, and ATT consult the override at dispatch time. Kernel dispatch tracing
+drops disabled contexts from the pass's tracing data. PC sampling and device counting are agent-wide
+and currently ignore localized overrides.
 
 Kernel replay is **not** gated on removing the queue callback registration mechanism. That removal
 would make per-pass enable/disable cleaner and is a planned improvement, but the feature works
