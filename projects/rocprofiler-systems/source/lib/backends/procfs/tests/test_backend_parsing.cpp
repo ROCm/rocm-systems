@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "backends/procfs/backend.hpp"
+#include "common/string_utility.hpp"
 
 #include <gtest/gtest.h>
 

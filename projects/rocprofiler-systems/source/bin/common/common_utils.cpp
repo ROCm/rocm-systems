@@ -110,7 +110,10 @@ print_environment_impl(const std::vector<std::string>&              env,
 static std::string
 strip_flag_prefix(std::string_view name)
 {
-    if(name.size() > 2 && name.starts_with("--")) return std::string{ name.substr(2) };
+    if(name.size() > 2 && name.starts_with("--"))
+    {
+        return std::string{ name.substr(2) };
+    }
     return std::string{ name };
 }
 
