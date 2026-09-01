@@ -3501,6 +3501,13 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     t->collApiEventHandle = ncclProfilerApiState.collApiEventHandle;
     t->opCount = comm->opCount;
     t->acc = info->acc;
+    // Honor rcclSelectAllReduce / rcclSelectAllGather: collTaskAppend is used for
+    // both RCCL_SYMMETRIC and ring/tree. Without this, ncclMakeSymmetricTaskList
+    // would still extract -R 2 AllReduce after symMaxR2 withdrew symk.
+    t->symkExtract = 0;
+    if (info->decisionValid) {
+      t->symkExtract = (info->decision.algo == RCCL_SYMMETRIC) ? 1 : -1;
+    }
 
     planner->nTasksColl += 1;
     ncclTaskCollSorterInsert(&planner->collSorter, t, t->trafficBytes);

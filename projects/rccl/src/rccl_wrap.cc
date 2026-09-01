@@ -1290,7 +1290,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   if (symEligible) {
     decision->algo = RCCL_SYMMETRIC;
     // Reporting only: fill the symk protocol/channels that will actually run.
-    // Skipped on the live path (taskAppend recomputes and dispatches symk).
+    // Live path: collTaskAppend tags the task (symkExtract=1) so
+    // ncclMakeSymmetricTaskList honors this choice instead of re-deriving it.
     if (query) {
       int a, p, ch;
       if (rcclSymkQuery(comm, ncclFuncAllReduce, count, datatype, op, &a, &p, &ch)) {

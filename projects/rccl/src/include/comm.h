@@ -247,6 +247,12 @@ struct ncclTaskColl {
   struct ncclDevrWindow* sendWin;
   struct ncclDevrWindow* recvWin;
   ncclSymRegType_t winRegType;
+  // 0 = no selector opinion (extractor uses windows + ncclSymkAvailable).
+  // 1 = rcclSelect* chose RCCL_SYMMETRIC; extractor may take this task.
+  // -1 = selector chose a non-symk backend (ring/tree, Direct, ...). Do not
+  // extract: otherwise AllReduce above symMaxR2 still becomes symk when
+  // CE-registered does not fire. ncclMemoryPoolAlloc does not zero this.
+  int8_t symkExtract;
   void*
     ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
   size_t ddaCopyBackBytes; // bytes to copy scratch -> user recvbuff
