@@ -41,7 +41,7 @@ template <typename T> class WarpShflUp : public WarpShflTest<WarpShflUp<T>, T> {
     deltas_.resize(width_);
     std::generate(deltas_.begin(), deltas_.end(),
                   [this] { return GenRandomInteger(0u, static_cast<unsigned int>(width_)); });
-    HIP_CHECK(hipMemcpy(deltas_dev.ptr(), deltas_.data(), alloc_size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(deltas_dev.ptr(), deltas_.data(), alloc_size, hipMemcpyHostToDevice))
     shfl_up<<<this->grid_.grid_dim_, this->grid_.block_dim_>>>(arr_dev, input_dev, active_masks,
                                                                deltas_dev.ptr(), width_);
   }
@@ -89,8 +89,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_Warp_Shfl_Up_Positive_Basic, int, unsigned int, long
                    long long, unsigned long long, float, double, __half, __half2) {
   int device;
   hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&device_properties, device))
 
   if (!device_properties.arch.hasWarpShuffle) {
     HIP_SKIP_TEST(HipTest::SkipReason::kWarpShuffleUnsupported);

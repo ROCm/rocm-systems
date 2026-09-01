@@ -53,7 +53,7 @@ bool testMallocFromChild() {
     write(fd[1], &testResult, sizeof(testResult));
 
     if (A_d != nullptr) {
-      HIP_CHECK(hipFree(A_d));
+      HIP_CHECK(hipFree(A_d))
     }
     // close the write descriptor:
     close(fd[1]);

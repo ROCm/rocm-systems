@@ -14,7 +14,7 @@
 class TextureGuard {
  public:
   TextureGuard(hipResourceDesc* res_desc, hipTextureDesc* tex_desc) {
-    HIP_CHECK(hipCreateTextureObject(&tex_obj_, res_desc, tex_desc, nullptr));
+    HIP_CHECK(hipCreateTextureObject(&tex_obj_, res_desc, tex_desc, nullptr))
   }
 
   ~TextureGuard() { static_cast<void>(hipDestroyTextureObject(tex_obj_)); }
@@ -25,7 +25,7 @@ class TextureGuard {
   hipTextureObject_t object() const { return tex_obj_; }
 
  private:
-  hipTextureObject_t tex_obj_ = 0;
+  hipTextureObject_t tex_obj_ = hipTextureObject_t{};
 };
 
 template <typename T> std::enable_if_t<std::is_integral_v<T>, float> NormalizeInteger(const T x) {

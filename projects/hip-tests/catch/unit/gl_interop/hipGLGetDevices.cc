@@ -33,7 +33,7 @@ HIP_TEST_CASE(Unit_hipGLGetDevices_Positive_Basic) {
     REQUIRE(gl_device_count == 0);
     REQUIRE(gl_devices.at(0) == -1);
   } else {
-    HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, device_list));
+    HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, device_list))
     REQUIRE(gl_device_count == 1);
     REQUIRE(gl_devices.at(0) == 0);
   }

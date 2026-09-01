@@ -46,7 +46,7 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Positive_Read
 
   const auto ext_mem_desc = vkt.BuildMemoryDescriptor(vk_storage.memory, vk_storage.size);
   hipExternalMemory_t ext_memory;
-  HIP_CHECK(hipImportExternalMemory(&ext_memory, &ext_mem_desc));
+  HIP_CHECK(hipImportExternalMemory(&ext_memory, &ext_mem_desc))
 
   hipExternalMemoryMipmappedArrayDesc mipmapped_arr_desc = {};
   mipmapped_arr_desc.extent = {};
@@ -63,16 +63,16 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Positive_Read
       hipExternalMemoryGetMappedMipmappedArray(&mipmapped_arr, ext_memory, &mipmapped_arr_desc));
 
   hipArray_t level_arr = nullptr;
-  HIP_CHECK(hipGetMipmappedArrayLevel(&level_arr, mipmapped_arr, 1));
+  HIP_CHECK(hipGetMipmappedArrayLevel(&level_arr, mipmapped_arr, 1))
 
   size_t level_arr_size = mipmapped_arr_desc.extent.width * mipmapped_arr_desc.extent.height *
                           mipmapped_arr_desc.extent.depth;
 
   REQUIRE(WriteAndValidateData<type>(level_arr, level_arr_size) == true);
 
-  HIP_CHECK(hipFreeArray(level_arr));
-  HIP_CHECK(hipFreeMipmappedArray(mipmapped_arr));
-  HIP_CHECK(hipDestroyExternalMemory(ext_memory));
+  HIP_CHECK(hipFreeArray(level_arr))
+  HIP_CHECK(hipFreeMipmappedArray(mipmapped_arr))
+  HIP_CHECK(hipDestroyExternalMemory(ext_memory))
 }
 
 HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Layered) {
@@ -88,7 +88,7 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Layered
 
   const auto ext_mem_desc = vkt.BuildMemoryDescriptor(vk_storage.memory, vk_storage.size);
   hipExternalMemory_t ext_memory;
-  HIP_CHECK(hipImportExternalMemory(&ext_memory, &ext_mem_desc));
+  HIP_CHECK(hipImportExternalMemory(&ext_memory, &ext_mem_desc))
 
   hipExternalMemoryMipmappedArrayDesc mipmapped_arr_desc = {};
   mipmapped_arr_desc.extent = {};
@@ -104,8 +104,8 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Layered
   HIP_CHECK(
       hipExternalMemoryGetMappedMipmappedArray(&mipmapped_arr, ext_memory, &mipmapped_arr_desc));
 
-  HIP_CHECK(hipFreeMipmappedArray(mipmapped_arr));
-  HIP_CHECK(hipDestroyExternalMemory(ext_memory));
+  HIP_CHECK(hipFreeMipmappedArray(mipmapped_arr))
+  HIP_CHECK(hipDestroyExternalMemory(ext_memory))
 }
 
 HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Cubemap) {
@@ -125,7 +125,7 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Cubemap
 
   const auto ext_mem_desc = vkt.BuildMemoryDescriptor(vk_storage.memory, vk_storage.size);
   hipExternalMemory_t ext_memory;
-  HIP_CHECK(hipImportExternalMemory(&ext_memory, &ext_mem_desc));
+  HIP_CHECK(hipImportExternalMemory(&ext_memory, &ext_mem_desc))
 
   hipExternalMemoryMipmappedArrayDesc mipmapped_arr_desc = {};
   mipmapped_arr_desc.extent = {};
@@ -141,8 +141,8 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Cubemap
   HIP_CHECK(
       hipExternalMemoryGetMappedMipmappedArray(&mipmapped_arr, ext_memory, &mipmapped_arr_desc));
 
-  HIP_CHECK(hipFreeMipmappedArray(mipmapped_arr));
-  HIP_CHECK(hipDestroyExternalMemory(ext_memory));
+  HIP_CHECK(hipFreeMipmappedArray(mipmapped_arr))
+  HIP_CHECK(hipDestroyExternalMemory(ext_memory))
 }
 
 HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Negative_Parameters) {
@@ -160,7 +160,7 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Negative_Para
 
   const auto ext_mem_desc = vkt.BuildMemoryDescriptor(vk_storage.memory, vk_storage.size);
   hipExternalMemory_t ext_memory;
-  HIP_CHECK(hipImportExternalMemory(&ext_memory, &ext_mem_desc));
+  HIP_CHECK(hipImportExternalMemory(&ext_memory, &ext_mem_desc))
 
   hipExternalMemoryMipmappedArrayDesc mipmapped_arr_desc = {};
   mipmapped_arr_desc.extent = {.width = count, .height = 0, .depth = 0};
@@ -195,7 +195,7 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Negative_Para
         hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipDestroyExternalMemory(ext_memory));
+  HIP_CHECK(hipDestroyExternalMemory(ext_memory))
 }
 
 /**
@@ -226,7 +226,7 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Capture) {
 
   const auto ext_mem_desc = vkt.BuildMemoryDescriptor(vk_storage.memory, vk_storage.size);
   hipExternalMemory_t ext_memory;
-  HIP_CHECK(hipImportExternalMemory(&ext_memory, &ext_mem_desc));
+  HIP_CHECK(hipImportExternalMemory(&ext_memory, &ext_mem_desc))
 
   hipExternalMemoryMipmappedArrayDesc mipmapped_arr_desc = {};
   mipmapped_arr_desc.extent = {};
@@ -246,6 +246,6 @@ HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Capture) {
                                                memcpy_err);
   END_CAPTURE_SYNC(memcpy_err);
 
-  HIP_CHECK(hipFreeMipmappedArray(mipmapped_arr));
-  HIP_CHECK(hipDestroyExternalMemory(ext_memory));
+  HIP_CHECK(hipFreeMipmappedArray(mipmapped_arr))
+  HIP_CHECK(hipDestroyExternalMemory(ext_memory))
 }

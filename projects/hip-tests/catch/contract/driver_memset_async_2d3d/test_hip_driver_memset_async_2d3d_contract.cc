@@ -29,7 +29,7 @@ bool TryMallocPitch(void** device_ptr, size_t* pitch, size_t width, size_t heigh
   if (status == hipErrorOutOfMemory) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 
@@ -41,7 +41,7 @@ bool TryMalloc3D(hipPitchedPtr* device_ptr, hipExtent extent) {
   if (status == hipErrorOutOfMemory || status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return false;
 }
 
@@ -63,14 +63,14 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_HipMemsetD2D16Async_FillsWordRows_V
     HIP_SKIP_TEST("hipMallocPitch is not supported by this device/runtime path.");
   }
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemsetD2D16Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
                                 kWidth * sizeof(uint16_t), kHeight, stream));
   HIP_CHECK(hipMemcpy2DAsync(dst.data(), kWidth * sizeof(uint16_t), device_ptr, pitch,
                              kWidth * sizeof(uint16_t), kHeight, hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   RequireAllEqual(dst, pattern);
 }
@@ -88,14 +88,14 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_HipMemsetD2D32Async_FillsDwordRows_
     HIP_SKIP_TEST("hipMallocPitch is not supported by this device/runtime path.");
   }
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemsetD2D32Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
                                 kWidth * sizeof(int), kHeight, stream));
   HIP_CHECK(hipMemcpy2DAsync(dst.data(), kWidth * sizeof(int), device_ptr, pitch,
                              kWidth * sizeof(int), kHeight, hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   RequireAllEqual(dst, pattern);
 }
@@ -113,13 +113,13 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_HipMemset2DAsync_FillsRegion_Visibl
     HIP_SKIP_TEST("hipMallocPitch is not supported by this device/runtime path.");
   }
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
-  HIP_CHECK(hipMemset2DAsync(device_ptr, pitch, pattern, kWidth, kHeight, stream));
+  HIP_CHECK(hipMemset2DAsync(device_ptr, pitch, pattern, kWidth, kHeight, stream))
   HIP_CHECK(hipMemcpy2DAsync(dst.data(), kWidth, device_ptr, pitch, kWidth, kHeight,
                              hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   RequireAllEqual(dst, pattern);
 }
@@ -137,18 +137,18 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_HipMemset3DAsync_FillsExtent_Visibl
     HIP_SKIP_TEST("hipMalloc3D is not supported by this device/runtime path.");
   }
   cleanup.Add([p0 = device.ptr] { (void)hipFree(p0); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
-  HIP_CHECK(hipMemset3DAsync(device, pattern, extent, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemset3DAsync(device, pattern, extent, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   hipMemcpy3DParms d2h{};
   d2h.srcPtr = device;
   d2h.dstPtr = HostPitchedPtr(dst.data(), kWidth, kHeight);
   d2h.extent = extent;
   d2h.kind = hipMemcpyDeviceToHost;
-  HIP_CHECK(hipMemcpy3D(&d2h));
+  HIP_CHECK(hipMemcpy3D(&d2h))
 
   RequireAllEqual(dst, pattern);
 }
@@ -161,7 +161,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_HipMemsetD2D16Async_NullDestination
   const auto extent = make_hipExtent(kWidth, kHeight, kDepth);
   constexpr size_t pitch = kWidth * sizeof(uint32_t);
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t d2d16_status = hipMemsetD2D16Async(

@@ -71,18 +71,18 @@ __global__ void freememKernel() {
  */
 HIP_TEST_CASE(Unit_AccessMallocAcrossKernels) {
   allocmemKernel<<<NUM_BLOCKS_DSM, 10>>>();
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   usememKernel<<<NUM_BLOCKS_DSM, 10>>>();
   usememKernel<<<NUM_BLOCKS_DSM, 10>>>();
   usememKernel<<<NUM_BLOCKS_DSM, 10>>>();
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   freememKernel<<<NUM_BLOCKS_DSM, 10>>>();
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 }
 
 /**

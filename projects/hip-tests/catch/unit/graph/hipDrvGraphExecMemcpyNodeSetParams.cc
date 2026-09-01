@@ -45,10 +45,10 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemcpyNodeSetParams_Negative) {
   hipGraphExec_t graphExec;
   hipGraphNode_t node;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipSetDevice(deviceid));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipCtxCreate(&context, 0, deviceid));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipSetDevice(deviceid))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipCtxCreate(&context, 0, deviceid))
 
 
   HIP_MEMCPY3D memCpy_params{};
@@ -72,10 +72,10 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemcpyNodeSetParams_Negative) {
   memCpy_params.dstPitch = numW;
   memCpy_params.dstHeight = 1;
 
-  HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, graph, nullptr, 0, &memCpy_params, context));
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, graph, nullptr, 0, &memCpy_params, context))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
   SECTION("graphExec is nullptr") {
     HIP_CHECK_ERROR(hipDrvGraphExecMemcpyNodeSetParams(nullptr, node, &memCpy_params, context),
                     hipErrorInvalidValue);
@@ -84,10 +84,10 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemcpyNodeSetParams_Negative) {
     HIP_CHECK_ERROR(hipDrvGraphExecMemcpyNodeSetParams(graphExec, nullptr, &memCpy_params, context),
                     hipErrorInvalidValue);
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipCtxDestroy(context))
 }
 /**
  * Test Description
@@ -123,10 +123,10 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemcpyNodeSetParams_Positive) {
   hipGraphExec_t graphExec;
   hipGraphNode_t node;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipSetDevice(deviceid));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipCtxCreate(&context, 0, deviceid));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
+  HIP_CHECK(hipSetDevice(deviceid))
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
+  HIP_CHECK(hipCtxCreate(&context, 0, deviceid))
 
 
   HIP_MEMCPY3D memCpy_params{};
@@ -149,10 +149,10 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemcpyNodeSetParams_Positive) {
   memCpy_params.dstPitch = numW;
   memCpy_params.dstHeight = 1;
 
-  HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, graph, nullptr, 0, &memCpy_params, context));
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, graph, nullptr, 0, &memCpy_params, context))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
   REQUIRE(memcmp(A_h.data(), B_h.data(), numW) == 0);
   // Host Vectors for source
   std::vector<int> C_h(numW);
@@ -178,16 +178,16 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemcpyNodeSetParams_Positive) {
   memCpy_params2.dstPitch = numW;
   memCpy_params2.dstHeight = 1;
 
-  HIP_CHECK(hipDrvGraphExecMemcpyNodeSetParams(graphExec, node, &memCpy_params2, context));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipDrvGraphExecMemcpyNodeSetParams(graphExec, node, &memCpy_params2, context))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   REQUIRE(memcmp(C_h.data(), B_h.data(), numW) == 0);
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
+  HIP_CHECK(hipCtxDestroy(context))
 }
 /**
  * End doxygen group GraphTest.

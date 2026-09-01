@@ -24,8 +24,8 @@ void test_vgprs_value() {
   size_t bufferSize = n * sizeof(v1024i);
 
   v1024i *dX, *dY;
-  HIP_CHECK(hipMalloc(&dX, bufferSize));
-  HIP_CHECK(hipMalloc(&dY, bufferSize));
+  HIP_CHECK(hipMalloc(&dX, bufferSize))
+  HIP_CHECK(hipMalloc(&dY, bufferSize))
 
   std::unique_ptr<v1024i[]> hX{new v1024i[n]};
   std::unique_ptr<v1024i[]> hY{new v1024i[n]};
@@ -36,10 +36,10 @@ void test_vgprs_value() {
       hY[i][j] = 0;
     }
   }
-  HIP_CHECK(hipMemcpy(dX, hX.get(), bufferSize, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dY, hY.get(), bufferSize, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dX, hX.get(), bufferSize, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dY, hY.get(), bufferSize, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test1024, NUM_BLOCKS, NUM_THREADS, 0, 0, dX, dY);
-  HIP_CHECK(hipMemcpy(hY.get(), dY, bufferSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hY.get(), dY, bufferSize, hipMemcpyDeviceToHost))
 
   for (int i = 0; i < n; ++i) {
     for (int j = 0; j < sizeofv1024i; j++) {
@@ -50,8 +50,8 @@ void test_vgprs_value() {
       }
     }
   }
-  HIP_CHECK(hipFree(dX));
-  HIP_CHECK(hipFree(dY));
+  HIP_CHECK(hipFree(dX))
+  HIP_CHECK(hipFree(dY))
   REQUIRE(true);
 }
 
@@ -60,8 +60,8 @@ HIP_TEST_CASE(Unit_Device__hip_check_VGPRs) {
   hipFuncAttributes attr;
   int maxAvailableVgprsPerThread = 0;
   constexpr int device = 0;
-  HIP_CHECK(hipSetDevice(device));
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipSetDevice(device))
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   HIP_CHECK(hipDeviceGetAttribute(&maxAvailableVgprsPerThread,
                                 hipDeviceAttributeMaxAvailableVgprsPerThread, device));
   if (maxAvailableVgprsPerThread > 1024) {
@@ -69,7 +69,7 @@ HIP_TEST_CASE(Unit_Device__hip_check_VGPRs) {
     HIP_SKIP_TEST(
         "maxAvailableVgprsPerThread > 1024 is not supported in this test.");
   }
-  HIP_CHECK(hipFuncGetAttributes(&attr, reinterpret_cast<void*>(test1024)));
+  HIP_CHECK(hipFuncGetAttributes(&attr, reinterpret_cast<void*>(test1024)))
   std::cout << "Info: running on device #" << device << " " << props.name << ": arch = "
         << props.gcnArchName << ", major = " << props.major << ", minor = " << props.minor
         << ", warpSize = " << props.warpSize << ", numRegs of test1024() = "

@@ -33,19 +33,19 @@ HIP_TEST_CASE(Contract_GraphInstantiateParams_HipGraphInstantiateWithParams_Defa
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
+  HIP_CHECK(hipMalloc(&device_ptr, kByteCount))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
 
   hipMemsetParams memset_params = MakeByteMemsetParams(device_ptr, 0x5A);
-  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &memset_params));
+  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &memset_params))
 
   // Instantiating a valid graph through the params-struct entry point must
   // report success, leave the error node cleared, and produce a runnable exec.
   hipGraphInstantiateParams params{};
   hipGraphExec_t exec = nullptr;
-  HIP_CHECK(hipGraphInstantiateWithParams(&exec, graph, &params));
+  HIP_CHECK(hipGraphInstantiateWithParams(&exec, graph, &params))
   cleanup.Add([exec] { (void)hipGraphExecDestroy(exec); });
   REQUIRE(exec != nullptr);
   REQUIRE(params.result_out == hipGraphInstantiateSuccess);
@@ -54,13 +54,13 @@ HIP_TEST_CASE(Contract_GraphInstantiateParams_HipGraphInstantiateWithParams_Defa
   // The produced executable must launch and apply the memset like any other
   // instantiated graph.
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipGraphLaunch(exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   uint8_t host = 0;
-  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost))
   REQUIRE(host == 0x5A);
 }
 
@@ -72,15 +72,15 @@ HIP_TEST_CASE(Contract_GraphInstantiateParams_HipGraphInstantiateWithParams_Uplo
   hipGraphNode_t node = nullptr;
   hipStream_t upload_stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
+  HIP_CHECK(hipMalloc(&device_ptr, kByteCount))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
-  HIP_CHECK(hipStreamCreate(&upload_stream));
+  HIP_CHECK(hipStreamCreate(&upload_stream))
   cleanup.Add([upload_stream] { (void)hipStreamDestroy(upload_stream); });
 
   hipMemsetParams memset_params = MakeByteMemsetParams(device_ptr, 0x3C);
-  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &memset_params));
+  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &memset_params))
 
   // Requesting upload at instantiation time (auto-upload flag plus an upload
   // stream) must still yield a successful, launchable executable. The upload is
@@ -95,20 +95,20 @@ HIP_TEST_CASE(Contract_GraphInstantiateParams_HipGraphInstantiateWithParams_Uplo
   if (status == hipErrorNotSupported) {
     HIP_SKIP_TEST("Instantiation with upload flag is not supported by this runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   cleanup.Add([exec] { (void)hipGraphExecDestroy(exec); });
   REQUIRE(exec != nullptr);
   REQUIRE(params.result_out == hipGraphInstantiateSuccess);
 
   // Drain the upload stream, then launch and verify the memset landed.
-  HIP_CHECK(hipStreamSynchronize(upload_stream));
+  HIP_CHECK(hipStreamSynchronize(upload_stream))
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipGraphLaunch(exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(exec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   uint8_t host = 0;
-  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&host, device_ptr, sizeof(host), hipMemcpyDeviceToHost))
   REQUIRE(host == 0x3C);
 }

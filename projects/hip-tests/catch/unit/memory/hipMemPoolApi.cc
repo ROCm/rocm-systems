@@ -32,7 +32,7 @@ void initMemPoolProps() {
 
 HIP_TEST_CASE(Unit_hipMemPoolApi_Basic) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
@@ -42,66 +42,66 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Basic) {
 
   hipMemPool_t mem_pool = nullptr;
   int device = 0;
-  HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, device));
-  HIP_CHECK(hipDeviceSetMemPool(device, mem_pool));
-  HIP_CHECK(hipDeviceGetMemPool(&mem_pool, device));
+  HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, device))
+  HIP_CHECK(hipDeviceSetMemPool(device, mem_pool))
+  HIP_CHECK(hipDeviceGetMemPool(&mem_pool, device))
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float), stream));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float), stream))
   INFO("hipMallocAsync result: " << A);
 
-  HIP_CHECK(hipFreeAsync(A, stream));
+  HIP_CHECK(hipFreeAsync(A, stream))
   // Reset the default memory pool usage for the following tests
   hipMemPoolAttr attr = hipMemPoolAttrUsedMemHigh;
   std::uint64_t value64 = 0;
-  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value64));
+  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value64))
 
   size_t min_bytes_to_hold = 1024 * 1024;
-  HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold));
+  HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold))
 
   attr = hipMemPoolReuseFollowEventDependencies;
   int value = 0;
 
-  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
+  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value))
 
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value))
 
   hipMemAccessDesc desc_list = {{hipMemLocationTypeDevice, 0}, hipMemAccessFlagsProtReadWrite};
   int count = 1;
-  HIP_CHECK(hipMemPoolSetAccess(mem_pool, &desc_list, count));
+  HIP_CHECK(hipMemPoolSetAccess(mem_pool, &desc_list, count))
 
   hipMemAccessFlags flags = hipMemAccessFlagsProtNone;
   hipMemLocation location = {hipMemLocationTypeDevice, 0};
-  HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, &location));
+  HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, &location))
   initMemPoolProps();
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps))
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float),
                                    mem_pool, stream));
-  HIP_CHECK(hipFreeAsync(B, stream));
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK(hipFreeAsync(B, stream))
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 HIP_TEST_CASE(Unit_hipMemPoolApi_BasicAlloc) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int* notified = nullptr;
-  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)))
   *notified = 0;
   initMemPoolProps();
   hipMemPool_t mem_pool;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps))
 
   float *B, *C;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   size_t numElements = 8 * 1024 * 1024;
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float),
@@ -115,81 +115,81 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicAlloc) {
   hipMemPoolAttr attr;
   notifiedKernel<<<blocks, 32, 0, stream>>>(B, notified);
 
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream))
 
   attr = hipMemPoolAttrReservedMemCurrent;
   std::uint64_t res_before_sync = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &res_before_sync));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &res_before_sync))
 
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
   *notified = 1;  // Notify kernel loop to exit
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   std::uint64_t res_after_sync = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &res_after_sync));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &res_after_sync))
   // Sync must releaae memory to OS
   REQUIRE(res_after_sync <= res_before_sync);
 
   int value = 0;
   attr = hipMemPoolReuseFollowEventDependencies;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value))
   // Default enabled
   REQUIRE(1 == value);
 
   attr = hipMemPoolReuseAllowOpportunistic;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value))
   // Default enabled
   REQUIRE(1 == value);
 
   attr = hipMemPoolReuseAllowInternalDependencies;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value))
   // Default enabled
   REQUIRE(1 == value);
 
   attr = hipMemPoolAttrReleaseThreshold;
   std::uint64_t value64 = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64))
   // Default is 0
   REQUIRE(0 == value64);
 
   attr = hipMemPoolAttrReservedMemHigh;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64))
   // Must be bigger than current
   REQUIRE(value64 >= res_after_sync);
 
   attr = hipMemPoolAttrUsedMemCurrent;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64))
   // Make sure the current usage query works - just small buffer left
   REQUIRE(sizeof(float) * 1024 == value64);
 
   attr = hipMemPoolAttrUsedMemHigh;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64))
   // Make sure the high watermark usage works - the both buffers must be reported
   REQUIRE(sizeof(float) * (8 * 1024 * 1024 + 1024) == value64);
 
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipHostFree(notified));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipHostFree(notified))
 }
 
 HIP_TEST_CASE(Unit_hipMemPoolApi_BasicTrim) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int* notified = nullptr;
-  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)))
   *notified = 0;
   initMemPoolProps();
   hipMemPool_t mem_pool;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps))
 
   float *B, *C;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   size_t numElements = 64 * 1024 * 1024;
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float),
@@ -206,77 +206,77 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicTrim) {
   attr = hipMemPoolAttrReleaseThreshold;
   // The pool must hold 512MB
   std::uint64_t threshold = 512 * 1024 * 1024ULL;
-  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &threshold));
+  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &threshold))
 
   // Not a real free, since kernel isn't done
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream))
 
   // Get reserved memory before trim
   attr = hipMemPoolAttrReservedMemCurrent;
   std::uint64_t res_before_trim = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &res_before_trim));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &res_before_trim))
 
   size_t min_bytes_to_hold = sizeof(float) * 1024;
-  HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold));
+  HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold))
 
   std::uint64_t res_after_trim = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &res_after_trim));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &res_after_trim))
   // Trim must be a nop because execution isn't done
   REQUIRE(res_before_trim == res_after_trim);
 
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
   *notified = 1;  // Notify kernel loop to exit
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   std::uint64_t res_after_sync = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &res_after_sync));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &res_after_sync))
   // Since hipMemPoolAttrReleaseThreshold is 128 MB sync does nothing to the freed memory
   REQUIRE(res_after_trim == res_after_sync);
 
-  HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold));
+  HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold))
 
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &res_after_trim));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &res_after_trim))
   // Validate memory after real trim. The pool must hold less memory than before
   REQUIRE(res_after_trim < res_after_sync);
 
   attr = hipMemPoolAttrReleaseThreshold;
   std::uint64_t value64 = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64))
   // Make sure the threshold query works
   REQUIRE(threshold == value64);
 
   attr = hipMemPoolAttrUsedMemCurrent;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64))
   // Make sure the current usage query works - just small buffer left
   REQUIRE(sizeof(float) * 1024 == value64);
 
   attr = hipMemPoolAttrUsedMemHigh;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64))
   // Make sure the high watermark usage works - the both buffers must be reported
   REQUIRE(sizeof(float) * (64 * 1024 * 1024 + 1024) == value64);
 
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipHostFree(notified));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipHostFree(notified))
 }
 
 HIP_TEST_CASE(Unit_hipMemPoolApi_BasicReuse) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int* notified = nullptr;
-  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)))
   *notified = 0;
   initMemPoolProps();
   hipMemPool_t mem_pool;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps))
 
   float *A, *B, *C;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   size_t numElements = 8 * 1024 * 1024;
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float),
@@ -291,7 +291,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicReuse) {
 
   hipMemPoolAttr attr;
   // Not a real free, since kernel isn't done
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream))
 
   numElements = 8 * 1024 * 1024;
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float),
@@ -302,7 +302,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicReuse) {
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
   *notified = 1;  // Notify kernel loop to exit
   // Make a sync before the second kernel launch to make sure memory B isn't gone
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Second kernel launch with new memory
   *notified = 0;
@@ -310,45 +310,45 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicReuse) {
 
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
   *notified = 1;  // Notify kernel loop to exit
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   attr = hipMemPoolAttrUsedMemCurrent;
   std::uint64_t value64 = 0;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64))
   // Make sure the current usage reports the both buffers
   REQUIRE(sizeof(float) * (8 * 1024 * 1024 + 1024) == value64);
 
   attr = hipMemPoolAttrUsedMemHigh;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64))
   // Make sure the high watermark usage works - the both buffers must be reported
   REQUIRE(sizeof(float) * (8 * 1024 * 1024 + 1024) == value64);
 
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream))
   attr = hipMemPoolAttrUsedMemCurrent;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64))
   // Make sure the current usage reports just one buffer, because the above free doesn't hold memory
   REQUIRE(sizeof(float) * 1024 == value64);
 
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipHostFree(notified));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipHostFree(notified))
 }
 
 HIP_TEST_CASE(Unit_hipMemPoolApi_Opportunistic) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified1 = nullptr, *notified2 = nullptr;
-  HIP_CHECK(hipHostMalloc(&notified1, sizeof(unsigned int)));
-  HIP_CHECK(hipHostMalloc(&notified2, sizeof(unsigned int)));
+  HIP_CHECK(hipHostMalloc(&notified1, sizeof(unsigned int)))
+  HIP_CHECK(hipHostMalloc(&notified2, sizeof(unsigned int)))
   *notified1 = 0;
   *notified2 = 0;
   initMemPoolProps();
   hipMemPool_t mem_pool;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps))
 
   hipMemPoolAttr attr;
   int blocks = 2;
@@ -357,8 +357,8 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Opportunistic) {
   hipStream_t stream1, stream2;
 
   // Create 2 async non-blocking streams
-  HIP_CHECK(hipStreamCreateWithFlags(&stream1, hipStreamNonBlocking));
-  HIP_CHECK(hipStreamCreateWithFlags(&stream2, hipStreamNonBlocking));
+  HIP_CHECK(hipStreamCreateWithFlags(&stream1, hipStreamNonBlocking))
+  HIP_CHECK(hipStreamCreateWithFlags(&stream2, hipStreamNonBlocking))
 
   size_t numElements = 1024;
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&C), numElements * sizeof(float),
@@ -372,17 +372,17 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Opportunistic) {
 
     // Disable all default pool states
     attr = hipMemPoolReuseFollowEventDependencies;
-    HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
+    HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value))
     attr = hipMemPoolReuseAllowOpportunistic;
-    HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
+    HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value))
     attr = hipMemPoolReuseAllowInternalDependencies;
-    HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
+    HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value))
 
     // Run kernel in the first stream
     notifiedKernel<<<blocks, 32, 0, stream1>>>(A, notified1);
 
     // Not a real free, since kernel isn't done
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream1));
+    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream1))
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified1 = 1;  // Notify kernel loop to exit
 
@@ -401,10 +401,10 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Opportunistic) {
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified2 = 1;  // Notify kernel loop to exit
-    HIP_CHECK(hipStreamSynchronize(stream1));
-    HIP_CHECK(hipStreamSynchronize(stream2));
+    HIP_CHECK(hipStreamSynchronize(stream1))
+    HIP_CHECK(hipStreamSynchronize(stream2))
 
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream2));
+    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream2))
   }
 
   SECTION("Allow Opportunistic - Reuse") {
@@ -415,13 +415,13 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Opportunistic) {
     value = 1;
     attr = hipMemPoolReuseAllowOpportunistic;
     // Enable Opportunistic
-    HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
+    HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value))
 
     // Run kernel in the first stream
     notifiedKernel<<<blocks, 32, 0, stream1>>>(A, notified1);
 
     // Not a real free, since kernel isn't done
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream1));
+    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream1))
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified1 = 1;  // Notify kernel loop to exit
 
@@ -441,10 +441,10 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Opportunistic) {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified2 = 1;  // Notify kernel loop to exit
 
-    HIP_CHECK(hipStreamSynchronize(stream1));
-    HIP_CHECK(hipStreamSynchronize(stream2));
+    HIP_CHECK(hipStreamSynchronize(stream1))
+    HIP_CHECK(hipStreamSynchronize(stream2))
 
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream2));
+    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream2))
   }
 
   SECTION("Allow Opportunistic - No Reuse") {
@@ -455,13 +455,13 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Opportunistic) {
     value = 1;
     attr = hipMemPoolReuseAllowOpportunistic;
     // Enable Opportunistic
-    HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
+    HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value))
 
     // Run kernel in the first stream
     notifiedKernel<<<blocks, 32, 0, stream1>>>(A, notified1);
 
     // Not a real free, since kernel isn't done
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream1));
+    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream1))
 
     numElements = 8 * 1024 * 1024;
     // Allocate memory for the second stream
@@ -477,86 +477,86 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Opportunistic) {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified1 = 1;  // Notify kernel loop to exit
     *notified2 = 1;  // Notify kernel loop to exit
-    HIP_CHECK(hipStreamSynchronize(stream1));
-    HIP_CHECK(hipStreamSynchronize(stream2));
+    HIP_CHECK(hipStreamSynchronize(stream1))
+    HIP_CHECK(hipStreamSynchronize(stream2))
 
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream2));
+    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream2))
   }
 
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream1));
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
-  HIP_CHECK(hipHostFree(notified1));
-  HIP_CHECK(hipHostFree(notified2));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream1))
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
+  HIP_CHECK(hipHostFree(notified1))
+  HIP_CHECK(hipHostFree(notified2))
 }
 
 HIP_TEST_CASE(Unit_hipMemPoolApi_Default) {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0))
   if (!mem_pool_support) {
     HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int* notified = nullptr;
-  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)))
   *notified = 0;
   hipMemPool_t mem_pool;
-  HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, 0));
+  HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, 0))
 
   float *A, *B, *C;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   size_t numElements = 8 * 1024 * 1024;
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float), stream));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float), stream))
 
   numElements = 1024;
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&C), numElements * sizeof(float), stream));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&C), numElements * sizeof(float), stream))
 
   int blocks = 2;
   notifiedKernel<<<blocks, 32, 0, stream>>>(A, notified);
 
   hipMemPoolAttr attr;
   // Not a real free, since kernel isn't done
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream))
 
   numElements = 8 * 1024 * 1024;
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float), stream));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float), stream))
   // Runtime must reuse the pointer
   REQUIRE(A == B);
 
   // Make a sync before the second kernel launch to make sure memory B isn't gone
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
   *notified = 1;  // Notify kernel loop to exit
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Second kernel launch with new memory
   *notified = 0;
   notifiedKernel<<<blocks, 32, 0, stream>>>(B, notified);
 
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream))
 
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
   *notified = 1;  // Notify kernel loop to exit
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   std::uint64_t value64 = 0;
   attr = hipMemPoolAttrReservedMemCurrent;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64))
   // Make sure the current reserved is at least allocation size of buffer C (4KB)
   REQUIRE(sizeof(float) * 1024 <= value64);
 
   attr = hipMemPoolAttrUsedMemHigh;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64))
   // Make sure the high watermark usage works - the both buffers must be reported
   REQUIRE(sizeof(float) * (8 * 1024 * 1024 + 1024) == value64);
 
   attr = hipMemPoolAttrUsedMemCurrent;
-  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64))
   // Make sure the current usage reports just one buffer, because the above free doesn't hold memory
   REQUIRE(sizeof(float) * 1024 == value64);
 
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipHostFree(notified));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipHostFree(notified))
 }

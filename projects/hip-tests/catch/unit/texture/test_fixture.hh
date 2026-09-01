@@ -138,7 +138,7 @@ struct TextureTestFixture {
     memcpy_params.srcPtr = make_hipPitchedPtr(tex_h.ptr(0), sizeof(VecType) * params.Width(),
                                               params.Width(), params.Height() ?: 1);
     memcpy_params.kind = hipMemcpyHostToDevice;
-    HIP_CHECK(hipMemcpy3D(&memcpy_params));
+    HIP_CHECK(hipMemcpy3D(&memcpy_params))
 
     memset(&res_desc, 0, sizeof(res_desc));
     if constexpr (mipmap) {
@@ -154,7 +154,7 @@ struct TextureTestFixture {
   void LoadOutput() {
     HIP_CHECK(hipMemcpy(out_alloc_h.data(), out_alloc_d.ptr(), sizeof(OutType) * params.NumIters(),
                         hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   template <typename ValType> bool Verify(const ValType& devValue, const ValType& hostValue) {

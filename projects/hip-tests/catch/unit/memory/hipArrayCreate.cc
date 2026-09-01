@@ -36,14 +36,14 @@ static constexpr auto ARRAY_LOOP{100};
  */
 
 static void ArrayCreate_DiffSizes(int gpu) {
-  HIP_CHECK_THREAD(hipSetDevice(gpu));
+  HIP_CHECK_THREAD(hipSetDevice(gpu))
   // Use of GENERATE in thead function causes random failures with multithread condition.
   std::vector<std::pair<size_t, size_t>> runs{std::make_pair(NUM_W, NUM_H),
                                               std::make_pair(BIGNUM_W, BIGNUM_H)};
   for (const auto& size : runs) {
     std::array<HIP_ARRAY, ARRAY_LOOP> array;
     size_t pavail;
-    HIP_CHECK_THREAD(hipMemGetInfo(&pavail, nullptr));
+    HIP_CHECK_THREAD(hipMemGetInfo(&pavail, nullptr))
     HIP_ARRAY_DESCRIPTOR desc;
     desc.NumChannels = 1;
     desc.Width = std::get<0>(size);
@@ -51,10 +51,10 @@ static void ArrayCreate_DiffSizes(int gpu) {
     desc.Format = HIP_AD_FORMAT_FLOAT;
 
     for (int i = 0; i < ARRAY_LOOP; i++) {
-      HIP_CHECK_THREAD(hipArrayCreate(&array[i], &desc));
+      HIP_CHECK_THREAD(hipArrayCreate(&array[i], &desc))
     }
     for (int i = 0; i < ARRAY_LOOP; i++) {
-      HIP_CHECK_THREAD(hipArrayDestroy(array[i]));
+      HIP_CHECK_THREAD(hipArrayDestroy(array[i]))
     }
   }
 }
@@ -108,7 +108,7 @@ void copyToArray(hipArray_t dst, const std::vector<T>& src, const size_t height)
   const auto sizeInBytes = src.size() * sizeof(T);
   if (height == 0) {
     // FIXME(EXSWCPHIPT-64) remove cast when API is fixed (will require major version change)
-    HIP_CHECK(hipMemcpyHtoA(reinterpret_cast<hipArray_t>(dst), 0, src.data(), sizeInBytes));
+    HIP_CHECK(hipMemcpyHtoA(reinterpret_cast<hipArray_t>(dst), 0, src.data(), sizeInBytes))
   } else {
     const auto pitch = sizeInBytes / height;
     hip_Memcpy2D copyParams{};
@@ -126,7 +126,7 @@ void copyToArray(hipArray_t dst, const std::vector<T>& src, const size_t height)
     copyParams.WidthInBytes = pitch;
     copyParams.Height = height;
 
-    HIP_CHECK(hipMemcpyParam2D(&copyParams));
+    HIP_CHECK(hipMemcpyParam2D(&copyParams))
   }
 }
 
@@ -162,11 +162,11 @@ void testArrayAsTexture(hipArray_t array, const size_t width, const size_t heigh
   // Use normalized coordinates and also read the data in the original data type
   texDesc.flags |= NORMALIZED_COORDINATES | READ_AS_INTEGER;
 
-  HIP_CHECK(hipTexObjectCreate(&textObj, &resDesc, &texDesc, nullptr));
+  HIP_CHECK(hipTexObjectCreate(&textObj, &resDesc, &texDesc, nullptr))
 
   // run kernel
   T* device_data{};
-  HIP_CHECK(hipMalloc(&device_data, size));
+  HIP_CHECK(hipMalloc(&device_data, size))
   readFromTexture<<<dim3(width / BlockSize, height ? height / BlockSize : 1, 1),
                     dim3(BlockSize, height ? BlockSize : 1, 1)>>>(device_data, textObj, width,
                                                                   height, false);
@@ -174,15 +174,15 @@ void testArrayAsTexture(hipArray_t array, const size_t width, const size_t heigh
 
   // copy data back and then test it
   std::fill(std::begin(hostData), std::end(hostData), 0);
-  HIP_CHECK(hipMemcpy(hostData.data(), device_data, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostData.data(), device_data, size, hipMemcpyDeviceToHost))
 
 #if !__HIP_NO_IMAGE_SUPPORT
   checkDataIsAscending(hostData);
 #endif
 
   // clean up
-  HIP_CHECK(hipTexObjectDestroy(textObj));
-  HIP_CHECK(hipFree(device_data));
+  HIP_CHECK(hipTexObjectDestroy(textObj))
+  HIP_CHECK(hipFree(device_data))
 }
 
 // Selection of types chosen since trying all types would be slow to compile
@@ -203,11 +203,11 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipArrayCreate_happy, uint, int, int4, ushort, short
   // pointer to the array in device memory
   hipArray_t array{};
 
-  HIP_CHECK(hipArrayCreate(&array, &desc));
+  HIP_CHECK(hipArrayCreate(&array, &desc))
 
   testArrayAsTexture<TestType>(array, desc.Width, desc.Height);
 
-  HIP_CHECK(hipArrayDestroy(array));
+  HIP_CHECK(hipArrayDestroy(array))
 }
 
 
@@ -248,8 +248,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipArrayCreate_maxTexture, uint, int, int4, ushort, 
     // this can try to alloc many GB of memory, so out of memory is acceptable
     // return to avoid destroy
     if (maxArrayCreateError == hipErrorOutOfMemory) return;
-    HIP_CHECK(maxArrayCreateError);
-    HIP_CHECK(hipArrayDestroy(array));
+    HIP_CHECK(maxArrayCreateError)
+    HIP_CHECK(hipArrayDestroy(array))
   }
   SECTION("Negative") {
     SECTION("1D - More Than Max") {

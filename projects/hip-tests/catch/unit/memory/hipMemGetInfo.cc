@@ -11,12 +11,12 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_FreeLessThanTotal) {
   size_t freeMemInit, totalMemInit;
   size_t freeMem, totalMem;
 
-  HIP_CHECK(hipMemGetInfo(&freeMemInit, &totalMemInit));
+  HIP_CHECK(hipMemGetInfo(&freeMemInit, &totalMemInit))
   REQUIRE(freeMemInit <= totalMemInit);
-  HIP_CHECK(hipMalloc(&A_mem, 1024));
-  HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem));
+  HIP_CHECK(hipMalloc(&A_mem, 1024))
+  HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem))
   REQUIRE(freeMem < totalMem);
   REQUIRE(totalMem == totalMemInit);
 
-  HIP_CHECK(hipFree(A_mem));
+  HIP_CHECK(hipFree(A_mem))
 }

@@ -62,7 +62,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_texCubemapLod_Positive_ReadModeElementType, char, un
       fixture.out_alloc_d.ptr(), params.NumItersX(), params.NumItersY(), params.NumItersZ(),
       fixture.tex.object(), params.Width(), params.Height(), params.Depth(),
       params.num_subdivisions, params.tex_desc.normalizedCoords, 0.0);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   fixture.LoadOutput();
 
@@ -143,7 +143,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_texCubemapLod_Positive_ReadModeNormalizedFloat, char
       fixture.out_alloc_d.ptr(), params.NumItersX(), params.NumItersY(), params.NumItersZ(),
       fixture.tex.object(), params.Width(), params.Height(), params.Depth(),
       params.num_subdivisions, params.tex_desc.normalizedCoords, 0.0);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   fixture.LoadOutput();
 

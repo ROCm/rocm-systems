@@ -99,13 +99,13 @@ bool run_sincosf() {
   for (int i = 0; i < N; i++) {
     A[i] = 1.0f;
   }
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_sincosf, dim3(1), dim3(N), 0, 0, Ad, Bd, Cd);
-  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(C, Cd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(C, Cd, SIZE, hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     if (B[i] == sinf(1.0f)) {
@@ -122,9 +122,9 @@ bool run_sincosf() {
   delete[] A;
   delete[] B;
   delete[] C;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipFree(Cd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
+  HIP_CHECK(hipFree(Cd))
 
   if (passed == 1) {
     return true;
@@ -141,13 +141,13 @@ bool run_sincospif() {
   for (int i = 0; i < N; i++) {
     A[i] = 1.0f;
   }
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_sincospif, dim3(1), dim3(N), 0, 0, Ad, Bd, Cd);
-  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(C, Cd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(C, Cd, SIZE, hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     if (B[i] - sinf(3.14 * 1.0f) < 0.1) {
@@ -164,9 +164,9 @@ bool run_sincospif() {
   delete[] A;
   delete[] B;
   delete[] C;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipFree(Cd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
+  HIP_CHECK(hipFree(Cd))
 
   if (passed == 1) {
     return true;
@@ -184,13 +184,13 @@ bool run_fdividef() {
     A[i] = 1.0f;
     B[i] = 2.0f;
   }
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_fdividef, dim3(1), dim3(N), 0, 0, Ad, Bd, Cd);
-  HIP_CHECK(hipMemcpy(C, Cd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(C, Cd, SIZE, hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     if (C[i] == A[i] / B[i]) {
@@ -201,9 +201,9 @@ bool run_fdividef() {
   delete[] A;
   delete[] B;
   delete[] C;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipFree(Cd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
+  HIP_CHECK(hipFree(Cd))
 
   if (passed == 1) {
     return true;
@@ -220,11 +220,11 @@ bool run_llrintf() {
   for (int i = 0; i < N; i++) {
     A[i] = 1.345f;
   }
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), N * sizeof(int64_t)));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), N * sizeof(int64_t)))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_llrintf, dim3(1), dim3(N), 0, 0, Ad, Bd);
-  HIP_CHECK(hipMemcpy(B, Bd, N * sizeof(int64_t), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, N * sizeof(int64_t), hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     int x = roundf(A[i]);
@@ -235,8 +235,8 @@ bool run_llrintf() {
 
   delete[] A;
   delete[] B;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
 
   if (passed == 1) {
     return true;
@@ -253,11 +253,11 @@ bool run_lrintf() {
   for (int i = 0; i < N; i++) {
     A[i] = 1.345f;
   }
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), N * sizeof(int64_t)));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), N * sizeof(int64_t)))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_lrintf, dim3(1), dim3(N), 0, 0, Ad, Bd);
-  HIP_CHECK(hipMemcpy(B, Bd, N * sizeof(int64_t), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, N * sizeof(int64_t), hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     int x = roundf(A[i]);
@@ -268,8 +268,8 @@ bool run_lrintf() {
 
   delete[] A;
   delete[] B;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
 
   if (passed == 1) {
     return true;
@@ -286,11 +286,11 @@ bool run_rintf() {
   for (int i = 0; i < N; i++) {
     A[i] = 1.345f;
   }
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_rintf, dim3(1), dim3(N), 0, 0, Ad, Bd);
-  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     float x = roundf(A[i]);
@@ -301,8 +301,8 @@ bool run_rintf() {
 
   delete[] A;
   delete[] B;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
 
   if (passed == 1) {
     return true;
@@ -319,11 +319,11 @@ bool run_llroundf() {
   for (int i = 0; i < N; i++) {
     A[i] = 1.345f;
   }
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), N * sizeof(int64_t)));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), N * sizeof(int64_t)))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_llroundf, dim3(1), dim3(N), 0, 0, Ad, Bd);
-  HIP_CHECK(hipMemcpy(B, Bd, N * sizeof(int64_t), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, N * sizeof(int64_t), hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     int x = roundf(A[i]);
@@ -334,8 +334,8 @@ bool run_llroundf() {
 
   delete[] A;
   delete[] B;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
 
   if (passed == 1) {
     return true;
@@ -352,11 +352,11 @@ bool run_lroundf() {
   for (int i = 0; i < N; i++) {
     A[i] = 1.345f;
   }
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), N * sizeof(int64_t)));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), N * sizeof(int64_t)))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_lroundf, dim3(1), dim3(N), 0, 0, Ad, Bd);
-  HIP_CHECK(hipMemcpy(B, Bd, N * sizeof(int64_t), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, N * sizeof(int64_t), hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     int x = roundf(A[i]);
@@ -367,8 +367,8 @@ bool run_lroundf() {
 
   delete[] A;
   delete[] B;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
 
   if (passed == 1) {
     return true;
@@ -390,15 +390,15 @@ bool run_norm3df() {
     C[i] = 3.0f;
   }
   val = sqrtf(1.0f + 4.0f + 9.0f);
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Dd), SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Cd, C, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Dd), SIZE))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Cd, C, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_norm3df, dim3(1), dim3(N), 0, 0, Ad, Bd, Cd, Dd);
-  HIP_CHECK(hipMemcpy(D, Dd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(D, Dd, SIZE, hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     if (D[i] - val < 0.000001) {
@@ -410,10 +410,10 @@ bool run_norm3df() {
   delete[] B;
   delete[] C;
   delete[] D;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipFree(Cd));
-  HIP_CHECK(hipFree(Dd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
+  HIP_CHECK(hipFree(Cd))
+  HIP_CHECK(hipFree(Dd))
 
   if (passed == 1) {
     return true;
@@ -437,17 +437,17 @@ bool run_norm4df() {
     D[i] = 4.0f;
   }
   val = sqrtf(1.0f + 4.0f + 9.0f + 16.0f);
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Dd), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ed), SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Cd, C, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Dd, D, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Dd), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ed), SIZE))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Cd, C, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Dd, D, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_norm4df, dim3(1), dim3(N), 0, 0, Ad, Bd, Cd, Dd, Ed);
-  HIP_CHECK(hipMemcpy(E, Ed, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(E, Ed, SIZE, hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     if (E[i] - val < 0.000001) {
@@ -460,11 +460,11 @@ bool run_norm4df() {
   delete[] C;
   delete[] D;
   delete[] E;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipFree(Cd));
-  HIP_CHECK(hipFree(Dd));
-  HIP_CHECK(hipFree(Ed));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
+  HIP_CHECK(hipFree(Cd))
+  HIP_CHECK(hipFree(Dd))
+  HIP_CHECK(hipFree(Ed))
 
   if (passed == 1) {
     return true;
@@ -484,11 +484,11 @@ bool run_normf() {
     val += 1.0f;
   }
   val = sqrtf(val);
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_normf, dim3(1), dim3(N), 0, 0, Ad, Bd);
-  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     if (B[0] - val < 0.000001) {
@@ -498,8 +498,8 @@ bool run_normf() {
 
   delete[] A;
   delete[] B;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
 
   if (passed == 1) {
     return true;
@@ -519,13 +519,13 @@ bool run_rhypotf() {
     B[i] = 2.0f;
   }
   val = 1 / sqrtf(1.0f + 4.0f);
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_rhypotf, dim3(1), dim3(N), 0, 0, Ad, Bd, Cd);
-  HIP_CHECK(hipMemcpy(C, Cd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(C, Cd, SIZE, hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     if (C[i] - val < 0.000001) {
@@ -536,9 +536,9 @@ bool run_rhypotf() {
   delete[] A;
   delete[] B;
   delete[] C;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipFree(Cd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
+  HIP_CHECK(hipFree(Cd))
 
   if (passed == 1) {
     return true;
@@ -560,15 +560,15 @@ bool run_rnorm3df() {
     C[i] = 3.0f;
   }
   val = 1 / sqrtf(1.0f + 4.0f + 9.0f);
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Dd), SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Cd, C, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Dd), SIZE))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Cd, C, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_rnorm3df, dim3(1), dim3(N), 0, 0, Ad, Bd, Cd, Dd);
-  HIP_CHECK(hipMemcpy(D, Dd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(D, Dd, SIZE, hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     if (D[i] - val < 0.000001) {
@@ -580,10 +580,10 @@ bool run_rnorm3df() {
   delete[] B;
   delete[] C;
   delete[] D;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipFree(Cd));
-  HIP_CHECK(hipFree(Dd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
+  HIP_CHECK(hipFree(Cd))
+  HIP_CHECK(hipFree(Dd))
 
   if (passed == 1) {
     return true;
@@ -607,17 +607,17 @@ bool run_rnorm4df() {
     D[i] = 4.0f;
   }
   val = 1 / sqrtf(1.0f + 4.0f + 9.0f + 16.0f);
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Dd), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ed), SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Cd, C, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Dd, D, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Cd), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Dd), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ed), SIZE))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Cd, C, SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Dd, D, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_rnorm4df, dim3(1), dim3(N), 0, 0, Ad, Bd, Cd, Dd, Ed);
-  HIP_CHECK(hipMemcpy(E, Ed, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(E, Ed, SIZE, hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     if (E[i] - val < 0.000001) {
@@ -630,11 +630,11 @@ bool run_rnorm4df() {
   delete[] C;
   delete[] D;
   delete[] E;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipFree(Cd));
-  HIP_CHECK(hipFree(Dd));
-  HIP_CHECK(hipFree(Ed));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
+  HIP_CHECK(hipFree(Cd))
+  HIP_CHECK(hipFree(Dd))
+  HIP_CHECK(hipFree(Ed))
 
   if (passed == 1) {
     return true;
@@ -654,11 +654,11 @@ bool run_rnormf() {
     val += 1.0f;
   }
   val = 1 / sqrtf(val);
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_rnormf, dim3(1), dim3(N), 0, 0, Ad, Bd);
-  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     if (B[0] - val < 0.000001) {
@@ -668,8 +668,8 @@ bool run_rnormf() {
 
   delete[] A;
   delete[] B;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
 
   if (passed == 1) {
     return true;
@@ -686,11 +686,11 @@ bool run_erfinvf() {
     A[i] = -0.6f;
     B[i] = 0.0f;
   }
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE))
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(test_erfinvf, dim3(1), dim3(N), 0, 0, Ad, Bd);
-  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost))
   int passed = 0;
   for (int i = 0; i < 512; i++) {
     if (B[i] - A[i] < 0.000001) {
@@ -700,8 +700,8 @@ bool run_erfinvf() {
 
   delete[] A;
   delete[] B;
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
 
   if (passed == 1) {
     return true;

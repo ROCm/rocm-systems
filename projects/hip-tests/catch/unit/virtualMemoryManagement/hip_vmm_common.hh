@@ -91,7 +91,7 @@ class ipcSocketCom {
 
     memset(handle, 0, sizeof(*handle));
     handle->socket = -1;
-    handle->name = NULL;
+    handle->name = nullptr;
 
     // Creating socket
     if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) == 0) {
@@ -201,7 +201,7 @@ public:
     ssize_t n;
     int receivedfd;
 
-    msg.msg_name = NULL;
+    msg.msg_name = nullptr;
     msg.msg_namelen = 0;
     msg.msg_control = control_un.control;
     msg.msg_controllen = sizeof(control_un.control);
@@ -213,7 +213,7 @@ public:
       perror("Socket failure: Receiving data over socket failed");
       return -1;
     }
-    if (((cmptr = CMSG_FIRSTHDR(&msg)) != NULL) &&
+    if (((cmptr = CMSG_FIRSTHDR(&msg)) != nullptr) &&
        (cmptr->cmsg_len == CMSG_LEN(sizeof(int)))) {
       if ((cmptr->cmsg_level != SOL_SOCKET) || (cmptr->cmsg_type != SCM_RIGHTS)) {
         return -1;

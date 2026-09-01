@@ -138,13 +138,13 @@ HIP_TEST_CASE(Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic) {
   });
   HIP_CHECK(hipMemcpy(active_masks_dev.ptr(), active_masks.ptr(), warps_in_grid * sizeof(uint64_t),
                       hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemsetAsync(uint_arr_dev.ptr(), 0, alloc_size));
+  HIP_CHECK(hipMemsetAsync(uint_arr_dev.ptr(), 0, alloc_size))
   coalesced_group_tiled_partition_size_getter<<<blocks, threads>>>(
       active_masks_dev.ptr(), tile_size, uint_arr_dev.ptr(), warp_size);
-  HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipMemsetAsync(uint_arr_dev.ptr(), 0, alloc_size));
+  HIP_CHECK(hipMemsetAsync(uint_arr_dev.ptr(), 0, alloc_size))
   coalesced_group_tiled_partition_thread_rank_getter<<<blocks, threads>>>(
       active_masks_dev.ptr(), tile_size, uint_arr_dev.ptr(), warp_size);
 
@@ -180,8 +180,8 @@ HIP_TEST_CASE(Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic) {
     }
   }
 
-  HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   // validate rank
   for (auto i = 0u; i < warps_in_grid; ++i) {
@@ -266,12 +266,12 @@ template <typename T> static void CoalescedGroupTiledPartitonShflUpTestImpl() {
                 [] { return GenerateRandomInteger(kMaskMin, kMaskLimit); });
   HIP_CHECK(hipMemcpy(active_masks_dev.ptr(), active_masks.ptr(), warps_in_grid * sizeof(uint64_t),
                       hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemsetAsync(uint_arr_dev.ptr(), 0, alloc_size));
+  HIP_CHECK(hipMemsetAsync(uint_arr_dev.ptr(), 0, alloc_size))
   coalesced_group_tiled_partition_shfl_up<T><<<blocks, threads>>>(
       active_masks_dev.ptr(), uint_arr_dev.ptr(), tile_size, delta, warp_size);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   const auto tail = warps_in_block * warp_size - grid.threads_in_block_count_;
 
@@ -377,12 +377,12 @@ template <typename T> static void CoalescedGroupTiledPartitonShflDownTestImpl() 
                 [] { return GenerateRandomInteger(kMaskMin, kMaskLimit); });
   HIP_CHECK(hipMemcpy(active_masks_dev.ptr(), active_masks.ptr(), warps_in_grid * sizeof(uint64_t),
                       hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemsetAsync(uint_arr_dev.ptr(), 0, alloc_size));
+  HIP_CHECK(hipMemsetAsync(uint_arr_dev.ptr(), 0, alloc_size))
   coalesced_group_tiled_partition_shfl_down<T><<<blocks, threads>>>(
       active_masks_dev.ptr(), uint_arr_dev.ptr(), tile_size, delta, warp_size);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   const auto tail = warps_in_block * warp_size - grid.threads_in_block_count_;
 
@@ -484,12 +484,12 @@ template <typename T> static void CoalescedGroupTiledPartitonShflTestImpl() {
                       hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(target_lanes_dev.ptr(), target_lanes.ptr(), tile_size * sizeof(uint8_t),
                       hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemsetAsync(uint_arr_dev.ptr(), 0, alloc_size));
+  HIP_CHECK(hipMemsetAsync(uint_arr_dev.ptr(), 0, alloc_size))
   coalesced_group_tiled_partition_shfl<T><<<blocks, threads>>>(
       active_masks_dev.ptr(), target_lanes_dev.ptr(), uint_arr_dev.ptr(), tile_size, warp_size);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   const auto tail = warps_in_block * warp_size - grid.threads_in_block_count_;
 
@@ -645,10 +645,10 @@ template <bool global_memory, typename T> void CoalescedGroupTiledPartitionSyncT
   coalesced_group_tiled_partition_sync_check<global_memory>
       <<<blocks, threads, shared_memory_size>>>(active_masks_dev.ptr(), arr_dev.ptr(),
                                                 wait_modifiers_dev.ptr(), tile_size, warp_size);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
-  HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   const auto tail = warps_in_block * warp_size - grid.threads_in_block_count_;
   for (int i = 0u; i < grid.block_count_; ++i) {

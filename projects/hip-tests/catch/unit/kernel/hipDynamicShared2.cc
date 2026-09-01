@@ -48,7 +48,7 @@ __global__ void vectorAdd(float* Ad, float* Bd, size_t num_elements) {
  */
 HIP_TEST_CASE(Unit_hipDynamicShared2) {
   hipFuncAttributes func_attributes{};
-  HIP_CHECK(hipFuncGetAttributes(&func_attributes, reinterpret_cast<const void*>(&vectorAdd)));
+  HIP_CHECK(hipFuncGetAttributes(&func_attributes, reinterpret_cast<const void*>(&vectorAdd)))
 
   int max_shared_memory_per_block{};
   HIP_CHECK(hipDeviceGetAttribute(&max_shared_memory_per_block,
@@ -68,11 +68,11 @@ HIP_TEST_CASE(Unit_hipDynamicShared2) {
   }
 
   float *Ad, *Bd;
-  HIP_CHECK(hipMalloc(&Ad, dynamic_shared_bytes));
-  HIP_CHECK(hipMalloc(&Bd, dynamic_shared_bytes));
+  HIP_CHECK(hipMalloc(&Ad, dynamic_shared_bytes))
+  HIP_CHECK(hipMalloc(&Bd, dynamic_shared_bytes))
 
-  HIP_CHECK(hipMemcpy(Ad, A.data(), dynamic_shared_bytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B.data(), dynamic_shared_bytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Ad, A.data(), dynamic_shared_bytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(Bd, B.data(), dynamic_shared_bytes, hipMemcpyHostToDevice))
 
   //  The sum of sharedSizeBytes (statically-allocated shared memory per block) and
   //  hipFuncAttributeMaxDynamicSharedMemorySize (dynamically-allocated shared memory per block)
@@ -82,14 +82,14 @@ HIP_TEST_CASE(Unit_hipDynamicShared2) {
 
   hipLaunchKernelGGL(vectorAdd, dim3(1, 1, 1), dim3(threadPerBlock, 1, 1), dynamic_shared_bytes, 0,
                      Ad, Bd, num_elements);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpy(B.data(), Bd, dynamic_shared_bytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMemcpy(B.data(), Bd, dynamic_shared_bytes, hipMemcpyDeviceToHost))
   for (int i = 0; i < num_elements; i++) {
     REQUIRE(B[i] > 1.0f);
     REQUIRE(B[i] < 3.0f);
   }
-  HIP_CHECK(hipFree(Ad));
-  HIP_CHECK(hipFree(Bd));
+  HIP_CHECK(hipFree(Ad))
+  HIP_CHECK(hipFree(Bd))
 }
 
 /**

@@ -36,7 +36,7 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Basic) {
 }
 
 HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior) {
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   SECTION("Host to Device") { Memcpy3DHtoDSyncBehavior(DrvMemcpy3DWrapper<>, true); }
 
@@ -100,7 +100,7 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Negative_Parameters) {
 
     SECTION("dst_ptr.pitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       hipPitchedPtr invalid_ptr = dst_ptr;
       invalid_ptr.pitch = attr;
       HIP_CHECK_ERROR(DrvMemcpy3DWrapper(invalid_ptr, dst_pos, src_ptr, src_pos, extent, kind),
@@ -109,7 +109,7 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Negative_Parameters) {
 
     SECTION("src_ptr.pitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       hipPitchedPtr invalid_ptr = src_ptr;
       invalid_ptr.pitch = attr;
       HIP_CHECK_ERROR(DrvMemcpy3DWrapper(dst_ptr, dst_pos, invalid_ptr, src_pos, extent, kind),

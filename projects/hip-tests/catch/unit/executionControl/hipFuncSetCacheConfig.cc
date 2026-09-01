@@ -37,10 +37,10 @@ constexpr std::array<hipFuncCache_t, 4> kCacheConfigs{
 HIP_TEST_CASE(Unit_hipFuncSetCacheConfig_Positive_Basic) {
   const auto cache_config = GENERATE(from_range(begin(kCacheConfigs), end(kCacheConfigs)));
 
-  HIP_CHECK(hipFuncSetCacheConfig(reinterpret_cast<void*>(kernel), cache_config));
+  HIP_CHECK(hipFuncSetCacheConfig(reinterpret_cast<void*>(kernel), cache_config))
 
   kernel<<<1, 1>>>();
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 }
 
 /**
@@ -99,10 +99,10 @@ HIP_TEST_CASE(Unit_hipFuncSetCacheConfig_Positive_VerifyCarveoutMapping) {
   };
 
   for (const auto& tc : testCases) {
-    HIP_CHECK(hipFuncSetCacheConfig(reinterpret_cast<void*>(kernel), tc.config));
+    HIP_CHECK(hipFuncSetCacheConfig(reinterpret_cast<void*>(kernel), tc.config))
 
     hipFuncAttributes attributes;
-    HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<void*>(kernel)));
+    HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<void*>(kernel)))
 
     REQUIRE(attributes.preferredShmemCarveout == tc.expectedCarveout);
   }

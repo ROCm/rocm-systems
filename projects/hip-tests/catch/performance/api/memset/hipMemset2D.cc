@@ -20,7 +20,7 @@ class Memset2DBenchmark : public Benchmark<Memset2DBenchmark> {
 
   void operator()() {
     TIMED_SECTION(kTimerTypeEvent) {
-      HIP_CHECK(hipMemset2D(dst_.ptr(), dst_.pitch(), 17, dst_.width(), dst_.height()));
+      HIP_CHECK(hipMemset2D(dst_.ptr(), dst_.pitch(), 17, dst_.width(), dst_.height()))
     }
   }
 

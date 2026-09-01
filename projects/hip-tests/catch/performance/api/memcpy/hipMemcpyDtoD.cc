@@ -27,9 +27,9 @@ static void RunBenchmark(size_t size, bool enable_peer_access = false) {
   int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
 
   LinearAllocGuard<int> src_allocation(LinearAllocs::hipMalloc, size);
-  HIP_CHECK(hipSetDevice(dst_device));
+  HIP_CHECK(hipSetDevice(dst_device))
   LinearAllocGuard<int> dst_allocation(LinearAllocs::hipMalloc, size);
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(src_device))
 
   benchmark.Run(reinterpret_cast<hipDeviceptr_t>(dst_allocation.ptr()),
                 reinterpret_cast<hipDeviceptr_t>(src_allocation.ptr()), size);

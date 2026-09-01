@@ -28,7 +28,7 @@
  */
 HIP_TEST_CASE(Unit_hipDriverGetVersion_Positive) {
   int driverVersion = -1;
-  HIP_CHECK(hipDriverGetVersion(&driverVersion));
+  HIP_CHECK(hipDriverGetVersion(&driverVersion))
   REQUIRE(driverVersion > 0);
   INFO("Driver version " << driverVersion);
 }

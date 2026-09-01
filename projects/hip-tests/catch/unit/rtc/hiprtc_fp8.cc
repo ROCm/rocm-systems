@@ -22,6 +22,8 @@ THE SOFTWARE.
 
 #include <vector>
 #include <string>
+#include <cstring>
+#include <cstdint>
 
 #include <hip/hiprtc.h>
 #include <hip/hip_fp8.h>
@@ -54,7 +56,7 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, source, "fp8.cu", 0, nullptr, nullptr));
   hipDeviceProp_t props;
   int device = 0;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
 #ifdef __HIP_PLATFORM_AMD__
   std::string sarg = std::string("--gpu-architecture=") + props.gcnArchName;
 #else
@@ -82,21 +84,21 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
   constexpr size_t size = 10;
 
   float *d_in, *d_out;
-  HIP_CHECK(hipMalloc(&d_in, size * sizeof(float)));
-  HIP_CHECK(hipMalloc(&d_out, size * sizeof(float)));
+  HIP_CHECK(hipMalloc(&d_in, size * sizeof(float)))
+  HIP_CHECK(hipMalloc(&d_out, size * sizeof(float)))
 
   hipModule_t module;
   hipFunction_t kernel;
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
-  HIP_CHECK(hipModuleGetFunction(&kernel, module, "float_to_fp8_to_float"));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, "float_to_fp8_to_float"))
 
   std::vector<float> in(size, 0.0f);
   for (size_t i = 0; i < size; i++) {
-    in[i] = -5.0f + i;
+    in[i] = -5.0f + static_cast<float>(i);
   }
 
-  HIP_CHECK(hipMemcpy(d_in, in.data(), size * sizeof(float), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemset(d_out, 0, size * sizeof(float)));
+  HIP_CHECK(hipMemcpy(d_in, in.data(), size * sizeof(float), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemset(d_out, 0, size * sizeof(float)))
 
   struct {
     float* out;
@@ -109,32 +111,39 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &arg_size,
                     HIP_LAUNCH_PARAM_END};
 
-  HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, size, 1, 1, 0, nullptr, nullptr, config));
+  HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, size, 1, 1, 0, nullptr, nullptr, config))
 
   std::vector<float> out(size, 0.0f);
-  HIP_CHECK(hipMemcpy(out.data(), d_out, size * sizeof(float), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out.data(), d_out, size * sizeof(float), hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < size; i++) {
     __hip_fp8_e4m3 tmp = in[i];
     float cpu_out = tmp;
     INFO("Index: " << i << " in: " << in[i] << " GPU: " << out[i] << " cpu: " << cpu_out);
-    REQUIRE(cpu_out == out[i]);
+    // Exact bit-level equality expected: both values come from the same fp8 encoding
+    uint32_t cpu_bits, gpu_bits;
+    std::memcpy(&cpu_bits, &cpu_out, sizeof(cpu_bits));
+    std::memcpy(&gpu_bits, &out[i], sizeof(gpu_bits));
+    REQUIRE(cpu_bits == gpu_bits);
   }
 
   args.e4m3 = false;
-  HIP_CHECK(hipMemset(d_out, 0, size * sizeof(float)));
-  HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, size, 1, 1, 0, nullptr, nullptr, config));
+  HIP_CHECK(hipMemset(d_out, 0, size * sizeof(float)))
+  HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, size, 1, 1, 0, nullptr, nullptr, config))
 
-  HIP_CHECK(hipMemcpy(out.data(), d_out, size * sizeof(float), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out.data(), d_out, size * sizeof(float), hipMemcpyDeviceToHost))
   for (size_t i = 0; i < size; i++) {
     __hip_fp8_e5m2 tmp = in[i];
     float cpu_out = tmp;
     INFO("Index: " << i << " in: " << in[i] << " GPU: " << out[i] << " cpu: " << cpu_out);
-    REQUIRE(cpu_out == out[i]);
+    uint32_t cpu_bits, gpu_bits;
+    std::memcpy(&cpu_bits, &cpu_out, sizeof(cpu_bits));
+    std::memcpy(&gpu_bits, &out[i], sizeof(gpu_bits));
+    REQUIRE(cpu_bits == gpu_bits);
   }
 
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipFree(d_in))
+  HIP_CHECK(hipFree(d_out))
 
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
 }

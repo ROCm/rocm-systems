@@ -44,20 +44,20 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Basic_AllDevices) {
   std::fill_n(alloc1.ptr(), count, fill_value);
 
   for (const auto device : supported_devices) {
-    HIP_CHECK(hipSetDevice(device));
+    HIP_CHECK(hipSetDevice(device))
     LinearAllocGuard<int> alloc2(LinearAllocs::hipMallocManaged, kPageSize);
     StreamGuard sg(Streams::created);
-    HIP_CHECK(hipMemPrefetchAsync(alloc1.ptr(), kPageSize, device, sg.stream()));
+    HIP_CHECK(hipMemPrefetchAsync(alloc1.ptr(), kPageSize, device, sg.stream()))
     MemPrefetchAsyncKernel<<<count / 1024 + 1, 1024, 0, sg.stream()>>>(alloc2.ptr(), alloc1.ptr(),
                                                                        count);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipStreamSynchronize(sg.stream()));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipStreamSynchronize(sg.stream()))
     ArrayFindIfNot(alloc1.ptr(), fill_value, count);
     ArrayFindIfNot(alloc2.ptr(), fill_value * fill_value, count);
   }
 
-  HIP_CHECK(hipMemPrefetchAsync(alloc1.ptr(), kPageSize, hipCpuDeviceId));
-  HIP_CHECK(hipStreamSynchronize(nullptr));
+  HIP_CHECK(hipMemPrefetchAsync(alloc1.ptr(), kPageSize, hipCpuDeviceId))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   ArrayFindIfNot(alloc1.ptr(), fill_value, count);
 }
 
@@ -72,9 +72,9 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Sync_Behavior) {
   StreamGuard sg(stream_type);
   LinearAllocGuard<void> alloc(LinearAllocs::hipMallocManaged, kPageSize);
   LaunchDelayKernel(std::chrono::milliseconds{100}, sg.stream());
-  HIP_CHECK(hipMemPrefetchAsync(alloc.ptr(), kPageSize, device, sg.stream()));
+  HIP_CHECK(hipMemPrefetchAsync(alloc.ptr(), kPageSize, device, sg.stream()))
   HIP_CHECK_ERROR(hipStreamQuery(sg.stream()), hipErrorNotReady);
-  HIP_CHECK(hipStreamSynchronize(sg.stream()));
+  HIP_CHECK(hipStreamSynchronize(sg.stream()))
 }
 
 HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Rounding_Behavior) {
@@ -89,8 +89,8 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Rounding_Behavior) {
       GENERATE_COPY(std::make_pair(kPageSize / 4, kPageSize / 2),   // Withing page
                     std::make_pair(kPageSize / 2, kPageSize),       // Across page border
                     std::make_pair(kPageSize / 2, kPageSize * 2));  // Across two page borders
-  HIP_CHECK(hipMemPrefetchAsync(alloc.ptr() + offset, width, device));
-  HIP_CHECK(hipStreamSynchronize(nullptr));
+  HIP_CHECK(hipMemPrefetchAsync(alloc.ptr() + offset, width, device))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   constexpr auto RoundDown = [](const intptr_t a, const intptr_t n) { return a - a % n; };
   constexpr auto RoundUp = [RoundDown](const intptr_t a, const intptr_t n) {
     return RoundDown(a + n - 1, n);

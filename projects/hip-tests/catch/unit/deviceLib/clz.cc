@@ -86,7 +86,7 @@ HIP_TEST_CASE(Unit_clz) {
   unsigned long long int* deviceD;
 
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
   INFO("System minor : " << devProp.minor);
   INFO("System major : " << devProp.major);
   INFO("agent prop name : " << devProp.name);
@@ -107,23 +107,23 @@ HIP_TEST_CASE(Unit_clz) {
     hostD[i] = i;
   }
 
-  HIP_CHECK(hipMalloc((void**)&deviceA, NUM * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc((void**)&deviceB, NUM * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc((void**)&deviceC, NUM * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc((void**)&deviceD, NUM * sizeof(unsigned long long int)));
+  HIP_CHECK(hipMalloc((void**)&deviceA, NUM * sizeof(unsigned int)))
+  HIP_CHECK(hipMalloc((void**)&deviceB, NUM * sizeof(unsigned int)))
+  HIP_CHECK(hipMalloc((void**)&deviceC, NUM * sizeof(unsigned int)))
+  HIP_CHECK(hipMalloc((void**)&deviceD, NUM * sizeof(unsigned long long int)))
 
-  HIP_CHECK(hipMemcpy(deviceB, hostB, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(deviceD, hostD, NUM * sizeof(unsigned long long int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceB, hostB, NUM * sizeof(unsigned int), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(deviceD, hostD, NUM * sizeof(unsigned long long int), hipMemcpyHostToDevice))
 
   hipLaunchKernelGGL(clz_HIP_kernel,
                      dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
                      dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, deviceA, deviceB,
                      deviceC, deviceD, WIDTH, HEIGHT);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
 
-  HIP_CHECK(hipMemcpy(hostA, deviceA, NUM * sizeof(unsigned int), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(hostC, deviceC, NUM * sizeof(unsigned int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostA, deviceA, NUM * sizeof(unsigned int), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(hostC, deviceC, NUM * sizeof(unsigned int), hipMemcpyDeviceToHost))
 
   // verify the results
   errors = 0;
@@ -142,10 +142,10 @@ HIP_TEST_CASE(Unit_clz) {
   }
 
 
-  HIP_CHECK(hipFree(deviceA));
-  HIP_CHECK(hipFree(deviceB));
-  HIP_CHECK(hipFree(deviceC));
-  HIP_CHECK(hipFree(deviceD));
+  HIP_CHECK(hipFree(deviceA))
+  HIP_CHECK(hipFree(deviceB))
+  HIP_CHECK(hipFree(deviceC))
+  HIP_CHECK(hipFree(deviceD))
 
   free(hostA);
   free(hostB);

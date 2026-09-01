@@ -74,12 +74,12 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_DeviceReset_2) {
   status =
       hipMemcpyAsync(A_d, A_h, ele_size * sizeof(int), hipMemcpyHostToDevice, hipStreamPerThread);
   if (status != hipSuccess) return;
-  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
   // Host Memory is not destroyed with hipDeviceReset, need to free it
   // explicitly to avoid memory leaks
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipDeviceReset());
+  HIP_CHECK(hipHostFree(A_h))
+  HIP_CHECK(hipDeviceReset())
 
   // After reset all memory objects will be destroyed hence allocating them again
   // Intention is to use hipStreamPerThread successfully after reset hence not validating
@@ -92,9 +92,9 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_DeviceReset_2) {
   status =
       hipMemcpyAsync(A_d, A_h, ele_size * sizeof(int), hipMemcpyHostToDevice, hipStreamPerThread);
   if (status != hipSuccess) return;
-  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread))
 
   // Clean up
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipHostFree(A_h))
+  HIP_CHECK(hipFree(A_d))
 }

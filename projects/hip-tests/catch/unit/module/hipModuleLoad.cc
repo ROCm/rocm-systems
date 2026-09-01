@@ -27,33 +27,33 @@ static int CountOpenFds() {
 }
 
 HIP_TEST_CASE(Unit_hipModuleLoad_Positive_NoFdLeak) {
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
 
   {
     hipModule_t warmup = nullptr;
-    HIP_CHECK(hipModuleLoad(&warmup, "empty_module.code"));
-    HIP_CHECK(hipModuleUnload(warmup));
+    HIP_CHECK(hipModuleLoad(&warmup, "empty_module.code"))
+    HIP_CHECK(hipModuleUnload(warmup))
   }
 
   const int baseline = CountOpenFds();
 
   {
     hipModule_t module = nullptr;
-    HIP_CHECK(hipModuleLoad(&module, "empty_module.code"));
+    HIP_CHECK(hipModuleLoad(&module, "empty_module.code"))
     REQUIRE(module != nullptr);
     const int after_load = CountOpenFds();
     INFO("Open FDs before load: " << baseline
          << ", after load (before unload): " << after_load);
     REQUIRE(after_load == baseline);
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   }
 
   constexpr int kIterations = 32;
   for (int i = 0; i < kIterations; ++i) {
     hipModule_t module = nullptr;
-    HIP_CHECK(hipModuleLoad(&module, "empty_module.code"));
+    HIP_CHECK(hipModuleLoad(&module, "empty_module.code"))
     REQUIRE(module != nullptr);
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   }
   const int after_cycles = CountOpenFds();
   INFO("Open FDs before: " << baseline << ", after " << kIterations
@@ -63,15 +63,15 @@ HIP_TEST_CASE(Unit_hipModuleLoad_Positive_NoFdLeak) {
 #endif
 
 HIP_TEST_CASE(Unit_hipModuleLoad_Positive_Basic) {
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoad(&module, "empty_module.code"));
+  HIP_CHECK(hipModuleLoad(&module, "empty_module.code"))
   REQUIRE(module != nullptr);
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
 }
 
 HIP_TEST_CASE(Unit_hipModuleLoad_Negative_Parameters) {
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
   hipModule_t module;
 
   SECTION("module == nullptr") {
@@ -92,7 +92,7 @@ HIP_TEST_CASE(Unit_hipModuleLoad_Negative_Parameters) {
 }
 
 HIP_TEST_CASE(Unit_hipModuleLoad_Negative_Load_From_A_File_That_Is_Not_A_Module) {
-  HIP_CHECK(hipFree(nullptr));
+  HIP_CHECK(hipFree(nullptr))
   hipModule_t module;
 
   HIP_CHECK_ERROR(hipModuleLoad(&module, "not_a_module.txt"), hipErrorInvalidImage);

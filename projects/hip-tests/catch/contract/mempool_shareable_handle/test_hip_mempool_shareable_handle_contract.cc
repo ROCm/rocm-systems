@@ -32,7 +32,7 @@ void CloseFd(int fd) {
 
 int CurrentDevice() {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   return device;
 }
 
@@ -66,7 +66,7 @@ hipMemPool_t CreatePosixFdPoolOrSkip() {
   ) {
     HIP_SKIP_TEST("Shareable memory pool handles are not supported by this runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   REQUIRE(pool != nullptr);
   return pool;
 }
@@ -83,7 +83,7 @@ bool ExportToFdOrSkip(hipMemPool_t pool, int* fd) {
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 }  // namespace
@@ -136,10 +136,10 @@ HIP_TEST_CASE(Contract_MemPoolShareableHandle_HipMemPoolExportPointer_ExportImpo
   // Allocations for pointer export must come from the original (exportable) pool
   // via a stream-ordered allocation; imported pools cannot create allocations.
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   void* dev_ptr = nullptr;
-  HIP_CHECK(hipMallocFromPoolAsync(&dev_ptr, kAllocSize, pool, stream));
+  HIP_CHECK(hipMallocFromPoolAsync(&dev_ptr, kAllocSize, pool, stream))
   // Free-and-drain on teardown: enqueue the async free, then synchronize the
   // stream so the free completes before the pool-destroy actions (registered
   // earlier, so they run after this one) tear down the pools it belongs to.
@@ -147,16 +147,16 @@ HIP_TEST_CASE(Contract_MemPoolShareableHandle_HipMemPoolExportPointer_ExportImpo
     (void)hipFreeAsync(dev_ptr, stream);
     (void)hipStreamSynchronize(stream);
   });
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   REQUIRE(dev_ptr != nullptr);
 
   // Export the specific allocation as opaque pointer-export data, then import it
   // through the imported pool. The imported pointer must be non-null.
   hipMemPoolPtrExportData export_data{};
-  HIP_CHECK(hipMemPoolExportPointer(&export_data, dev_ptr));
+  HIP_CHECK(hipMemPoolExportPointer(&export_data, dev_ptr))
 
   void* imported_ptr = nullptr;
-  HIP_CHECK(hipMemPoolImportPointer(&imported_ptr, imported, &export_data));
+  HIP_CHECK(hipMemPoolImportPointer(&imported_ptr, imported, &export_data))
   REQUIRE(imported_ptr != nullptr);
 }
 

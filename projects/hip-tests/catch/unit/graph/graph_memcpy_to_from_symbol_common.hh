@@ -17,16 +17,16 @@ constexpr size_t kArraySize = 5;
 }
 
 #define HIP_GRAPH_MEMCPY_FROM_SYMBOL_NODE_DEFINE_GLOBALS(type)                                     \
-  __device__ type type##_device_var = 1;                                                           \
-  __constant__ __device__ type type##_const_device_var = 1;                                        \
-  __device__ type type##_device_arr[kArraySize] = {1, 2, 3, 4, 5};                                 \
-  __constant__ __device__ type type##_const_device_arr[kArraySize] = {1, 2, 3, 4, 5};
+  static __device__ type type##_device_var = 1;                                                    \
+  static __constant__ __device__ type type##_const_device_var = 1;                                 \
+  static __device__ type type##_device_arr[kArraySize] = {1, 2, 3, 4, 5};                          \
+  static __constant__ __device__ type type##_const_device_arr[kArraySize] = {1, 2, 3, 4, 5};
 
 #define HIP_GRAPH_MEMCPY_FROM_SYMBOL_NODE_DEFINE_ALTERNATE_GLOBALS(type)                           \
-  __device__ type type##_alt_device_var = 0;                                                       \
-  __constant__ __device__ type type##_alt_const_device_var = 0;                                    \
-  __device__ type type##_alt_device_arr[kArraySize] = {0, 0, 0, 0, 0};                             \
-  __constant__ __device__ type type##_alt_const_device_arr[kArraySize] = {0, 0, 0, 0, 0};
+  static __device__ type type##_alt_device_var = 0;                                                \
+  static __constant__ __device__ type type##_alt_const_device_var = 0;                             \
+  static __device__ type type##_alt_device_arr[kArraySize] = {0, 0, 0, 0, 0};                      \
+  static __constant__ __device__ type type##_alt_const_device_arr[kArraySize] = {0, 0, 0, 0, 0};
 
 template <typename T, typename F>
 void MemcpyFromSymbolShell(F f, const void* symbol, size_t offset, const std::vector<T> expected) {
@@ -41,10 +41,10 @@ void MemcpyFromSymbolShell(F f, const void* symbol, size_t offset, const std::ve
     direction = GENERATE(hipMemcpyDeviceToHost, hipMemcpyDefault);
   }
   INFO("Memcpy direction: " << direction);
-  HIP_CHECK(f(dst_alloc.ptr(), symbol, size, offset * sizeof(T), direction));
+  HIP_CHECK(f(dst_alloc.ptr(), symbol, size, offset * sizeof(T), direction))
 
   std::vector<T> symbol_values(expected.size());
-  HIP_CHECK(hipMemcpy(symbol_values.data(), dst_alloc.ptr(), size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(symbol_values.data(), dst_alloc.ptr(), size, hipMemcpyDefault))
   REQUIRE_THAT(expected, Catch::Matchers::Equals(symbol_values));
 }
 
@@ -53,7 +53,7 @@ void MemcpyToSymbolShell(F f, const void* symbol, size_t offset, const std::vect
   const auto alloc_type = GENERATE(LinearAllocs::hipMalloc, LinearAllocs::hipHostMalloc);
   const auto size = set_values.size() * sizeof(T);
   LinearAllocGuard<T> src_alloc(alloc_type, size);
-  HIP_CHECK(hipMemcpy(src_alloc.ptr(), set_values.data(), size, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(src_alloc.ptr(), set_values.data(), size, hipMemcpyDefault))
 
   hipMemcpyKind direction;
   if (alloc_type == LinearAllocs::hipMalloc) {
@@ -62,10 +62,10 @@ void MemcpyToSymbolShell(F f, const void* symbol, size_t offset, const std::vect
     direction = GENERATE(hipMemcpyHostToDevice, hipMemcpyDefault);
   }
   INFO("Memcpy direction: " << direction);
-  HIP_CHECK(f(symbol, src_alloc.ptr(), size, offset * sizeof(T), direction));
+  HIP_CHECK(f(symbol, src_alloc.ptr(), size, offset * sizeof(T), direction))
 
   std::vector<T> symbol_values(set_values.size());
-  HIP_CHECK(hipMemcpyFromSymbol(symbol_values.data(), symbol, size, offset * sizeof(T)));
+  HIP_CHECK(hipMemcpyFromSymbol(symbol_values.data(), symbol, size, offset * sizeof(T)))
   REQUIRE_THAT(set_values, Catch::Matchers::Equals(symbol_values));
 }
 

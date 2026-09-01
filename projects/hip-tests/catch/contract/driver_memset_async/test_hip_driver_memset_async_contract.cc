@@ -33,15 +33,15 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync_HipMemsetD8Async_D8FillsByte_VisibleAft
   void* device_ptr = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, dst.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, dst.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemsetD8Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), pattern, dst.size(),
                              stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipMemcpyDtoH(dst.data(), reinterpret_cast<hipDeviceptr_t>(device_ptr), dst.size()));
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipMemcpyDtoH(dst.data(), reinterpret_cast<hipDeviceptr_t>(device_ptr), dst.size()))
 
   RequireAllEqual(dst, pattern);
 }
@@ -54,14 +54,14 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync_HipMemsetD16Async_D16FillsWord_VisibleA
   void* device_ptr = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, dst.size() * sizeof(uint16_t)));
+  HIP_CHECK(hipMalloc(&device_ptr, dst.size() * sizeof(uint16_t)))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemsetD16Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), pattern, dst.size(),
                               stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   HIP_CHECK(hipMemcpyDtoH(dst.data(), reinterpret_cast<hipDeviceptr_t>(device_ptr),
                           dst.size() * sizeof(uint16_t)));
 
@@ -76,14 +76,14 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync_HipMemsetD32Async_D32FillsDword_Visible
   void* device_ptr = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, dst.size() * sizeof(int)));
+  HIP_CHECK(hipMalloc(&device_ptr, dst.size() * sizeof(int)))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), pattern, dst.size(),
                               stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   HIP_CHECK(hipMemcpyDtoH(dst.data(), reinterpret_cast<hipDeviceptr_t>(device_ptr),
                           dst.size() * sizeof(int)));
 
@@ -97,12 +97,12 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync_HipMemsetD32Async_NullStream_UsesDefaul
   std::array<int, kDwordCount> dst{};
   void* device_ptr = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, dst.size() * sizeof(int)));
+  HIP_CHECK(hipMalloc(&device_ptr, dst.size() * sizeof(int)))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   HIP_CHECK(
       hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), pattern, dst.size(), nullptr));
-  HIP_CHECK(hipStreamSynchronize(nullptr));
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   HIP_CHECK(hipMemcpyDtoH(dst.data(), reinterpret_cast<hipDeviceptr_t>(device_ptr),
                           dst.size() * sizeof(int)));
 
@@ -118,15 +118,15 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync_HipMemsetD8Async_ZeroCount_Succeeds) {
   void* device_ptr = nullptr;
   hipStream_t stream = nullptr;
 
-  HIP_CHECK(hipMalloc(&device_ptr, dst.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, dst.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipMemsetD8(reinterpret_cast<hipDeviceptr_t>(device_ptr), original, dst.size()));
+  HIP_CHECK(hipMemsetD8(reinterpret_cast<hipDeviceptr_t>(device_ptr), original, dst.size()))
 
-  HIP_CHECK(hipMemsetD8Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), replacement, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipMemcpyDtoH(dst.data(), reinterpret_cast<hipDeviceptr_t>(device_ptr), dst.size()));
+  HIP_CHECK(hipMemsetD8Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), replacement, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipMemcpyDtoH(dst.data(), reinterpret_cast<hipDeviceptr_t>(device_ptr), dst.size()))
 
   RequireAllEqual(dst, original);
 }
@@ -135,7 +135,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync_HipMemsetD8Async_ZeroCount_Succeeds) {
 HIP_TEST_CASE(Contract_DriverMemsetAsync_HipMemsetD8Async_NullDestination_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   REQUIRE(hipMemsetD8Async(hipDeviceptr_t(nullptr), 0x5a, kByteCount, stream) != hipSuccess);

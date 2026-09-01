@@ -127,8 +127,8 @@ template <typename T> __global__ void VectorSet(T* const vec, const T value, siz
 static __global__ void Delay(uint32_t interval, const uint32_t ticks_per_ms) {
   while (interval--) {
     #if HT_AMD
-    uint64_t start = clock_function();
-    while (clock_function() - start < ticks_per_ms) {
+    uint64_t start = static_cast<uint64_t>(clock_function());
+    while (static_cast<uint64_t>(clock_function()) - start < ticks_per_ms) {
       __builtin_amdgcn_s_sleep(10);
     }
     #endif
@@ -155,16 +155,16 @@ __global__ void Iota(T* const out, size_t pitch, size_t w, size_t h, size_t d) {
 inline void LaunchDelayKernel(const std::chrono::milliseconds interval, const hipStream_t stream = nullptr) {
   int ticks_per_ms = 0;
   #if HT_AMD
-  HIPCHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0));
+  HIPCHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0))
   if (ticks_per_ms == 0) {
     std::cout << "clkFrequency = 0, set it to 1000KHz\n";
     ticks_per_ms = 1000;
   }
   #endif
   #if HT_NVIDIA
-  HIPCHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, 0));
+  HIPCHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, 0))
   #endif
-  Delay<<<1, 1, 0, stream>>>(interval.count(), ticks_per_ms);
+  Delay<<<1, 1, 0, stream>>>(static_cast<uint32_t>(interval.count()), static_cast<uint32_t>(ticks_per_ms));
 }
 
 // Keeps a stream busy for at least `interval` by enqueuing a host callback that
@@ -188,7 +188,7 @@ inline bool DeviceAttributesSupport(const int device, Attributes... attributes) 
   constexpr auto DeviceAttributeSupport = [](const int device,
                                              const hipDeviceAttribute_t attribute) {
     int value = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&value, attribute, device));
+    HIP_CHECK(hipDeviceGetAttribute(&value, attribute, device))
     return value;
   };
   return (... && DeviceAttributeSupport(device, attributes));
@@ -196,6 +196,6 @@ inline bool DeviceAttributesSupport(const int device, Attributes... attributes) 
 
 inline int GetDeviceAttribute(const hipDeviceAttribute_t attr, int device) {
   int value = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));
+  HIP_CHECK(hipDeviceGetAttribute(&value, attr, device))
   return value;
 }

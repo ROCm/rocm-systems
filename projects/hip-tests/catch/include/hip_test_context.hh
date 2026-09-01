@@ -147,9 +147,9 @@ static bool _log_enable = (!TestContext::getEnvVar("HT_LOG_ENABLE").empty() ? tr
 
 // printing logs
 #define LogPrintf(format, ...)                                                                     \
-  {                                                                                                \
+  do {                                                                                             \
     if (_log_enable) {                                                                             \
       printf(format, __VA_ARGS__);                                                                 \
       printf("%c", '\n');                                                                          \
     }                                                                                              \
-  }
+  } while (0)

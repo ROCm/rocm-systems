@@ -24,9 +24,9 @@
       calling hipUserObjectRelease */
 static void hipUserObjectCreate_Functional_1(void* object, void destroyObj(void*)) {
   hipUserObject_t hObject;
-  HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyObj, 1, hipUserObjectNoDestructorSync));
+  HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyObj, 1, hipUserObjectNoDestructorSync))
   REQUIRE(hObject != nullptr);
-  HIP_CHECK(hipUserObjectRelease(hObject));
+  HIP_CHECK(hipUserObjectRelease(hObject))
 }
 
 HIP_TEST_CASE(Unit_hipUserObjectCreate_Functional_1) {
@@ -60,7 +60,7 @@ static void hipUserObjectCreate_Functional_2(void* object, void destroyObj(void*
   HIP_CHECK(
       hipUserObjectCreate(&hObject, object, destroyObj, refCount, hipUserObjectNoDestructorSync));
   REQUIRE(hObject != nullptr);
-  HIP_CHECK(hipUserObjectRelease(hObject, refCount));
+  HIP_CHECK(hipUserObjectRelease(hObject, refCount))
 }
 
 HIP_TEST_CASE(Unit_hipUserObjectCreate_Functional_2) {
@@ -90,11 +90,11 @@ HIP_TEST_CASE(Unit_hipUserObjectCreate_Functional_2) {
       and release it by calling hipUserObjectRelease twice. */
 static void hipUserObjectCreate_Functional_3(void* object, void destroyObj(void*)) {
   hipUserObject_t hObject;
-  HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyObj, 1, hipUserObjectNoDestructorSync));
+  HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyObj, 1, hipUserObjectNoDestructorSync))
   REQUIRE(hObject != nullptr);
-  HIP_CHECK(hipUserObjectRetain(hObject));
-  HIP_CHECK(hipUserObjectRelease(hObject));
-  HIP_CHECK(hipUserObjectRelease(hObject));
+  HIP_CHECK(hipUserObjectRetain(hObject))
+  HIP_CHECK(hipUserObjectRelease(hObject))
+  HIP_CHECK(hipUserObjectRelease(hObject))
 }
 
 HIP_TEST_CASE(Unit_hipUserObjectCreate_Functional_3) {
@@ -130,8 +130,8 @@ static void hipUserObjectCreate_Functional_4(void* object, void destroyObj(void*
   HIP_CHECK(
       hipUserObjectCreate(&hObject, object, destroyObj, refCount, hipUserObjectNoDestructorSync));
   REQUIRE(hObject != nullptr);
-  HIP_CHECK(hipUserObjectRetain(hObject, refCountRetain));
-  HIP_CHECK(hipUserObjectRelease(hObject, refCount + refCountRetain));
+  HIP_CHECK(hipUserObjectRetain(hObject, refCountRetain))
+  HIP_CHECK(hipUserObjectRelease(hObject, refCount + refCountRetain))
 }
 
 HIP_TEST_CASE(Unit_hipUserObjectCreate_Functional_4) {
@@ -180,7 +180,7 @@ HIP_TEST_CASE(Unit_hipUserObjectCreate_Negative) {
   SECTION("Pass object as nullptr") {
     HIP_CHECK(
         hipUserObjectCreate(&hObject, nullptr, destroyIntObj, 1, hipUserObjectNoDestructorSync));
-    HIP_CHECK(hipUserObjectRelease(hObject, 1));
+    HIP_CHECK(hipUserObjectRelease(hObject, 1))
     delete object;
   }
   SECTION("Pass Callback function as nullptr") {
@@ -198,7 +198,7 @@ HIP_TEST_CASE(Unit_hipUserObjectCreate_Negative) {
   SECTION("Pass initialRefcount as INT_MAX") {
     HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyIntObj, INT_MAX,
                                   hipUserObjectNoDestructorSync));
-    HIP_CHECK(hipUserObjectRelease(hObject, INT_MAX));
+    HIP_CHECK(hipUserObjectRelease(hObject, INT_MAX))
   }
   SECTION("Pass flag other than hipUserObjectNoDestructorSync") {
     HIP_CHECK_ERROR(hipUserObjectCreate(&hObject, object, destroyIntObj, 1, hipUserObjectFlags(9)),
@@ -214,15 +214,15 @@ HIP_TEST_CASE(Unit_hipUserObj_Negative_Test) {
   hipUserObject_t hObject;
 
   // Create a new hObject with 2 reference
-  HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyIntObj, 2, hipUserObjectNoDestructorSync));
+  HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyIntObj, 2, hipUserObjectNoDestructorSync))
   REQUIRE(hObject != nullptr);
 
   // Release more than created. Will not release the references.
-  HIP_CHECK(hipUserObjectRelease(hObject, 4));
+  HIP_CHECK(hipUserObjectRelease(hObject, 4))
 
   // Retain reference
-  HIP_CHECK(hipUserObjectRetain(hObject, 1));
+  HIP_CHECK(hipUserObjectRetain(hObject, 1))
 
   // Release all the references pending
-  HIP_CHECK(hipUserObjectRelease(hObject, 3));
+  HIP_CHECK(hipUserObjectRelease(hObject, 3))
 }

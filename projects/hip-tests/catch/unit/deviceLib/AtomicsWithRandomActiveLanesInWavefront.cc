@@ -378,19 +378,19 @@ template <typename T> static void runIntTest() {
   // allocate device memory for result
   T* dOData;
   bool* dIActiveLanes;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dOData), memSize));
-  HIP_CHECK(hipMalloc(reinterpret_cast<bool**>(&dIActiveLanes), N * sizeof(bool)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dOData), memSize))
+  HIP_CHECK(hipMalloc(reinterpret_cast<bool**>(&dIActiveLanes), N * sizeof(bool)))
 
   // copy host memory to device to initialize to zero
-  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dIActiveLanes, hIActiveLanes, N, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dIActiveLanes, hIActiveLanes, N, hipMemcpyHostToDevice))
 
   // execute the atomicAdd kernel
   hipLaunchKernelGGL(testAtomicAdd_uniValue, dim3(numBlocks), dim3(numThreads), 0, 0, dOData,
                      dIActiveLanes);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult == verifyAdd(hOData, numThreads * numBlocks, hIActiveLanes));
@@ -400,7 +400,7 @@ template <typename T> static void runIntTest() {
                      dIActiveLanes);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult == verifySub(hOData, numThreads * numBlocks, hIActiveLanes));
@@ -410,7 +410,7 @@ template <typename T> static void runIntTest() {
                      dIActiveLanes);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult == verifyMax(hOData, numThreads * numBlocks, hIActiveLanes));
@@ -420,7 +420,7 @@ template <typename T> static void runIntTest() {
                      dIActiveLanes);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult == verifyMin(hOData, numThreads * numBlocks, hIActiveLanes));
@@ -430,7 +430,7 @@ template <typename T> static void runIntTest() {
                      dIActiveLanes);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult == verifyAnd(hOData, numThreads * numBlocks, hIActiveLanes));
@@ -440,7 +440,7 @@ template <typename T> static void runIntTest() {
                      dIActiveLanes);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult == verifyOr(hOData, numThreads * numBlocks, hIActiveLanes));
@@ -450,7 +450,7 @@ template <typename T> static void runIntTest() {
                      dIActiveLanes);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult == verifyXor(hOData, numThreads * numBlocks, hIActiveLanes));
@@ -458,8 +458,8 @@ template <typename T> static void runIntTest() {
   // Cleanup memory
   free(hOData);
   free(hIActiveLanes);
-  HIP_CHECK(hipFree(dOData));
-  HIP_CHECK(hipFree(dIActiveLanes));
+  HIP_CHECK(hipFree(dOData))
+  HIP_CHECK(hipFree(dIActiveLanes))
 }
 
 static void runFloatTest() {
@@ -489,19 +489,19 @@ static void runFloatTest() {
   // allocate device memory for result
   float* dOData;
   bool* dIActiveLanes;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dOData), memSize));
-  HIP_CHECK(hipMalloc(reinterpret_cast<bool**>(&dIActiveLanes), N * sizeof(bool)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dOData), memSize))
+  HIP_CHECK(hipMalloc(reinterpret_cast<bool**>(&dIActiveLanes), N * sizeof(bool)))
 
   // copy host memory to device to initialize to zero
-  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dIActiveLanes, hIActiveLanes, N * sizeof(bool), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dIActiveLanes, hIActiveLanes, N * sizeof(bool), hipMemcpyHostToDevice))
 
   // execute the atomicAdd kernel
   hipLaunchKernelGGL(testAtomicAdd_uniValue, dim3(numBlocks), dim3(numThreads), 0, 0, dOData,
                      dIActiveLanes);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult == verifyAdd(hOData, numThreads * numBlocks, hIActiveLanes));
@@ -511,7 +511,7 @@ static void runFloatTest() {
                      dIActiveLanes);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult == verifySub(hOData, numThreads * numBlocks, hIActiveLanes));
@@ -521,7 +521,7 @@ static void runFloatTest() {
                      dIActiveLanes);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult == verifyMax(hOData, numThreads * numBlocks, hIActiveLanes));
@@ -531,7 +531,7 @@ static void runFloatTest() {
                      dIActiveLanes);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult == verifyMin(hOData, numThreads * numBlocks, hIActiveLanes));
@@ -539,8 +539,8 @@ static void runFloatTest() {
   // Cleanup memory
   free(hOData);
   free(hIActiveLanes);
-  HIP_CHECK(hipFree(dOData));
-  HIP_CHECK(hipFree(dIActiveLanes));
+  HIP_CHECK(hipFree(dOData))
+  HIP_CHECK(hipFree(dIActiveLanes))
 }
 
 
@@ -578,21 +578,21 @@ template <typename T> static void runDivIntTest() {
   T* dOData;
   bool* dIActiveLanes;
   T* dIDivValues;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dOData), memSize));
-  HIP_CHECK(hipMalloc(reinterpret_cast<bool**>(&dIActiveLanes), N * sizeof(bool)));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dIDivValues), N * sizeof(T)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dOData), memSize))
+  HIP_CHECK(hipMalloc(reinterpret_cast<bool**>(&dIActiveLanes), N * sizeof(bool)))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dIDivValues), N * sizeof(T)))
 
   // copy host memory to device to initialize to zero
-  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dIActiveLanes, hIActiveLanes, N * sizeof(bool), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dIDivValues, hIDivValues, N * sizeof(T), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dIActiveLanes, hIActiveLanes, N * sizeof(bool), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dIDivValues, hIDivValues, N * sizeof(T), hipMemcpyHostToDevice))
 
   // execute the atomicAdd kernel
   hipLaunchKernelGGL(testAtomicAdd_divValue, dim3(numBlocks), dim3(numThreads), 0, 0, dOData,
                      dIActiveLanes, dIDivValues);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult ==
@@ -603,7 +603,7 @@ template <typename T> static void runDivIntTest() {
                      dIActiveLanes, dIDivValues);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult ==
@@ -614,7 +614,7 @@ template <typename T> static void runDivIntTest() {
                      dIActiveLanes, dIDivValues);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult ==
@@ -625,7 +625,7 @@ template <typename T> static void runDivIntTest() {
                      dIActiveLanes, dIDivValues);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult ==
@@ -636,7 +636,7 @@ template <typename T> static void runDivIntTest() {
                      dIActiveLanes, dIDivValues);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult ==
@@ -647,7 +647,7 @@ template <typename T> static void runDivIntTest() {
                      dIActiveLanes, dIDivValues);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult ==
@@ -658,7 +658,7 @@ template <typename T> static void runDivIntTest() {
                      dIActiveLanes, dIDivValues);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult ==
@@ -668,9 +668,9 @@ template <typename T> static void runDivIntTest() {
   free(hOData);
   free(hIDivValues);
   free(hIActiveLanes);
-  HIP_CHECK(hipFree(dOData));
-  HIP_CHECK(hipFree(dIActiveLanes));
-  HIP_CHECK(hipFree(dIDivValues));
+  HIP_CHECK(hipFree(dOData))
+  HIP_CHECK(hipFree(dIActiveLanes))
+  HIP_CHECK(hipFree(dIDivValues))
 }
 
 static void runDivFloatTest() {
@@ -704,21 +704,21 @@ static void runDivFloatTest() {
   float* dOData;
   bool* dIActiveLanes;
   float* dIDivValues;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dOData), memSize));
-  HIP_CHECK(hipMalloc(reinterpret_cast<bool**>(&dIActiveLanes), N * sizeof(bool)));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dIDivValues), N * sizeof(float)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dOData), memSize))
+  HIP_CHECK(hipMalloc(reinterpret_cast<bool**>(&dIActiveLanes), N * sizeof(bool)))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dIDivValues), N * sizeof(float)))
 
   // copy host memory to device to initialize to zero
-  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dIActiveLanes, hIActiveLanes, N * sizeof(bool), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dIDivValues, hIDivValues, N * sizeof(float), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dIActiveLanes, hIActiveLanes, N * sizeof(bool), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(dIDivValues, hIDivValues, N * sizeof(float), hipMemcpyHostToDevice))
 
   // execute the atomicAdd kernel
   hipLaunchKernelGGL(testAtomicAdd_divValue, dim3(numBlocks), dim3(numThreads), 0, 0, dOData,
                      dIActiveLanes, dIDivValues);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult ==
@@ -729,7 +729,7 @@ static void runDivFloatTest() {
                      dIActiveLanes, dIDivValues);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult ==
@@ -740,7 +740,7 @@ static void runDivFloatTest() {
                      dIActiveLanes, dIDivValues);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult ==
@@ -751,7 +751,7 @@ static void runDivFloatTest() {
                      dIActiveLanes, dIDivValues);
 
   // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost))
 
   // Compute reference solution
   REQUIRE(testResult ==
@@ -761,9 +761,9 @@ static void runDivFloatTest() {
   free(hOData);
   free(hIDivValues);
   free(hIActiveLanes);
-  HIP_CHECK(hipFree(dOData));
-  HIP_CHECK(hipFree(dIActiveLanes));
-  HIP_CHECK(hipFree(dIDivValues));
+  HIP_CHECK(hipFree(dOData))
+  HIP_CHECK(hipFree(dIActiveLanes))
+  HIP_CHECK(hipFree(dIDivValues))
 }
 
 /*

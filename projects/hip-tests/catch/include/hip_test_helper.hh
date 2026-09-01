@@ -16,14 +16,14 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <windows.h>
+#include <Windows.h>
 #include <sysinfoapi.h>
 #endif
 
 namespace HipTest {
 static inline int getGeviceCount() {
   int dev = 0;
-  HIP_CHECK(hipGetDeviceCount(&dev));
+  HIP_CHECK(hipGetDeviceCount(&dev))
   return dev;
 }
 

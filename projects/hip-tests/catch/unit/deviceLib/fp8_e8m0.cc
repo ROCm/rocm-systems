@@ -33,19 +33,19 @@ void device_cvt_bfloat16raw_to_e8m0(const std::vector<__hip_bfloat16>& in,
   unsigned char* out_d = nullptr;
   REQUIRE(in.size() < 1024);
 
-  HIP_CHECK(hipMalloc(&in_d, sizeof(__hip_bfloat16) * in.size()));
-  HIP_CHECK(hipMalloc(&out_d, sizeof(unsigned char) * out.size()));
+  HIP_CHECK(hipMalloc(&in_d, sizeof(__hip_bfloat16) * in.size()))
+  HIP_CHECK(hipMalloc(&out_d, sizeof(unsigned char) * out.size()))
 
-  HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(__hip_bfloat16) * in.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(__hip_bfloat16) * in.size(), hipMemcpyHostToDevice))
 
   bfloat16raw_to_e8m0<<<1, 1024>>>(in_d, out_d, in.size(), sat, round);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   HIP_CHECK(
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipFree(in_d));
-  HIP_CHECK(hipFree(out_d));
+  HIP_CHECK(hipFree(in_d))
+  HIP_CHECK(hipFree(out_d))
 }
 
 HIP_TEST_CASE(Unit__hip_cvt_bfloat16raw_to_e8m0) {
@@ -123,19 +123,19 @@ void device_cvt_float_to_e8m0(const std::vector<float>& in, std::vector<unsigned
   unsigned char* out_d = nullptr;
   REQUIRE(in.size() < 1024);
 
-  HIP_CHECK(hipMalloc(&in_d, sizeof(float) * in.size()));
-  HIP_CHECK(hipMalloc(&out_d, sizeof(unsigned char) * out.size()));
+  HIP_CHECK(hipMalloc(&in_d, sizeof(float) * in.size()))
+  HIP_CHECK(hipMalloc(&out_d, sizeof(unsigned char) * out.size()))
 
-  HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(float) * in.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(float) * in.size(), hipMemcpyHostToDevice))
 
   float_to_e8m0_kernel<<<1, 1024>>>(in_d, out_d, in.size(), sat, round);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   HIP_CHECK(
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipFree(in_d));
-  HIP_CHECK(hipFree(out_d));
+  HIP_CHECK(hipFree(in_d))
+  HIP_CHECK(hipFree(out_d))
 }
 
 HIP_TEST_CASE(Unit__hip_cvt_float_to_e8m0) {
@@ -213,19 +213,19 @@ void device_cvt_double_to_e8m0(const std::vector<double>& in, std::vector<unsign
   unsigned char* out_d = nullptr;
   REQUIRE(in.size() < 1024);
 
-  HIP_CHECK(hipMalloc(&in_d, sizeof(double) * in.size()));
-  HIP_CHECK(hipMalloc(&out_d, sizeof(unsigned char) * out.size()));
+  HIP_CHECK(hipMalloc(&in_d, sizeof(double) * in.size()))
+  HIP_CHECK(hipMalloc(&out_d, sizeof(unsigned char) * out.size()))
 
-  HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(double) * in.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(double) * in.size(), hipMemcpyHostToDevice))
 
   double_to_e8m0_kernel<<<1, 1024>>>(in_d, out_d, in.size(), sat, round);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   HIP_CHECK(
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipFree(in_d));
-  HIP_CHECK(hipFree(out_d));
+  HIP_CHECK(hipFree(in_d))
+  HIP_CHECK(hipFree(out_d))
 }
 
 
@@ -323,18 +323,18 @@ void device_cvt_e8m0_to_bf16raw(const std::vector<unsigned char>& in, std::vecto
   float* out_d = nullptr;
   REQUIRE(in.size() < 1024);
 
-  HIP_CHECK(hipMalloc(&in_d, sizeof(unsigned char) * in.size()));
-  HIP_CHECK(hipMalloc(&out_d, sizeof(float) * out.size()));
+  HIP_CHECK(hipMalloc(&in_d, sizeof(unsigned char) * in.size()))
+  HIP_CHECK(hipMalloc(&out_d, sizeof(float) * out.size()))
 
-  HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(unsigned char) * in.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(unsigned char) * in.size(), hipMemcpyHostToDevice))
 
   e8m0_to_bf16raw_kernel<<<1, 1024>>>(in_d, out_d, in.size());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
-  HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(float) * out.size(), hipMemcpyDeviceToHost))
 
-  HIP_CHECK(hipFree(in_d));
-  HIP_CHECK(hipFree(out_d));
+  HIP_CHECK(hipFree(in_d))
+  HIP_CHECK(hipFree(out_d))
 }
 
 HIP_TEST_CASE(Unit__hip_cvt_e8m0_to_bf16raw) {
@@ -387,18 +387,18 @@ void device_e8m0_constructors(const std::vector<T_in>& in, std::vector<T_out>& o
   T_out* out_d = nullptr;
   REQUIRE(in.size() <= 1024);
 
-  HIP_CHECK(hipMalloc(&in_d, sizeof(T_in) * in.size()));
-  HIP_CHECK(hipMalloc(&out_d, sizeof(T_out) * out.size()));
+  HIP_CHECK(hipMalloc(&in_d, sizeof(T_in) * in.size()))
+  HIP_CHECK(hipMalloc(&out_d, sizeof(T_out) * out.size()))
 
-  HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(T_in) * in.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(T_in) * in.size(), hipMemcpyHostToDevice))
 
   e8m0_constructors_kernel<T_in, T_out><<<1, 1024>>>(in_d, out_d, in.size());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
-  HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(T_out) * out.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(T_out) * out.size(), hipMemcpyDeviceToHost))
 
-  HIP_CHECK(hipFree(in_d));
-  HIP_CHECK(hipFree(out_d));
+  HIP_CHECK(hipFree(in_d))
+  HIP_CHECK(hipFree(out_d))
 }
 
 template <typename T>
@@ -505,18 +505,18 @@ void device_e8m0_float_conversions(const std::vector<float>& in, std::vector<T_o
   T_out* out_d = nullptr;
   REQUIRE(in.size() <= 1024);
 
-  HIP_CHECK(hipMalloc(&in_d, sizeof(float) * in.size()));
-  HIP_CHECK(hipMalloc(&out_d, sizeof(T_out) * out.size()));
+  HIP_CHECK(hipMalloc(&in_d, sizeof(float) * in.size()))
+  HIP_CHECK(hipMalloc(&out_d, sizeof(T_out) * out.size()))
 
-  HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(float) * in.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(float) * in.size(), hipMemcpyHostToDevice))
 
   e8m0_float_conversions_kernel<T_out><<<1, 1024>>>(in_d, out_d, in.size());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
-  HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(T_out) * out.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(T_out) * out.size(), hipMemcpyDeviceToHost))
 
-  HIP_CHECK(hipFree(in_d));
-  HIP_CHECK(hipFree(out_d));
+  HIP_CHECK(hipFree(in_d))
+  HIP_CHECK(hipFree(out_d))
 }
 
 HIP_TEMPLATE_TEST_CASE(Unit_e8m0_float_conversions, half, __hip_bfloat16, float, double) {
@@ -606,18 +606,18 @@ void device_e8m0_saturation_conversions(const std::vector<unsigned char>& in,
   T_out* out_d = nullptr;
   REQUIRE(in.size() <= 1024);
 
-  HIP_CHECK(hipMalloc(&in_d, sizeof(unsigned char) * in.size()));
-  HIP_CHECK(hipMalloc(&out_d, sizeof(T_out) * out.size()));
+  HIP_CHECK(hipMalloc(&in_d, sizeof(unsigned char) * in.size()))
+  HIP_CHECK(hipMalloc(&out_d, sizeof(T_out) * out.size()))
 
-  HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(unsigned char) * in.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(unsigned char) * in.size(), hipMemcpyHostToDevice))
 
   e8m0_saturation_conversions_kernel<T_out><<<1, 1024>>>(in_d, out_d, in.size());
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
-  HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(T_out) * out.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(T_out) * out.size(), hipMemcpyDeviceToHost))
 
-  HIP_CHECK(hipFree(in_d));
-  HIP_CHECK(hipFree(out_d));
+  HIP_CHECK(hipFree(in_d))
+  HIP_CHECK(hipFree(out_d))
 }
 
 // Exhaustively verify that the e8m0 -> double host conversion agrees with the

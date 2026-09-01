@@ -51,8 +51,8 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_LinearResource) {
   hipDeviceProp_t devProp;
 
   // Initialization
-  HIP_CHECK(hipMalloc(&texBuf, N * sizeof(float)));
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipMalloc(&texBuf, N * sizeof(float)))
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
   memset(&resDesc, 0, sizeof(resDesc));
   memset(&texDesc, 0, sizeof(texDesc));
   resDesc.resType = hipResourceTypeLinear;
@@ -78,8 +78,8 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_LinearResource) {
 
     // Populate texture descriptor
     texDesc.readMode = hipReadModeElementType;
-    HIP_CHECK(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr));
-    HIP_CHECK(hipDestroyTextureObject(texObj));
+    HIP_CHECK(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr))
+    HIP_CHECK(hipDestroyTextureObject(texObj))
   }
 
   SECTION("hipResourceTypeLinear and sizeInBytes(max(size_t))") {
@@ -131,7 +131,7 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_LinearResource) {
   }
 
   // De-Initialization
-  HIP_CHECK(hipFree(texBuf));
+  HIP_CHECK(hipFree(texBuf))
 }
 
 /**

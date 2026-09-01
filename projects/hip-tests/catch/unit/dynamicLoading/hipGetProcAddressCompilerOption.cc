@@ -52,7 +52,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_With_spt_CompilerOption) {
 
   hipDriverProcAddressQueryResult status;
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   void *handle = nullptr;
   handle = dlopen("libamdhip64.so", RTLD_LAZY);

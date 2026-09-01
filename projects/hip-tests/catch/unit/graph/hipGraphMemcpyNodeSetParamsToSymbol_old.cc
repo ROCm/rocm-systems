@@ -32,13 +32,13 @@ code.
 __device__ int globalIn[SIZE], globalOut[SIZE];
 __device__ __constant__ int globalConst[SIZE];
 
-__global__ void CpyToSymbolKernel(int* B_d) {
+static __global__ void CpyToSymbolKernel(int* B_d) {
   for (int i = 0; i < SIZE; i++) {
     B_d[i] = globalIn[i];
   }
 }
 
-__global__ void CpyToConstSymbolKernel(int* B_d) {
+static __global__ void CpyToConstSymbolKernel(int* B_d) {
   for (int i = 0; i < SIZE; i++) {
     B_d[i] = globalConst[i];
   }
@@ -56,7 +56,7 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative) {
   hipError_t ret;
   hipGraphNode_t memcpyToSymbolNode, memcpyH2D_A;
   std::vector<hipGraphNode_t> dependencies;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   // Adding MemcpyNode
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
@@ -115,5 +115,5 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative) {
   }
 
   HipTest::freeArrays<int>(A_d, B_d, nullptr, A_h, B_h, nullptr, false);
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }

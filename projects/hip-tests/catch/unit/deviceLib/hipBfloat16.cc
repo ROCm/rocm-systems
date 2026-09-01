@@ -96,23 +96,23 @@ HIP_TEST_CASE(Unit_hipBfloat16) {
     REQUIRE(result == true);
   }
 
-  HIP_CHECK(hipMalloc(&d_fa, sizeof(float) * SIZE));
-  HIP_CHECK(hipMalloc(&d_fb, sizeof(float) * SIZE));
-  HIP_CHECK(hipMalloc(&d_fc, sizeof(bool)));
+  HIP_CHECK(hipMalloc(&d_fa, sizeof(float) * SIZE))
+  HIP_CHECK(hipMalloc(&d_fb, sizeof(float) * SIZE))
+  HIP_CHECK(hipMalloc(&d_fc, sizeof(bool)))
 
-  HIP_CHECK(hipMemcpy(d_fa, h_fa, sizeof(float) * SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_fb, h_fb, sizeof(float) * SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_fc, &h_fc, sizeof(bool), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_fa, h_fa, sizeof(float) * SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(d_fb, h_fb, sizeof(float) * SIZE, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(d_fc, &h_fc, sizeof(bool), hipMemcpyHostToDevice))
 
   hipLaunchKernelGGL(testOperationsGPU, 1, SIZE, 0, 0, d_fa, d_fb, d_fc);
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipMemcpy(&h_fc, d_fc, sizeof(bool), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipMemcpy(&h_fc, d_fc, sizeof(bool), hipMemcpyDeviceToHost))
 
   REQUIRE(h_fc == true);
 
   delete[] h_fa;
   delete[] h_fb;
-  HIP_CHECK(hipFree(d_fa));
-  HIP_CHECK(hipFree(d_fb));
-  HIP_CHECK(hipFree(d_fc));
+  HIP_CHECK(hipFree(d_fa))
+  HIP_CHECK(hipFree(d_fb))
+  HIP_CHECK(hipFree(d_fc))
 }

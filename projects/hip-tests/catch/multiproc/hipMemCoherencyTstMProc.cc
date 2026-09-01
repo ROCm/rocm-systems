@@ -48,7 +48,7 @@ bool static TstCoherency(int* Ptr, bool HmmMem) {
   using namespace std::chrono_literals;
   int* Dptr = nullptr;
   hipStream_t strm;
-  HIP_CHECK(hipStreamCreate(&strm));
+  HIP_CHECK(hipStreamCreate(&strm))
   // storing value 1 in the memory created above
   *Ptr = 1;
 
@@ -57,7 +57,7 @@ bool static TstCoherency(int* Ptr, bool HmmMem) {
   *expired = 0;
 
   if (!HmmMem) {
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&Dptr), Ptr, 0));
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&Dptr), Ptr, 0))
     CoherentTst<<<1, 1, 0, strm>>>(Dptr, expired);
   } else {
     CoherentTst<<<1, 1, 0, strm>>>(Ptr, expired);
@@ -73,9 +73,9 @@ bool static TstCoherency(int* Ptr, bool HmmMem) {
     }
   }
   *expired = 1;  // Notify kernel loop to exit
-  HIP_CHECK(hipStreamSynchronize(strm));
-  HIP_CHECK(hipStreamDestroy(strm));
-  HIP_CHECK(hipHostFree(expired));
+  HIP_CHECK(hipStreamSynchronize(strm))
+  HIP_CHECK(hipStreamDestroy(strm))
+  HIP_CHECK(hipHostFree(expired))
 
   if (*Ptr == 4) {
     return true;
@@ -92,7 +92,7 @@ HIP_TEST_CASE(Unit_malloc_CoherentTst) {
   CHECK_PCIE_ATOMIC_SUPPORT
   CHECK_MANAGED_MEMORY_SUPPORT
   hipDeviceProp_t prop;
-  HIPCHECK(hipGetDeviceProperties(&prop, 0));
+  HIPCHECK(hipGetDeviceProperties(&prop, 0))
   char* p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
@@ -117,7 +117,7 @@ HIP_TEST_CASE(Unit_malloc_CoherentTst) {
 HIP_TEST_CASE(Unit_malloc_CoherentTstWthAdvise) {
   CHECK_MANAGED_MEMORY_SUPPORT
   hipDeviceProp_t prop;
-  HIPCHECK(hipGetDeviceProperties(&prop, 0));
+  HIPCHECK(hipGetDeviceProperties(&prop, 0))
   char* p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
@@ -127,10 +127,10 @@ HIP_TEST_CASE(Unit_malloc_CoherentTstWthAdvise) {
     Ptr = reinterpret_cast<int*>(malloc(SIZE));
     *Ptr = 4;
     hipStream_t strm;
-    HIP_CHECK(hipStreamCreate(&strm));
+    HIP_CHECK(hipStreamCreate(&strm))
     SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
-    HIP_CHECK(hipStreamSynchronize(strm));
-    HIP_CHECK(hipStreamDestroy(strm));
+    HIP_CHECK(hipStreamSynchronize(strm))
+    HIP_CHECK(hipStreamDestroy(strm))
     REQUIRE(*Ptr == 16);
     free(Ptr);
   } else {
@@ -147,7 +147,7 @@ HIP_TEST_CASE(Unit_mmap_CoherentTst) {
   CHECK_PCIE_ATOMIC_SUPPORT
   CHECK_MANAGED_MEMORY_SUPPORT
   hipDeviceProp_t prop;
-  HIPCHECK(hipGetDeviceProperties(&prop, 0));
+  HIPCHECK(hipGetDeviceProperties(&prop, 0))
   char *p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
@@ -171,7 +171,7 @@ HIP_TEST_CASE(Unit_mmap_CoherentTst) {
 HIP_TEST_CASE(Unit_mmap_CoherentTstWthAdvise) {
   CHECK_MANAGED_MEMORY_SUPPORT
   hipDeviceProp_t prop;
-  HIPCHECK(hipGetDeviceProperties(&prop, 0));
+  HIPCHECK(hipGetDeviceProperties(&prop, 0))
   char *p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
@@ -179,18 +179,18 @@ HIP_TEST_CASE(Unit_mmap_CoherentTstWthAdvise) {
     int *Ptr = reinterpret_cast<int *>(mmap(NULL, SIZE, PROT_READ | PROT_WRITE,
                                             MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
     REQUIRE(Ptr != MAP_FAILED);
-    HIP_CHECK(hipMemAdvise(Ptr, SIZE, hipMemAdviseSetCoarseGrain, 0));
+    HIP_CHECK(hipMemAdvise(Ptr, SIZE, hipMemAdviseSetCoarseGrain, 0))
     // Initializing the value with 9
     *Ptr = 9;
     hipStream_t strm;
-    HIP_CHECK(hipStreamCreate(&strm));
+    HIP_CHECK(hipStreamCreate(&strm))
     SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
-    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipStreamSynchronize(strm))
 
     REQUIRE(*Ptr == 81);
     REQUIRE(munmap(Ptr, SIZE) == 0);
 
-    HIP_CHECK(hipStreamDestroy(strm));
+    HIP_CHECK(hipStreamDestroy(strm))
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
@@ -210,21 +210,21 @@ HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv0Flg1) {
   if (fork() == 0) {
     int *Ptr = nullptr, *PtrD = nullptr, SIZE = sizeof(int);
     // Allocating hipHostMalloc() memory
-    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocPortable));
+    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocPortable))
     *Ptr = 4;
     hipStream_t strm;
-    HIP_CHECK(hipStreamCreate(&strm));
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&PtrD), Ptr, 0));
+    HIP_CHECK(hipStreamCreate(&strm))
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&PtrD), Ptr, 0))
     SquareKrnl<<<1, 1, 0, strm>>>(PtrD);
-    HIP_CHECK(hipStreamSynchronize(strm));
-    HIP_CHECK(hipStreamDestroy(strm));
+    HIP_CHECK(hipStreamSynchronize(strm))
+    HIP_CHECK(hipStreamDestroy(strm))
     if (*Ptr == 16) {
       // exit() with code 10 which indicates pass
-      HIP_CHECK(hipHostFree(Ptr));
+      HIP_CHECK(hipHostFree(Ptr))
       exit(10);
     } else {
       // exit() with code 9 which indicates fail
-      HIP_CHECK(hipHostFree(Ptr));
+      HIP_CHECK(hipHostFree(Ptr))
       exit(9);
     }
   } else {
@@ -250,21 +250,21 @@ HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv0Flg2) {
   if (fork() == 0) {
     int *Ptr = nullptr, *PtrD = nullptr, SIZE = sizeof(int);
     // Allocating hipHostMalloc() memory
-    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocWriteCombined));
+    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocWriteCombined))
     *Ptr = 4;
     hipStream_t strm;
-    HIP_CHECK(hipStreamCreate(&strm));
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&PtrD), Ptr, 0));
+    HIP_CHECK(hipStreamCreate(&strm))
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&PtrD), Ptr, 0))
     SquareKrnl<<<1, 1, 0, strm>>>(PtrD);
-    HIP_CHECK(hipStreamSynchronize(strm));
-    HIP_CHECK(hipStreamDestroy(strm));
+    HIP_CHECK(hipStreamSynchronize(strm))
+    HIP_CHECK(hipStreamDestroy(strm))
     if (*Ptr == 16) {
       // exit() with code 10 which indicates pass
-      HIP_CHECK(hipHostFree(Ptr));
+      HIP_CHECK(hipHostFree(Ptr))
       exit(10);
     } else {
       // exit() with code 9 which indicates fail
-      HIP_CHECK(hipHostFree(Ptr));
+      HIP_CHECK(hipHostFree(Ptr))
       exit(9);
     }
   } else {
@@ -290,21 +290,21 @@ HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv0Flg3) {
   if (fork() == 0) {
     int *Ptr = nullptr, *PtrD = nullptr, SIZE = sizeof(int);
     // Allocating hipHostMalloc() memory
-    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocNumaUser));
+    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocNumaUser))
     *Ptr = 4;
     hipStream_t strm;
-    HIP_CHECK(hipStreamCreate(&strm));
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&PtrD), Ptr, 0));
+    HIP_CHECK(hipStreamCreate(&strm))
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&PtrD), Ptr, 0))
     SquareKrnl<<<1, 1, 0, strm>>>(PtrD);
-    HIP_CHECK(hipStreamSynchronize(strm));
-    HIP_CHECK(hipStreamDestroy(strm));
+    HIP_CHECK(hipStreamSynchronize(strm))
+    HIP_CHECK(hipStreamDestroy(strm))
     if (*Ptr == 16) {
       // exit() with code 10 which indicates pass
-      HIP_CHECK(hipHostFree(Ptr));
+      HIP_CHECK(hipHostFree(Ptr))
       exit(10);
     } else {
       // exit() with code 9 which indicates fail
-      HIP_CHECK(hipHostFree(Ptr));
+      HIP_CHECK(hipHostFree(Ptr))
       exit(9);
     }
   } else {
@@ -330,21 +330,21 @@ HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv0Flg4) {
   if (fork() == 0) {
     int *Ptr = nullptr, *PtrD = nullptr, SIZE = sizeof(int);
     // Allocating hipHostMalloc() memory
-    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocNonCoherent));
+    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocNonCoherent))
     *Ptr = 4;
     hipStream_t strm;
-    HIP_CHECK(hipStreamCreate(&strm));
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&PtrD), Ptr, 0));
+    HIP_CHECK(hipStreamCreate(&strm))
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&PtrD), Ptr, 0))
     SquareKrnl<<<1, 1, 0, strm>>>(PtrD);
-    HIP_CHECK(hipStreamSynchronize(strm));
-    HIP_CHECK(hipStreamDestroy(strm));
+    HIP_CHECK(hipStreamSynchronize(strm))
+    HIP_CHECK(hipStreamDestroy(strm))
     if (*Ptr == 16) {
       // exit() with code 10 which indicates pass
-      HIP_CHECK(hipHostFree(Ptr));
+      HIP_CHECK(hipHostFree(Ptr))
       exit(10);
     } else {
       // exit() with code 9 which indicates fail
-      HIP_CHECK(hipHostFree(Ptr));
+      HIP_CHECK(hipHostFree(Ptr))
       exit(9);
     }
   } else {
@@ -373,9 +373,9 @@ HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv1) {
     int *Ptr = nullptr, SIZE = sizeof(int);
     bool HmmMem = false;
     // Allocating hipHostMalloc() memory
-    HIP_CHECK(hipHostMalloc(&Ptr, SIZE));
+    HIP_CHECK(hipHostMalloc(&Ptr, SIZE))
     auto ret = TstCoherency(Ptr, HmmMem);
-    HIP_CHECK(hipHostFree(Ptr));
+    HIP_CHECK(hipHostFree(Ptr))
     exit(ret ? EXIT_SUCCESS : EXIT_FAILURE);
   } else {  // parent process
     wait(&stat);
@@ -402,9 +402,9 @@ HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv1Flg1) {
     int *Ptr = nullptr, SIZE = sizeof(int);
     bool HmmMem = false;
     // Allocating hipHostMalloc() memory
-    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocPortable));
+    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocPortable))
     auto ret = TstCoherency(Ptr, HmmMem);
-    HIP_CHECK(hipHostFree(Ptr));
+    HIP_CHECK(hipHostFree(Ptr))
     exit(ret ? EXIT_SUCCESS : EXIT_FAILURE);
   } else {  // parent process
     wait(&stat);
@@ -430,9 +430,9 @@ HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv1Flg2) {
     int *Ptr = nullptr, SIZE = sizeof(int);
     bool HmmMem = false;
     // Allocating hipHostMalloc() memory
-    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocWriteCombined));
+    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocWriteCombined))
     auto ret = TstCoherency(Ptr, HmmMem);
-    HIP_CHECK(hipHostFree(Ptr));
+    HIP_CHECK(hipHostFree(Ptr))
     exit(ret ? EXIT_SUCCESS : EXIT_FAILURE);
   } else {  // parent process
     wait(&stat);
@@ -458,9 +458,9 @@ HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv1Flg3) {
     int *Ptr = nullptr, SIZE = sizeof(int);
     bool HmmMem = false;
     // Allocating hipHostMalloc() memory
-    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocNumaUser));
+    HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocNumaUser))
     auto ret = TstCoherency(Ptr, HmmMem);
-    HIP_CHECK(hipHostFree(Ptr));
+    HIP_CHECK(hipHostFree(Ptr))
     exit(ret ? EXIT_SUCCESS : EXIT_FAILURE);
   } else {  // parent process
     wait(&stat);

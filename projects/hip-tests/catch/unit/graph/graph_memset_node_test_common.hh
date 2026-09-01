@@ -25,7 +25,7 @@ template <typename T, typename Tp, typename F> void GraphMemsetNodeCommonPositiv
     params.pitch = alloc.pitch();
     params.value = set_value;
 
-    HIP_CHECK(f(&params));
+    HIP_CHECK(f(&params))
 
     LinearAllocGuard<T> buffer(LinearAllocs::hipHostMalloc, width * sizeof(T) * height);
     HIP_CHECK(hipMemcpy2D(buffer.ptr(), width * sizeof(T), alloc.ptr(), alloc.pitch(),

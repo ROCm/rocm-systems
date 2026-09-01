@@ -31,7 +31,7 @@ class MemcpyHtoDKernelDtoHv1AsyncBenchmark
       Sum<<<count / threads_num + 1, threads_num, 0, stream>>>(device_mem, count);
       HIP_CHECK(
           hipMemcpyDtoHAsync(host_mem, reinterpret_cast<hipDeviceptr_t>(device_mem), size, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     size_t sum = ((size_t*)host_mem)[0];
     REQUIRE(sum == count * (count - 1) / 2);
@@ -46,11 +46,11 @@ class MemcpyHtoDKernelDtoHv2AsyncBenchmark
       ((size_t*)host_mem)[i] = i;
     }
     TIMED_SECTION_STREAM(kTimerTypeCpu, stream) {
-      HIP_CHECK(hipMemcpyAsync(device_mem, host_mem, size, hipMemcpyHostToDevice, stream));
+      HIP_CHECK(hipMemcpyAsync(device_mem, host_mem, size, hipMemcpyHostToDevice, stream))
       int threads_num = 32;
       Sum<<<count / threads_num + 1, threads_num, 0, stream>>>(device_mem, count);
-      HIP_CHECK(hipMemcpyWithStream(host_mem, device_mem, size, hipMemcpyDeviceToHost, stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipMemcpyWithStream(host_mem, device_mem, size, hipMemcpyDeviceToHost, stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
     }
     size_t sum = ((size_t*)host_mem)[0];
     REQUIRE(sum == count * (count - 1) / 2);

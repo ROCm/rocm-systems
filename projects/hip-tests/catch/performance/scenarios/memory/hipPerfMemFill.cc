@@ -100,7 +100,7 @@ template <class T> class hipPerfMemFill {
 
   bool open(int deviceId) {
     int nGpu = 0;
-    HIP_CHECK(hipGetDeviceCount(&nGpu));
+    HIP_CHECK(hipGetDeviceCount(&nGpu))
     if (nGpu < 1) {
       printf("No GPU!");
       return false;
@@ -109,9 +109,9 @@ template <class T> class hipPerfMemFill {
       return false;
     }
 
-    HIP_CHECK(hipSetDevice(deviceId));
+    HIP_CHECK(hipSetDevice(deviceId))
     memset(&props_, 0, sizeof(props_));
-    HIP_CHECK(hipGetDeviceProperties(&props_, deviceId));
+    HIP_CHECK(hipGetDeviceProperties(&props_, deviceId))
     blocksPerCU_ = props_.multiProcessorCount * 4;
 
     std::cout << "Info: running on device: id: " << deviceId << ", bus: 0x" << props_.pciBusID
@@ -158,7 +158,7 @@ template <class T> class hipPerfMemFill {
     // kernel will be loaded first time
     hipLaunchKernelGGL(HIP_KERNEL_NAME(vec_fill<T>), dim3(blocks), dim3(threadsPerBlock_), 0, 0,
                        data, 0, num);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     auto start = std::chrono::steady_clock::now();
 
@@ -166,7 +166,7 @@ template <class T> class hipPerfMemFill {
       hipLaunchKernelGGL(HIP_KERNEL_NAME(vec_fill<T>), dim3(blocks), dim3(threadsPerBlock_), 0, 0,
                          data, coef, num);
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     auto end = std::chrono::steady_clock::now();
     std::chrono::duration<double> diff = end - start;  // in second
@@ -203,7 +203,7 @@ template <class T> class hipPerfMemFill {
     // kernel will be loaded first time
     hipLaunchKernelGGL(HIP_KERNEL_NAME(vec_verify<T>), dim3(blocks), dim3(threadsPerBlock_), 0, 0,
                        data, coef, num);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     // Now all data verified. The following is to test bandwidth.
     auto start = std::chrono::steady_clock::now();
@@ -212,7 +212,7 @@ template <class T> class hipPerfMemFill {
       hipLaunchKernelGGL(HIP_KERNEL_NAME(vec_verify<T>), dim3(blocks), dim3(threadsPerBlock_), 0, 0,
                          data, coef, num);
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     auto end = std::chrono::steady_clock::now();
     std::chrono::duration<double> diff = end - start;  // in second
@@ -227,10 +227,10 @@ template <class T> class hipPerfMemFill {
     double GBytes = static_cast<double>(size) / NUM_1GB;
 
     T* A;
-    HIP_CHECK(hipMalloc(&A, size));
+    HIP_CHECK(hipMalloc(&A, size))
     double sec = 0;
     hostFill(size, A, coef_, &sec);  // Cpu can access device mem in LB
-    HIP_CHECK(hipFree(A));
+    HIP_CHECK(hipFree(A))
 
     log_host("Largebar: host   fill", GBytes, sec);
     return true;
@@ -258,10 +258,10 @@ template <class T> class hipPerfMemFill {
     double GBytes = static_cast<double>(size) / NUM_1GB;
 
     T* A;
-    HIP_CHECK(hipMallocManaged(&A, size));
+    HIP_CHECK(hipMallocManaged(&A, size))
     double sec = 0;
     hostFill(size, A, coef_, &sec);  // Cpu can access HMM mem
-    HIP_CHECK(hipFree(A));
+    HIP_CHECK(hipFree(A))
 
     log_host("Managed: host   fill", GBytes, sec);
     return true;
@@ -274,14 +274,14 @@ template <class T> class hipPerfMemFill {
     double GBytes = static_cast<double>(size) / NUM_1GB;
 
     T* A;
-    HIP_CHECK(hipMallocManaged(&A, size));
+    HIP_CHECK(hipMallocManaged(&A, size))
 
     double sec = 0, sec_hv = 0, sec_kv = 0;
     kernelFill(size, A, coef_, &sec);
     // Managed memory can be verified by host
     hostVerify(size, A, coef_, &sec_hv);
     kernelVerify(size, A, coef_, &sec_kv);
-    HIP_CHECK(hipFree(A));
+    HIP_CHECK(hipFree(A))
 
     log_kernel("Managed: kernel fill", GBytes, sec, sec_hv, sec_kv);
 
@@ -313,10 +313,10 @@ template <class T> class hipPerfMemFill {
   bool testHostMemoryHostFill(size_t size, unsigned int flags) {
     double GBytes = static_cast<double>(size) / NUM_1GB;
     T* A;
-    HIP_CHECK(hipHostMalloc(&A, size, flags));
+    HIP_CHECK(hipHostMalloc(&A, size, flags))
     double sec = 0;
     hostFill(size, A, coef_, &sec);
-    HIP_CHECK(hipHostFree(A));
+    HIP_CHECK(hipHostFree(A))
 
     log_host("Host: host   fill", GBytes, sec);
     return true;
@@ -326,12 +326,12 @@ template <class T> class hipPerfMemFill {
     double GBytes = static_cast<double>(size) / NUM_1GB;
 
     T* A;
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), size, flags));
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), size, flags))
     double sec = 0, sec_hv = 0, sec_kv = 0;
     kernelFill(size, A, coef_, &sec);
     hostVerify(size, A, coef_, &sec_hv);
     kernelVerify(size, A, coef_, &sec_kv);
-    HIP_CHECK(hipHostFree(A));
+    HIP_CHECK(hipHostFree(A))
 
     log_kernel("Host: kernel fill", GBytes, sec, sec_hv, sec_kv);
     return true;
@@ -380,7 +380,7 @@ template <class T> class hipPerfMemFill {
     if (err || !A) {
       return false;
     }
-    HIP_CHECK(hipFree(A));
+    HIP_CHECK(hipFree(A))
     return true;
 #else
     return false;
@@ -402,7 +402,7 @@ template <class T> class hipPerfMemFill {
     double GBytes = static_cast<double>(size) / NUM_1GB;
 
     T* A = nullptr;
-    HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&A), size, flags));
+    HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&A), size, flags))
     if (!A) {
       std::cout << "failed hipExtMallocWithFlags() with size =" << size << " flags=" << std::hex
                 << flags << std::endl;
@@ -411,7 +411,7 @@ template <class T> class hipPerfMemFill {
 
     double sec = 0;
     hostFill(size, A, coef_, &sec);  // Cpu can access this mem
-    HIP_CHECK(hipFree(A));
+    HIP_CHECK(hipFree(A))
 
     log_host("ExtDevice: host   fill", GBytes, sec);
     return true;
@@ -421,7 +421,7 @@ template <class T> class hipPerfMemFill {
     double GBytes = static_cast<double>(size) / NUM_1GB;
 
     T* A = nullptr;
-    HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&A), size, flags));
+    HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&A), size, flags))
     if (!A) {
       std::cout << "failed hipExtMallocWithFlags() with size =" << size << " flags=" << std::hex
                 << flags << std::endl;
@@ -433,7 +433,7 @@ template <class T> class hipPerfMemFill {
     // Fine grained device memory can be verified by host
     hostVerify(size, A, coef_, &sec_hv);
     kernelVerify(size, A, coef_, &sec_kv);
-    HIP_CHECK(hipFree(A));
+    HIP_CHECK(hipFree(A))
 
     log_kernel("ExtDevice: kernel fill", GBytes, sec, sec_hv, sec_kv);
 

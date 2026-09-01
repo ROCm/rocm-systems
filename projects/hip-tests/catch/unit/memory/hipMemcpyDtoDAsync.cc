@@ -35,57 +35,57 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoDAsync_Basic, int, float,
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
   hipStream_t stream;
 
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   int canAccessPeer = 0;
-  HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1))
+  HIP_CHECK(hipSetDevice(0))
   if (canAccessPeer) {
-    HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+    HIP_CHECK(hipDeviceEnablePeerAccess(1, 0))
   } else {
     INFO("Machine does not have P2P Capabilities");
     HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
   HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM, false);
-  HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipMalloc(&X_d, Nbytes));
-  HIP_CHECK(hipMalloc(&Y_d, Nbytes));
-  HIP_CHECK(hipMalloc(&Z_d, Nbytes));
+  HIP_CHECK(hipSetDevice(1))
+  HIP_CHECK(hipMalloc(&X_d, Nbytes))
+  HIP_CHECK(hipMalloc(&Y_d, Nbytes))
+  HIP_CHECK(hipMalloc(&Z_d, Nbytes))
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
   hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), NUM_ELM, 0, 0,
                      static_cast<const TestType*>(A_d), static_cast<const TestType*>(B_d), C_d,
                      NUM_ELM);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
   HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
 
-  HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipMemcpyDtoDAsync((hipDeviceptr_t)X_d, (hipDeviceptr_t)A_d, Nbytes, stream));
-  HIP_CHECK(hipMemcpyDtoDAsync((hipDeviceptr_t)Y_d, (hipDeviceptr_t)B_d, Nbytes, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipSetDevice(1))
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipMemcpyDtoDAsync((hipDeviceptr_t)X_d, (hipDeviceptr_t)A_d, Nbytes, stream))
+  HIP_CHECK(hipMemcpyDtoDAsync((hipDeviceptr_t)Y_d, (hipDeviceptr_t)B_d, Nbytes, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), NUM_ELM, 0, 0,
                      static_cast<const TestType*>(X_d), static_cast<const TestType*>(Y_d), Z_d,
                      NUM_ELM);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpyDtoHAsync(C_h, (hipDeviceptr_t)Z_d, Nbytes, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMemcpyDtoHAsync(C_h, (hipDeviceptr_t)Z_d, Nbytes, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipDeviceSynchronize())
   HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
 
   HipTest::freeArrays<TestType>(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(X_d));
-  HIP_CHECK(hipFree(Y_d));
-  HIP_CHECK(hipFree(Z_d));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(X_d))
+  HIP_CHECK(hipFree(Y_d))
+  HIP_CHECK(hipFree(Z_d))
 }
 
 /**
@@ -102,13 +102,13 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoDAsync_Basic, int, float,
  */
 HIP_TEST_CASE(Unit_hipMemcpyDtoDAsync_Capture) {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count <= 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   int peer_access = 0;
-  HIP_CHECK(hipDeviceCanAccessPeer(&peer_access, 0, 1));
+  HIP_CHECK(hipDeviceCanAccessPeer(&peer_access, 0, 1))
   if (!peer_access) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
@@ -125,14 +125,14 @@ HIP_TEST_CASE(Unit_hipMemcpyDtoDAsync_Capture) {
   int* device_src = nullptr;
   int* device_dst = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_src), kNumBytes));
-  HIP_CHECK(hipMemcpy(device_src, host_src.get(), kNumBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_src), kNumBytes))
+  HIP_CHECK(hipMemcpy(device_src, host_src.get(), kNumBytes, hipMemcpyHostToDevice))
 
-  HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_dst), kNumBytes));
+  HIP_CHECK(hipSetDevice(1))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_dst), kNumBytes))
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
@@ -140,14 +140,14 @@ HIP_TEST_CASE(Unit_hipMemcpyDtoDAsync_Capture) {
                                reinterpret_cast<hipDeviceptr_t>(device_src), kNumBytes, stream));
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipMemcpyDtoH(host_dst.get(), reinterpret_cast<hipDeviceptr_t>(device_dst), kNumBytes));
+  HIP_CHECK(hipMemcpyDtoH(host_dst.get(), reinterpret_cast<hipDeviceptr_t>(device_dst), kNumBytes))
   for (size_t i = 0; i < kNumElements; ++i) {
     REQUIRE(host_dst[i] == host_src[i]);
   }
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(device_src));
-  HIP_CHECK(hipFree(device_dst));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(device_src))
+  HIP_CHECK(hipFree(device_dst))
 }

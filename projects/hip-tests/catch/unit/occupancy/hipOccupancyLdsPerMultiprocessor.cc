@@ -38,7 +38,7 @@ static __global__ void dynLdsKernel(unsigned int* out) {
 
 HIP_TEST_CASE(Unit_hipOccupancy_Positive_SharedMemPerMultiprocessorConsistency) {
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
 
   REQUIRE(devProp.sharedMemPerBlock > 0);
   REQUIRE(devProp.sharedMemPerMultiprocessor > 0);
@@ -56,7 +56,7 @@ HIP_TEST_CASE(Unit_hipOccupancy_Positive_SharedMemPerMultiprocessorConsistency) 
 
 HIP_TEST_CASE(Unit_hipOccupancy_Positive_OccupancyMatchesSharedMemPerMultiprocessor) {
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
 
   const int blockSize = devProp.warpSize * 2;
   REQUIRE(blockSize <= devProp.maxThreadsPerBlock);
@@ -100,7 +100,7 @@ HIP_TEST_CASE(Unit_hipOccupancy_Positive_OccupancyMatchesSharedMemPerMultiproces
 
 HIP_TEST_CASE(Unit_hipOccupancy_Positive_ZeroLdsMatchesThreadLimit) {
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
 
   const int blockSize = devProp.warpSize * 2;
   REQUIRE(blockSize <= devProp.maxThreadsPerBlock);

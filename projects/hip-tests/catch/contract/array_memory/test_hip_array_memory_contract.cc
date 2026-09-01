@@ -35,7 +35,7 @@ HIP_TEST_CASE(Contract_ArrayMemory_HipMallocArray_Default_ReturnsUsableArray) {
   hipArray_t array = nullptr;
   const auto desc = ByteChannelDesc();
 
-  HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight));
+  HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight))
   cleanup.Add([array] { (void)hipFreeArray(array); });
 
   REQUIRE(array != nullptr);
@@ -51,7 +51,7 @@ HIP_TEST_CASE(Contract_ArrayMemory_HipMemcpy2DToArray_AndBack_RoundTripsBytes) {
   hipArray_t array = nullptr;
   const auto desc = ByteChannelDesc();
 
-  HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight));
+  HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight))
   cleanup.Add([array] { (void)hipFreeArray(array); });
   HIP_CHECK(hipMemcpy2DToArray(array, 0, 0, src.data(), kWidth, kWidth, kHeight,
                                hipMemcpyHostToDevice));
@@ -68,8 +68,8 @@ HIP_TEST_CASE(Contract_ArrayMemory_HipFreeArray_Default_Succeeds) {
   hipArray_t array = nullptr;
   const auto desc = ByteChannelDesc();
 
-  HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight));
-  HIP_CHECK(hipFreeArray(array));
+  HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight))
+  HIP_CHECK(hipFreeArray(array))
 }
 
 // @asserts: hipArrayGetInfo - reports the array's channel descriptor, extent, and flags matching allocation
@@ -83,9 +83,9 @@ HIP_TEST_CASE(Contract_ArrayMemory_HipArrayGetInfo_Default_ReturnsDescriptorIfAv
   hipExtent returned_extent{};
   unsigned int returned_flags = 0;
 
-  HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight));
+  HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight))
   cleanup.Add([array] { (void)hipFreeArray(array); });
-  HIP_CHECK(hipArrayGetInfo(&returned_desc, &returned_extent, &returned_flags, array));
+  HIP_CHECK(hipArrayGetInfo(&returned_desc, &returned_extent, &returned_flags, array))
 
   REQUIRE(returned_extent.width == kWidth);
   REQUIRE(returned_extent.height == kHeight);

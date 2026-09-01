@@ -47,9 +47,9 @@ TEST_CASE("TDM_Basic_load_2d")
 {
 #if HT_AMD
     int device = 0;
-    HIP_CHECK(hipGetDevice(&device));
+    HIP_CHECK(hipGetDevice(&device))
     hipDeviceProp_t props{};
-    HIP_CHECK(hipGetDeviceProperties(&props, device));
+    HIP_CHECK(hipGetDeviceProperties(&props, device))
     const std::string arch(props.gcnArchName);
     if (arch.find("gfx1250") == std::string::npos && arch.find("gfx1251") == std::string::npos) {
         HIP_SKIP_TEST("TDM_Basic_load_2d requires gfx1250 or gfx1251");
@@ -64,17 +64,17 @@ TEST_CASE("TDM_Basic_load_2d")
 
     LinearAllocGuard<int> result_dev(LinearAllocs::hipMalloc, alloc_size);
     LinearAllocGuard<int> result(LinearAllocs::hipHostMalloc, alloc_size);
-    HIP_CHECK(hipMemset(result_dev.ptr(), 0, alloc_size));
+    HIP_CHECK(hipMemset(result_dev.ptr(), 0, alloc_size))
 
     for(int i = 0; i < kAllocSize; ++i)
     {
         input.ptr()[i] = i;
     }
 
-    HIP_CHECK(hipMemcpy(input_dev.ptr(), input.ptr(), alloc_size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(input_dev.ptr(), input.ptr(), alloc_size, hipMemcpyHostToDevice))
     TDM_load_store_tester<<<1, 32>>>(input_dev.ptr(), result_dev.ptr(), 10, 10);
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipMemcpy(result.ptr(), result_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipMemcpy(result.ptr(), result_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
 
     for(int i = 0; i < kAllocSize; ++i)
     {

@@ -51,7 +51,7 @@ template <KernelType kernel_type, bool timer_type> static void RunBenchmark(bool
   benchmark.AddSectionName(GetKernelTypeSectionName<kernel_type>());
   benchmark.AddSectionName(GetTimerTypeSectionName<timer_type>());
   benchmark.Run(sync);
-  HIP_CHECK(benchmark.GetError());
+  HIP_CHECK(benchmark.GetError())
 }
 
 /**

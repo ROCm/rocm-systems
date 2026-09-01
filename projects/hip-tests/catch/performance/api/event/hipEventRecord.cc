@@ -18,11 +18,11 @@ class HipEventRecordBenchmark : public Benchmark<HipEventRecordBenchmark> {
  public:
   void operator()(hipStream_t stream) {
     hipEvent_t event;
-    HIP_CHECK(hipEventCreate(&event));
+    HIP_CHECK(hipEventCreate(&event))
 
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipEventRecord(event, stream)); }
 
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventDestroy(event))
   }
 };
 

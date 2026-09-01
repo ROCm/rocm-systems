@@ -36,7 +36,7 @@ HIP_TEST_CASE(Unit_hipWaitExternalSemaphoresAsync_Vulkan_Negative_Parameters) {
     const auto hip_ext_semaphore = ImportBinarySemaphore(vkt);
     HIP_CHECK_ERROR(hipWaitExternalSemaphoresAsync(&hip_ext_semaphore, nullptr, 1, nullptr),
                     hipErrorInvalidValue);
-    HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore));
+    HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore))
   }
 
   SECTION("Wait params flag != 0") {
@@ -44,16 +44,16 @@ HIP_TEST_CASE(Unit_hipWaitExternalSemaphoresAsync_Vulkan_Negative_Parameters) {
     wait_params.flags = 1;
     HIP_CHECK_ERROR(hipWaitExternalSemaphoresAsync(&hip_ext_semaphore, &wait_params, 1, nullptr),
                     hipErrorInvalidValue);
-    HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore));
+    HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore))
   }
 
   SECTION("Invalid stream") {
     const auto hip_ext_semaphore = ImportBinarySemaphore(vkt);
     hipStream_t stream = nullptr;
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamCreate(&stream))
+    HIP_CHECK(hipStreamDestroy(stream))
     HIP_CHECK_ERROR(hipWaitExternalSemaphoresAsync(&hip_ext_semaphore, &wait_params, 1, stream),
                     hipErrorInvalidValue);
-    HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore));
+    HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore))
   }
 }

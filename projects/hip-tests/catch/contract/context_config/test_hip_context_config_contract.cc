@@ -13,7 +13,7 @@ namespace {
 // ordinal.
 void RequireDevice() {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -23,14 +23,14 @@ void RequireDevice() {
   // context". hipFree(0) is the canonical no-op that forces primary-context
   // initialization, and is a harmless success on AMD where the runtime already
   // auto-initializes.
-  HIP_CHECK(hipFree(0));
+  HIP_CHECK(hipFree(0))
 }
 
 // Resolves the driver-style handle for ordinal zero, which every context
 // configuration contract builds on.
 hipDevice_t DeviceForOrdinalZero() {
   hipDevice_t device = 0;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   return device;
 }
 
@@ -80,7 +80,7 @@ HIP_TEST_CASE(Contract_ContextConfig_HipCtxGetCacheConfig_Default_ReturnsEnumOrN
     // backends; an unsupported report is contract-compliant.
     return;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   // When supported, the queried preference must be a documented enumerator; the
   // specific value is device- and backend-dependent and therefore not asserted.
@@ -100,16 +100,16 @@ HIP_TEST_CASE(Contract_ContextConfig_HipCtxSetCacheConfig_IsAcceptedOrUnsupporte
   if (get_status == hipSuccess) {
     have_saved = true;
   } else if (get_status != hipErrorNotSupported) {
-    HIP_CHECK(get_status);
+    HIP_CHECK(get_status)
   }
 
   const hipError_t set_status = hipCtxSetCacheConfig(hipFuncCachePreferNone);
   if (set_status != hipErrorNotSupported) {
-    HIP_CHECK(set_status);
+    HIP_CHECK(set_status)
     // The runtime may coerce the request; the exact post-state is not part of
     // the contract, so only the saved preference is restored when known.
     if (have_saved) {
-      HIP_CHECK(hipCtxSetCacheConfig(saved));
+      HIP_CHECK(hipCtxSetCacheConfig(saved))
     }
   }
 
@@ -134,7 +134,7 @@ HIP_TEST_CASE(Contract_ContextConfig_HipCtxGetSharedMemConfig_Default_ReturnsEnu
     // unsupported.
     return;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   // When supported, the reported value must be a documented enumerator.
   REQUIRE(IsKnownSharedMemConfig(config));
@@ -153,16 +153,16 @@ HIP_TEST_CASE(Contract_ContextConfig_HipCtxSetSharedMemConfig_Default_IsAccepted
   if (get_status == hipSuccess) {
     have_saved = true;
   } else if (get_status != hipErrorNotSupported) {
-    HIP_CHECK(get_status);
+    HIP_CHECK(get_status)
   }
 
   const hipError_t set_status = hipCtxSetSharedMemConfig(hipSharedMemBankSizeDefault);
   if (set_status != hipErrorNotSupported) {
-    HIP_CHECK(set_status);
+    HIP_CHECK(set_status)
     // The runtime may coerce the request; only the saved bank size is restored
     // when it is known.
     if (have_saved) {
-      HIP_CHECK(hipCtxSetSharedMemConfig(saved));
+      HIP_CHECK(hipCtxSetSharedMemConfig(saved))
     }
   }
 }
@@ -178,7 +178,7 @@ HIP_TEST_CASE(Contract_ContextConfig_HipCtxGetFlags_Default_ReturnsScheduleOrNot
     // backends; an unsupported report is contract-compliant.
     return;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   // The schedule subfield must resolve to one of the documented scheduling
   // modes. Backends may report additional device-specific flag bits, so only the
@@ -196,11 +196,11 @@ HIP_TEST_CASE(Contract_ContextConfig_HipCtxEnablePeerAccess_Self_IsRejectedOrUns
   const ScopedCurrentContext scoped_context;
 
   hipCtx_t context = nullptr;
-  HIP_CHECK(hipCtxCreate(&context, 0, device));
+  HIP_CHECK(hipCtxCreate(&context, 0, device))
   REQUIRE(context != nullptr);
 
   hipCtx_t current = nullptr;
-  HIP_CHECK(hipCtxGetCurrent(&current));
+  HIP_CHECK(hipCtxGetCurrent(&current))
   REQUIRE(current != nullptr);
 
   // Enabling peer access from a context to itself is not a real cross-device
@@ -232,6 +232,6 @@ HIP_TEST_CASE(Contract_ContextConfig_HipCtxEnablePeerAccess_Self_IsRejectedOrUns
   // Restore the previously current context explicitly before destroying the
   // context created here, so the restore is an asserted step rather than relying
   // solely on the RAII guard's silent restore.
-  HIP_CHECK(hipCtxSetCurrent(scoped_context.previous()));
-  HIP_CHECK(hipCtxDestroy(context));
+  HIP_CHECK(hipCtxSetCurrent(scoped_context.previous()))
+  HIP_CHECK(hipCtxDestroy(context))
 }

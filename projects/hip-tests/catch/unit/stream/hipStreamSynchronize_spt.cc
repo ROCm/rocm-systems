@@ -29,9 +29,9 @@
  */
 HIP_TEST_CASE(Unit_hipStreamSynchronize_spt_EmptyStream) {
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipStreamSynchronize_spt(stream));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipStreamSynchronize_spt(stream))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 /**
  * Test Description
@@ -63,15 +63,15 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_spt_FinishWork) {
   hipStream_t explicitStream = reinterpret_cast<hipStream_t>(-1);
   hipStream_t stream = GENERATE_COPY(explicitStream, hip::nullStream, hip::streamPerThread);
   if (explicitStream) {
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
   }
 
   LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 500), stream);
-  HIP_CHECK(hipStreamSynchronize_spt(stream));
-  HIP_CHECK(hipStreamQuery(stream));
+  HIP_CHECK(hipStreamSynchronize_spt(stream))
+  HIP_CHECK(hipStreamQuery(stream))
 
   if (explicitStream) {
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 }
 /**
@@ -93,8 +93,8 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_spt_SynchronizeStreamAndQueryNullStream)
   hipStream_t stream1;
   hipStream_t stream2;
 
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipStreamCreate(&stream2));
+  HIP_CHECK(hipStreamCreate(&stream1))
+  HIP_CHECK(hipStreamCreate(&stream2))
 
   LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 500), stream1);
   LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 400 : 2000), stream2);
@@ -104,16 +104,16 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_spt_SynchronizeStreamAndQueryNullStream)
   HIP_CHECK_ERROR(hipStreamQuery(stream2), hipErrorNotReady);
   HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
 
-  HIP_CHECK(hipStreamSynchronize_spt(stream1));
-  HIP_CHECK(hipStreamQuery(stream1));
+  HIP_CHECK(hipStreamSynchronize_spt(stream1))
+  HIP_CHECK(hipStreamQuery(stream1))
   HIP_CHECK_ERROR(hipStreamQuery(stream2), hipErrorNotReady);
   HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
 
-  HIP_CHECK(hipStreamSynchronize_spt(stream2));
-  HIP_CHECK(hipStreamQuery(stream2));
+  HIP_CHECK(hipStreamSynchronize_spt(stream2))
+  HIP_CHECK(hipStreamQuery(stream2))
 
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
 }
 #endif
 /**

@@ -86,10 +86,10 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations) 
   }
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t memAllocNode[numberOfNodes], memFreeNode[numberOfNodes];
 
@@ -103,7 +103,7 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations) 
     memAllocNodeParams.bytesize = sizeof(int);
 
     if (i == 0) {
-      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0, &memAllocNodeParams));
+      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0, &memAllocNodeParams))
     } else {
       ::std::vector<hipGraphNode_t> memAllocNodeDependencies;
       memAllocNodeDependencies.push_back(memAllocNode[i - 1]);
@@ -135,18 +135,18 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations) 
   }
 
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0));
+  HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0))
 
   // Warm up call
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   std::cout << "Graph launches = " << launches << std::endl;
 
   auto launch_start = std::chrono::high_resolution_clock::now();
 
   for (int itr = 1; itr <= launches; itr++) {
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
   }
 
   auto launch_stop = std::chrono::high_resolution_clock::now();
@@ -154,7 +154,7 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations) 
 
   auto sync_start = std::chrono::high_resolution_clock::now();
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   auto sync_stop = std::chrono::high_resolution_clock::now();
   auto sync_result = std::chrono::duration<double, std::milli>(sync_stop - sync_start);
@@ -167,9 +167,9 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations) 
             << std::chrono::duration_cast<std::chrono::milliseconds>(sync_result).count()
             << " millisecs " << std::endl;
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -215,10 +215,10 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWit
   }
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t memAllocNode[SIZE], memsetNode[SIZE], kernelNode[SIZE], memcpyNode[SIZE],
       memFreeNode[SIZE];
@@ -233,7 +233,7 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWit
     memAllocNodeParams.bytesize = sizeof(char);
 
     if (i == 0) {
-      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0, &memAllocNodeParams));
+      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0, &memAllocNodeParams))
     } else {
       ::std::vector<hipGraphNode_t> memAllocNodeDependencies;
       memAllocNodeDependencies.push_back(memAllocNode[i - 1]);
@@ -328,25 +328,25 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWit
   }
 
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0));
+  HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0))
 
   // Warm up call
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   std::cout << "Graph launches = " << launches << std::endl;
 
   auto launch_start = std::chrono::high_resolution_clock::now();
 
   for (int itr = 1; itr <= launches; itr++) {
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
   }
   auto launch_stop = std::chrono::high_resolution_clock::now();
   auto launch_result = std::chrono::duration<double, std::milli>(launch_stop - launch_start);
 
   auto sync_start = std::chrono::high_resolution_clock::now();
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   auto sync_stop = std::chrono::high_resolution_clock::now();
   auto sync_result = std::chrono::duration<double, std::milli>(sync_stop - sync_start);
@@ -363,9 +363,9 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWit
     REQUIRE(hostDst[i] == (i + 1));
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -405,7 +405,7 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_MultipleBranches) {
   REQUIRE(hostMemSrc != nullptr);
 
   int* devMemSrc1 = nullptr;
-  HIP_CHECK(hipMalloc(&devMemSrc1, NBYTES));
+  HIP_CHECK(hipMalloc(&devMemSrc1, NBYTES))
   REQUIRE(devMemSrc1 != nullptr);
 
   int* devMemSrc2[BRANCHES];
@@ -417,10 +417,10 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_MultipleBranches) {
   int finalHostDst[BRANCHES * SIZE];
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t memcpyNodeH2D, memAllocNode[BRANCHES], fillKernelNode[BRANCHES],
       addKernelNode[BRANCHES], memcpyNodeD2H[BRANCHES], memFreeNode[BRANCHES], memcpyNodeH2H;
@@ -511,11 +511,11 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_MultipleBranches) {
                                     BRANCHES * SIZE * sizeof(int), hipMemcpyHostToHost));
 
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0));
+  HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0))
 
   // Warm up call
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   std::cout << "Graph launches : " << launches << std::endl;
 
@@ -524,7 +524,7 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_MultipleBranches) {
   for (int launch = 1; launch <= launches; launch++) {
     std::fill(hostMemSrc, hostMemSrc + SIZE, launch);
 
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
   }
 
   auto launch_stop = std::chrono::high_resolution_clock::now();
@@ -532,7 +532,7 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_MultipleBranches) {
 
   auto sync_start = std::chrono::high_resolution_clock::now();
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   auto sync_stop = std::chrono::high_resolution_clock::now();
   auto sync_result = std::chrono::duration<double, std::milli>(sync_stop - sync_start);
@@ -554,10 +554,10 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_MultipleBranches) {
     REQUIRE(finalHostDst[idx] == (launches + value));
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(devMemSrc1));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(devMemSrc1))
 }
 
 /**
@@ -596,10 +596,10 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_MultipleIndependentBranche
   }
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t memAllocNode[BRANCHES], memsetNode[BRANCHES], kernelNode[BRANCHES],
       memcpyNode[BRANCHES], memFreeNode[BRANCHES];
@@ -613,7 +613,7 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_MultipleIndependentBranche
     memAllocNodeParams.poolProps.location.id = 0;
     memAllocNodeParams.bytesize = sizeof(char);
 
-    HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0, &memAllocNodeParams));
+    HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0, &memAllocNodeParams))
 
     dev[i] = reinterpret_cast<char*>(memAllocNodeParams.dptr);
     REQUIRE(dev[i] != nullptr);
@@ -671,25 +671,25 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_MultipleIndependentBranche
   }
 
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0));
+  HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0))
 
   // Warm up call
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   std::cout << "Graph launches = " << launches << std::endl;
 
   auto launch_start = std::chrono::high_resolution_clock::now();
 
   for (int itr = 1; itr <= launches; itr++) {
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
   }
   auto launch_stop = std::chrono::high_resolution_clock::now();
   auto launch_result = std::chrono::duration<double, std::milli>(launch_stop - launch_start);
 
   auto sync_start = std::chrono::high_resolution_clock::now();
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   auto sync_stop = std::chrono::high_resolution_clock::now();
   auto sync_result = std::chrono::duration<double, std::milli>(sync_stop - sync_start);
@@ -706,9 +706,9 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_MultipleIndependentBranche
     REQUIRE(hostDst[i] == (i + 1));
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -738,10 +738,10 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_OneBranchNoOps_AutoFreeOnL
   }
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t memAllocNode[SIZE];
 
@@ -754,7 +754,7 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_OneBranchNoOps_AutoFreeOnL
     memAllocNodeParams.bytesize = sizeof(int);
 
     if (i == 0) {
-      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0, &memAllocNodeParams));
+      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0, &memAllocNodeParams))
     } else {
       ::std::vector<hipGraphNode_t> memAllocNodeDependencies;
       memAllocNodeDependencies.push_back(memAllocNode[i - 1]);
@@ -771,15 +771,15 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_OneBranchNoOps_AutoFreeOnL
       hipGraphInstantiateWithFlags(&graphExec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
 
   // Warm up call
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   std::cout << "Graph launches = " << launches << std::endl;
 
   auto launch_start = std::chrono::high_resolution_clock::now();
 
   for (int itr = 1; itr <= launches; itr++) {
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
   }
 
   auto launch_stop = std::chrono::high_resolution_clock::now();
@@ -787,7 +787,7 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_OneBranchNoOps_AutoFreeOnL
 
   auto sync_start = std::chrono::high_resolution_clock::now();
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   auto sync_stop = std::chrono::high_resolution_clock::now();
   auto sync_result = std::chrono::duration<double, std::milli>(sync_stop - sync_start);
@@ -800,9 +800,9 @@ HIP_TEST_CASE(Performance_GraphWithMoreAllocFreeNodes_OneBranchNoOps_AutoFreeOnL
             << std::chrono::duration_cast<std::chrono::milliseconds>(sync_result).count()
             << " millisecs " << std::endl;
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

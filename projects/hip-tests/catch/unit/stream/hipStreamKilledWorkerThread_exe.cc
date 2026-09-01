@@ -21,8 +21,8 @@ __global__ void NoopKernel() {}
 #define WIN32_LEAN_AND_MEAN
 #endif
 
-#include <windows.h>
-#include <tlhelp32.h>
+#include <Windows.h>
+#include <TlHelp32.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -124,7 +124,7 @@ int main() {
 
   HANDLE worker_thread = OpenThread(THREAD_TERMINATE | THREAD_SUSPEND_RESUME | SYNCHRONIZE, FALSE,
                                     worker_thread_ids.front());
-  if (worker_thread == NULL) {
+  if (worker_thread == nullptr) {
     std::cerr << "Failed to open HIP worker thread " << worker_thread_ids.front() << std::endl;
     return 1;
   }
@@ -147,7 +147,7 @@ int main() {
 
   HANDLE killer_thread =
       CreateThread(nullptr, 0, TerminateWorkerThreadAfterDelay, worker_thread, 0, nullptr);
-  if (killer_thread == NULL) {
+  if (killer_thread == nullptr) {
     std::cerr << "Failed to create HIP worker killer thread" << std::endl;
     CloseHandle(worker_thread);
     return 1;

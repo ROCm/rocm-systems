@@ -37,12 +37,12 @@ HIP_TEST_CASE(Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister) {
 #endif
       DYNAMIC_SECTION("Using flag: " << flag) {
       auto x = std::unique_ptr<int>(new int);
-      HIP_CHECK(hipHostRegister(x.get(), sizeof(int), flag));
+      HIP_CHECK(hipHostRegister(x.get(), sizeof(int), flag))
 
       void* device_memory;
-      HIP_CHECK(hipHostGetDevicePointer(&device_memory, x.get(), 0));
+      HIP_CHECK(hipHostGetDevicePointer(&device_memory, x.get(), 0))
 
-      HIP_CHECK(hipHostUnregister(x.get()));
+      HIP_CHECK(hipHostUnregister(x.get()))
       HIP_CHECK_ERROR(hipHostGetDevicePointer(&device_memory, x.get(), 0), hipErrorInvalidValue);
     }
   }
@@ -54,9 +54,9 @@ HIP_TEST_CASE(Unit_hipHostUnregister_NullPtr) {
 
 HIP_TEST_CASE(Unit_hipHostUnregister_Ptr_Different_Than_Specified_To_Register) {
   std::vector<int> alloc(2);
-  HIP_CHECK(hipHostRegister(alloc.data(), alloc.size(), 0));
+  HIP_CHECK(hipHostRegister(alloc.data(), alloc.size(), 0))
   HIP_CHECK_ERROR(hipHostUnregister(&alloc.data()[1]), hipErrorHostMemoryNotRegistered);
-  HIP_CHECK(hipHostUnregister(alloc.data()));
+  HIP_CHECK(hipHostUnregister(alloc.data()))
 }
 
 HIP_TEST_CASE(Unit_hipHostUnregister_NotRegisteredPointer) {
@@ -75,8 +75,8 @@ HIP_TEST_CASE(Unit_hipHostUnregister_AlreadyUnregisteredPointer) {
 #endif
     DYNAMIC_SECTION("Using flag: " << flag) {
       auto x = std::unique_ptr<int>(new int);
-      HIP_CHECK(hipHostRegister(x.get(), sizeof(int), flag));
-      HIP_CHECK(hipHostUnregister(x.get()));
+      HIP_CHECK(hipHostRegister(x.get(), sizeof(int), flag))
+      HIP_CHECK(hipHostUnregister(x.get()))
       HIP_CHECK_ERROR(hipHostUnregister(x.get()), hipErrorHostMemoryNotRegistered);
     }
   }
@@ -95,7 +95,7 @@ HIP_TEST_CASE(Unit_hipHostUnregister_Capture) {
   END_CAPTURE_SYNC(capture_error);
 
   if (capture_error != hipSuccess) {
-    HIP_CHECK(hipHostUnregister(buffer.get()));
+    HIP_CHECK(hipHostUnregister(buffer.get()))
   }
 }
 

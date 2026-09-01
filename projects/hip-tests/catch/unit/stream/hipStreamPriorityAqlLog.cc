@@ -53,11 +53,11 @@ __global__ void delayedNoopKernel(uint64_t delay_cycles) {
 // the runtime emits AQL dispatch/barrier packets tagged with that priority.
 void launchOnPriority(int priority) {
   hipStream_t stream{nullptr};
-  HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, priority));
+  HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, priority))
   hipLaunchKernelGGL(noopKernel, dim3(1), dim3(1), 0, stream);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 std::string selfExePath() {
@@ -207,7 +207,7 @@ HIP_TEST_CASE(Unit_hipStreamPriorityAqlLog_ChildWorkload) {
   }
 
   int priorityLow = 0, priorityHigh = 0;
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priorityLow, &priorityHigh));
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priorityLow, &priorityHigh))
 
   // priorityHigh/priorityLow are the extremes of the supported range; the
   // mid-range value maps to Normal (consistent with other stream-priority tests
@@ -240,7 +240,7 @@ HIP_TEST_CASE(Unit_hipStreamPriorityAqlLog_TraceReportsPriority) {
   }
 
   int priorityLow = 0, priorityHigh = 0;
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priorityLow, &priorityHigh));
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&priorityLow, &priorityHigh))
   if (priorityLow == priorityHigh) {
     WARN("Stream priority range not supported. Skipping test.");
     return;

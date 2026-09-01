@@ -34,16 +34,16 @@ template <class T, class F> void check_simple(F f, T expected, const char* file,
   T* outputCPU = reinterpret_cast<T*>(malloc(memsize));
   T* outputGPU = nullptr;
   REQUIRE(outputCPU != nullptr);
-  HIP_CHECK(hipMalloc(&outputGPU, memsize));
+  HIP_CHECK(hipMalloc(&outputGPU, memsize))
   hipLaunchKernelGGL(kernel_simple, 1, 1, 0, 0, f, outputGPU);
-  HIP_CHECK(hipMemcpy(outputCPU, outputGPU, memsize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(outputCPU, outputGPU, memsize, hipMemcpyDeviceToHost))
   if (*outputCPU != expected) {
     INFO("File " << file << ", line " << line << " check failed."
                  << " output = " << static_cast<double>(*outputCPU) << " expected "
                  << static_cast<double>(expected));
     REQUIRE(false);
   }
-  HIP_CHECK(hipFree(outputGPU));
+  HIP_CHECK(hipFree(outputGPU))
   free(outputCPU);
 }
 
@@ -66,8 +66,8 @@ HIP_TEST_CASE(Unit_abs_int64_Verification) {
   outputCPU = reinterpret_cast<datatype_t*>(malloc(memsize));
   REQUIRE(inputCPU != nullptr);
   REQUIRE(outputCPU != nullptr);
-  HIP_CHECK(hipMalloc(&inputGPU, memsize));
-  HIP_CHECK(hipMalloc(&outputGPU, memsize));
+  HIP_CHECK(hipMalloc(&inputGPU, memsize))
+  HIP_CHECK(hipMalloc(&outputGPU, memsize))
 
   // populate input with constants
   inputCPU[0] = -81985529216486895ll;
@@ -80,12 +80,12 @@ HIP_TEST_CASE(Unit_abs_int64_Verification) {
   inputCPU[7] = 291ll;
 
   // copy inputs to device
-  HIP_CHECK(hipMemcpy(inputGPU, inputCPU, memsize, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(inputGPU, inputCPU, memsize, hipMemcpyHostToDevice))
 
   // launch kernel
   hipLaunchKernelGGL(kernel_abs_int64, dim3(1), dim3(NUM_INPUTS), 0, 0, inputGPU, outputGPU);
   // copy outputs from device
-  HIP_CHECK(hipMemcpy(outputCPU, outputGPU, memsize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(outputCPU, outputGPU, memsize, hipMemcpyDeviceToHost))
 
   // check outputs
   CHECK_ABS_INT64(inputCPU[0], outputCPU[0], outputCPU[1]);
@@ -98,8 +98,8 @@ HIP_TEST_CASE(Unit_abs_int64_Verification) {
   CHECK_ABS_INT64(inputCPU[7], outputCPU[7], outputCPU[7]);
 
   // free memories
-  HIP_CHECK(hipFree(inputGPU));
-  HIP_CHECK(hipFree(outputGPU));
+  HIP_CHECK(hipFree(inputGPU))
+  HIP_CHECK(hipFree(outputGPU))
   free(inputCPU);
   free(outputCPU);
 }

@@ -45,15 +45,15 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpyDtoA_ThenAtoH_RoundTripsBytes) {
   hipArray_t array = nullptr;
   const auto desc = ByteChannelDesc();
 
-  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipMallocArray(&array, &desc, kByteCount, 1));
+  HIP_CHECK(hipMallocArray(&array, &desc, kByteCount, 1))
   cleanup.Add([array] { (void)hipFreeArray(array); });
 
   HIP_CHECK(
       hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(device_ptr), HtoDSrc(src.data()), src.size()));
-  HIP_CHECK(hipMemcpyDtoA(array, 0, reinterpret_cast<hipDeviceptr_t>(device_ptr), src.size()));
-  HIP_CHECK(hipMemcpyAtoH(dst.data(), array, 0, dst.size()));
+  HIP_CHECK(hipMemcpyDtoA(array, 0, reinterpret_cast<hipDeviceptr_t>(device_ptr), src.size()))
+  HIP_CHECK(hipMemcpyAtoH(dst.data(), array, 0, dst.size()))
 
   REQUIRE(dst == src);
 }
@@ -69,16 +69,16 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpyAtoA_Default_RoundTripsBytes) {
   hipArray_t dst_array = nullptr;
   const auto desc = ByteChannelDesc();
 
-  HIP_CHECK(hipMallocArray(&src_array, &desc, kByteCount, 1));
+  HIP_CHECK(hipMallocArray(&src_array, &desc, kByteCount, 1))
   cleanup.Add([src_array] { (void)hipFreeArray(src_array); });
-  HIP_CHECK(hipMallocArray(&dst_array, &desc, kByteCount, 1));
+  HIP_CHECK(hipMallocArray(&dst_array, &desc, kByteCount, 1))
   cleanup.Add([dst_array] { (void)hipFreeArray(dst_array); });
 
   // Seed the source array, copy array-to-array, then read the destination back:
   // hipMemcpyAtoA must preserve the bytes it transfers between two HIP arrays.
-  HIP_CHECK(hipMemcpyHtoA(src_array, 0, src.data(), src.size()));
-  HIP_CHECK(hipMemcpyAtoA(dst_array, 0, src_array, 0, src.size()));
-  HIP_CHECK(hipMemcpyAtoH(dst.data(), dst_array, 0, dst.size()));
+  HIP_CHECK(hipMemcpyHtoA(src_array, 0, src.data(), src.size()))
+  HIP_CHECK(hipMemcpyAtoA(dst_array, 0, src_array, 0, src.size()))
+  HIP_CHECK(hipMemcpyAtoH(dst.data(), dst_array, 0, dst.size()))
 
   REQUIRE(dst == src);
 }
@@ -94,9 +94,9 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpy2DArrayToArray_Default_RoundTripsBy
   hipArray_t dst_array = nullptr;
   const auto desc = ByteChannelDesc();
 
-  HIP_CHECK(hipMallocArray(&src_array, &desc, kWidth, kHeight));
+  HIP_CHECK(hipMallocArray(&src_array, &desc, kWidth, kHeight))
   cleanup.Add([src_array] { (void)hipFreeArray(src_array); });
-  HIP_CHECK(hipMallocArray(&dst_array, &desc, kWidth, kHeight));
+  HIP_CHECK(hipMallocArray(&dst_array, &desc, kWidth, kHeight))
   cleanup.Add([dst_array] { (void)hipFreeArray(dst_array); });
 
   HIP_CHECK(hipMemcpy2DToArray(src_array, 0, 0, src.data(), kWidth, kWidth, kHeight,
@@ -118,10 +118,10 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpyHtoAAsync_NullSource_IsRejected) {
   hipStream_t stream = nullptr;
   const auto desc = ByteChannelDesc();
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMallocArray(&array, &desc, kByteCount, 1));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMallocArray(&array, &desc, kByteCount, 1))
   cleanup.Add([array] { (void)hipFreeArray(array); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   const hipError_t status = hipMemcpyHtoAAsync(array, 0, nullptr, kByteCount, stream);
@@ -143,8 +143,8 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpyDtoA_NullArray_IsRejected) {
   const auto src = MakePattern(0x67);
   void* device_ptr = nullptr;
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
   HIP_CHECK(
       hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(device_ptr), HtoDSrc(src.data()), src.size()));
@@ -166,8 +166,8 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpyAtoD_NullArray_IsRejected) {
   hip::contract::ContractCleanup cleanup;
   void* device_ptr = nullptr;
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMalloc(&device_ptr, kByteCount))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   const hipError_t status =
@@ -189,10 +189,10 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpy2DArrayToArray_InvalidKind_IsReject
   hipArray_t dst_array = nullptr;
   const auto desc = ByteChannelDesc();
 
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMallocArray(&src_array, &desc, kWidth, kHeight));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMallocArray(&src_array, &desc, kWidth, kHeight))
   cleanup.Add([src_array] { (void)hipFreeArray(src_array); });
-  HIP_CHECK(hipMallocArray(&dst_array, &desc, kWidth, kHeight));
+  HIP_CHECK(hipMallocArray(&dst_array, &desc, kWidth, kHeight))
   cleanup.Add([dst_array] { (void)hipFreeArray(dst_array); });
 
   const hipError_t status = hipMemcpy2DArrayToArray(
@@ -200,7 +200,7 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpy2DArrayToArray_InvalidKind_IsReject
 
   REQUIRE(status != hipSuccess);
   HIP_CHECK_ERROR(hipGetLastError(), status);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 }
 
 // BACKEND-DIFF: the host-to-array / array-to-host async round-trip
@@ -220,14 +220,14 @@ HIP_TEST_CASE(Contract_ArrayCopyExt_HipMemcpyHtoAAsync_ThenAtoHAsync_VisibleAfte
   hipStream_t stream = nullptr;
   const auto desc = ByteChannelDesc();
 
-  HIP_CHECK(hipMallocArray(&array, &desc, kByteCount, 1));
+  HIP_CHECK(hipMallocArray(&array, &desc, kByteCount, 1))
   cleanup.Add([array] { (void)hipFreeArray(array); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
-  HIP_CHECK(hipMemcpyHtoAAsync(array, 0, src.data(), src.size(), stream));
-  HIP_CHECK(hipMemcpyAtoHAsync(dst.data(), array, 0, dst.size(), stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpyHtoAAsync(array, 0, src.data(), src.size(), stream))
+  HIP_CHECK(hipMemcpyAtoHAsync(dst.data(), array, 0, dst.size(), stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   REQUIRE(dst == src);
 }

@@ -49,7 +49,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
   int testIdx = 0;
   unsigned int numIter;
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   // 1. Run all P2P for all sizes
   if (numDevices >= 2) {
     for (int sizeIdx = 0; sizeIdx < NUM_SIZES; ++sizeIdx) {
@@ -61,54 +61,54 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       void* srcBuffer = NULL;
       void* dstBuffer = NULL;
       numIter = Iterations[1];
-      HIP_CHECK(hipSetDevice(0));
-      HIP_CHECK(hipMalloc(&srcBuffer, bufSize_));
+      HIP_CHECK(hipSetDevice(0))
+      HIP_CHECK(hipMalloc(&srcBuffer, bufSize_))
       hipError_t errMemset = hipMemset(srcBuffer, 0xd0, bufSize_);
       if (errMemset != hipSuccess) {
-        HIP_CHECK(hipFree(srcBuffer));
+        HIP_CHECK(hipFree(srcBuffer))
         continue;
       }
-      HIP_CHECK(hipSetDevice(1));
-      HIP_CHECK(hipMalloc(&dstBuffer, bufSize_));
+      HIP_CHECK(hipSetDevice(1))
+      HIP_CHECK(hipMalloc(&dstBuffer, bufSize_))
       int canAccessPeer01 = 0, canAccessPeer10 = 0;
-      HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer01, 0, 1));
-      HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer10, 1, 0));
+      HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer01, 0, 1))
+      HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer10, 1, 0))
       if (!canAccessPeer01 || !canAccessPeer10) {
-        HIP_CHECK(hipSetDevice(0));
-        HIP_CHECK(hipDeviceDisablePeerAccess(1));
-        HIP_CHECK(hipSetDevice(1));
-        HIP_CHECK(hipDeviceDisablePeerAccess(0));
-        HIP_CHECK(hipSetDevice(0));
-        HIP_CHECK(hipFree(srcBuffer));
-        HIP_CHECK(hipSetDevice(1));
-        HIP_CHECK(hipFree(dstBuffer));
-        HIP_CHECK(hipSetDevice(0));
+        HIP_CHECK(hipSetDevice(0))
+        HIP_CHECK(hipDeviceDisablePeerAccess(1))
+        HIP_CHECK(hipSetDevice(1))
+        HIP_CHECK(hipDeviceDisablePeerAccess(0))
+        HIP_CHECK(hipSetDevice(0))
+        HIP_CHECK(hipFree(srcBuffer))
+        HIP_CHECK(hipSetDevice(1))
+        HIP_CHECK(hipFree(dstBuffer))
+        HIP_CHECK(hipSetDevice(0))
         continue;
       }
-      HIP_CHECK(hipSetDevice(0));
+      HIP_CHECK(hipSetDevice(0))
       hipError_t errPeer0 = hipDeviceEnablePeerAccess(1, 0);
-      HIP_CHECK(hipSetDevice(1));
+      HIP_CHECK(hipSetDevice(1))
       hipError_t errPeer1 = hipDeviceEnablePeerAccess(0, 0);
       if (errPeer0 != hipSuccess || errPeer1 != hipSuccess) {
-        HIP_CHECK(hipSetDevice(0));
-        HIP_CHECK(hipFree(srcBuffer));
-        HIP_CHECK(hipSetDevice(1));
-        HIP_CHECK(hipFree(dstBuffer));
-        HIP_CHECK(hipSetDevice(0));
+        HIP_CHECK(hipSetDevice(0))
+        HIP_CHECK(hipFree(srcBuffer))
+        HIP_CHECK(hipSetDevice(1))
+        HIP_CHECK(hipFree(dstBuffer))
+        HIP_CHECK(hipSetDevice(0))
         continue;
       }
-      HIP_CHECK(hipMemcpyPeer(dstBuffer, 1, srcBuffer, 0, bufSize_));
+      HIP_CHECK(hipMemcpyPeer(dstBuffer, 1, srcBuffer, 0, bufSize_))
       auto all_start = std::chrono::steady_clock::now();
       for (unsigned int i = 0; i < numIter; i++) {
-        HIP_CHECK(hipMemcpyPeerAsync(dstBuffer, 1, srcBuffer, 0, bufSize_, 0));
+        HIP_CHECK(hipMemcpyPeerAsync(dstBuffer, 1, srcBuffer, 0, bufSize_, 0))
       }
-      HIP_CHECK(hipSetDevice(1));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipSetDevice(1))
+      HIP_CHECK(hipDeviceSynchronize())
       hipError_t syncErr = hipGetLastError();
       if (syncErr != hipSuccess) {
         DEBUG_PRINT("WARNING: hipDeviceSynchronize error: %s\n", hipGetErrorString(syncErr));
       }
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipDeviceSynchronize())
       auto all_end = std::chrono::steady_clock::now();
       std::chrono::duration<double> elapsed_secs = all_end - all_start;
       DEBUG_PRINT("Elapsed seconds: %f\n", elapsed_secs.count());
@@ -124,18 +124,18 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
            testIdx, bufSize_, "dev0", "dev1", numIter, (float)perf);
       void* temp = malloc(bufSize_ + 4096);
       void* chkBuf = reinterpret_cast<void*>(temp);
-      HIP_CHECK(hipMemcpy(chkBuf, dstBuffer, bufSize_, hipMemcpyDefault));
+      HIP_CHECK(hipMemcpy(chkBuf, dstBuffer, bufSize_, hipMemcpyDefault))
       checkData(chkBuf, bufSize_, 0xd0);
       free(temp);
-      HIP_CHECK(hipSetDevice(0));
-      HIP_CHECK(hipDeviceDisablePeerAccess(1));
-      HIP_CHECK(hipSetDevice(1));
-      HIP_CHECK(hipDeviceDisablePeerAccess(0));
-      HIP_CHECK(hipSetDevice(0));
-      HIP_CHECK(hipFree(srcBuffer));
-      HIP_CHECK(hipSetDevice(1));
-      HIP_CHECK(hipFree(dstBuffer));
-      HIP_CHECK(hipSetDevice(0));
+      HIP_CHECK(hipSetDevice(0))
+      HIP_CHECK(hipDeviceDisablePeerAccess(1))
+      HIP_CHECK(hipSetDevice(1))
+      HIP_CHECK(hipDeviceDisablePeerAccess(0))
+      HIP_CHECK(hipSetDevice(0))
+      HIP_CHECK(hipFree(srcBuffer))
+      HIP_CHECK(hipSetDevice(1))
+      HIP_CHECK(hipFree(dstBuffer))
+      HIP_CHECK(hipSetDevice(0))
       ++testIdx;
     }
   }
@@ -149,21 +149,21 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     void* srcBuffer = NULL;
     void* dstBuffer = NULL;
     numIter = Iterations[1];
-    HIP_CHECK(hipSetDevice(0));
-    HIP_CHECK(hipMalloc(&srcBuffer, bufSize_));
-    HIP_CHECK(hipMalloc(&dstBuffer, bufSize_));
-    HIP_CHECK(hipMemset(srcBuffer, 0xd0, bufSize_));
-    HIP_CHECK(hipMemcpy(dstBuffer, srcBuffer, bufSize_, hipMemcpyDeviceToDeviceNoCU));
+    HIP_CHECK(hipSetDevice(0))
+    HIP_CHECK(hipMalloc(&srcBuffer, bufSize_))
+    HIP_CHECK(hipMalloc(&dstBuffer, bufSize_))
+    HIP_CHECK(hipMemset(srcBuffer, 0xd0, bufSize_))
+    HIP_CHECK(hipMemcpy(dstBuffer, srcBuffer, bufSize_, hipMemcpyDeviceToDeviceNoCU))
     auto all_start = std::chrono::steady_clock::now();
     for (unsigned int i = 0; i < numIter; i++) {
-      HIP_CHECK(hipMemcpyAsync(dstBuffer, srcBuffer, bufSize_, hipMemcpyDeviceToDeviceNoCU, NULL));
+      HIP_CHECK(hipMemcpyAsync(dstBuffer, srcBuffer, bufSize_, hipMemcpyDeviceToDeviceNoCU, NULL))
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     hipError_t syncErr = hipGetLastError();
     if (syncErr != hipSuccess) {
       DEBUG_PRINT("WARNING: hipDeviceSynchronize error: %s\n", hipGetErrorString(syncErr));
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     auto all_end = std::chrono::steady_clock::now();
     std::chrono::duration<double> elapsed_secs = all_end - all_start;
     DEBUG_PRINT("Elapsed seconds: %f\n", elapsed_secs.count());
@@ -179,11 +179,11 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
          testIdx, bufSize_, "dev0", "dev0", numIter, (float)perf);
     void* temp = malloc(bufSize_ + 4096);
     void* chkBuf = reinterpret_cast<void*>(temp);
-    HIP_CHECK(hipMemcpy(chkBuf, dstBuffer, bufSize_, hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(chkBuf, dstBuffer, bufSize_, hipMemcpyDefault))
     checkData(chkBuf, bufSize_, 0xd0);
     free(temp);
-    HIP_CHECK(hipFree(srcBuffer));
-    HIP_CHECK(hipFree(dstBuffer));
+    HIP_CHECK(hipFree(srcBuffer))
+    HIP_CHECK(hipFree(dstBuffer))
     ++testIdx;
   }
 
@@ -225,10 +225,10 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
           deviceMallocUncached[1] = true;
         }
         if (deviceMallocUncached[0]) {
-          HIP_CHECK(hipExtMallocWithFlags(&srcBuffer, bufSize_, hipDeviceMallocUncached));
-          HIP_CHECK(hipMemset(srcBuffer, 0xd0, bufSize_));
+          HIP_CHECK(hipExtMallocWithFlags(&srcBuffer, bufSize_, hipDeviceMallocUncached))
+          HIP_CHECK(hipMemset(srcBuffer, 0xd0, bufSize_))
         } else if (hostMalloc[0]) {
-          HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&srcBuffer), bufSize_, 0));
+          HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&srcBuffer), bufSize_, 0))
           setData(srcBuffer, bufSize_, 0xd0);
         } else if (hostRegister[0]) {
           memptr[0] = malloc(bufSize_ + 4096);
@@ -237,7 +237,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
           alignedmemptr[0] = reinterpret_cast<void*>(aligned);
           srcBuffer = alignedmemptr[0];
           setData(srcBuffer, bufSize_, 0xd0);
-          HIP_CHECK(hipHostRegister(srcBuffer, bufSize_, 0));
+          HIP_CHECK(hipHostRegister(srcBuffer, bufSize_, 0))
         } else if (unpinnedMalloc[0]) {
           memptr[0] = malloc(bufSize_ + 4096);
           uintptr_t raw = reinterpret_cast<uintptr_t>(memptr[0]);
@@ -246,20 +246,20 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
           srcBuffer = alignedmemptr[0];
           setData(srcBuffer, bufSize_, 0xd0);
         } else {
-          HIP_CHECK(hipMalloc(&srcBuffer, bufSize_));
-          HIP_CHECK(hipMemset(srcBuffer, 0xd0, bufSize_));
+          HIP_CHECK(hipMalloc(&srcBuffer, bufSize_))
+          HIP_CHECK(hipMemset(srcBuffer, 0xd0, bufSize_))
         }
         if (deviceMallocUncached[1]) {
-          HIP_CHECK(hipExtMallocWithFlags(&dstBuffer, bufSize_, hipDeviceMallocUncached));
+          HIP_CHECK(hipExtMallocWithFlags(&dstBuffer, bufSize_, hipDeviceMallocUncached))
         } else if (hostMalloc[1]) {
-          HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&dstBuffer), bufSize_, 0));
+          HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&dstBuffer), bufSize_, 0))
         } else if (hostRegister[1]) {
           memptr[1] = malloc(bufSize_ + 4096);
           uintptr_t raw = reinterpret_cast<uintptr_t>(memptr[1]);
           uintptr_t aligned = (raw + 4095) & ~static_cast<uintptr_t>(4095);
           alignedmemptr[1] = reinterpret_cast<void*>(aligned);
           dstBuffer = alignedmemptr[1];
-          HIP_CHECK(hipHostRegister(dstBuffer, bufSize_, 0));
+          HIP_CHECK(hipHostRegister(dstBuffer, bufSize_, 0))
         } else if (unpinnedMalloc[1]) {
           memptr[1] = malloc(bufSize_ + 4096);
           uintptr_t raw = reinterpret_cast<uintptr_t>(memptr[1]);
@@ -267,19 +267,19 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
           alignedmemptr[1] = reinterpret_cast<void*>(aligned);
           dstBuffer = alignedmemptr[1];
         } else {
-          HIP_CHECK(hipMalloc(&dstBuffer, bufSize_));
+          HIP_CHECK(hipMalloc(&dstBuffer, bufSize_))
         }
-        HIP_CHECK(hipMemcpy(dstBuffer, srcBuffer, bufSize_, hipMemcpyDefault));
+        HIP_CHECK(hipMemcpy(dstBuffer, srcBuffer, bufSize_, hipMemcpyDefault))
         auto all_start = std::chrono::steady_clock::now();
         for (unsigned int i = 0; i < numIter; i++) {
-          HIP_CHECK(hipMemcpyAsync(dstBuffer, srcBuffer, bufSize_, hipMemcpyDefault, NULL));
+          HIP_CHECK(hipMemcpyAsync(dstBuffer, srcBuffer, bufSize_, hipMemcpyDefault, NULL))
         }
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipDeviceSynchronize())
         hipError_t syncErr = hipGetLastError();
         if (syncErr != hipSuccess) {
           DEBUG_PRINT("WARNING: hipDeviceSynchronize error: %s\n", hipGetErrorString(syncErr));
         }
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipDeviceSynchronize())
         auto all_end = std::chrono::steady_clock::now();
         std::chrono::duration<double> elapsed_secs = all_end - all_start;
         DEBUG_PRINT("Elapsed seconds: %f\n", elapsed_secs.count());
@@ -323,32 +323,32 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
             testIdx, bufSize_, "     ", strSrc, strDst, numIter, (float)perf);
         void* temp = malloc(bufSize_ + 4096);
         void* chkBuf = reinterpret_cast<void*>(temp);
-        HIP_CHECK(hipMemcpy(chkBuf, dstBuffer, bufSize_, hipMemcpyDefault));
+        HIP_CHECK(hipMemcpy(chkBuf, dstBuffer, bufSize_, hipMemcpyDefault))
         checkData(chkBuf, bufSize_, 0xd0);
         free(temp);
         if (deviceMallocUncached[0]) {
-          HIP_CHECK(hipFree(srcBuffer));
+          HIP_CHECK(hipFree(srcBuffer))
         } else if (hostMalloc[0]) {
-          HIP_CHECK(hipHostFree(srcBuffer));
+          HIP_CHECK(hipHostFree(srcBuffer))
         } else if (hostRegister[0]) {
-          HIP_CHECK(hipHostUnregister(srcBuffer));
+          HIP_CHECK(hipHostUnregister(srcBuffer))
           free(memptr[0]);
         } else if (unpinnedMalloc[0]) {
           free(memptr[0]);
         } else {
-          HIP_CHECK(hipFree(srcBuffer));
+          HIP_CHECK(hipFree(srcBuffer))
         }
         if (deviceMallocUncached[1]) {
-          HIP_CHECK(hipFree(dstBuffer));
+          HIP_CHECK(hipFree(dstBuffer))
         } else if (hostMalloc[1]) {
-          HIP_CHECK(hipHostFree(dstBuffer));
+          HIP_CHECK(hipHostFree(dstBuffer))
         } else if (hostRegister[1]) {
-          HIP_CHECK(hipHostUnregister(dstBuffer));
+          HIP_CHECK(hipHostUnregister(dstBuffer))
           free(memptr[1]);
         } else if (unpinnedMalloc[1]) {
           free(memptr[1]);
         } else {
-          HIP_CHECK(hipFree(dstBuffer));
+          HIP_CHECK(hipFree(dstBuffer))
         }
       }
       ++testIdx;
@@ -371,14 +371,14 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
 
 HIP_TEST_CASE(Performance_hipPerfBufferCopySpeed_test) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   } else {
     int deviceId = 0;
-    HIP_CHECK(hipSetDevice(deviceId));
+    HIP_CHECK(hipSetDevice(deviceId))
     hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+    HIP_CHECK(hipGetDeviceProperties(&props, deviceId))
 
     CONSOLE_PRINT(
         "hipPerfBufferCopySpeed - info: Set device to %d : %s\nLegend: unp - unpinned(malloc), hM "

@@ -97,16 +97,16 @@ template <typename T> void runTestShflSync(int option) {
   T a[n];
   T cpuSum = sum(a);
   T* d_a;
-  HIP_CHECK(hipMalloc(&d_a, bufferSize));
+  HIP_CHECK(hipMalloc(&d_a, bufferSize))
 
   hipModule_t module;
   hipFunction_t kernel;
-  HIP_CHECK(hipModuleLoadData(&module, code.data()));
+  HIP_CHECK(hipModuleLoadData(&module, code.data()))
   const char* name;
   hiprtcGetLoweredName(prog, str.c_str(), &name);
-  HIP_CHECK(hipModuleGetFunction(&kernel, module, name));
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, name))
 
-  HIP_CHECK(hipMemcpy(d_a, &a, bufferSize, hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(d_a, &a, bufferSize, hipMemcpyDefault))
 
   struct {
     T* a_;
@@ -117,10 +117,10 @@ template <typename T> void runTestShflSync(int option) {
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
 
-  HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, n, 1, 1, 0, nullptr, nullptr, config));
+  HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, n, 1, 1, 0, nullptr, nullptr, config))
 
-  HIP_CHECK(hipMemcpy(&a, d_a, bufferSize, hipMemcpyDefault));
-  bool result;
+  HIP_CHECK(hipMemcpy(&a, d_a, bufferSize, hipMemcpyDefault))
+  bool result = false;
   switch (option) {
     case 1:  // shflUpSum
       result = compare(a[n - 1], cpuSum);
@@ -129,15 +129,17 @@ template <typename T> void runTestShflSync(int option) {
     case 3:  // shflXorSum
       result = compare(a[0], cpuSum);
       break;
+    default:
+      break;
   }
 
   if (result) {
-    HIP_CHECK(hipFree(d_a));
+    HIP_CHECK(hipFree(d_a))
     REQUIRE(false);
   }
 
-  HIP_CHECK(hipFree(d_a));
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipFree(d_a))
+  HIP_CHECK(hipModuleUnload(module))
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }
 

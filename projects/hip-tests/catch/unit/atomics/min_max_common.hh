@@ -254,7 +254,7 @@ void TestCore(const TestParams& p) {
   std::vector<LinearAllocGuard<TestType>> mem_devs;
   std::vector<StreamGuard> streams;
   for (auto i = 0; i < p.num_devices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     old_vals_devs.emplace_back(LinearAllocs::hipMalloc, old_vals_alloc_size);
     for (auto j = 0; j < p.kernel_count; ++j) {
       streams.emplace_back(Streams::created);
@@ -271,16 +271,16 @@ void TestCore(const TestParams& p) {
       std::is_floating_point_v<TestType> ? kFloatingPointTestValue : kIntegerTestValue;
   std::vector<TestType> test_values(p.width * p.pitch / sizeof(TestType), test_value);
   for (auto i = 0u; i < p.num_devices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     TestType* const mem_ptr =
         p.alloc_type == LinearAllocs::hipMalloc ? mem_devs[i].ptr() : mem_devs[i].host_ptr();
-    HIP_CHECK(hipMemset(mem_ptr, 0, mem_alloc_size));
-    HIP_CHECK(hipMemcpy(mem_ptr, test_values.data(), p.width * p.pitch, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemset(mem_ptr, 0, mem_alloc_size))
+    HIP_CHECK(hipMemcpy(mem_ptr, test_values.data(), p.width * p.pitch, hipMemcpyHostToDevice))
   }
 
   // Launch kernel
   for (auto i = 0u; i < p.num_devices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     for (auto j = 0u; j < p.kernel_count; ++j) {
       const auto& stream = streams[i * p.kernel_count + j].stream();
       const auto old_vals = old_vals_devs[i].ptr() + j * p.ThreadCount();
@@ -289,12 +289,12 @@ void TestCore(const TestParams& p) {
     }
   }
   for (auto i = 0; i < p.num_devices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipSetDevice(i))
+    HIP_CHECK(hipDeviceSynchronize())
   }
   // Copy Results back to Host
   for (auto i = 0u; i < p.num_devices; ++i) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     const auto device_offset = i * p.kernel_count * p.ThreadCount();
     HIP_CHECK(hipMemcpy(old_vals.data() + device_offset, old_vals_devs[i].ptr(),
                         old_vals_alloc_size, hipMemcpyDeviceToHost));
@@ -324,7 +324,7 @@ void SingleDeviceSingleKernelTest(const unsigned int width, const unsigned int p
                         operation == AtomicOperation::kBuiltinMax) &&
                        memory_scope == __HIP_MEMORY_SCOPE_WAVEFRONT) {
     int warp_size = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
     params.threads = dim3(warp_size);
   } else {
     params.threads = GenerateThreadDimensions();
@@ -364,7 +364,7 @@ template <typename TestType, AtomicOperation operation>
 void SingleDeviceMultipleKernelTest(const unsigned int kernel_count, const unsigned int width,
                                     const unsigned int pitch) {
   int concurrent_kernels = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, 0))
   if (!concurrent_kernels) {
     HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentKernelExecutionUnsupported);
   }

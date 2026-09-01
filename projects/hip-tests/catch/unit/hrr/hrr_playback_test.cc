@@ -12,7 +12,7 @@
  */
 
 #include <hip_test_common.hh>
-#include "hip_playback.h"
+#include <hip_playback.h>
 
 // ROCM-27985: the post-H2D-restore drain (hrr_sync_after_replayed_h2d) must
 // be skipped while a stream graph is being captured, because a device/stream

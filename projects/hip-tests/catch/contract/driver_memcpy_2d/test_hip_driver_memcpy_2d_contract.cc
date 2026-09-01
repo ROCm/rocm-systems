@@ -29,7 +29,7 @@ bool TryMallocPitch(void** device_ptr, size_t* pitch, size_t width, size_t heigh
   if (status == hipErrorOutOfMemory) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 
@@ -94,10 +94,10 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_HipMemcpyParam2D_HtoDtoH_RoundTripsRows) {
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   auto h2d = HostToDeviceCopy(device_ptr, pitch, src.data(), kWidth, kWidth, kHeight);
-  HIP_CHECK(hipMemcpyParam2D(&h2d));
+  HIP_CHECK(hipMemcpyParam2D(&h2d))
 
   auto d2h = DeviceToHostCopy(dst.data(), kWidth, device_ptr, pitch, kWidth, kHeight);
-  HIP_CHECK(hipMemcpyParam2D(&d2h));
+  HIP_CHECK(hipMemcpyParam2D(&d2h))
 
   REQUIRE(dst == src);
 }
@@ -122,13 +122,13 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_HipMemcpyParam2D_DtoDSingleDevice_CopiesRo
   cleanup.Add([dst_device_ptr] { (void)hipFree(dst_device_ptr); });
 
   auto h2d = HostToDeviceCopy(src_device_ptr, src_pitch, src.data(), kWidth, kWidth, kHeight);
-  HIP_CHECK(hipMemcpyParam2D(&h2d));
+  HIP_CHECK(hipMemcpyParam2D(&h2d))
 
   auto d2d = DeviceToDeviceCopy(dst_device_ptr, dst_pitch, src_device_ptr, src_pitch, kWidth, kHeight);
-  HIP_CHECK(hipMemcpyParam2D(&d2d));
+  HIP_CHECK(hipMemcpyParam2D(&d2d))
 
   auto d2h = DeviceToHostCopy(dst.data(), kWidth, dst_device_ptr, dst_pitch, kWidth, kHeight);
-  HIP_CHECK(hipMemcpyParam2D(&d2h));
+  HIP_CHECK(hipMemcpyParam2D(&d2h))
 
   REQUIRE(dst == src);
 }
@@ -147,13 +147,13 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_HipMemcpyParam2D_ZeroExtent_Succeeds) {
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   auto initialize = HostToDeviceCopy(device_ptr, pitch, src.data(), kWidth, kWidth, kHeight);
-  HIP_CHECK(hipMemcpyParam2D(&initialize));
+  HIP_CHECK(hipMemcpyParam2D(&initialize))
 
   auto zero_copy = HostToDeviceCopy(device_ptr, pitch, dst.data(), kWidth, 0, 0);
-  HIP_CHECK(hipMemcpyParam2D(&zero_copy));
+  HIP_CHECK(hipMemcpyParam2D(&zero_copy))
 
   auto read_back = DeviceToHostCopy(dst.data(), kWidth, device_ptr, pitch, kWidth, kHeight);
-  HIP_CHECK(hipMemcpyParam2D(&read_back));
+  HIP_CHECK(hipMemcpyParam2D(&read_back))
 
   REQUIRE(dst == src);
 }
@@ -171,15 +171,15 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_HipMemcpyParam2DAsync_AsyncOnStream_HostTo
     SkipPitchedAllocationUnsupported();
   }
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   auto h2d = HostToDeviceCopy(device_ptr, pitch, src.data(), kWidth, kWidth, kHeight);
-  HIP_CHECK(hipMemcpyParam2DAsync(&h2d, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpyParam2DAsync(&h2d, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   auto d2h = DeviceToHostCopy(dst.data(), kWidth, device_ptr, pitch, kWidth, kHeight);
-  HIP_CHECK(hipMemcpyParam2D(&d2h));
+  HIP_CHECK(hipMemcpyParam2D(&d2h))
 
   REQUIRE(dst == src);
 }
@@ -196,7 +196,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_HipMemcpyParam2D_NullPointersInStruct_AreR
     SkipPitchedAllocationUnsupported();
   }
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   auto null_src = HostToDeviceCopy(device_ptr, pitch, nullptr, kWidth, kWidth, kHeight);
@@ -208,7 +208,7 @@ HIP_TEST_CASE(Contract_DriverMemcpy2D_HipMemcpyParam2D_NullPointersInStruct_AreR
   const hipError_t async_null_dst_status = hipMemcpyParam2DAsync(&null_dst, stream);
 
   auto valid_copy = HostToDeviceCopy(device_ptr, pitch, host.data(), kWidth, kWidth, kHeight);
-  HIP_CHECK(hipMemcpyParam2D(&valid_copy));
+  HIP_CHECK(hipMemcpyParam2D(&valid_copy))
 
   REQUIRE(sync_null_src_status != hipSuccess);
   REQUIRE(async_null_src_status != hipSuccess);

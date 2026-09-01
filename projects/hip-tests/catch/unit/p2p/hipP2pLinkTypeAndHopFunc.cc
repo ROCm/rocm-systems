@@ -40,13 +40,13 @@ void getDeviceCount(int* pdevCnt) {
     // close the read-descriptor
     close(fd[0]);
     // wait for child exit
-    wait(NULL);
+    wait(nullptr);
     *pdevCnt = val;
   } else if (!childpid) {  // Child
     int devCnt = 1;
     // writing only, no need for read-descriptor
     close(fd[0]);
-    HIP_CHECK(hipGetDeviceCount(&devCnt));
+    HIP_CHECK(hipGetDeviceCount(&devCnt))
     // send the value on the write-descriptor:
     write(fd[1], &devCnt, sizeof(devCnt));
     // close the write descriptor:
@@ -90,7 +90,7 @@ bool testMaskedDevice(int actualNumGPUs) {
     close(fd[1]);
     read(fd[0], &testResult, sizeof(testResult));
     close(fd[0]);
-    wait(NULL);
+    wait(nullptr);
 
   } else {
     printf("Info:fork() failed\n");
@@ -158,8 +158,8 @@ bool testhipLinkTypeHopcountDeviceOrderRev(int numDevices) {
     for (int y = x + 1; y < numDevices; y++) {
       uint32_t linktype1 = 0, linktype2 = 0;
       uint32_t hopcount1 = 0, hopcount2 = 0;
-      HIP_CHECK(hipExtGetLinkTypeAndHopCount(x, y, &linktype1, &hopcount1));
-      HIP_CHECK(hipExtGetLinkTypeAndHopCount(y, x, &linktype2, &hopcount2));
+      HIP_CHECK(hipExtGetLinkTypeAndHopCount(x, y, &linktype1, &hopcount1))
+      HIP_CHECK(hipExtGetLinkTypeAndHopCount(y, x, &linktype2, &hopcount2))
       if (hopcount1 != hopcount2) {
         TestPassed = false;
         break;
@@ -242,7 +242,7 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
   }
   for (auto pos = devicePairList.begin(); pos != devicePairList.end(); pos++) {
     int can_access_peer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, (*pos).device1, (*pos).device2));
+    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, (*pos).device1, (*pos).device2))
     if (!can_access_peer) {
       continue;
     }
@@ -251,7 +251,7 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
     RSMI_IO_LINK_TYPE linktype2 = RSMI_IOLINK_TYPE_UNDEFINED;
     uint64_t hopcount2 = 0;
     rsmi_status_t retsmi;
-    HIPCHECK(hipExtGetLinkTypeAndHopCount((*pos).device1, (*pos).device2, &linktype1, &hopcount1));
+    HIPCHECK(hipExtGetLinkTypeAndHopCount((*pos).device1, (*pos).device2, &linktype1, &hopcount1))
     retsmi = fntopo_get_link_type((*pos).device1, (*pos).device2, &hopcount2, &linktype2);
     REQUIRE(RSMI_STATUS_SUCCESS == retsmi);
 
@@ -279,8 +279,8 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
  *    - Validates negative scenarios for hipExtGetLinkTypeAndHopCount
  * 1)Test Scenario to verify when device1 is visible and device2 is masked
  * 2)Test Scenario to verify Invalid Device Number(s)
- * 3)Test Scenario to verify when linktype = NULL
- * 4)Test Scenario to verify when hopcount = NULL
+ * 3)Test Scenario to verify when linktype = nullptr
+ * 4)Test Scenario to verify when hopcount = nullptr
  * 5)Test Scenario to verify when device1 = device2
  * 6)Test Scenario: Verify (hopcount, linktype) values for (src= device1, dest = device2)
  * and (src = device2, dest = device1), where device1 and device2 are valid device numbers.
@@ -298,7 +298,7 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
 HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
   int numDevices = 0;
   bool TestPassed = true;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }

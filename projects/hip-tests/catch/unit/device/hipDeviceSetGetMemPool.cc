@@ -37,7 +37,7 @@ static inline hipMemPool_t CreateMemPool(const int device) {
   kPoolProps.win32SecurityAttributes = nullptr;
 
   hipMemPool_t mem_pool;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps))
 
   return mem_pool;
 }
@@ -60,9 +60,9 @@ HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Positive_Basic) {
   CheckMemPoolSupport(device);
 
   hipMemPool_t mem_pool = CreateMemPool(device);
-  HIP_CHECK(hipDeviceSetMemPool(device, mem_pool));
+  HIP_CHECK(hipDeviceSetMemPool(device, mem_pool))
 
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
 }
 
 /**
@@ -85,7 +85,7 @@ HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Positive_Basic) {
  */
 HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Negative_Parameters) {
   hipMemPool_t mem_pool;
-  HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, 0));
+  HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, 0))
 
   SECTION("mem_pool == nullptr") {
     HIP_CHECK_ERROR(hipDeviceSetMemPool(0, nullptr), hipErrorInvalidValue);
@@ -131,10 +131,10 @@ HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Default) {
   CheckMemPoolSupport(device);
 
   hipMemPool_t default_mem_pool;
-  HIP_CHECK(hipDeviceGetDefaultMemPool(&default_mem_pool, device));
+  HIP_CHECK(hipDeviceGetDefaultMemPool(&default_mem_pool, device))
 
   hipMemPool_t mem_pool;
-  HIP_CHECK(hipDeviceGetMemPool(&mem_pool, device));
+  HIP_CHECK(hipDeviceGetMemPool(&mem_pool, device))
 
   REQUIRE(mem_pool == default_mem_pool);
 }
@@ -157,14 +157,14 @@ HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Basic) {
   CheckMemPoolSupport(device);
 
   hipMemPool_t mem_pool = CreateMemPool(device);
-  HIP_CHECK(hipDeviceSetMemPool(device, mem_pool));
+  HIP_CHECK(hipDeviceSetMemPool(device, mem_pool))
 
   hipMemPool_t returned_mem_pool;
-  HIP_CHECK(hipDeviceGetMemPool(&returned_mem_pool, device));
+  HIP_CHECK(hipDeviceGetMemPool(&returned_mem_pool, device))
 
   REQUIRE(returned_mem_pool == mem_pool);
 
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
 }
 
 /**
@@ -184,11 +184,11 @@ HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Threaded) {
    public:
     void TestPart2() {
       mem_pool_ = CreateMemPool(0);
-      HIP_CHECK_THREAD(hipDeviceSetMemPool(0, mem_pool_));
+      HIP_CHECK_THREAD(hipDeviceSetMemPool(0, mem_pool_))
     }
     void TestPart3() {
       hipMemPool_t returned_mem_pool;
-      HIP_CHECK(hipDeviceGetMemPool(&returned_mem_pool, 0));
+      HIP_CHECK(hipDeviceGetMemPool(&returned_mem_pool, 0))
 
       REQUIRE(returned_mem_pool == mem_pool_);
     }

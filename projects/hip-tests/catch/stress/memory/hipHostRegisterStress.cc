@@ -41,7 +41,7 @@ static __global__ void Inc(uint8_t* Ad) {
  */
 HIP_TEST_CASE(Stress_hipHostRegister_Oversubscription) {
   hipDeviceProp_t prop;
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0))
   std::string arch = prop.gcnArchName;
 #if HT_AMD
   if (std::string::npos == arch.find("xnack+")) {
@@ -50,7 +50,7 @@ HIP_TEST_CASE(Stress_hipHostRegister_Oversubscription) {
 #endif
   size_t maxGpuMem = 0, availableMem = 0;
   // Get available GPU memory and total GPU memory
-  HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
+  HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem))
   INFO("Maximum GPU memory Size = " << maxGpuMem);
   size_t allocsize = maxGpuMem + ((maxGpuMem * ADDITIONAL_MEMORY_PERCENT) / 100);
   // Calculate grid size and block size
@@ -75,17 +75,17 @@ HIP_TEST_CASE(Stress_hipHostRegister_Oversubscription) {
   // Inititalize
   memset(A, INITIAL_VAL, allocsize);
   // Register the entire host memory chunk
-  HIP_CHECK(hipHostRegister(A, allocsize, 0));
+  HIP_CHECK(hipHostRegister(A, allocsize, 0))
   // Read and Write the entire allocsize in chunks of use_size
   for (size_t chk_chunk = 0; chk_chunk < allocsize; chk_chunk += use_size) {
     ptr = A + chk_chunk;
     hipLaunchKernelGGL(Inc, dim3(use_size / num_threads), num_threads, 0, 0, ptr);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     for (int i = 0; i < use_size; i++) {
       REQUIRE(ptr[i] == EXPECTED_VAL);
     }
   }
-  HIP_CHECK(hipHostUnregister(A));
+  HIP_CHECK(hipHostUnregister(A))
   free(A);
 }
 

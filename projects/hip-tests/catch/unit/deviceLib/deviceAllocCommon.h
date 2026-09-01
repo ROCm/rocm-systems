@@ -19,6 +19,11 @@ static __device__ void deviceFree(int* outputBuf, int* devmem, int test_type, in
 /**
  * Allocation base and derived class to test dynamic allocation.
  */
+// baseAlloc/derivedAlloc are __device__-only classes; a virtual host-side
+// destructor would break __device__ static initialization, so suppress the
+// host-compiler warning for this intentional pattern.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnon-virtual-dtor"
 class baseAlloc {
  public:
   virtual __device__ int* alloc(size_t size) = 0;
@@ -27,9 +32,10 @@ class baseAlloc {
 
 class derivedAlloc : public baseAlloc {
  public:
-  virtual __device__ int* alloc(size_t size) { return new int[size]; }
-  virtual __device__ void free(int* ptr) { delete ptr; }
+  __device__ int* alloc(size_t size) override { return new int[size]; }
+  __device__ void free(int* ptr) override { delete ptr; }
 };
+#pragma clang diagnostic pop
 
 /**
  * Allocation Structure to test dynamic allocation.

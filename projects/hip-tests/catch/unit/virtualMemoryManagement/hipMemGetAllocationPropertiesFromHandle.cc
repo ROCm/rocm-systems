@@ -32,7 +32,7 @@
 HIP_TEST_CASE(Unit_hipMemGetAllocationPropertiesFromHandle_functional) {
   hipDevice_t device;
   CTX_CREATE();
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   checkVMMSupported(device);
   hipMemGenericAllocationHandle_t handle;
   hipMemAllocationProp prop = {};
@@ -49,13 +49,13 @@ HIP_TEST_CASE(Unit_hipMemGetAllocationPropertiesFromHandle_functional) {
   REQUIRE(granularity > 0);
   size_t mem_size = ((granularity + buffer_size - 1) / granularity) * granularity;
   // Allocate physical memory
-  HIP_CHECK(hipMemCreate(&handle, mem_size, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle, mem_size, &prop, 0))
   // verify properties has been retrived from handle
-  HIP_CHECK(hipMemGetAllocationPropertiesFromHandle(&prop_temp, handle));
+  HIP_CHECK(hipMemGetAllocationPropertiesFromHandle(&prop_temp, handle))
   REQUIRE(prop_temp.type == prop.type);
   REQUIRE(prop_temp.location.type == prop.location.type);
   REQUIRE(prop_temp.location.id == prop.location.id);
-  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemRelease(handle))
   CTX_DESTROY();
 }
 
@@ -72,7 +72,7 @@ HIP_TEST_CASE(Unit_hipMemGetAllocationPropertiesFromHandle_functional) {
 HIP_TEST_CASE(Unit_hipMemGetAllocationPropertiesFromHandle_Negative) {
   CTX_CREATE();
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   checkVMMSupported(device);
   hipMemGenericAllocationHandle_t handle;
   hipMemAllocationProp prop = {};
@@ -89,7 +89,7 @@ HIP_TEST_CASE(Unit_hipMemGetAllocationPropertiesFromHandle_Negative) {
   REQUIRE(granularity > 0);
   size_t mem_size = ((granularity + buffer_size - 1) / granularity) * granularity;
   // Allocate physical memory
-  HIP_CHECK(hipMemCreate(&handle, mem_size, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle, mem_size, &prop, 0))
 
   SECTION("Nullptr as prop") {
     REQUIRE(hipMemGetAllocationPropertiesFromHandle(nullptr, handle) == hipErrorInvalidValue);
@@ -101,14 +101,14 @@ HIP_TEST_CASE(Unit_hipMemGetAllocationPropertiesFromHandle_Negative) {
                 &prop_temp, (hipMemGenericAllocationHandle_t) nullptr) == hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemRelease(handle))
   CTX_DESTROY();
 }
 
 HIP_TEST_CASE(Unit_hipMemGetAllocationPropertiesFromHandle_Capture) {
   CTX_CREATE();
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGet(&device, 0))
   checkVMMSupported(device);
 
   hipMemGenericAllocationHandle_t handle;
@@ -127,18 +127,18 @@ HIP_TEST_CASE(Unit_hipMemGetAllocationPropertiesFromHandle_Capture) {
 
   size_t mem_size = ((granularity + buffer_size - 1) / granularity) * granularity;
 
-  HIP_CHECK(hipMemCreate(&handle, mem_size, &allocation_prop, 0));
+  HIP_CHECK(hipMemCreate(&handle, mem_size, &allocation_prop, 0))
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemGetAllocationPropertiesFromHandle(&allocation_prop_temp, handle));
+  HIP_CHECK(hipMemGetAllocationPropertiesFromHandle(&allocation_prop_temp, handle))
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipMemRelease(handle))
   CTX_DESTROY();
 }
 

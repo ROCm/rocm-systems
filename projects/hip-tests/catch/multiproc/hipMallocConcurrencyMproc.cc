@@ -61,7 +61,7 @@ static void getDeviceCount(int* pdevCnt) {
     // writing only, no need for read-descriptor
     close(fd[0]);
 
-    HIP_CHECK(hipGetDeviceCount(&devCnt));
+    HIP_CHECK(hipGetDeviceCount(&devCnt))
     // send the value on the write-descriptor:
     write(fd[1], &devCnt, sizeof(devCnt));
 
@@ -87,10 +87,10 @@ static bool validateMemoryOnGPU(int gpu, bool concurOnOneGPU = false) {
   constexpr auto threadsPerBlock = 256;
   size_t Nbytes = N * sizeof(int);
 
-  HIP_CHECK(hipSetDevice(gpu));
-  HIP_CHECK(hipMemGetInfo(&prevAvl, &prevTot));
+  HIP_CHECK(hipSetDevice(gpu))
+  HIP_CHECK(hipMemGetInfo(&prevAvl, &prevTot))
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
-  HIP_CHECK(hipMemGetInfo(&curAvl, &curTot));
+  HIP_CHECK(hipMemGetInfo(&curAvl, &curTot))
 
   if (!concurOnOneGPU && (prevAvl < curAvl || prevTot != curTot)) {
     // In concurrent calls on one GPU, we cannot verify leaking in this way
@@ -103,13 +103,13 @@ static bool validateMemoryOnGPU(int gpu, bool concurOnOneGPU = false) {
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
 
   hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
                      static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d, N);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
 
   if (!HipTest::checkVectorADD(A_h, B_h, C_h, N)) {
     printf("Validation PASSED for gpu %d from pid %d\n", gpu, getpid());
@@ -118,9 +118,9 @@ static bool validateMemoryOnGPU(int gpu, bool concurOnOneGPU = false) {
     TestPassed = false;
   }
 
-  HIP_CHECK(hipMemGetInfo(&prevAvl, &prevTot));
+  HIP_CHECK(hipMemGetInfo(&prevAvl, &prevTot))
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipMemGetInfo(&curAvl, &curTot));
+  HIP_CHECK(hipMemGetInfo(&curAvl, &curTot))
 
   if (!concurOnOneGPU && (curAvl < prevAvl || prevTot != curTot)) {
     // In concurrent calls on one GPU, we cannot verify leaking in this way

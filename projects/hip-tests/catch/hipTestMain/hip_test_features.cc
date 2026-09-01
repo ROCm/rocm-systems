@@ -11,14 +11,14 @@
 #include <map>
 #include "hip_test_context.hh"
 
-std::vector<std::unordered_set<std::string>> GCNArchFeatMap = {
+static std::vector<std::unordered_set<std::string>> GCNArchFeatMap = {
     {"gfx90a", "gfx942", "gfx950"},  // CT_FEATURE_FINEGRAIN_HWSUPPORT
     {"gfx90a", "gfx942", "gfx950"},  // CT_FEATURE_HMM
     {"gfx90a", "gfx942", "gfx950"},  // CT_FEATURE_TEXTURES_NOT_SUPPORTED
 };
 
 #if HT_AMD
-std::string TrimAndGetGFXName(const std::string& full_gfx_name) {
+static std::string TrimAndGetGFXName(const std::string& full_gfx_name) {
   std::string gfx_name("");
 
   // Split the first part of the delimiter

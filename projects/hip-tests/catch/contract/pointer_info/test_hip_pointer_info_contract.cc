@@ -43,13 +43,13 @@ bool ManagedMemorySupported() {
   void* ptr = nullptr;
   const hipError_t status = hipMallocManaged(&ptr, sizeof(int), hipMemAttachGlobal);
   if (status == hipSuccess) {
-    HIP_CHECK(hipFree(ptr));
+    HIP_CHECK(hipFree(ptr))
     return true;
   }
   if (status == hipErrorNotSupported || status == hipErrorOutOfMemory) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return false;
 }
 
@@ -64,7 +64,7 @@ bool QueryPointerAttributeOrSkip(void* data, hipPointer_attribute attribute, hip
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 }  // namespace
@@ -73,14 +73,14 @@ bool QueryPointerAttributeOrSkip(void* data, hipPointer_attribute attribute, hip
 HIP_TEST_CASE(Contract_PointerInfo_HipPointerGetAttributes_DeviceAllocation_ReportsDeviceType) {
   hip::contract::ContractCleanup cleanup;
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   void* data = nullptr;
-  HIP_CHECK(hipMalloc(&data, kAllocationBytes));
+  HIP_CHECK(hipMalloc(&data, kAllocationBytes))
   cleanup.Add([data] { (void)hipFree(data); });
 
   hipPointerAttribute_t attributes{};
-  HIP_CHECK(hipPointerGetAttributes(&attributes, data));
+  HIP_CHECK(hipPointerGetAttributes(&attributes, data))
 
   REQUIRE(IsDeviceMemoryType(attributes.type));
   REQUIRE(attributes.device == device);
@@ -91,11 +91,11 @@ HIP_TEST_CASE(Contract_PointerInfo_HipPointerGetAttributes_DeviceAllocation_Repo
 HIP_TEST_CASE(Contract_PointerInfo_HipPointerGetAttributes_HostAllocation_ReportsHostType) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
-  HIP_CHECK(hipHostMalloc(&data, kAllocationBytes, hipHostMallocDefault));
+  HIP_CHECK(hipHostMalloc(&data, kAllocationBytes, hipHostMallocDefault))
   cleanup.Add([data] { (void)hipHostFree(data); });
 
   hipPointerAttribute_t attributes{};
-  HIP_CHECK(hipPointerGetAttributes(&attributes, data));
+  HIP_CHECK(hipPointerGetAttributes(&attributes, data))
 
   REQUIRE(IsHostMemoryType(attributes.type));
   REQUIRE(attributes.hostPointer == data);
@@ -107,14 +107,14 @@ HIP_TEST_CASE(Contract_PointerInfo_HipPointerGetAttributes_ManagedAllocation_Rep
   hip::contract::ContractCleanup cleanup;
 
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   void* data = nullptr;
-  HIP_CHECK(hipMallocManaged(&data, kAllocationBytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&data, kAllocationBytes, hipMemAttachGlobal))
   cleanup.Add([data] { (void)hipFree(data); });
 
   hipPointerAttribute_t attributes{};
-  HIP_CHECK(hipPointerGetAttributes(&attributes, data));
+  HIP_CHECK(hipPointerGetAttributes(&attributes, data))
 
   REQUIRE(IsManagedMemoryType(attributes.type));
   REQUIRE(attributes.device == device);
@@ -124,11 +124,11 @@ HIP_TEST_CASE(Contract_PointerInfo_HipPointerGetAttributes_ManagedAllocation_Rep
 HIP_TEST_CASE(Contract_PointerInfo_HipPointerGetAttribute_MemoryType_MatchesGetAttributes) {
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
-  HIP_CHECK(hipMalloc(&data, kAllocationBytes));
+  HIP_CHECK(hipMalloc(&data, kAllocationBytes))
   cleanup.Add([data] { (void)hipFree(data); });
 
   hipPointerAttribute_t attributes{};
-  HIP_CHECK(hipPointerGetAttributes(&attributes, data));
+  HIP_CHECK(hipPointerGetAttributes(&attributes, data))
 
   unsigned int memory_type = 0;
   if (!QueryPointerAttributeOrSkip(&memory_type, HIP_POINTER_ATTRIBUTE_MEMORY_TYPE,
@@ -144,7 +144,7 @@ HIP_TEST_CASE(Contract_PointerInfo_HipPointerGetAttribute_MemoryType_MatchesGetA
 HIP_TEST_CASE(Contract_PointerInfo_HipMemGetAddressRange_Default_ReturnsBaseAndSize) {
   hip::contract::ContractCleanup cleanup;
   char* data = nullptr;
-  HIP_CHECK(hipMalloc(&data, kAllocationBytes));
+  HIP_CHECK(hipMalloc(&data, kAllocationBytes))
   cleanup.Add([data] { (void)hipFree(data); });
 
   hipDeviceptr_t base = 0;
@@ -163,7 +163,7 @@ HIP_TEST_CASE(Contract_PointerInfo_HipMemGetInfo_Default_FreeNotGreaterThanTotal
   size_t free_bytes = 0;
   size_t total_bytes = 0;
 
-  HIP_CHECK(hipMemGetInfo(&free_bytes, &total_bytes));
+  HIP_CHECK(hipMemGetInfo(&free_bytes, &total_bytes))
 
   REQUIRE(total_bytes > 0);
   REQUIRE(free_bytes <= total_bytes);
@@ -180,7 +180,7 @@ HIP_TEST_CASE(Contract_PointerInfo_HipPointerGetAttributes_NullOutput_IsRejected
 #if HT_AMD
   hip::contract::ContractCleanup cleanup;
   void* data = nullptr;
-  HIP_CHECK(hipMalloc(&data, sizeof(int)));
+  HIP_CHECK(hipMalloc(&data, sizeof(int)))
   cleanup.Add([data] { (void)hipFree(data); });
 
   const hipError_t status = hipPointerGetAttributes(nullptr, data);

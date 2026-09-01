@@ -18,13 +18,13 @@ class HipEventQueryBenchmark : public Benchmark<HipEventQueryBenchmark> {
  public:
   void operator()() {
     hipEvent_t event;
-    HIP_CHECK(hipEventCreate(&event));
-    HIP_CHECK(hipEventRecord(event));
-    HIP_CHECK(hipEventSynchronize(event));
+    HIP_CHECK(hipEventCreate(&event))
+    HIP_CHECK(hipEventRecord(event))
+    HIP_CHECK(hipEventSynchronize(event))
 
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipEventQuery(event)); }
 
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventDestroy(event))
   }
 };
 

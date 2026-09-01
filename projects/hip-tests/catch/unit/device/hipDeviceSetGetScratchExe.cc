@@ -17,13 +17,13 @@
   }
 
 #define REQUIRE(res)                                                                               \
-  {                                                                                                \
+  do {                                                                                             \
     if (res) {                                                                                     \
       return 0;                                                                                    \
     } else {                                                                                       \
       return -1;                                                                                   \
     }                                                                                              \
-  }
+  } while (0)
 
 /*
  * This funtion perform the below operations,
@@ -37,23 +37,22 @@
 int main() {
   size_t min = 0, max = 0, orgCurrent = 0;
 
-  HIP_CHECK(hipDeviceGetLimit(&min, hipExtLimitScratchMin));
+  HIP_CHECK(hipDeviceGetLimit(&min, hipExtLimitScratchMin))
   REQUIRE(min == 0);
 
-  HIP_CHECK(hipDeviceGetLimit(&max, hipExtLimitScratchMax));
+  HIP_CHECK(hipDeviceGetLimit(&max, hipExtLimitScratchMax))
   REQUIRE(max > 0);
 
-  HIP_CHECK(hipDeviceGetLimit(&orgCurrent, hipExtLimitScratchCurrent));
-  REQUIRE(orgCurrent >= 0);
+  HIP_CHECK(hipDeviceGetLimit(&orgCurrent, hipExtLimitScratchCurrent))
 
-  size_t setCurrent = 0.5 * max;
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, setCurrent));
+  size_t setCurrent = max / 2;
+  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, setCurrent))
 
   size_t getCurrent = 0;
-  HIP_CHECK(hipDeviceGetLimit(&getCurrent, hipExtLimitScratchCurrent));
+  HIP_CHECK(hipDeviceGetLimit(&getCurrent, hipExtLimitScratchCurrent))
   REQUIRE(getCurrent == setCurrent);
 
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, orgCurrent));
+  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, orgCurrent))
 
   return 0;
 }

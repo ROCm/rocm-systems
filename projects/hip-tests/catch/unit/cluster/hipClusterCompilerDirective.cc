@@ -75,16 +75,16 @@ void SetupHostMemory(int*& hptr_in, int*& hptr_out) {
 }
 
 void SetupDeviceMemory(int*& dptr_in, int*& dptr_out) {
-  HIP_CHECK(hipMalloc(&dptr_in, num_size));
-  HIP_CHECK(hipMalloc(&dptr_out, num_size));
+  HIP_CHECK(hipMalloc(&dptr_in, num_size))
+  HIP_CHECK(hipMalloc(&dptr_out, num_size))
 
-  HIP_CHECK(hipMemset(dptr_in, 0x00, num_size));
-  HIP_CHECK(hipMemset(dptr_out, 0x00, num_size));
+  HIP_CHECK(hipMemset(dptr_in, 0x00, num_size))
+  HIP_CHECK(hipMemset(dptr_out, 0x00, num_size))
 }
 
 void ReleaseHostAndDeviceMemory(int* hptr_in, int* hptr_out, int* dptr_in, int* dptr_out) {
-  HIP_CHECK(hipFree(dptr_in));
-  HIP_CHECK(hipFree(dptr_out));
+  HIP_CHECK(hipFree(dptr_in))
+  HIP_CHECK(hipFree(dptr_out))
   free(hptr_in);
   free(hptr_out);
 }
@@ -104,10 +104,10 @@ HIP_TEST_CASE(Unit_hipClusterLaunch_CompilerDirective_Basic) {
 
   assert(hptr_in != nullptr && hptr_out != nullptr && dptr_in != nullptr && dptr_out != nullptr);
 
-  HIP_CHECK(hipMemcpy(dptr_in, hptr_in, num_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dptr_in, hptr_in, num_size, hipMemcpyHostToDevice))
   ClusterLaunchKernelBasicCD<<<nbig, ntib>>>(dptr_in, dptr_out, num_elems);
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipMemcpy(hptr_out, dptr_out, num_size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipMemcpy(hptr_out, dptr_out, num_size, hipMemcpyDeviceToHost))
 
   REQUIRE(bma.ValidateArrays(hptr_in, hptr_out));
 

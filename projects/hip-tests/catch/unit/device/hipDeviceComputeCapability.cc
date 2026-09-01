@@ -37,10 +37,10 @@ HIP_TEST_CASE(Unit_hipDeviceComputeCapability_Negative) {
   int major, minor, numDevices;
   hipDevice_t device;
 
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   if (numDevices > 0) {
-    HIP_CHECK(hipDeviceGet(&device, 0));
+    HIP_CHECK(hipDeviceGet(&device, 0))
 
     // Scenario1
     SECTION("major is nullptr") {
@@ -79,10 +79,10 @@ HIP_TEST_CASE(Unit_hipDeviceComputeCapability_ValidateVersion) {
   int major, minor;
   hipDevice_t device;
   int numDevices = -1;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   for (int i = 0; i < numDevices; i++) {
-    HIP_CHECK(hipDeviceGet(&device, i));
-    HIP_CHECK(hipDeviceComputeCapability(&major, &minor, device));
+    HIP_CHECK(hipDeviceGet(&device, i))
+    HIP_CHECK(hipDeviceComputeCapability(&major, &minor, device))
     REQUIRE(major >= 0);
     REQUIRE(minor >= 0);
   }

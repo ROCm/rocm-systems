@@ -29,7 +29,7 @@ __global__ void multipleMasksKernel(T* output, const T* input, const unsigned lo
                                     int numMasks) {
   bool isInAnyOfTheMasks = false;
   int numMask = 0;
-  unsigned long long mask;
+  unsigned long long mask = 0;
 
   while (numMask < numMasks && !isInAnyOfTheMasks) {
     mask = masks[numMask];
@@ -92,11 +92,11 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
   dim3 grdDim{1u};
   T expectedByLane[64];
 
-  HIP_CHECK(hipMemcpy(d_masks.ptr(), &masks[0], d_masks.size_bytes(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_masks.ptr(), &masks[0], d_masks.size_bytes(), hipMemcpyHostToDevice))
   genRandomBuffers(d_input, input, distInput, gen, wavefrontSize);
   multipleMasksKernel<T>
       <<<grdDim, blkDim>>>(d_output.ptr(), d_input.ptr(), d_masks.ptr(), numMasks);
-  HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost))
 
   for (int numMask = 0; numMask < numMasks; numMask++) {
     unsigned long long mask = masks[numMask];

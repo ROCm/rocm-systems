@@ -35,7 +35,7 @@ HIP_TEST_CASE(Unit_hipMemcpyAtoA_Basic) {
 #if HT_NVIDIA
   HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
 #else
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   CHECK_IMAGE_SUPPORT
   int row, col;
   row = 1;
@@ -47,8 +47,8 @@ HIP_TEST_CASE(Unit_hipMemcpyAtoA_Basic) {
   }
   hipArray_t A_a, B_a;
   hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
-  HIP_CHECK(hipMallocArray(&A_a, &desc, col, row, hipArrayDefault));
-  HIP_CHECK(hipMallocArray(&B_a, &desc, col, row, hipArrayDefault));
+  HIP_CHECK(hipMallocArray(&A_a, &desc, col, row, hipArrayDefault))
+  HIP_CHECK(hipMallocArray(&B_a, &desc, col, row, hipArrayDefault))
   HIP_CHECK(hipMemcpy2DToArray(A_a, 0, 0, A_h, col * sizeof(int), col * sizeof(int), row,
                                hipMemcpyHostToDevice));
 
@@ -64,8 +64,8 @@ HIP_TEST_CASE(Unit_hipMemcpyAtoA_Basic) {
       REQUIRE(A_h[i] == B_h[i]);
     }
   }
-  HIP_CHECK(hipFreeArray(A_a));
-  HIP_CHECK(hipFreeArray(B_a));
+  HIP_CHECK(hipFreeArray(A_a))
+  HIP_CHECK(hipFreeArray(B_a))
   free(A_h);
   free(B_h);
 #endif

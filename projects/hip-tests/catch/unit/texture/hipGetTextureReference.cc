@@ -14,7 +14,7 @@ HIP_TEST_CASE(Unit_hipGetTextureReference_Positive) {
   CHECK_IMAGE_SUPPORT
 
   const textureReference* tex_ref = nullptr;
-  HIP_CHECK(hipGetTextureReference(&tex_ref, &tex));
+  HIP_CHECK(hipGetTextureReference(&tex_ref, &tex))
   REQUIRE(tex_ref != nullptr);
 }
 
@@ -32,7 +32,7 @@ HIP_TEST_CASE(Unit_hipGetTextureReference_Negative) {
 
   SECTION("texture is null") {
 #if HT_AMD
-    HIP_CHECK(hipGetTextureReference(&tex_ref, nullptr));
+    HIP_CHECK(hipGetTextureReference(&tex_ref, nullptr))
 #else
     HIP_CHECK_ERROR(hipGetTextureReference(&tex_ref, nullptr), hipErrorInvalidTexture);
 #endif

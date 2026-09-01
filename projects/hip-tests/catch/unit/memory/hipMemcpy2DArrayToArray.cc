@@ -36,10 +36,10 @@ HIP_TEST_CASE(Unit_hipMemcpy2DArrayToArray_Negative) {
   hipArray_t d_src_arr;
   hipArray_t d_dst_arr;
   hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
-  HIP_CHECK(hipMallocArray(&d_src_arr, &desc, width, height));
-  HIP_CHECK(hipMallocArray(&d_dst_arr, &desc, width, height));
+  HIP_CHECK(hipMallocArray(&d_src_arr, &desc, width, height))
+  HIP_CHECK(hipMallocArray(&d_dst_arr, &desc, width, height))
 
-  HIP_CHECK(hipMemcpyToArray(d_src_arr, 0, 0, h_array, size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpyToArray(d_src_arr, 0, 0, h_array, size, hipMemcpyHostToDevice))
 
   SECTION("Source array is nullptr") {
     HIP_CHECK_ERROR(hipMemcpy2DArrayToArray(d_dst_arr, 0, 0, nullptr, 0, 0, width * sizeof(int),
@@ -95,8 +95,8 @@ HIP_TEST_CASE(Unit_hipMemcpy2DArrayToArray_Negative) {
                     hipErrorInvalidMemcpyDirection);
   }
 
-  HIP_CHECK(hipFreeArray(d_src_arr));
-  HIP_CHECK(hipFreeArray(d_dst_arr));
+  HIP_CHECK(hipFreeArray(d_src_arr))
+  HIP_CHECK(hipFreeArray(d_dst_arr))
 }
 
 HIP_TEST_CASE(Unit_hipMemcpy2DArrayToArray_Positive) {
@@ -116,24 +116,24 @@ HIP_TEST_CASE(Unit_hipMemcpy2DArrayToArray_Positive) {
   hipArray_t d_src_arr;
   hipArray_t d_dst_arr;
   hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
-  HIP_CHECK(hipMallocArray(&d_src_arr, &desc, width, height));
-  HIP_CHECK(hipMallocArray(&d_dst_arr, &desc, width, height));
+  HIP_CHECK(hipMallocArray(&d_src_arr, &desc, width, height))
+  HIP_CHECK(hipMallocArray(&d_dst_arr, &desc, width, height))
 
-  HIP_CHECK(hipMemcpyToArray(d_src_arr, 0, 0, h_array, size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpyToArray(d_src_arr, 0, 0, h_array, size, hipMemcpyHostToDevice))
 
   HIP_CHECK(hipMemcpy2DArrayToArray(d_dst_arr, 0, 0, d_src_arr, 0, 0, width * sizeof(int), height,
                                     hipMemcpyDeviceToDevice));
 
   int* out_arr = reinterpret_cast<int*>(malloc(size));
   REQUIRE(out_arr != nullptr);
-  HIP_CHECK(hipMemcpyFromArray(out_arr, d_dst_arr, 0, 0, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpyFromArray(out_arr, d_dst_arr, 0, 0, size, hipMemcpyDeviceToHost))
 
   bool valid = compare_arrays((int*)h_array, out_arr, width, height);
   REQUIRE(valid == true);
 
   free(out_arr);
-  HIP_CHECK(hipFreeArray(d_src_arr));
-  HIP_CHECK(hipFreeArray(d_dst_arr));
+  HIP_CHECK(hipFreeArray(d_src_arr))
+  HIP_CHECK(hipFreeArray(d_dst_arr))
 }
 
 /**
@@ -171,11 +171,11 @@ HIP_TEST_CASE(Unit_hipMemcpy2DArrayToArray_BasicPositive) {
   unsigned int flags = hipArrayDefault;
 
   hipArray_t srcArray = nullptr;
-  HIP_CHECK(hipMallocArray(&srcArray, &desc, width, height, flags));
+  HIP_CHECK(hipMallocArray(&srcArray, &desc, width, height, flags))
   REQUIRE(srcArray != nullptr);
 
   hipArray_t dstArray = nullptr;
-  HIP_CHECK(hipMallocArray(&dstArray, &desc, width, height, flags));
+  HIP_CHECK(hipMallocArray(&dstArray, &desc, width, height, flags))
   REQUIRE(dstArray != nullptr);
 
   HIP_CHECK(hipMemcpy2DToArray(srcArray, 0, 0, srcHost.data(), width, width, height,
@@ -191,6 +191,6 @@ HIP_TEST_CASE(Unit_hipMemcpy2DArrayToArray_BasicPositive) {
     REQUIRE(dstHost[i] == 'A');
   }
 
-  HIP_CHECK(hipFreeArray(srcArray));
-  HIP_CHECK(hipFreeArray(dstArray));
+  HIP_CHECK(hipFreeArray(srcArray))
+  HIP_CHECK(hipFreeArray(dstArray))
 }

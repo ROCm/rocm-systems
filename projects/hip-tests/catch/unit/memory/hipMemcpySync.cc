@@ -56,9 +56,9 @@ static inline void memcpyCheck(allocType type, memType memType, char* aPtr, Mult
   switch (memType) {
     case memType::hipMem:
       if (async) {
-        HIP_CHECK(hipMemcpyAsync(aPtr + data.offset, fillerData, sizeInBytes, cpyType, stream));
+        HIP_CHECK(hipMemcpyAsync(aPtr + data.offset, fillerData, sizeInBytes, cpyType, stream))
       } else {
-        HIP_CHECK(hipMemcpy(aPtr + data.offset, fillerData, sizeInBytes, cpyType));
+        HIP_CHECK(hipMemcpy(aPtr + data.offset, fillerData, sizeInBytes, cpyType))
       }
       break;
     case memType::hipMem2D:
@@ -84,9 +84,9 @@ static inline void memcpyCheck(allocType type, memType memType, char* aPtr, Mult
 
       params.extent = extent;
       if (async) {
-        HIP_CHECK(hipMemcpy3DAsync(&params, stream));
+        HIP_CHECK(hipMemcpy3DAsync(&params, stream))
       } else {
-        HIP_CHECK(hipMemcpy3D(&params));
+        HIP_CHECK(hipMemcpy3D(&params))
       }
       break;
     }
@@ -102,8 +102,8 @@ static inline char* createFillerData(size_t count, size_t value, bool fromHost) 
     return fillerData;
   } else {
     char* fillerData;
-    HIP_CHECK(hipMalloc(&fillerData, count * sizeof(char)));
-    HIP_CHECK(hipMemset(fillerData, value, count * sizeof(char)));
+    HIP_CHECK(hipMalloc(&fillerData, count * sizeof(char)))
+    HIP_CHECK(hipMemset(fillerData, value, count * sizeof(char)))
     return fillerData;
   }
 }
@@ -113,11 +113,11 @@ static void checkForSync(hipStream_t stream, bool async, allocType type, bool fr
     if (type == allocType::deviceMalloc) {
       HIP_CHECK_ERROR(hipStreamQuery(stream), hipErrorNotReady);
     } else {
-      HIP_CHECK(hipStreamQuery(stream));
+      HIP_CHECK(hipStreamQuery(stream))
     }
   } else {
     if (type != allocType::deviceMalloc && !async) {
-      HIP_CHECK(hipStreamQuery(stream));
+      HIP_CHECK(hipStreamQuery(stream))
     } else {
       HIP_CHECK_ERROR(hipStreamQuery(stream), hipErrorNotReady);
     }
@@ -145,7 +145,7 @@ static void runMemcpyTests(hipStream_t stream, bool async, allocType type, memTy
   memcpyCheck(type, memType, aPtr.first, data, fillerData, async, stream, fromHost);
   checkForSync(stream, async, type, fromHost);
   // verify
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   verifyData(aPtr.first, testValue, data, type, memType);
   if (type == allocType::devRegistered) {
     freeStuff(aPtr.second, type);
@@ -155,7 +155,7 @@ static void runMemcpyTests(hipStream_t stream, bool async, allocType type, memTy
   if (fromHost) {
     delete[] fillerData;
   } else {
-    HIP_CHECK(hipFree(fillerData));
+    HIP_CHECK(hipFree(fillerData))
   }
 }
 

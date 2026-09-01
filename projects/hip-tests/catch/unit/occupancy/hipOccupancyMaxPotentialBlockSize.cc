@@ -27,11 +27,11 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Negative_Parameters) {
 
 #if HT_AMD
 #if 0  // EXSWHTEC-219
-  SECTION("Kernel function is NULL") {
+  SECTION("Kernel function is nullptr") {
     int blockSize = 0;
     int gridSize = 0;
-    // nvcc doesnt support kernelfunc(NULL) for api
-    HIP_CHECK_ERROR(hipOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, NULL, 0, 0),
+    // nvcc doesnt support kernelfunc(nullptr) for api
+    HIP_CHECK_ERROR(hipOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, nullptr, 0, 0),
                     hipErrorInvalidDeviceFunction);
   }
 #endif
@@ -41,7 +41,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Negative_Parameters) {
 HIP_TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Positive_RangeValidation) {
   hipDeviceProp_t devProp;
 
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
 
   SECTION("dynSharedMemPerBlk = 0, blockSizeLimit = 0") {
     MaxPotentialBlockSize(
@@ -64,7 +64,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Positive_RangeValidation) {
 HIP_TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Positive_TemplateInvocation) {
   hipDeviceProp_t devProp;
 
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
 
   SECTION("dynSharedMemPerBlk = 0, blockSizeLimit = 0") {
     MaxPotentialBlockSize(

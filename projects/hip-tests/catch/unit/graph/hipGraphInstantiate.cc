@@ -44,7 +44,7 @@ HIP_TEST_CASE(Unit_hipGraphInstantiate_Negative) {
   hipError_t ret;
   hipGraphExec_t gExec{};
   hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   SECTION("Pass pGraphExec as nullptr") {
     ret = hipGraphInstantiate(nullptr, graph, nullptr, nullptr, 0);
@@ -62,9 +62,9 @@ HIP_TEST_CASE(Unit_hipGraphInstantiate_Negative) {
   SECTION("Pass pGraphExec as un-initialize") {
     ret = hipGraphInstantiate(&gExec, graph, nullptr, nullptr, 0);
     REQUIRE(hipSuccess == ret);
-    HIP_CHECK(hipGraphExecDestroy(gExec));
+    HIP_CHECK(hipGraphExecDestroy(gExec))
   }
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /* Test verifies hipGraphInstantiate Basic scenarios.
@@ -74,12 +74,12 @@ HIP_TEST_CASE(Unit_hipGraphInstantiate_Basic) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   REQUIRE(nullptr != graph);
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 #if HT_NVIDIA
 /* Test Functional Scenario 2.a, 2.b, 2.c with hipGraphInstantiate and
@@ -88,22 +88,22 @@ hipGraphInstantiateWithFlags.
 HIP_TEST_CASE(Unit_hipGraphInstantiate_InvalidCyclicGraph) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   SECTION("Simple Cyclic Graph") {
     hipGraphNode_t emptyNode1, emptyNode2;
     hipGraph_t clonedgraph;
     // Create emptyNode and add it to graph with dependency
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0));
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode2, graph, nullptr, 0));
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0))
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode2, graph, nullptr, 0))
     // Create illegal dependency
-    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &emptyNode2, 1));
-    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode2, &emptyNode1, 1));
+    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &emptyNode2, 1))
+    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode2, &emptyNode1, 1))
     // Detect the error during instantiation
     REQUIRE(hipErrorInvalidValue == hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
     REQUIRE(hipErrorInvalidValue == hipGraphInstantiateWithFlags(&graphExec, graph, 0));
     // Clone the illegal graph
-    HIP_CHECK(hipGraphClone(&clonedgraph, graph));
+    HIP_CHECK(hipGraphClone(&clonedgraph, graph))
     // Try instantiating the cloned graph
     REQUIRE(hipErrorInvalidValue ==
             hipGraphInstantiate(&graphExec, clonedgraph, nullptr, nullptr, 0));
@@ -115,27 +115,27 @@ HIP_TEST_CASE(Unit_hipGraphInstantiate_InvalidCyclicGraph) {
         emptyNode7;
     hipGraph_t clonedgraph;
     // Create emptyNode and add it to graph with dependency
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0));
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode2, graph, nullptr, 0));
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode3, graph, nullptr, 0));
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode4, graph, nullptr, 0));
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode5, graph, nullptr, 0));
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode6, graph, nullptr, 0));
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode7, graph, nullptr, 0));
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0))
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode2, graph, nullptr, 0))
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode3, graph, nullptr, 0))
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode4, graph, nullptr, 0))
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode5, graph, nullptr, 0))
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode6, graph, nullptr, 0))
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode7, graph, nullptr, 0))
     // Create illegal dependency
-    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &emptyNode2, 1));
-    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode2, &emptyNode3, 1));
-    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode3, &emptyNode4, 1));
-    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode4, &emptyNode7, 1));
-    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &emptyNode5, 1));
-    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode5, &emptyNode6, 1));
-    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode6, &emptyNode7, 1));
-    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode4, &emptyNode1, 1));
+    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &emptyNode2, 1))
+    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode2, &emptyNode3, 1))
+    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode3, &emptyNode4, 1))
+    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode4, &emptyNode7, 1))
+    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &emptyNode5, 1))
+    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode5, &emptyNode6, 1))
+    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode6, &emptyNode7, 1))
+    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode4, &emptyNode1, 1))
     // Detect the error during instantiation
     REQUIRE(hipErrorInvalidValue == hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
     REQUIRE(hipErrorInvalidValue == hipGraphInstantiateWithFlags(&graphExec, graph, 0));
     // Clone the illegal graph
-    HIP_CHECK(hipGraphClone(&clonedgraph, graph));
+    HIP_CHECK(hipGraphClone(&clonedgraph, graph))
     // Try instantiating the cloned graph
     REQUIRE(hipErrorInvalidValue ==
             hipGraphInstantiate(&graphExec, clonedgraph, nullptr, nullptr, 0));
@@ -144,30 +144,30 @@ HIP_TEST_CASE(Unit_hipGraphInstantiate_InvalidCyclicGraph) {
 
   SECTION("A Cyclic Graph as Child Node") {
     hipGraph_t childgraph;
-    HIP_CHECK(hipGraphCreate(&childgraph, 0));
+    HIP_CHECK(hipGraphCreate(&childgraph, 0))
     hipGraphNode_t emptyNode1, emptyNode2, emptyNode3, emptyNode4, emptyNode5, emptyNode6,
         childNode;
     // Create emptyNode and add it to graph with dependency
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0));
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode2, graph, nullptr, 0));
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode1, graph, nullptr, 0))
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode2, graph, nullptr, 0))
     // Create emptyNode and add it to childgraph with dependency
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode3, childgraph, nullptr, 0));
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode4, childgraph, nullptr, 0));
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode5, childgraph, nullptr, 0));
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode6, childgraph, nullptr, 0));
-    HIP_CHECK(hipGraphAddDependencies(childgraph, &emptyNode3, &emptyNode4, 1));
-    HIP_CHECK(hipGraphAddDependencies(childgraph, &emptyNode4, &emptyNode5, 1));
-    HIP_CHECK(hipGraphAddDependencies(childgraph, &emptyNode5, &emptyNode6, 1));
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode3, childgraph, nullptr, 0))
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode4, childgraph, nullptr, 0))
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode5, childgraph, nullptr, 0))
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode6, childgraph, nullptr, 0))
+    HIP_CHECK(hipGraphAddDependencies(childgraph, &emptyNode3, &emptyNode4, 1))
+    HIP_CHECK(hipGraphAddDependencies(childgraph, &emptyNode4, &emptyNode5, 1))
+    HIP_CHECK(hipGraphAddDependencies(childgraph, &emptyNode5, &emptyNode6, 1))
     // Illegal dependency
-    HIP_CHECK(hipGraphAddDependencies(childgraph, &emptyNode5, &emptyNode4, 1));
-    HIP_CHECK(hipGraphAddChildGraphNode(&childNode, graph, nullptr, 0, childgraph));
-    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &childNode, 1));
-    HIP_CHECK(hipGraphAddDependencies(graph, &childNode, &emptyNode2, 1));
+    HIP_CHECK(hipGraphAddDependencies(childgraph, &emptyNode5, &emptyNode4, 1))
+    HIP_CHECK(hipGraphAddChildGraphNode(&childNode, graph, nullptr, 0, childgraph))
+    HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode1, &childNode, 1))
+    HIP_CHECK(hipGraphAddDependencies(graph, &childNode, &emptyNode2, 1))
     // Detect the error during instantiation
     REQUIRE(hipErrorInvalidValue == hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
     REQUIRE(hipErrorInvalidValue == hipGraphInstantiateWithFlags(&graphExec, graph, 0));
   }
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 #endif
 /* Local function to initialize input data.
@@ -184,7 +184,7 @@ static void init_input(int* a, size_t size) {
 HIP_TEST_CASE(Unit_hipGraphInstantiate_functionalScenarios) {
   hipGraph_t graph;
   hipGraphExec_t graphExec[NUM_OF_INSTANCES];
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   constexpr size_t size = 1024;
   constexpr auto blocksPerCU = 6;
@@ -211,73 +211,73 @@ HIP_TEST_CASE(Unit_hipGraphInstantiate_functionalScenarios) {
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, nullptr, 0, &kernelNodeParams));
-  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyh2d, &kernelNode, 1));
-  HIP_CHECK(hipGraphAddDependencies(graph, &kernelNode, &memcpyd2h, 1));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, nullptr, 0, &kernelNodeParams))
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyh2d, &kernelNode, 1))
+  HIP_CHECK(hipGraphAddDependencies(graph, &kernelNode, &memcpyd2h, 1))
 
   SECTION("Creating Redundant Dependencies") {
-    HIP_CHECK(hipGraphAddDependencies(graph, &memcpyh2d, &memcpyd2h, 1));
+    HIP_CHECK(hipGraphAddDependencies(graph, &memcpyh2d, &memcpyd2h, 1))
     // Create Executable Graphs
-    HIP_CHECK(hipGraphInstantiate(&graphExec[0], graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphInstantiate(&graphExec[0], graph, nullptr, nullptr, 0))
     REQUIRE(graphExec[0] != nullptr);
     // Test Graph
     init_input(inputVec_h, size);
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipGraphLaunch(graphExec[0], stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamCreate(&stream))
+    HIP_CHECK(hipGraphLaunch(graphExec[0], stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     for (size_t i = 0; i < size; i++) {
       REQUIRE(outputVec_h[i] == (inputVec_h[i] * inputVec_h[i]));
     }
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK(hipGraphExecDestroy(graphExec[0]));
+    HIP_CHECK(hipStreamDestroy(stream))
+    HIP_CHECK(hipGraphExecDestroy(graphExec[0]))
   }
 
   SECTION("Creating Multiple Instances Graph") {
     // Create Executable Graphs
     for (int i = 0; i < NUM_OF_INSTANCES; i++) {
-      HIP_CHECK(hipGraphInstantiate(&graphExec[i], graph, nullptr, nullptr, 0));
+      HIP_CHECK(hipGraphInstantiate(&graphExec[i], graph, nullptr, nullptr, 0))
       REQUIRE(graphExec[i] != nullptr);
     }
     // Execute all the instances of the graph
     init_input(inputVec_h, size);
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     for (int i = 0; i < NUM_OF_INSTANCES; i++) {
-      HIP_CHECK(hipGraphLaunch(graphExec[i], stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipGraphLaunch(graphExec[i], stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
       for (size_t ii = 0; ii < size; ii++) {
         REQUIRE(outputVec_h[ii] == (inputVec_h[ii] * inputVec_h[ii]));
       }
     }
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
     for (int i = 0; i < NUM_OF_INSTANCES; i++) {
-      HIP_CHECK(hipGraphExecDestroy(graphExec[i]));
+      HIP_CHECK(hipGraphExecDestroy(graphExec[i]))
     }
   }
 
   SECTION("Creating Multiple Instances Graph and Destroying After Use") {
     // Create Executable Graphs
     for (int i = 0; i < NUM_OF_INSTANCES; i++) {
-      HIP_CHECK(hipGraphInstantiate(&graphExec[i], graph, nullptr, nullptr, 0));
+      HIP_CHECK(hipGraphInstantiate(&graphExec[i], graph, nullptr, nullptr, 0))
       REQUIRE(graphExec[i] != nullptr);
     }
     // Execute all the instances of the graph
     init_input(inputVec_h, size);
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     for (int i = 0; i < NUM_OF_INSTANCES; i++) {
-      HIP_CHECK(hipGraphLaunch(graphExec[i], stream));
-      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipGraphLaunch(graphExec[i], stream))
+      HIP_CHECK(hipStreamSynchronize(stream))
       for (size_t ii = 0; ii < size; ii++) {
         REQUIRE(outputVec_h[ii] == (inputVec_h[ii] * inputVec_h[ii]));
       }
-      HIP_CHECK(hipGraphExecDestroy(graphExec[i]));
+      HIP_CHECK(hipGraphExecDestroy(graphExec[i]))
     }
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
   // Free
   HipTest::freeArrays<int>(inputVec_d, outputVec_d, nullptr, inputVec_h, outputVec_h, nullptr,
                            false);
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }

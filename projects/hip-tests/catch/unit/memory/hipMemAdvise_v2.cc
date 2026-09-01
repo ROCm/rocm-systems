@@ -61,7 +61,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_v2_Device_Host) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
-  HIP_CHECK(hipSetDevice(supportedDevices[0]));
+  HIP_CHECK(hipSetDevice(supportedDevices[0]))
 
   constexpr int N = 1024;
   constexpr int Nbytes = N * sizeof(int);
@@ -76,7 +76,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_v2_Device_Host) {
     std::fill_n(memPtr, N, value);
 
     for (int deviceId : supportedDevices) {
-      HIP_CHECK(hipSetDevice(deviceId));
+      HIP_CHECK(hipSetDevice(deviceId))
 
       hipMemLocation location;
       location.type = hipMemLocationTypeDevice;
@@ -85,14 +85,14 @@ HIP_TEST_CASE(Unit_hipMemAdvise_v2_Device_Host) {
       HIP_CHECK(
           hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
       int *devArr = nullptr;
-      HIP_CHECK(hipMalloc(&devArr, Nbytes));
+      HIP_CHECK(hipMalloc(&devArr, Nbytes))
       REQUIRE(devArr != nullptr);
 
       copyDataKernel<<<1, N>>>(devArr, memPtr);
 
       int hostArr[N];
-      HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost));
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost))
+      HIP_CHECK(hipDeviceSynchronize())
 
       for (int i = 0; i < N; i++) {
         INFO("For Device " << deviceId << " At index " << i
@@ -101,13 +101,13 @@ HIP_TEST_CASE(Unit_hipMemAdvise_v2_Device_Host) {
         REQUIRE(hostArr[i] == value);
       }
 
-      HIP_CHECK(hipFree(devArr));
+      HIP_CHECK(hipFree(devArr))
     }
   }
 
   SECTION("With Host") {
     fillDataKernel<<<1, N>>>(memPtr, value);
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     hipMemLocation location;
     location.type = hipMemLocationTypeHost;
@@ -122,9 +122,9 @@ HIP_TEST_CASE(Unit_hipMemAdvise_v2_Device_Host) {
     }
   }
 
-  HIP_CHECK(hipFree(memPtr));
+  HIP_CHECK(hipFree(memPtr))
   // Reset to default device
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 }
 
 /**
@@ -150,7 +150,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent) {
     HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
   }
 
-  HIP_CHECK(hipSetDevice(supportedDevices[0]));
+  HIP_CHECK(hipSetDevice(supportedDevices[0]))
 
   int maxNode = numa_max_node();
   REQUIRE(maxNode >= 0);
@@ -164,7 +164,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent) {
                              hipMemAttachGlobal));
   REQUIRE(memPtr != nullptr);
   fillDataKernel<<<1, N>>>(memPtr, value);
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   SECTION("With Host NUMA") {
     for (int node = 0; node <= maxNode; ++node) {
@@ -197,9 +197,9 @@ HIP_TEST_CASE(Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent) {
     }
   }
 
-  HIP_CHECK(hipFree(memPtr));
+  HIP_CHECK(hipFree(memPtr))
   // Reset to default device
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 }
 #endif
 
@@ -225,13 +225,13 @@ HIP_TEST_CASE(Unit_hipMemAdvise_v2_Negative) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
-  HIP_CHECK(hipSetDevice(supportedDevices[0]));
+  HIP_CHECK(hipSetDevice(supportedDevices[0]))
 
   constexpr int N = 16;
   constexpr int Nbytes = N * sizeof(int);
 
   void *memPtr = nullptr;
-  HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal));
+  HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal))
   REQUIRE(memPtr != nullptr);
 
   hipMemLocation location;
@@ -275,7 +275,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_v2_Negative) {
                     hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipFree(memPtr));
+  HIP_CHECK(hipFree(memPtr))
   // Reset to default device
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 }

@@ -90,8 +90,8 @@ HIP_TEST_CASE(Unit_all_fp4_from_double_device) {
     std::vector<double> inputs{-1.0, 0.0, 1.0};
     double* d_in;
     float* d_out;
-    HIP_CHECK(hipMalloc(&d_in, sizeof(double) * inputs.size()));
-    HIP_CHECK(hipMalloc(&d_out, sizeof(float) * inputs.size()));
+    HIP_CHECK(hipMalloc(&d_in, sizeof(double) * inputs.size()))
+    HIP_CHECK(hipMalloc(&d_out, sizeof(float) * inputs.size()))
 
     HIP_CHECK(
         hipMemcpy(d_in, inputs.data(), sizeof(double) * inputs.size(), hipMemcpyHostToDevice));
@@ -105,8 +105,8 @@ HIP_TEST_CASE(Unit_all_fp4_from_double_device) {
       REQUIRE(inputs[i] == outputs[i]);
     }
 
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_out));
+    HIP_CHECK(hipFree(d_in))
+    HIP_CHECK(hipFree(d_out))
   }
 
   SECTION("sanityx2") {
@@ -121,8 +121,8 @@ HIP_TEST_CASE(Unit_all_fp4_from_double_device) {
     std::vector<double2> inputs{{-1.0, 0.0}, {0.0, 1.0}, {1.0, -1.0}, {1.0, 0.0}, {0.0, -1.0}};
     double2* d_in;
     float2* d_out;
-    HIP_CHECK(hipMalloc(&d_in, sizeof(double2) * inputs.size()));
-    HIP_CHECK(hipMalloc(&d_out, sizeof(float2) * inputs.size()));
+    HIP_CHECK(hipMalloc(&d_in, sizeof(double2) * inputs.size()))
+    HIP_CHECK(hipMalloc(&d_out, sizeof(float2) * inputs.size()))
 
     HIP_CHECK(
         hipMemcpy(d_in, inputs.data(), sizeof(double2) * inputs.size(), hipMemcpyHostToDevice));
@@ -138,8 +138,8 @@ HIP_TEST_CASE(Unit_all_fp4_from_double_device) {
       REQUIRE(inputs[i].y == outputs[i].y);
     }
 
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_out));
+    HIP_CHECK(hipFree(d_in))
+    HIP_CHECK(hipFree(d_out))
   }
 
   SECTION("sanityx4") {
@@ -155,8 +155,8 @@ HIP_TEST_CASE(Unit_all_fp4_from_double_device) {
         {-1.0, 0.0, 1.0, 0.5}, {0.0, 1.0, -0.5, -1.0}, {1.0, 0.0, 1.0, -1.0}};
     double4* d_in;
     float4* d_out;
-    HIP_CHECK(hipMalloc(&d_in, sizeof(double4) * inputs.size()));
-    HIP_CHECK(hipMalloc(&d_out, sizeof(float4) * inputs.size()));
+    HIP_CHECK(hipMalloc(&d_in, sizeof(double4) * inputs.size()))
+    HIP_CHECK(hipMalloc(&d_out, sizeof(float4) * inputs.size()))
 
     HIP_CHECK(
         hipMemcpy(d_in, inputs.data(), sizeof(double4) * inputs.size(), hipMemcpyHostToDevice));
@@ -175,8 +175,8 @@ HIP_TEST_CASE(Unit_all_fp4_from_double_device) {
       REQUIRE(inputs[i].w == outputs[i].w);
     }
 
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_out));
+    HIP_CHECK(hipFree(d_in))
+    HIP_CHECK(hipFree(d_out))
   }
 }
 
@@ -263,15 +263,15 @@ HIP_TEMPLATE_TEST_CASE(Unit_all_fp4_from_integer_data_device, int, long int, lon
   }
   TestType* d_in;
   float* d_out;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(TestType) * inputs.size()));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * inputs.size()));
+  HIP_CHECK(hipMalloc(&d_in, sizeof(TestType) * inputs.size()))
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * inputs.size()))
 
   HIP_CHECK(
       hipMemcpy(d_in, inputs.data(), sizeof(TestType) * inputs.size(), hipMemcpyHostToDevice));
   lambda_kernel_launch<<<1, 32>>>(fp4x1_l, d_in, d_out, inputs.size());
 
   std::vector<float> outputs(inputs.size(), 0.0f);
-  HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(), hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < inputs.size(); i++) {
     auto lbound = std::lower_bound(all_fp4.begin(), all_fp4.end(), outputs[i]);
@@ -279,8 +279,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_all_fp4_from_integer_data_device, int, long int, lon
     REQUIRE(*lbound == outputs[i]);
   }
 
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipFree(d_in))
+  HIP_CHECK(hipFree(d_out))
 }
 
 /**
@@ -314,15 +314,15 @@ HIP_TEMPLATE_TEST_CASE(Unit_all_fp4_from__unsigned_integer_data_device, unsigned
   }
   TestType* d_in;
   float* d_out;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(TestType) * inputs.size()));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * inputs.size()));
+  HIP_CHECK(hipMalloc(&d_in, sizeof(TestType) * inputs.size()))
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * inputs.size()))
 
   HIP_CHECK(
       hipMemcpy(d_in, inputs.data(), sizeof(TestType) * inputs.size(), hipMemcpyHostToDevice));
   lambda_kernel_launch<<<1, 32>>>(fp4x1_l, d_in, d_out, inputs.size());
 
   std::vector<float> outputs(inputs.size(), 0.0f);
-  HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(), hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < inputs.size(); i++) {
     auto lbound = std::lower_bound(all_fp4.begin(), all_fp4.end(), outputs[i]);
@@ -330,8 +330,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_all_fp4_from__unsigned_integer_data_device, unsigned
     REQUIRE(*lbound == outputs[i]);
   }
 
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipFree(d_in))
+  HIP_CHECK(hipFree(d_out))
 }
 
 /**
@@ -396,14 +396,14 @@ HIP_TEST_CASE(Unit_ocp_fp4_from_double_full_range_device) {
   }
   double* d_in;
   float* d_out;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(double) * inputs.size()));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * inputs.size()));
+  HIP_CHECK(hipMalloc(&d_in, sizeof(double) * inputs.size()))
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * inputs.size()))
 
-  HIP_CHECK(hipMemcpy(d_in, inputs.data(), sizeof(double) * inputs.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_in, inputs.data(), sizeof(double) * inputs.size(), hipMemcpyHostToDevice))
   lambda_kernel_launch<<<1, 32>>>(fp4x1_l, d_in, d_out, inputs.size());
 
   std::vector<float> outputs(inputs.size(), 0.0f);
-  HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(), hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < inputs.size(); i++) {
     auto lbound = std::lower_bound(all_fp4.begin(), all_fp4.end(), outputs[i]);
@@ -411,6 +411,6 @@ HIP_TEST_CASE(Unit_ocp_fp4_from_double_full_range_device) {
     REQUIRE(*lbound == outputs[i]);
   }
 
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipFree(d_in))
+  HIP_CHECK(hipFree(d_out))
 }

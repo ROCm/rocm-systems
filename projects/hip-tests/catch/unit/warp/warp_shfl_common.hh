@@ -38,7 +38,7 @@ template <typename Derived, typename T> class WarpShflTest {
     LinearAllocGuard<T> input(LinearAllocs::hipHostMalloc, alloc_size);
     LinearAllocGuard<T> arr_dev(LinearAllocs::hipMalloc, alloc_size);
     LinearAllocGuard<T> arr(LinearAllocs::hipHostMalloc, alloc_size);
-    HIP_CHECK(hipMemset(arr_dev.ptr(), 0, alloc_size));
+    HIP_CHECK(hipMemset(arr_dev.ptr(), 0, alloc_size))
 
     warps_in_block_ = (grid_.threads_in_block_count_ + warp_size_ - 1) / warp_size_;
     const auto warps_in_grid = warps_in_block_ * grid_.block_count_;
@@ -50,11 +50,11 @@ template <typename Derived, typename T> class WarpShflTest {
 
     HIP_CHECK(hipMemcpy(active_masks_dev.ptr(), active_masks_.data(),
                         warps_in_grid * sizeof(uint64_t), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(input_dev.ptr(), input.ptr(), alloc_size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(input_dev.ptr(), input.ptr(), alloc_size, hipMemcpyHostToDevice))
     cast_to_derived().launch_kernel(arr_dev.ptr(), input_dev.ptr(), active_masks_dev.ptr());
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipMemcpy(arr.ptr(), arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
 
     cast_to_derived().validate(arr.ptr(), input.ptr());
   }
@@ -62,9 +62,9 @@ template <typename Derived, typename T> class WarpShflTest {
  private:
   int get_warp_size() const {
     int current_dev = -1;
-    HIP_CHECK(hipGetDevice(&current_dev));
+    HIP_CHECK(hipGetDevice(&current_dev))
     int warp_size = 0u;
-    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
     return warp_size;
   }
 

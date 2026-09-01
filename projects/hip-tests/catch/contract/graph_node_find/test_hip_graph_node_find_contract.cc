@@ -24,13 +24,13 @@ HIP_TEST_CASE(Contract_GraphNodeFind_HipGraphNodeFindInClone_ClonedNode_IsFoundA
   hipGraphNode_t original_node = nullptr;
   hipGraphNode_t found = nullptr;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
-  HIP_CHECK(hipGraphAddEmptyNode(&original_node, graph, nullptr, 0));
-  HIP_CHECK(hipGraphClone(&clone, graph));
+  HIP_CHECK(hipGraphAddEmptyNode(&original_node, graph, nullptr, 0))
+  HIP_CHECK(hipGraphClone(&clone, graph))
   cleanup.Add([clone] { (void)hipGraphDestroy(clone); });
 
-  HIP_CHECK(hipGraphNodeFindInClone(&found, original_node, clone));
+  HIP_CHECK(hipGraphNodeFindInClone(&found, original_node, clone))
 
   REQUIRE(found != nullptr);
   REQUIRE(found != original_node);
@@ -47,19 +47,19 @@ HIP_TEST_CASE(Contract_GraphNodeFind_HipGraphNodeFindInClone_Default_FoundNodeMa
   hipGraphNode_t found = nullptr;
   hipGraphNodeType node_type{};
 
-  HIP_CHECK(hipMalloc(&device_ptr, host.size()));
+  HIP_CHECK(hipMalloc(&device_ptr, host.size()))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddMemcpyNode1D(&original_node, graph, nullptr, 0, device_ptr, host.data(),
                                     host.size(), hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphClone(&clone, graph));
+  HIP_CHECK(hipGraphClone(&clone, graph))
   cleanup.Add([clone] { (void)hipGraphDestroy(clone); });
 
-  HIP_CHECK(hipGraphNodeFindInClone(&found, original_node, clone));
+  HIP_CHECK(hipGraphNodeFindInClone(&found, original_node, clone))
   REQUIRE(found != nullptr);
 
-  HIP_CHECK(hipGraphNodeGetType(found, &node_type));
+  HIP_CHECK(hipGraphNodeGetType(found, &node_type))
   REQUIRE(node_type == hipGraphNodeTypeMemcpy);
 }
 
@@ -72,16 +72,16 @@ HIP_TEST_CASE(Contract_GraphNodeFind_HipGraphNodeFindInClone_NodeOnlyInOriginal_
   hipGraphNode_t second_node = nullptr;
   hipGraphNode_t found = nullptr;
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
-  HIP_CHECK(hipGraphAddEmptyNode(&first_node, graph, nullptr, 0));
-  HIP_CHECK(hipGraphClone(&clone, graph));
+  HIP_CHECK(hipGraphAddEmptyNode(&first_node, graph, nullptr, 0))
+  HIP_CHECK(hipGraphClone(&clone, graph))
   cleanup.Add([clone] { (void)hipGraphDestroy(clone); });
 
   // The second node is added only to the original graph after cloning, so it
   // has no counterpart in the clone and the lookup must report a portable
   // invalid-value error.
-  HIP_CHECK(hipGraphAddEmptyNode(&second_node, graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&second_node, graph, nullptr, 0))
 
   HIP_CHECK_ERROR(hipGraphNodeFindInClone(&found, second_node, clone), hipErrorInvalidValue);
 }

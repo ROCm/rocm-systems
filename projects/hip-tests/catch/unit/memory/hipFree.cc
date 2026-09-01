@@ -35,7 +35,7 @@ constexpr size_t numAllocs = 10;
 HIP_TEST_CASE(Unit_hipFreeImplicitSyncDev) {
   int* devPtr{};
   size_t size_mult = GENERATE(1, 32, 64, 128, 256);
-  HIP_CHECK(hipMalloc(&devPtr, sizeof(*devPtr) * size_mult));
+  HIP_CHECK(hipMalloc(&devPtr, sizeof(*devPtr) * size_mult))
 
   HipTest::BlockingContext b_context{nullptr};
 
@@ -45,15 +45,15 @@ HIP_TEST_CASE(Unit_hipFreeImplicitSyncDev) {
   HIP_CHECK_ERROR(hipStreamQuery(nullptr), hipErrorNotReady);
   b_context.unblock_stream();
 
-  HIP_CHECK(hipFree(devPtr));
-  HIP_CHECK(hipStreamQuery(nullptr));
+  HIP_CHECK(hipFree(devPtr))
+  HIP_CHECK(hipStreamQuery(nullptr))
 }
 
 HIP_TEST_CASE(Unit_hipFreeImplicitSyncHost) {
   int* hostPtr{};
   size_t size_mult = GENERATE(1, 32, 64, 128, 256);
 
-  HIP_CHECK(hipHostMalloc(&hostPtr, sizeof(*hostPtr) * size_mult));
+  HIP_CHECK(hipHostMalloc(&hostPtr, sizeof(*hostPtr) * size_mult))
 
   HipTest::BlockingContext b_context{nullptr};
 
@@ -63,8 +63,8 @@ HIP_TEST_CASE(Unit_hipFreeImplicitSyncHost) {
   HIP_CHECK_ERROR(hipStreamQuery(nullptr), hipErrorNotReady);
   b_context.unblock_stream();
 
-  HIP_CHECK(hipHostFree(hostPtr));
-  HIP_CHECK(hipStreamQuery(nullptr));
+  HIP_CHECK(hipHostFree(hostPtr))
+  HIP_CHECK(hipStreamQuery(nullptr))
 }
 
 #if HT_NVIDIA
@@ -83,12 +83,12 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeImplicitSyncArray, char, float, float2, float
     hipArray_t arrayPtr{};
     hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
 
-    HIP_CHECK(hipMallocArray(&arrayPtr, &desc, width, height, hipArrayDefault));
+    HIP_CHECK(hipMallocArray(&arrayPtr, &desc, width, height, hipArrayDefault))
     LaunchDelayKernel(delay);
     // make sure device is busy
     HIP_CHECK_ERROR(hipStreamQuery(nullptr), hipErrorNotReady);
-    HIP_CHECK(hipFreeArray(arrayPtr));
-    HIP_CHECK(hipStreamQuery(nullptr));
+    HIP_CHECK(hipFreeArray(arrayPtr))
+    HIP_CHECK(hipStreamQuery(nullptr))
   }
   SECTION("ArrayDestroy") {
     hipArray_t cuArrayPtr{};
@@ -98,12 +98,12 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeImplicitSyncArray, char, float, float2, float
     cuDesc.Height = height;
     cuDesc.Format = vec_info::format;
     cuDesc.NumChannels = vec_info::size;
-    HIP_CHECK(hipArrayCreate(&cuArrayPtr, &cuDesc));
+    HIP_CHECK(hipArrayCreate(&cuArrayPtr, &cuDesc))
     LaunchDelayKernel(delay);
     // make sure device is busy
     HIP_CHECK_ERROR(hipStreamQuery(nullptr), hipErrorNotReady);
-    HIP_CHECK(hipArrayDestroy(cuArrayPtr));
-    HIP_CHECK(hipStreamQuery(nullptr));
+    HIP_CHECK(hipArrayDestroy(cuArrayPtr))
+    HIP_CHECK(hipStreamQuery(nullptr))
   }
 }
 #else  // AMD
@@ -117,7 +117,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeImplicitSyncArray, char, float, float2, float
   extent.height = GENERATE(0, 32, 128, 256, 512, 1024);
   hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
 
-  HIP_CHECK(hipMallocArray(&arrayPtr, &desc, extent.width, extent.height, hipArrayDefault));
+  HIP_CHECK(hipMallocArray(&arrayPtr, &desc, extent.width, extent.height, hipArrayDefault))
   HipTest::BlockingContext b_context{nullptr};
 
   b_context.block_stream();
@@ -128,12 +128,12 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeImplicitSyncArray, char, float, float2, float
 
   // Second free segfaults
   SECTION("ArrayDestroy") {
-    HIP_CHECK(hipArrayDestroy(arrayPtr));
-    HIP_CHECK(hipStreamQuery(nullptr));
+    HIP_CHECK(hipArrayDestroy(arrayPtr))
+    HIP_CHECK(hipStreamQuery(nullptr))
   }
   SECTION("ArrayFree") {
-    HIP_CHECK(hipFreeArray(arrayPtr));
-    HIP_CHECK(hipStreamQuery(nullptr));
+    HIP_CHECK(hipFreeArray(arrayPtr))
+    HIP_CHECK(hipStreamQuery(nullptr))
   }
 }
 
@@ -158,9 +158,9 @@ HIP_TEST_CASE(Unit_hipFreeNegativeHost) {
   SECTION("hipHostRegister") {
     char* hostPtr = new char;
     auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped);
-    HIP_CHECK(hipHostRegister((void*)hostPtr, sizeof(char), flag));
+    HIP_CHECK(hipHostRegister((void*)hostPtr, sizeof(char), flag))
     HIP_CHECK_ERROR(hipHostFree(hostPtr), hipErrorInvalidValue);
-    HIP_CHECK(hipHostUnregister(hostPtr));
+    HIP_CHECK(hipHostUnregister(hostPtr))
     delete hostPtr;
   }
 #if (HT_AMD == 1) && (HT_LINUX == 1)
@@ -168,9 +168,9 @@ HIP_TEST_CASE(Unit_hipFreeNegativeHost) {
     char* hostPtr = new char;
     auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped,
                          hipHostRegisterIoMemory);
-    HIP_CHECK(hipHostRegister((void*)hostPtr, sizeof(char), flag));
+    HIP_CHECK(hipHostRegister((void*)hostPtr, sizeof(char), flag))
     HIP_CHECK_ERROR(hipHostFree(hostPtr), hipErrorInvalidValue);
-    HIP_CHECK(hipHostUnregister(hostPtr));
+    HIP_CHECK(hipHostUnregister(hostPtr))
     delete hostPtr;
   }
 #endif
@@ -199,9 +199,9 @@ HIP_TEST_CASE(Unit_hipFreeDoubleDevice) {
   size_t width = GENERATE(32, 512, 1024);
   char* ptr{};
   size_t size_mult = width;
-  HIP_CHECK(hipMalloc(&ptr, sizeof(char) * size_mult));
+  HIP_CHECK(hipMalloc(&ptr, sizeof(char) * size_mult))
 
-  HIP_CHECK(hipFree(ptr));
+  HIP_CHECK(hipFree(ptr))
   HIP_CHECK_ERROR(hipFree(ptr), hipErrorInvalidValue);
 }
 
@@ -210,9 +210,9 @@ HIP_TEST_CASE(Unit_hipFreeDoubleHost) {
   char* ptr{};
   size_t size_mult = width;
 
-  HIP_CHECK(hipHostMalloc(&ptr, sizeof(char) * size_mult));
+  HIP_CHECK(hipHostMalloc(&ptr, sizeof(char) * size_mult))
 
-  HIP_CHECK(hipHostFree(ptr));
+  HIP_CHECK(hipHostFree(ptr))
   HIP_CHECK_ERROR(hipHostFree(ptr), hipErrorInvalidValue);
 }
 
@@ -228,9 +228,9 @@ HIP_TEST_CASE(Unit_hipFreeDoubleArrayFree) {
   extent.height = height;
   hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
 
-  HIP_CHECK(hipMallocArray(&arrayPtr, &desc, extent.width, extent.height, hipArrayDefault));
+  HIP_CHECK(hipMallocArray(&arrayPtr, &desc, extent.width, extent.height, hipArrayDefault))
 
-  HIP_CHECK(hipFreeArray(arrayPtr));
+  HIP_CHECK(hipFreeArray(arrayPtr))
   HIP_CHECK_ERROR(hipFreeArray(arrayPtr), hipErrorContextIsDestroyed);
 }
 
@@ -248,8 +248,8 @@ HIP_TEST_CASE(Unit_hipFreeDoubleArrayDestroy) {
   cuDesc.Height = height;
   cuDesc.Format = vec_info::format;
   cuDesc.NumChannels = vec_info::size;
-  HIP_CHECK(hipArrayCreate(&ArrayPtr, &cuDesc));
-  HIP_CHECK(hipArrayDestroy(ArrayPtr));
+  HIP_CHECK(hipArrayCreate(&ArrayPtr, &cuDesc))
+  HIP_CHECK(hipArrayDestroy(ArrayPtr))
   HIP_CHECK_ERROR(hipArrayDestroy(ArrayPtr), hipErrorContextIsDestroyed);
 }
 
@@ -266,14 +266,14 @@ HIP_TEST_CASE(Unit_hipFreeDoubleArray) {
   extent.height = height;
   hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
 
-  HIP_CHECK(hipMallocArray(&arrayPtr, &desc, extent.width, extent.height, hipArrayDefault));
+  HIP_CHECK(hipMallocArray(&arrayPtr, &desc, extent.width, extent.height, hipArrayDefault))
 
   SECTION("ArrayFree") {
-    HIP_CHECK(hipFreeArray(arrayPtr));
+    HIP_CHECK(hipFreeArray(arrayPtr))
     HIP_CHECK_ERROR(hipFreeArray(arrayPtr), hipErrorContextIsDestroyed);
   }
   SECTION("ArrayDestroy") {
-    HIP_CHECK(hipArrayDestroy(arrayPtr));
+    HIP_CHECK(hipArrayDestroy(arrayPtr))
     HIP_CHECK_ERROR(hipArrayDestroy(arrayPtr), hipErrorContextIsDestroyed);
   }
 }
@@ -286,15 +286,15 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTDev, char, int, float2, float4) {
   size_t allocSize = sizeof(TestType) * GENERATE(1, 32, 64, 128);
 
   for (auto& ptr : ptrs) {
-    HIP_CHECK(hipMalloc(&ptr, allocSize));
+    HIP_CHECK(hipMalloc(&ptr, allocSize))
   }
 
   std::vector<std::thread> threads;
 
   for (auto ptr : ptrs) {
     threads.emplace_back(([ptr] {
-      HIP_CHECK_THREAD(hipFree(ptr));
-      HIP_CHECK_THREAD(hipStreamQuery(nullptr));
+      HIP_CHECK_THREAD(hipFree(ptr))
+      HIP_CHECK_THREAD(hipStreamQuery(nullptr))
     }));
   }
 
@@ -309,15 +309,15 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTHost, char, int, float2, float4) {
   size_t allocSize = sizeof(TestType) * GENERATE(1, 32, 64, 128);
 
   for (auto& ptr : ptrs) {
-    HIP_CHECK(hipHostMalloc(&ptr, allocSize));
+    HIP_CHECK(hipHostMalloc(&ptr, allocSize))
   }
 
   std::vector<std::thread> threads;
 
   for (auto ptr : ptrs) {
     threads.emplace_back(([ptr] {
-      HIP_CHECK_THREAD(hipHostFree(ptr));
-      HIP_CHECK_THREAD(hipStreamQuery(nullptr));
+      HIP_CHECK_THREAD(hipHostFree(ptr))
+      HIP_CHECK_THREAD(hipStreamQuery(nullptr))
     }));
   }
 
@@ -345,14 +345,14 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTArray, char, int, float2, float4) {
     cuDesc.Format = vec_info::format;
     cuDesc.NumChannels = vec_info::size;
     for (auto& ptr : ptrs) {
-      HIP_CHECK(hipArrayCreate(&ptr, &cuDesc));
+      HIP_CHECK(hipArrayCreate(&ptr, &cuDesc))
     }
 
 
     for (auto& ptr : ptrs) {
       threads.emplace_back(([ptr] {
-        HIP_CHECK_THREAD(hipArrayDestroy(ptr));
-        HIP_CHECK_THREAD(hipStreamQuery(nullptr));
+        HIP_CHECK_THREAD(hipArrayDestroy(ptr))
+        HIP_CHECK_THREAD(hipStreamQuery(nullptr))
       }));
     }
     for (auto& t : threads) {
@@ -369,14 +369,14 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTArray, char, int, float2, float4) {
     hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
 
     for (auto& ptr : ptrs) {
-      HIP_CHECK(hipMallocArray(&ptr, &desc, extent.width, extent.height, hipArrayDefault));
+      HIP_CHECK(hipMallocArray(&ptr, &desc, extent.width, extent.height, hipArrayDefault))
     }
 
     for (auto ptr : ptrs) {
       SECTION("ArrayFree") {
         threads.emplace_back(([ptr] {
-          HIP_CHECK_THREAD(hipFreeArray(ptr));
-          HIP_CHECK_THREAD(hipStreamQuery(nullptr));
+          HIP_CHECK_THREAD(hipFreeArray(ptr))
+          HIP_CHECK_THREAD(hipStreamQuery(nullptr))
         }));
       }
     }
@@ -403,10 +403,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTArray, char, int, float2, float4) {
   SECTION("ArrayFree") {
     std::vector<hipArray_t> ptrs(numAllocs);
     for (auto& ptr : ptrs) {
-      HIP_CHECK(hipMallocArray(&ptr, &desc, extent.width, extent.height, hipArrayDefault));
+      HIP_CHECK(hipMallocArray(&ptr, &desc, extent.width, extent.height, hipArrayDefault))
       threads.emplace_back([ptr] {
-        HIP_CHECK_THREAD(hipFreeArray(ptr));
-        HIP_CHECK_THREAD(hipStreamQuery(nullptr));
+        HIP_CHECK_THREAD(hipFreeArray(ptr))
+        HIP_CHECK_THREAD(hipStreamQuery(nullptr))
       });
     }
   }
@@ -419,11 +419,11 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTArray, char, int, float2, float4) {
     cuDesc.Format = vec_info::format;
     cuDesc.NumChannels = vec_info::size;
     for (auto ptr : cuArrayPtrs) {
-      HIP_CHECK(hipArrayCreate(&ptr, &cuDesc));
+      HIP_CHECK(hipArrayCreate(&ptr, &cuDesc))
 
       threads.emplace_back([ptr] {
-        HIP_CHECK_THREAD(hipArrayDestroy(ptr));
-        HIP_CHECK_THREAD(hipStreamQuery(nullptr));
+        HIP_CHECK_THREAD(hipArrayDestroy(ptr))
+        HIP_CHECK_THREAD(hipStreamQuery(nullptr))
       });
     }
   }

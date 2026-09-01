@@ -15,7 +15,7 @@ __global__ void attribute_test_kernel() {}
 
 HIP_TEST_CASE(Unit_hipFuncGetAttributes_Positive_Basic) {
   hipFuncAttributes attr;
-  HIP_CHECK(hipFuncGetAttributes(&attr, reinterpret_cast<void*>(attribute_test_kernel)));
+  HIP_CHECK(hipFuncGetAttributes(&attr, reinterpret_cast<void*>(attribute_test_kernel)))
 
   SECTION("binaryVersion") {
     const auto major = GetDeviceAttribute(hipDeviceAttributeComputeCapabilityMajor, 0);

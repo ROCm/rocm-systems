@@ -17,8 +17,8 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Basic) {
   LinearAllocGuard<hipDeviceptr_t> managed(LinearAllocs::hipMallocManaged, kPageSize,
                                            hipMemAttachHost);
 
-  HIP_CHECK(hipStreamAttachMemAsync(stream.stream(), managed.ptr(), 0));
-  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipStreamAttachMemAsync(stream.stream(), managed.ptr(), 0))
+  HIP_CHECK(hipStreamSynchronize(stream.stream()))
 }
 
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Pageable) {
@@ -31,8 +31,8 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Pageable) {
   StreamGuard stream(Streams::created);
   LinearAllocGuard<hipDeviceptr_t> pageable(LinearAllocs::malloc, kPageSize);
 
-  HIP_CHECK(hipStreamAttachMemAsync(stream.stream(), pageable.ptr(), kPageSize));
-  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipStreamAttachMemAsync(stream.stream(), pageable.ptr(), kPageSize))
+  HIP_CHECK(hipStreamSynchronize(stream.stream()))
 }
 
 // CUDA docs:
@@ -48,7 +48,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachGlobal) {
   streams.reserve(stream_count);
   for (int i = 0; i < stream_count; ++i) {
     if (device_count > 1) {
-      HIP_CHECK(hipSetDevice(i));
+      HIP_CHECK(hipSetDevice(i))
     }
     streams.push_back(std::make_unique<StreamGuard>(Streams::created));
   }
@@ -58,17 +58,17 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachGlobal) {
 
   HIP_CHECK(hipStreamAttachMemAsync(
       nullptr, reinterpret_cast<hipDeviceptr_t*>(managed_global.ptr()), 0, hipMemAttachGlobal));
-  HIP_CHECK(hipStreamSynchronize(nullptr));
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
   for (int i = 0; i < stream_count; ++i) {
     if (device_count > 1) {
-      HIP_CHECK(hipSetDevice(i));
+      HIP_CHECK(hipSetDevice(i))
     }
     HipTest::launchKernel(Set, 1, 1, 0, streams.at(i)->stream(), managed_global.ptr() + i, i);
   }
 
   for (auto&& stream : streams) {
-    HIP_CHECK(hipStreamSynchronize(stream->stream()));
+    HIP_CHECK(hipStreamSynchronize(stream->stream()))
   }
 
   for (int i = 0; i < stream_count; ++i) {
@@ -93,11 +93,11 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachHost) {
 
   HIP_CHECK(hipStreamAttachMemAsync(
       stream.stream(), reinterpret_cast<hipDeviceptr_t*>(managed_host.ptr()), 0, hipMemAttachHost));
-  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream.stream()))
 
   HipTest::launchKernel(Set, 1, 1, 0, stream.stream(), managed_global.ptr(), 32);
   *managed_host.ptr() = 64;
-  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream.stream()))
 
   REQUIRE(*managed_global.ptr() == 32);
   REQUIRE(*managed_host.ptr() == 64);
@@ -124,17 +124,17 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachSingle) {
   HIP_CHECK(hipStreamAttachMemAsync(stream1.stream(),
                                     reinterpret_cast<hipDeviceptr_t*>(managed_single.ptr()), 0,
                                     hipMemAttachSingle));
-  HIP_CHECK(hipStreamSynchronize(stream1.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream1.stream()))
 
   HipTest::launchKernel(Set, 1, 1, 0, stream1.stream(), managed_single.ptr(), 64);
-  HIP_CHECK(hipStreamSynchronize(stream1.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream1.stream()))
 
   HipTest::launchKernel(Set, 1, 1, 0, stream2.stream(), managed_global.ptr(), 32);
 
   REQUIRE(*managed_single.ptr() == 64);
   *managed_single.ptr() = 128;
 
-  HIP_CHECK(hipStreamSynchronize(stream2.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream2.stream()))
 
   REQUIRE(*managed_global.ptr() == 32);
   REQUIRE(*managed_single.ptr() == 128);

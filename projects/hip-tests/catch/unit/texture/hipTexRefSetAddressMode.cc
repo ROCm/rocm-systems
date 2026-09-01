@@ -15,13 +15,13 @@ HIP_TEST_CASE(Unit_hipTexRefSetAddressMode_Negative_Parameters) {
   hipCtx_t ctx;
   hipDevice_t device;
 
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipCtxCreate(&ctx, 0, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipCtxCreate(&ctx, 0, device))
 
   hipTexRef tex_ref = nullptr;
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
-  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"));
+  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"))
+  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"))
 
 #if HT_AMD
   hipTextureAddressMode am = hipAddressModeWrap;
@@ -43,8 +43,8 @@ HIP_TEST_CASE(Unit_hipTexRefSetAddressMode_Negative_Parameters) {
     HIP_CHECK_ERROR(hipTexRefSetAddressMode(tex_ref, 3, am), hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 
 HIP_TEST_CASE(Unit_hipTexRefSetAddressMode_Positive) {
@@ -53,13 +53,13 @@ HIP_TEST_CASE(Unit_hipTexRefSetAddressMode_Positive) {
   hipCtx_t ctx;
   hipDevice_t device;
 
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipCtxCreate(&ctx, 0, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipCtxCreate(&ctx, 0, device))
 
   hipTexRef tex_ref = nullptr;
   hipModule_t module = nullptr;
-  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
-  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"));
+  HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"))
+  HIP_CHECK(hipModuleGetTexRef(&tex_ref, module, "tex"))
 
   auto dim = GENERATE(0, 1, 2);
 #if HT_AMD
@@ -70,10 +70,10 @@ HIP_TEST_CASE(Unit_hipTexRefSetAddressMode_Positive) {
                      HIP_TR_ADDRESS_MODE_MIRROR, HIP_TR_ADDRESS_MODE_BORDER);
 #endif
 
-  HIP_CHECK(hipTexRefSetAddressMode(tex_ref, dim, am));
+  HIP_CHECK(hipTexRefSetAddressMode(tex_ref, dim, am))
 
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipCtxDestroy(ctx));
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipCtxDestroy(ctx))
 }
 
 #endif

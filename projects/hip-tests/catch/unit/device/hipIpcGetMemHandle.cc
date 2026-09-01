@@ -32,15 +32,15 @@
 HIP_TEST_CASE(Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Separate_Allocations) {
   void *ptr1, *ptr2;
   hipIpcMemHandle_t handle1, handle2;
-  HIP_CHECK(hipMalloc(&ptr1, 1024));
-  HIP_CHECK(hipMalloc(&ptr2, 1024));
-  HIP_CHECK(hipIpcGetMemHandle(&handle1, ptr1));
-  HIP_CHECK(hipIpcGetMemHandle(&handle2, ptr2));
+  HIP_CHECK(hipMalloc(&ptr1, 1024))
+  HIP_CHECK(hipMalloc(&ptr2, 1024))
+  HIP_CHECK(hipIpcGetMemHandle(&handle1, ptr1))
+  HIP_CHECK(hipIpcGetMemHandle(&handle2, ptr2))
 
   CHECK(memcmp(&handle1, &handle2, sizeof(handle1)) != 0);
 
-  HIP_CHECK(hipFree(ptr1));
-  HIP_CHECK(hipFree(ptr2));
+  HIP_CHECK(hipFree(ptr1))
+  HIP_CHECK(hipFree(ptr2))
 }
 
 /**
@@ -60,8 +60,8 @@ HIP_TEST_CASE(Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Separate_Allocatio
 HIP_TEST_CASE(Unit_hipIpcGetMemHandle_Negative_Handle_For_Freed_Memory) {
   void* ptr;
   hipIpcMemHandle_t handle;
-  HIP_CHECK(hipMalloc(&ptr, 1024));
-  HIP_CHECK(hipFree(ptr));
+  HIP_CHECK(hipMalloc(&ptr, 1024))
+  HIP_CHECK(hipFree(ptr))
   HIP_CHECK_ERROR(hipIpcGetMemHandle(&handle, ptr), hipErrorInvalidValue);
 }
 
@@ -83,10 +83,10 @@ HIP_TEST_CASE(Unit_hipIpcGetMemHandle_Negative_Out_Of_Bound_Pointer) {
   int* ptr;
   constexpr size_t n = 1024;
   hipIpcMemHandle_t handle;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr), n * sizeof(*ptr)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr), n * sizeof(*ptr)))
   HIP_CHECK_ERROR(hipIpcGetMemHandle(&handle, reinterpret_cast<void*>(ptr + n)),
                   hipErrorInvalidValue);
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr)));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr)))
 }
 
 /**

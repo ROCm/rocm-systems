@@ -41,7 +41,7 @@ static bool checkBuffer(const test_target_t* buffer, size_t size, test_target_t 
   bool result = true;
 
   test_target_t* host_ptr = new test_target_t[size];
-  HIP_CHECK(hipMemcpy(host_ptr, buffer, size * sizeof(test_target_t), hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(host_ptr, buffer, size * sizeof(test_target_t), hipMemcpyDefault))
 
   for (size_t i = 0; i < size; i++) {
     if (host_ptr[i] != pattern) {
@@ -64,13 +64,13 @@ static bool testMemset(allocator_fn_t allocator, deallocator_fn_t deallocator) {
   for (size_t size : buffer_nelems) {
     void* ptr = nullptr;
 
-    HIP_CHECK(allocator(&ptr, size * sizeof(test_target_t)));
+    HIP_CHECK(allocator(&ptr, size * sizeof(test_target_t)))
 
-    HIP_CHECK(memset_fn((hipDeviceptr_t)(ptr), pattern, size));
+    HIP_CHECK(memset_fn((hipDeviceptr_t)(ptr), pattern, size))
 
     result = checkBuffer(static_cast<test_target_t*>(ptr), size, pattern);
 
-    HIP_CHECK(deallocator(ptr));
+    HIP_CHECK(deallocator(ptr))
 
     if (!result) {
       break;
@@ -124,7 +124,7 @@ HIP_TEST_CASE(Unit_hipMemsetD16_InvalidArg) {
   constexpr size_t ptr_test_nelem = 4096;
   void* ptr = nullptr;
 
-  HIP_CHECK(hipMalloc(&ptr, ptr_test_nelem));
+  HIP_CHECK(hipMalloc(&ptr, ptr_test_nelem))
 
   SECTION("nullptr destination") {
     HIP_CHECK_ERROR(memset_fn((hipDeviceptr_t)(nullptr), pattern, ptr_test_nelem),
@@ -133,7 +133,7 @@ HIP_TEST_CASE(Unit_hipMemsetD16_InvalidArg) {
 
   SECTION("zero size") { HIP_CHECK(memset_fn((hipDeviceptr_t)(ptr), pattern, 0)); }
 
-  HIP_CHECK(hipFree(ptr));
+  HIP_CHECK(hipFree(ptr))
 }
 
 /**
@@ -158,27 +158,27 @@ HIP_TEST_CASE(Unit_hipMemsetD16_KernelBuffer) {
   hipStream_t stream = nullptr;
   size_t nbytes = ptr_test_nelem * sizeof(test_target_t);
 
-  HIP_CHECK(hipMalloc(&src_ptr, nbytes));
-  HIP_CHECK(hipMalloc(&add_by_one_src_ptr, nbytes));
-  HIP_CHECK(hipMalloc(&dest_ptr, nbytes));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipMalloc(&src_ptr, nbytes))
+  HIP_CHECK(hipMalloc(&add_by_one_src_ptr, nbytes))
+  HIP_CHECK(hipMalloc(&dest_ptr, nbytes))
+  HIP_CHECK(hipStreamCreate(&stream))
 
-  HIP_CHECK(memset_fn((hipDeviceptr_t)(src_ptr), pattern, ptr_test_nelem));
-  HIP_CHECK(memset_fn((hipDeviceptr_t)(add_by_one_src_ptr), 1, ptr_test_nelem));
+  HIP_CHECK(memset_fn((hipDeviceptr_t)(src_ptr), pattern, ptr_test_nelem))
+  HIP_CHECK(memset_fn((hipDeviceptr_t)(add_by_one_src_ptr), 1, ptr_test_nelem))
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, ptr_test_nelem);
 
   hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream, src_ptr,
                      add_by_one_src_ptr, dest_ptr, ptr_test_nelem);
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   bool result = checkBuffer(dest_ptr, ptr_test_nelem, pattern + 1);
 
-  HIP_CHECK(hipFree(src_ptr));
-  HIP_CHECK(hipFree(add_by_one_src_ptr));
-  HIP_CHECK(hipFree(dest_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(src_ptr))
+  HIP_CHECK(hipFree(add_by_one_src_ptr))
+  HIP_CHECK(hipFree(dest_ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 
   REQUIRE(result == true);
 }
@@ -197,12 +197,12 @@ HIP_TEST_CASE(Unit_hipMemsetD16_KernelBuffer) {
 HIP_TEST_CASE(Unit_hipMemsetD16_Capture) {
   const size_t N = 256;
   void* dst = nullptr;
-  HIP_CHECK(hipMalloc(&dst, N * sizeof(uint16_t)));
+  HIP_CHECK(hipMalloc(&dst, N * sizeof(uint16_t)))
 
   hipError_t memcpy_err = hipSuccess;
   BEGIN_CAPTURE_SYNC(memcpy_err, false);
   HIP_CHECK_ERROR(hipMemsetD16(reinterpret_cast<hipDeviceptr_t>(dst), 0xAB, N), memcpy_err);
   END_CAPTURE_SYNC(memcpy_err);
 
-  HIP_CHECK(hipFree(dst));
+  HIP_CHECK(hipFree(dst))
 }

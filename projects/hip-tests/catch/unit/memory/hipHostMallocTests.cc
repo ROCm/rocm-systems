@@ -43,7 +43,7 @@ HIP_TEST_CASE(Unit_hipHostMalloc_ArgValidation) {
   }
 
   SECTION("Pass size as zero and check ptr reset") {
-    HIP_CHECK(hipHostMalloc(&ptr, 0));
+    HIP_CHECK(hipHostMalloc(&ptr, 0))
     REQUIRE(ptr == nullptr);
   }
 

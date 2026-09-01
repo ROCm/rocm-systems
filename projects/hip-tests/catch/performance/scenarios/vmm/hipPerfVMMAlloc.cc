@@ -37,7 +37,7 @@ constexpr size_t chunk_size = (64 * kMB);
 bool CheckVMMSupportedOnDevice(int deviceId) {
   int value = 0;
   hipDeviceAttribute_t attr = hipDeviceAttributeVirtualMemoryManagementSupported;
-  HIP_CHECK(hipDeviceGetAttribute(&value, attr, deviceId));
+  HIP_CHECK(hipDeviceGetAttribute(&value, attr, deviceId))
   return static_cast<bool>(value);
 }
 
@@ -71,14 +71,14 @@ bool ValidateUsingCopy(int deviceId, void* dev_ptr, size_t data_size,
     B_h[idx] = 0;
   }
 
-  HIP_CHECK(hipSetDevice(deviceId));
+  HIP_CHECK(hipSetDevice(deviceId))
   auto start = std::chrono::high_resolution_clock::now();
-  HIP_CHECK(hipMemcpy(dev_ptr, A_h.data(), data_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dev_ptr, A_h.data(), data_size, hipMemcpyHostToDevice))
   auto end = std::chrono::high_resolution_clock::now();
   h2d_elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
   start = std::chrono::high_resolution_clock::now();
-  HIP_CHECK(hipMemcpy(B_h.data(), dev_ptr, data_size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B_h.data(), dev_ptr, data_size, hipMemcpyDeviceToHost))
   end = std::chrono::high_resolution_clock::now();
   d2h_elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
@@ -98,7 +98,7 @@ bool ValidateUsingCopy(int deviceId, void* dev_ptr, size_t data_size,
 }
 
 bool TestOnDevice(int deviceId) {
-  HIP_CHECK(hipSetDevice(deviceId));
+  HIP_CHECK(hipSetDevice(deviceId))
   // Check if VMM is supported
   if (!CheckVMMSupportedOnDevice(deviceId)) {
     INFO("VMM is not suppored on device: " << deviceId);
@@ -119,7 +119,7 @@ bool TestOnDevice(int deviceId) {
     // This seems to be a completely blocking call, measuring CPU time in this test for now.
     // Create Memory Reservation
     auto start = std::chrono::high_resolution_clock::now();
-    HIP_CHECK(hipMemAddressReserve(&dev_ptr, size_idx, granularity, nullptr, 0));
+    HIP_CHECK(hipMemAddressReserve(&dev_ptr, size_idx, granularity, nullptr, 0))
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::microseconds reserve_elapsed =
         std::chrono::duration_cast<std::chrono::microseconds>(end - start);
@@ -131,7 +131,7 @@ bool TestOnDevice(int deviceId) {
     size_t chunk_idx = 0;
 
     size_t freeVRAM = 0, totalVRAM = 0;
-    HIP_CHECK(hipMemGetInfo(&freeVRAM, &totalVRAM));
+    HIP_CHECK(hipMemGetInfo(&freeVRAM, &totalVRAM))
     INFO("Available total device memory : " << totalVRAM);
 
     if (freeVRAM < size_idx) {
@@ -148,14 +148,14 @@ bool TestOnDevice(int deviceId) {
       hipMemGenericAllocationHandle_t handle;
 
       start = std::chrono::high_resolution_clock::now();
-      HIP_CHECK(hipMemCreate(&handle, size_idx, &prop, 0));
+      HIP_CHECK(hipMemCreate(&handle, size_idx, &prop, 0))
       end = std::chrono::high_resolution_clock::now();
       alloc_elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
       physmem_handles.push_back(handle);
 
       // Map the memory
       start = std::chrono::high_resolution_clock::now();
-      HIP_CHECK(hipMemMap(dev_ptr, size_idx, 0, handle, 0));
+      HIP_CHECK(hipMemMap(dev_ptr, size_idx, 0, handle, 0))
       end = std::chrono::high_resolution_clock::now();
       map_elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     } else {
@@ -166,7 +166,7 @@ bool TestOnDevice(int deviceId) {
         prop.location.type = hipMemLocationTypeDevice;
         prop.location.id = deviceId;
         hipMemGenericAllocationHandle_t handle;
-        HIP_CHECK(hipMemCreate(&handle, chunk_size, &prop, 0));
+        HIP_CHECK(hipMemCreate(&handle, chunk_size, &prop, 0))
         physmem_handles.push_back(handle);
         ++chunk_idx;
       }
@@ -196,7 +196,7 @@ bool TestOnDevice(int deviceId) {
         uint64_t uiptr = reinterpret_cast<uint64_t>(dev_ptr);
         uiptr = uiptr + chunk_idx * chunk_size;
         // Make the address accessible to GPU 0
-        HIP_CHECK(hipMemSetAccess(reinterpret_cast<void*>(uiptr), chunk_size, &accessDesc, 1));
+        HIP_CHECK(hipMemSetAccess(reinterpret_cast<void*>(uiptr), chunk_size, &accessDesc, 1))
         ++chunk_idx;
       }
     }
@@ -215,7 +215,7 @@ bool TestOnDevice(int deviceId) {
     while (chunk_idx < chunk_max) {
       uint64_t uiptr = reinterpret_cast<uint64_t>(dev_ptr);
       uiptr = uiptr + chunk_idx * chunk_size;
-      HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(uiptr), chunk_size));
+      HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(uiptr), chunk_size))
       ++chunk_idx;
     }
     end = std::chrono::high_resolution_clock::now();
@@ -224,14 +224,14 @@ bool TestOnDevice(int deviceId) {
 
     start = std::chrono::high_resolution_clock::now();
     for (auto& physmem_handle : physmem_handles) {
-      HIP_CHECK(hipMemRelease(physmem_handle));
+      HIP_CHECK(hipMemRelease(physmem_handle))
     }
     end = std::chrono::high_resolution_clock::now();
     std::chrono::microseconds release_elapsed =
         std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
     start = std::chrono::high_resolution_clock::now();
-    HIP_CHECK(hipMemAddressFree(dev_ptr, size_idx));
+    HIP_CHECK(hipMemAddressFree(dev_ptr, size_idx))
     end = std::chrono::high_resolution_clock::now();
     std::chrono::microseconds free_elapsed =
         std::chrono::duration_cast<std::chrono::microseconds>(end - start);
@@ -253,12 +253,12 @@ bool TestOnDevice(int deviceId) {
 
     void* dev_ptr_legacy = nullptr;
     start = std::chrono::high_resolution_clock::now();
-    HIP_CHECK(hipMalloc(&dev_ptr_legacy, size_idx));
+    HIP_CHECK(hipMalloc(&dev_ptr_legacy, size_idx))
     end = std::chrono::high_resolution_clock::now();
     std::chrono::microseconds hm_elapsed =
         std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     start = std::chrono::high_resolution_clock::now();
-    HIP_CHECK(hipFree(dev_ptr_legacy));
+    HIP_CHECK(hipFree(dev_ptr_legacy))
     end = std::chrono::high_resolution_clock::now();
     std::chrono::microseconds hf_elapsed =
         std::chrono::duration_cast<std::chrono::microseconds>(end - start);
@@ -274,7 +274,7 @@ bool TestOnDevice(int deviceId) {
 
 HIP_TEST_CASE(Performance_hipPerfVMMAllocSpeed_test) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   } else {

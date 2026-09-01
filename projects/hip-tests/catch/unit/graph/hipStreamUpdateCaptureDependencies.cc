@@ -65,7 +65,7 @@ static void UpdateStreamCaptureDependenciesSet(hipStream_t stream,
   EventsGuard events_guard(3);
   StreamsGuard streams_guard(2);
 
-  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
+  HIP_CHECK(hipStreamBeginCapture(stream, captureMode))
   captureSequenceBranched(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), B_d.ptr(), N, stream,
                           streams_guard.stream_list(), events_guard.event_list());
 
@@ -90,7 +90,7 @@ static void UpdateStreamCaptureDependenciesSet(hipStream_t stream,
     myparams.dstPtr = make_hipPitchedPtr(C_d.ptr(), Nbytes, N, 1);
     myparams.kind = hipMemcpyHostToDevice;
 
-    HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNodeC, capInfoGraph, nullptr, 0, &myparams));
+    HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNodeC, capInfoGraph, nullptr, 0, &myparams))
 
     // Replace capture dependency with new memcpy node created.
     // Further nodes captured in stream will depend on the new memcpy node.
@@ -123,7 +123,7 @@ static void UpdateStreamCaptureDependenciesSet(hipStream_t stream,
     kernelNodeParams.sharedMemBytes = 0;
     kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
     kernelNodeParams.extra = nullptr;
-    HIP_CHECK(hipGraphAddKernelNode(&kernelNode, capInfoGraph, &nodelist[0], 1, &kernelNodeParams));
+    HIP_CHECK(hipGraphAddKernelNode(&kernelNode, capInfoGraph, &nodelist[0], 1, &kernelNodeParams))
 
     // Replace capture dependency with new kernel node created.
     // Further nodes captured in stream will depend on the new kernel node.
@@ -138,24 +138,24 @@ static void UpdateStreamCaptureDependenciesSet(hipStream_t stream,
     REQUIRE(nodelist[0] == kernelNode);
   }
 
-  HIP_CHECK(hipMemcpyAsync(B_h.ptr(), C_d.ptr(), Nbytes, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipMemcpyAsync(B_h.ptr(), C_d.ptr(), Nbytes, hipMemcpyDeviceToHost, stream))
 
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
   REQUIRE(graph != nullptr);
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   // Replay the recorded sequence multiple times
   for (size_t i = 0; i < kLaunchIters; i++) {
     std::fill_n(A_h.host_ptr(), N, static_cast<float>(i));
     std::fill_n(C_h.host_ptr(), N, static_cast<float>(i));
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     ArrayFindIfNot(B_h.host_ptr(), static_cast<float>(i) * static_cast<float>(i), N);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /* Local Function for adding new dependency
@@ -185,7 +185,7 @@ static void UpdateStreamCaptureDependenciesAdd(hipStream_t stream,
   EventsGuard events_guard(3);
   StreamsGuard streams_guard(2);
 
-  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
+  HIP_CHECK(hipStreamBeginCapture(stream, captureMode))
   captureSequenceBranched(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), B_d.ptr(), N, stream,
                           streams_guard.stream_list(), events_guard.event_list());
 
@@ -210,7 +210,7 @@ static void UpdateStreamCaptureDependenciesAdd(hipStream_t stream,
     myparams.dstPtr = make_hipPitchedPtr(C_d.ptr(), Nbytes, N, 1);
     myparams.kind = hipMemcpyHostToDevice;
 
-    HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNodeC, capInfoGraph, nullptr, 0, &myparams));
+    HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNodeC, capInfoGraph, nullptr, 0, &myparams))
 
     // Add/Append additional dependency MemcpyNodeC to the existing set.
     // Further nodes captured in stream will depend on Memcpy nodes A, B and C.
@@ -240,7 +240,7 @@ static void UpdateStreamCaptureDependenciesAdd(hipStream_t stream,
     kernelNodeParams.sharedMemBytes = 0;
     kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
     kernelNodeParams.extra = nullptr;
-    HIP_CHECK(hipGraphAddKernelNode(&kernelNode, capInfoGraph, &nodelist[0], 1, &kernelNodeParams));
+    HIP_CHECK(hipGraphAddKernelNode(&kernelNode, capInfoGraph, &nodelist[0], 1, &kernelNodeParams))
 
     // Add/Append additional dependency addNode to the existing set.
     HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &kernelNode, 1,
@@ -255,24 +255,24 @@ static void UpdateStreamCaptureDependenciesAdd(hipStream_t stream,
                        C_d.ptr(), B_d.ptr(), N);
   }
 
-  HIP_CHECK(hipMemcpyAsync(B_h.ptr(), B_d.ptr(), Nbytes, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipMemcpyAsync(B_h.ptr(), B_d.ptr(), Nbytes, hipMemcpyDeviceToHost, stream))
 
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
   REQUIRE(graph != nullptr);
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   // Replay the recorded sequence multiple times
   for (size_t i = 0; i < kLaunchIters; i++) {
     std::fill_n(A_h.host_ptr(), N, static_cast<float>(i));
     std::fill_n(C_h.host_ptr(), N, static_cast<float>(i));
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     ArrayFindIfNot(B_h.host_ptr(), static_cast<float>(i) * 2, N);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -355,13 +355,13 @@ HIP_TEST_CASE(Unit_hipStreamUpdateCaptureDependencies_Positive_Parameters) {
   const hipStreamUpdateCaptureDependenciesFlags flag =
       GENERATE(hipStreamAddCaptureDependencies, hipStreamSetCaptureDependencies);
 
-  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));  // hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));  // hipStreamCaptureModeGlobal))
 
-  HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, nullptr, 0, flag));
+  HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, nullptr, 0, flag))
 
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -396,8 +396,8 @@ HIP_TEST_CASE(Unit_hipStreamUpdateCaptureDependencies_Negative_Parameters) {
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
 
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemsetAsync(A_d.ptr(), 0, Nbytes, stream));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipMemsetAsync(A_d.ptr(), 0, Nbytes, stream))
 
   HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &captureStatus, nullptr, &capInfoGraph, &nodelist,
                                        &numDependencies));
@@ -447,7 +447,7 @@ HIP_TEST_CASE(Unit_hipStreamUpdateCaptureDependencies_Negative_Parameters) {
                                                hipStreamAddCaptureDependencies));
 #endif
 
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
   SECTION("Stream is not capturing") {
     HIP_CHECK_ERROR(
@@ -456,7 +456,7 @@ HIP_TEST_CASE(Unit_hipStreamUpdateCaptureDependencies_Negative_Parameters) {
         hipErrorIllegalState);
   }
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**

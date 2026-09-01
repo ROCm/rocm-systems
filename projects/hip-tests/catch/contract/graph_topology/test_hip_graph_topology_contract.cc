@@ -25,9 +25,9 @@ struct TwoNodeGraph {
 
 TwoNodeGraph CreateTwoNodeGraph() {
   TwoNodeGraph result{};
-  HIP_CHECK(hipGraphCreate(&result.graph, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&result.root, result.graph, nullptr, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(&result.dependent, result.graph, &result.root, 1));
+  HIP_CHECK(hipGraphCreate(&result.graph, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&result.root, result.graph, nullptr, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&result.dependent, result.graph, &result.root, 1))
   return result;
 }
 }
@@ -39,11 +39,11 @@ HIP_TEST_CASE(Contract_GraphTopology_HipGraphGetNodes_Default_ReturnsAddedNodes)
   cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
   size_t node_count = 0;
 
-  HIP_CHECK(hipGraphGetNodes(graph.graph, nullptr, &node_count));
+  HIP_CHECK(hipGraphGetNodes(graph.graph, nullptr, &node_count))
   REQUIRE(node_count == 2);
 
   std::array<hipGraphNode_t, 2> nodes{};
-  HIP_CHECK(hipGraphGetNodes(graph.graph, nodes.data(), &node_count));
+  HIP_CHECK(hipGraphGetNodes(graph.graph, nodes.data(), &node_count))
 
   REQUIRE(node_count == 2);
   REQUIRE(ContainsNode(nodes.data(), node_count, graph.root));
@@ -57,11 +57,11 @@ HIP_TEST_CASE(Contract_GraphTopology_HipGraphGetRootNodes_Default_ReturnsDepende
   cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
   size_t root_count = 0;
 
-  HIP_CHECK(hipGraphGetRootNodes(graph.graph, nullptr, &root_count));
+  HIP_CHECK(hipGraphGetRootNodes(graph.graph, nullptr, &root_count))
   REQUIRE(root_count == 1);
 
   std::array<hipGraphNode_t, 1> roots{};
-  HIP_CHECK(hipGraphGetRootNodes(graph.graph, roots.data(), &root_count));
+  HIP_CHECK(hipGraphGetRootNodes(graph.graph, roots.data(), &root_count))
 
   REQUIRE(root_count == 1);
   REQUIRE(roots[0] == graph.root);
@@ -74,12 +74,12 @@ HIP_TEST_CASE(Contract_GraphTopology_HipGraphGetEdges_Default_ReturnsDependencyE
   cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
   size_t edge_count = 0;
 
-  HIP_CHECK(hipGraphGetEdges(graph.graph, nullptr, nullptr, &edge_count));
+  HIP_CHECK(hipGraphGetEdges(graph.graph, nullptr, nullptr, &edge_count))
   REQUIRE(edge_count == 1);
 
   std::array<hipGraphNode_t, 1> from{};
   std::array<hipGraphNode_t, 1> to{};
-  HIP_CHECK(hipGraphGetEdges(graph.graph, from.data(), to.data(), &edge_count));
+  HIP_CHECK(hipGraphGetEdges(graph.graph, from.data(), to.data(), &edge_count))
 
   REQUIRE(edge_count == 1);
   REQUIRE(from[0] == graph.root);
@@ -93,11 +93,11 @@ HIP_TEST_CASE(Contract_GraphTopology_HipGraphNodeGetDependencies_NodeDependencie
   cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
   size_t dependency_count = 0;
 
-  HIP_CHECK(hipGraphNodeGetDependencies(graph.dependent, nullptr, &dependency_count));
+  HIP_CHECK(hipGraphNodeGetDependencies(graph.dependent, nullptr, &dependency_count))
   REQUIRE(dependency_count == 1);
 
   std::array<hipGraphNode_t, 1> dependencies{};
-  HIP_CHECK(hipGraphNodeGetDependencies(graph.dependent, dependencies.data(), &dependency_count));
+  HIP_CHECK(hipGraphNodeGetDependencies(graph.dependent, dependencies.data(), &dependency_count))
 
   REQUIRE(dependency_count == 1);
   REQUIRE(dependencies[0] == graph.root);
@@ -110,11 +110,11 @@ HIP_TEST_CASE(Contract_GraphTopology_HipGraphNodeGetDependentNodes_NodeDependent
   cleanup.Add([p0 = graph.graph] { (void)hipGraphDestroy(p0); });
   size_t dependent_count = 0;
 
-  HIP_CHECK(hipGraphNodeGetDependentNodes(graph.root, nullptr, &dependent_count));
+  HIP_CHECK(hipGraphNodeGetDependentNodes(graph.root, nullptr, &dependent_count))
   REQUIRE(dependent_count == 1);
 
   std::array<hipGraphNode_t, 1> dependents{};
-  HIP_CHECK(hipGraphNodeGetDependentNodes(graph.root, dependents.data(), &dependent_count));
+  HIP_CHECK(hipGraphNodeGetDependentNodes(graph.root, dependents.data(), &dependent_count))
 
   REQUIRE(dependent_count == 1);
   REQUIRE(dependents[0] == graph.dependent);

@@ -13,7 +13,7 @@ HIP_TEST_CASE(Unit_hipTexRefSetGetMipmapLevelBias) {
 
   // Retrieve the texture reference for our symbol
   const textureReference* texRefConst = nullptr;
-  HIP_CHECK(hipGetTextureReference(&texRefConst, &tex));
+  HIP_CHECK(hipGetTextureReference(&texRefConst, &tex))
   REQUIRE(texRefConst != nullptr);
   // Implementation expects non-const textureReference*
   textureReference* texRef = const_cast<textureReference*>(texRefConst);
@@ -22,7 +22,7 @@ HIP_TEST_CASE(Unit_hipTexRefSetGetMipmapLevelBias) {
 
   SECTION("Set mipmap level bias to custom value and verify") {
     float newBias = 2.25;
-    HIP_CHECK(hipTexRefSetMipmapLevelBias(texRef, newBias));
+    HIP_CHECK(hipTexRefSetMipmapLevelBias(texRef, newBias))
     auto res = hipTexRefGetMipmapLevelBias(&bias, texRef);
     REQUIRE(res == hipErrorInvalidValue);
     REQUIRE(bias == newBias);

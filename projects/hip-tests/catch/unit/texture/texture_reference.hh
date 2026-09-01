@@ -210,6 +210,7 @@ class TextureReference {
         if (CheckBorder(coord, dim)) {
           return std::numeric_limits<float>::quiet_NaN();
         }
+        [[fallthrough]];
       case hipAddressModeWrap:
         return ApplyWrap(coord, dim);
       case hipAddressModeMirror:

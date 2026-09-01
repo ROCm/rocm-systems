@@ -42,16 +42,16 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_WithSptCompilerOption) {
   fillArr(hostArrSrc, N, 1);
 
   int* devArr = nullptr;
-  HIP_CHECK(hipMalloc(&devArr, NBYTES));
+  HIP_CHECK(hipMalloc(&devArr, NBYTES))
   REQUIRE(devArr != nullptr);
 
   int* hostArrDst = new int[N];
   REQUIRE(hostArrDst != nullptr);
   fillArr(hostArrDst, N, 3);
 
-  HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
-  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
-  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy))
+  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy))
+  HIP_CHECK(hipStreamSynchronize(hipStreamLegacy))
 
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 1 \n");
@@ -60,7 +60,7 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_WithSptCompilerOption) {
 
   delete[] hostArrSrc;
   delete[] hostArrDst;
-  HIP_CHECK(hipFree(devArr));
+  HIP_CHECK(hipFree(devArr))
 }
 
 /*
@@ -107,7 +107,7 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsDiffOperationWithSptCompOption) {
   fillArr(hostArrSrc, N, 50);
 
   int* devArr = nullptr;
-  HIP_CHECK(hipMalloc(&devArr, NBYTES));
+  HIP_CHECK(hipMalloc(&devArr, NBYTES))
   REQUIRE(devArr != nullptr);
 
   int* hostArrDst = new int[N];
@@ -128,5 +128,5 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsDiffOperationWithSptCompOption) {
 
   delete[] hostArrSrc;
   delete[] hostArrDst;
-  HIP_CHECK(hipFree(devArr));
+  HIP_CHECK(hipFree(devArr))
 }

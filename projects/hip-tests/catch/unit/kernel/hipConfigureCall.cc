@@ -22,7 +22,7 @@ HIP_TEST_CASE(Unit_ConfigureCall) {
   struct dim3 block_dim{};
   size_t shared_memory_size = 1024;
 
-  HIP_CHECK(hipConfigureCall(grid_dim, block_dim, shared_memory_size));
+  HIP_CHECK(hipConfigureCall(grid_dim, block_dim, shared_memory_size))
 }
 
 /**
@@ -45,7 +45,7 @@ HIP_TEST_CASE(Unit_ConfigureCall_CheckParams) {
   size_t test_shmem_size = 0;
   hipStream_t test_stream;
 
-  HIP_CHECK(hipConfigureCall(grid_dim, block_dim, shmem_size));
+  HIP_CHECK(hipConfigureCall(grid_dim, block_dim, shmem_size))
 
   HIP_CHECK(
       __hipPopCallConfiguration(&test_grid_dim, &test_block_dim, &test_shmem_size, &test_stream));

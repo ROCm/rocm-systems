@@ -16,8 +16,8 @@
 
 static void GraphSetGetAttribute(int device, hipGraphMemAttributeType attr, size_t set_value) {
   size_t get_value = 100;
-  HIP_CHECK(hipDeviceSetGraphMemAttribute(device, attr, &set_value));
-  HIP_CHECK(hipDeviceGetGraphMemAttribute(device, attr, &get_value));
+  HIP_CHECK(hipDeviceSetGraphMemAttribute(device, attr, &set_value))
+  HIP_CHECK(hipDeviceGetGraphMemAttribute(device, attr, &get_value))
   REQUIRE(get_value == set_value);
 }
 
@@ -60,10 +60,10 @@ HIP_TEST_CASE(Unit_hipDeviceSetGraphMemAttribute_Positive_Default) {
  */
 HIP_TEST_CASE(Unit_hipDeviceSetGraphMemAttribute_Negative_Parameters) {
   int device_id = 0;
-  HIP_CHECK(hipSetDevice(device_id));
+  HIP_CHECK(hipSetDevice(device_id))
 
   int num_dev = 0;
-  HIP_CHECK(hipGetDeviceCount(&num_dev));
+  HIP_CHECK(hipGetDeviceCount(&num_dev))
 
   hipGraphMemAttributeType attr = hipGraphMemAttrUsedMemHigh;
   size_t set_value = 0;

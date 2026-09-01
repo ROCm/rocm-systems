@@ -31,7 +31,7 @@
  */
 HIP_TEST_CASE(Unit_hipRuntimeGetVersion_Positive) {
   int runtimeVersion = -1;
-  HIP_CHECK(hipRuntimeGetVersion(&runtimeVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&runtimeVersion))
   REQUIRE(runtimeVersion > 0);
   INFO("Runtime version " << runtimeVersion);
 }

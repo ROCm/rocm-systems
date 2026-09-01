@@ -112,7 +112,7 @@ void thread_run(const int iThread) {
   // Lauching kernel from host
   hipLaunchKernelGGL(
       matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
-      dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix, gpuMatrix, WIDTH);
+      dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, nullptr, gpuTransposeMatrix, gpuMatrix, WIDTH);
   // Record the stop event
   HIP_CHECK_THREAD(hipEventRecord(stop));
 
@@ -207,7 +207,7 @@ HIP_TEST_CASE(Unit_hipEventMGpuMThreads_1) { testEventMGpuMThreads(1); }
  */
 HIP_TEST_CASE(Unit_hipEventMGpuMThreads_2) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices > 1) {
     testEventMGpuMThreads(numDevices);
   } else {
@@ -228,7 +228,7 @@ HIP_TEST_CASE(Unit_hipEventMGpuMThreads_2) {
  */
 HIP_TEST_CASE(Unit_hipEventMGpuMThreads_3) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   if (numDevices > 1) {
     fprintf(stderr, "First round\n");
     testEventMGpuMThreads(numDevices);

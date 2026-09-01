@@ -10,7 +10,7 @@
 namespace {
 void RequireDevice() {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -36,7 +36,7 @@ HIP_TEST_CASE(Contract_DriverEntryPoint_HipGetDriverEntryPoint_ResolvesKnownSymb
 
   void* function_ptr = nullptr;
   hipDriverEntryPointQueryResult query_status = hipDriverEntryPointSymbolNotFound;
-  HIP_CHECK(hipGetDriverEntryPoint(kKnownSymbol, &function_ptr, hipEnableDefault, &query_status));
+  HIP_CHECK(hipGetDriverEntryPoint(kKnownSymbol, &function_ptr, hipEnableDefault, &query_status))
 
   REQUIRE(function_ptr != nullptr);
   REQUIRE(query_status == hipDriverEntryPointSuccess);
@@ -49,7 +49,7 @@ HIP_TEST_CASE(Contract_DriverEntryPoint_HipGetDriverEntryPoint_ResolvesKnownSymb
   REQUIRE(resolved(&resolved_count) == 0);
 
   int direct_count = -1;
-  HIP_CHECK(hipGetDeviceCount(&direct_count));
+  HIP_CHECK(hipGetDeviceCount(&direct_count))
   REQUIRE(resolved_count == direct_count);
 }
 

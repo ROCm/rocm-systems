@@ -13,7 +13,7 @@ HIP_TEST_CASE(Unit_hipTexRefSetGetFilterMode) {
 
   // Retrieve the texture reference for our symbol
   const textureReference* texRefConst = nullptr;
-  HIP_CHECK(hipGetTextureReference(&texRefConst, &tex));
+  HIP_CHECK(hipGetTextureReference(&texRefConst, &tex))
   REQUIRE(texRefConst != nullptr);
   // Implementation expects non-const textureReference*
   textureReference* texRef = const_cast<textureReference*>(texRefConst);
@@ -21,19 +21,19 @@ HIP_TEST_CASE(Unit_hipTexRefSetGetFilterMode) {
   hipTextureFilterMode mode;
 
   SECTION("Default filter mode is Point") {
-    HIP_CHECK(hipTexRefGetFilterMode(&mode, texRef));
+    HIP_CHECK(hipTexRefGetFilterMode(&mode, texRef))
     REQUIRE(mode == hipFilterModePoint);
   }
 
   SECTION("Set filter mode to Linear and verify") {
-    HIP_CHECK(hipTexRefSetFilterMode(texRef, hipFilterModeLinear));
-    HIP_CHECK(hipTexRefGetFilterMode(&mode, texRef));
+    HIP_CHECK(hipTexRefSetFilterMode(texRef, hipFilterModeLinear))
+    HIP_CHECK(hipTexRefGetFilterMode(&mode, texRef))
     REQUIRE(mode == hipFilterModeLinear);
   }
 
   SECTION("Set filter mode back to Point and verify") {
-    HIP_CHECK(hipTexRefSetFilterMode(texRef, hipFilterModePoint));
-    HIP_CHECK(hipTexRefGetFilterMode(&mode, texRef));
+    HIP_CHECK(hipTexRefSetFilterMode(texRef, hipFilterModePoint))
+    HIP_CHECK(hipTexRefGetFilterMode(&mode, texRef))
     REQUIRE(mode == hipFilterModePoint);
   }
 

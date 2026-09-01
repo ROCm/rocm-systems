@@ -28,7 +28,7 @@ void SkipIfP2PAttributeUnsupported(int device) {
 // @asserts: hipDeviceGetP2PAttribute - rejects a same-device (src==dst) P2P attribute query with a non-success status
 HIP_TEST_CASE(Contract_PeerQuery_HipDeviceGetP2PAttribute_SelfDevice_IsRejected) {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   SkipIfP2PAttributeUnsupported(device);
 
   int value = -1;
@@ -39,8 +39,8 @@ HIP_TEST_CASE(Contract_PeerQuery_HipDeviceGetP2PAttribute_SelfDevice_IsRejected)
 HIP_TEST_CASE(Contract_PeerQuery_HipDeviceGetP2PAttribute_InvalidArgs_AreRejected) {
   int device = 0;
   int device_count = 0;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   SkipIfP2PAttributeUnsupported(device);
 
   int value = -1;
@@ -60,7 +60,7 @@ HIP_TEST_CASE(Contract_PeerQuery_HipDeviceGetP2PAttribute_InvalidArgs_AreRejecte
 // @asserts: hipExtGetLinkTypeAndHopCount - rejects a same-device (0,0) link-topology query with a non-success status
 HIP_TEST_CASE(Contract_PeerQuery_HipExtGetLinkTypeAndHopCount_SameDevice_IsRejected) {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   REQUIRE(device_count > 0);
 
   uint32_t link_type = 0;
@@ -72,7 +72,7 @@ HIP_TEST_CASE(Contract_PeerQuery_HipExtGetLinkTypeAndHopCount_SameDevice_IsRejec
 // @asserts: hipExtGetLinkTypeAndHopCount - rejects out-of-range and negative device ids with a non-success status
 HIP_TEST_CASE(Contract_PeerQuery_HipExtGetLinkTypeAndHopCount_InvalidDevice_IsRejected) {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
 
   uint32_t link_type = 0;
   uint32_t hop_count = 0;

@@ -38,7 +38,7 @@ inline void fillBuffer(void* buffer, const std::vector<unsigned char>& data,
                        const LinearAllocs allocType) {
   const hipMemcpyKind kind =
       allocType == LinearAllocs::hipMalloc ? hipMemcpyHostToDevice : hipMemcpyHostToHost;
-  HIP_CHECK(hipMemcpy(buffer, data.data(), data.size(), kind));
+  HIP_CHECK(hipMemcpy(buffer, data.data(), data.size(), kind))
 }
 
 // Read `buffer` back to the host, picking the copy kind from its allocation type, and require it to
@@ -48,7 +48,7 @@ inline void requireBufferEquals(const void* buffer, const std::vector<unsigned c
   std::vector<unsigned char> host_out(expected.size());
   const hipMemcpyKind kind =
       allocType == LinearAllocs::hipMalloc ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
-  HIP_CHECK(hipMemcpy(host_out.data(), buffer, expected.size(), kind));
+  HIP_CHECK(hipMemcpy(host_out.data(), buffer, expected.size(), kind))
 
   const auto diff = std::mismatch(host_out.begin(), host_out.end(), expected.begin());
   INFO("First mismatch at byte " << std::distance(host_out.begin(), diff.first));
@@ -124,18 +124,18 @@ inline IndirectCopyBuffers makeIndirectCopyBuffers(const size_t count, const siz
 // access is already enabled so tests can share device state without failing.
 inline void EnablePeerAccess(const std::vector<std::pair<int, int>>& peer_pairs) {
   for (const auto& [src_device, dst_device] : peer_pairs) {
-    HIP_CHECK(hipSetDevice(src_device));
+    HIP_CHECK(hipSetDevice(src_device))
     hipError_t peer_status = hipDeviceEnablePeerAccess(dst_device, 0);
     if (peer_status != hipSuccess && peer_status != hipErrorPeerAccessAlreadyEnabled) {
-      HIP_CHECK(peer_status);
+      HIP_CHECK(peer_status)
     }
   }
 }
 
 inline void DisablePeerAccess(const std::vector<std::pair<int, int>>& peer_pairs) {
   for (const auto& [src_device, dst_device] : peer_pairs) {
-    HIP_CHECK(hipSetDevice(src_device));
-    HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
+    HIP_CHECK(hipSetDevice(src_device))
+    HIP_CHECK(hipDeviceDisablePeerAccess(dst_device))
   }
 }
 
@@ -176,7 +176,7 @@ inline hipError_t getSwapExpectedReturn(const LinearAllocs alloc_type_a,
   // Keep in sync if CLR adds architectures.
   const auto supportsSwap = [](int device) {
     int major, minor;
-    HIP_CHECK(hipDeviceComputeCapability(&major, &minor, device));
+    HIP_CHECK(hipDeviceComputeCapability(&major, &minor, device))
     return (major == 9 && minor >= 4) || (major == 12 && minor >= 5);
   };
 

@@ -27,7 +27,7 @@ void CloseFd(int fd) {
 
 int CurrentDevice() {
   int device = 0;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
   return device;
 }
 
@@ -61,7 +61,7 @@ void SkipIfVmmUnsupported() {
 // still lack the capability report it through a clean status and skip below.
 bool IsDiscreteDevice() {
   hipDeviceProp_t props{};
-  HIP_CHECK(hipGetDeviceProperties(&props, CurrentDevice()));
+  HIP_CHECK(hipGetDeviceProperties(&props, CurrentDevice()))
   return props.integrated == 0;
 }
 
@@ -88,7 +88,7 @@ hipMemAllocationProp PosixFdAllocationProp() {
 size_t AllocationGranularity() {
   const auto prop = DeviceAllocationProp();
   size_t granularity = 0;
-  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum))
   return granularity;
 }
 
@@ -116,10 +116,10 @@ bool CreateMappedAllocation(hip::contract::ContractCleanup& cleanup, MappedAlloc
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   cleanup.Add([out] { (void)hipMemRelease(out->handle); });
 
-  HIP_CHECK(hipMemAddressReserve(&out->address, out->size, 0, nullptr, 0));
+  HIP_CHECK(hipMemAddressReserve(&out->address, out->size, 0, nullptr, 0))
   cleanup.Add([out] {
     if (out->address != nullptr) (void)hipMemAddressFree(out->address, out->size);
   });
@@ -128,7 +128,7 @@ bool CreateMappedAllocation(hip::contract::ContractCleanup& cleanup, MappedAlloc
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   out->mapped = true;
   cleanup.Add([out] {
     if (out->mapped) (void)hipMemUnmap(out->address, out->size);
@@ -154,8 +154,8 @@ HIP_TEST_CASE(Contract_VmmHandle_HipMemRetainAllocationHandle_ByAddress_Succeeds
   // Retaining the allocation handle for a mapped address must return a usable
   // handle that can be released independently of the original.
   hipMemGenericAllocationHandle_t retained{};
-  HIP_CHECK(hipMemRetainAllocationHandle(&retained, alloc.address));
-  HIP_CHECK(hipMemRelease(retained));
+  HIP_CHECK(hipMemRetainAllocationHandle(&retained, alloc.address))
+  HIP_CHECK(hipMemRelease(retained))
 }
 
 // @asserts: hipMemGetAllocationPropertiesFromHandle - properties queried from the handle reflect the pinned type and device location it was created with
@@ -175,7 +175,7 @@ HIP_TEST_CASE(Contract_VmmHandle_HipMemGetAllocationPropertiesFromHandle_GetAllo
   // The properties queried from the handle must reflect what the allocation was
   // created with: pinned type on the current device location.
   hipMemAllocationProp prop{};
-  HIP_CHECK(hipMemGetAllocationPropertiesFromHandle(&prop, alloc.handle));
+  HIP_CHECK(hipMemGetAllocationPropertiesFromHandle(&prop, alloc.handle))
   REQUIRE(prop.type == hipMemAllocationTypePinned);
   REQUIRE(prop.location.type == hipMemLocationTypeDevice);
   REQUIRE(prop.location.id == CurrentDevice());
@@ -240,14 +240,14 @@ HIP_TEST_CASE(Contract_VmmHandle_HipMemExportToShareableHandle_ExportImportShare
   if (gran_status == hipErrorNotSupported || size == 0) {
     HIP_SKIP_TEST("POSIX-fd VMM allocations are not supported by this device/runtime path.");
   }
-  HIP_CHECK(gran_status);
+  HIP_CHECK(gran_status)
 
   hipMemGenericAllocationHandle_t handle{};
   const hipError_t create_status = hipMemCreate(&handle, size, &prop, 0);
   if (create_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("POSIX-fd VMM allocations are not supported by this device/runtime path.");
   }
-  HIP_CHECK(create_status);
+  HIP_CHECK(create_status)
   cleanup.Add([handle] { (void)hipMemRelease(handle); });
 
   // Export the allocation to a POSIX file descriptor. A supported path yields a
@@ -258,7 +258,7 @@ HIP_TEST_CASE(Contract_VmmHandle_HipMemExportToShareableHandle_ExportImportShare
   if (export_status == hipErrorNotSupported) {
     HIP_SKIP_TEST("VMM shareable-handle export is not supported by this device/runtime path.");
   }
-  HIP_CHECK(export_status);
+  HIP_CHECK(export_status)
   cleanup.Add([fd] { CloseFd(fd); });
   REQUIRE(fd >= 0);
 
@@ -268,6 +268,6 @@ HIP_TEST_CASE(Contract_VmmHandle_HipMemExportToShareableHandle_ExportImportShare
   HIP_CHECK(hipMemImportFromShareableHandle(
       &imported, reinterpret_cast<void*>(static_cast<long>(fd)),
       hipMemHandleTypePosixFileDescriptor));
-  HIP_CHECK(hipMemRelease(imported));
+  HIP_CHECK(hipMemRelease(imported))
 #endif  // _WIN32
 }

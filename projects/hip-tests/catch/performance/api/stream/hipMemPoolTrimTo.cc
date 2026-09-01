@@ -17,11 +17,11 @@ class MemPoolTrimToBenchmark : public Benchmark<MemPoolTrimToBenchmark> {
   void operator()(const size_t min_bytes_to_hold) {
     hipMemPool_t mem_pool{nullptr};
     hipMemPoolProps pool_props = CreateMemPoolProps(0, hipMemHandleTypeNone);
-    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props))
 
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold)); }
 
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+    HIP_CHECK(hipMemPoolDestroy(mem_pool))
   }
 };
 

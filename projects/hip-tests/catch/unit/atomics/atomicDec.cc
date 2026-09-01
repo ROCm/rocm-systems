@@ -42,7 +42,7 @@
  */
 HIP_TEMPLATE_TEST_CASE(Unit_atomicDec_Positive, unsigned int) {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
@@ -86,7 +86,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_atomicDec_Positive, unsigned int) {
  */
 HIP_TEMPLATE_TEST_CASE(Unit_atomicDec_Positive_Multi_Kernel, unsigned int) {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {

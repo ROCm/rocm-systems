@@ -116,13 +116,13 @@ static bool hipPerfSharedMemReadSpeed_test() {
   const unsigned threadsPerBlock = 64;
 
   static int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs\n", props.pciBusID, props.name,
                 props.multiProcessorCount);
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   for (int nTest = 0; nTest < numSizes; nTest++) {
     uint nBytes = Sizes[nTest % numSizes];
@@ -130,16 +130,16 @@ static bool hipPerfSharedMemReadSpeed_test() {
     const unsigned blocks = N / threadsPerBlock;
 
     hDst = new float[nBytes];
-    HIP_CHECK(hDst == 0 ? hipErrorOutOfMemory : hipSuccess);
+    HIP_CHECK(hDst == 0 ? hipErrorOutOfMemory : hipSuccess)
     memset(hDst, 0, nBytes);
 
-    HIP_CHECK(hipMalloc(&dDst, nBytes));
-    HIP_CHECK(hipMemcpy(dDst, hDst, nBytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&dDst, nBytes))
+    HIP_CHECK(hipMemcpy(dDst, hDst, nBytes, hipMemcpyHostToDevice))
 
     hipLaunchKernelGGL(sharedMemReadSpeed1, dim3(blocks), dim3(threadsPerBlock), 0, stream, dDst,
                        N);
-    HIP_CHECK(hipMemcpy(hDst, dDst, nBytes, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemcpy(hDst, dDst, nBytes, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
 
     int tmp = 0;
     for (int i = 0; i < N; i++) {
@@ -158,7 +158,7 @@ static bool hipPerfSharedMemReadSpeed_test() {
       hipLaunchKernelGGL(sharedMemReadSpeed1, dim3(blocks), dim3(threadsPerBlock), 0, stream, dDst,
                          N);
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     auto all_end = std::chrono::steady_clock::now();
     std::chrono::duration<double> all_kernel_time = all_end - all_start;
@@ -174,7 +174,7 @@ static bool hipPerfSharedMemReadSpeed_test() {
         perf, sharedMemSizeBytes1 / 1024, blocks * threadsPerBlock, numReads1);
 
     delete[] hDst;
-    HIP_CHECK(hipFree(dDst));
+    HIP_CHECK(hipFree(dDst))
   }
 
   for (int nTest = 0; nTest < numSizes; nTest++) {
@@ -183,23 +183,23 @@ static bool hipPerfSharedMemReadSpeed_test() {
     const unsigned blocks = N / threadsPerBlock;
 
     hDst = new float[nBytes];
-    HIP_CHECK(hDst == 0 ? hipErrorOutOfMemory : hipSuccess);
+    HIP_CHECK(hDst == 0 ? hipErrorOutOfMemory : hipSuccess)
     memset(hDst, 0, nBytes);
 
-    HIP_CHECK(hipMalloc(&dDst, nBytes));
-    HIP_CHECK(hipMemcpy(dDst, hDst, nBytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&dDst, nBytes))
+    HIP_CHECK(hipMemcpy(dDst, hDst, nBytes, hipMemcpyHostToDevice))
 
     hipLaunchKernelGGL(sharedMemReadSpeed2, dim3(blocks), dim3(threadsPerBlock), 0, stream, dDst,
                        N);
-    HIP_CHECK(hipMemcpy(hDst, dDst, nBytes, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemcpy(hDst, dDst, nBytes, hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
 
     auto all_start = std::chrono::steady_clock::now();
     for (int i = 0; i < nIter; i++) {
       hipLaunchKernelGGL(sharedMemReadSpeed2, dim3(blocks), dim3(threadsPerBlock), 0, stream, dDst,
                          N);
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
 
     auto all_end = std::chrono::steady_clock::now();
     std::chrono::duration<double> all_kernel_time = all_end - all_start;
@@ -215,9 +215,9 @@ static bool hipPerfSharedMemReadSpeed_test() {
         perf, sharedMemSizeBytes2 / 1024, blocks * threadsPerBlock, numReads2);
 
     delete[] hDst;
-    HIP_CHECK(hipFree(dDst));
+    HIP_CHECK(hipFree(dDst))
   }
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
   return true;
 }
 
@@ -235,7 +235,7 @@ static bool hipPerfSharedMemReadSpeed_test() {
 
 HIP_TEST_CASE(Performance_hipPerfSharedMemReadSpeed_test) {
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   if (numDevices <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);

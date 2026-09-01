@@ -15,18 +15,18 @@ HIP_TEST_CASE(Unit_hipExtLaunchKernel_Positive_Basic) {
   SECTION("Kernel with no arguments") {
     HIP_CHECK(hipExtLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, 1},
                                  nullptr, 0, nullptr, nullptr, nullptr, 0u));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   SECTION("Kernel with arguments using kernelParams") {
     LinearAllocGuard<int> result_dev(LinearAllocs::hipMalloc, sizeof(int));
-    HIP_CHECK(hipMemset(result_dev.ptr(), 0, sizeof(*result_dev.ptr())));
+    HIP_CHECK(hipMemset(result_dev.ptr(), 0, sizeof(*result_dev.ptr())))
     int* result_ptr = result_dev.ptr();
     void* kernel_args[1] = {&result_ptr};
     HIP_CHECK(hipExtLaunchKernel(reinterpret_cast<void*>(kernel_42), dim3{1, 1, 1}, dim3{1, 1, 1},
                                  kernel_args, 0, nullptr, nullptr, nullptr, 0u));
     int result = 0;
-    HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(result), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(result), hipMemcpyDefault))
     REQUIRE(result == 42);
   }
 }
@@ -140,8 +140,8 @@ HIP_TEST_CASE(Unit_hipExtLaunchKernel_Negative_Parameters) {
 
   SECTION("Invalid startEvent") {
     hipEvent_t event = nullptr;
-    HIP_CHECK(hipEventCreate(&event));
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventCreate(&event))
+    HIP_CHECK(hipEventDestroy(event))
     HIP_CHECK_ERROR(hipExtLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
                                        dim3{1, 1, 1}, nullptr, 0, nullptr, event, nullptr, 0u),
                     hipErrorInvalidValue);
@@ -149,8 +149,8 @@ HIP_TEST_CASE(Unit_hipExtLaunchKernel_Negative_Parameters) {
 
   SECTION("Invalid endEvent") {
     hipEvent_t event = nullptr;
-    HIP_CHECK(hipEventCreate(&event));
-    HIP_CHECK(hipEventDestroy(event));
+    HIP_CHECK(hipEventCreate(&event))
+    HIP_CHECK(hipEventDestroy(event))
     HIP_CHECK_ERROR(hipExtLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
                                        dim3{1, 1, 1}, nullptr, 0, nullptr, nullptr, event, 0u),
                     hipErrorInvalidValue);
@@ -171,11 +171,11 @@ HIP_TEST_CASE(Unit_hipExtLaunchKernel_Negative_Parameters) {
  */
 HIP_TEST_CASE(Unit_hipExtLaunchKernel_capturehipExtLaunchKernel) {
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   int* A_d;
   int* A_h = nullptr;
   A_h = reinterpret_cast<int*>(malloc(sizeof(int)));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), sizeof(int)));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), sizeof(int)))
   void* args[1] = {&A_d};
 
   // Begin Capture operation
@@ -186,13 +186,13 @@ HIP_TEST_CASE(Unit_hipExtLaunchKernel_capturehipExtLaunchKernel) {
   // End Capture
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
-  HIP_CHECK(hipMemcpyDtoH(A_h, A_d, sizeof(int)));
+  HIP_CHECK(hipMemcpyDtoH(A_h, A_d, sizeof(int)))
   REQUIRE(A_h != nullptr);
   REQUIRE(*A_h == 42);
 
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipStreamDestroy(stream))
+  HIP_CHECK(hipFree(A_d))
   free(A_h);
 }

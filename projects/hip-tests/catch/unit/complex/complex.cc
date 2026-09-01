@@ -233,8 +233,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device_make_Complex_Device_Positive, hipFloatComplex
   LinearAllocGuard<TestType> result_h(LinearAllocs::hipHostMalloc, sizeof(TestType));
 
   MakeComplexTypeKernel<TestType><<<1, 1>>>(result_d.ptr(), input_r, input_i);
-  HIP_CHECK(hipMemcpy(result_h.ptr(), result_d.ptr(), sizeof(TestType), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(result_h.ptr(), result_d.ptr(), sizeof(TestType), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(result_h.ptr()[0].x == input_r);
   REQUIRE(result_h.ptr()[0].y == input_i);
@@ -286,8 +286,8 @@ HIP_TEST_CASE(Unit_Device_make_hipComplex_Device_Positive) {
   LinearAllocGuard<hipComplex> result_h(LinearAllocs::hipHostMalloc, sizeof(hipComplex));
 
   MakeHipComplexTypeKernel<<<1, 1>>>(result_d.ptr(), input_r, input_i);
-  HIP_CHECK(hipMemcpy(result_h.ptr(), result_d.ptr(), sizeof(hipComplex), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(result_h.ptr(), result_d.ptr(), sizeof(hipComplex), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(result_h.ptr()[0].x == input_r);
   REQUIRE(result_h.ptr()[0].y == input_i);
@@ -344,7 +344,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_Cast_Device_Sanity_Positive, hipFloat
   CastComplexTypeKernel<<<1, 1>>>(result_d.ptr(), input);
   HIP_CHECK(hipMemcpy(result_h.ptr(), result_d.ptr(), sizeof(CastType_t<TestType>),
                       hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   REQUIRE(result_h.ptr()[0].x == static_cast<decltype(CastType_t<TestType>().x)>(input_r));
   REQUIRE(result_h.ptr()[0].y == static_cast<decltype(CastType_t<TestType>().x)>(input_i));

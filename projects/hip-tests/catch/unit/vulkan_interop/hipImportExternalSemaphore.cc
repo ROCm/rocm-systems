@@ -35,8 +35,8 @@ HIP_TEST_CASE(Unit_hipImportExternalSemaphore_Vulkan_Negative_Parameters) {
   }
 
 #ifdef _WIN32
-  SECTION("semHandleDesc.handle == NULL") {
-    handle_desc.handle.win32.handle = NULL;
+  SECTION("semHandleDesc.handle == nullptr") {
+    handle_desc.handle.win32.handle = nullptr;
     HIP_CHECK_ERROR(hipImportExternalSemaphore(&ext_semaphore, &handle_desc), hipErrorInvalidValue);
   }
 #endif

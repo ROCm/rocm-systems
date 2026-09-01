@@ -65,39 +65,39 @@ void GraphModuleLaunchKernel::allocateMemory() {
       B[i * N + j] = 1;
     }
   }
-  HIPCHECK(hipStreamCreate(&stream1));
-  HIPCHECK(hipStreamCreate(&stream2));
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE * sizeof(int)));
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE * sizeof(int)));
-  HIPCHECK(hipHostMalloc(reinterpret_cast<void**>(&C), SIZE * sizeof(int)));
-  HIPCHECK(hipMemcpy(Ad, A, SIZE * sizeof(int), hipMemcpyHostToDevice));
-  HIPCHECK(hipMemcpy(Bd, B, SIZE * sizeof(int), hipMemcpyHostToDevice));
+  HIPCHECK(hipStreamCreate(&stream1))
+  HIPCHECK(hipStreamCreate(&stream2))
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE * sizeof(int)))
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&Bd), SIZE * sizeof(int)))
+  HIPCHECK(hipHostMalloc(reinterpret_cast<void**>(&C), SIZE * sizeof(int)))
+  HIPCHECK(hipMemcpy(Ad, A, SIZE * sizeof(int), hipMemcpyHostToDevice))
+  HIPCHECK(hipMemcpy(Bd, B, SIZE * sizeof(int), hipMemcpyHostToDevice))
   args1._Ad = Ad;
   args1._Bd = Bd;
   args1._Cd = C;
   args1._n = N;
-  args2._Ad = NULL;
-  args2._Bd = NULL;
-  args2._Cd = NULL;
+  args2._Ad = nullptr;
+  args2._Bd = nullptr;
+  args2._Cd = nullptr;
   args2._n = 0;
   size1 = sizeof(args1);
   size2 = sizeof(args2);
 }
 
 void GraphModuleLaunchKernel::moduleLoad() {
-  HIPCHECK(hipModuleLoad(&module, fileName));
-  HIPCHECK(hipModuleGetFunction(&multKernel, module, matmulK));
+  HIPCHECK(hipModuleLoad(&module, fileName))
+  HIPCHECK(hipModuleGetFunction(&multKernel, module, matmulK))
 }
 
 void GraphModuleLaunchKernel::deAllocateMemory() {
-  HIPCHECK(hipStreamDestroy(stream1));
-  HIPCHECK(hipStreamDestroy(stream2));
+  HIPCHECK(hipStreamDestroy(stream1))
+  HIPCHECK(hipStreamDestroy(stream2))
   delete[] A;
   delete[] B;
-  HIPCHECK(hipFree(Ad));
-  HIPCHECK(hipFree(Bd));
-  HIPCHECK(hipHostFree(C));
-  HIPCHECK(hipModuleUnload(module));
+  HIPCHECK(hipFree(Ad))
+  HIPCHECK(hipFree(Bd))
+  HIPCHECK(hipHostFree(C))
+  HIPCHECK(hipModuleUnload(module))
 }
 
 bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmul() {
@@ -105,9 +105,9 @@ bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmul() {
   int mismatch = 0;
   void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
                      HIP_LAUNCH_PARAM_END};
-  HIPCHECK(hipExtModuleLaunchKernel(multKernel, N, N, 1, 32, 32, 1, 0, stream1, NULL,
-                                    reinterpret_cast<void**>(&config1), NULL, NULL, 0));
-  HIPCHECK(hipStreamSynchronize(stream1));
+  HIPCHECK(hipExtModuleLaunchKernel(multKernel, N, N, 1, 32, 32, 1, 0, stream1, nullptr,
+                                    reinterpret_cast<void**>(&config1), nullptr, nullptr, 0));
+  HIPCHECK(hipStreamSynchronize(stream1))
 
   for (int i = 0; i < N; i++) {
     for (int j = 0; j < N; j++) {
@@ -129,29 +129,29 @@ bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmulwithStreamCapture(
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
 
-  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal))
 
   void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
                      HIP_LAUNCH_PARAM_END};
 
-  HIPCHECK(hipExtModuleLaunchKernel(multKernel, N, N, 1, 32, 32, 1, 0, stream1, NULL,
-                                    reinterpret_cast<void**>(&config1), NULL, NULL, 0));
+  HIPCHECK(hipExtModuleLaunchKernel(multKernel, N, N, 1, 32, 32, 1, 0, stream1, nullptr,
+                                    reinterpret_cast<void**>(&config1), nullptr, nullptr, 0));
 
-  HIP_CHECK(hipStreamEndCapture(stream1, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream1, &graph))
 
   // Validate end capture is successful
   REQUIRE(graph != nullptr);
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   REQUIRE(graphExec != nullptr);
 
   // Replay the recorded sequence
-  HIP_CHECK(hipGraphLaunch(graphExec, LaunchByDifferentStream ? stream2 : stream1));
+  HIP_CHECK(hipGraphLaunch(graphExec, LaunchByDifferentStream ? stream2 : stream1))
 
-  HIP_CHECK(hipStreamSynchronize(LaunchByDifferentStream ? stream2 : stream1));
+  HIP_CHECK(hipStreamSynchronize(LaunchByDifferentStream ? stream2 : stream1))
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 
   for (int i = 0; i < N; i++) {
     for (int j = 0; j < N; j++) {
@@ -173,7 +173,7 @@ HIP_TEST_CASE(Unit_hipStreamCapture_ExtModuleLaunchKernel) {
                         << "/opt/rocm/hip/bin/hipcc --cuda-device-only hipMatMul.cc -o hipMatMul.code");
     return;
   }
-  HIPCHECK(hipSetDevice(0));
+  HIPCHECK(hipSetDevice(0))
   GraphModuleLaunchKernel kernelLaunch;
 
   SECTION("extModuleKernelExecutionMatmul") {

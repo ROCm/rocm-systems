@@ -14,10 +14,10 @@ HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Basic) {
   SECTION("hipDeviceMallocDefault") {
     const auto alloc_size =
         GENERATE_COPY(10, kPageSize / 2, kPageSize, kPageSize * 3 / 2, kPageSize * 2);
-    HIP_CHECK(hipExtMallocWithFlags(&ptr, alloc_size, hipDeviceMallocDefault));
+    HIP_CHECK(hipExtMallocWithFlags(&ptr, alloc_size, hipDeviceMallocDefault))
     CHECK(ptr != nullptr);
     CHECK(reinterpret_cast<intptr_t>(ptr) % 256 == 0);
-    HIP_CHECK(hipFree(ptr));
+    HIP_CHECK(hipFree(ptr))
   }
 
   SECTION("hipDeviceMallocFinegrained") {
@@ -27,23 +27,23 @@ HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Basic) {
     }
     const auto alloc_size =
         GENERATE_COPY(10, kPageSize / 2, kPageSize, kPageSize * 3 / 2, kPageSize * 2);
-    HIP_CHECK(hipExtMallocWithFlags(&ptr, alloc_size, hipDeviceMallocFinegrained));
+    HIP_CHECK(hipExtMallocWithFlags(&ptr, alloc_size, hipDeviceMallocFinegrained))
     CHECK(ptr != nullptr);
     CHECK(reinterpret_cast<intptr_t>(ptr) % 256 == 0);
-    HIP_CHECK(hipFree(ptr));
+    HIP_CHECK(hipFree(ptr))
   }
 
   SECTION("hipMallocSignalMemory") {
-    HIP_CHECK(hipExtMallocWithFlags(&ptr, 8, hipMallocSignalMemory));
+    HIP_CHECK(hipExtMallocWithFlags(&ptr, 8, hipMallocSignalMemory))
     CHECK(ptr != nullptr);
-    HIP_CHECK(hipFree(ptr));
+    HIP_CHECK(hipFree(ptr))
   }
 }
 
 HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Zero_Size) {
   void* ptr = reinterpret_cast<void*>(0x1);
   const auto flag = GENERATE(hipDeviceMallocDefault, hipDeviceMallocFinegrained);
-  HIP_CHECK(hipExtMallocWithFlags(&ptr, 0, flag));
+  HIP_CHECK(hipExtMallocWithFlags(&ptr, 0, flag))
   REQUIRE(ptr == nullptr);
 }
 
@@ -54,12 +54,12 @@ HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Alignment) {
       !DeviceAttributesSupport(0, hipDeviceAttributeFineGrainSupport)) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
-  HIP_CHECK(hipExtMallocWithFlags(&ptr1, 1, flag));
-  HIP_CHECK(hipExtMallocWithFlags(&ptr2, 10, flag));
+  HIP_CHECK(hipExtMallocWithFlags(&ptr1, 1, flag))
+  HIP_CHECK(hipExtMallocWithFlags(&ptr2, 10, flag))
   CHECK(reinterpret_cast<intptr_t>(ptr1) % 256 == 0);
   CHECK(reinterpret_cast<intptr_t>(ptr2) % 256 == 0);
-  HIP_CHECK(hipFree(ptr1));
-  HIP_CHECK(hipFree(ptr2));
+  HIP_CHECK(hipFree(ptr1))
+  HIP_CHECK(hipFree(ptr2))
 }
 
 HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Negative_Parameters) {

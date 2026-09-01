@@ -32,7 +32,7 @@
 HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_Functional) {
   char pciBusId[SIZE]{};
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   HIP_ASSERT(deviceCount != 0);
   for (int i = 0; i < deviceCount; i++) {
     int pciBusID = -1;
@@ -41,13 +41,13 @@ HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_Functional) {
     int tempPciBusId = -1;
     int tempDeviceId = -1;
     int pciFunction = -1;
-    HIP_CHECK(hipDeviceGetPCIBusId(&pciBusId[0], SIZE, i));
+    HIP_CHECK(hipDeviceGetPCIBusId(&pciBusId[0], SIZE, i))
     REQUIRE(sscanf(pciBusId, "%x:%x:%x.%x", &pciDomainID, &pciBusID, &pciDeviceID, &pciFunction) ==
             4);
-    HIP_CHECK(hipDeviceGetAttribute(&tempPciBusId, hipDeviceAttributePciBusId, i));
+    HIP_CHECK(hipDeviceGetAttribute(&tempPciBusId, hipDeviceAttributePciBusId, i))
 
     REQUIRE(pciBusID == tempPciBusId);
-    HIP_CHECK(hipDeviceGetByPCIBusId(&tempDeviceId, pciBusId));
+    HIP_CHECK(hipDeviceGetByPCIBusId(&tempDeviceId, pciBusId))
     REQUIRE(tempDeviceId == i);
   }
 }
@@ -118,7 +118,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_NegativeInputString) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_WrongBusID) {
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   HIP_ASSERT(deviceCount != 0);
   constexpr int MaxIter = 256;
   constexpr int MaxBusIdLen = 12;
@@ -129,7 +129,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_WrongBusID) {
   // get bus id of all the devices
   for (int i = 0; i < deviceCount; i++) {
     hipDeviceProp_t prop;
-    HIP_CHECK(hipGetDeviceProperties(&prop, i));
+    HIP_CHECK(hipGetDeviceProperties(&prop, i))
     pciBusId.push_back(prop.pciBusID);
     pciDeviceID.push_back(prop.pciDeviceID);
     pciDomainID.push_back(prop.pciDomainID);

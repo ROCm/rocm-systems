@@ -43,12 +43,12 @@ bool check_architecture(const char** Combination_CO, int Combination_CO_size, in
     return 0;
   }
   hipDeviceProp_t prop;
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0))
   std::string actual_architecture = prop.gcnArchName;
   std::string complete_CO = retrieved_CO + actual_architecture;
   const char* compiler_option = complete_CO.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, max_thread_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, max_thread_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -116,13 +116,13 @@ bool check_rdc(const char** Combination_CO, int Combination_CO_size, int max_thr
     B_h[i] = 4;
     result[i] = 16;
   }
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMalloc(&B_d, Nbytes));
-  HIP_CHECK(hipMalloc(&C_d, Nbytes));
-  HIP_CHECK(hipMemcpy(A_d, A_h.data(), Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h.data(), Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMalloc(&B_d, Nbytes))
+  HIP_CHECK(hipMalloc(&C_d, Nbytes))
+  HIP_CHECK(hipMemcpy(A_d, A_h.data(), Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(B_d, B_h.data(), Nbytes, hipMemcpyHostToDevice))
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, rdc_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, rdc_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -200,13 +200,13 @@ bool check_rdc(const char** Combination_CO, int Combination_CO_size, int max_thr
         HIPRTC_CHECK(hiprtcLinkAddData(rtc_link_state, HIPRTC_JIT_INPUT_LLVM_BITCODE, codec.data(),
                                        codeSize, 0, 0, 0, 0));
         HIPRTC_CHECK(hiprtcLinkComplete(rtc_link_state, &binary, &binarySize));
-        HIP_CHECK(hipModuleLoadData(&module, binary));
-        HIP_CHECK(hipModuleGetFunction(&function, module, kername));
+        HIP_CHECK(hipModuleLoadData(&module, binary))
+        HIP_CHECK(hipModuleGetFunction(&function, module, kername))
         HIP_CHECK(
             hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
         pass_count++;
-        HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipModuleUnload(module));
+        HIP_CHECK(hipDeviceSynchronize())
+        HIP_CHECK(hipModuleUnload(module))
         HIPRTC_CHECK(hiprtcLinkDestroy(rtc_link_state));
         break;
       case 1:
@@ -215,12 +215,12 @@ bool check_rdc(const char** Combination_CO, int Combination_CO_size, int max_thr
         HIPRTC_CHECK(hiprtcLinkAddData(rtc_link_state, HIPRTC_JIT_INPUT_LLVM_BITCODE, codec.data(),
                                        codeSize, 0, 0, 0, 0));
         HIPRTC_CHECK(hiprtcLinkComplete(rtc_link_state, &binary, &binarySize));
-        HIP_CHECK(hipModuleLoadData(&module, binary));
-        HIP_CHECK(hipModuleGetFunction(&function, module, kername));
+        HIP_CHECK(hipModuleLoadData(&module, binary))
+        HIP_CHECK(hipModuleGetFunction(&function, module, kername))
         HIP_CHECK(
             hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
-        HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipModuleUnload(module));
+        HIP_CHECK(hipDeviceSynchronize())
+        HIP_CHECK(hipModuleUnload(module))
         HIPRTC_CHECK(hiprtcLinkDestroy(rtc_link_state));
         pass_count++;
         break;
@@ -229,10 +229,10 @@ bool check_rdc(const char** Combination_CO, int Combination_CO_size, int max_thr
         break;
     }
   }
-  HIP_CHECK(hipMemcpy(result.data(), C_d, Nbytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(C_d));
+  HIP_CHECK(hipMemcpy(result.data(), C_d, Nbytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
+  HIP_CHECK(hipFree(C_d))
   for (int i = 0; i < 1; i++) {
     if (result[i] != ((A_h[i] * B_h[i]))) {
       WARN("Compiler Option : " << compiler_opt);
@@ -297,14 +297,14 @@ bool check_denormals_enabled(const char** Combination_CO, int Combination_CO_siz
     base_h[0] = Input_Vals_int[test_case];
     power_h[0] = Input_Vals_int[test_case + 1];
     result_h[0] = 1;
-    HIP_CHECK(hipMalloc(&base_d, Nbytes));
-    HIP_CHECK(hipMalloc(&power_d, Nbytes));
-    HIP_CHECK(hipMalloc(&result_d, Nbytes));
-    HIP_CHECK(hipMemcpy(base_d, base_h.data(), Nbytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(power_d, power_h.data(), Nbytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(result_d, result_h.data(), Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&base_d, Nbytes))
+    HIP_CHECK(hipMalloc(&power_d, Nbytes))
+    HIP_CHECK(hipMalloc(&result_d, Nbytes))
+    HIP_CHECK(hipMemcpy(base_d, base_h.data(), Nbytes, hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(power_d, power_h.data(), Nbytes, hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(result_d, result_h.data(), Nbytes, hipMemcpyHostToDevice))
     hiprtcProgram program;
-    HIPRTC_CHECK(hiprtcCreateProgram(&program, denormals_string, "denormals", 0, NULL, NULL));
+    HIPRTC_CHECK(hiprtcCreateProgram(&program, denormals_string, "denormals", 0, nullptr, nullptr));
     if (Combination_CO_size != -1) {
       hiprtcResult compileResult{
           hiprtcCompileProgram(program, Combination_CO_size, Combination_CO)};
@@ -353,12 +353,12 @@ bool check_denormals_enabled(const char** Combination_CO, int Combination_CO_siz
                                 HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
     hipModule_t module;
     hipFunction_t function;
-    HIP_CHECK(hipModuleLoadData(&module, codec.data()));
-    HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-    HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
-    HIP_CHECK(hipMemcpy(result_h.data(), result_d, sizeof(double), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleLoadData(&module, codec.data()))
+    HIP_CHECK(hipModuleGetFunction(&function, module, kername))
+    HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter))
+    HIP_CHECK(hipMemcpy(result_h.data(), result_d, sizeof(double), hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipModuleUnload(module))
     HIPRTC_CHECK(hiprtcDestroyProgram(&program));
     if (result_h[0] != Expected_Results_int[res_inc]) {
       WARN("Compiler Option : " << compiler_option);
@@ -375,9 +375,9 @@ bool check_denormals_enabled(const char** Combination_CO, int Combination_CO_siz
       WARN("OBTAINED OP: " << result_h[0]);
       return 0;
     }
-    HIP_CHECK(hipFree(base_d));
-    HIP_CHECK(hipFree(power_d));
-    HIP_CHECK(hipFree(result_d));
+    HIP_CHECK(hipFree(base_d))
+    HIP_CHECK(hipFree(power_d))
+    HIP_CHECK(hipFree(result_d))
   }
   return 1;
 }
@@ -429,14 +429,14 @@ bool check_denormals_disabled(const char** Combination_CO, int Combination_CO_si
     base_h[0] = Input_Vals_int[test_case];
     power_h[0] = Input_Vals_int[test_case + 1];
     result_h[0] = 0;
-    HIP_CHECK(hipMalloc(&base_d, Nbytes));
-    HIP_CHECK(hipMalloc(&power_d, Nbytes));
-    HIP_CHECK(hipMalloc(&result_d, Nbytes));
-    HIP_CHECK(hipMemcpy(base_d, base_h.data(), Nbytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(power_d, power_h.data(), Nbytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(result_d, result_h.data(), Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&base_d, Nbytes))
+    HIP_CHECK(hipMalloc(&power_d, Nbytes))
+    HIP_CHECK(hipMalloc(&result_d, Nbytes))
+    HIP_CHECK(hipMemcpy(base_d, base_h.data(), Nbytes, hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(power_d, power_h.data(), Nbytes, hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(result_d, result_h.data(), Nbytes, hipMemcpyHostToDevice))
     hiprtcProgram program;
-    HIPRTC_CHECK(hiprtcCreateProgram(&program, denormals_string, "denormals", 0, NULL, NULL));
+    HIPRTC_CHECK(hiprtcCreateProgram(&program, denormals_string, "denormals", 0, nullptr, nullptr));
     if (Combination_CO_size != -1) {
       hiprtcResult compileResult{
           hiprtcCompileProgram(program, Combination_CO_size, Combination_CO)};
@@ -485,12 +485,12 @@ bool check_denormals_disabled(const char** Combination_CO, int Combination_CO_si
                                 HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
     hipModule_t module;
     hipFunction_t function;
-    HIP_CHECK(hipModuleLoadData(&module, codec.data()));
-    HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-    HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
-    HIP_CHECK(hipMemcpy(result_h.data(), result_d, sizeof(double), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleLoadData(&module, codec.data()))
+    HIP_CHECK(hipModuleGetFunction(&function, module, kername))
+    HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter))
+    HIP_CHECK(hipMemcpy(result_h.data(), result_d, sizeof(double), hipMemcpyDeviceToHost))
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipModuleUnload(module))
     HIPRTC_CHECK(hiprtcDestroyProgram(&program));
     if (result_h[0] != Expected_Results_for_no_int[res_inc]) {
       WARN("Compiler Option : " << compiler_option);
@@ -507,9 +507,9 @@ bool check_denormals_disabled(const char** Combination_CO, int Combination_CO_si
       WARN("OBTAINED OP: " << result_h[0]);
       return 0;
     }
-    HIP_CHECK(hipFree(base_d));
-    HIP_CHECK(hipFree(power_d));
-    HIP_CHECK(hipFree(result_d));
+    HIP_CHECK(hipFree(base_d))
+    HIP_CHECK(hipFree(power_d))
+    HIP_CHECK(hipFree(result_d))
   }
   return 1;
 }
@@ -841,7 +841,7 @@ bool check_slp_vectorize_enabled(const char** Combination_CO, int Combination_CO
   CO_IRadded[3] = "-mllvm";
   CO_IRadded[4] = ir_dump_option.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     int Combination_CO_IRadded_size = Combination_CO_size + 5;
     int b = 0;
@@ -975,7 +975,7 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
   CO_IRadded[5] = "-mllvm";
   CO_IRadded[6] = "-disable-vector-combine";
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     int Combination_CO_IRadded_size = Combination_CO_size + 7;
     int b = 0;
@@ -1099,7 +1099,7 @@ bool check_macro(const char** Combination_CO, int Combination_CO_size, int max_t
   }
   const char* compiler_option = retrieved_CO.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, macro_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, macro_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -1137,9 +1137,9 @@ bool check_macro(const char** Combination_CO, int Combination_CO_size, int max_t
   }
   std::vector<int> macro_value_h(1);
   int* macro_value_d;
-  HIP_CHECK(hipMalloc(&macro_value_d, sizeof(int)));
+  HIP_CHECK(hipMalloc(&macro_value_d, sizeof(int)))
   macro_value_h[0] = 0;
-  HIP_CHECK(hipMemcpy(macro_value_d, macro_value_h.data(), sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(macro_value_d, macro_value_h.data(), sizeof(int), hipMemcpyHostToDevice))
   size_t codeSize;
   HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
   std::vector<char> codec(codeSize);
@@ -1150,13 +1150,13 @@ bool check_macro(const char** Combination_CO, int Combination_CO_size, int max_t
                               HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
   hipModule_t module;
   hipFunction_t function;
-  HIP_CHECK(hipModuleLoadData(&module, codec.data()));
-  HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
-  HIP_CHECK(hipMemcpy(macro_value_h.data(), macro_value_d, sizeof(int), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipModuleUnload(module));
-  HIP_CHECK(hipFree(macro_value_d));
+  HIP_CHECK(hipModuleLoadData(&module, codec.data()))
+  HIP_CHECK(hipModuleGetFunction(&function, module, kername))
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter))
+  HIP_CHECK(hipMemcpy(macro_value_h.data(), macro_value_d, sizeof(int), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipModuleUnload(module))
+  HIP_CHECK(hipFree(macro_value_d))
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   if (macro_value_h[0] != Expected_Results_int[0]) {
     WARN("Compiler Option : " << compiler_option);
@@ -1203,7 +1203,7 @@ bool check_undef_macro(const char** Combination_CO, int Combination_CO_size, int
     appended_compiler_options[i] = variable[i].c_str();
   }
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, undef_macro_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, undef_macro_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -1390,22 +1390,22 @@ bool check_header_dir(const char** Combination_CO, int Combination_CO_size, int 
     int* ptr_input_h = &input_h;
     int* value_d;
     int* input_d;
-    HIP_CHECK(hipMalloc(&value_d, sizeof(int)));
-    HIP_CHECK(hipMalloc(&input_d, sizeof(int)));
-    HIP_CHECK(hipMemcpy(value_d, ptr_value_h, sizeof(int), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(input_d, ptr_input_h, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&value_d, sizeof(int)))
+    HIP_CHECK(hipMalloc(&input_d, sizeof(int)))
+    HIP_CHECK(hipMemcpy(value_d, ptr_value_h, sizeof(int), hipMemcpyHostToDevice))
+    HIP_CHECK(hipMemcpy(input_d, ptr_input_h, sizeof(int), hipMemcpyHostToDevice))
     void* kernelParam[] = {value_d, input_d};
     auto size = sizeof(kernelParam);
     void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
                                 HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
     hipModule_t module;
     hipFunction_t function;
-    HIP_CHECK(hipModuleLoadData(&module, codec.data()));
-    HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-    HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
-    HIP_CHECK(hipMemcpy(ptr_value_h, value_d, sizeof(int), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipFree(value_d));
-    HIP_CHECK(hipFree(input_d));
+    HIP_CHECK(hipModuleLoadData(&module, codec.data()))
+    HIP_CHECK(hipModuleGetFunction(&function, module, kername))
+    HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter))
+    HIP_CHECK(hipMemcpy(ptr_value_h, value_d, sizeof(int), hipMemcpyDeviceToHost))
+    HIP_CHECK(hipFree(value_d))
+    HIP_CHECK(hipFree(input_d))
     if (*ptr_value_h != Expected_Results_int[senario]) {
       WARN("Compiler Option : " << appended_CO);
       if (Combination_CO_size != -1) {
@@ -1421,8 +1421,8 @@ bool check_header_dir(const char** Combination_CO, int Combination_CO_size, int 
       WARN(" OBTAINED OP: " << *ptr_value_h);
       return 0;
     }
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipModuleUnload(module))
     HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   }
   return 1;
@@ -1446,7 +1446,7 @@ bool check_warning(const char** Combination_CO, int Combination_CO_size, int max
   const char* kername = kernel_name.c_str();
   const char* compiler_option = retrieved_CO.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, warning_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, warning_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -1528,7 +1528,7 @@ bool check_Rpass_inline(const char** Combination_CO, int Combination_CO_size, in
   const char* kername = kernel_name.c_str();
   const char* compiler_option = retrieved_CO.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, max_thread_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, max_thread_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -1622,7 +1622,7 @@ bool check_conversionerror_enabled(const char** Combination_CO, int Combination_
   std::string variable = CO_vec[0];
   const char* compiler_option = variable.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
   } else {
@@ -1688,7 +1688,7 @@ bool check_conversionerror_disabled(const char** Combination_CO, int Combination
   std::string variable = CO_vec[1];
   const char* compiler_option = variable.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
   } else {
@@ -1745,7 +1745,7 @@ bool check_conversionwarning_enabled(const char** Combination_CO, int Combinatio
   std::string variable = CO_vec[2];
   const char* compiler_option = variable.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
   } else {
@@ -1810,7 +1810,7 @@ bool check_conversionwarning_disabled(const char** Combination_CO, int Combinati
   std::string variable = CO_vec[3];
   const char* compiler_option = variable.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
   } else {
@@ -1911,7 +1911,7 @@ bool check_max_thread(const char** Combination_CO, int Combination_CO_size, int 
       continue;
     }
     hiprtcProgram prog;
-    HIPRTC_CHECK(hiprtcCreateProgram(&prog, max_thread_string, kername, 0, NULL, NULL));
+    HIPRTC_CHECK(hiprtcCreateProgram(&prog, max_thread_string, kername, 0, nullptr, nullptr));
     if (Combination_CO_size != -1) {
       std::string max_thread_string = variable[senario];
       Combination_CO[max_thread_pos] = max_thread_string.c_str();
@@ -1960,20 +1960,20 @@ bool check_max_thread(const char** Combination_CO, int Combination_CO_size, int 
       int num_threads_h = 0;
       int* ptr_num_threads_h = &num_threads_h;
       int* Thread_count_d;
-      HIP_CHECK(hipMalloc(&Thread_count_d, sizeof(int)));
-      HIP_CHECK(hipMemcpy(Thread_count_d, ptr_num_threads_h, sizeof(int), hipMemcpyHostToDevice));
+      HIP_CHECK(hipMalloc(&Thread_count_d, sizeof(int)))
+      HIP_CHECK(hipMemcpy(Thread_count_d, ptr_num_threads_h, sizeof(int), hipMemcpyHostToDevice))
       void* kernelParam[] = {Thread_count_d};
       auto size = sizeof(kernelParam);
       void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
                                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
       hipModule_t module;
       hipFunction_t function;
-      HIP_CHECK(hipModuleLoadData(&module, codec.data()));
-      HIP_CHECK(hipModuleGetFunction(&function, module, kername));
+      HIP_CHECK(hipModuleLoadData(&module, codec.data()))
+      HIP_CHECK(hipModuleGetFunction(&function, module, kername))
       hipError_t status = hipModuleLaunchKernel(function, 1, 1, 1, Input_Thrd_Vals_int[test_case],
                                                 1, 1, 0, 0, nullptr, kernel_parameter);
-      HIP_CHECK(hipMemcpy(ptr_num_threads_h, Thread_count_d, sizeof(int), hipMemcpyDeviceToHost));
-      HIP_CHECK(hipFree(Thread_count_d));
+      HIP_CHECK(hipMemcpy(ptr_num_threads_h, Thread_count_d, sizeof(int), hipMemcpyDeviceToHost))
+      HIP_CHECK(hipFree(Thread_count_d))
       if ((status == hipSuccess) && (num_threads_h <= Target_Thrd_Vals_int[senario])) {
         check = 1;
       } else {
@@ -1996,8 +1996,8 @@ bool check_max_thread(const char** Combination_CO, int Combination_CO_size, int 
         WARN("OBTAINED OP: " << check);
         return 0;
       }
-      HIP_CHECK(hipDeviceSynchronize());
-      HIP_CHECK(hipModuleUnload(module));
+      HIP_CHECK(hipDeviceSynchronize())
+      HIP_CHECK(hipModuleUnload(module))
     }
     start += inc;
     HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
@@ -2032,11 +2032,11 @@ bool check_unsafe_atomic_enabled(const char** Combination_CO, int Combination_CO
     A_h[i] = 0.1f;
     sum_tocheck += A_h[i] + 0.2f;
   }
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
   for (int senario = 0; senario < 2; senario++) {
     hiprtcProgram prog;
-    HIPRTC_CHECK(hiprtcCreateProgram(&prog, unsafe_atomic_string, kername, 0, NULL, NULL));
+    HIPRTC_CHECK(hiprtcCreateProgram(&prog, unsafe_atomic_string, kername, 0, nullptr, nullptr));
     if (Combination_CO_size != -1) {
       hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
       if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -2084,10 +2084,10 @@ bool check_unsafe_atomic_enabled(const char** Combination_CO, int Combination_CO
                                 HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
     hipModule_t module;
     hipFunction_t function;
-    HIP_CHECK(hipModuleLoadData(&module, codec.data()));
-    HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-    HIP_CHECK(hipModuleLaunchKernel(function, N, 1, 1, N, 1, 1, 0, 0, nullptr, kernel_parameter));
-    HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipModuleLoadData(&module, codec.data()))
+    HIP_CHECK(hipModuleGetFunction(&function, module, kername))
+    HIP_CHECK(hipModuleLaunchKernel(function, N, 1, 1, N, 1, 1, 0, 0, nullptr, kernel_parameter))
+    HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost))
     for (int i = 0; i < N; i++) {
       if (senario == 0) {
         sum_wo += A_h[i];
@@ -2095,11 +2095,11 @@ bool check_unsafe_atomic_enabled(const char** Combination_CO, int Combination_CO
         sum_w += A_h[i];
       }
     }
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipDeviceSynchronize())
+    HIP_CHECK(hipModuleUnload(module))
     HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   }
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(A_d))
   if (sum_w != sum_tocheck) {
     return 1;
   } else {
@@ -2142,10 +2142,10 @@ bool check_unsafe_atomic_disabled(const char** Combination_CO, int Combination_C
     A_h[i] = 0.1f;
     sum_tocheck += A_h[i] + 0.2f;
   }
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, unsafe_atomic_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, unsafe_atomic_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -2193,16 +2193,16 @@ bool check_unsafe_atomic_disabled(const char** Combination_CO, int Combination_C
                               HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
   hipModule_t module;
   hipFunction_t function;
-  HIP_CHECK(hipModuleLoadData(&module, codec.data()));
-  HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-  HIP_CHECK(hipModuleLaunchKernel(function, N, 1, 1, N, 1, 1, 0, 0, nullptr, kernel_parameter));
-  HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipModuleLoadData(&module, codec.data()))
+  HIP_CHECK(hipModuleGetFunction(&function, module, kername))
+  HIP_CHECK(hipModuleLaunchKernel(function, N, 1, 1, N, 1, 1, 0, 0, nullptr, kernel_parameter))
+  HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipFree(A_d))
   for (int i = 0; i < N; i++) {
     sum += A_h[i];
   }
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipModuleUnload(module))
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   if (sum == sum_tocheck) {
     return 1;
@@ -3023,14 +3023,14 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
     C_h[i] = 0.1f;
     result[i] = 0.2f;
   }
-  HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipMalloc(&B_d, Nbytes));
-  HIP_CHECK(hipMalloc(&C_d, Nbytes));
-  HIP_CHECK(hipMemcpy(A_d, A_h.data(), Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h.data(), Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(C_d, C_h.data(), Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&A_d, Nbytes))
+  HIP_CHECK(hipMalloc(&B_d, Nbytes))
+  HIP_CHECK(hipMalloc(&C_d, Nbytes))
+  HIP_CHECK(hipMemcpy(A_d, A_h.data(), Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(B_d, B_h.data(), Nbytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(C_d, C_h.data(), Nbytes, hipMemcpyHostToDevice))
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, ffp_contract_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, ffp_contract_string, kername, 0, nullptr, nullptr));
   CaptureIR ir_capture;
   auto dump_dir = ir_capture.CreateDumpDir();
   std::string ir_dump_option = "-ir-dump-directory=" + dump_dir.string();
@@ -3113,20 +3113,20 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
                               HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
   hipModule_t module;
   hipFunction_t function;
-  HIP_CHECK(hipModuleLoadData(&module, codec.data()));
-  HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
-  HIP_CHECK(hipMemcpy(result.data(), C_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipModuleLoadData(&module, codec.data()))
+  HIP_CHECK(hipModuleGetFunction(&function, module, kername))
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter))
+  HIP_CHECK(hipMemcpy(result.data(), C_d, Nbytes, hipMemcpyDeviceToHost))
   for (int i = 0; i < 1; i++) {
     if (result[i] != ((A_h[i] * B_h[i]) + C_h[i])) {
       return "";
     }
   }
   std::stringstream dataStream;
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(C_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
+  HIP_CHECK(hipFree(C_d))
   return data;
 }

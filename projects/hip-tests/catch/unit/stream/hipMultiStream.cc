@@ -143,24 +143,24 @@ HIP_TEST_CASE(Unit_hipMultiStream_sameDevice) {
   float *data[num_streams], *yd, *xd;
   float y{1.0f}, x{1.0f};
   const int n = isQuickLevel() ? (1 << 12) : NN;
-  HIP_CHECK(hipMalloc((void**)&yd, sizeof(float)));
-  HIP_CHECK(hipMalloc((void**)&xd, sizeof(float)));
-  HIP_CHECK(hipMemcpy(yd, &y, sizeof(float), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(xd, &x, sizeof(float), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc((void**)&yd, sizeof(float)))
+  HIP_CHECK(hipMalloc((void**)&xd, sizeof(float)))
+  HIP_CHECK(hipMemcpy(yd, &y, sizeof(float), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(xd, &x, sizeof(float), hipMemcpyHostToDevice))
   for (int i = 0; i < num_streams; i++) {
-    HIP_CHECK(hipStreamCreate(&streams[i]));
-    HIP_CHECK(hipMalloc(&data[i], n * sizeof(float)));
+    HIP_CHECK(hipStreamCreate(&streams[i]))
+    HIP_CHECK(hipMalloc(&data[i], n * sizeof(float)))
     hipLaunchKernelGGL(kernel, dim3(1), dim3(1), 0, streams[i], data[i], xd, n);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
     hipLaunchKernelGGL(HIP_KERNEL_NAME(nKernel), dim3(1), dim3(1), 0, 0, yd);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipFree(data[i]));
-    HIP_CHECK(hipStreamDestroy(streams[i]));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipFree(data[i]))
+    HIP_CHECK(hipStreamDestroy(streams[i]))
   }
-  HIP_CHECK(hipMemcpy(&x, xd, sizeof(float), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(&y, yd, sizeof(float), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipFree(xd));
-  HIP_CHECK(hipFree(yd));
+  HIP_CHECK(hipMemcpy(&x, xd, sizeof(float), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipMemcpy(&y, yd, sizeof(float), hipMemcpyDeviceToHost))
+  HIP_CHECK(hipFree(xd))
+  HIP_CHECK(hipFree(yd))
   REQUIRE(x == Catch::Approx(y));
 }
 
@@ -169,37 +169,37 @@ HIP_TEST_CASE(Unit_hipMultiStream_multimeDevice) {
   constexpr int nStreams = 2;
   std::vector<hipStream_t> streams(nStreams);
   int nGpu = 0;
-  HIP_CHECK(hipGetDeviceCount(&nGpu));
+  HIP_CHECK(hipGetDeviceCount(&nGpu))
   if (nGpu < 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
   static int device = 0;
-  HIP_CHECK(hipSetDevice(device));
+  HIP_CHECK(hipSetDevice(device))
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device))
   INFO("Running on Bus: " << props.pciBusID << " " << props.name);
   for (int i = 0; i < nStreams; i++) {
-    HIP_CHECK(hipStreamCreate(&streams[i]));
+    HIP_CHECK(hipStreamCreate(&streams[i]))
   }
   for (int k = 0; k <= nLoops; ++k) {
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
     // Launch kernel with default stream
     hipLaunchKernelGGL(kernel_do_nothing, dim3(1), dim3(1), 0, 0, 1);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
     // Launch kernel on all streams
     for (int i = 0; i < nStreams; i++) {
       hipLaunchKernelGGL(kernel_do_nothing, dim3(1), dim3(1), 0, streams[i], 1);
-      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipGetLastError())
     }
     // Sync stream 1
-    HIP_CHECK(hipStreamSynchronize(streams[0]));
+    HIP_CHECK(hipStreamSynchronize(streams[0]))
     if (k % 10000 == 0 || k == nLoops) {
       INFO("Iter: " << k);
     }
   }
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
   // Clean up
   for (int i = 0; i < nStreams; i++) {
-    HIP_CHECK(hipStreamDestroy(streams[i]));
+    HIP_CHECK(hipStreamDestroy(streams[i]))
   }
 }

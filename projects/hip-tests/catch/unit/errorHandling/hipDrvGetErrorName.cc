@@ -34,7 +34,7 @@ HIP_TEST_CASE(Unit_hipDrvGetErrorName_Positive_Basic) {
       GENERATE(from_range(std::begin(kErrorEnumerators), std::end(kErrorEnumerators)));
   INFO("Error: " << enumerator);
 
-  HIP_CHECK(hipDrvGetErrorName(enumerator, &error_string));
+  HIP_CHECK(hipDrvGetErrorName(enumerator, &error_string))
 
   REQUIRE(error_string != nullptr);
   REQUIRE(strcmp(error_string, ErrorName(enumerator)) == 0);

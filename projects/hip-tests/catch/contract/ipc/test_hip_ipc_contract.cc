@@ -20,7 +20,7 @@ constexpr size_t kAllocSize = 64;
 // against a provisioned runtime.
 void RequireDevice() {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -67,12 +67,12 @@ bool IsIpcUnsupportedFromValidCall(hipError_t error) {
 // The probe allocation is always freed before returning.
 bool IpcMemHandleSupported() {
   void* ptr = nullptr;
-  HIP_CHECK(hipMalloc(&ptr, kAllocSize));
+  HIP_CHECK(hipMalloc(&ptr, kAllocSize))
 
   hipIpcMemHandle_t handle{};
   const hipError_t status = hipIpcGetMemHandle(&handle, ptr);
 
-  HIP_CHECK(hipFree(ptr));
+  HIP_CHECK(hipFree(ptr))
 
   if (status == hipSuccess) {
     return true;
@@ -80,7 +80,7 @@ bool IpcMemHandleSupported() {
   if (IsIpcUnsupportedFromValidCall(status)) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return false;
 }
 
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Contract_Ipc_HipIpcGetMemHandle_Default_SucceedsForDeviceAllocatio
   hip::contract::ContractCleanup cleanup;
 
   void* ptr = nullptr;
-  HIP_CHECK(hipMalloc(&ptr, kAllocSize));
+  HIP_CHECK(hipMalloc(&ptr, kAllocSize))
   cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   hipIpcMemHandle_t handle{};
@@ -108,7 +108,7 @@ HIP_TEST_CASE(Contract_Ipc_HipIpcGetMemHandle_Default_SucceedsForDeviceAllocatio
   if (IsIpcUnsupportedFromValidCall(status)) {
     HIP_SKIP_TEST("IPC memory handles are not supported by this device/runtime path.");
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   // The handle is an opaque, fixed-size descriptor. Its exact byte contents are
   // backend-specific and not part of the public contract, so the contract only
@@ -121,7 +121,7 @@ HIP_TEST_CASE(Contract_Ipc_HipIpcOpenMemHandle_Default_SameProcessRoundTrip) {
   hip::contract::ContractCleanup cleanup;
 
   void* ptr = nullptr;
-  HIP_CHECK(hipMalloc(&ptr, kAllocSize));
+  HIP_CHECK(hipMalloc(&ptr, kAllocSize))
   cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   hipIpcMemHandle_t handle{};
@@ -132,7 +132,7 @@ HIP_TEST_CASE(Contract_Ipc_HipIpcOpenMemHandle_Default_SameProcessRoundTrip) {
   if (IsIpcUnsupportedFromValidCall(get_status)) {
     HIP_SKIP_TEST("IPC memory handles are not supported by this device/runtime path.");
   }
-  HIP_CHECK(get_status);
+  HIP_CHECK(get_status)
 
   void* mapped = nullptr;
   const hipError_t open_status =
@@ -171,7 +171,7 @@ HIP_TEST_CASE(Contract_Ipc_HipIpcGetMemHandle_NullArgs_AreRejected) {
   hip::contract::ContractCleanup cleanup;
 
   void* ptr = nullptr;
-  HIP_CHECK(hipMalloc(&ptr, kAllocSize));
+  HIP_CHECK(hipMalloc(&ptr, kAllocSize))
   cleanup.Add([ptr] { (void)hipFree(ptr); });
 
   // A null output handle is invalid input and must be rejected with a public
@@ -201,7 +201,7 @@ HIP_TEST_CASE(Contract_Ipc_HipIpcGetEventHandle_Default_RequiresInterprocessFlag
   // hipIpcGetEventHandle must not report success for it. Backends differ in the
   // exact error code, so the contract only requires a non-success result.
   hipEvent_t event = nullptr;
-  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
+  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming))
   cleanup.Add([event] { (void)hipEventDestroy(event); });
 
   hipIpcEventHandle_t handle{};
@@ -215,7 +215,7 @@ HIP_TEST_CASE(Contract_Ipc_HipIpcOpenEventHandle_Default_SameProcessRoundTrip) {
   hip::contract::ContractCleanup cleanup;
 
   hipEvent_t event = nullptr;
-  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming | hipEventInterprocess));
+  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming | hipEventInterprocess))
   cleanup.Add([event] { (void)hipEventDestroy(event); });
 
   hipIpcEventHandle_t handle{};
@@ -227,7 +227,7 @@ HIP_TEST_CASE(Contract_Ipc_HipIpcOpenEventHandle_Default_SameProcessRoundTrip) {
   if (IsIpcUnsupportedFromValidCall(get_status)) {
     HIP_SKIP_TEST("IPC event handles are not supported by this device/runtime path.");
   }
-  HIP_CHECK(get_status);
+  HIP_CHECK(get_status)
 
   hipEvent_t opened = nullptr;
   const hipError_t open_status = hipIpcOpenEventHandle(&opened, handle);

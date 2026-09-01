@@ -17,7 +17,7 @@ class Memcpy2DFromArrayBenchmark : public Benchmark<Memcpy2DFromArrayBenchmark> 
   void operator()(void* dst, size_t dst_pitch, hipArray_const_t src, size_t width, size_t height,
                   hipMemcpyKind kind) {
     TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipMemcpy2DFromArray(dst, dst_pitch, src, 0, 0, width, height, kind));
+      HIP_CHECK(hipMemcpy2DFromArray(dst, dst_pitch, src, 0, 0, width, height, kind))
     }
   }
 };
@@ -39,9 +39,9 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
 
     LinearAllocGuard2D<int> device_allocation(width, height);
-    HIP_CHECK(hipSetDevice(dst_device));
+    HIP_CHECK(hipSetDevice(dst_device))
     ArrayAllocGuard<int> array_allocation(make_hipExtent(width, height, 0), hipArrayDefault);
-    HIP_CHECK(hipSetDevice(src_device));
+    HIP_CHECK(hipSetDevice(src_device))
     benchmark.Run(device_allocation.ptr(), device_allocation.pitch(), array_allocation.ptr(),
                   device_allocation.width(), device_allocation.height(), hipMemcpyDeviceToDevice);
   }

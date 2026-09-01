@@ -55,10 +55,10 @@ HIP_TEST_CASE(Unit_hipImportExternalMemory_Vulkan_Negative_Parameters) {
 #endif
 
 #ifdef _WIN32
-  SECTION("memHandleDesc.handle == NULL") {
+  SECTION("memHandleDesc.handle == nullptr") {
     hipExternalMemory_t ext_memory;
     hipExternalMemoryHandleDesc desc;
-    desc.handle.win32.handle = NULL;
+    desc.handle.win32.handle = nullptr;
     HIP_CHECK_ERROR(hipImportExternalMemory(&ext_memory, &desc), hipErrorInvalidValue);
   }
 #endif

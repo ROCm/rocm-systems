@@ -36,7 +36,7 @@ bool CompileLibrarySource(std::vector<char>& code) {
 
 #if HT_AMD
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, 0));
+  HIP_CHECK(hipGetDeviceProperties(&properties, 0))
   const std::string offload_arch = std::string("--offload-arch=") + properties.gcnArchName;
   const char* options[] = {offload_arch.c_str()};
   const int num_options = 1;
@@ -98,10 +98,10 @@ HIP_TEST_CASE(Contract_LibraryFile_HipLibraryLoadFromFile_Default_ResolvesKnownK
   REQUIRE(library != nullptr);
 
   hipKernel_t kernel = nullptr;
-  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
+  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName))
   REQUIRE(kernel != nullptr);
 
-  HIP_CHECK(hipLibraryUnload(library));
+  HIP_CHECK(hipLibraryUnload(library))
   std::remove(path.c_str());
 }
 
@@ -133,6 +133,6 @@ HIP_TEST_CASE(Contract_LibraryFile_HipLibraryGetManaged_UnknownSymbol_IsRejected
       hipLibraryGetManaged(&device_address, &byte_count, library, "no_such_managed_symbol");
   REQUIRE(status != hipSuccess);
 
-  HIP_CHECK(hipLibraryUnload(library));
+  HIP_CHECK(hipLibraryUnload(library))
   std::remove(path.c_str());
 }

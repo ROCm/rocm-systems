@@ -47,17 +47,17 @@ static hipLaunchAttribute makeDynDataPrefetchAttr(
 HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_NegativeTests) {
   constexpr int N = 1024;
   float* d_A = nullptr;
-  HIP_CHECK(hipMalloc(&d_A, N * sizeof(float)));
+  HIP_CHECK(hipMalloc(&d_A, N * sizeof(float)))
 
   int maxRegions = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&maxRegions, hipDeviceAttributeMaxDynDataPrefetchRegions, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&maxRegions, hipDeviceAttributeMaxDynDataPrefetchRegions, 0))
 
   auto makeConfig = [](hipLaunchAttribute* attr, int numAttrs) {
     hipLaunchConfig_t cfg = {};
     cfg.gridDim  = dim3{4, 1, 1};
     cfg.blockDim = dim3{256, 1, 1};
     cfg.dynamicSmemBytes = 0;
-    cfg.stream   = 0;
+    cfg.stream   = nullptr;
     cfg.attrs    = attr;
     cfg.numAttrs = numAttrs;
     return cfg;
@@ -218,7 +218,7 @@ HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_NegativeTests) {
                     unsupportedOrInvalid);
   }
 
-  HIP_CHECK(hipFree(d_A));
+  HIP_CHECK(hipFree(d_A))
 }
 
 /**
@@ -237,7 +237,7 @@ HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_NegativeTests) {
  */
 HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_FunctionalDaxpy) {
   int maxRegions = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&maxRegions, hipDeviceAttributeMaxDynDataPrefetchRegions, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&maxRegions, hipDeviceAttributeMaxDynDataPrefetchRegions, 0))
   if (maxRegions < 2) {
     HIP_SKIP_TEST("Device does not support >= 2 prefetch regions");
     return;
@@ -250,17 +250,17 @@ HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_FunctionalDaxpy) {
   float* d_A = nullptr;
   float* d_B = nullptr;
   float* d_C = nullptr;
-  HIP_CHECK(hipMalloc(&d_A, bytes));
-  HIP_CHECK(hipMalloc(&d_B, bytes));
-  HIP_CHECK(hipMalloc(&d_C, bytes));
+  HIP_CHECK(hipMalloc(&d_A, bytes))
+  HIP_CHECK(hipMalloc(&d_B, bytes))
+  HIP_CHECK(hipMalloc(&d_C, bytes))
 
   std::vector<float> h_A(N), h_B(N), h_C(N);
   for (int i = 0; i < N; ++i) {
     h_A[i] = static_cast<float>(i);
     h_B[i] = static_cast<float>(i * 0.5f);
   }
-  HIP_CHECK(hipMemcpy(d_A, h_A.data(), bytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_B, h_B.data(), bytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_A, h_A.data(), bytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(d_B, h_B.data(), bytes, hipMemcpyHostToDevice))
 
   size_t width = (bytes / 256) * 256;
 
@@ -287,25 +287,25 @@ HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_FunctionalDaxpy) {
   config.gridDim  = dim3{(N + blockSize - 1) / blockSize, 1, 1};
   config.blockDim = dim3{blockSize, 1, 1};
   config.dynamicSmemBytes = 0;
-  config.stream   = 0;
+  config.stream   = nullptr;
   config.attrs    = &attr;
   config.numAttrs = 1;
 
   int n = N;
   void* args[] = {&d_A, &d_B, &d_C, const_cast<float*>(&alpha), &n};
-  HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(daxpyKernel), args));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(daxpyKernel), args))
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipMemcpy(h_C.data(), d_C, bytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(h_C.data(), d_C, bytes, hipMemcpyDeviceToHost))
 
   for (int i = 0; i < N; ++i) {
     float expected = h_A[i] + alpha * h_B[i];
     REQUIRE(h_C[i] == Catch::Approx(expected).epsilon(1e-5f));
   }
 
-  HIP_CHECK(hipFree(d_A));
-  HIP_CHECK(hipFree(d_B));
-  HIP_CHECK(hipFree(d_C));
+  HIP_CHECK(hipFree(d_A))
+  HIP_CHECK(hipFree(d_B))
+  HIP_CHECK(hipFree(d_C))
 }
 
 /**
@@ -322,7 +322,7 @@ HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_FunctionalDaxpy) {
  */
 HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_SingleRegion) {
   int maxRegions = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&maxRegions, hipDeviceAttributeMaxDynDataPrefetchRegions, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&maxRegions, hipDeviceAttributeMaxDynDataPrefetchRegions, 0))
   if (maxRegions < 1) {
     HIP_SKIP_TEST("Device does not support prefetch regions");
     return;
@@ -335,13 +335,13 @@ HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_SingleRegion) {
   float* d_A = nullptr;
   float* d_B = nullptr;
   float* d_C = nullptr;
-  HIP_CHECK(hipMalloc(&d_A, bytes));
-  HIP_CHECK(hipMalloc(&d_B, bytes));
-  HIP_CHECK(hipMalloc(&d_C, bytes));
+  HIP_CHECK(hipMalloc(&d_A, bytes))
+  HIP_CHECK(hipMalloc(&d_B, bytes))
+  HIP_CHECK(hipMalloc(&d_C, bytes))
 
   std::vector<float> h_A(N, 1.0f), h_B(N, 2.0f), h_C(N);
-  HIP_CHECK(hipMemcpy(d_A, h_A.data(), bytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_B, h_B.data(), bytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_A, h_A.data(), bytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(d_B, h_B.data(), bytes, hipMemcpyHostToDevice))
 
   size_t width = (bytes / 256) * 256;
 
@@ -362,25 +362,25 @@ HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_SingleRegion) {
   config.gridDim  = dim3{(N + blockSize - 1) / blockSize, 1, 1};
   config.blockDim = dim3{blockSize, 1, 1};
   config.dynamicSmemBytes = 0;
-  config.stream   = 0;
+  config.stream   = nullptr;
   config.attrs    = &attr;
   config.numAttrs = 1;
 
   int n = N;
   void* args[] = {&d_A, &d_B, &d_C, const_cast<float*>(&alpha), &n};
-  HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(daxpyKernel), args));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(daxpyKernel), args))
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipMemcpy(h_C.data(), d_C, bytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(h_C.data(), d_C, bytes, hipMemcpyDeviceToHost))
 
   for (int i = 0; i < N; ++i) {
     float expected = 1.0f + alpha * 2.0f;
     REQUIRE(h_C[i] == Catch::Approx(expected).epsilon(1e-5f));
   }
 
-  HIP_CHECK(hipFree(d_A));
-  HIP_CHECK(hipFree(d_B));
-  HIP_CHECK(hipFree(d_C));
+  HIP_CHECK(hipFree(d_A))
+  HIP_CHECK(hipFree(d_B))
+  HIP_CHECK(hipFree(d_C))
 }
 
 /**
@@ -397,7 +397,7 @@ HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_SingleRegion) {
  */
 HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_TemporalHints) {
   int maxRegions = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&maxRegions, hipDeviceAttributeMaxDynDataPrefetchRegions, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&maxRegions, hipDeviceAttributeMaxDynDataPrefetchRegions, 0))
   if (maxRegions < 1) {
     HIP_SKIP_TEST("Device does not support prefetch regions");
     return;
@@ -410,13 +410,13 @@ HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_TemporalHints) {
   float* d_A = nullptr;
   float* d_B = nullptr;
   float* d_C = nullptr;
-  HIP_CHECK(hipMalloc(&d_A, bytes));
-  HIP_CHECK(hipMalloc(&d_B, bytes));
-  HIP_CHECK(hipMalloc(&d_C, bytes));
+  HIP_CHECK(hipMalloc(&d_A, bytes))
+  HIP_CHECK(hipMalloc(&d_B, bytes))
+  HIP_CHECK(hipMalloc(&d_C, bytes))
 
   std::vector<float> h_A(N, 3.0f), h_B(N, 4.0f), h_C(N);
-  HIP_CHECK(hipMemcpy(d_A, h_A.data(), bytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d_B, h_B.data(), bytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_A, h_A.data(), bytes, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(d_B, h_B.data(), bytes, hipMemcpyHostToDevice))
 
   auto temporal = GENERATE(hipExtDynDataPrefetchTemporalRegular,
                            hipExtDynDataPrefetchTemporalHigh);
@@ -439,23 +439,23 @@ HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_TemporalHints) {
   config.gridDim  = dim3{1, 1, 1};
   config.blockDim = dim3{(unsigned)N, 1, 1};
   config.dynamicSmemBytes = 0;
-  config.stream   = 0;
+  config.stream   = nullptr;
   config.attrs    = &attr;
   config.numAttrs = 1;
 
   int n = N;
   void* args[] = {&d_A, &d_B, &d_C, const_cast<float*>(&alpha), &n};
-  HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(daxpyKernel), args));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipLaunchKernelExC(&config, reinterpret_cast<void*>(daxpyKernel), args))
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipMemcpy(h_C.data(), d_C, bytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(h_C.data(), d_C, bytes, hipMemcpyDeviceToHost))
   for (int i = 0; i < N; ++i) {
     REQUIRE(h_C[i] == Catch::Approx(3.0f + alpha * 4.0f).epsilon(1e-5f));
   }
 
-  HIP_CHECK(hipFree(d_A));
-  HIP_CHECK(hipFree(d_B));
-  HIP_CHECK(hipFree(d_C));
+  HIP_CHECK(hipFree(d_A))
+  HIP_CHECK(hipFree(d_B))
+  HIP_CHECK(hipFree(d_C))
 }
 
 /**

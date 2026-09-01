@@ -71,7 +71,7 @@ hipArray_t arrayCreate1D(int format, int channel) {
     default:
       desc.Format = HIP_AD_FORMAT_FLOAT;
   }
-  HIP_CHECK(hipArrayCreate(&array, &desc));
+  HIP_CHECK(hipArrayCreate(&array, &desc))
   return array;
 }
 
@@ -122,7 +122,7 @@ hipArray_t arrayCreate2D(int format, int channel) {
     default:
       desc.Format = HIP_AD_FORMAT_FLOAT;
   }
-  HIP_CHECK(hipArrayCreate(&array, &desc));
+  HIP_CHECK(hipArrayCreate(&array, &desc))
   return array;
 }
 // Create a simple 1D array for multithread scenario
@@ -133,7 +133,7 @@ static hipArray_t arrayCreate1D_Thread() {
   desc.Width = 16;
   desc.Height = 0;
   desc.Format = HIP_AD_FORMAT_HALF;
-  HIP_CHECK(hipArrayCreate(&array, &desc));
+  HIP_CHECK(hipArrayCreate(&array, &desc))
   return array;
 }
 // Create a simple 2D array for multithread scenario
@@ -144,7 +144,7 @@ static hipArray_t arrayCreate2D_Thread() {
   desc.Width = 4;
   desc.Height = 4;
   desc.Format = HIP_AD_FORMAT_FLOAT;
-  HIP_CHECK(hipArrayCreate(&array, &desc));
+  HIP_CHECK(hipArrayCreate(&array, &desc))
   return array;
 }
 // Thread function for 1D Array
@@ -179,7 +179,7 @@ static hipArray_t arrayCreateSimple1D() {
   desc.Width = 1024;
   desc.Height = 0;
   desc.Format = HIP_AD_FORMAT_FLOAT;
-  HIP_CHECK(hipArrayCreate(&array, &desc));
+  HIP_CHECK(hipArrayCreate(&array, &desc))
   return array;
 }
 // 2D Array of type Float
@@ -190,13 +190,13 @@ static hipArray_t arrayCreateSimple2D() {
   desc.Width = 1024;
   desc.Height = 1024;
   desc.Format = HIP_AD_FORMAT_FLOAT;
-  HIP_CHECK(hipArrayCreate(&array, &desc));
+  HIP_CHECK(hipArrayCreate(&array, &desc))
   return array;
 }
 // Function to verify data type and assign back memory from Array to Host
 float* funcToChkArray(hipArray_t array) {
   HIP_ARRAY_DESCRIPTOR desc;
-  HIP_CHECK(hipArrayGetDescriptor(&desc, array));
+  HIP_CHECK(hipArrayGetDescriptor(&desc, array))
   float* A_h = nullptr;
   static constexpr auto NUM_ELM{1024};
   size_t mem_size = NUM_ELM * sizeof(float);
@@ -206,7 +206,7 @@ float* funcToChkArray(hipArray_t array) {
       A_h[i] = 2.0;
     }
   }
-  HIP_CHECK(hipMemcpyAtoH(A_h, array, 0, mem_size));
+  HIP_CHECK(hipMemcpyAtoH(A_h, array, 0, mem_size))
   return A_h;
 }
 /**
@@ -224,30 +224,30 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   for (int i = 0; i < numDevices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     CHECK_IMAGE_SUPPORT
 #if HT_NVIDIA
-    HIP_CHECK(hipInit(0));
+    HIP_CHECK(hipInit(0))
     hipCtx_t ctx;
-    HIP_CHECK(hipCtxCreate(&ctx, 0, i));
+    HIP_CHECK(hipCtxCreate(&ctx, 0, i))
 #endif
     // 1D array parameters verification
     SECTION("1D Array parameters verification") {
       hipArray_t array1D = arrayCreate1D(1, 1);
       HIP_ARRAY_DESCRIPTOR desc1;
-      HIP_CHECK(hipArrayGetDescriptor(&desc1, array1D));
+      HIP_CHECK(hipArrayGetDescriptor(&desc1, array1D))
       // Verify width of Array
       REQUIRE(desc1.Width == 16);
       // Verify Height of Array
       REQUIRE(desc1.Height == 0);
-      HIP_CHECK(hipArrayDestroy(array1D));
+      HIP_CHECK(hipArrayDestroy(array1D))
       for (int j = 1; j < 5; j++) {
         for (int i = 1; i < 33; i++) {
           hipArray_t array1D1 = arrayCreate1D(i, j);
           HIP_ARRAY_DESCRIPTOR desc1;
-          HIP_CHECK(hipArrayGetDescriptor(&desc1, array1D1));
+          HIP_CHECK(hipArrayGetDescriptor(&desc1, array1D1))
 
           // Verify Num Of Channels
           REQUIRE(desc1.NumChannels == j);
@@ -256,7 +256,7 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk) {
           if (i == 3) i = 7;
           if (i == 10) i = 15;
           if (i == 16) i = 31;
-          HIP_CHECK(hipArrayDestroy(array1D1));
+          HIP_CHECK(hipArrayDestroy(array1D1))
         }
         if (j == 2) j = 3;
       }
@@ -265,17 +265,17 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk) {
     SECTION("2D Array parameters verification") {
       hipArray_t array2D = arrayCreate2D(1, 1);
       HIP_ARRAY_DESCRIPTOR desc;
-      HIP_CHECK(hipArrayGetDescriptor(&desc, array2D));
+      HIP_CHECK(hipArrayGetDescriptor(&desc, array2D))
       // Verify width of Array
       REQUIRE(desc.Width == 4);
       // Verify Height of Array
       REQUIRE(desc.Height == 4);
-      HIP_CHECK(hipArrayDestroy(array2D));
+      HIP_CHECK(hipArrayDestroy(array2D))
       for (int j = 1; j < 5; j++) {
         for (int i = 1; i < 33; i++) {
           hipArray_t array2D1 = arrayCreate2D(i, j);
           HIP_ARRAY_DESCRIPTOR desc;
-          HIP_CHECK(hipArrayGetDescriptor(&desc, array2D1));
+          HIP_CHECK(hipArrayGetDescriptor(&desc, array2D1))
           // Num Of Channels
           REQUIRE(desc.NumChannels == j);
           // Verify format of Array
@@ -283,13 +283,13 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk) {
           if (i == 3) i = 7;
           if (i == 10) i = 15;
           if (i == 16) i = 31;
-          HIP_CHECK(hipArrayDestroy(array2D1));
+          HIP_CHECK(hipArrayDestroy(array2D1))
         }
         if (j == 2) j = 3;
       }
     }
 #if HT_NVIDIA
-    HIP_CHECK(hipCtxDestroy(ctx));
+    HIP_CHECK(hipCtxDestroy(ctx))
 #endif
   }
 }
@@ -309,14 +309,14 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   for (int i = 0; i < numDevices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
     CHECK_IMAGE_SUPPORT
 #if HT_NVIDIA
-    HIP_CHECK(hipInit(0));
+    HIP_CHECK(hipInit(0))
     hipCtx_t ctx;
-    HIP_CHECK(hipCtxCreate(&ctx, 0, i));
+    HIP_CHECK(hipCtxCreate(&ctx, 0, i))
 #endif
     hipArray_t array_t1 = arrayCreate1D_Thread();
     hipArray_t array_t2 = arrayCreate2D_Thread();
@@ -336,10 +336,10 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array) {
     // Validation
     REQUIRE(testPassed1D);
     REQUIRE(testPassed2D);
-    HIP_CHECK(hipArrayDestroy(array_t1));
-    HIP_CHECK(hipArrayDestroy(array_t2));
+    HIP_CHECK(hipArrayDestroy(array_t1))
+    HIP_CHECK(hipArrayDestroy(array_t2))
 #if HT_NVIDIA
-    HIP_CHECK(hipCtxDestroy(ctx));
+    HIP_CHECK(hipCtxDestroy(ctx))
 #endif
   }
 }
@@ -360,14 +360,14 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Host2Array_Array2Host) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   for (int k = 0; k < numDevices; k++) {
-    HIP_CHECK(hipSetDevice(k));
+    HIP_CHECK(hipSetDevice(k))
     CHECK_IMAGE_SUPPORT
 #if HT_NVIDIA
-    HIP_CHECK(hipInit(0));
+    HIP_CHECK(hipInit(0))
     hipCtx_t ctx;
-    HIP_CHECK(hipCtxCreate(&ctx, 0, k));
+    HIP_CHECK(hipCtxCreate(&ctx, 0, k))
 #endif
     int count_1D = 0;
     size_t mem_size = NUM_ELM * sizeof(float);
@@ -377,7 +377,7 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Host2Array_Array2Host) {
       A_h[i] = 2.0;
     }
     hipArray_t arraySimple1D = arrayCreateSimple1D();
-    HIP_CHECK(hipMemcpyHtoA(arraySimple1D, 0, A_h, mem_size));
+    HIP_CHECK(hipMemcpyHtoA(arraySimple1D, 0, A_h, mem_size))
     float* A_h1 = funcToChkArray(arraySimple1D);
     for (int i = 0; i < NUM_ELM; i++) {
       if (A_h[i] == A_h1[i]) {
@@ -387,7 +387,7 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Host2Array_Array2Host) {
     // Validation
     REQUIRE(count_1D == NUM_ELM);
     free(A_h);
-    HIP_CHECK(hipArrayDestroy(arraySimple1D));
+    HIP_CHECK(hipArrayDestroy(arraySimple1D))
     SECTION("2D Array Verification") {
       int count_2D = 0;
       size_t mem_size1 = NUM_ELM * sizeof(float);
@@ -398,7 +398,7 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Host2Array_Array2Host) {
       }
 
       hipArray_t arraySimple2D = arrayCreateSimple2D();
-      HIP_CHECK(hipMemcpyHtoA(arraySimple2D, 0, A_h2, mem_size1));
+      HIP_CHECK(hipMemcpyHtoA(arraySimple2D, 0, A_h2, mem_size1))
       float* A_h3 = funcToChkArray(arraySimple2D);
       for (int i = 0; i < NUM_ELM; i++) {
         if (A_h2[i] == A_h3[i]) {
@@ -408,10 +408,10 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Host2Array_Array2Host) {
       // Validation
       REQUIRE(count_2D == NUM_ELM);
       free(A_h2);
-      HIP_CHECK(hipArrayDestroy(arraySimple2D));
+      HIP_CHECK(hipArrayDestroy(arraySimple2D))
     }
 #if HT_NVIDIA
-    HIP_CHECK(hipCtxDestroy(ctx));
+    HIP_CHECK(hipCtxDestroy(ctx))
 #endif
   }
 }
@@ -437,10 +437,10 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Negative_Scenarios) {
 #if HT_AMD
   void* dptr;
   SECTION("Invalid Array Address") {
-    HIP_CHECK(hipMalloc(&dptr, 1024));
+    HIP_CHECK(hipMalloc(&dptr, 1024))
     error = hipArrayGetDescriptor(&desc_Neg, reinterpret_cast<hipArray_t>(dptr));
     REQUIRE(error != hipSuccess);
-    HIP_CHECK(hipFree(dptr));
+    HIP_CHECK(hipFree(dptr))
   }
 #endif
 }
@@ -475,17 +475,17 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Positive_Basic) {
   expected_desc.Height = 4;
 
   hipArray_t ptr;
-  HIP_CHECK(hipArrayCreate(&ptr, &expected_desc));
+  HIP_CHECK(hipArrayCreate(&ptr, &expected_desc))
 
   HIP_ARRAY_DESCRIPTOR desc;
-  HIP_CHECK(hipArrayGetDescriptor(&desc, ptr));
+  HIP_CHECK(hipArrayGetDescriptor(&desc, ptr))
 
   REQUIRE(desc.Format == expected_desc.Format);
   REQUIRE(desc.NumChannels == expected_desc.NumChannels);
   REQUIRE(desc.Width == expected_desc.Width);
   REQUIRE(desc.Height == expected_desc.Height);
 
-  HIP_CHECK(hipArrayDestroy(ptr));
+  HIP_CHECK(hipArrayDestroy(ptr))
 }
 
 /**
@@ -510,7 +510,7 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Negative_Parameters) {
   expected_desc.Height = 4;
 
   hipArray_t ptr;
-  HIP_CHECK(hipArrayCreate(&ptr, &expected_desc));
+  HIP_CHECK(hipArrayCreate(&ptr, &expected_desc))
 
   HIP_ARRAY_DESCRIPTOR desc;
 
@@ -523,7 +523,7 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Negative_Parameters) {
   }
 
   SECTION("array is freed") {
-    HIP_CHECK(hipArrayDestroy(ptr));
+    HIP_CHECK(hipArrayDestroy(ptr))
     HIP_CHECK_ERROR(hipArrayGetDescriptor(&desc, ptr), hipErrorInvalidHandle);
   }
 

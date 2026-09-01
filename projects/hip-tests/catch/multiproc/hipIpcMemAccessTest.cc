@@ -89,14 +89,14 @@ HIP_TEST_CASE(Unit_hipIpcMemAccess_Semaphores) {
   pid = fork();
   if (pid != 0) {
     // Parent process
-    HIP_CHECK(hipGetDeviceCount(&Num_devices));
+    HIP_CHECK(hipGetDeviceCount(&Num_devices))
     for (int i = 0; i < Num_devices; ++i) {
       if (shrd_mem->IfTestPassed == true) {
-        HIP_CHECK(hipSetDevice(i));
-        HIP_CHECK(hipMalloc(&A_d, Nbytes));
+        HIP_CHECK(hipSetDevice(i))
+        HIP_CHECK(hipMalloc(&A_d, Nbytes))
         HIP_CHECK(
             hipIpcGetMemHandle(reinterpret_cast<hipIpcMemHandle_t*>(&shrd_mem->memHandle), A_d));
-        HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
         shrd_mem->device = i;
         if ((sem_post(sem_ob1)) == -1) {
           // Need to use inline function to release resources.
@@ -107,14 +107,14 @@ HIP_TEST_CASE(Unit_hipIpcMemAccess_Semaphores) {
           shrd_mem->IfTestPassed = false;
           WARN("sem_wait() call failed in parent process.");
         }
-        HIP_CHECK(hipFree(A_d));
+        HIP_CHECK(hipFree(A_d))
       }
     }
   } else {
     // Child process
-    HIP_CHECK(hipGetDeviceCount(&Num_devices));
+    HIP_CHECK(hipGetDeviceCount(&Num_devices))
     for (int j = 0; j < Num_devices; ++j) {
-      HIP_CHECK(hipSetDevice(j));
+      HIP_CHECK(hipSetDevice(j))
       if ((sem_wait(sem_ob1)) == -1) {
         shrd_mem->IfTestPassed = false;
         WARN("sem_wait() call failed in child process.");
@@ -126,22 +126,22 @@ HIP_TEST_CASE(Unit_hipIpcMemAccess_Semaphores) {
       }
       for (int i = 0; i < Num_devices; ++i) {
 
-        HIP_CHECK(hipDeviceCanAccessPeer(&CanAccessPeer, i, shrd_mem->device));
+        HIP_CHECK(hipDeviceCanAccessPeer(&CanAccessPeer, i, shrd_mem->device))
         if (CanAccessPeer == 1) {
-          HIP_CHECK(hipDeviceEnablePeerAccess(i, 0));
-          HIP_CHECK(hipSetDevice(i));
-          HIP_CHECK(hipMalloc(&C_d, Nbytes));
+          HIP_CHECK(hipDeviceEnablePeerAccess(i, 0))
+          HIP_CHECK(hipSetDevice(i))
+          HIP_CHECK(hipMalloc(&C_d, Nbytes))
           HIP_CHECK(hipIpcOpenMemHandle(reinterpret_cast<void**>(&B_d), shrd_mem->memHandle,
                                         hipIpcMemLazyEnablePeerAccess));
-          HIP_CHECK(hipMemcpy(C_d, B_d, Nbytes, hipMemcpyDeviceToDevice));
-          HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+          HIP_CHECK(hipMemcpy(C_d, B_d, Nbytes, hipMemcpyDeviceToDevice))
+          HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
           HipTest::checkTest<int>(A_h, C_h, N);
           memset(reinterpret_cast<void*>(C_h), 0, Nbytes);
           // Checking if the data obtained from Ipc shared memory is consistent
-          HIP_CHECK(hipMemcpy(C_h, B_d, Nbytes, hipMemcpyDeviceToHost));
+          HIP_CHECK(hipMemcpy(C_h, B_d, Nbytes, hipMemcpyDeviceToHost))
           HipTest::checkTest<int>(A_h, C_h, N);
-          HIP_CHECK(hipIpcCloseMemHandle(reinterpret_cast<void*>(B_d)));
-          HIP_CHECK(hipFree(C_d));
+          HIP_CHECK(hipIpcCloseMemHandle(reinterpret_cast<void*>(B_d)))
+          HIP_CHECK(hipFree(C_d))
         }
       }
       if ((sem_post(sem_ob2)) == -1) {
@@ -203,7 +203,7 @@ HIP_TEST_CASE(Unit_hipIpcMemAccess_ParameterValidation) {
   void *Ad{}, *Ad2{};
   hipError_t ret;
 
-  HIP_CHECK(hipMalloc(&Ad, 1024));
+  HIP_CHECK(hipMalloc(&Ad, 1024))
 
 #if HT_AMD
   // Test is disabled for nvidia as api resulting in seg fault.
@@ -240,7 +240,7 @@ HIP_TEST_CASE(Unit_hipIpcMemAccess_ParameterValidation) {
   // Test is disabled for nvidia as api not returning expected value.
   SECTION("Open mem handle with flags as random value") {
     constexpr unsigned int flags = 123;
-    HIP_CHECK(hipIpcGetMemHandle(&MemHandle, Ad));
+    HIP_CHECK(hipIpcGetMemHandle(&MemHandle, Ad))
     ret = hipIpcOpenMemHandle(&Ad2, MemHandle, flags);
     REQUIRE(ret == hipErrorInvalidValue);
   }
@@ -250,7 +250,7 @@ HIP_TEST_CASE(Unit_hipIpcMemAccess_ParameterValidation) {
     REQUIRE(ret == hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Ad))
 }
 
 /**

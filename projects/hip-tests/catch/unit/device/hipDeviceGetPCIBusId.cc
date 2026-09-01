@@ -26,7 +26,7 @@ namespace hipDeviceGetPCIBusIdTests {
 
 void getPciBusId(int deviceCount, char** hipDeviceList) {
   for (int i = 0; i < deviceCount; i++) {
-    HIP_CHECK(hipDeviceGetPCIBusId(hipDeviceList[i], MAX_DEVICE_LENGTH, i));
+    HIP_CHECK(hipDeviceGetPCIBusId(hipDeviceList[i], MAX_DEVICE_LENGTH, i))
   }
 }
 }  // namespace hipDeviceGetPCIBusIdTests
@@ -45,7 +45,7 @@ void getPciBusId(int deviceCount, char** hipDeviceList) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr) {
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   REQUIRE_FALSE(deviceCount == 0);
   printf("No.of gpus in the system: %d\n", deviceCount);
   // Allocate an array of pointer to characters
@@ -63,7 +63,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr) {
     int pciDomainID = -1;
     int tempPciBusId = -1;
     sscanf(hipDeviceList[i], "%04x:%02x:%02x", &pciDomainID, &pciBusID, &pciDeviceID);
-    HIP_CHECK(hipDeviceGetAttribute(&tempPciBusId, hipDeviceAttributePciBusId, i));
+    HIP_CHECK(hipDeviceGetAttribute(&tempPciBusId, hipDeviceAttributePciBusId, i))
     REQUIRE_FALSE(pciBusID != tempPciBusId);
   }
   // Deallocate
@@ -94,7 +94,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_Negative_PartialFill) {
 
   const int device = GENERATE(range(0, HipTest::getDeviceCount()));
 
-  HIP_CHECK(hipDeviceGetPCIBusId(busID.data(), busID.size(), device));
+  HIP_CHECK(hipDeviceGetPCIBusId(busID.data(), busID.size(), device))
 
   auto start = std::begin(busID);
   auto end = std::end(busID);
@@ -137,7 +137,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_Negative_PartialFill) {
 HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_NegTst) {
   char pciBusId[MAX_DEVICE_LENGTH];
   int device;
-  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDevice(&device))
 
   // pciBusId is nullptr
   SECTION("pciBusId is nullptr") {
@@ -159,7 +159,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_NegTst) {
   // device = Non Existing Device
   SECTION("device is out of bounds") {
     int deviceCount = 0;
-    HIP_CHECK(hipGetDeviceCount(&deviceCount));
+    HIP_CHECK(hipGetDeviceCount(&deviceCount))
     REQUIRE_FALSE(deviceCount == 0);
     REQUIRE_FALSE(hipDeviceGetPCIBusId(pciBusId, MAX_DEVICE_LENGTH, deviceCount) == hipSuccess);
   }

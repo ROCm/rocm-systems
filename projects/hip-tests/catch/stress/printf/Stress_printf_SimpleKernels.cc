@@ -200,8 +200,8 @@ bool test_printf_conststr(uint32_t num_blocks, uint32_t threads_per_block, uint3
     CaptureStream captured(stdout);
     hipLaunchKernelGGL(kernel_printf_conststr, dim3(num_blocks, 1, 1),
                        dim3(threads_per_block, 1, 1), 0, 0, iterCount);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipStreamSynchronize(0));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipStreamSynchronize(0))
     std::ifstream CapturedData = captured.getCapturedData();
     char* buffer = new char[CHUNK_SIZE];
     while (CapturedData.good()) {
@@ -257,8 +257,8 @@ bool test_printf_two_conditionalstr(uint32_t num_blocks, uint32_t threads_per_bl
     CaptureStream captured(stdout);
     hipLaunchKernelGGL(kernel_printf_two_conditionalstr, dim3(num_blocks, 1, 1),
                        dim3(threads_per_block, 1, 1), 0, 0, iterCount);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipStreamSynchronize(0));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipStreamSynchronize(0))
     std::ifstream CapturedData = captured.getCapturedData();
     char* buffer = new char[CHUNK_SIZE];
     while (CapturedData.good()) {
@@ -315,8 +315,8 @@ bool test_printf_single_conditionalstr(uint32_t num_blocks, uint32_t threads_per
     CaptureStream captured(stdout);
     hipLaunchKernelGGL(kernel_printf_single_conditionalstr, dim3(num_blocks, 1, 1),
                        dim3(threads_per_block, 1, 1), 0, 0, iterCount);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipStreamSynchronize(0));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipStreamSynchronize(0))
     std::ifstream CapturedData = captured.getCapturedData();
     char* buffer = new char[CHUNK_SIZE];
     while (CapturedData.good()) {
@@ -362,16 +362,16 @@ bool test_variable_str(uint32_t print_limit, void (*func)(uint32_t, int*),
   for (uint32_t i = 0; i < buffsize; i++) {
     Ah[i] = 0;
   }
-  HIP_CHECK(hipMalloc(&Ad, buffsize * sizeof(int32_t)));
-  HIP_CHECK(hipMemcpy(Ad, Ah, buffsize * sizeof(int32_t), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&Ad, buffsize * sizeof(int32_t)))
+  HIP_CHECK(hipMemcpy(Ad, Ah, buffsize * sizeof(int32_t), hipMemcpyHostToDevice))
   // DO NOT PUT ANY PRINTF WITHIN THIS BLOCK OF CODE
   {
     CaptureStream captured(stdout);
     hipLaunchKernelGGL(func, dim3(num_blocks, 1, 1), dim3(threads_per_block, 1, 1), 0, 0, iterCount,
                        Ad);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipStreamSynchronize(0));
-    HIP_CHECK(hipMemcpy(Ah, Ad, buffsize * sizeof(int32_t), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipMemcpy(Ah, Ad, buffsize * sizeof(int32_t), hipMemcpyDeviceToHost))
     std::ifstream CapturedData = captured.getCapturedData();
     char* buffer = new char[CHUNK_SIZE];
     while (CapturedData.good()) {
@@ -389,7 +389,7 @@ bool test_variable_str(uint32_t print_limit, void (*func)(uint32_t, int*),
   for (uint32_t i = 0; i < buffsize; i++) {
     expectedFileSize += Ah[i];
   }
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK(hipFree(Ad))
   delete[] Ah;
   printf("totalExpectedLines = %u \n", totalExpectedLines);
   printf("totalActualLines = %u \n", totalActualLines - 1);
@@ -421,8 +421,8 @@ bool test_decimal_str(uint32_t num_blocks, uint32_t threads_per_block, uint32_t 
     CaptureStream captured(stdout);
     hipLaunchKernelGGL(kernel_decimal_calculation, dim3(num_blocks, 1, 1),
                        dim3(threads_per_block, 1, 1), 0, 0, iterCount, maxPrecision);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipStreamSynchronize(0));
+    HIP_CHECK(hipGetLastError())
+    HIP_CHECK(hipStreamSynchronize(0))
     std::ifstream CapturedData = captured.getCapturedData();
     char* buffer = new char[CHUNK_SIZE];
     while (CapturedData.good()) {
@@ -468,13 +468,13 @@ bool test_shared_mem(uint32_t num_blocks, uint32_t threads_per_block, uint32_t p
   {
     CaptureStream captured(stdout);
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     for (int count = 0; count < (const int)iterCount; count++) {
       HIP_CHECK(hipLaunchKernel((const void*)kernel_shared_mem, dim3(num_blocks, 1, 1),
                                 dim3(threads_per_block, 1, 1), NULL, 0, stream));
     }
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipStreamDestroy(stream))
     std::ifstream CapturedData = captured.getCapturedData();
     char* buffer = new char[CHUNK_SIZE];
     while (CapturedData.good()) {
@@ -523,13 +523,13 @@ bool test_synchronized_printf(uint32_t num_blocks, uint32_t threads_per_block,
   {
     CaptureStream captured(stdout);
     hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
     for (int count = 0; count < (const int)iterCount; count++) {
       HIP_CHECK(hipLaunchKernel((const void*)kernel_synchronized_printf, dim3(num_blocks, 1, 1),
                                 dim3(threads_per_block, 1, 1), NULL, 0, stream));
     }
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamSynchronize(stream))
+    HIP_CHECK(hipStreamDestroy(stream))
     std::ifstream CapturedData = captured.getCapturedData();
     char* buffer = new char[CHUNK_SIZE];
     while (CapturedData.good()) {

@@ -19,12 +19,12 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Positive_Basic) {
   SECTION("Cooperative kernel with no arguments") {
     HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(coop_kernel), dim3{2, 2, 1},
                                          dim3{1, 1, 1}, nullptr, 0, nullptr));
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDeviceSynchronize())
   }
 
   SECTION("Kernel with arguments using kernelParams") {
     LinearAllocGuard<int> result_dev(LinearAllocs::hipMalloc, sizeof(int));
-    HIP_CHECK(hipMemset(result_dev.ptr(), 0, sizeof(*result_dev.ptr())));
+    HIP_CHECK(hipMemset(result_dev.ptr(), 0, sizeof(*result_dev.ptr())))
 
     int* result_ptr = result_dev.ptr();
     void* kernel_args[1] = {&result_ptr};
@@ -32,7 +32,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Positive_Basic) {
                                          dim3{1, 1, 1}, kernel_args, 0, nullptr));
 
     int result = 0;
-    HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(result), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(result), hipMemcpyDefault))
     REQUIRE(result == 42);
   }
 }
@@ -165,7 +165,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Verify_Capture) {
   }
 
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
@@ -173,6 +173,6 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Verify_Capture) {
                                        dim3{1, 1, 1}, nullptr, 0, stream));
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipStreamDestroy(stream))
 }

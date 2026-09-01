@@ -31,7 +31,7 @@ static void runAtomicOrSystemSameAddressTest() {
 template <typename TestType>
 static void runAtomicOrSystemAdjacentAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
 
   for (auto current = 0; current < 1; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
@@ -45,7 +45,7 @@ static void runAtomicOrSystemAdjacentAddressesTest() {
 template <typename TestType>
 static void runAtomicOrSystemScatteredAddressesTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < 1; ++current) {

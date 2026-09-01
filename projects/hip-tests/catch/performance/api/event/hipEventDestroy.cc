@@ -18,7 +18,7 @@ class HipEventDestroyBenchmark : public Benchmark<HipEventDestroyBenchmark> {
  public:
   void operator()() {
     hipEvent_t event;
-    HIP_CHECK(hipEventCreate(&event));
+    HIP_CHECK(hipEventCreate(&event))
 
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipEventDestroy(event)); }
   }

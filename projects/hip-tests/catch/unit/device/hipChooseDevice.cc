@@ -27,11 +27,11 @@
  */
 HIP_TEST_CASE(Unit_hipChooseDevice_ValidateDevId) {
   hipDeviceProp_t prop;
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0))
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
   int dev = -1;
-  HIP_CHECK(hipChooseDevice(&dev, &prop));
+  HIP_CHECK(hipChooseDevice(&dev, &prop))
   REQUIRE_FALSE(dev < 0);
   REQUIRE_FALSE(dev >= numDevices);
 }

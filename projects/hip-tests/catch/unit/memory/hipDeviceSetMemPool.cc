@@ -27,7 +27,7 @@ static bool checkMallocAsync() {
   streamMemAllocTest testObj(NUM_ELM);
   // create a stream
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   // Create host buffer with test data.
   testObj.createHostBufferWithData();
   // Allocate device memory and transfer data to it asyncronously on stream.
@@ -38,11 +38,11 @@ static bool checkMallocAsync() {
   testObj.transferFromMempool(stream);
   // Free Buffer Asynchronously on stream.
   testObj.freeDevBuf(stream);
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   // verify and validate
   REQUIRE(true == testObj.validateResult());
   // Destroy resources
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
   testObj.freeHostBuf();
   return true;
 }
@@ -60,7 +60,7 @@ static bool checkMallocAsync() {
  */
 HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Basic) {
   int num_devices;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
   for (int dev = 0; dev < num_devices; dev++) {
     checkMempoolSupported(dev) hipMemPool_t mem_pool_device = nullptr, curr_mem_pool = nullptr;
     // create explicit mem pool
@@ -68,14 +68,14 @@ HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Basic) {
     prop.allocType = hipMemAllocationTypePinned;
     prop.location.id = dev;
     prop.location.type = hipMemLocationTypeDevice;
-    HIP_CHECK(hipMemPoolCreate(&mem_pool_device, &prop));
-    HIP_CHECK(hipDeviceSetMemPool(dev, mem_pool_device));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool_device, &prop))
+    HIP_CHECK(hipDeviceSetMemPool(dev, mem_pool_device))
     // get current mem pool
-    HIP_CHECK(hipDeviceGetMemPool(&curr_mem_pool, dev));
+    HIP_CHECK(hipDeviceGetMemPool(&curr_mem_pool, dev))
     // validate both memory are same.
     REQUIRE(curr_mem_pool == mem_pool_device);
     // free mem pool
-    HIP_CHECK(hipMemPoolDestroy(mem_pool_device));
+    HIP_CHECK(hipMemPoolDestroy(mem_pool_device))
   }
 }
 
@@ -94,7 +94,7 @@ HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Basic) {
  */
 HIP_TEST_CASE(Unit_hipDeviceSetMemPool_DestroyCurrentMempool) {
   int num_devices;
-  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  HIP_CHECK(hipGetDeviceCount(&num_devices))
   for (int dev = 0; dev < num_devices; dev++) {
     checkMempoolSupported(dev) HIP_CHECK(hipSetDevice(dev));
     hipMemPool_t mem_pool_device, curr_mem_pool, def_mem_pool;
@@ -103,15 +103,15 @@ HIP_TEST_CASE(Unit_hipDeviceSetMemPool_DestroyCurrentMempool) {
     prop.location.id = dev;
     prop.location.type = hipMemLocationTypeDevice;
     // Create explicit mempool
-    HIP_CHECK(hipMemPoolCreate(&mem_pool_device, &prop));
+    HIP_CHECK(hipMemPoolCreate(&mem_pool_device, &prop))
     // Set mempool
-    HIP_CHECK(hipDeviceSetMemPool(dev, mem_pool_device));
+    HIP_CHECK(hipDeviceSetMemPool(dev, mem_pool_device))
     // Destroy mem pool
-    HIP_CHECK(hipMemPoolDestroy(mem_pool_device));
+    HIP_CHECK(hipMemPoolDestroy(mem_pool_device))
     // Get current mem pool
-    HIP_CHECK(hipDeviceGetMemPool(&curr_mem_pool, dev));
+    HIP_CHECK(hipDeviceGetMemPool(&curr_mem_pool, dev))
     // Get default mempool
-    HIP_CHECK(hipDeviceGetDefaultMemPool(&def_mem_pool, dev));
+    HIP_CHECK(hipDeviceGetDefaultMemPool(&def_mem_pool, dev))
     // validate the mempool is the default mempool
     REQUIRE(curr_mem_pool == def_mem_pool);
   }
@@ -135,12 +135,12 @@ HIP_TEST_CASE(Unit_hipDeviceSetMemPool_functional) {
   PoolProps.allocType = hipMemAllocationTypePinned;
   PoolProps.location.id = 0;
   PoolProps.location.type = hipMemLocationTypeDevice;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &PoolProps));
-  HIP_CHECK(hipDeviceSetMemPool(0, mem_pool));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &PoolProps))
+  HIP_CHECK(hipDeviceSetMemPool(0, mem_pool))
   // call checkMallocAsync function
   REQUIRE(true == checkMallocAsync());
   // destroy the mem pool.
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
 }
 
 /**
@@ -162,14 +162,14 @@ HIP_TEST_CASE(Unit_hipDeviceSetMemPool_functionalAttribute) {
   PoolProps.allocType = hipMemAllocationTypePinned;
   PoolProps.location.id = 0;
   PoolProps.location.type = hipMemLocationTypeDevice;
-  HIP_CHECK(hipMemPoolCreate(&mem_pool, &PoolProps));
-  HIP_CHECK(hipDeviceSetMemPool(0, mem_pool));
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &PoolProps))
+  HIP_CHECK(hipDeviceSetMemPool(0, mem_pool))
   // set attribute hipMemPoolAttrReleaseThreshold as UINT64_MAX
   hipMemPoolAttr attr = hipMemPoolAttrReleaseThreshold;
   std::uint64_t value = UINT64_MAX;
-  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
+  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value))
   // call checkMallocAsync function
   REQUIRE(true == checkMallocAsync());
   // destroy the mem pool.
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool))
 }

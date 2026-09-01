@@ -126,11 +126,11 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters) {
   constexpr auto NegativeTests = [](hipPitchedPtr dst_ptr, hipPos dst_pos, hipPitchedPtr src_ptr,
                                     hipPos src_pos, hipExtent extent, hipMemcpyKind kind) {
     hipGraph_t graph = nullptr;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphCreate(&graph, 0))
 
     hipGraphNode_t node = nullptr;
     auto params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent, kind);
-    HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params));
+    HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params))
 
     SECTION("node == nullptr") {
       params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent, kind);
@@ -177,7 +177,7 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters) {
 
     SECTION("dst_ptr.pitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       hipPitchedPtr invalid_ptr = dst_ptr;
       invalid_ptr.pitch = attr;
       params = GetMemcpy3DParms(invalid_ptr, dst_pos, src_ptr, src_pos, extent, kind);
@@ -186,7 +186,7 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters) {
 
     SECTION("src_ptr.pitch > max pitch") {
       int attr = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
+      HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0))
       hipPitchedPtr invalid_ptr = src_ptr;
       invalid_ptr.pitch = attr;
       params = GetMemcpy3DParms(dst_ptr, dst_pos, invalid_ptr, src_pos, extent, kind);
@@ -241,7 +241,7 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters) {
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidMemcpyDirection);
     }
 
-    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphDestroy(graph))
   };
 
   SECTION("Host to Device") {

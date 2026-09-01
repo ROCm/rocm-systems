@@ -21,7 +21,7 @@
 template <typename TestType>
 static void runUnsafeAtomicAddTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
@@ -45,7 +45,7 @@ static void runUnsafeAtomicAddTest() {
 template <typename TestType>
 static void runUnsafeAtomicAddMultiKernelTest() {
   int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0))
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
@@ -152,12 +152,12 @@ static void runUnsafeAtomicAddHalfAndBfloatTest() {
   // unsafeAtomicAdd for __half/__hip_bfloat16 internally uses 4-byte atomics,
   // so we must allocate at least 4 bytes even for 2-byte types
   constexpr size_t alloc_size = sizeof(TestType) < 4 ? 4 : sizeof(TestType);
-  HIP_CHECK(hipMalloc(&out, alloc_size));
-  HIP_CHECK(hipMemset(out, 0, alloc_size));
+  HIP_CHECK(hipMalloc(&out, alloc_size))
+  HIP_CHECK(hipMemset(out, 0, alloc_size))
   kernel<<<1, 32>>>(out, val);
 
   TestType dout;
-  HIP_CHECK(hipMemcpy(&dout, out, sizeof(TestType), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&dout, out, sizeof(TestType), hipMemcpyDeviceToHost))
 
   float2 hout;
   if constexpr (std::is_same<TestType, __half2>::value) {
@@ -174,7 +174,7 @@ static void runUnsafeAtomicAddHalfAndBfloatTest() {
 
   REQUIRE(hout.x == 32.0f);
   REQUIRE(hout.y == 64.0f);
-  HIP_CHECK(hipFree(out));
+  HIP_CHECK(hipFree(out))
 }
 
 TEST_CASE(Unit_unsafe_atomic_add_half_and_bfloat) {

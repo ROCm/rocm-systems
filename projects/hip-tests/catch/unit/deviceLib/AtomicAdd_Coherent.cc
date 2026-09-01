@@ -61,19 +61,19 @@ static void runAtomicAddCoherentNoUnsafeFlagTest() {
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType),
                           hipHostMallocCoherent));
   result[0] = INITIAL_VAL;
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
   hipLaunchKernelGGL(AtomicCheck<TestType>, dim3(1), dim3(1), 0, 0, A_d, result_d);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
   bool testResult;
   testResult = HipTest::assemblyFile_Verification<TestType>(
       "AtomicAdd_Coherent_withnoUnsafeflag-hip-amdgcn(.*)\\.s", "global_atomic_cmpswap");
   REQUIRE(testResult == true);
   REQUIRE(A_h[0] == INITIAL_VAL + INC_VAL);
   REQUIRE(result[0] == INITIAL_VAL);
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipHostFree(result));
+  HIP_CHECK(hipHostFree(A_h))
+  HIP_CHECK(hipHostFree(result))
 }
 
 // Helper function for "without any flag" test
@@ -87,19 +87,19 @@ static void runAtomicAddCoherentWithoutFlagTest() {
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType),
                           hipHostMallocCoherent));
   result[0] = INITIAL_VAL;
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
   hipLaunchKernelGGL(AtomicCheck<TestType>, dim3(1), dim3(1), 0, 0, A_d, result_d);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
   bool testResult;
   testResult = HipTest::assemblyFile_Verification<TestType>(
       "AtomicAdd_Coherent_withoutflag-hip-amdgcn(.*)\\.s", "global_atomic_cmpswap");
   REQUIRE(result[0] == INITIAL_VAL);
   REQUIRE(A_h[0] == INITIAL_VAL + INC_VAL);
   REQUIRE(testResult == true);
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipHostFree(result));
+  HIP_CHECK(hipHostFree(A_h))
+  HIP_CHECK(hipHostFree(result))
 }
 
 // Helper function for "with -munsafe-fp-atomics flag" test
@@ -113,11 +113,11 @@ static void runAtomicAddCoherentUnsafeFlagTest(const std::string& gfxName) {
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType),
                           hipHostMallocCoherent));
   result[0] = INITIAL_VAL;
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0))
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0))
   hipLaunchKernelGGL(AtomicCheck<TestType>, dim3(1), dim3(1), 0, 0, A_d, result_d);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
   bool testResult;
 
   if ((std::is_same<TestType, float>::value)) {
@@ -136,15 +136,15 @@ static void runAtomicAddCoherentUnsafeFlagTest(const std::string& gfxName) {
     REQUIRE(A_h[0] == INITIAL_VAL + INC_VAL);
     REQUIRE(result[0] == INITIAL_VAL);
   }
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipHostFree(result));
+  HIP_CHECK(hipHostFree(A_h))
+  HIP_CHECK(hipHostFree(result))
 }
 
 TEST_CASE(Unit_AtomicAdd_Coherent) {
   hipDeviceProp_t prop;
   int device;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipGetDeviceProperties(&prop, device))
   std::string gfxName(prop.gcnArchName);
 
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {

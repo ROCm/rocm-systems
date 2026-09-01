@@ -29,7 +29,7 @@ HIP_TEST_CASE(Unit_hipBindTexture_Positive) {
 
   hipChannelFormatDesc channel_desc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
 
-  HIP_CHECK(hipMalloc(&tex_buf, N * sizeof(float)));
+  HIP_CHECK(hipMalloc(&tex_buf, N * sizeof(float)))
 
   SECTION("With Channel Descriptor") {
     HIP_CHECK(hipBindTexture(&offset, tex_ref, reinterpret_cast<void*>(tex_buf), channel_desc,
@@ -41,8 +41,8 @@ HIP_TEST_CASE(Unit_hipBindTexture_Positive) {
         hipBindTexture(&offset, tex_ref, reinterpret_cast<void*>(tex_buf), N * sizeof(float)));
   }
 
-  HIP_CHECK(hipUnbindTexture(&tex_ref));
-  HIP_CHECK(hipFree(tex_buf));
+  HIP_CHECK(hipUnbindTexture(&tex_ref))
+  HIP_CHECK(hipFree(tex_buf))
 }
 
 HIP_TEST_CASE(Unit_hipBindTexture_1DfetchVerification) {
@@ -58,9 +58,9 @@ HIP_TEST_CASE(Unit_hipBindTexture_1DfetchVerification) {
   }
   hipChannelFormatDesc channel_desc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
 
-  HIP_CHECK(hipMalloc(&tex_buf, N * sizeof(float)));
-  HIP_CHECK(hipMalloc(&dev_buf, N * sizeof(float)));
-  HIP_CHECK(hipMemcpy(tex_buf, val, N * sizeof(float), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&tex_buf, N * sizeof(float)))
+  HIP_CHECK(hipMalloc(&dev_buf, N * sizeof(float)))
+  HIP_CHECK(hipMemcpy(tex_buf, val, N * sizeof(float), hipMemcpyHostToDevice))
 
   tex_ref.addressMode[0] = hipAddressModeClamp;
   tex_ref.addressMode[1] = hipAddressModeClamp;
@@ -69,15 +69,15 @@ HIP_TEST_CASE(Unit_hipBindTexture_1DfetchVerification) {
 
   HIP_CHECK(hipBindTexture(&offset, tex_ref, reinterpret_cast<void*>(tex_buf), channel_desc,
                            N * sizeof(float)));
-  HIP_CHECK(hipGetTextureAlignmentOffset(&offset, &tex_ref));
+  HIP_CHECK(hipGetTextureAlignmentOffset(&offset, &tex_ref))
 
   dim3 dimBlock(64, 1, 1);
   dim3 dimGrid(N / dimBlock.x, 1, 1);
 
   hipLaunchKernelGGL(kernel, dim3(dimGrid), dim3(dimBlock), 0, 0, dev_buf);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipMemcpy(output, dev_buf, N * sizeof(float), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
+  HIP_CHECK(hipMemcpy(output, dev_buf, N * sizeof(float), hipMemcpyDeviceToHost))
   for (int i = 0; i < N; i++) {
     if (output[i] != val[i]) {
       INFO("Mismatch at index : " << i << ", output[i] " << output[i] << ", val[i] " << val[i]);
@@ -85,9 +85,9 @@ HIP_TEST_CASE(Unit_hipBindTexture_1DfetchVerification) {
     }
   }
 
-  HIP_CHECK(hipUnbindTexture(&tex_ref));
-  HIP_CHECK(hipFree(tex_buf));
-  HIP_CHECK(hipFree(dev_buf));
+  HIP_CHECK(hipUnbindTexture(&tex_ref))
+  HIP_CHECK(hipFree(tex_buf))
+  HIP_CHECK(hipFree(dev_buf))
 }
 
 HIP_TEST_CASE(Unit_hipBindTexture_Negative) {
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Unit_hipBindTexture_Negative) {
 
   hipChannelFormatDesc channel_desc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
 
-  HIP_CHECK(hipMalloc(&tex_buf, N * sizeof(float)));
+  HIP_CHECK(hipMalloc(&tex_buf, N * sizeof(float)))
 
   SECTION("Invalid texture reference") {
 #if HT_AMD
@@ -124,7 +124,7 @@ HIP_TEST_CASE(Unit_hipBindTexture_Negative) {
   }
 
   if (tex_buf) {
-    HIP_CHECK(hipFree(tex_buf));
+    HIP_CHECK(hipFree(tex_buf))
   }
 }
 

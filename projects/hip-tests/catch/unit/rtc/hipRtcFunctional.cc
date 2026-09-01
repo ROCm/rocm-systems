@@ -16,7 +16,7 @@
 #include <iostream>
 #include <vector>
 
-const char* funname = "testinline";
+static const char* funname = "testinline";
 static constexpr auto code{
     R"(
 __forceinline__ __device__ float f() { return 123.4f; }
@@ -32,7 +32,7 @@ HIP_TEST_CASE(Unit_hiprtc_functional) {
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, nullptr, 0, nullptr, nullptr));
 
-  hiprtcResult compileResult{hiprtcCompileProgram(prog, 0, 0)};
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, 0, nullptr)};
   size_t logSize;
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
   if (logSize) {
@@ -50,22 +50,22 @@ HIP_TEST_CASE(Unit_hiprtc_functional) {
 
 #if HT_NVIDIA
   int device = 0;
-  HIPCHECK(hipInit(0));
+  HIPCHECK(hipInit(0))
   hipCtx_t ctx;
-  HIPCHECK(hipCtxCreate(&ctx, 0, device));
+  HIPCHECK(hipCtxCreate(&ctx, 0, device))
 #endif
 
   hipModule_t module;
   hipFunction_t function;
-  HIP_CHECK(hipModuleLoadData(&module, codec.data()));
-  HIP_CHECK(hipModuleGetFunction(&function, module, funname));
+  HIP_CHECK(hipModuleLoadData(&module, codec.data()))
+  HIP_CHECK(hipModuleGetFunction(&function, module, funname))
 
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 64, 1, 1, 0, 0, nullptr, 0));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 64, 1, 1, 0, nullptr, nullptr, nullptr))
+  HIP_CHECK(hipDeviceSynchronize())
 
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
 
 #if HT_NVIDIA
-  HIPCHECK(hipCtxDestroy(ctx));
+  HIPCHECK(hipCtxDestroy(ctx))
 #endif
 }

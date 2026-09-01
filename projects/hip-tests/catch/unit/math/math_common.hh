@@ -108,10 +108,10 @@ template <typename T, typename... Ts> class MathTest {
      ...);
 
     kernel_<<<grid_dim, block_dim>>>(y_dev_.ptr(), num_args, std::get<I>(xss_dev_).ptr()...);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 
-    HIP_CHECK(hipMemcpy(y_.ptr(), y_dev_.ptr(), num_args * sizeof(T), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipStreamSynchronize(nullptr));
+    HIP_CHECK(hipMemcpy(y_.ptr(), y_dev_.ptr(), num_args * sizeof(T), hipMemcpyDeviceToHost))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
 
     if constexpr (!parallel) {
       for (auto i = 0u; i < num_args; ++i) {
@@ -193,13 +193,13 @@ template <typename T> using RefType_t = typename RefType<T>::type;
 
 template <typename F> auto GetOccupancyMaxPotentialBlockSize(F kernel) {
   int grid_size = 0, block_size = 0;
-  HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&grid_size, &block_size, kernel, 0, 0));
+  HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&grid_size, &block_size, kernel, 0, 0))
   return std::make_tuple(grid_size, block_size);
 }
 
 inline size_t GetMaxAllowedDeviceMemoryUsage() {
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, 0))
   return props.totalGlobalMem > cmd_options.max_memory
       ? cmd_options.max_memory
       : props.totalGlobalMem * (cmd_options.accuracy_max_memory * 0.01f);

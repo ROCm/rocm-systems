@@ -28,8 +28,8 @@
 HIP_TEST_CASE(Unit_hipStreamCopyAttributes_Basic) {
   hipStream_t stream1, stream2, stream3, stream4;
   hipStreamAttrValue val1, val2;
-  HIP_CHECK(hipStreamCreate(&stream1));
-  HIP_CHECK(hipStreamCreate(&stream2));
+  HIP_CHECK(hipStreamCreate(&stream1))
+  HIP_CHECK(hipStreamCreate(&stream2))
 
   SECTION("Two Non Default Streams") {
     val1.syncPolicy = hipSyncPolicySpin;
@@ -39,7 +39,7 @@ HIP_TEST_CASE(Unit_hipStreamCopyAttributes_Basic) {
         stream1, hipStreamAttributeSynchronizationPolicy, &val1));
 
     // Copy attributes from stream1 to stream2
-    HIP_CHECK(hipStreamCopyAttributes(stream2, stream1));
+    HIP_CHECK(hipStreamCopyAttributes(stream2, stream1))
 
     // Query stream2 to verify the copied sync policy
     HIP_CHECK(hipStreamGetAttribute(
@@ -58,7 +58,7 @@ HIP_TEST_CASE(Unit_hipStreamCopyAttributes_Basic) {
         stream3, hipStreamAttributeSynchronizationPolicy, &val1));
 
     // Copy attributes from null stream to legacy stream
-    HIP_CHECK(hipStreamCopyAttributes(stream4, stream3));
+    HIP_CHECK(hipStreamCopyAttributes(stream4, stream3))
 
     // Query stream2 to verify the copied sync policy
     HIP_CHECK(hipStreamGetAttribute(
@@ -76,7 +76,7 @@ HIP_TEST_CASE(Unit_hipStreamCopyAttributes_Basic) {
         stream3, hipStreamAttributeSynchronizationPolicy, &val1));
 
     // Copy attributes from streamperthread to non default stream
-    HIP_CHECK(hipStreamCopyAttributes(stream2, stream3));
+    HIP_CHECK(hipStreamCopyAttributes(stream2, stream3))
 
     // Query stream2 to verify the copied sync policy
     HIP_CHECK(hipStreamGetAttribute(
@@ -85,8 +85,8 @@ HIP_TEST_CASE(Unit_hipStreamCopyAttributes_Basic) {
     REQUIRE(val2.syncPolicy == hipSyncPolicyBlockingSync);
   }
 
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
+  HIP_CHECK(hipStreamDestroy(stream1))
+  HIP_CHECK(hipStreamDestroy(stream2))
 }
 
 /**
@@ -105,14 +105,14 @@ HIP_TEST_CASE(Unit_hipStreamCopyAttributes_Basic) {
  */
 HIP_TEST_CASE(Unit_hipStreamCopyAttributes_Negative) {
   hipStream_t srcStream = nullptr;
-  HIP_CHECK(hipStreamCreate(&srcStream));
+  HIP_CHECK(hipStreamCreate(&srcStream))
   hipStream_t dstStream = nullptr;
-  HIP_CHECK(hipStreamCreate(&dstStream));
+  HIP_CHECK(hipStreamCreate(&dstStream))
 
   hipStream_t invalidStream = reinterpret_cast<hipStream_t>(-1);
 
   SECTION("Sanity - Should pass") {
-    HIP_CHECK(hipStreamCopyAttributes(srcStream, dstStream));
+    HIP_CHECK(hipStreamCopyAttributes(srcStream, dstStream))
   }
 
   SECTION("With Invalid Source Stream") {
@@ -130,8 +130,8 @@ HIP_TEST_CASE(Unit_hipStreamCopyAttributes_Negative) {
                     hipErrorInvalidResourceHandle);
   }
 
-  HIP_CHECK(hipStreamDestroy(srcStream));
-  HIP_CHECK(hipStreamDestroy(dstStream));
+  HIP_CHECK(hipStreamDestroy(srcStream))
+  HIP_CHECK(hipStreamDestroy(dstStream))
 }
 
 /**
@@ -148,9 +148,9 @@ HIP_TEST_CASE(Unit_hipStreamCopyAttributes_Negative) {
  */
 HIP_TEST_CASE(Unit_hipStreamCopyAttributes_WithAllSyncPolicyValues) {
   hipStream_t srcStream = nullptr;
-  HIP_CHECK(hipStreamCreate(&srcStream));
+  HIP_CHECK(hipStreamCreate(&srcStream))
   hipStream_t dstStream = nullptr;
-  HIP_CHECK(hipStreamCreate(&dstStream));
+  HIP_CHECK(hipStreamCreate(&dstStream))
 
   hipStreamAttrID attr = hipStreamAttributeSynchronizationPolicy;
   hipStreamAttrValue valueToSetForSrc;
@@ -160,18 +160,18 @@ HIP_TEST_CASE(Unit_hipStreamCopyAttributes_WithAllSyncPolicyValues) {
                hipSynchronizationPolicy::hipSyncPolicyYield,
                hipSynchronizationPolicy::hipSyncPolicyBlockingSync);
   valueToSetForSrc.syncPolicy = syncPolicy;
-  HIP_CHECK(hipStreamSetAttribute(srcStream, attr, &valueToSetForSrc));
+  HIP_CHECK(hipStreamSetAttribute(srcStream, attr, &valueToSetForSrc))
 
   hipStreamAttrValue valueToSetForDst;
   valueToSetForDst.syncPolicy = hipSynchronizationPolicy::hipSyncPolicySpin;
-  HIP_CHECK(hipStreamSetAttribute(dstStream, attr, &valueToSetForDst));
+  HIP_CHECK(hipStreamSetAttribute(dstStream, attr, &valueToSetForDst))
 
-  HIP_CHECK(hipStreamCopyAttributes(dstStream, srcStream));
+  HIP_CHECK(hipStreamCopyAttributes(dstStream, srcStream))
 
   hipStreamAttrValue valueOut;
-  HIP_CHECK(hipStreamGetAttribute(dstStream, attr, &valueOut));
+  HIP_CHECK(hipStreamGetAttribute(dstStream, attr, &valueOut))
   REQUIRE(valueOut.syncPolicy == syncPolicy);
 
-  HIP_CHECK(hipStreamDestroy(srcStream));
-  HIP_CHECK(hipStreamDestroy(dstStream));
+  HIP_CHECK(hipStreamDestroy(srcStream))
+  HIP_CHECK(hipStreamDestroy(dstStream))
 }

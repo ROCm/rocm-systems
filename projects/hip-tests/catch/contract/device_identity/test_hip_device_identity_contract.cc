@@ -15,7 +15,7 @@ bool GetDeviceByPciBusIdOrSkip(int* device, const char* pci_bus_id) {
   if (status == hipErrorNotSupported) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 }  // namespace
@@ -23,10 +23,10 @@ bool GetDeviceByPciBusIdOrSkip(int* device, const char* pci_bus_id) {
 // @asserts: hipDeviceGetByPCIBusId - the PCI bus id from hipDeviceGetPCIBusId round-trips back to the same device ordinal
 HIP_TEST_CASE(Contract_DeviceIdentity_HipDeviceGetByPCIBusId_Default_RoundTripsWithGetPCIBusId) {
   int current_device = 0;
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
 
   char pci_bus_id[kPciBusIdLength]{};
-  HIP_CHECK(hipDeviceGetPCIBusId(pci_bus_id, kPciBusIdLength, current_device));
+  HIP_CHECK(hipDeviceGetPCIBusId(pci_bus_id, kPciBusIdLength, current_device))
 
   int resolved_device = -1;
   if (!GetDeviceByPciBusIdOrSkip(&resolved_device, pci_bus_id)) {
@@ -47,10 +47,10 @@ HIP_TEST_CASE(Contract_DeviceIdentity_HipDeviceGetByPCIBusId_InvalidString_IsRej
 // @asserts: hipDeviceGetByPCIBusId - a null device out-pointer or null bus-id string is rejected with a non-success status
 HIP_TEST_CASE(Contract_DeviceIdentity_HipDeviceGetByPCIBusId_NullArgs_AreRejected) {
   int current_device = 0;
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
 
   char pci_bus_id[kPciBusIdLength]{};
-  HIP_CHECK(hipDeviceGetPCIBusId(pci_bus_id, kPciBusIdLength, current_device));
+  HIP_CHECK(hipDeviceGetPCIBusId(pci_bus_id, kPciBusIdLength, current_device))
 
   int device = -1;
   REQUIRE(hipDeviceGetByPCIBusId(nullptr, pci_bus_id) != hipSuccess);
@@ -61,14 +61,14 @@ HIP_TEST_CASE(Contract_DeviceIdentity_HipDeviceGetByPCIBusId_NullArgs_AreRejecte
 HIP_TEST_CASE(Contract_DeviceIdentity_HipChooseDevice_Default_ReturnsInRangeOrdinal) {
   int current_device = 0;
   int device_count = 0;
-  HIP_CHECK(hipGetDevice(&current_device));
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDevice(&current_device))
+  HIP_CHECK(hipGetDeviceCount(&device_count))
 
   hipDeviceProp_t properties{};
-  HIP_CHECK(hipGetDeviceProperties(&properties, current_device));
+  HIP_CHECK(hipGetDeviceProperties(&properties, current_device))
 
   int chosen_device = -1;
-  HIP_CHECK(hipChooseDevice(&chosen_device, &properties));
+  HIP_CHECK(hipChooseDevice(&chosen_device, &properties))
 
   REQUIRE(chosen_device >= 0);
   REQUIRE(chosen_device < device_count);
@@ -86,10 +86,10 @@ HIP_TEST_CASE(Contract_DeviceIdentity_HipChooseDevice_NullArgs_AreRejected) {
 // @asserts: hipDeviceCanAccessPeer - a self-peer query returns a boolean-valued (0 or 1) accessibility result
 HIP_TEST_CASE(Contract_DeviceIdentity_HipDeviceCanAccessPeer_Default_SelfQueryReturnsBoolean) {
   int current_device = 0;
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
 
   int can_access_peer = -1;
-  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, current_device, current_device));
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, current_device, current_device))
 
   REQUIRE((can_access_peer == 0 || can_access_peer == 1));
 }
@@ -98,8 +98,8 @@ HIP_TEST_CASE(Contract_DeviceIdentity_HipDeviceCanAccessPeer_Default_SelfQueryRe
 HIP_TEST_CASE(Contract_DeviceIdentity_HipDeviceCanAccessPeer_InvalidArgs_AreRejected) {
   int current_device = 0;
   int device_count = 0;
-  HIP_CHECK(hipGetDevice(&current_device));
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDevice(&current_device))
+  HIP_CHECK(hipGetDeviceCount(&device_count))
 
   int can_access_peer = -1;
   REQUIRE(hipDeviceCanAccessPeer(nullptr, current_device, current_device) != hipSuccess);

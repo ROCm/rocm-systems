@@ -20,8 +20,8 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_process.hh>
-#include "hrr_reader.h"
-#include "hrr_api_args.h"
+#include <hrr_reader.h>
+#include <hrr_api_args.h>
 
 #include <cstdint>
 #include <cstdio>

@@ -63,7 +63,7 @@ static void runSimpleTexture3D_Check(int width, int height, int depth,
   myparms.extent = make_hipExtent(width, height, depth);
   myparms.kind = hipMemcpyHostToDevice;
 
-  HIP_CHECK(hipMemcpy3D(&myparms));
+  HIP_CHECK(hipMemcpy3D(&myparms))
 
   // set texture parameters
   tex->addressMode[0] = hipAddressModeWrap;
@@ -72,17 +72,17 @@ static void runSimpleTexture3D_Check(int width, int height, int depth,
   tex->normalized = false;
 
   // Bind the array to the texture
-  HIP_CHECK(hipBindTextureToArray(*tex, arr, channelDesc));
+  HIP_CHECK(hipBindTextureToArray(*tex, arr, channelDesc))
 
   // Allocate device memory for result
   T* dData = nullptr;
-  HIP_CHECK(hipMalloc(&dData, size));
+  HIP_CHECK(hipMalloc(&dData, size))
   REQUIRE(dData != nullptr);
 
   hipLaunchKernelGGL(simpleKernel3DArray, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, dData, width, height,
                      depth);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Allocate mem for the result on host side
   T* hOutputData = reinterpret_cast<T*>(malloc(size));
@@ -90,11 +90,11 @@ static void runSimpleTexture3D_Check(int width, int height, int depth,
   memset(hOutputData, 0, size);
 
   // copy result from device to host
-  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost))
   HipTest::checkArray(hData, hOutputData, width, height, depth);
 
-  HIP_CHECK(hipFree(dData));
-  HIP_CHECK(hipFreeArray(arr));
+  HIP_CHECK(hipFree(dData))
+  HIP_CHECK(hipFreeArray(arr))
   free(hData);
   free(hOutputData);
 }

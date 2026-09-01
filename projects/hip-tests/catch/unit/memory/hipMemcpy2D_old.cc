@@ -48,7 +48,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H, int, float, double) {
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
   auto memcpy_d2d_type = GENERATE(0, 1);
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr}, *B_d{nullptr};
   size_t pitch_A, pitch_B;
   size_t width{NUM_W * sizeof(TestType)};
@@ -66,8 +66,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H, int, float, double) {
   } else {
     d2d_type = hipMemcpyDeviceToDeviceNoCU;
   }
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H));
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B, width, NUM_H));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H))
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B, width, NUM_H))
 
   // Initialize the data
   HipTest::setDefaultData<TestType>(NUM_W * NUM_H, A_h, B_h, C_h);
@@ -77,7 +77,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H, int, float, double) {
                         ROWS, hipMemcpyHostToDevice));
 
   // Performs D2D on same GPU device
-  HIP_CHECK(hipMemcpy2D(B_d, pitch_B, A_d, pitch_A, COLUMNS * sizeof(TestType), ROWS, d2d_type));
+  HIP_CHECK(hipMemcpy2D(B_d, pitch_B, A_d, pitch_A, COLUMNS * sizeof(TestType), ROWS, d2d_type))
 
   // hipMemcpy2D Device to Host
   HIP_CHECK(hipMemcpy2D(B_h, COLUMNS * sizeof(TestType), B_d, pitch_B, COLUMNS * sizeof(TestType),
@@ -87,8 +87,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H, int, float, double) {
   REQUIRE(HipTest::checkArray<TestType>(A_h, B_h, COLUMNS, ROWS) == true);
 
   // DeAllocating the memory
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
   if (mem_type) {
     HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, B_h, C_h, true);
   } else {
@@ -123,7 +123,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset, int, float, doub
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
   auto memcpy_d2d_type = GENERATE(0, 1);
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr}, *B_d{nullptr};
   size_t pitch_A, pitch_B;
   size_t width{NUM_W * sizeof(TestType)};
@@ -141,8 +141,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset, int, float, doub
   } else {
     d2d_type = hipMemcpyDeviceToDeviceNoCU;
   }
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H));
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B, width, NUM_H));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H))
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B, width, NUM_H))
 
   // Initialize the data
   HipTest::setDefaultData<TestType>(NUM_W * NUM_H, A_h, B_h, C_h);
@@ -165,8 +165,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset, int, float, doub
 
 
   // DeAllocating the memory
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
   if (mem_type) {
     HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, B_h, C_h, true);
   } else {
@@ -202,7 +202,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H_Managed_WithOffset, int, flo
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
   auto memcpy_default = GENERATE(0, 1);
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr}, *B_d{nullptr};
 
   // Allocating memory
@@ -244,8 +244,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H_Managed_WithOffset, int, flo
 
 
   // DeAllocating the memory
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
   if (mem_type) {
     HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, B_h, C_h, true);
   } else {
@@ -262,7 +262,7 @@ static void hipMemcpy2D_Basic_Size_Test(size_t inc) {
   size_t size = sizeof(int) * N * inc;
 
   size_t free, total;
-  HIP_CHECK(hipMemGetInfo(&free, &total));
+  HIP_CHECK(hipMemGetInfo(&free, &total))
 
   if (free < 2 * size)
     newSize = (free - defaultProgramSize) / 2;
@@ -273,9 +273,9 @@ static void hipMemcpy2D_Basic_Size_Test(size_t inc) {
   INFO("Free memory: " << free / 1024.0 / 1024.0 << " MB or " << free << " Bytes");
   INFO("NewSize:" << newSize / 1024.0 / 1024.0 << "MB or " << newSize << " Bytes");
 
-  HIP_CHECK(hipHostMalloc(&in, newSize));
-  HIP_CHECK(hipHostMalloc(&out, newSize));
-  HIP_CHECK(hipMalloc(&dev, newSize));
+  HIP_CHECK(hipHostMalloc(&in, newSize))
+  HIP_CHECK(hipHostMalloc(&out, newSize))
+  HIP_CHECK(hipMalloc(&dev, newSize))
 
   inp = newSize / (sizeof(int) * N);
   for (size_t i = 0; i < N; i++) {
@@ -284,16 +284,16 @@ static void hipMemcpy2D_Basic_Size_Test(size_t inc) {
 
   size_t pitch = sizeof(int) * inp;
 
-  HIP_CHECK(hipMemcpy2D(dev, pitch, in, pitch, sizeof(int), N, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy2D(out, pitch, dev, pitch, sizeof(int), N, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy2D(dev, pitch, in, pitch, sizeof(int), N, hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy2D(out, pitch, dev, pitch, sizeof(int), N, hipMemcpyDeviceToHost))
 
   for (size_t i = 0; i < N; i++) {
     REQUIRE(out[i * inp] == value);
   }
 
-  HIP_CHECK(hipFree(dev));
-  HIP_CHECK(hipHostFree(in));
-  HIP_CHECK(hipHostFree(out));
+  HIP_CHECK(hipFree(dev))
+  HIP_CHECK(hipHostFree(in))
+  HIP_CHECK(hipHostFree(out))
 }
 
 /**
@@ -313,10 +313,10 @@ static void hipMemcpy2D_Basic_Size_Test(size_t inc) {
 HIP_TEST_CASE(Unit_hipMemcpy2D_multiDevice_Basic_Size_Test) {
   size_t input = 1 << 20;
   int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  HIP_CHECK(hipGetDeviceCount(&numDevices))
 
   for (int i = 0; i < numDevices; i++) {
-    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipSetDevice(i))
 
     SECTION("Verify hipMemcpy2D with 1 << 20 size") { hipMemcpy2D_Basic_Size_Test(input); }
     SECTION("Verify hipMemcpy2D with 1 << 21 size") {

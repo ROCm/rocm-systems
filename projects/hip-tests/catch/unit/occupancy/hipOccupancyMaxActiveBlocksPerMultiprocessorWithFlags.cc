@@ -42,7 +42,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_ValidAr
     err = hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(&numBlocks, kern1, blockSize, 0,
                                                                 hipOccupancyDefault);
 
-    HIP_CHECK(err);
+    HIP_CHECK(err)
     REQUIRE(numBlocks > 0);
   }
 
@@ -51,7 +51,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_ValidAr
     err = hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(&numBlocks, kern1, blockSize, 256,
                                                                 hipOccupancyDefault);
 
-    HIP_CHECK(err);
+    HIP_CHECK(err)
     REQUIRE(numBlocks > 0);
   }
 
@@ -60,7 +60,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_ValidAr
     err = hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(&numBlocks, kern1, blockSize, 0,
                                                                 hipOccupancyDisableCachingOverride);
 
-    HIP_CHECK(err);
+    HIP_CHECK(err)
     REQUIRE(numBlocks > 0);
   }
 
@@ -69,7 +69,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_ValidAr
     err = hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(&numBlocks, kern1, blockSize, 256,
                                                                 hipOccupancyDisableCachingOverride);
 
-    HIP_CHECK(err);
+    HIP_CHECK(err)
     REQUIRE(numBlocks > 0);
   }
 }
@@ -127,7 +127,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Invalid
     err = hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
         &numBlocks, kern1, std::numeric_limits<int>::max(), 0, hipOccupancyDefault);
 
-    HIP_CHECK(err);
+    HIP_CHECK(err)
     REQUIRE(numBlocks == 0);
   }
 
@@ -136,7 +136,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Invalid
     err = hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
         &numBlocks, kern1, blockSize, std::numeric_limits<int>::max(), hipOccupancyDefault);
 
-    HIP_CHECK(err);
+    HIP_CHECK(err)
     REQUIRE(numBlocks == 0);
   }
 }

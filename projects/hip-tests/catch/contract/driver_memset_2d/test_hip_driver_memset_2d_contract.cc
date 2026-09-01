@@ -28,7 +28,7 @@ bool TryMallocPitch(void** device_ptr, size_t* pitch, size_t width, size_t heigh
   if (status == hipErrorOutOfMemory) {
     return false;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
   return true;
 }
 
@@ -113,12 +113,12 @@ HIP_TEST_CASE(Contract_DriverMemset2D_HipMemsetD2D8Async_AsyncD2D8_VisibleAfterS
     SkipPitchedAllocationUnsupported();
   }
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemsetD2D8Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
                                kWidth * sizeof(uint8_t), kHeight, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   HIP_CHECK(hipMemcpy2D(dst.data(), kWidth * sizeof(uint8_t), device_ptr, pitch,
                         kWidth * sizeof(uint8_t), kHeight, hipMemcpyDeviceToHost));
 
@@ -138,7 +138,7 @@ HIP_TEST_CASE(Contract_DriverMemset2D_HipMemset2D_RuntimeMemset2D_FillsRegion) {
   }
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
-  HIP_CHECK(hipMemset2D(device_ptr, pitch, pattern, kWidth, kHeight));
+  HIP_CHECK(hipMemset2D(device_ptr, pitch, pattern, kWidth, kHeight))
   HIP_CHECK(hipMemcpy2D(dst.data(), kWidth, device_ptr, pitch, kWidth, kHeight,
                         hipMemcpyDeviceToHost));
 

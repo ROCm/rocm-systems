@@ -55,10 +55,10 @@ HIP_TEST_CASE(Unit_hipGraphAddKernelNode_Negative) {
   hipKernelNodeParams kNodeParams{};
   std::vector<hipGraphNode_t> dependencies;
 
-  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N));
-  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N))
+  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N))
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
   kNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
@@ -104,17 +104,17 @@ HIP_TEST_CASE(Unit_hipGraphAddKernelNode_Negative) {
 #if HT_AMD  // On Cuda setup this test case getting failed
   SECTION("Try adding kernel node after destroy the already created graph") {
     hipGraph_t destroyed_graph;
-    HIP_CHECK(hipGraphCreate(&destroyed_graph, 0));
-    HIP_CHECK(hipGraphDestroy(destroyed_graph));
+    HIP_CHECK(hipGraphCreate(&destroyed_graph, 0))
+    HIP_CHECK(hipGraphDestroy(destroyed_graph))
     HIP_CHECK_ERROR(hipGraphAddKernelNode(&kNode, destroyed_graph, nullptr, 0, &kNodeParams),
                     hipErrorInvalidValue);
   }
 #endif
 
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
-  HIP_CHECK(hipFree(C_d));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(B_d))
+  HIP_CHECK(hipFree(C_d))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 #if HT_AMD
 static __global__ void Add(int* A_d, int* B_d, int* C_d) {
@@ -124,14 +124,14 @@ static __global__ void Add(int* A_d, int* B_d, int* C_d) {
 static void validateOutput(const hipGraph_t& graph, int* A_h, int* B_h, int* C_h,
                            size_t inputSize) {
   hipStream_t streamForGraph;
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
+  HIP_CHECK(hipStreamCreate(&streamForGraph))
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
-  HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
+  HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipStreamDestroy(streamForGraph))
   // Verify output
   for (size_t i = 0; i < inputSize; i++) {
     REQUIRE((A_h[i] + B_h[i]) == C_h[i]);
@@ -145,10 +145,10 @@ static void kernelFnChange(int* A_d, int* A_h, int* B_d, int* B_h, int* C_d, int
 
   hipModule_t Module;
   hipFunction_t Function;
-  HIPCHECK(hipModuleLoad(&Module, CODEOBJ_FILE));
-  HIPCHECK(hipModuleGetFunction(&Function, Module, KERNEL_NAME));
+  HIPCHECK(hipModuleLoad(&Module, CODEOBJ_FILE))
+  HIPCHECK(hipModuleGetFunction(&Function, Module, KERNEL_NAME))
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   // Add MemCpy nodes H2D
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, A_d, A_h,
                                     sizeof(int) * inputSize, hipMemcpyHostToDevice));
@@ -182,7 +182,7 @@ static void kernelFnChange(int* A_d, int* A_h, int* B_d, int* B_h, int* C_d, int
   kernelNodeParamsUpdate.sharedMemBytes = 0;
   kernelNodeParamsUpdate.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kernelNodeParamsUpdate.extra = nullptr;
-  HIP_CHECK(hipGraphKernelNodeSetParams(kernelNode, &kernelNodeParamsUpdate));
+  HIP_CHECK(hipGraphKernelNodeSetParams(kernelNode, &kernelNodeParamsUpdate))
   nodeDependencies.clear();
   nodeDependencies.push_back(kernelNode);
 
@@ -195,8 +195,8 @@ static void kernelFnChange(int* A_d, int* A_h, int* B_d, int* B_h, int* C_d, int
   // Validation
   validateOutput(graph, A_h, B_h, C_h, inputSize);
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIPCHECK(hipModuleUnload(Module));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIPCHECK(hipModuleUnload(Module))
 }
 /**
  * Test Description
@@ -219,12 +219,12 @@ HIP_TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_graphNclonedGraph) {
   hipGraph_t graph, clonedGraph;
   std::vector<hipGraphNode_t> nodeDependencies;
   hipGraphNode_t memcpyNode, memcpyNode1, memcpyNode2, kernelNode;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipModule_t Module;
   hipFunction_t Function;
-  HIPCHECK(hipModuleLoad(&Module, CODEOBJ_FILE));
-  HIPCHECK(hipModuleGetFunction(&Function, Module, KERNEL_NAME));
+  HIPCHECK(hipModuleLoad(&Module, CODEOBJ_FILE))
+  HIPCHECK(hipModuleGetFunction(&Function, Module, KERNEL_NAME))
 
   // Add MemCpy nodes H2D
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, A_d, A_h, sizeof(int) * size,
@@ -260,13 +260,13 @@ HIP_TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_graphNclonedGraph) {
   }
   SECTION("Cloned Graph") {
     // Clone the graph
-    HIP_CHECK(hipGraphClone(&clonedGraph, graph));
+    HIP_CHECK(hipGraphClone(&clonedGraph, graph))
     // Cloned graph Validation
     validateOutput(clonedGraph, A_h, B_h, C_h, size);
-    HIP_CHECK(hipGraphDestroy(clonedGraph));
+    HIP_CHECK(hipGraphDestroy(clonedGraph))
   }
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIPCHECK(hipModuleUnload(Module));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIPCHECK(hipModuleUnload(Module))
   HipTest::freeArrays<int>(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 /**
@@ -321,11 +321,11 @@ HIP_TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph) {
 
   hipModule_t Module;
   hipFunction_t Function;
-  HIPCHECK(hipModuleLoad(&Module, CODEOBJ_FILE));
-  HIPCHECK(hipModuleGetFunction(&Function, Module, KERNEL_NAME));
+  HIPCHECK(hipModuleLoad(&Module, CODEOBJ_FILE))
+  HIPCHECK(hipModuleGetFunction(&Function, Module, KERNEL_NAME))
 
   // Create child graph
-  HIP_CHECK(hipGraphCreate(&childgraph, 0));
+  HIP_CHECK(hipGraphCreate(&childgraph, 0))
 
   // kerrel params.
   hipKernelNodeParams kernelNodeParams{};
@@ -337,9 +337,9 @@ HIP_TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph) {
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, childgraph, nullptr, 0, &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, childgraph, nullptr, 0, &kernelNodeParams))
 
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
   // Add MemCpy nodes H2D
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyh2d1, graph, nullptr, 0, A_d, A_h, sizeof(int) * size,
                                     hipMemcpyHostToDevice));
@@ -365,14 +365,14 @@ HIP_TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph) {
   }
   SECTION("Cloned Graph") {
     // Clone the graph
-    HIP_CHECK(hipGraphClone(&clonedGraph, graph));
+    HIP_CHECK(hipGraphClone(&clonedGraph, graph))
     // Cloned Graph validation
     validateOutput(clonedGraph, A_h, B_h, C_h, size);
-    HIP_CHECK(hipGraphDestroy(clonedGraph));
+    HIP_CHECK(hipGraphDestroy(clonedGraph))
   }
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphDestroy(childgraph));
-  HIPCHECK(hipModuleUnload(Module));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipGraphDestroy(childgraph))
+  HIPCHECK(hipModuleUnload(Module))
   HipTest::freeArrays<int>(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 /**
@@ -400,15 +400,15 @@ HIP_TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_streamCapture) {
 
   hipModule_t Module;
   hipFunction_t Function;
-  HIPCHECK(hipModuleLoad(&Module, CODEOBJ_FILE));
-  HIPCHECK(hipModuleGetFunction(&Function, Module, KERNEL_NAME));
+  HIPCHECK(hipModuleLoad(&Module, CODEOBJ_FILE))
+  HIPCHECK(hipModuleGetFunction(&Function, Module, KERNEL_NAME))
 
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
 
   // MemCpy node H2D
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
-  HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream))
+  HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream))
   // kerrel params.
   void* kernelArgs[] = {&A_d, &B_d, &C_d};
 
@@ -417,15 +417,15 @@ HIP_TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_streamCapture) {
       hipModuleLaunchKernel(Function, 1, 1, 1, maxBlocks, 1, 1, 0, stream, kernelArgs, nullptr));
 
   // MemCpy nodes D2H
-  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream))
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
+  HIP_CHECK(hipStreamDestroy(stream))
 
   // validation
   validateOutput(graph, A_h, B_h, C_h, maxBlocks);
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIPCHECK(hipModuleUnload(Module));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIPCHECK(hipModuleUnload(Module))
   HipTest::freeArrays<int>(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 #endif

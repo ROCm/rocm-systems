@@ -40,11 +40,11 @@ bool hasUniqueStreamIds(const std::vector<unsigned long long>& streamIds) {
  */
 HIP_TEST_CASE(Unit_hipStreamGetId_Negative) {
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   SECTION("Null Pointer") {
     HIP_CHECK_ERROR(hipStreamGetId(stream, nullptr), hipErrorInvalidValue);
   }
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -55,21 +55,21 @@ HIP_TEST_CASE(Unit_hipStreamGetId_Basic) {
   hipStream_t stream1, stream2;
   unsigned long long id1, id2, id3, id4, id5;
   SECTION("Unique Stream Id") {
-    HIP_CHECK(hipStreamCreate(&stream1));
-    HIP_CHECK(hipStreamCreate(&stream2));
-    HIP_CHECK(hipStreamGetId(stream1, &id1));
-    HIP_CHECK(hipStreamGetId(stream2, &id2));
-    HIP_CHECK(hipStreamDestroy(stream1));
-    HIP_CHECK(hipStreamDestroy(stream2));
+    HIP_CHECK(hipStreamCreate(&stream1))
+    HIP_CHECK(hipStreamCreate(&stream2))
+    HIP_CHECK(hipStreamGetId(stream1, &id1))
+    HIP_CHECK(hipStreamGetId(stream2, &id2))
+    HIP_CHECK(hipStreamDestroy(stream1))
+    HIP_CHECK(hipStreamDestroy(stream2))
     REQUIRE(id1 != id2);
   }
   SECTION("Null and legacy stream") {
-    HIP_CHECK(hipStreamGetId(nullptr, &id3));
-    HIP_CHECK(hipStreamGetId(hipStreamLegacy, &id4));
+    HIP_CHECK(hipStreamGetId(nullptr, &id3))
+    HIP_CHECK(hipStreamGetId(hipStreamLegacy, &id4))
     REQUIRE(id3 == id4);
   }
   SECTION("StreamPerThread") {
-    HIP_CHECK(hipStreamGetId(hipStreamPerThread, &id5));
+    HIP_CHECK(hipStreamGetId(hipStreamPerThread, &id5))
     REQUIRE(id5);
   }
 }
@@ -91,11 +91,11 @@ HIP_TEST_CASE(Unit_hipStreamGetId_WithDifferentStreamCreateAPIs) {
   unsigned long long streamId_1 = 0, streamId_2 = 0;
 
   SECTION("With hipStreamCreateWithFlags") {
-    HIP_CHECK(hipStreamCreateWithFlags(&stream_1, hipStreamNonBlocking));
-    HIP_CHECK(hipStreamCreateWithFlags(&stream_2, hipStreamNonBlocking));
+    HIP_CHECK(hipStreamCreateWithFlags(&stream_1, hipStreamNonBlocking))
+    HIP_CHECK(hipStreamCreateWithFlags(&stream_2, hipStreamNonBlocking))
 
-    HIP_CHECK(hipStreamGetId(stream_1, &streamId_1));
-    HIP_CHECK(hipStreamGetId(stream_2, &streamId_2));
+    HIP_CHECK(hipStreamGetId(stream_1, &streamId_1))
+    HIP_CHECK(hipStreamGetId(stream_2, &streamId_2))
 
     REQUIRE(streamId_1 != streamId_2);
   }
@@ -103,19 +103,19 @@ HIP_TEST_CASE(Unit_hipStreamGetId_WithDifferentStreamCreateAPIs) {
   SECTION("With hipStreamCreateWithPriority") {
     int priority_low{};
     int priority_high{};
-    HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high));
+    HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high))
 
     int priority = priority_high;
-    HIP_CHECK(hipStreamCreateWithPriority(&stream_1, hipStreamDefault, priority));
-    HIP_CHECK(hipStreamCreateWithPriority(&stream_2, hipStreamDefault, priority));
+    HIP_CHECK(hipStreamCreateWithPriority(&stream_1, hipStreamDefault, priority))
+    HIP_CHECK(hipStreamCreateWithPriority(&stream_2, hipStreamDefault, priority))
 
-    HIP_CHECK(hipStreamGetId(stream_1, &streamId_1));
-    HIP_CHECK(hipStreamGetId(stream_2, &streamId_2));
+    HIP_CHECK(hipStreamGetId(stream_1, &streamId_1))
+    HIP_CHECK(hipStreamGetId(stream_2, &streamId_2))
 
     REQUIRE(streamId_1 != streamId_2);
   }
-  HIP_CHECK(hipStreamDestroy(stream_1));
-  HIP_CHECK(hipStreamDestroy(stream_2));
+  HIP_CHECK(hipStreamDestroy(stream_1))
+  HIP_CHECK(hipStreamDestroy(stream_2))
 }
 
 /**
@@ -125,9 +125,9 @@ HIP_TEST_CASE(Unit_hipStreamGetId_WithDifferentStreamCreateAPIs) {
 void launchFunction() {
   hipStream_t stream;
   unsigned long long streamId;
-  HIP_CHECK_THREAD(hipStreamCreate(&stream));
+  HIP_CHECK_THREAD(hipStreamCreate(&stream))
 
-  HIP_CHECK_THREAD(hipStreamGetId(stream, &streamId));
+  HIP_CHECK_THREAD(hipStreamGetId(stream, &streamId))
 
   mutex.lock();
   streamIds.push_back(streamId);
@@ -181,7 +181,7 @@ HIP_TEST_CASE(Unit_hipStreamGetId_MultipleThreads) {
  */
 HIP_TEST_CASE(Unit_hipStreamGetId_MultiDevice) {
   int deviceCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+  HIP_CHECK(hipGetDeviceCount(&deviceCount))
   if (deviceCount < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
@@ -189,16 +189,16 @@ HIP_TEST_CASE(Unit_hipStreamGetId_MultiDevice) {
   std::vector<unsigned long long> streamIds;
 
   for (int deviceId = 0; deviceId < deviceCount; deviceId++) {
-    HIP_CHECK(hipSetDevice(deviceId));
+    HIP_CHECK(hipSetDevice(deviceId))
 
     hipStream_t stream;
     unsigned long long streamId;
-    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamCreate(&stream))
 
-    HIP_CHECK(hipStreamGetId(stream, &streamId));
+    HIP_CHECK(hipStreamGetId(stream, &streamId))
     streamIds.push_back(streamId);
 
-    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipStreamDestroy(stream))
   }
 
   REQUIRE(hasUniqueStreamIds(streamIds) == true);
@@ -225,15 +225,15 @@ HIP_TEST_CASE(Unit_hipStreamGetId_MultiProcess) {
     hipStream_t stream_1 = nullptr, stream_2 = nullptr;
     unsigned long long streamId_1 = 0, streamId_2 = 0;
 
-    HIP_CHECK(hipStreamCreate(&stream_1));
-    HIP_CHECK(hipStreamCreate(&stream_2));
+    HIP_CHECK(hipStreamCreate(&stream_1))
+    HIP_CHECK(hipStreamCreate(&stream_2))
 
-    HIP_CHECK(hipStreamGetId(stream_1, &streamId_1));
-    HIP_CHECK(hipStreamGetId(stream_2, &streamId_2));
+    HIP_CHECK(hipStreamGetId(stream_1, &streamId_1))
+    HIP_CHECK(hipStreamGetId(stream_2, &streamId_2))
 
     REQUIRE(streamId_1 != streamId_2);
-    HIP_CHECK(hipStreamDestroy(stream_1));
-    HIP_CHECK(hipStreamDestroy(stream_2));
+    HIP_CHECK(hipStreamDestroy(stream_1))
+    HIP_CHECK(hipStreamDestroy(stream_2))
 
     int status;
     REQUIRE(wait(&status) >= 0);
@@ -241,15 +241,15 @@ HIP_TEST_CASE(Unit_hipStreamGetId_MultiProcess) {
     hipStream_t stream_1 = nullptr, stream_2 = nullptr;
     unsigned long long streamId_1 = 0, streamId_2 = 0;
 
-    HIP_CHECK(hipStreamCreate(&stream_1));
-    HIP_CHECK(hipStreamCreate(&stream_2));
+    HIP_CHECK(hipStreamCreate(&stream_1))
+    HIP_CHECK(hipStreamCreate(&stream_2))
 
-    HIP_CHECK(hipStreamGetId(stream_1, &streamId_1));
-    HIP_CHECK(hipStreamGetId(stream_2, &streamId_2));
+    HIP_CHECK(hipStreamGetId(stream_1, &streamId_1))
+    HIP_CHECK(hipStreamGetId(stream_2, &streamId_2))
 
     REQUIRE(streamId_1 != streamId_2);
-    HIP_CHECK(hipStreamDestroy(stream_1));
-    HIP_CHECK(hipStreamDestroy(stream_2));
+    HIP_CHECK(hipStreamDestroy(stream_1))
+    HIP_CHECK(hipStreamDestroy(stream_2))
 
     exit(0);
   }

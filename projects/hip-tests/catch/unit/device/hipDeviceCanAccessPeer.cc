@@ -39,11 +39,11 @@ HIP_TEST_CASE(Unit_hipDeviceCanAccessPeer_positive) {
 
   GENERATE_CAPTURE();
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, dev, peerDev));
+  HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, dev, peerDev))
   END_CAPTURE(stream);
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 
   if (dev != peerDev) {
     REQUIRE(canAccessPeer >= 0);

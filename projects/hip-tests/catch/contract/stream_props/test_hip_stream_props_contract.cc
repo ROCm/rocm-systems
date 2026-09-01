@@ -18,7 +18,7 @@ constexpr size_t kBufferBytes = 256;
 // timing contracts are only exercised against a provisioned runtime.
 void RequireDevice() {
   int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
+  HIP_CHECK(hipGetDeviceCount(&device_count))
   if (device_count <= 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
@@ -31,12 +31,12 @@ HIP_TEST_CASE(Contract_StreamProps_HipStreamGetFlags_CreateWithDefaultFlags_Repo
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamDefault));
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamDefault))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   REQUIRE(stream != nullptr);
 
   unsigned int flags = 0xFFFFFFFFu;
-  HIP_CHECK(hipStreamGetFlags(stream, &flags));
+  HIP_CHECK(hipStreamGetFlags(stream, &flags))
 
   // A stream created with the default flags must not report the non-blocking
   // bit; the runtime may report additional device-specific bits, so the
@@ -51,12 +51,12 @@ HIP_TEST_CASE(Contract_StreamProps_HipStreamGetFlags_CreateWithNonBlockingFlags_
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   REQUIRE(stream != nullptr);
 
   unsigned int flags = 0;
-  HIP_CHECK(hipStreamGetFlags(stream, &flags));
+  HIP_CHECK(hipStreamGetFlags(stream, &flags))
 
   // The non-blocking request must round-trip as a set bit; the reported word
   // may carry additional bits, so a mask is used rather than exact equality.
@@ -70,15 +70,15 @@ HIP_TEST_CASE(Contract_StreamProps_HipStreamGetPriority_CreateWithPriority_Clamp
 
   int least_priority = 0;
   int greatest_priority = 0;
-  HIP_CHECK(hipDeviceGetStreamPriorityRange(&least_priority, &greatest_priority));
+  HIP_CHECK(hipDeviceGetStreamPriorityRange(&least_priority, &greatest_priority))
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, greatest_priority));
+  HIP_CHECK(hipStreamCreateWithPriority(&stream, hipStreamDefault, greatest_priority))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
   REQUIRE(stream != nullptr);
 
   int priority = 0;
-  HIP_CHECK(hipStreamGetPriority(stream, &priority));
+  HIP_CHECK(hipStreamGetPriority(stream, &priority))
 
   // HIP orders priorities so that greatest (highest) is numerically smaller or
   // equal to least (lowest). The reported priority must be clamped within that
@@ -93,10 +93,10 @@ HIP_TEST_CASE(Contract_StreamProps_HipStreamGetDevice_Default_MatchesCurrentDevi
   hip::contract::ContractCleanup cleanup;
 
   int current_device = -1;
-  HIP_CHECK(hipGetDevice(&current_device));
+  HIP_CHECK(hipGetDevice(&current_device))
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   hipDevice_t stream_device = hipDevice_t{};
@@ -106,7 +106,7 @@ HIP_TEST_CASE(Contract_StreamProps_HipStreamGetDevice_Default_MatchesCurrentDevi
     // backends; an unsupported report is a contract-compliant outcome.
     return;
   }
-  HIP_CHECK(status);
+  HIP_CHECK(status)
 
   // The stream is created on the current device, so its reported owning device
   // ordinal must match the current device.
@@ -120,9 +120,9 @@ HIP_TEST_CASE(Contract_StreamProps_HipStreamGetId_GetId_DistinctStreamsDifferAnd
 
   hipStream_t first_stream = nullptr;
   hipStream_t second_stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&first_stream));
+  HIP_CHECK(hipStreamCreate(&first_stream))
   cleanup.Add([first_stream] { (void)hipStreamDestroy(first_stream); });
-  HIP_CHECK(hipStreamCreate(&second_stream));
+  HIP_CHECK(hipStreamCreate(&second_stream))
   cleanup.Add([second_stream] { (void)hipStreamDestroy(second_stream); });
 
   unsigned long long first_id = 0;
@@ -132,10 +132,10 @@ HIP_TEST_CASE(Contract_StreamProps_HipStreamGetId_GetId_DistinctStreamsDifferAnd
     // is contract-compliant.
     return;
   }
-  HIP_CHECK(first_status);
+  HIP_CHECK(first_status)
 
   unsigned long long second_id = 0;
-  HIP_CHECK(hipStreamGetId(second_stream, &second_id));
+  HIP_CHECK(hipStreamGetId(second_stream, &second_id))
 
   // Two independently created streams must report distinct identities.
   REQUIRE(first_id != second_id);
@@ -143,7 +143,7 @@ HIP_TEST_CASE(Contract_StreamProps_HipStreamGetId_GetId_DistinctStreamsDifferAnd
   // The null (default) stream has a well-defined identity that must be queryable
   // and succeed.
   unsigned long long null_stream_id = 0;
-  HIP_CHECK(hipStreamGetId(nullptr, &null_stream_id));
+  HIP_CHECK(hipStreamGetId(nullptr, &null_stream_id))
 }
 
 // @asserts: hipEventElapsedTime - elapsed time between two ordered events on one stream is non-negative
@@ -156,22 +156,22 @@ HIP_TEST_CASE(Contract_StreamProps_HipEventElapsedTime_Default_NonNegativeForOrd
   hipEvent_t stop_event = nullptr;
   void* device_ptr = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipEventCreate(&start_event));
+  HIP_CHECK(hipEventCreate(&start_event))
   cleanup.Add([start_event] { (void)hipEventDestroy(start_event); });
-  HIP_CHECK(hipEventCreate(&stop_event));
+  HIP_CHECK(hipEventCreate(&stop_event))
   cleanup.Add([stop_event] { (void)hipEventDestroy(stop_event); });
-  HIP_CHECK(hipMalloc(&device_ptr, kBufferBytes));
+  HIP_CHECK(hipMalloc(&device_ptr, kBufferBytes))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
-  HIP_CHECK(hipEventRecord(start_event, stream));
-  HIP_CHECK(hipMemsetAsync(device_ptr, 0, kBufferBytes, stream));
-  HIP_CHECK(hipEventRecord(stop_event, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipEventRecord(start_event, stream))
+  HIP_CHECK(hipMemsetAsync(device_ptr, 0, kBufferBytes, stream))
+  HIP_CHECK(hipEventRecord(stop_event, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   float elapsed_ms = -1.0f;
-  HIP_CHECK(hipEventElapsedTime(&elapsed_ms, start_event, stop_event));
+  HIP_CHECK(hipEventElapsedTime(&elapsed_ms, start_event, stop_event))
 
   // Time between an earlier and a later event on the same stream is monotonic
   // and must be non-negative; the exact magnitude is timing-dependent and is
@@ -189,13 +189,13 @@ HIP_TEST_CASE(Contract_StreamProps_HipEventRecordWithFlags_Default_RecordsAndTim
   hipEvent_t stop_event = nullptr;
   void* device_ptr = nullptr;
 
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-  HIP_CHECK(hipEventCreate(&start_event));
+  HIP_CHECK(hipEventCreate(&start_event))
   cleanup.Add([start_event] { (void)hipEventDestroy(start_event); });
-  HIP_CHECK(hipEventCreate(&stop_event));
+  HIP_CHECK(hipEventCreate(&stop_event))
   cleanup.Add([stop_event] { (void)hipEventDestroy(stop_event); });
-  HIP_CHECK(hipMalloc(&device_ptr, kBufferBytes));
+  HIP_CHECK(hipMalloc(&device_ptr, kBufferBytes))
   cleanup.Add([device_ptr] { (void)hipFree(device_ptr); });
 
   const hipError_t start_status =
@@ -205,14 +205,14 @@ HIP_TEST_CASE(Contract_StreamProps_HipEventRecordWithFlags_Default_RecordsAndTim
     // backends; an unsupported report is a contract-compliant outcome.
     return;
   }
-  HIP_CHECK(start_status);
+  HIP_CHECK(start_status)
 
-  HIP_CHECK(hipMemsetAsync(device_ptr, 0, kBufferBytes, stream));
-  HIP_CHECK(hipEventRecordWithFlags(stop_event, stream, hipEventRecordDefault));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemsetAsync(device_ptr, 0, kBufferBytes, stream))
+  HIP_CHECK(hipEventRecordWithFlags(stop_event, stream, hipEventRecordDefault))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   float elapsed_ms = -1.0f;
-  HIP_CHECK(hipEventElapsedTime(&elapsed_ms, start_event, stop_event));
+  HIP_CHECK(hipEventElapsedTime(&elapsed_ms, start_event, stop_event))
 
   // Events recorded with the default record flags must produce a non-negative
   // elapsed time just like the plain record path.

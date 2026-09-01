@@ -72,7 +72,7 @@ void hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(int block_size_limi
 HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange) {
   hipDeviceProp_t devProp;
   // Get current device property
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
   SECTION("block_size_limit = 0") {
     hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(0, devProp.maxThreadsPerBlock);
   }
@@ -98,7 +98,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange) {
 */
 HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu) {
   int devcount = 0;
-  HIP_CHECK(hipGetDeviceCount(&devcount));
+  HIP_CHECK(hipGetDeviceCount(&devcount))
   // If only single GPU is detected then return
   if (devcount < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
@@ -106,14 +106,14 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu) {
   // Get current device property
   for (int dev = 0; dev < devcount; dev++) {
     hipDeviceProp_t devProp;
-    HIP_CHECK(hipGetDeviceProperties(&devProp, dev));
-    HIP_CHECK(hipSetDevice(dev));
+    HIP_CHECK(hipGetDeviceProperties(&devProp, dev))
+    HIP_CHECK(hipSetDevice(dev))
     hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(0, devProp.maxThreadsPerBlock);
     hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange((devProp.maxThreadsPerBlock - 1),
                                                             devProp.maxThreadsPerBlock);
     hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(devProp.maxThreadsPerBlock,
                                                             devProp.maxThreadsPerBlock);
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
   }
 }
 
@@ -123,7 +123,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu) {
 */
 HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functor) {
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
   functorBlockSizeToDynamicSMemSize testFunc(SHARED_MEM_CONST);
   // Get current device property
   int minGridSize = 0, blockSize = 0;
@@ -143,7 +143,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functor) {
 */
 HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Lambda) {
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
   auto testFunc = [](const int blockSize) {
     return (static_cast<size_t>(blockSize * SHARED_MEM_CONST));
   };
@@ -219,24 +219,24 @@ static void checkFunc(void (*kerFn)(int*, int*), int num, int sharedMemBytes, in
     inpArr_h[i] = i;
   }
   // allocate the memory on the device side
-  HIP_CHECK(hipMalloc(&inpArr_d, SIZE));
-  HIP_CHECK(hipMalloc(&outArr_d, SIZE));
+  HIP_CHECK(hipMalloc(&inpArr_d, SIZE))
+  HIP_CHECK(hipMalloc(&outArr_d, SIZE))
   // Memory transfer from host to device
-  HIP_CHECK(hipMemcpy(inpArr_d, inpArr_h, SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(inpArr_d, inpArr_h, SIZE, hipMemcpyHostToDevice))
   // Lauching kernel from host
   dim3 gridsize = dim3(num / blockSize);
   dim3 blocksize = dim3(blockSize);
   hipLaunchKernelGGL(kerFn, gridsize, blocksize, sharedMemBytes, 0, outArr_d, inpArr_d);
   // Memory transfer from device to host
-  HIP_CHECK(hipMemcpy(outArr_h, outArr_d, SIZE, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(outArr_h, outArr_d, SIZE, hipMemcpyDeviceToHost))
+  HIP_CHECK(hipDeviceSynchronize())
   // verify the results
   for (int i = 0; i < num; i++) {
     REQUIRE(outArr_h[i] == inpArr_h[i]);
   }
   // free the resources on device side
-  HIP_CHECK(hipFree(inpArr_d));
-  HIP_CHECK(hipFree(outArr_d));
+  HIP_CHECK(hipFree(inpArr_d))
+  HIP_CHECK(hipFree(outArr_d))
   // free the resources on host side
   free(inpArr_h);
   free(outArr_h);
@@ -282,7 +282,7 @@ static size_t getMaxDynShMem(int blocksize) {
 */
 HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functional) {
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
   SECTION("Non Dynamic Shared Kernel") {
     int arrSize;
     int minGridSize = 0, blockSize = 0;

@@ -60,7 +60,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex2Dgather_Positive_ReadModeElementType, char, unsi
   tex2DgatherKernel<vec4<TestType>><<<dim_grid, dim_block>>>(
       fixture.out_alloc_d.ptr(), comp, params.NumItersX(), params.NumItersY(), fixture.tex.object(),
       params.Width(), params.Height(), params.num_subdivisions, params.tex_desc.normalizedCoords);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
   fixture.LoadOutput();
 

@@ -58,7 +58,7 @@ static void runMipMapTest(unsigned int width, unsigned int height, unsigned int 
                                     hipArrayDefault));
 
   hipArray_t hipArray = nullptr;
-  HIP_CHECK(hipGetMipmappedArrayLevel(&hipArray, mip_array_ptr, mipmap_level));
+  HIP_CHECK(hipGetMipmappedArrayLevel(&hipArray, mip_array_ptr, mipmap_level))
   HIP_CHECK(hipMemcpy2DToArray(hipArray, 0, 0, hData, width * sizeof(float), width * sizeof(float),
                                height, hipMemcpyHostToDevice));
 
@@ -69,11 +69,11 @@ static void runMipMapTest(unsigned int width, unsigned int height, unsigned int 
   texRef.normalized = 1;
 
   // Bind the array to the texture
-  HIP_CHECK(hipBindTextureToMipmappedArray(&texRef, mip_array_ptr, &channelDesc));
+  HIP_CHECK(hipBindTextureToMipmappedArray(&texRef, mip_array_ptr, &channelDesc))
 
   // Allocate device memory for result
   float* dData = nullptr;
-  HIP_CHECK(hipMalloc(&dData, size));
+  HIP_CHECK(hipMalloc(&dData, size))
   REQUIRE(dData != nullptr);
 
   dim3 dimBlock(16, 16, 1);
@@ -81,14 +81,14 @@ static void runMipMapTest(unsigned int width, unsigned int height, unsigned int 
 
   hipLaunchKernelGGL(tex2DKernel, dim3(dimGrid), dim3(dimBlock), 0, 0, dData, width, height,
                      mipmap_level);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError())
+  HIP_CHECK(hipDeviceSynchronize())
 
   // Allocate memory on host and copy result from device to host
   float* hOutputData = reinterpret_cast<float*>(malloc(size));
   REQUIRE(hOutputData != nullptr);
   memset(hOutputData, 0, size);
-  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost))
 
   for (i = 0; i < height; i++) {
     for (j = 0; j < width; j++) {
@@ -99,10 +99,10 @@ static void runMipMapTest(unsigned int width, unsigned int height, unsigned int 
       }
     }
   }
-  HIP_CHECK(hipUnbindTexture(texRef));
-  HIP_CHECK(hipFree(dData));
-  HIP_CHECK(hipFreeArray(hipArray));
-  HIP_CHECK(hipFreeMipmappedArray(mip_array_ptr));
+  HIP_CHECK(hipUnbindTexture(texRef))
+  HIP_CHECK(hipFree(dData))
+  HIP_CHECK(hipFreeArray(hipArray))
+  HIP_CHECK(hipFreeMipmappedArray(mip_array_ptr))
   free(hData);
 }
 #endif
@@ -194,7 +194,7 @@ HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Negative_Parameters) {
     REQUIRE(ret != hipSuccess);
   }
 
-  HIP_CHECK(hipFreeMipmappedArray(mip_array_ptr));
+  HIP_CHECK(hipFreeMipmappedArray(mip_array_ptr))
 #else
   HIP_SKIP_TEST(HipTest::SkipReason::kMipmappedArraysUnsupported);
 #endif

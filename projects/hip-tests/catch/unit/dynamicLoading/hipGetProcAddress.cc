@@ -55,7 +55,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_Positive) {
   void *funcPtr = nullptr;
   hipDriverProcAddressQueryResult status;
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   SECTION("Get driver symbol for default flag") {
     HIP_CHECK(hipGetProcAddress("hipGetDeviceCount", &funcPtr,
@@ -79,10 +79,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_Positive) {
 
   hipError_t (*hipGetDeviceCount_ptr)(int *) = (hipError_t(*)(int *))funcPtr;
   int countFuncPtr = 0;
-  HIP_CHECK(hipGetDeviceCount_ptr(&countFuncPtr));
+  HIP_CHECK(hipGetDeviceCount_ptr(&countFuncPtr))
 
   int count = 0;
-  HIP_CHECK(hipGetDeviceCount(&count));
+  HIP_CHECK(hipGetDeviceCount(&count))
 
   REQUIRE(count > 0);
   REQUIRE(countFuncPtr > 0);
@@ -107,7 +107,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_Negative) {
   void *funcPtr = nullptr;
   hipDriverProcAddressQueryResult status;
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   SECTION("Empty symbol") {
     HIP_CHECK_ERROR(hipGetProcAddress("", &funcPtr, currentHipVersion,
@@ -139,7 +139,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Positive) {
   void *funcPtr = nullptr;
   hipDriverProcAddressQueryResult status;
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   SECTION("Get driver symbol for default flag") {
     HIP_CHECK(hipGetProcAddress_spt("hipGetDeviceCount", &funcPtr,
@@ -163,10 +163,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Positive) {
 
   hipError_t (*hipGetDeviceCount_ptr)(int *) = (hipError_t(*)(int *))funcPtr;
   int countFuncPtr = 0;
-  HIP_CHECK(hipGetDeviceCount_ptr(&countFuncPtr));
+  HIP_CHECK(hipGetDeviceCount_ptr(&countFuncPtr))
 
   int count = 0;
-  HIP_CHECK(hipGetDeviceCount(&count));
+  HIP_CHECK(hipGetDeviceCount(&count))
 
   REQUIRE(count > 0);
   REQUIRE(countFuncPtr > 0);
@@ -191,7 +191,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Negative) {
   void *funcPtr = nullptr;
   hipDriverProcAddressQueryResult status;
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   SECTION("Empty symbol") {
     HIP_CHECK_ERROR(hipGetProcAddress_spt("", &funcPtr, currentHipVersion,
@@ -225,7 +225,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Negative) {
 HIP_TEST_CASE(Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress) {
   hipDriverProcAddressQueryResult status;
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   void *funcPtr_default = nullptr;
   void *funcPtr_legacy = nullptr;

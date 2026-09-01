@@ -51,11 +51,11 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_NegativeTests) {
 
   constexpr size_t kAllocSize = 4096;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   // Allocate managed memory for tests that need valid pointers
   void* managed_ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&managed_ptr, kAllocSize));
+  HIP_CHECK(hipMallocManaged(&managed_ptr, kAllocSize))
 
   void* dev_ptrs[2] = {managed_ptr, managed_ptr};
   size_t sizes[2] = {kAllocSize, kAllocSize};
@@ -134,7 +134,7 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_NegativeTests) {
 
   SECTION("NonManagedMemory") {
     void* device_ptr = nullptr;
-    HIP_CHECK(hipMalloc(&device_ptr, kAllocSize));
+    HIP_CHECK(hipMalloc(&device_ptr, kAllocSize))
     void* non_managed_ptrs[1] = {device_ptr};
     size_t non_managed_sizes[1] = {kAllocSize};
     // Non-managed memory should fail if pageable memory access not supported,
@@ -144,7 +144,7 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_NegativeTests) {
     // Non-managed memory requires pageable memory access support.
     // Returns hipSuccess if supported, hipErrorInvalidValue if not.
     REQUIRE((err == hipSuccess || err == hipErrorInvalidValue));
-    HIP_CHECK(hipFree(device_ptr));
+    HIP_CHECK(hipFree(device_ptr))
   }
 
   SECTION("SystemAllocatedMemory") {
@@ -159,8 +159,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_NegativeTests) {
     free(sys_ptr);
   }
 
-  HIP_CHECK(hipFree(managed_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(managed_ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 // =====================================================================================
@@ -188,10 +188,10 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_SingleDiscard) {
 
   constexpr size_t kSize = 4096;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* managed_ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&managed_ptr, kSize));
+  HIP_CHECK(hipMallocManaged(&managed_ptr, kSize))
 
   // Initialize with known values
   memset(managed_ptr, 0xAB, kSize);
@@ -199,8 +199,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_SingleDiscard) {
   // Discard via runtime API
   void* ptrs[1] = {managed_ptr};
   size_t sizes[1] = {kSize};
-  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Write new values — this "undoes" the discard per CUDA semantics
   memset(managed_ptr, 0xCD, kSize);
@@ -211,8 +211,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_SingleDiscard) {
     REQUIRE(bytes[i] == 0xCD);
   }
 
-  HIP_CHECK(hipFree(managed_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(managed_ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -236,18 +236,18 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_MultipleDiscards) {
   constexpr size_t kCount = 4;
   constexpr size_t kSizes[kCount] = {4096, 65536, 1024 * 1024, 16};
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* managed_ptrs[kCount] = {};
   size_t sizes[kCount];
   for (size_t i = 0; i < kCount; i++) {
-    HIP_CHECK(hipMallocManaged(&managed_ptrs[i], kSizes[i]));
+    HIP_CHECK(hipMallocManaged(&managed_ptrs[i], kSizes[i]))
     memset(managed_ptrs[i], static_cast<int>(0xAA + i), kSizes[i]);
     sizes[i] = kSizes[i];
   }
 
-  HIP_CHECK(hipMemDiscardBatchAsync(managed_ptrs, sizes, kCount, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemDiscardBatchAsync(managed_ptrs, sizes, kCount, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Write and verify each allocation is still usable
   for (size_t i = 0; i < kCount; i++) {
@@ -261,9 +261,9 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_MultipleDiscards) {
   }
 
   for (size_t i = 0; i < kCount; i++) {
-    HIP_CHECK(hipFree(managed_ptrs[i]));
+    HIP_CHECK(hipFree(managed_ptrs[i]))
   }
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -287,18 +287,18 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_LargeCount) {
   constexpr size_t kCount = 64;
   constexpr size_t kEachSize = 4096;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   std::vector<void*> managed_ptrs(kCount);
   std::vector<size_t> sizes(kCount, kEachSize);
 
   for (size_t i = 0; i < kCount; i++) {
-    HIP_CHECK(hipMallocManaged(&managed_ptrs[i], kEachSize));
+    HIP_CHECK(hipMallocManaged(&managed_ptrs[i], kEachSize))
     memset(managed_ptrs[i], 0xFF, kEachSize);
   }
 
-  HIP_CHECK(hipMemDiscardBatchAsync(managed_ptrs.data(), sizes.data(), kCount, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemDiscardBatchAsync(managed_ptrs.data(), sizes.data(), kCount, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Verify all allocations are still usable after discard
   for (size_t i = 0; i < kCount; i++) {
@@ -310,9 +310,9 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_LargeCount) {
   }
 
   for (size_t i = 0; i < kCount; i++) {
-    HIP_CHECK(hipFree(managed_ptrs[i]));
+    HIP_CHECK(hipFree(managed_ptrs[i]))
   }
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -335,22 +335,22 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_DiscardThenPrefetch) {
 
   constexpr size_t kSize = 4096;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* managed_ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&managed_ptr, kSize));
+  HIP_CHECK(hipMallocManaged(&managed_ptr, kSize))
   memset(managed_ptr, 0xBB, kSize);
 
   // Discard
   void* ptrs[1] = {managed_ptr};
   size_t sizes[1] = {kSize};
-  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream));
+  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream))
 
   // Prefetch to device 0 — should "undo" the discard
   int device;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipMemPrefetchAsync(managed_ptr, kSize, device, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGetDevice(&device))
+  HIP_CHECK(hipMemPrefetchAsync(managed_ptr, kSize, device, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Memory should be accessible — write and read back
   memset(managed_ptr, 0xCC, kSize);
@@ -359,8 +359,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_DiscardThenPrefetch) {
     REQUIRE(bytes[i] == 0xCC);
   }
 
-  HIP_CHECK(hipFree(managed_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(managed_ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -384,10 +384,10 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_StreamOrdering) {
 
   constexpr size_t kSize = 4096;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* managed_ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&managed_ptr, kSize));
+  HIP_CHECK(hipMallocManaged(&managed_ptr, kSize))
 
   // Write initial values
   memset(managed_ptr, 0x11, kSize);
@@ -395,10 +395,10 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_StreamOrdering) {
   // Discard on stream
   void* ptrs[1] = {managed_ptr};
   size_t sizes[1] = {kSize};
-  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream));
+  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream))
 
   // Write new values on same stream (after discard completes in stream order)
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
   memset(managed_ptr, 0x22, kSize);
 
   // Verify the new values
@@ -407,8 +407,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_StreamOrdering) {
     REQUIRE(bytes[i] == 0x22);
   }
 
-  HIP_CHECK(hipFree(managed_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(managed_ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -433,18 +433,18 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_SubrangeDiscard) {
   constexpr size_t kOffset = 4096;
   constexpr size_t kDiscardSize = 8192;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* managed_ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&managed_ptr, kTotalSize));
+  HIP_CHECK(hipMallocManaged(&managed_ptr, kTotalSize))
   memset(managed_ptr, 0xDD, kTotalSize);
 
   // Discard only a sub-range
   void* sub_ptr = static_cast<char*>(managed_ptr) + kOffset;
   void* ptrs[1] = {sub_ptr};
   size_t sizes[1] = {kDiscardSize};
-  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Bytes before the discarded range should be intact
   auto* bytes = static_cast<unsigned char*>(managed_ptr);
@@ -464,8 +464,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_SubrangeDiscard) {
     REQUIRE(sub_bytes[i] == 0xEE);
   }
 
-  HIP_CHECK(hipFree(managed_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(managed_ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -488,16 +488,16 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_SamePointerTwice) {
 
   constexpr size_t kSize = 4096;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* managed_ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&managed_ptr, kSize));
+  HIP_CHECK(hipMallocManaged(&managed_ptr, kSize))
   memset(managed_ptr, 0xAA, kSize);
 
   void* ptrs[2] = {managed_ptr, managed_ptr};
   size_t sizes[2] = {kSize, kSize};
-  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 2, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 2, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Should still be usable
   memset(managed_ptr, 0xBB, kSize);
@@ -505,8 +505,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_SamePointerTwice) {
   REQUIRE(bytes[0] == 0xBB);
   REQUIRE(bytes[kSize - 1] == 0xBB);
 
-  HIP_CHECK(hipFree(managed_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(managed_ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -529,23 +529,23 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_MinimalSize) {
 
   constexpr size_t kAllocSize = 4096;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* managed_ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&managed_ptr, kAllocSize));
+  HIP_CHECK(hipMallocManaged(&managed_ptr, kAllocSize))
 
   void* ptrs[1] = {managed_ptr};
   size_t sizes[1] = {1};
-  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Should still be usable
   auto* bytes = static_cast<unsigned char*>(managed_ptr);
   bytes[0] = 0x42;
   REQUIRE(bytes[0] == 0x42);
 
-  HIP_CHECK(hipFree(managed_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(managed_ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -569,29 +569,29 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_DrvApiParity) {
 
   constexpr size_t kSize = 4096;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   // Test with runtime API
   void* managed_ptr1 = nullptr;
-  HIP_CHECK(hipMallocManaged(&managed_ptr1, kSize));
+  HIP_CHECK(hipMallocManaged(&managed_ptr1, kSize))
   memset(managed_ptr1, 0xAA, kSize);
   {
     void* ptrs[1] = {managed_ptr1};
     size_t sizes[1] = {kSize};
-    HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
   memset(managed_ptr1, 0x11, kSize);
 
   // Test with driver API
   void* managed_ptr2 = nullptr;
-  HIP_CHECK(hipMallocManaged(&managed_ptr2, kSize));
+  HIP_CHECK(hipMallocManaged(&managed_ptr2, kSize))
   memset(managed_ptr2, 0xBB, kSize);
   {
     hipDeviceptr_t dptrs[1] = {reinterpret_cast<hipDeviceptr_t>(managed_ptr2)};
     size_t sizes[1] = {kSize};
-    HIP_CHECK(hipDrvMemDiscardBatchAsync(dptrs, sizes, 1, 0, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipDrvMemDiscardBatchAsync(dptrs, sizes, 1, 0, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
   }
   memset(managed_ptr2, 0x22, kSize);
 
@@ -603,9 +603,9 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_DrvApiParity) {
     REQUIRE(bytes2[i] == 0x22);
   }
 
-  HIP_CHECK(hipFree(managed_ptr1));
-  HIP_CHECK(hipFree(managed_ptr2));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(managed_ptr1))
+  HIP_CHECK(hipFree(managed_ptr2))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 /**
  * Test Description
@@ -630,10 +630,10 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_ContentAfterDiscard) {
 
   constexpr size_t kSize = 65536;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* managed_ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&managed_ptr, kSize));
+  HIP_CHECK(hipMallocManaged(&managed_ptr, kSize))
 
   // Fill with known pattern
   memset(managed_ptr, 0xAB, kSize);
@@ -641,8 +641,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_ContentAfterDiscard) {
   // Discard
   void* ptrs[1] = {managed_ptr};
   size_t sizes[1] = {kSize};
-  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Read back immediately — content is undefined per spec.
   // We do NOT assert specific values, but the access must not fault.
@@ -660,8 +660,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_ContentAfterDiscard) {
     REQUIRE(check[i] == 0xCD);
   }
 
-  HIP_CHECK(hipFree(managed_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(managed_ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 // =============================================================================
@@ -698,30 +698,30 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_PageableDeviceMemory) {
 
   constexpr size_t kSize = 65536;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* ptr = nullptr;
-  HIP_CHECK(hipMalloc(&ptr, kSize));
-  HIP_CHECK(hipMemset(ptr, 0xAB, kSize));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMalloc(&ptr, kSize))
+  HIP_CHECK(hipMemset(ptr, 0xAB, kSize))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   void* ptrs[1] = {ptr};
   size_t sizes[1] = {kSize};
-  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Write new data and verify
-  HIP_CHECK(hipMemset(ptr, 0xCD, kSize));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemset(ptr, 0xCD, kSize))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   std::vector<unsigned char> host_buf(kSize);
-  HIP_CHECK(hipMemcpy(host_buf.data(), ptr, kSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_buf.data(), ptr, kSize, hipMemcpyDeviceToHost))
   for (size_t i = 0; i < kSize; i++) {
     REQUIRE(host_buf[i] == 0xCD);
   }
 
-  HIP_CHECK(hipFree(ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -742,7 +742,7 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_PageableSystemMemory) {
 
   constexpr size_t kSize = 65536;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* ptr = malloc(kSize);
   REQUIRE(ptr != nullptr);
@@ -750,8 +750,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_PageableSystemMemory) {
 
   void* ptrs[1] = {ptr};
   size_t sizes[1] = {kSize};
-  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Write and verify
   memset(ptr, 0xCD, kSize);
@@ -761,7 +761,7 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_PageableSystemMemory) {
   }
 
   free(ptr);
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -782,30 +782,30 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_PageableMixedBatch) {
 
   constexpr size_t kSize = 4096;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* managed_ptr = nullptr;
   void* device_ptr = nullptr;
   void* system_ptr = malloc(kSize);
   REQUIRE(system_ptr != nullptr);
-  HIP_CHECK(hipMallocManaged(&managed_ptr, kSize));
-  HIP_CHECK(hipMalloc(&device_ptr, kSize));
+  HIP_CHECK(hipMallocManaged(&managed_ptr, kSize))
+  HIP_CHECK(hipMalloc(&device_ptr, kSize))
 
   memset(managed_ptr, 0xAA, kSize);
   memset(system_ptr, 0xBB, kSize);
-  HIP_CHECK(hipMemset(device_ptr, 0xCC, kSize));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemset(device_ptr, 0xCC, kSize))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   void* ptrs[3] = {managed_ptr, device_ptr, system_ptr};
   size_t sizes[3] = {kSize, kSize, kSize};
-  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 3, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 3, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Write new data
   memset(managed_ptr, 0x11, kSize);
-  HIP_CHECK(hipMemset(device_ptr, 0x22, kSize));
+  HIP_CHECK(hipMemset(device_ptr, 0x22, kSize))
   memset(system_ptr, 0x33, kSize);
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Verify managed
   auto* mb = static_cast<unsigned char*>(managed_ptr);
@@ -815,7 +815,7 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_PageableMixedBatch) {
 
   // Verify device
   std::vector<unsigned char> dev_buf(kSize);
-  HIP_CHECK(hipMemcpy(dev_buf.data(), device_ptr, kSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(dev_buf.data(), device_ptr, kSize, hipMemcpyDeviceToHost))
   for (size_t i = 0; i < kSize; i++) {
     REQUIRE(dev_buf[i] == 0x22);
   }
@@ -826,10 +826,10 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_PageableMixedBatch) {
     REQUIRE(sb[i] == 0x33);
   }
 
-  HIP_CHECK(hipFree(managed_ptr));
-  HIP_CHECK(hipFree(device_ptr));
+  HIP_CHECK(hipFree(managed_ptr))
+  HIP_CHECK(hipFree(device_ptr))
   free(system_ptr);
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 #endif  // !HT_NVIDIA
@@ -852,10 +852,10 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_PageableMixedBatch) {
 HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_NegativeTests) {
   constexpr size_t kAllocSize = 4096;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&ptr, kAllocSize));
+  HIP_CHECK(hipMallocManaged(&ptr, kAllocSize))
 
   void* ptrs[1] = {ptr};
   size_t sizes[1] = {kAllocSize};
@@ -905,8 +905,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_NegativeTests) {
   REQUIRE(hipMemDiscardAndPrefetchBatchAsync(ptrs, sizes, 1, &loc, loc_idxs, 2, 0, stream)
           == hipErrorInvalidValue);
 
-  HIP_CHECK(hipFree(ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -929,10 +929,10 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_SingleBuffer) {
 
   constexpr size_t kSize = 1024 * 1024;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&ptr, kSize));
+  HIP_CHECK(hipMallocManaged(&ptr, kSize))
   memset(ptr, 0xAB, kSize);
 
   void* ptrs[1] = {ptr};
@@ -942,8 +942,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_SingleBuffer) {
   loc.id = 0;
   size_t loc_idxs[1] = {0};
 
-  HIP_CHECK(hipMemDiscardAndPrefetchBatchAsync(ptrs, sizes, 1, &loc, loc_idxs, 1, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemDiscardAndPrefetchBatchAsync(ptrs, sizes, 1, &loc, loc_idxs, 1, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Verify memory is usable — write new content and read back
   memset(ptr, 0xCD, kSize);
@@ -952,8 +952,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_SingleBuffer) {
     REQUIRE(bytes[i] == 0xCD);
   }
 
-  HIP_CHECK(hipFree(ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -977,12 +977,12 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_MultipleSameDevice) {
   constexpr size_t kCount = 4;
   constexpr size_t kSize = 65536;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   std::vector<void*> ptrs(kCount);
   std::vector<size_t> sizes(kCount, kSize);
   for (size_t i = 0; i < kCount; i++) {
-    HIP_CHECK(hipMallocManaged(&ptrs[i], kSize));
+    HIP_CHECK(hipMallocManaged(&ptrs[i], kSize))
     memset(ptrs[i], static_cast<int>(0xA0 + i), kSize);
   }
 
@@ -993,7 +993,7 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_MultipleSameDevice) {
 
   HIP_CHECK(hipMemDiscardAndPrefetchBatchAsync(ptrs.data(), sizes.data(), kCount, &loc,
                                                loc_idxs, 1, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Verify all buffers usable
   for (size_t i = 0; i < kCount; i++) {
@@ -1005,9 +1005,9 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_MultipleSameDevice) {
   }
 
   for (size_t i = 0; i < kCount; i++) {
-    HIP_CHECK(hipFree(ptrs[i]));
+    HIP_CHECK(hipFree(ptrs[i]))
   }
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -1030,13 +1030,13 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_ParitySeparateCalls) {
 
   constexpr size_t kSize = 65536;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   // Allocate two buffers — one for combined, one for separate calls
   void* ptr_combined = nullptr;
   void* ptr_separate = nullptr;
-  HIP_CHECK(hipMallocManaged(&ptr_combined, kSize));
-  HIP_CHECK(hipMallocManaged(&ptr_separate, kSize));
+  HIP_CHECK(hipMallocManaged(&ptr_combined, kSize))
+  HIP_CHECK(hipMallocManaged(&ptr_separate, kSize))
   memset(ptr_combined, 0xAA, kSize);
   memset(ptr_separate, 0xAA, kSize);
 
@@ -1048,16 +1048,16 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_ParitySeparateCalls) {
   // Combined API
   void* ptrs_c[1] = {ptr_combined};
   size_t sizes_c[1] = {kSize};
-  HIP_CHECK(hipMemDiscardAndPrefetchBatchAsync(ptrs_c, sizes_c, 1, &loc, loc_idxs, 1, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemDiscardAndPrefetchBatchAsync(ptrs_c, sizes_c, 1, &loc, loc_idxs, 1, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Separate calls
   void* ptrs_s[1] = {ptr_separate};
   size_t sizes_s[1] = {kSize};
-  HIP_CHECK(hipMemDiscardBatchAsync(ptrs_s, sizes_s, 1, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipMemPrefetchBatchAsync(ptrs_s, sizes_s, 1, &loc, loc_idxs, 1, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemDiscardBatchAsync(ptrs_s, sizes_s, 1, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipMemPrefetchBatchAsync(ptrs_s, sizes_s, 1, &loc, loc_idxs, 1, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Both should be usable — write and verify
   memset(ptr_combined, 0xBB, kSize);
@@ -1069,9 +1069,9 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_ParitySeparateCalls) {
     REQUIRE(bs[i] == 0xBB);
   }
 
-  HIP_CHECK(hipFree(ptr_combined));
-  HIP_CHECK(hipFree(ptr_separate));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(ptr_combined))
+  HIP_CHECK(hipFree(ptr_separate))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -1096,10 +1096,10 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_Atomicity) {
 
   constexpr size_t kSize = 4096;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&ptr, kSize));
+  HIP_CHECK(hipMallocManaged(&ptr, kSize))
 
   void* ptrs[1] = {ptr};
   size_t sizes[1] = {kSize};
@@ -1111,7 +1111,7 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_Atomicity) {
   hipError_t err = hipMemDiscardAndPrefetchBatchAsync(ptrs, sizes, 1,
       nullptr, nullptr, 0, 0, stream);
   REQUIRE(err == hipErrorInvalidValue);
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Verify data is unchanged — discard did not happen
   auto* bytes = static_cast<unsigned char*>(ptr);
@@ -1130,7 +1130,7 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_Atomicity) {
   err = hipMemDiscardAndPrefetchBatchAsync(ptrs, sizes, 1,
       &loc, bad_idxs, 1, 0, stream);
   REQUIRE(err == hipErrorInvalidValue);
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Verify data is unchanged — discard did not happen
   bytes = static_cast<unsigned char*>(ptr);
@@ -1138,8 +1138,8 @@ HIP_TEST_CASE(Unit_hipMemDiscardAndPrefetchBatchAsync_Atomicity) {
     REQUIRE(bytes[i] == 0xBB);
   }
 
-  HIP_CHECK(hipFree(ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**
@@ -1162,10 +1162,10 @@ HIP_TEST_CASE(Unit_hipDrvMemDiscardAndPrefetchBatchAsync_SingleBuffer) {
 
   constexpr size_t kSize = 65536;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&stream))
 
   void* ptr = nullptr;
-  HIP_CHECK(hipMallocManaged(&ptr, kSize));
+  HIP_CHECK(hipMallocManaged(&ptr, kSize))
   memset(ptr, 0xAB, kSize);
 
   hipDeviceptr_t dptrs[1] = {reinterpret_cast<hipDeviceptr_t>(ptr)};
@@ -1175,8 +1175,8 @@ HIP_TEST_CASE(Unit_hipDrvMemDiscardAndPrefetchBatchAsync_SingleBuffer) {
   loc.id = 0;
   size_t loc_idxs[1] = {0};
 
-  HIP_CHECK(hipDrvMemDiscardAndPrefetchBatchAsync(dptrs, sizes, 1, &loc, loc_idxs, 1, 0, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipDrvMemDiscardAndPrefetchBatchAsync(dptrs, sizes, 1, &loc, loc_idxs, 1, 0, stream))
+  HIP_CHECK(hipStreamSynchronize(stream))
 
   // Verify usable
   memset(ptr, 0xCD, kSize);
@@ -1185,8 +1185,8 @@ HIP_TEST_CASE(Unit_hipDrvMemDiscardAndPrefetchBatchAsync_SingleBuffer) {
     REQUIRE(bytes[i] == 0xCD);
   }
 
-  HIP_CHECK(hipFree(ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(ptr))
+  HIP_CHECK(hipStreamDestroy(stream))
 }
 
 /**

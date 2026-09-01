@@ -58,7 +58,7 @@ HIP_TEST_CASE(Unit_bitExtract) {
   unsigned int* deviceSrc264;
 
   hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, 0))
   INFO("System minor : " << devProp.minor);
   INFO("System major : " << devProp.major);
   INFO("agent prop name : " << devProp.name);
@@ -102,33 +102,33 @@ HIP_TEST_CASE(Unit_bitExtract) {
     hostSrc264[i] = uint64_src12_dist(rd);
   }
 
-  HIP_CHECK(hipMalloc((void**)&deviceOut32, NUM * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc((void**)&deviceSrc032, NUM * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc((void**)&deviceSrc132, NUM * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc((void**)&deviceSrc232, NUM * sizeof(unsigned int)));
+  HIP_CHECK(hipMalloc((void**)&deviceOut32, NUM * sizeof(unsigned int)))
+  HIP_CHECK(hipMalloc((void**)&deviceSrc032, NUM * sizeof(unsigned int)))
+  HIP_CHECK(hipMalloc((void**)&deviceSrc132, NUM * sizeof(unsigned int)))
+  HIP_CHECK(hipMalloc((void**)&deviceSrc232, NUM * sizeof(unsigned int)))
 
-  HIP_CHECK(hipMalloc((void**)&deviceOut64, NUM * sizeof(unsigned long long int)));
-  HIP_CHECK(hipMalloc((void**)&deviceSrc064, NUM * sizeof(unsigned long long int)));
-  HIP_CHECK(hipMalloc((void**)&deviceSrc164, NUM * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc((void**)&deviceSrc264, NUM * sizeof(unsigned int)));
+  HIP_CHECK(hipMalloc((void**)&deviceOut64, NUM * sizeof(unsigned long long int)))
+  HIP_CHECK(hipMalloc((void**)&deviceSrc064, NUM * sizeof(unsigned long long int)))
+  HIP_CHECK(hipMalloc((void**)&deviceSrc164, NUM * sizeof(unsigned int)))
+  HIP_CHECK(hipMalloc((void**)&deviceSrc264, NUM * sizeof(unsigned int)))
 
-  HIP_CHECK(hipMemcpy(deviceSrc032, hostSrc032, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(deviceSrc132, hostSrc132, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(deviceSrc232, hostSrc232, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceSrc032, hostSrc032, NUM * sizeof(unsigned int), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(deviceSrc132, hostSrc132, NUM * sizeof(unsigned int), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(deviceSrc232, hostSrc232, NUM * sizeof(unsigned int), hipMemcpyHostToDevice))
 
   HIP_CHECK(hipMemcpy(deviceSrc064, hostSrc064, NUM * sizeof(unsigned long long int),
                       hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(deviceSrc164, hostSrc164, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(deviceSrc264, hostSrc264, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceSrc164, hostSrc164, NUM * sizeof(unsigned int), hipMemcpyHostToDevice))
+  HIP_CHECK(hipMemcpy(deviceSrc264, hostSrc264, NUM * sizeof(unsigned int), hipMemcpyHostToDevice))
 
 
   hipLaunchKernelGGL(HIP_kernel, dim3(num_blocks), dim3(num_threads_per_block), 0, 0, deviceOut32,
                      deviceSrc032, deviceSrc132, deviceSrc232, deviceOut64, deviceSrc064,
                      deviceSrc164, deviceSrc264);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipGetLastError())
 
 
-  HIP_CHECK(hipMemcpy(hostOut32, deviceOut32, NUM * sizeof(unsigned int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostOut32, deviceOut32, NUM * sizeof(unsigned int), hipMemcpyDeviceToHost))
   HIP_CHECK(hipMemcpy(hostOut64, deviceOut64, NUM * sizeof(unsigned long long int),
                       hipMemcpyDeviceToHost));
 
@@ -152,14 +152,14 @@ HIP_TEST_CASE(Unit_bitExtract) {
     }
   }
 
-  HIP_CHECK(hipFree(deviceOut32));
-  HIP_CHECK(hipFree(deviceSrc032));
-  HIP_CHECK(hipFree(deviceSrc132));
-  HIP_CHECK(hipFree(deviceSrc232));
-  HIP_CHECK(hipFree(deviceOut64));
-  HIP_CHECK(hipFree(deviceSrc064));
-  HIP_CHECK(hipFree(deviceSrc164));
-  HIP_CHECK(hipFree(deviceSrc264));
+  HIP_CHECK(hipFree(deviceOut32))
+  HIP_CHECK(hipFree(deviceSrc032))
+  HIP_CHECK(hipFree(deviceSrc132))
+  HIP_CHECK(hipFree(deviceSrc232))
+  HIP_CHECK(hipFree(deviceOut64))
+  HIP_CHECK(hipFree(deviceSrc064))
+  HIP_CHECK(hipFree(deviceSrc164))
+  HIP_CHECK(hipFree(deviceSrc264))
 
   free(hostOut32);
   free(hostSrc032);

@@ -28,8 +28,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Swap) {
   const int device_for_b = 1;
   int can_access_peer_a_to_b = 0;
   int can_access_peer_b_to_a = 0;
-  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer_a_to_b, device_for_a, device_for_b));
-  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer_b_to_a, device_for_b, device_for_a));
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer_a_to_b, device_for_a, device_for_b))
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer_b_to_a, device_for_b, device_for_a))
 
   if (!can_access_peer_a_to_b || !can_access_peer_b_to_a) {
     HIP_SKIP_TEST(
@@ -53,24 +53,24 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Swap) {
 
   EnablePeerAccess({{device_for_a, device_for_b}, {device_for_b, device_for_a}});
 
-  HIP_CHECK(hipSetDevice(device_for_a));
+  HIP_CHECK(hipSetDevice(device_for_a))
   StreamGuard stream_guard(Streams::created);
 
   for (size_t i = 0; i < count; ++i) {
-    HIP_CHECK(hipSetDevice(device_for_b));
+    HIP_CHECK(hipSetDevice(device_for_b))
     LinearAllocGuard<unsigned char> alloc_b(LinearAllocs::hipMalloc, size_in_bytes);
     swap_ptrs_b[i] = alloc_b.ptr();
     allocations.push_back(std::move(alloc_b));
     fillBuffer(swap_ptrs_b[i], initial_values_b[i], LinearAllocs::hipMalloc);
 
-    HIP_CHECK(hipSetDevice(device_for_a));
+    HIP_CHECK(hipSetDevice(device_for_a))
     LinearAllocGuard<unsigned char> alloc_a(LinearAllocs::hipMalloc, size_in_bytes);
     swap_ptrs_a[i] = alloc_a.ptr();
     allocations.push_back(std::move(alloc_a));
     fillBuffer(swap_ptrs_a[i], initial_values_a[i], LinearAllocs::hipMalloc);
   }
 
-  HIP_CHECK(hipSetDevice(device_for_a));
+  HIP_CHECK(hipSetDevice(device_for_a))
   std::vector<size_t> sizes(count, size_in_bytes);
   hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap};
   size_t attrs_idxs[1] = {0};
@@ -80,13 +80,13 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Swap) {
                                       &attr, attrs_idxs, 1, &fail_index, stream_guard.stream()),
                   expectedError);
   if (expectedError == hipSuccess) {
-    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
-    HIP_CHECK(hipSetDevice(device_for_a));
+    HIP_CHECK(hipSetDevice(device_for_a))
     for (size_t i = 0; i < count; ++i) {
       requireBufferEquals(swap_ptrs_a[i], initial_values_b[i], LinearAllocs::hipMalloc);
     }
-    HIP_CHECK(hipSetDevice(device_for_b));
+    HIP_CHECK(hipSetDevice(device_for_b))
     for (size_t i = 0; i < count; ++i) {
       requireBufferEquals(swap_ptrs_b[i], initial_values_a[i], LinearAllocs::hipMalloc);
     }
@@ -107,13 +107,13 @@ static void RunMulticastCopyP2pTest(size_t count, size_t size_in_bytes, int devi
 
   EnablePeerAccess({{device_for_dst, device_for_src}});
 
-  HIP_CHECK(hipSetDevice(device_for_src));
+  HIP_CHECK(hipSetDevice(device_for_src))
   LinearAllocGuard<unsigned char> src_alloc(LinearAllocs::hipMalloc, size_in_bytes);
   void* src_mem = src_alloc.ptr();
   fillBuffer(src_mem, initial_values, LinearAllocs::hipMalloc);
   allocations.push_back(std::move(src_alloc));
 
-  HIP_CHECK(hipSetDevice(device_for_dst));
+  HIP_CHECK(hipSetDevice(device_for_dst))
   StreamGuard stream_guard(Streams::created);
 
   for (size_t i = 0; i < count; ++i) {
@@ -129,7 +129,7 @@ static void RunMulticastCopyP2pTest(size_t count, size_t size_in_bytes, int devi
   size_t fail_index = 0;
   HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), count, &attr,
                                 attrs_idxs, 1, &fail_index, stream_guard.stream()));
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()))
 
   for (size_t i = 0; i < count; ++i) {
     requireBufferEquals(dst_ptrs[i], initial_values, LinearAllocs::hipMalloc);
@@ -148,7 +148,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Multicast) {
   }
 
   int can_access_peer = 0;
-  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 1, 0));
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 1, 0))
 
   if (!can_access_peer) {
     HIP_SKIP_TEST("Skipping because device 1 cannot access peer memory on device 0");
@@ -169,7 +169,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Multicast_Large) {
   }
 
   int can_access_peer = 0;
-  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 1, 0));
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 1, 0))
 
   if (!can_access_peer) {
     HIP_SKIP_TEST("Skipping because device 1 cannot access peer memory on device 0");

@@ -36,7 +36,7 @@ HIP_TEST_CASE(Unit___syncthreads_count_Positive_Basic) {
 
   HipTest::launchKernel(SyncthreadsKernel<SyncthreadsKind::kCount>, kGridSize, kBlockSize,
                         sizeof(int) * kBlockSize, nullptr, out_alloc.ptr());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int i = 0; i < kGridSize; ++i) {
     REQUIRE(out_alloc.host_ptr()[i] == kBlockSize * (kBlockSize + 1) / 2);
@@ -64,7 +64,7 @@ HIP_TEST_CASE(Unit___syncthreads_count_Positive_Predicate_Zero) {
 
   HipTest::launchKernel(SyncthreadsZeroKernel<SyncthreadsKind::kCount>, kGridSize, kBlockSize, 0,
                         nullptr, out_alloc.ptr());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int i = 0; i < kGridSize * kBlockSize; ++i) {
     REQUIRE(out_alloc.host_ptr()[i] == 0);
@@ -92,7 +92,7 @@ HIP_TEST_CASE(Unit___syncthreads_count_Positive_Predicate_One) {
 
   HipTest::launchKernel(SyncthreadsOneKernel<SyncthreadsKind::kCount>, kGridSize, kBlockSize, 0,
                         nullptr, out_alloc.ptr());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int i = 0; i < kGridSize * kBlockSize; ++i) {
     REQUIRE(out_alloc.host_ptr()[i] == kBlockSize);
@@ -121,7 +121,7 @@ HIP_TEST_CASE(Unit___syncthreads_count_Positive_Predicate_OddEven) {
 
   HipTest::launchKernel(SyncthreadsOddEvenKernel<SyncthreadsKind::kCount>, kGridSize, kBlockSize, 0,
                         nullptr, out_alloc.ptr());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int i = 0; i < kGridSize * kBlockSize; ++i) {
     REQUIRE(out_alloc.host_ptr()[i] == kBlockSize / 2);
@@ -149,7 +149,7 @@ HIP_TEST_CASE(Unit___syncthreads_count_Positive_Predicate_Negative) {
 
   HipTest::launchKernel(SyncthreadsNegativeKernel<SyncthreadsKind::kCount>, kGridSize, kBlockSize,
                         0, nullptr, out_alloc.ptr());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int i = 0; i < kGridSize * kBlockSize; ++i) {
     REQUIRE(out_alloc.host_ptr()[i] == kBlockSize);
@@ -177,7 +177,7 @@ HIP_TEST_CASE(Unit___syncthreads_count_Positive_Predicate_Id) {
 
   HipTest::launchKernel(SyncthreadsIdKernel<SyncthreadsKind::kCount>, kGridSize, kBlockSize, 0,
                         nullptr, out_alloc.ptr());
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipDeviceSynchronize())
 
   for (int i = 0; i < kGridSize * kBlockSize; ++i) {
     REQUIRE(out_alloc.host_ptr()[i] == kBlockSize - 1);

@@ -66,9 +66,9 @@ class Timer {
 class EventTimer : public Timer {
  public:
   EventTimer(float& time, hipStream_t stream = nullptr) : Timer(time, stream) {
-    HIP_CHECK(hipEventCreate(&start_));
-    HIP_CHECK(hipEventCreate(&stop_));
-    HIP_CHECK(hipEventRecord(start_, GetStream()));
+    HIP_CHECK(hipEventCreate(&start_))
+    HIP_CHECK(hipEventCreate(&stop_))
+    HIP_CHECK(hipEventRecord(start_, GetStream()))
   }
 
   ~EventTimer() {

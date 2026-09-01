@@ -38,9 +38,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
   void* hipHccModuleLaunchKernel_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
-  HIP_CHECK(hipGetProcAddress("hipModuleLoad", &hipModuleLoad_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipModuleLoad", &hipModuleLoad_ptr, currentHipVersion, 0, nullptr))
   HIP_CHECK(
       hipGetProcAddress("hipModuleUnload", &hipModuleUnload_ptr, currentHipVersion, 0, nullptr));
   HIP_CHECK(hipGetProcAddress("hipModuleGetFunction", &hipModuleGetFunction_ptr, currentHipVersion,
@@ -102,12 +102,12 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
 
   // Validating hipModuleLoad API
   hipModule_t module;
-  HIP_CHECK(dyn_hipModuleLoad_ptr(&module, "addKernel.code"));
+  HIP_CHECK(dyn_hipModuleLoad_ptr(&module, "addKernel.code"))
   REQUIRE(module != nullptr);
 
   // Validating hipModuleGetFunction API
   hipFunction_t function;
-  HIP_CHECK(dyn_hipModuleGetFunction_ptr(&function, module, "addKernel"));
+  HIP_CHECK(dyn_hipModuleGetFunction_ptr(&function, module, "addKernel"))
   REQUIRE(function != nullptr);
 
   // Validating  hipModuleLaunchKernel API
@@ -119,9 +119,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
   fillHostArray(hostArr, N, 10);
 
   int* devArr = nullptr;
-  HIP_CHECK(hipMalloc(&devArr, Nbytes));
+  HIP_CHECK(hipMalloc(&devArr, Nbytes))
   REQUIRE(devArr != nullptr);
-  HIP_CHECK(hipMemcpy(devArr, hostArr, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(devArr, hostArr, Nbytes, hipMemcpyHostToDevice))
 
   dim3 blocksPerGrid(1, 1, 1);
   dim3 threadsPerBlock(1, 1, N);
@@ -142,7 +142,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
                                           blocksPerGrid.z, threadsPerBlock.x, threadsPerBlock.y,
                                           threadsPerBlock.z, 0, 0, nullptr, kernel_parameter));
 
-  HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost))
   REQUIRE(validateHostArray(hostArr, N, 12) == true);
 
   // Validating hipExtModuleLaunchKernel API
@@ -150,7 +150,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
       function, blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z, threadsPerBlock.x,
       threadsPerBlock.y, threadsPerBlock.z, 0, 0, nullptr, kernel_parameter, nullptr, nullptr, 0));
 
-  HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost))
   REQUIRE(validateHostArray(hostArr, N, 14) == true);
 
   // Validating hipHccModuleLaunchKernel API
@@ -158,12 +158,12 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
       function, blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z, threadsPerBlock.x,
       threadsPerBlock.y, threadsPerBlock.z, 0, 0, nullptr, kernel_parameter, nullptr, nullptr));
 
-  HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost))
   REQUIRE(validateHostArray(hostArr, N, 16) == true);
 
   // Validating hipGetFuncBySymbol API
   hipFunction_t functionWithOrgApi, functionWithFuncPtr;
-  HIP_CHECK(hipGetFuncBySymbol(&functionWithOrgApi, reinterpret_cast<const void*>(addOneKernel)));
+  HIP_CHECK(hipGetFuncBySymbol(&functionWithOrgApi, reinterpret_cast<const void*>(addOneKernel)))
   REQUIRE(functionWithOrgApi != nullptr);
 
   HIP_CHECK(dyn_hipGetFuncBySymbol_ptr(&functionWithFuncPtr,
@@ -175,7 +175,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
   // Validating hipFuncGetAttributes API
   struct hipFuncAttributes attrWithOrgApi, attrWithFuncPtr;
 
-  HIP_CHECK(hipFuncGetAttributes(&attrWithOrgApi, reinterpret_cast<const void*>(addOneKernel)));
+  HIP_CHECK(hipFuncGetAttributes(&attrWithOrgApi, reinterpret_cast<const void*>(addOneKernel)))
   HIP_CHECK(
       dyn_hipFuncGetAttributes_ptr(&attrWithFuncPtr, reinterpret_cast<const void*>(addOneKernel)));
 
@@ -221,7 +221,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
   // Validating hipModuleGetGlobal API
   hipDeviceptr_t dptrWithOrgApi = nullptr;
   size_t bytesWithOrgApi = 0;
-  HIP_CHECK(hipModuleGetGlobal(&dptrWithOrgApi, &bytesWithOrgApi, module, "globalDevData"));
+  HIP_CHECK(hipModuleGetGlobal(&dptrWithOrgApi, &bytesWithOrgApi, module, "globalDevData"))
   REQUIRE(dptrWithOrgApi != nullptr);
 
   hipDeviceptr_t dptrWithFuncPtr = nullptr;
@@ -235,11 +235,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
   REQUIRE(bytesWithFuncPtr == bytesWithOrgApi);
 
   // Validating hipModuleUnload API
-  HIP_CHECK(dyn_hipModuleUnload_ptr(module));
+  HIP_CHECK(dyn_hipModuleUnload_ptr(module))
   REQUIRE(dyn_hipModuleUnload_ptr(module) == hipErrorNotFound);
 
   free(hostArr);
-  HIP_CHECK(hipFree(devArr));
+  HIP_CHECK(hipFree(devArr))
 }
 
 /**
@@ -261,7 +261,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisLoadData) {
   void* hipModuleLoadDataEx_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(hipGetProcAddress("hipModuleLoadData", &hipModuleLoadData_ptr, currentHipVersion, 0,
                               nullptr));
@@ -281,30 +281,30 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisLoadData) {
   {
     hipModule_t module = nullptr;
 
-    HIP_CHECK(dyn_hipModuleLoadData_ptr(&module, rtc.data()));
+    HIP_CHECK(dyn_hipModuleLoadData_ptr(&module, rtc.data()))
     REQUIRE(module != nullptr);
 
     hipFunction_t function;
-    HIP_CHECK(hipModuleGetFunction(&function, module, "simpleKernel"));
+    HIP_CHECK(hipModuleGetFunction(&function, module, "simpleKernel"))
     REQUIRE(function != nullptr);
-    HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, nullptr));
+    HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, nullptr))
 
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   }
 
   // Validating hipModuleLoadDataEx API
   {
     hipModule_t module = nullptr;
 
-    HIP_CHECK(dyn_hipModuleLoadDataEx_ptr(&module, rtc.data(), 0, nullptr, nullptr));
+    HIP_CHECK(dyn_hipModuleLoadDataEx_ptr(&module, rtc.data(), 0, nullptr, nullptr))
     REQUIRE(module != nullptr);
 
     hipFunction_t function;
-    HIP_CHECK(hipModuleGetFunction(&function, module, "simpleKernel"));
+    HIP_CHECK(hipModuleGetFunction(&function, module, "simpleKernel"))
     REQUIRE(function != nullptr);
-    HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, nullptr));
+    HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, nullptr))
 
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   }
 }
 
@@ -327,7 +327,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisCooperativeKernels) {
     HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
-  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipSetDevice(0))
 
   void* hipModuleLaunchCooperativeKernel_ptr = nullptr;
   void* hipModuleLaunchCooperativeKernelMultiDevice_ptr = nullptr;
@@ -336,7 +336,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisCooperativeKernels) {
   void* hipExtLaunchMultiKernelMultiDevice_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(hipGetProcAddress("hipModuleLaunchCooperativeKernel",
                               &hipModuleLaunchCooperativeKernel_ptr, currentHipVersion, 0,
@@ -386,9 +386,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisCooperativeKernels) {
   fillHostArray(hostArr, N, 10);
 
   int* devArr = nullptr;
-  HIP_CHECK(hipMalloc(&devArr, Nbytes));
+  HIP_CHECK(hipMalloc(&devArr, Nbytes))
   REQUIRE(devArr != nullptr);
-  HIP_CHECK(hipMemcpy(devArr, hostArr, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(devArr, hostArr, Nbytes, hipMemcpyHostToDevice))
 
   dim3 blocksPerGrid(1, 1, 1);
   dim3 threadsPerBlock(1, 1, N);
@@ -405,43 +405,43 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisCooperativeKernels) {
   // Validating hipModuleLaunchCooperativeKernel API
   {
     hipModule_t module;
-    HIP_CHECK(hipModuleLoad(&module, "addKernel.code"));
+    HIP_CHECK(hipModuleLoad(&module, "addKernel.code"))
     REQUIRE(module != nullptr);
 
     hipFunction_t function;
-    HIP_CHECK(hipModuleGetFunction(&function, module, "addKernel"));
+    HIP_CHECK(hipModuleGetFunction(&function, module, "addKernel"))
     REQUIRE(function != nullptr);
 
     HIP_CHECK(dyn_hipModuleLaunchCooperativeKernel_ptr(
         function, blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z, threadsPerBlock.x,
         threadsPerBlock.y, threadsPerBlock.z, 0, 0, kernel_parameter));
 
-    HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost))
     REQUIRE(validateHostArray(hostArr, N, 12) == true);
-    HIP_CHECK(hipModuleUnload(module));
+    HIP_CHECK(hipModuleUnload(module))
   }
 
   // Validating hipModuleLaunchCooperativeKernelMultiDevice API
   {
     int deviceCount = 0;
-    HIP_CHECK(hipGetDeviceCount(&deviceCount));
+    HIP_CHECK(hipGetDeviceCount(&deviceCount))
 
     auto module = std::make_unique<hipModule_t[]>(deviceCount);
     auto function = std::make_unique<hipFunction_t[]>(deviceCount);
     auto stream_arr = std::make_unique<hipStream_t[]>(deviceCount);
 
     for (int i = 0; i < deviceCount; ++i) {
-      HIP_CHECK(hipSetDevice(i));
-      HIP_CHECK(hipStreamCreate(&stream_arr[i]));
+      HIP_CHECK(hipSetDevice(i))
+      HIP_CHECK(hipStreamCreate(&stream_arr[i]))
 
-      HIP_CHECK(hipModuleLoad(&module[i], "addKernel.code"));
+      HIP_CHECK(hipModuleLoad(&module[i], "addKernel.code"))
       REQUIRE(module[i] != nullptr);
 
-      HIP_CHECK(hipModuleGetFunction(&function[i], module[i], "sampleModuleKernel"));
+      HIP_CHECK(hipModuleGetFunction(&function[i], module[i], "sampleModuleKernel"))
       REQUIRE(function[i] != nullptr);
     }
 
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
 
     ::std::vector<hipFunctionLaunchParams> params(deviceCount);
 
@@ -458,15 +458,15 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisCooperativeKernels) {
       params[i].hStream = stream_arr[i];
     }
 
-    HIP_CHECK(dyn_hipModuleLaunchCooperativeKernelMultiDevice_ptr(params.data(), deviceCount, 0));
+    HIP_CHECK(dyn_hipModuleLaunchCooperativeKernelMultiDevice_ptr(params.data(), deviceCount, 0))
 
     for (int i = 0; i < deviceCount; ++i) {
-      HIP_CHECK(hipStreamSynchronize(params[i].hStream));
+      HIP_CHECK(hipStreamSynchronize(params[i].hStream))
     }
 
     for (int i = 0; i < deviceCount; ++i) {
-      HIP_CHECK(hipStreamDestroy(stream_arr[i]));
-      HIP_CHECK(hipModuleUnload(module[i]));
+      HIP_CHECK(hipStreamDestroy(stream_arr[i]))
+      HIP_CHECK(hipModuleUnload(module[i]))
     }
   }
 
@@ -475,23 +475,23 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisCooperativeKernels) {
     HIP_CHECK(dyn_hipLaunchCooperativeKernel_ptr(reinterpret_cast<void*>(addOneKernel),
                                                  dim3(1, 1, 1), dim3(1, 1, 1), kernel_parameter, 0,
                                                  0));
-    HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost))
     REQUIRE(validateHostArray(hostArr, N, 13) == true);
   }
 
   // Validating hipLaunchCooperativeKernelMultiDevice API
   {
     int deviceCount = 0;
-    HIP_CHECK(hipGetDeviceCount(&deviceCount));
+    HIP_CHECK(hipGetDeviceCount(&deviceCount))
 
     auto stream_arr = std::make_unique<hipStream_t[]>(deviceCount);
 
     for (int i = 0; i < deviceCount; ++i) {
-      HIP_CHECK(hipSetDevice(i));
-      HIP_CHECK(hipStreamCreate(&stream_arr[i]));
+      HIP_CHECK(hipSetDevice(i))
+      HIP_CHECK(hipStreamCreate(&stream_arr[i]))
     }
 
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
 
     std::vector<hipLaunchParams> params(deviceCount);
 
@@ -504,30 +504,30 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisCooperativeKernels) {
       params[i].stream = stream_arr[i];
     }
 
-    HIP_CHECK(dyn_hipLaunchCooperativeKernelMultiDevice_ptr(params.data(), deviceCount, 0));
+    HIP_CHECK(dyn_hipLaunchCooperativeKernelMultiDevice_ptr(params.data(), deviceCount, 0))
 
     for (int i = 0; i < deviceCount; ++i) {
-      HIP_CHECK(hipStreamSynchronize(params[i].stream));
+      HIP_CHECK(hipStreamSynchronize(params[i].stream))
     }
 
     for (int i = 0; i < deviceCount; ++i) {
-      HIP_CHECK(hipStreamDestroy(stream_arr[i]));
+      HIP_CHECK(hipStreamDestroy(stream_arr[i]))
     }
   }
 
   // Validating hipExtLaunchMultiKernelMultiDevice API
   {
     int deviceCount = 0;
-    HIP_CHECK(hipGetDeviceCount(&deviceCount));
+    HIP_CHECK(hipGetDeviceCount(&deviceCount))
 
     auto stream_arr = std::make_unique<hipStream_t[]>(deviceCount);
 
     for (int i = 0; i < deviceCount; ++i) {
-      HIP_CHECK(hipSetDevice(i));
-      HIP_CHECK(hipStreamCreate(&stream_arr[i]));
+      HIP_CHECK(hipSetDevice(i))
+      HIP_CHECK(hipStreamCreate(&stream_arr[i]))
     }
 
-    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipSetDevice(0))
 
     std::vector<hipLaunchParams> params(deviceCount);
 
@@ -540,19 +540,19 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisCooperativeKernels) {
       params[i].stream = stream_arr[i];
     }
 
-    HIP_CHECK(dyn_hipExtLaunchMultiKernelMultiDevice_ptr(params.data(), deviceCount, 0));
+    HIP_CHECK(dyn_hipExtLaunchMultiKernelMultiDevice_ptr(params.data(), deviceCount, 0))
 
     for (int i = 0; i < deviceCount; ++i) {
-      HIP_CHECK(hipStreamSynchronize(params[i].stream));
+      HIP_CHECK(hipStreamSynchronize(params[i].stream))
     }
 
     for (int i = 0; i < deviceCount; ++i) {
-      HIP_CHECK(hipStreamDestroy(stream_arr[i]));
+      HIP_CHECK(hipStreamDestroy(stream_arr[i]))
     }
   }
 
   free(hostArr);
-  HIP_CHECK(hipFree(devArr));
+  HIP_CHECK(hipFree(devArr))
 }
 
 /**
@@ -579,7 +579,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisOccupancy) {
   void* hipOccupancyMaxPotentialBlockSize_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion))
 
   HIP_CHECK(hipGetProcAddress("hipModuleOccupancyMaxPotentialBlockSize",
                               &hipModuleOccupancyMaxPotentialBlockSize_ptr, currentHipVersion, 0,
@@ -638,10 +638,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisOccupancy) {
           hipOccupancyMaxPotentialBlockSize_ptr);
 
   hipModule_t module;
-  HIP_CHECK(hipModuleLoad(&module, "addKernel.code"));
+  HIP_CHECK(hipModuleLoad(&module, "addKernel.code"))
   REQUIRE(module != nullptr);
   hipFunction_t function;
-  HIP_CHECK(hipModuleGetFunction(&function, module, "addKernel"));
+  HIP_CHECK(hipModuleGetFunction(&function, module, "addKernel"))
   REQUIRE(function != nullptr);
 
   int gridSize = 0, blockSize = 0;
@@ -649,7 +649,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisOccupancy) {
 
   // Validating hipModuleOccupancyMaxPotentialBlockSize API
   {
-    HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, function, 0, 0));
+    HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, function, 0, 0))
     HIP_CHECK(dyn_hipModuleOccupancyMaxPotentialBlockSize_ptr(
         &gridSizeWithFuncPtr, &blockSizeWithFuncPtr, function, 0, 0));
 
@@ -735,5 +735,5 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisOccupancy) {
     REQUIRE(blockSizeWithFuncPtr == blockSize);
   }
 
-  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipModuleUnload(module))
 }

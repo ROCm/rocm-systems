@@ -60,7 +60,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex2DLayeredLod_Positive_ReadModeElementType, char, 
         fixture.out_alloc_d.ptr(), params.NumItersX(), params.NumItersY(), fixture.tex.object(),
         params.Width(), params.Height(), params.num_subdivisions, params.tex_desc.normalizedCoords,
         layer, 0);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 
     fixture.LoadOutput();
 
@@ -132,7 +132,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex2DLayeredLod_Positive_ReadModeNormalizedFloat, ch
         fixture.out_alloc_d.ptr(), params.NumItersX(), params.NumItersY(), fixture.tex.object(),
         params.Width(), params.Height(), params.num_subdivisions, params.tex_desc.normalizedCoords,
         layer, 0);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipGetLastError())
 
     fixture.LoadOutput();
 

@@ -42,8 +42,8 @@ __global__ void __launch_bounds__(256, 2) myKern(int* C, const int* A, int N) {
 HIP_TEST_CASE(Unit_kernel_LaunchBounds_Functional) {
   size_t Nbytes = N * sizeof(int);
   int *A_d, *C_d, *A_h, *C_h;
-  HIPCHECK(hipMalloc(&A_d, Nbytes));
-  HIPCHECK(hipMalloc(&C_d, Nbytes));
+  HIPCHECK(hipMalloc(&A_d, Nbytes))
+  HIPCHECK(hipMalloc(&C_d, Nbytes))
 
   A_h = reinterpret_cast<int*>(malloc(Nbytes));
   C_h = reinterpret_cast<int*>(malloc(Nbytes));
@@ -54,8 +54,8 @@ HIP_TEST_CASE(Unit_kernel_LaunchBounds_Functional) {
   }
   int blocks = N / p_blockSize;
 
-  HIPCHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-  HIPCHECK(hipGetLastError());
+  HIPCHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
+  HIPCHECK(hipGetLastError())
   hipLaunchKernelGGL(myKern, dim3(blocks), dim3(p_blockSize), 0, 0, C_d, A_d, N);
 
 #ifdef __HIP_PLATFORM_NVIDIA__
@@ -71,17 +71,17 @@ HIP_TEST_CASE(Unit_kernel_LaunchBounds_Functional) {
   printf("sharedSizeBytes = %zud\n", attrib.sharedSizeBytes);
 #endif
 
-  HIPCHECK(hipDeviceSynchronize());
-  HIPCHECK(hipGetLastError());
-  HIPCHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
-  HIPCHECK(hipDeviceSynchronize());
+  HIPCHECK(hipDeviceSynchronize())
+  HIPCHECK(hipGetLastError())
+  HIPCHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
+  HIPCHECK(hipDeviceSynchronize())
 
   for (int i = 0; i < N; i++) {
     int goldVal = i * 10;
     REQUIRE(C_h[i] == goldVal);
   }
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(C_d));
+  HIP_CHECK(hipFree(A_d))
+  HIP_CHECK(hipFree(C_d))
   free(A_h);
   free(C_h);
 }

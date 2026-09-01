@@ -78,14 +78,14 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Positive_GraphDestroy) {
   hipStream_t stream = stream_guard.stream();
 
   const hipStreamCaptureMode captureMode = hipStreamCaptureModeGlobal;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&graph, 0))
 
-  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
+  HIP_CHECK(hipStreamBeginCapture(stream, captureMode))
   captureSequenceSimple(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), N, stream);
 
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 static void thread_func_neg(hipStream_t stream, hipGraph_t graph) {
@@ -119,7 +119,7 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Negative_Thread) {
 
   const hipStreamCaptureMode captureMode = hipStreamCaptureModeGlobal;
 
-  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
+  HIP_CHECK(hipStreamBeginCapture(stream, captureMode))
   captureSequenceSimple(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), N, stream);
 
   std::thread t(thread_func_neg, stream, graph);
@@ -127,10 +127,10 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Negative_Thread) {
   HIP_CHECK_THREAD_FINALIZE();
 
 #if HT_AMD
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph))
 #endif
 
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 static void thread_func_pos(hipStream_t stream, hipGraph_t* graph) {
@@ -165,7 +165,7 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Positive_Thread) {
 
   const hipStreamCaptureMode captureMode = hipStreamCaptureModeRelaxed;
 
-  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
+  HIP_CHECK(hipStreamBeginCapture(stream, captureMode))
   captureSequenceSimple(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), N, stream);
 
   std::thread t(thread_func_pos, stream, &graph);
@@ -174,18 +174,18 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Positive_Thread) {
   // Validate end capture is successful
   REQUIRE(graph != nullptr);
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   // Replay the recorded sequence multiple times
   for (size_t i = 0; i < kLaunchIters; i++) {
     std::fill_n(A_h.host_ptr(), N, static_cast<float>(i));
-    HIP_CHECK(hipGraphLaunch(graphExec, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphLaunch(graphExec, stream))
+    HIP_CHECK(hipStreamSynchronize(stream))
     ArrayFindIfNot(B_h.host_ptr(), static_cast<float>(i), N);
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphExecDestroy(graphExec))
+  HIP_CHECK(hipGraphDestroy(graph))
 }
 
 /**
@@ -215,13 +215,13 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Negative_InvalidatedStateReset) {
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
 
   // Begin capture
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal))
+  HIP_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr))
   REQUIRE(captureStatus == hipStreamCaptureStatusActive);
 
   // Illegal sync during capture — invalidates the stream
   HIP_CHECK_ERROR(hipStreamSynchronize(stream), hipErrorStreamCaptureUnsupported);
-  HIP_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
+  HIP_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr))
   REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
 
   // EndCapture on invalidated stream must fail with the appropriate error
@@ -234,13 +234,13 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Negative_InvalidatedStateReset) {
 
   // Querying capture state twice must both return None (not Invalidated).
   // Without the fix, the state stays Invalidated after the failed EndCapture.
-  HIP_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
+  HIP_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr))
   REQUIRE(captureStatus == hipStreamCaptureStatusNone);
-  HIP_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
+  HIP_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr))
   REQUIRE(captureStatus == hipStreamCaptureStatusNone);
 
   // Stream must be usable again — sync should succeed
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream))
 }
 
 /**

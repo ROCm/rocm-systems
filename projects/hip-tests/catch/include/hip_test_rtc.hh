@@ -57,11 +57,11 @@ inline std::string reconstructExpression(std::string& kernelName,
  */
 inline std::vector<char> alignArguments(std::vector<KernelArgument>& args) {
   std::vector<char> alignedArguments{};
-  int count = 0;
+  size_t count = 0;
   for (auto& arg : args) {
     const char* argPtr{reinterpret_cast<const char*>(arg.ptr)};
 
-    int paddingNeeded = (arg.alignmentRequirement - 1) & (~count + 1);
+    size_t paddingNeeded = (arg.alignmentRequirement - 1) & (~count + 1u);
     alignedArguments.insert(std::end(alignedArguments), paddingNeeded, 0);
     count += paddingNeeded;
 

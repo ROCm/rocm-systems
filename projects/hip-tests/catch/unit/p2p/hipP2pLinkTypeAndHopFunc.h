@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#ifndef _HIP_DIRTEST_P2PLINKTYPEHOP_H_
-#define _HIP_DIRTEST_P2PLINKTYPEHOP_H_
+#ifndef HIP_DIRTEST_P2PLINKTYPEHOP_H
+#define HIP_DIRTEST_P2PLINKTYPEHOP_H
 /**
  * rocm_smi.h enums
  */
@@ -60,7 +60,7 @@ typedef enum {
 /**
  * Types for IO Link returned from rocm_smi
  */
-typedef enum _RSMI_IO_LINK_TYPE {
+typedef enum RSMI_IO_LINK_TYPE_E {
   RSMI_IOLINK_TYPE_UNDEFINED = 0,     //!< unknown type.
   RSMI_IOLINK_TYPE_PCIEXPRESS = 1,    //!< PCI Express
   RSMI_IOLINK_TYPE_XGMI = 2,          //!< XGMI

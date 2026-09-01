@@ -36,8 +36,8 @@ HIP_TEST_CASE(Unit_hipUnbindTexture_Positive_1D) {
     array[i] = i + 1;
   }
 
-  HIP_CHECK(hipMalloc(&tex_buffer, size * sizeof(float)));
-  HIP_CHECK(hipMemcpy(tex_buffer, array, size * sizeof(float), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&tex_buffer, size * sizeof(float)))
+  HIP_CHECK(hipMemcpy(tex_buffer, array, size * sizeof(float), hipMemcpyHostToDevice))
 
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
   tex_1D.addressMode[0] = hipAddressModeClamp;
@@ -46,8 +46,8 @@ HIP_TEST_CASE(Unit_hipUnbindTexture_Positive_1D) {
   HIP_CHECK(hipBindTexture(&offset, tex_1D, reinterpret_cast<void*>(tex_buffer), desc,
                            size * sizeof(float)));
 
-  HIP_CHECK(hipUnbindTexture(&tex_1D));
-  HIP_CHECK(hipFree(tex_buffer));
+  HIP_CHECK(hipUnbindTexture(&tex_1D))
+  HIP_CHECK(hipFree(tex_buffer))
 }
 
 HIP_TEST_CASE(Unit_hipUnbindTexture_Positive_2D) {
@@ -66,10 +66,10 @@ HIP_TEST_CASE(Unit_hipUnbindTexture_Positive_2D) {
   tex_2D.addressMode[1] = hipAddressModeWrap;
   tex_2D.filterMode = hipFilterModePoint;
   tex_2D.normalized = 0;
-  HIP_CHECK(hipBindTexture2D(&tex_offset, &tex_2D, dev_ptr, &desc, width, height, dev_pitch));
+  HIP_CHECK(hipBindTexture2D(&tex_offset, &tex_2D, dev_ptr, &desc, width, height, dev_pitch))
 
-  HIP_CHECK(hipUnbindTexture(tex_2D));
-  HIP_CHECK(hipFree(dev_ptr));
+  HIP_CHECK(hipUnbindTexture(tex_2D))
+  HIP_CHECK(hipFree(dev_ptr))
 }
 
 HIP_TEST_CASE(Unit_hipUnbindTexture_Positive_3D) {
@@ -94,7 +94,7 @@ HIP_TEST_CASE(Unit_hipUnbindTexture_Positive_3D) {
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
 
   hipArray_t array;
-  HIP_CHECK(hipMalloc3DArray(&array, &desc, make_hipExtent(width, height, depth), hipArrayDefault));
+  HIP_CHECK(hipMalloc3DArray(&array, &desc, make_hipExtent(width, height, depth), hipArrayDefault))
   hipMemcpy3DParms copy_params{};
   copy_params.srcPos = make_hipPos(0, 0, 0);
   copy_params.dstPos = make_hipPos(0, 0, 0);
@@ -103,17 +103,17 @@ HIP_TEST_CASE(Unit_hipUnbindTexture_Positive_3D) {
   copy_params.extent = make_hipExtent(width, height, depth);
   copy_params.kind = hipMemcpyHostToDevice;
 
-  HIP_CHECK(hipMemcpy3D(&copy_params));
+  HIP_CHECK(hipMemcpy3D(&copy_params))
 
   tex_3D.addressMode[0] = hipAddressModeWrap;
   tex_3D.addressMode[1] = hipAddressModeWrap;
   tex_3D.filterMode = hipFilterModePoint;
   tex_3D.normalized = 0;
 
-  HIP_CHECK(hipBindTextureToArray(tex_3D, array, desc));
+  HIP_CHECK(hipBindTextureToArray(tex_3D, array, desc))
 
-  HIP_CHECK(hipUnbindTexture(tex_3D));
-  HIP_CHECK(hipFreeArray(array));
+  HIP_CHECK(hipUnbindTexture(tex_3D))
+  HIP_CHECK(hipFreeArray(array))
   free(data);
 }
 
