@@ -28,6 +28,30 @@ struct ConSanOrdinaryGlobalFaultEncoding {
   uint32_t scope = 0;
 };
 
+/// Target-owned outcome from rewriting one normalized atomic operand.
+///
+/// The common fault engine renders policy diagnostics from this vocabulary;
+/// concrete target packages retain ownership of instruction layout and range
+/// checks.
+enum class ConSanAtomicFaultRewriteStatus : uint8_t {
+  Rewritten,
+  InvalidEncoding,
+  OffsetOverflow,
+  MisalignedOffset,
+  AlreadyWaveScope,
+};
+
+struct ConSanAtomicFaultRewriteResult {
+  ConSanAtomicFaultRewriteStatus status = ConSanAtomicFaultRewriteStatus::InvalidEncoding;
+  /// Previous target value when a rewrite succeeds. Scope rewriting uses this
+  /// to render the semantic before/after diagnostic without exposing raw bits.
+  uint32_t previous_value = 0;
+
+  [[nodiscard]] bool rewritten() const {
+    return status == ConSanAtomicFaultRewriteStatus::Rewritten;
+  }
+};
+
 [[nodiscard]] bool consan_lds_address_fault_arch_supported(rj_code_arch_t arch);
 
 [[nodiscard]] ConSanAtomicFaultEncoding
@@ -36,6 +60,14 @@ classify_consan_atomic_fault_encoding(std::string_view mnemonic, uint32_t size,
 [[nodiscard]] bool consan_atomic_fault_supports_scope(ConSanAtomicFaultEncoding encoding);
 [[nodiscard]] bool consan_atomic_fault_supports_order(ConSanAtomicFaultEncoding encoding);
 [[nodiscard]] bool consan_atomic_fault_supports_address(ConSanAtomicFaultEncoding encoding);
+
+[[nodiscard]] ConSanAtomicFaultRewriteResult
+rewrite_consan_atomic_fault_address(std::span<uint8_t> instruction,
+                                    ConSanAtomicFaultEncoding encoding, uint32_t width_bits,
+                                    uint32_t address_delta);
+[[nodiscard]] ConSanAtomicFaultRewriteResult
+rewrite_consan_atomic_fault_scope_to_wave(std::span<uint8_t> instruction,
+                                          ConSanAtomicFaultEncoding encoding);
 
 [[nodiscard]] std::optional<ConSanOrdinaryGlobalFaultEncoding>
 decode_consan_ordinary_global_fault_encoding(std::span<const uint8_t> instruction);

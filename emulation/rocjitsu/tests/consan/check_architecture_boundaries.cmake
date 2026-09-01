@@ -546,6 +546,28 @@ _consan_assert_no_match(
     "common fault mutation must derive encoding from its code-object target"
 )
 _consan_assert_no_match(
+    "${_consan_dir}/consan_fault_injection.inc"
+    "sign_extend_24|words\\[0\\].*0xff|words\\[1\\].*18u|words\\[2\\]"
+    "common atomic fault mutation must not edit target instruction bitfields"
+)
+file(READ "${_consan_dir}/consan_fault_injection.inc" _fault_target_operation_consumer)
+if(NOT _fault_target_operation_consumer MATCHES "rewrite_consan_atomic_fault_address" OR
+   NOT _fault_target_operation_consumer MATCHES "rewrite_consan_atomic_fault_scope_to_wave")
+    message(FATAL_ERROR
+        "ConSan atomic fault mutation lost its target-owned rewrite operations"
+    )
+endif()
+file(READ "${_consan_dir}/consan_fault_gfx12_target_ops.cpp" _gfx12_fault_target_owner)
+if(NOT _gfx12_fault_target_owner MATCHES "rewrite_gfx12_atomic_fault_address" OR
+   NOT _gfx12_fault_target_owner MATCHES "rewrite_gfx12_atomic_fault_scope_to_wave" OR
+   NOT _gfx12_fault_target_owner MATCHES "rdna4::VdsMachineInst" OR
+   NOT _gfx12_fault_target_owner MATCHES "rdna4::VflatMachineInst" OR
+   NOT _gfx12_fault_target_owner MATCHES "rdna4::VbufferMachineInst")
+    message(FATAL_ERROR
+        "ConSan gfx12 fault target owner lost a concrete atomic rewrite recipe"
+    )
+endif()
+_consan_assert_no_match(
     "${_consan_dir}/consan_moi_access_apply.h"
     "ROCJITSU_CODE_ARCH_"
     "common access application must consume typed target facts"

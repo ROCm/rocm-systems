@@ -3189,3 +3189,71 @@ remaining placement and validation concentrations, surviving mode/target
 interactions, physical locality of the complete architecture and mode
 surfaces, and the independent deep-read completion audit remain open. The goal
 therefore remains active.
+
+### 16.32 Convergence checkpoint 31: gfx12-owned atomic-fault instruction rewriting
+
+The next architecture-locality deep read followed every raw instruction-field
+mutation in the fault-injection engine. That engine already classified atomic
+sites through the target-operation facade, but then reached back through the
+facade: common fault policy decoded and rewrote gfx12 DS `offset0`, flat and
+buffer signed 24-bit `ioffset`, and atomic-scope bits itself. Thus a reader of
+the common engine still needed gfx12 encoding knowledge, and adding a target
+with a different atomic layout would have required editing both its target
+owner and common policy.
+
+Raw atomic address and scope rewriting now belongs to the existing gfx12 fault
+target owner. The common engine supplies a normalized atomic encoding, access
+width, and semantic address delta, and receives a typed result distinguishing
+success, invalid encoding, overflow, misalignment, and an already-wave scope.
+It continues to own fault selection, semantic delta validation, diagnostics,
+patch proof, and the outer all-or-nothing transaction. The gfx12 owner alone
+validates exact instruction sizes and owns the word, mask, signed-offset, and
+scope-bit recipes. Rejected rewrites leave the instruction unchanged.
+
+This deliberately does not move fault policy into architecture code. Nor is it
+a claim that every fault mutation is now target-local: the common engine still
+contains an LDS address-operand mutation path whose architectural ownership
+must be assessed separately. It does close the concrete atomic peephole without
+inventing a second target hierarchy or duplicating mode policy.
+
+The architecture-boundary gate now rejects the raw gfx12 atomic word recipes
+in the common fault engine, requires both normalized target operations there,
+and pins the concrete recipes to the gfx12 owner. A direct regression covers
+flat, buffer, and DS address rewrites; wave-scope rewriting and the
+already-wave result; overflow, alignment, and invalid-encoding rejection; and
+failure atomicity. The test inventory grows by that one owner-level regression.
+
+| Signal | Checkpoint 31 | Cumulative change | Slice change from checkpoint 30 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,510 | +535 | **+110** |
+| Nonblank production lines | 99,229 | +146 | **+101** |
+| Production implementation lines | 91,517 | **+67** | **+98** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 207 / 56 | **-69 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 206 / 28 | +6 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| Common-engine raw gfx12 atomic-field rewrites | 0 | n/a | consolidated |
+| Direct gfx12 atomic-rewrite owner regressions | 1 | n/a | **+1** |
+| Test inventory | 5,379 | +34 | **+1** |
+
+Validation includes a full final-tree `-j16` rebuild; all 38 focused fault,
+target-operation, and architecture-boundary tests; and all 4,744 nonphysical
+tests at `-j16` in 196.27 seconds, including the unchanged 2,908 simulator rows
+over five targets. In the first serialized physical run, 634 tests passed and
+`RecordReplayRepeatedDispatchIdentity.Correct` failed transiently; that test
+immediately passed alone, and the complete rerun passed all 635 physical
+gfx1201 tests at `-j1` in 109.62 seconds. No test was removed, renamed,
+disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.2, 14.5, 14.6, 14.7, and 14.9:
+common policy no longer edits gfx12 atomic bitfields and the target owner has a
+checked, transactional contract. Its 98-line implementation cost, however,
+makes the cumulative production implementation 67 lines larger than baseline
+and is negative evidence for Section 14.8. The cost cannot be declared paid
+merely by improved locality; subsequent slices must exploit the clarified
+boundary to consolidate or delete implementation. Remaining raw target
+peepholes, mode locality across the complete surface, the broad operating
+point and transform transaction, placement and validation concentrations, and
+the independent deep-read completion audit all remain open. The goal therefore
+remains active.

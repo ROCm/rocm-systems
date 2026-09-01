@@ -38,4 +38,19 @@ bool consan_atomic_fault_supports_address(ConSanAtomicFaultEncoding encoding) {
          encoding == ConSanAtomicFaultEncoding::Buffer || encoding == ConSanAtomicFaultEncoding::Ds;
 }
 
+ConSanAtomicFaultRewriteResult
+rewrite_consan_atomic_fault_address(std::span<uint8_t> instruction,
+                                    ConSanAtomicFaultEncoding encoding, uint32_t width_bits,
+                                    uint32_t address_delta) {
+  return consan_fault_target_detail::rewrite_gfx12_atomic_fault_address(instruction, encoding,
+                                                                        width_bits, address_delta);
+}
+
+ConSanAtomicFaultRewriteResult
+rewrite_consan_atomic_fault_scope_to_wave(std::span<uint8_t> instruction,
+                                          ConSanAtomicFaultEncoding encoding) {
+  return consan_fault_target_detail::rewrite_gfx12_atomic_fault_scope_to_wave(instruction,
+                                                                              encoding);
+}
+
 } // namespace rocjitsu

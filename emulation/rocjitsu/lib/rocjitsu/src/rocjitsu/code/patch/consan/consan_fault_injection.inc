@@ -1549,6 +1549,7 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
     result.replacement.assign(original_bytes.begin(), original_bytes.end());
   std::array<uint32_t, 3> words{};
   std::memcpy(words.data(), result.replacement.data() + selected->file_offset, selected->size);
+  std::span<uint8_t> atomic_instruction(reinterpret_cast<uint8_t *>(words.data()), selected->size);
   if (address_plan != nullptr) {
     const uint32_t address_delta = address_plan->address_delta_bytes.value_or(0u);
     if (address_delta == 0 || address_delta % sizeof(uint32_t) != 0 || address_delta > 0x7fffffu) {
@@ -1556,32 +1557,26 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
           "ConSan atomic address delta must be a positive aligned signed-24-bit offset");
       return;
     }
-    if (encoding == AtomicFaultEncoding::Ds) {
-      // RDNA4 VDS offset0 is the low byte of word 0. DS atomic addresses are
-      // byte addressed, so retain the requested natural u32 alignment.
-      const uint32_t replacement_offset = (words[0] & 0xffu) + address_delta;
-      if (replacement_offset > 0xffu) {
-        result.errors.emplace_back("ConSan DS atomic address delta overflows 8-bit offset0");
-        return;
-      }
-      const uint32_t natural_alignment =
-          std::max<uint32_t>(sizeof(uint32_t), selected->width_bits / 8u);
-      if (replacement_offset % natural_alignment != 0) {
+    const ConSanAtomicFaultRewriteResult rewrite = rewrite_consan_atomic_fault_address(
+        atomic_instruction, encoding, selected->width_bits, address_delta);
+    if (!rewrite.rewritten()) {
+      switch (rewrite.status) {
+      case ConSanAtomicFaultRewriteStatus::OffsetOverflow:
+        result.errors.emplace_back(
+            encoding == AtomicFaultEncoding::Ds
+                ? "ConSan DS atomic address delta overflows 8-bit offset0"
+                : "ConSan atomic address delta overflows signed-24-bit ioffset");
+        break;
+      case ConSanAtomicFaultRewriteStatus::MisalignedOffset:
         result.errors.emplace_back("ConSan DS atomic replacement offset is not naturally aligned");
-        return;
+        break;
+      case ConSanAtomicFaultRewriteStatus::InvalidEncoding:
+      case ConSanAtomicFaultRewriteStatus::AlreadyWaveScope:
+      case ConSanAtomicFaultRewriteStatus::Rewritten:
+        result.errors.emplace_back("ConSan atomic address fault could not rewrite target encoding");
+        break;
       }
-      words[0] = (words[0] & ~0xffu) | replacement_offset;
-    } else {
-      // The high 24 bits of word 2 are the signed byte ioffset on RDNA4 flat,
-      // global, and buffer atomics.
-      const int32_t original_offset = sign_extend_24(words[2] >> 8u);
-      const int64_t replacement_offset = static_cast<int64_t>(original_offset) + address_delta;
-      if (replacement_offset > 0x7fffff) {
-        result.errors.emplace_back("ConSan atomic address delta overflows signed-24-bit ioffset");
-        return;
-      }
-      words[2] =
-          (words[2] & 0xffu) | ((static_cast<uint32_t>(replacement_offset) & 0xffffffu) << 8u);
+      return;
     }
     ConSanPatchInfo info;
     info.phase = ConSanPatchPhase::Mutation;
@@ -1744,12 +1739,16 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
       result.patches.push_back(*release_wait_info);
   }
   if (scope_plan != nullptr) {
-    const uint32_t original_scope = (words[1] >> 18u) & 0x3u;
-    if (original_scope == 0) {
-      result.errors.emplace_back("ConSan atomic scope fault cannot weaken wave scope further");
+    const ConSanAtomicFaultRewriteResult rewrite =
+        rewrite_consan_atomic_fault_scope_to_wave(atomic_instruction, encoding);
+    if (!rewrite.rewritten()) {
+      if (rewrite.status == ConSanAtomicFaultRewriteStatus::AlreadyWaveScope) {
+        result.errors.emplace_back("ConSan atomic scope fault cannot weaken wave scope further");
+      } else {
+        result.errors.emplace_back("ConSan atomic scope fault could not rewrite target encoding");
+      }
       return;
     }
-    words[1] &= ~(0x3u << 18u);
     ConSanPatchInfo info;
     info.phase = ConSanPatchPhase::Mutation;
     info.kind = ConSanPatchKind::InlineAtomicScopeRewrite;
@@ -1758,7 +1757,8 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
     info.original_size = selected->size;
     result.patches.push_back(info);
     result.warnings.emplace_back("ConSan atomic fault lowered " + selected->mnemonic +
-                                 " scope from " + std::to_string(original_scope) + " to wave");
+                                 " scope from " + std::to_string(rewrite.previous_value) +
+                                 " to wave");
   }
   std::memcpy(result.replacement.data() + selected->file_offset, words.data(), selected->size);
   result.mark_modified();

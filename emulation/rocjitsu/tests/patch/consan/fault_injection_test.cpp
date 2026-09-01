@@ -5,7 +5,9 @@
 #include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/code/patch/consan/consan_composition.h"
 #include "rocjitsu/code/patch/consan/consan_fault_selection.h"
+#include "rocjitsu/code/patch/consan/consan_fault_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_final_validation.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 
 namespace rocjitsu {
 namespace {
@@ -25,6 +27,60 @@ apply_planned_faults(std::span<const uint8_t> code_object_bytes,
                                 planned_artifacts.fault_plans, planned_artifacts);
   return finalize_consan_result(std::move(planned_artifacts), code_object_bytes,
                                 application_context.moi_report_dispatch_id);
+}
+
+TEST(ConSan, Gfx12AtomicFaultTargetOperationsOwnRawAddressAndScopeRewrites) {
+  const auto bytes_of = []<typename Raw>(Raw &raw) {
+    return std::span<uint8_t>(reinterpret_cast<uint8_t *>(&raw), sizeof(raw));
+  };
+
+  rdna4::VflatMachineInst flat{};
+  flat.ioffset = 0xfffffcu; // -4
+  flat.scope = 3u;
+  auto rewrite = rewrite_consan_atomic_fault_address(bytes_of(flat),
+                                                     ConSanAtomicFaultEncoding::FlatLike, 32u, 8u);
+  ASSERT_TRUE(rewrite.rewritten());
+  EXPECT_EQ(flat.ioffset, 4u);
+  rewrite = rewrite_consan_atomic_fault_scope_to_wave(bytes_of(flat),
+                                                      ConSanAtomicFaultEncoding::FlatLike);
+  ASSERT_TRUE(rewrite.rewritten());
+  EXPECT_EQ(rewrite.previous_value, 3u);
+  EXPECT_EQ(flat.scope, 0u);
+  EXPECT_EQ(
+      rewrite_consan_atomic_fault_scope_to_wave(bytes_of(flat), ConSanAtomicFaultEncoding::FlatLike)
+          .status,
+      ConSanAtomicFaultRewriteStatus::AlreadyWaveScope);
+
+  rdna4::VbufferMachineInst buffer{};
+  buffer.ioffset = 0x7ffffcu;
+  buffer.scope = 2u;
+  const rdna4::VbufferMachineInst original_buffer = buffer;
+  rewrite = rewrite_consan_atomic_fault_address(bytes_of(buffer), ConSanAtomicFaultEncoding::Buffer,
+                                                32u, 4u);
+  EXPECT_EQ(rewrite.status, ConSanAtomicFaultRewriteStatus::OffsetOverflow);
+  EXPECT_EQ(std::memcmp(&buffer, &original_buffer, sizeof(buffer)), 0);
+
+  rdna4::VdsMachineInst ds{};
+  ds.offset0 = 4u;
+  rewrite =
+      rewrite_consan_atomic_fault_address(bytes_of(ds), ConSanAtomicFaultEncoding::Ds, 32u, 4u);
+  ASSERT_TRUE(rewrite.rewritten());
+  EXPECT_EQ(ds.offset0, 8u);
+  ds.offset0 = 0u;
+  rewrite =
+      rewrite_consan_atomic_fault_address(bytes_of(ds), ConSanAtomicFaultEncoding::Ds, 64u, 4u);
+  EXPECT_EQ(rewrite.status, ConSanAtomicFaultRewriteStatus::MisalignedOffset);
+  EXPECT_EQ(ds.offset0, 0u);
+  ds.offset0 = 252u;
+  rewrite =
+      rewrite_consan_atomic_fault_address(bytes_of(ds), ConSanAtomicFaultEncoding::Ds, 32u, 4u);
+  EXPECT_EQ(rewrite.status, ConSanAtomicFaultRewriteStatus::OffsetOverflow);
+  EXPECT_EQ(ds.offset0, 252u);
+
+  EXPECT_EQ(rewrite_consan_atomic_fault_address(bytes_of(flat), ConSanAtomicFaultEncoding::CdnaFlat,
+                                                32u, 4u)
+                .status,
+            ConSanAtomicFaultRewriteStatus::InvalidEncoding);
 }
 
 TEST(ConSan, ExactBarrierDropIssuesAreTypedAndRenderEstablishedDiagnostics) {
