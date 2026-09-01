@@ -111,6 +111,15 @@ contract:
   Contract_Device_HipGetDevice_CurrentOrdinal_IsWithinDeviceCount:
     <<: *level_0
     tags: [device]
+  Contract_Device_HipDeviceGetExecAffinitySupport_CuCountType_ReportsBoolean:
+    <<: *level_0
+    tags: [device]
+  Contract_Device_HipDeviceGetExecAffinitySupport_GranularityTypes_ReportBoolean:
+    <<: *level_0
+    tags: [device]
+  Contract_Device_HipDeviceGetExecAffinitySupport_NullOutput_ReturnsInvalidValue:
+    <<: *level_0
+    tags: [device]
   Contract_DeviceIdentity_HipDeviceGetByPCIBusId_Default_RoundTripsWithGetPCIBusId:
     <<: *level_0
     tags: [device_identity]

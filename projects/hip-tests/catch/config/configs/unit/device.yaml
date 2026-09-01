@@ -173,6 +173,12 @@ device:
   Unit_hipDeviceGetLuid_VerifyLuidFrm_hipGetDeviceProperties:
     <<: *level_2
     tags: [query]
+  Unit_hipDeviceGetExecAffinitySupport_Positive:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetExecAffinitySupport_Negative:
+    <<: *level_2
+    tags: [query]
   Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151

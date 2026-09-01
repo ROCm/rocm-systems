@@ -611,6 +611,16 @@ typedef enum hipDeviceAttribute_t {
   // Extended attributes for vendors
 } hipDeviceAttribute_t;
 
+/**
+ * @brief Execution affinity types, mirroring CUDA's CUexecAffinityType.
+ */
+typedef enum hipExecAffinityType {
+  hipExecAffinityTypeCUCount = 0,     ///< Compute-unit count affinity (== CU_EXEC_AFFINITY_TYPE_SM_COUNT); always supported
+  hipExecAffinityTypeMax,             ///< Sentinel (== CU_EXEC_AFFINITY_TYPE_MAX)
+  hipExtExecAffinityTypeGranularityCU = 0x1000,   ///< Per-CU masking granularity (gfx9 / gfx12.5+). Valid only on Rocm device.
+  hipExtExecAffinityTypeGranularityWGP = 0x1001,  ///< Per-WGP masking granularity (RDNA gfx10-12.4). Valid only on Rocm device.
+} hipExecAffinityType;
+
 // Flags that can be used with hipGetProcAddress.
 /** Default flag. Equivalent to HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM if compiled with
  *  -fgpu-default-stream=per-thread flag or HIP_API_PER_THREAD_DEFAULT_STREAM macro is
@@ -2470,6 +2480,17 @@ hipError_t hipGetDeviceCount(int* count);
  * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
  */
 hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int deviceId);
+/**
+ * @brief Returns whether the device supports an execution affinity type, and the
+ * device's CU-masking granularity.
+ *
+ * @param [out] pi   Set to 1 if @p type is supported, 0 otherwise.
+ * @param [in]  type The ::hipExecAffinityType to query.
+ * @param [in]  dev  The device ordinal to query.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDevice
+ */
+hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type, hipDevice_t dev);
 /**
  * @brief Returns the default memory pool of the specified device
  *
