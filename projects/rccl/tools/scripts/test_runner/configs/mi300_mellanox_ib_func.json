@@ -2220,7 +2220,7 @@
         },
         {
           "name": "Revoke_NonBlocking_ThenShrink_NoRace",
-          "description": "Race commRevokeAsync worker thread against an immediate ncclCommShrink on the same parent across 10 iterations; shrink must succeed",
+          "description": "Non-blocking revoke then shrink on the same parent across 10 iterations, draining each async op via ncclCommGetAsyncError before the next per the non-blocking contract; shrink must succeed",
           "test_filter": "RevokeNonBlockingMPITest.Revoke_NonBlocking_ThenShrink_NoRace",
           "timeout": 300
         }
@@ -2263,7 +2263,7 @@
         },
         {
           "name": "Revoke_NonBlocking_ThenShrink_NoRace",
-          "description": "Race commRevokeAsync worker thread against an immediate ncclCommShrink on the same parent across 10 iterations over IB transport; shrink must succeed",
+          "description": "Non-blocking revoke then shrink on the same parent across 10 iterations over IB transport, draining each async op via ncclCommGetAsyncError before the next per the non-blocking contract; shrink must succeed",
           "test_filter": "RevokeNonBlockingMPITest.Revoke_NonBlocking_ThenShrink_NoRace",
           "timeout": 300
         },

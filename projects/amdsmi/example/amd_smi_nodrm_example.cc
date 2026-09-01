@@ -22,7 +22,7 @@
       std::cout << "AMDSMI call returned " << RET << " at line " << __LINE__ << ": " << err_str \
                 << std::endl;                                                                   \
       if (RET != AMDSMI_STATUS_NOT_SUPPORTED && RET != AMDSMI_STATUS_INVAL) {                   \
-        return RET;                                                                             \
+        return static_cast<int>(RET);                                                           \
       }                                                                                         \
     }                                                                                           \
   }

@@ -5,6 +5,7 @@
 #include <getopt.h>
 #include <unistd.h>
 
+#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -23,6 +24,8 @@
  * - List and query device CUIDs using the public amd_cuid.h API
  * - Always reads from the library's internal registry
  */
+
+namespace {
 
 /**
  * @brief Check if running with root privileges
@@ -96,7 +99,7 @@ const char* device_type_to_string(amdcuid_device_type_t type) {
 
 amdcuid_device_type_t string_to_device_type(const std::string& type_str) {
   std::string upper = type_str;
-  for (auto& c : upper) c = toupper(c);
+  for (auto& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
 
   if (upper == "PLATFORM") return AMDCUID_DEVICE_TYPE_PLATFORM;
   if (upper == "CPU") return AMDCUID_DEVICE_TYPE_CPU;
@@ -473,6 +476,8 @@ int query_device(const std::string& identifier, bool show_primary,
   return 0;
 }
 
+}  // namespace
+
 int main(int argc, char* argv[]) {
   static struct option long_options[] = {{"generate-cuid", no_argument, 0, 'g'},
                                          {"generate-key", no_argument, 0, 'k'},
@@ -499,6 +504,8 @@ int main(int argc, char* argv[]) {
   int opt;
   int option_index = 0;
 
+  // Option parsing in main(), before any thread exists.
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
   while ((opt = getopt_long(argc, argv, "gks:nlt:pq:vh", long_options, &option_index)) != -1) {
     switch (opt) {
       case 'g':
