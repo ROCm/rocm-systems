@@ -5276,3 +5276,58 @@ short of material whole-refactoring shrinkage. Remaining architecture
 locality, broader operating-point and mutable-transaction surfaces, larger
 legacy harvesting, material Section 14.8 evidence, and the independent Section
 14 completion audit remain open. The goal therefore remains active.
+
+### 16.64 Convergence checkpoint 63: one InlineShadow EXEC-mask emitter
+
+The InlineShadow synchronization deep read compared complete transaction
+bodies rather than treating their mode-local file as inherently cohesive. The
+acquired-token transaction, causal-snapshot capture, and versioned-release
+transaction each independently declared the same instruction mini-language:
+save EXEC, restore EXEC, intersect EXEC with VCC, and optionally compare a
+VGPR with a literal before intersecting. Their mask registers and predicates
+are intentionally different, but the target-normalized instruction recipes
+and optional-instruction failure handling were exact copies.
+
+One translation-unit-private `InlineExecMaskEmission` now owns those four
+mechanical operations. Each transaction constructs it with its own narrow-save
+pair, retains its own named mask lifetimes, and retains every semantic
+predicate, load, table operation, retry rule, and failure path. This boundary
+therefore shares implementation inside InlineShadow without promoting
+Inline-specific synchronization policy into common MOI infrastructure.
+
+The three local instruction recipes are deleted. The architecture gate
+requires all three transactions to instantiate the private emitter and rejects
+restoration of local EXEC-mask builder lambdas. Existing acquired-token,
+causal-frontier, versioned-release, compare-exchange, malformed-publication,
+and architecture-matrix tests exercise the shared operations under their
+different policies.
+
+| Signal | Checkpoint 63 | Cumulative change | Slice change from checkpoint 62 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,148 | +173 | **-24** |
+| Nonblank production lines | 98,825 | **-258** | **-32** |
+| Production implementation lines | 91,091 | **-359** | **-35** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **174 / 52** | **-102 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| InlineShadow transaction-local EXEC-mask recipes | **0** | n/a | **-3** |
+| Shared InlineShadow EXEC-mask emitters | **1 private mechanism** | n/a | **+1** |
+| Test inventory | **5,388** | **+43** | 0 |
+
+Validation includes a final-tree `-j16` build; 223 focused InlineShadow,
+acquired-token, causal, release, acquire, and architecture-boundary tests; and
+all 4,753 nonphysical tests over the five emulated targets at `-j16`. The
+immediately preceding checkpoint's final tree passed all 635 physical gfx1201
+tests serialized at `-j1`; this slice changes no transaction policy or encoded
+instruction sequence. No test was removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, 14.8, and
+14.9. InlineShadow has a clearer internal mechanism/policy boundary and three
+copies have been harvested rather than hidden behind mode dispatch. The
+cumulative reduction reaches 359 implementation lines, still short of material
+whole-refactoring shrinkage. Remaining architecture locality, broader
+operating-point and mutable-transaction surfaces, larger legacy harvesting,
+material Section 14.8 evidence, and the independent Section 14 completion audit
+remain open. The goal therefore remains active.

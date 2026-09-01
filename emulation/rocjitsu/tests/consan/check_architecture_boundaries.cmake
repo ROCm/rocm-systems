@@ -708,6 +708,24 @@ _consan_assert_match_count_at_most(
     "InlineShadow atomic release and causal-snapshot tables must share one address hash"
 )
 file(READ "${_consan_dir}/consan_moi_sync_emission.cpp" _moi_sync_emission_owner)
+if(NOT _moi_sync_emission_owner MATCHES "class InlineExecMaskEmission")
+    message(FATAL_ERROR
+        "ConSan InlineShadow synchronization lost its shared EXEC-mask emitter"
+    )
+endif()
+string(REGEX MATCHALL "InlineExecMaskEmission[ \t]+exec_masks"
+       _inline_exec_mask_consumers "${_moi_sync_emission_owner}")
+list(LENGTH _inline_exec_mask_consumers _inline_exec_mask_consumer_count)
+if(NOT _inline_exec_mask_consumer_count EQUAL 3)
+    message(FATAL_ERROR
+        "ConSan InlineShadow synchronization must share EXEC-mask emission across three transactions"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sync_emission.cpp"
+    "const auto (restore_exec|save_exec|narrow_vcc)[^;]*instrumentation::build_"
+    "InlineShadow transactions must not redeclare EXEC-mask instruction recipes"
+)
 if(NOT _moi_sync_emission_owner MATCHES
        "append_inline_atomic_table_address<ConSanMoiInlineAtomicReleaseSlot>" OR
    NOT _moi_sync_emission_owner MATCHES

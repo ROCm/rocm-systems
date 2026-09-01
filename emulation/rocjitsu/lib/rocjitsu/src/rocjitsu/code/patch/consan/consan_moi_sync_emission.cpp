@@ -55,6 +55,48 @@ using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 
 namespace consan_moi_impl {
+
+/// Shared instruction-sequence mechanics for InlineShadow's nested EXEC-mask
+/// transactions. Callers own mask lifetimes and semantic predicates; this
+/// emitter owns the target-normalized save, restore, and VCC narrowing recipe.
+class InlineExecMaskEmission {
+public:
+  InlineExecMaskEmission(std::vector<uint32_t> &words, uint16_t narrow_save, rj_code_arch_t arch)
+      : words_(words), narrow_save_(narrow_save), arch_(arch) {}
+
+  [[nodiscard]] bool restore(uint16_t source) {
+    return append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, source, arch_));
+  }
+
+  [[nodiscard]] bool save(uint16_t destination) {
+    return append(instrumentation::build_s_mov_b64(destination, kAmdGpuExecLo, arch_));
+  }
+
+  [[nodiscard]] bool narrow_vcc() {
+    return append(instrumentation::build_s_and_saveexec_b64(narrow_save_, kAmdGpuVccLo, arch_));
+  }
+
+  [[nodiscard]] bool require_literal(uint16_t value, uint32_t literal, bool equal) {
+    const auto compare = equal ? instrumentation::build_v_cmp_eq_u32_vcc(
+                                     scalar_positive_inline_u32(literal), value, arch_)
+                               : instrumentation::build_v_cmp_ne_u32_vcc(
+                                     scalar_positive_inline_u32(literal), value, arch_);
+    return append(compare) && narrow_vcc();
+  }
+
+private:
+  [[nodiscard]] bool append(std::optional<uint32_t> instruction) {
+    if (!instruction)
+      return false;
+    words_.push_back(*instruction);
+    return true;
+  }
+
+  std::vector<uint32_t> &words_;
+  uint16_t narrow_save_ = 0;
+  rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
+};
+
 [[nodiscard]] bool append_moi_sync_intent_lowering_commit(
     ConSanTransformArtifacts &result, std::span<const ConSanProbeIntentId> intent_ids,
     const ConSanCommittedPatchGeometry &patch, std::string_view probe_name,
@@ -926,28 +968,10 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const uint16_t skipped = static_cast<uint16_t>(exec_base + 14u);
   const uint16_t eligible = static_cast<uint16_t>(exec_base + 6u);
 
-  const auto restore_exec = [&](uint16_t source) {
-    const auto instruction = instrumentation::build_s_mov_b64(kAmdGpuExecLo, source, arch);
-    if (!instruction)
-      return false;
-    words.push_back(*instruction);
-    return true;
-  };
-  const auto save_exec = [&](uint16_t destination) {
-    const auto instruction = instrumentation::build_s_mov_b64(destination, kAmdGpuExecLo, arch);
-    if (!instruction)
-      return false;
-    words.push_back(*instruction);
-    return true;
-  };
-  const auto narrow_vcc = [&] {
-    const auto instruction =
-        instrumentation::build_s_and_saveexec_b64(exec_base, kAmdGpuVccLo, arch);
-    if (!instruction)
-      return false;
-    words.push_back(*instruction);
-    return true;
-  };
+  InlineExecMaskEmission exec_masks(words, exec_base, arch);
+  const auto restore_exec = [&](uint16_t source) { return exec_masks.restore(source); };
+  const auto save_exec = [&](uint16_t destination) { return exec_masks.save(destination); };
+  const auto narrow_vcc = [&] { return exec_masks.narrow_vcc(); };
   const auto require_equal = [&](size_t offset, uint16_t expected_vgpr) {
     if (!append_load_u32_vgpr_at_offset(words, base, offset, value, arch))
       return false;
@@ -1976,36 +2000,12 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     return false;
   words.push_back(*save_scan_exec);
 
-  const auto restore_exec = [&](uint16_t source) -> bool {
-    const auto restore = instrumentation::build_s_mov_b64(kAmdGpuExecLo, source, arch);
-    if (!restore)
-      return false;
-    words.push_back(*restore);
-    return true;
-  };
-  const auto save_exec = [&](uint16_t destination) -> bool {
-    const auto save = instrumentation::build_s_mov_b64(destination, kAmdGpuExecLo, arch);
-    if (!save)
-      return false;
-    words.push_back(*save);
-    return true;
-  };
-  const auto narrow_vcc = [&]() -> bool {
-    const auto narrow = instrumentation::build_s_and_saveexec_b64(narrow_save, kAmdGpuVccLo, arch);
-    if (!narrow)
-      return false;
-    words.push_back(*narrow);
-    return true;
-  };
-  const auto require_literal = [&](uint16_t value, uint32_t literal, bool equal) -> bool {
-    const auto compare = equal ? instrumentation::build_v_cmp_eq_u32_vcc(
-                                     scalar_positive_inline_u32(literal), value, arch)
-                               : instrumentation::build_v_cmp_ne_u32_vcc(
-                                     scalar_positive_inline_u32(literal), value, arch);
-    if (!compare)
-      return false;
-    words.push_back(*compare);
-    return narrow_vcc();
+  InlineExecMaskEmission exec_masks(words, narrow_save, arch);
+  const auto restore_exec = [&](uint16_t source) { return exec_masks.restore(source); };
+  const auto save_exec = [&](uint16_t destination) { return exec_masks.save(destination); };
+  const auto narrow_vcc = [&] { return exec_masks.narrow_vcc(); };
+  const auto require_literal = [&](uint16_t value, uint32_t literal, bool equal) {
+    return exec_masks.require_literal(value, literal, equal);
   };
   const auto load_require_literal = [&](size_t offset, uint32_t literal, bool equal) -> bool {
     return append_load_u32_vgpr_at_offset(words, snapshot_address, offset, temporary, arch) &&
@@ -2474,36 +2474,12 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const uint16_t guest_address = address_plan.result_address_vgpr;
   const uint16_t stable_guest_address = static_cast<uint16_t>(base + required_scratch_count - 2u);
 
-  const auto restore_exec = [&](uint16_t source) -> bool {
-    const auto restore = instrumentation::build_s_mov_b64(kAmdGpuExecLo, source, arch);
-    if (!restore)
-      return false;
-    words.push_back(*restore);
-    return true;
-  };
-  const auto save_exec = [&](uint16_t destination) -> bool {
-    const auto save = instrumentation::build_s_mov_b64(destination, kAmdGpuExecLo, arch);
-    if (!save)
-      return false;
-    words.push_back(*save);
-    return true;
-  };
-  const auto narrow_vcc = [&]() -> bool {
-    const auto narrow = instrumentation::build_s_and_saveexec_b64(narrow_save, kAmdGpuVccLo, arch);
-    if (!narrow)
-      return false;
-    words.push_back(*narrow);
-    return true;
-  };
-  const auto require_literal = [&](uint16_t value, uint32_t literal, bool equal) -> bool {
-    const auto compare = equal ? instrumentation::build_v_cmp_eq_u32_vcc(
-                                     scalar_positive_inline_u32(literal), value, arch)
-                               : instrumentation::build_v_cmp_ne_u32_vcc(
-                                     scalar_positive_inline_u32(literal), value, arch);
-    if (!compare)
-      return false;
-    words.push_back(*compare);
-    return narrow_vcc();
+  InlineExecMaskEmission exec_masks(words, narrow_save, arch);
+  const auto restore_exec = [&](uint16_t source) { return exec_masks.restore(source); };
+  const auto save_exec = [&](uint16_t destination) { return exec_masks.save(destination); };
+  const auto narrow_vcc = [&] { return exec_masks.narrow_vcc(); };
+  const auto require_literal = [&](uint16_t value, uint32_t literal, bool equal) {
+    return exec_masks.require_literal(value, literal, equal);
   };
   const auto require_field = [&](size_t offset, uint16_t expected) -> bool {
     if (!append_load_u32_vgpr_at_offset(words, slot_address, offset, temporary, arch))
