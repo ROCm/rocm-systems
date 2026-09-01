@@ -30,6 +30,10 @@ enum class IoType;
 
 namespace hipFile {
 
+struct AsyncFailoverState {
+    bool fallback_needed{false};
+};
+
 class AsyncOp {
 public:
     const IoType                         io_type;
@@ -41,6 +45,8 @@ public:
     std::variant<const hoff_t, hoff_t *> buffer_offset;
     ssize_t *const                       bytes_transferred;
     ssize_t                              bytes_transferred_internal;
+    std::shared_ptr<AsyncFailoverState>  failover{};
+    bool                                 write_result{true};
 
     AsyncOp(const AsyncOp &)            = delete;
     AsyncOp &operator=(const AsyncOp &) = delete;
