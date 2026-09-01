@@ -202,6 +202,14 @@ fi  # SUMMARISE_ONLY
     {printf "  cold latency spread         %.2f%% across a 16x range of flush sizes\n", $4}' \
     "$OUT/rows.tsv" 2>/dev/null
   echo
+  # A clock mismatch explains an assertion failure far more often than a real
+  # regression does, so surface it next to the failure rather than leaving the
+  # reader to go digging.
+  if grep -qs 'SEE WARNING BELOW' "$OUT"/*.txt; then
+    echo "WARNING: the device clock differs from the one REPORT.md was measured at."
+    echo "         Results in this set are NOT comparable with the published numbers."
+    grep -hm1 'clock  ' "$OUT"/*.txt | head -1 | sed 's/^/         /'
+  fi
   [ $ISA_RC -ne 0 ] && echo "WARNING: ISA check failed; see isa_check.txt"
   [ $failed -ne 0 ] && echo "WARNING: at least one experiment reported a failed assertion"
   echo "e2e_memcpy is not run here: it needs a patched CLR build. See e2e_run.sh."

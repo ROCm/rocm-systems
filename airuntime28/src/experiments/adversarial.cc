@@ -228,9 +228,19 @@ int main(int argc, char** argv) {
               g.mostAdverseCase.c_str());
   std::printf("  coarsest resolution in the suite            : %.2f pp (%s)\n", g.widestLimit,
               g.widestLimitCase.c_str());
-  std::printf("\n  So: no regression was found, and a regression smaller than %.2f pp could not\n",
-              g.widestLimit);
-  std::printf("  have been found in the least sensitive case. That is the claim's limit.\n");
+  // Phrased from the data rather than from the expected answer. An earlier
+  // version printed "no regression was found" unconditionally, which meant it
+  // said so on the same screen as a count of three regressions.
+  if (g.worseCases == 0) {
+    std::printf("\n  So: no regression was found, and one smaller than %.2f pp could not have\n",
+                g.widestLimit);
+    std::printf("  been found in the least sensitive case. That is the claim's limit.\n");
+  } else {
+    std::printf("\n  So: %d case(s) show the hint losing. The suite's least sensitive case\n",
+                g.worseCases);
+    std::printf("  resolves only to %.2f pp, so treat that one as untested rather than clean.\n",
+                g.widestLimit);
+  }
   emitRow("adversarial", "-", "worse_cases", static_cast<double>(g.worseCases), "count", "");
   emitRow("adversarial", "-", "most_adverse_pct", g.mostAdverse, "pct",
           g.mostAdverseCase.c_str());

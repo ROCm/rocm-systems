@@ -19,8 +19,8 @@ CXXFILT=${CXXFILT:-/opt/rocm/llvm/bin/llvm-cxxfilt}
 mkdir -p isa build
 
 echo "=== emitting device assembly ==="
-$HIPCC --offload-arch=$ARCH -O3 -std=c++17 --offload-device-only -S \
-       src/experiments/isolated_copy.hip -o isa/isolated_copy.s || exit 1
+$HIPCC --offload-arch=$ARCH -x hip -O3 -std=c++17 --offload-device-only -S \
+       src/experiments/isolated_copy.cc -o isa/isolated_copy.s || exit 1
 wc -l isa/isolated_copy.s
 
 [ -x build/isolated_copy ] || ./build.sh isolated_copy >/dev/null || exit 1

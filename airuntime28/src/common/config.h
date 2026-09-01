@@ -70,6 +70,20 @@ constexpr u64 kLocalWorkSize = 512;
 constexpr unsigned kMaxAlignment = 16;
 
 // ---------------------------------------------------------------------------
+// The machine the published numbers came from
+// ---------------------------------------------------------------------------
+// Every figure in REPORT.md was measured with the device reporting this maximum
+// clock. It is recorded because it is not stable on a shared machine: a later
+// session found the same part reporting 2400 MHz, and at that clock several
+// published results changed sign. Nothing was wrong with the code - the machine
+// had moved underneath it, and nothing in the suite said so.
+//
+// initMachine() compares against this and prints a loud warning on a mismatch,
+// so a contaminated run announces itself instead of quietly producing numbers
+// that get compared against ones taken under different conditions.
+constexpr int kReferenceClockMHz = 1100;
+
+// ---------------------------------------------------------------------------
 // Statistics
 // ---------------------------------------------------------------------------
 constexpr int kBootstrapResamples = 3000;
