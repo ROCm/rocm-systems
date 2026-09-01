@@ -587,6 +587,25 @@ _consan_assert_match_count_at_most(
     1
     "Record/Replay may use the broad attempt only at its mode entry"
 )
+foreach(
+    _inline_shadow_owner
+    IN ITEMS
+        consan_moi_inline_shadow.h
+        consan_moi_inline_shadow.inc
+        consan_moi_inline_atomic.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_inline_shadow_owner}"
+        "MoiOptions|static_cast<const ConSan(Request|MoiOperatingPoint|BoundRuntimeResources)"
+        "InlineShadow components must separate immutable input from operating-point state"
+    )
+endforeach()
+_consan_assert_match_count_at_most(
+    "${_consan_dir}/consan_moi_inline_shadow.cpp"
+    "MoiOptions"
+    1
+    "InlineShadow may use the broad attempt only at its mode entry"
+)
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
     "GFX90A_ACCUM_OFFSET"

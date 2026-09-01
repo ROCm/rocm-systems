@@ -130,12 +130,12 @@ void apply_inline_shadow_mode_patches(std::span<const uint8_t> bytes, MoiOptions
                                       rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
                                       std::span<const ConSanMoiCandidate> candidates,
                                       const MoiObjectFacts &, ConSanTransformArtifacts &result) {
-  try_apply_inline_shadow_patch(bytes, options, arch, resource_state, candidates, result);
+  try_apply_inline_shadow_patch(bytes, options, options, arch, resource_state, candidates, result);
   if (!result.errors.empty())
     return;
   try_apply_inline_shadow_barrier_patch(bytes, options, arch, resource_state, result);
   if (result.errors.empty())
-    try_apply_inline_atomic_ordering_patch(bytes, options, arch, result);
+    try_apply_inline_atomic_ordering_patch(bytes, options, options, arch, result);
 }
 
 uint16_t inline_shadow_access_scratch_vgpr_count(const ConSanRequest &request,

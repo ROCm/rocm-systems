@@ -1,4 +1,5 @@
-void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
+void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
+                                   const ConSanMoiOperatingPoint &operating_point,
                                    rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
                                    std::span<const ConSanMoiCandidate> admitted,
                                    ConSanTransformArtifacts &result) {
@@ -19,11 +20,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
   if (options.max_patches == 0)
     return;
-  if (!validate_inline_shadow_exec_save_sgpr(options, options, options, arch, result.warnings))
+  if (!validate_inline_shadow_exec_save_sgpr(options, options, operating_point, arch,
+                                             result.warnings))
     return;
-  if (!options.moi_owner_epoch_vgprs.owner() &&
+  if (!operating_point.moi_owner_epoch_vgprs.owner() &&
       result.moi_operating_point.owner_persistent_vgprs.empty() &&
-      !options.moi_persistent_sgprs.owner() && !options.automatic_moi_private_epoch) {
+      !operating_point.moi_persistent_sgprs.owner() &&
+      !operating_point.automatic_moi_private_epoch) {
     result.warnings.emplace_back("ConSan MOI inline-shadow probe requires persistent owner state");
     return;
   }
@@ -91,7 +94,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     if (kernel.has_dynamic_lds)
       dynamic_lds_descriptors.insert(kernel.descriptor_file_offset);
   }
-  std::unordered_map<uint64_t, std::optional<MoiOptions>> direct_options_by_descriptor;
+  std::unordered_map<uint64_t, std::optional<ConSanMoiOperatingPoint>> direct_points_by_descriptor;
   std::unordered_map<uint64_t, std::optional<ConSanMoiWorkgroupShadowLayout>>
       direct_workgroup_shadow_by_descriptor;
   std::unordered_map<uint64_t, std::optional<MoiPrivateEpochLayout>>
@@ -106,13 +109,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                             return assignment.branch_only_spill.has_value();
                           });
   const bool use_indirect_appended =
-      options.moi_exec_save_sgpr.has_value() &&
+      operating_point.moi_exec_save_sgpr.has_value() &&
       (candidates.size() >= 8u || has_function_candidate || has_branch_only_scalar_assignment);
   const uint64_t reserved_barrier_island_count =
-      use_indirect_appended ? moi_reserved_access_sync_island_count(result.program_inventory,
-                                                                    result.observation_plan(),
-                                                                    options, options, options)
-                            : 0u;
+      use_indirect_appended
+          ? moi_reserved_access_sync_island_count(result.program_inventory,
+                                                  result.observation_plan(), options, options,
+                                                  operating_point)
+          : 0u;
   const uint64_t indirect_body_begin =
       original_text_size + reserved_barrier_island_count * kIndirectIslandWords * sizeof(uint32_t) +
       candidates.size() * access_relay_words * sizeof(uint32_t);
@@ -149,10 +153,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   };
 
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
-      result.program_inventory, result.resource_plans, options, options, arch, resource_state,
-      original_text, candidates, target->moi_dense_route_group_capacity, access_island_begin,
-      access_relay_words, use_indirect_appended, MoiDenseAccessRouteAbi::InlineShadow,
-      local_entry_islands ? &*local_entry_islands : nullptr, &branch_router);
+      result.program_inventory, result.resource_plans, options, operating_point, arch,
+      resource_state, original_text, candidates, target->moi_dense_route_group_capacity,
+      access_island_begin, access_relay_words, use_indirect_appended,
+      MoiDenseAccessRouteAbi::InlineShadow, local_entry_islands ? &*local_entry_islands : nullptr,
+      &branch_router);
   const auto &dense_candidates = dense_routes.partition;
   const auto &candidate_indices = dense_candidates.index_by_candidate;
   auto &dense_entry_islands = dense_routes.entry_islands;
@@ -270,23 +275,23 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     // the deferred guest load.
     const uint16_t expected_scratch_count =
         selected_reduced_spill_recovery
-            ? inline_shadow_spill_backed_scratch_count(options, options, candidate, arch)
-            : inline_shadow_scratch_count(options, options, candidate, arch);
+            ? inline_shadow_spill_backed_scratch_count(options, operating_point, candidate, arch)
+            : inline_shadow_scratch_count(options, operating_point, candidate, arch);
     const auto resources = resolve_moi_scratch_plan(
-        *resource_plan, options, result.moi_operating_point, expected_scratch_count);
+        *resource_plan, operating_point, result.moi_operating_point, expected_scratch_count);
     if (!resources)
       continue;
     const std::optional<uint64_t> direct_descriptor =
         resources->owner_descriptor_file_offsets.size() == 1u
             ? std::optional<uint64_t>(resources->owner_descriptor_file_offsets.front())
             : std::nullopt;
-    MoiOptions candidate_options;
+    ConSanMoiOperatingPoint candidate_point;
     if (direct_descriptor) {
       auto [cached, inserted] =
-          direct_options_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
+          direct_points_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
       if (inserted) {
-        MoiOptions resolved = options;
-        if (apply_moi_transient_sgpr_assignment(resolved, resolved, result.moi_operating_point,
+        ConSanMoiOperatingPoint resolved = operating_point;
+        if (apply_moi_transient_sgpr_assignment(options, resolved, result.moi_operating_point,
                                                 resources->owner_descriptor_file_offsets) &&
             apply_moi_persistent_vgpr_assignment(resolved, result.moi_operating_point,
                                                  resources->owner_descriptor_file_offsets)) {
@@ -295,13 +300,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       }
       if (!cached->second)
         continue;
-      candidate_options = *cached->second;
+      candidate_point = *cached->second;
     } else {
-      candidate_options = options;
-      if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
-                                               result.moi_operating_point,
+      candidate_point = operating_point;
+      if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
                                                resources->owner_descriptor_file_offsets) ||
-          !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
+          !apply_moi_persistent_vgpr_assignment(candidate_point, result.moi_operating_point,
                                                 resources->owner_descriptor_file_offsets)) {
         continue;
       }
@@ -320,7 +324,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     // cannot borrow that guest window. Keep the semantically equivalent
     // external exact-shadow table for every spill-backed component, whether
     // or not it also found a fresh visible-evidence latch.
-    const bool spill_backed_scalar_state = candidate_options.has_inline_moi_scalar_spill();
+    const bool spill_backed_scalar_state = candidate_point.has_inline_moi_scalar_spill();
     if (!requires_wave_partitioned_exact_shadow && !has_unspilled_component_override &&
         !spill_backed_scalar_state) {
       uint16_t next_compact_token = 0u;
@@ -362,9 +366,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
 
     std::optional<MoiPrivateEpochLayout> private_layout;
     std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
-    if (candidate_options.automatic_moi_private_epoch) {
+    if (candidate_point.automatic_moi_private_epoch) {
       const bool persist_workitem_owner =
-          candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
+          options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
       // Every supported target exposes workgroup identity as an entry ABI
       // value. Preserve the complete key before arbitrary guest code can reuse
       // the ordinary SGPR or TTMP inputs.
@@ -373,9 +377,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       // guest state. Capture that owner's identity in private storage and
       // reload it into the access router's dead PC pair after the router has
       // entered its body.
-      const bool persist_dispatch_id = !moi_has_runtime_hardware_dispatch_id(candidate_options) &&
-                                       (candidate_options.moi_dispatch_identity.sgpr() ||
-                                        candidate_options.moi_dispatch_identity.private_fallback());
+      const bool persist_dispatch_id = !moi_has_runtime_hardware_dispatch_id(candidate_point) &&
+                                       (candidate_point.moi_dispatch_identity.sgpr() ||
+                                        candidate_point.moi_dispatch_identity.private_fallback());
       if (direct_descriptor) {
         auto [cached, inserted] =
             direct_private_layout_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
@@ -402,7 +406,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       }
       if (!private_layout)
         continue;
-      if (candidate_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
+      if (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
         std::optional<uint16_t> owner_shift;
         if (direct_descriptor) {
           auto [cached, inserted] =
@@ -425,21 +429,21 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     }
 
     if (private_layout && private_layout->dispatch_id_offset) {
-      const auto reload = moi_indirect_jump_sgprs(candidate_options, candidate_options);
+      const auto reload = moi_indirect_jump_sgprs(options, candidate_point);
       if (!reload) {
         result.warnings.emplace_back(
             "ConSan MOI private dispatch identity has no owner-local scalar reload pair");
         continue;
       }
-      candidate_options.moi_dispatch_identity.set_sgpr(reload->pc_sgpr);
+      candidate_point.moi_dispatch_identity.set_sgpr(reload->pc_sgpr);
     }
 
     std::vector<std::string> workgroup_errors;
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
     const bool has_persistent_workgroup_key =
         (private_layout && private_layout->workgroup_key_offset) ||
-        candidate_options.moi_workgroup_key_vgpr ||
-        candidate_options.moi_persistent_sgprs.workgroup_key;
+        candidate_point.moi_workgroup_key_vgpr ||
+        candidate_point.moi_persistent_sgprs.workgroup_key;
     if (has_persistent_workgroup_key) {
       // The owner-specific entry prologue captured the descriptor-valid
       // coordinates. Shared physical text can therefore consume one stable
@@ -475,18 +479,15 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
 
     std::optional<VgprSpillSequence> spill;
     if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-        moi_scalar_spill_requires_dynamic_vgpr_frame(
-            result.program_inventory, *resources,
-            static_cast<const ConSanMoiOperatingPoint &>(candidate_options))) {
-      if (candidate_options.moi_branch_only_spill &&
-          candidate_options.moi_branch_only_spill->dynamic_stack_borrowed_sgpr) {
+        moi_scalar_spill_requires_dynamic_vgpr_frame(result.program_inventory, *resources,
+                                                     candidate_point)) {
+      if (candidate_point.moi_branch_only_spill &&
+          candidate_point.moi_branch_only_spill->dynamic_stack_borrowed_sgpr) {
         constexpr uint16_t reservoir_count =
             DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount;
         const uint32_t scalar_frame_bytes =
             static_cast<uint32_t>(moi_exec_save_sgpr_count(
-                resolve_moi_exec_save_requirement(candidate_options, candidate_options,
-                                                  candidate_options),
-                arch)) *
+                resolve_moi_exec_save_requirement(options, options, candidate_point), arch)) *
             SpillManager::kSlotBytes;
         if (resources->count < reservoir_count) {
           result.warnings.emplace_back(
@@ -497,7 +498,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
             static_cast<uint16_t>(resources->base + resources->count - reservoir_count);
         const auto borrowed = build_dynamic_stack_borrowed_sgpr_spill_sequence(
             resources->base, resources->count,
-            *candidate_options.moi_branch_only_spill->dynamic_stack_borrowed_sgpr, reservoir_base,
+            *candidate_point.moi_branch_only_spill->dynamic_stack_borrowed_sgpr, reservoir_base,
             resources->original_private_segment_size, arch, scalar_frame_bytes);
         if (!borrowed) {
           result.warnings.emplace_back(
@@ -507,8 +508,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
         spill = borrowed->as_vgpr_spill_sequence();
       } else {
         spill = build_moi_spill_sequence(
-            result.program_inventory, *resources, candidate_options, candidate_options,
-            candidate_options, spill_managers, arch, result.warnings,
+            result.program_inventory, *resources, options, options, candidate_point, spill_managers,
+            arch, result.warnings,
             private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base)
                            : std::nullopt);
       }
@@ -516,26 +517,22 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
         continue;
     }
     std::optional<SgprSpillSequence> scalar_spill;
-    if (candidate_options.has_inline_moi_scalar_spill()) {
+    if (candidate_point.has_inline_moi_scalar_spill()) {
       scalar_spill = build_moi_sgpr_spill_sequence(
-          result.program_inventory, *resources,
-          static_cast<const ConSanRequest &>(candidate_options),
-          static_cast<const BoundRuntimeResources &>(candidate_options),
-          static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
-          result.warnings,
+          result.program_inventory, *resources, options, options, candidate_point, spill_managers,
+          arch, result.warnings,
           private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
           spill ? &*spill : nullptr);
       if (!scalar_spill)
         continue;
     }
 
-    candidate_options.scratch_vgpr = resources->base;
     std::vector<std::string> candidate_errors;
     uint32_t guest_instruction_word_count = 0;
     auto words = build_inline_shadow_words(
-        bytes, candidate, candidate_options, candidate_options, candidate_options, resources->base,
-        candidate_options.moi_partition_mask_debug, arch, layout, *workgroup_sources,
-        workgroup_shadow, requires_wave_partitioned_exact_shadow,
+        bytes, candidate, options, options, candidate_point, resources->base,
+        options.moi_partition_mask_debug, arch, layout, *workgroup_sources, workgroup_shadow,
+        requires_wave_partitioned_exact_shadow,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         owner_derivation, private_layout ? private_layout->workgroup_key_offset : std::nullopt,
         private_layout ? private_layout->dispatch_id_offset : std::nullopt,
@@ -598,7 +595,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     uint64_t branch_only_relay_bank_word_count = 0u;
     uint32_t displaced_original_size = candidate.size();
     bool placed_through_indirect_island = false;
-    if (use_indirect_appended && candidate_options.moi_branch_only_spill) {
+    if (use_indirect_appended && candidate_point.moi_branch_only_spill) {
       const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t)) +
                                    spill_bytes + scalar_spill_bytes + vgpr_msb_bytes +
                                    scalar_spill_guard_bytes;
@@ -712,7 +709,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       }
     }
     if (use_indirect_appended && !placed_through_indirect_island) {
-      if (candidate_options.moi_branch_only_spill) {
+      if (candidate_point.moi_branch_only_spill) {
         result.warnings.emplace_back(
             "ConSan MOI inline-shadow probe could not route its branch-only scalar-spill body");
         continue;
@@ -774,7 +771,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                                    spill_bytes + scalar_spill_bytes + vgpr_msb_bytes +
                                    scalar_spill_guard_bytes;
       const bool needs_chainable_entry_patch =
-          moi_initializes_owner_epoch(options, options) &&
+          moi_initializes_owner_epoch(options, operating_point) &&
           std::ranges::any_of(
               resources->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
                 const ConSanKernelInfo *kernel =
@@ -783,8 +780,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                   return false;
                 }
                 return kernel->uses_dynamic_stack.value_or(false) ||
-                       options.automatic_moi_persistent_vgprs ||
-                       options.moi_persistent_sgprs.complete();
+                       operating_point.automatic_moi_persistent_vgprs ||
+                       operating_point.moi_persistent_sgprs.complete();
               });
       DbiPatchPlacementRequest placement_request;
       placement_request.anchor_offset = candidate.anchor();
@@ -897,13 +894,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   MoiDescriptorLdsRequirements lds_requirements;
   for (const PlannedInlineShadowPatch &planned_patch : planned_patches) {
     note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
-    MoiOptions candidate_options = options;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
-                                             result.moi_operating_point,
+    ConSanMoiOperatingPoint candidate_point = operating_point;
+    if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
                                              planned_patch.resources.owner_descriptor_file_offsets))
       continue;
-    note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, candidate_options,
-                               candidate_options, candidate_options, arch);
+    note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, options, options,
+                               candidate_point, arch);
     if (planned_patch.workgroup_shadow) {
       note_moi_lds_requirements(lds_requirements, planned_patch.resources,
                                 *planned_patch.workgroup_shadow);
@@ -918,9 +914,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
     if (!apply_moi_appended_access_descriptor_requirements(
-            patcher, code_object, static_cast<const RuntimeCapabilities &>(options),
-            descriptor_requirements, scalar_requirements, private_requirements, &lds_requirements,
-            arch, result))
+            patcher, code_object, options, descriptor_requirements, scalar_requirements,
+            private_requirements, &lds_requirements, arch, result))
       return;
     std::vector<uint8_t> new_text;
     std::vector<ConSanPatchInfo> patches;
@@ -941,40 +936,39 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
       return;
     for (const PlannedInlineShadowPatch &planned_patch : planned_patches) {
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-      MoiOptions candidate_options = options;
+      ConSanMoiOperatingPoint candidate_point = operating_point;
       if (!apply_moi_transient_sgpr_assignment(
-              candidate_options, candidate_options, result.moi_operating_point,
+              options, candidate_point, result.moi_operating_point,
               planned_patch.resources.owner_descriptor_file_offsets)) {
         result.errors.emplace_back(
             "ConSan MOI inline-shadow access lost its transient scalar assignment");
         return;
       }
       if (!apply_moi_persistent_vgpr_assignment(
-              candidate_options, result.moi_operating_point,
+              candidate_point, result.moi_operating_point,
               planned_patch.resources.owner_descriptor_file_offsets)) {
         result.errors.emplace_back(
             "ConSan MOI inline-shadow access lost its persistent VGPR assignment");
         return;
       }
-      candidate_options.scratch_vgpr = planned_patch.resources.base;
       if (planned_patch.private_dispatch_id_offset) {
-        const auto reload = moi_indirect_jump_sgprs(candidate_options, candidate_options);
+        const auto reload = moi_indirect_jump_sgprs(options, candidate_point);
         if (!reload) {
           result.errors.emplace_back(
               "ConSan MOI inline-shadow access lost its private dispatch reload pair");
           return;
         }
-        candidate_options.moi_dispatch_identity.set_sgpr(reload->pc_sgpr);
+        candidate_point.moi_dispatch_identity.set_sgpr(reload->pc_sgpr);
       }
       auto words = build_inline_shadow_words(
-          bytes, candidate, candidate_options, candidate_options, candidate_options,
-          planned_patch.resources.base, candidate_options.moi_partition_mask_debug, arch, layout,
-          planned_patch.workgroup_sources, planned_patch.workgroup_shadow,
-          requires_wave_partitioned_exact_shadow, planned_patch.private_epoch_offset,
-          planned_patch.owner_derivation, planned_patch.private_workgroup_key_offset,
-          planned_patch.private_dispatch_id_offset, planned_patch.workgroup_shadow_compact_token,
-          planned_patch.resources.count, planned_patch.spill.has_value(),
-          planned_patch.spill ? &*planned_patch.spill : nullptr, result.errors);
+          bytes, candidate, options, options, candidate_point, planned_patch.resources.base,
+          options.moi_partition_mask_debug, arch, layout, planned_patch.workgroup_sources,
+          planned_patch.workgroup_shadow, requires_wave_partitioned_exact_shadow,
+          planned_patch.private_epoch_offset, planned_patch.owner_derivation,
+          planned_patch.private_workgroup_key_offset, planned_patch.private_dispatch_id_offset,
+          planned_patch.workgroup_shadow_compact_token, planned_patch.resources.count,
+          planned_patch.spill.has_value(), planned_patch.spill ? &*planned_patch.spill : nullptr,
+          result.errors);
       if (!words)
         return;
 
@@ -1052,7 +1046,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
           return;
 
         if (planned_patch.entry_island_offset && !planned_patch.dense_call_anchor) {
-          const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options, candidate_options);
+          const auto jump_sgprs = moi_indirect_jump_sgprs(options, candidate_point);
           if (!jump_sgprs) {
             result.errors.emplace_back(
                 "ConSan MOI inline-shadow probe has no indirect jump scalar state");
@@ -1103,8 +1097,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
           body_options.high_bank_address_source = candidate.lowering.form->address_vgpr;
           body_options.high_bank_address_destination = static_cast<uint16_t>(
               consan_detail::inline_shadow_loop_counter_vgpr(
-                  planned_patch.resources.base, candidate_options.moi_exec_save_sgpr.has_value(),
-                  candidate_options.moi_track_atomics) +
+                  planned_patch.resources.base, candidate_point.moi_exec_save_sgpr.has_value(),
+                  options.moi_track_atomics) +
               inline_shadow_loop_scratch_count(candidate));
         }
         auto cave_words = assemble_moi_appended_body(planned_patch, *words, "inline-shadow probe",
@@ -1137,7 +1131,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
           cave_words->erase(displaced_begin, cave_words->end());
         }
         if (planned_patch.branch_only_route) {
-          if (!candidate_options.moi_branch_only_spill || planned_patch.entry_island_offset ||
+          if (!candidate_point.moi_branch_only_spill || planned_patch.entry_island_offset ||
               planned_patch.dense_call_anchor || !planned_patch.displaced_tail_words.empty()) {
             result.errors.emplace_back(
                 "ConSan MOI inline-shadow probe found inconsistent branch-only state");
@@ -1190,12 +1184,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
             cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
                                displaced_tail_words.end());
             const uint16_t call_return_sgpr =
-                candidate_options.has_inline_moi_scalar_spill()
-                    ? candidate_options.moi_router_call->call_return_sgpr
-                    : static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 28u);
+                candidate_point.has_inline_moi_scalar_spill()
+                    ? candidate_point.moi_router_call->call_return_sgpr
+                    : static_cast<uint16_t>(*candidate_point.moi_exec_save_sgpr + 28u);
             cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));
           } else {
-            const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options, candidate_options);
+            const auto jump_sgprs = moi_indirect_jump_sgprs(options, candidate_point);
             empty_exec_continuation_word_offset = cave_words->size();
             if (!jump_sgprs ||
                 !append_moi_scc_preserving_indirect_jump(
@@ -1220,7 +1214,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
                                displaced_tail_words.end());
           }
         } else if (planned_patch.entry_island_offset) {
-          const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options, candidate_options);
+          const auto jump_sgprs = moi_indirect_jump_sgprs(options, candidate_point);
           empty_exec_continuation_word_offset = cave_words->size();
           if (!jump_sgprs) {
             result.errors.emplace_back(
@@ -1357,38 +1351,35 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
 
   if (!apply_inline_moi_access_patches(
           bytes, planned_patches, descriptor_requirements, scalar_requirements,
-          private_requirements, &lds_requirements,
-          static_cast<const RuntimeCapabilities *>(&options), "inline-shadow probe", arch,
+          private_requirements, &lds_requirements, &options, "inline-shadow probe", arch,
           [&](const PlannedInlineShadowPatch &planned_patch) {
-            MoiOptions candidate_options = options;
+            ConSanMoiOperatingPoint candidate_point = operating_point;
             if (!apply_moi_transient_sgpr_assignment(
-                    candidate_options, candidate_options, result.moi_operating_point,
+                    options, candidate_point, result.moi_operating_point,
                     planned_patch.resources.owner_descriptor_file_offsets)) {
               result.errors.emplace_back(
                   "ConSan MOI inline-shadow access lost its transient scalar assignment");
               return std::optional<std::vector<uint32_t>>{};
             }
             if (!apply_moi_persistent_vgpr_assignment(
-                    candidate_options, result.moi_operating_point,
+                    candidate_point, result.moi_operating_point,
                     planned_patch.resources.owner_descriptor_file_offsets)) {
               result.errors.emplace_back(
                   "ConSan MOI inline-shadow access lost its persistent VGPR assignment");
               return std::optional<std::vector<uint32_t>>{};
             }
-            candidate_options.scratch_vgpr = planned_patch.resources.base;
             if (planned_patch.private_dispatch_id_offset) {
-              const auto reload = moi_indirect_jump_sgprs(candidate_options, candidate_options);
+              const auto reload = moi_indirect_jump_sgprs(options, candidate_point);
               if (!reload) {
                 result.errors.emplace_back(
                     "ConSan MOI inline-shadow access lost its private dispatch reload pair");
                 return std::optional<std::vector<uint32_t>>{};
               }
-              candidate_options.moi_dispatch_identity.set_sgpr(reload->pc_sgpr);
+              candidate_point.moi_dispatch_identity.set_sgpr(reload->pc_sgpr);
             }
             return build_inline_shadow_words(
-                bytes, *planned_patch.candidate, candidate_options, candidate_options,
-                candidate_options, planned_patch.resources.base,
-                candidate_options.moi_partition_mask_debug, arch, layout,
+                bytes, *planned_patch.candidate, options, options, candidate_point,
+                planned_patch.resources.base, options.moi_partition_mask_debug, arch, layout,
                 planned_patch.workgroup_sources, planned_patch.workgroup_shadow,
                 requires_wave_partitioned_exact_shadow, planned_patch.private_epoch_offset,
                 planned_patch.owner_derivation, planned_patch.private_workgroup_key_offset,

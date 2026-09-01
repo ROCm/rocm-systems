@@ -3501,3 +3501,68 @@ shrinkage is still open. InlineShadow, the exact-subset barrier owner, common
 prologues, architecture peepholes, placement and validation concentrations,
 the extension exercises, and the independent deep-read completion audit also
 remain open. The goal therefore remains active.
+
+### 16.37 Convergence checkpoint 36: typed InlineShadow construction boundary
+
+After checkpoints 34 and 35, InlineShadow was the remaining MOI engine whose
+mode-owned construction inherited the complete `MoiOptions` attempt. The
+access owner cached an optional whole attempt per directly owned descriptor,
+then copied or assigned the aggregate across planning, descriptor accounting,
+appended emission, and inline emission. Atomic construction repeated the same
+pattern for site planning, requirements, dense groups, dense bodies, and
+ordinary bodies. Across the two owners there were eleven whole-attempt
+copy/assignment sites and six assignments to the immutable `scratch_vgpr`
+debug field despite every consumer already receiving the selected scratch base.
+
+InlineShadow access and atomic construction now receive immutable
+`ConSanOptions` and `ConSanMoiOperatingPoint` separately. The per-descriptor
+cache stores only resolved operating points. Owner-local binding copies only
+that state; resource selection, spill construction, private owner/dispatch
+layout, dense routing, exact-shadow emission, and atomic-order emission name
+their immutable and resolved inputs independently; and scratch remains an
+explicit resource-plan value. The mode entry is the sole remaining
+InlineShadow location that accepts the broad attempt before invoking these
+owners and the separately owned barrier mechanism. No InlineShadow-specific
+view, compatibility overload, or duplicate shared mechanism was introduced.
+
+The architecture-boundary gate rejects `MoiOptions` and inherited input/point
+casts in the InlineShadow internal header, access owner, and atomic owner, and
+budgets at most one broad-attempt reference at mode entry. Together with the
+Sampled and Record/Replay gates, all three MOI engine packages now obey the same
+physical input/state boundary while retaining their distinct policies and
+evidence models. SuperCollider does not use the MOI attempt type and is
+unaffected by this particular invariant.
+
+| Signal | Checkpoint 36 | Cumulative change | Slice change from checkpoint 35 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,453 | +478 | **-19** |
+| Nonblank production lines | 99,169 | +86 | **-19** |
+| Production implementation lines | 91,452 | **+2** | **-19** |
+| `MoiOptions` references / files | 48 / 18 | **-39 / -7** | **-15 / -3** |
+| `ConSanTransformArtifacts` references / files | 207 / 56 | **-69 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 205 / 28 | +5 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 326 / 58 | +36 / +7 | **+10 / +1** |
+| `MoiOptions` references in InlineShadow-owned construction | 1 | n/a | **-15** |
+| InlineShadow whole-attempt copy/assignment sites | 0 | n/a | **-11** |
+| InlineShadow immutable scratch-field assignments | 0 | n/a | **-6** |
+| Descriptor caches containing whole attempts | 0 | n/a | **-1** |
+| Test inventory | 5,379 | +34 | 0 |
+
+Validation includes a full final-tree `-j16` rebuild; all 825 `ConSanMoi` and
+architecture-boundary focused tests; all 4,744 nonphysical tests at `-j16` in
+197.39 seconds, including the unchanged 2,908 simulator rows over five targets;
+and all 635 physical gfx1201 tests serialized at `-j1` in 108.41 seconds. No
+test was removed, renamed, disabled, added, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.7, 14.8, and 14.9:
+every MOI engine package now uses one enforced immutable-input/resolved-state
+boundary, the last engine-local whole-attempt cache and copies are deleted, and
+the same existing shared contracts serve all three engines. Production
+implementation is only two lines above baseline, fully paying back 19 of the
+previous checkpoint's remaining 21-line temporary growth, but Section 14.8
+requires material shrinkage rather than merely reaching parity. The
+exact-subset barrier owner, common prologues, the remaining orchestration and
+placement attempts, architecture peepholes, extension exercises, and the
+independent deep-read completion audit remain open. The goal therefore remains
+active.
