@@ -37,6 +37,7 @@
 #include <rocprofiler-sdk/experimental/kernel_replay.h>
 
 #include <atomic>
+#include <type_traits>
 
 namespace rocprofiler
 {
@@ -54,11 +55,19 @@ replay_service_configured_flag()
     return *_v;
 }
 
+// Extract bits [last:first] from x. Mirrors the helper in hsa/queue.cpp, including its guard for a
+// mask spanning the full width of Integral, where the shift below would otherwise be undefined.
 template <typename Integral>
 constexpr Integral
 bit_extract(Integral x, int first, int last)
 {
-    return (x >> first) & ((Integral{1} << (last - first + 1)) - 1);
+    static_assert(std::is_integral<Integral>::value, "Integral type required");
+
+    const auto num_bits = static_cast<size_t>(last - first + 1);
+    const auto mask     = (num_bits >= sizeof(Integral) * 8)
+                              ? ~Integral{0}
+                              : static_cast<Integral>((Integral{1} << num_bits) - 1);
+    return (x >> first) & mask;
 }
 
 bool
