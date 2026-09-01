@@ -339,15 +339,21 @@ amdsmi_status_t fwupd_set_carveout(uint32_t option_index) {
   DbusIter it;
   d->iter_init_append(msg, &it);
   DbusIter arr;
-  d->iter_open(&it, kTypeArray, "{ss}", &arr);
   DbusIter ent;
-  d->iter_open(&arr, kTypeDictEntry, nullptr, &ent);
   const char* k = name.c_str();
   const char* v = value.c_str();
-  d->iter_append(&ent, kTypeString, &k);
-  d->iter_append(&ent, kTypeString, &v);
-  d->iter_close(&arr, &ent);
-  d->iter_close(&it, &arr);
+  // Message construction can fail on OOM (each step returns FALSE); bail cleanly
+  // rather than sending a malformed request.
+  const bool built = d->iter_open(&it, kTypeArray, "{ss}", &arr) &&
+                     d->iter_open(&arr, kTypeDictEntry, nullptr, &ent) &&
+                     d->iter_append(&ent, kTypeString, &k) &&
+                     d->iter_append(&ent, kTypeString, &v) && d->iter_close(&arr, &ent) &&
+                     d->iter_close(&it, &arr);
+  if (!built) {
+    d->msg_unref(msg);
+    CloseBus(*d, conn);
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
   DBusMessage* reply = d->send_block(conn, msg, 30000, &err);
   d->msg_unref(msg);
 
@@ -371,6 +377,9 @@ amdsmi_status_t fwupd_set_carveout(uint32_t option_index) {
       status = AMDSMI_STATUS_NOT_SUPPORTED;
     }
     d->error_free(&err);
+  } else if (reply == nullptr) {
+    // No error reported but also no reply: treat as failure, not success.
+    status = AMDSMI_STATUS_NOT_SUPPORTED;
   }
   if (reply != nullptr) d->msg_unref(reply);
   CloseBus(*d, conn);

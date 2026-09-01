@@ -29,13 +29,34 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdlib>
+
 #include "amd_smi/amdsmi.h"
 
-TEST(FwupdCarveout, GetReportsNotSupported) {
+// On a typical CI host no APU firmware exposes the carveout setting (and usually
+// there is no fwupd daemon or D-Bus system bus), so the adapter reports
+// NOT_SUPPORTED. On real affected hardware it can succeed; accept that too and
+// sanity-check the result rather than hard-failing.
+TEST(FwupdCarveout, GetReportsNotSupportedOrSaneInfo) {
   amdsmi_uma_carveout_info_t info{};
-  EXPECT_EQ(amd::smi::fwupd_get_carveout_info(&info), AMDSMI_STATUS_NOT_SUPPORTED);
+  const amdsmi_status_t ret = amd::smi::fwupd_get_carveout_info(&info);
+  if (ret == AMDSMI_STATUS_SUCCESS) {
+    EXPECT_GT(info.num_options, 0u);
+    EXPECT_LE(info.num_options, static_cast<uint32_t>(AMDSMI_MAX_CARVEOUT_OPTIONS));
+    EXPECT_LE(info.current_index, info.num_options);
+  } else {
+    EXPECT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
+  }
 }
 
-TEST(FwupdCarveout, SetReportsNotSupported) {
-  EXPECT_EQ(amd::smi::fwupd_set_carveout(0), AMDSMI_STATUS_NOT_SUPPORTED);
+// Force dry-run so the test can never change a real BIOS setting on affected
+// hardware. CI hosts still get NOT_SUPPORTED (no carveout); affected hardware
+// resolves the setting and returns SUCCESS (or NO_PERM) without writing.
+TEST(FwupdCarveout, SetReportsNotSupportedWithoutMutating) {
+  setenv("AMDSMI_DRY_RUN", "1", 1);
+  const amdsmi_status_t ret = amd::smi::fwupd_set_carveout(0);
+  unsetenv("AMDSMI_DRY_RUN");
+  EXPECT_TRUE(ret == AMDSMI_STATUS_NOT_SUPPORTED || ret == AMDSMI_STATUS_SUCCESS ||
+              ret == AMDSMI_STATUS_NO_PERM)
+      << "unexpected status: " << ret;
 }

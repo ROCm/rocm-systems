@@ -8585,11 +8585,14 @@ amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(amdsmi_processor_handle process
   // the integrated GPU, then fall back to the amdgpu sysfs node.
   const bool is_apu = gpu_handle_is_apu(processor_handle);
 
-  SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
-
+  // The fwupd path only performs D-Bus I/O and never touches gpu_device, so run
+  // it before taking the device mutex to avoid holding the lock across a
+  // multi-second D-Bus round trip.
   if (is_apu && amd::smi::fwupd_get_carveout_info(info) == AMDSMI_STATUS_SUCCESS) {
     return AMDSMI_STATUS_SUCCESS;
   }
+
+  SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
 
   return get_gpu_uma_carveout_info_internal(gpu_device, info);
 }
@@ -8612,14 +8615,17 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(amdsmi_processor_handle processor_ha
   // back to the amdgpu sysfs node when fwupd cannot service the request.
   const bool is_apu = gpu_handle_is_apu(processor_handle);
 
-  SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
-
+  // The fwupd path only performs D-Bus I/O and never touches gpu_device, so run
+  // it before taking the device mutex to avoid holding the lock across a
+  // multi-second D-Bus round trip.
   if (is_apu) {
     amdsmi_status_t fwupd_ret = amd::smi::fwupd_set_carveout(option_index);
     if (fwupd_ret != AMDSMI_STATUS_NOT_SUPPORTED) {
       return fwupd_ret;
     }
   }
+
+  SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
 
   // Get GPU path for sysfs
   std::string gpu_path = gpu_device->get_gpu_path();
