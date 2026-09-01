@@ -30,6 +30,17 @@ inline constexpr Tick TICKS_PER_SECOND = 1'000'000'000'000ULL;
 /// @brief Maximum tick value (used as a sentinel for "no event").
 inline constexpr Tick TICK_MAX = std::numeric_limits<Tick>::max();
 
+/// @brief Add two tick values, saturating at TICK_MAX rather than wrapping.
+///
+/// @details Simulation time is unsigned, so an overflow does not produce a
+/// large wrong answer -- it produces a small one, and a duration that wraps to
+/// "immediately" is indistinguishable from work that really is instantaneous.
+/// Saturating turns it into "never", which is visible in a result.
+/// @param a First addend in ticks.
+/// @param b Second addend in ticks.
+/// @returns @p a + @p b, or TICK_MAX if that would overflow.
+inline constexpr Tick saturating_add(Tick a, Tick b) { return a > TICK_MAX - b ? TICK_MAX : a + b; }
+
 /// @brief Unique identifier for a Node or Component.
 using ComponentID = uint32_t;
 
