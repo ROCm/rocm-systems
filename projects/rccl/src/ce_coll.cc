@@ -413,9 +413,6 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
   int lsaSize = comm->devrState.lsaSize;
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
-  int lsaSize = comm->devrState.lsaSize;
-  int lsaSelf = comm->devrState.lsaSelf;
-  int* lsaRankList = comm->devrState.lsaRankList;
 
   bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
   uint32_t currentSeq = ++comm->ceColl.ceSeqNum;
@@ -441,12 +438,9 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
                               cudaMemcpyDeviceToDevice, stream),
               ret, fail);
 
-  // Intra-node CE barrier: wait only on LSA peers. Global ranks outside the
-  // LSA team are not reachable via LSA pointers (and are synchronized by the
-  // hierarchical rail path instead).
-  for (int i = 0; i < lsaSize; ++i) {
-    if (i == lsaSelf) continue;
-    int r = lsaRankList[i];
+  // Add local wait operations for every other LSA rank.
+  for (int r = 0; r < lsaSize; ++r) {
+    if (r == myLsaRank) continue;
     batchParams[*opIdx] = {};
     batchParams[*opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
     batchParams[*opIdx].waitValue.address = (CUdeviceptr)(isComplete ? (void*)&completePtrs[r] : (void*)&readyPtrs[r]);
@@ -470,12 +464,14 @@ static ncclResult_t ncclPrepUCSyncCapture(struct ncclComm* comm, bool isComplete
   size_t writeIdx = 0;
   void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
   size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
+  int lsaSize = comm->devrState.lsaSize;
+  int lsaSelf = comm->devrState.lsaSelf;
 
-  NCCLCHECKGOTO(ncclCalloc(&writeParams, comm->nRanks), ret, fail);
-  for (int r = 0; r < comm->nRanks; ++r) {
-    if (r == comm->rank) continue;
+  NCCLCHECKGOTO(ncclCalloc(&writeParams, lsaSize), ret, fail);
+  for (int i = 0; i < lsaSize; ++i) {
+    if (i == lsaSelf) continue;
     void* peerDstPtr;
-    NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, r, &peerDstPtr), ret, fail);
+    NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, i, &peerDstPtr), ret, fail);
     writeParams[writeIdx] = {};
     writeParams[writeIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
     writeParams[writeIdx].writeValue.address = (CUdeviceptr)peerDstPtr;
@@ -502,18 +498,11 @@ static ncclResult_t ncclPrepUCSyncNonCapture(struct ncclComm* comm, bool isCompl
   void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
   size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
 
-  // Intra-node CE barrier over the LSA team only. ncclDevrGetLsaRankPtr takes an
-  // LSA rank (0..lsaSize-1), not a global rank — looping comm->nRanks on a
-  // multi-node comm returns ncclInvalidArgument for remote ranks.
-  uint32_t waitValue = capturing ? GRAPH_SYNC_VALUE : currentSeq;
   int lsaSize = comm->devrState.lsaSize;
   int lsaSelf = comm->devrState.lsaSelf;
-  int* lsaRankList = comm->devrState.lsaRankList;
   for (int i = 0; i < lsaSize; ++i) {
     if (i == lsaSelf) continue;
     void* peerDstPtr;
-    void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
-    size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
     NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, i, &peerDstPtr), ret, fail);
     batchParams[*opIdx] = {};
     batchParams[*opIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
@@ -521,6 +510,36 @@ static ncclResult_t ncclPrepUCSyncNonCapture(struct ncclComm* comm, bool isCompl
     batchParams[*opIdx].writeValue.value = waitValue;
     batchParams[*opIdx].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
     (*opIdx)++;
+  }
+
+exit:
+  return ret;
+fail:
+  goto exit;
+}
+
+ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete, hipStreamBatchMemOpParams* batchParams,
+                            size_t* opIdx, cudaStream_t stream) {
+  ncclResult_t ret = ncclSuccess;
+
+#ifdef ENABLE_FAULT_INJECTION
+  NCCLCHECK(ceFaultCheck(comm, CE_FAULT_SYNC_PREP, "ncclPrepUCSync"));
+#endif
+
+  uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
+  uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
+  bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
+  uint32_t currentSeq = ++comm->ceColl.ceSeqNum;
+  uint32_t waitValue = capturing ? GRAPH_SYNC_VALUE : currentSeq;
+  int lsaSize = comm->devrState.lsaSize;
+  int lsaSelf = comm->devrState.lsaSelf;
+  int* lsaRankList = comm->devrState.lsaRankList;
+
+  if (capturing) {
+    NCCLCHECKGOTO(ncclPrepUCSyncCapture(comm, isComplete, readyPtrs, completePtrs, waitValue, stream), ret, fail);
+  } else {
+    NCCLCHECKGOTO(ncclPrepUCSyncNonCapture(comm, isComplete, readyPtrs, completePtrs, waitValue, batchParams, opIdx),
+                  ret, fail);
   }
 
   // Wait on each LSA peer's slot in the local ready/complete array. Slots stay
@@ -580,13 +599,14 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct nc
   // For graph capture, reset our flag array to 0 in a separate batch so the
   // fixed-value barrier can be replayed.
   if (ncclCudaGraphValid(comm->planner.capturingGraph)) {
+    size_t resetIdx = 0;
     for (int i = 0; i < lsaSize; i++) {
       int r = comm->devrState.lsaRankList[i];
-      batchParams[opIdx] = {};
-      batchParams[opIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
-      batchParams[opIdx].writeValue.address =
+      batchParams[resetIdx] = {};
+      batchParams[resetIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+      batchParams[resetIdx].writeValue.address =
         (CUdeviceptr)(comm->ceColl.useCompletePtr ? (void*)&completePtrs[r] : (void*)&readyPtrs[r]);
-      batchParams[opIdx].writeValue.value = 0;
+      batchParams[resetIdx].writeValue.value = 0;
       // CU_STREAM_WRITE_VALUE_DEFAULT is a CUDA-specific constant with no HIP equivalent.
       // This field must be initialized to satisfy the CUDA-compatible struct definition,
       // but the HIP runtime does not use this flag and treats it as 0.
