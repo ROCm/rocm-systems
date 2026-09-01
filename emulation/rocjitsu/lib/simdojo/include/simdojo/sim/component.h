@@ -293,10 +293,33 @@ public:
   /// @returns Latency value.
   Tick latency() const { return latency_; }
 
-  /// @brief Send a message over this link. Routes to local queue or
-  /// cross-partition inbox based on partition assignment.
+  /// @brief Send a message departing now.
+  ///
+  /// @details Routes to the local queue or a cross-partition inbox according
+  /// to partition assignment.
   /// @param[in] msg The message to send (ownership transferred).
-  virtual void send(std::unique_ptr<Message> msg);
+  /// @throws std::logic_error if a clocked sender is not attached to a live
+  ///         engine. A functional link needs no engine and needs no tick.
+  void send(std::unique_ptr<Message> msg) {
+    // The mode is checked here rather than left to send_at(), because asking
+    // for the current tick is itself what requires an engine, and a functional
+    // link is used between components that have none.
+    send_at(std::move(msg), exec_mode_ == ExecMode::FUNCTIONAL ? Tick{0} : depart_now());
+  }
+
+  /// @brief Send a message that the sender makes ready at @p ready_tick.
+  ///
+  /// @details The departure tick is a parameter rather than something read
+  /// back out of the message, so it means exactly what the caller said and
+  /// nothing the message happens to be carrying can change it. A message being
+  /// forwarded still holds the departure stamp of the hop it arrived on; that
+  /// stamp is overwritten here rather than treated as a request.
+  /// @param[in] msg The message to send (ownership transferred).
+  /// @param[in] ready_tick Tick the sender makes the message ready.
+  /// @throws std::logic_error if the sender is not attached to a live engine.
+  /// @throws std::invalid_argument if @p ready_tick is before the sender's
+  ///         current tick, or is TICK_MAX.
+  virtual void send_at(std::unique_ptr<Message> msg, Tick ready_tick);
 
   /// @brief Whether this link crosses a partition boundary.
   /// @retval true Source and destination are in different partitions.
@@ -323,6 +346,34 @@ public:
   /// propagation latency.
   /// @param[in] mode The execution mode to set.
   void set_exec_mode(ExecMode mode) { exec_mode_ = mode; }
+
+protected:
+  /// @brief The current tick of the partition this link sends from.
+  ///
+  /// @details The partition's local processing tick, not GVT: GVT is stale in
+  /// multi-threaded mode, which would let a cross-partition message arrive
+  /// before what its neighbours have already processed.
+  /// @returns The sender's current tick.
+  /// @throws std::logic_error if the sender is not attached to a live engine.
+  Tick depart_now() const;
+
+  /// @brief Stamp @p message to depart at @p ready_tick and return its arrival.
+  ///
+  /// @details Every clocked send goes through here, so a message's departure
+  /// tick, its propagation latency, and the arrival that follows from them are
+  /// decided in one place.
+  ///
+  /// A departure already in the past is refused rather than clamped. It would
+  /// otherwise be scheduled behind the current tick, and the engine, being a
+  /// min-heap with no floor, would pop it next and move simulated time
+  /// backwards. TICK_MAX is refused too: it is the "no such tick" value, and a
+  /// saturated completion tick means the sender computed a deadline it cannot
+  /// meet rather than one at the end of time.
+  /// @param message Message to stamp.
+  /// @param ready_tick Tick the sender makes the message ready.
+  /// @returns The tick the message arrives at the destination port.
+  /// @throws std::invalid_argument if @p ready_tick is unusable.
+  Tick stamp_for_send(Message &message, Tick ready_tick) const;
 
 private:
   LinkID id_;                              ///< Unique link identifier.
@@ -387,6 +438,35 @@ public:
     link_->send(std::move(msg));
   }
 
+  /// @brief Send a message that becomes ready at @p ready_tick.
+  ///
+  /// @details The message departs at @p ready_tick rather than now, so it
+  /// arrives @p ready_tick plus the link's latency later. A clocked server
+  /// that has reserved itself until a completion tick uses this to answer at
+  /// that tick without scheduling an event to wake itself up and do it, which
+  /// is the difference between one event per request and two.
+  ///
+  /// The link's own propagation is added on top, not folded in: @p ready_tick
+  /// is when the *sender* is finished, and the crossing costs what the link
+  /// says it costs.
+  ///
+  /// A link in FUNCTIONAL mode calls the destination handler synchronously and
+  /// has no notion of when, so @p ready_tick has no effect there.
+  /// @param[in] msg The message to send (ownership transferred).
+  /// @param[in] ready_tick Tick at which the sender makes the message ready;
+  ///            must not be before the sender's current tick, and must not be
+  ///            TICK_MAX.
+  /// @throws std::invalid_argument if @p ready_tick is unusable.
+  /// @throws std::logic_error if the sender is not attached to a live engine.
+  void send_at(std::unique_ptr<Message> msg, Tick ready_tick) {
+    assert(link_ != nullptr && "Port::send_at called on unconnected port");
+    assert(direction_ == PortDirection::OUT && "can only send from OUT ports");
+    Port *p = peer();
+    assert(p != nullptr && "Port::send_at peer is null");
+    msg->set_ports(port_id_, p->port_id());
+    link_->send_at(std::move(msg), ready_tick);
+  }
+
   /// @brief Return the port's reusable message-arrival event.
   /// @returns Pointer to the event.
   Event *recv_event() { return &recv_event_; }
@@ -428,20 +508,30 @@ public:
   QueuedLink(LinkID id, Port *src, Port *dst, Tick latency, size_t capacity)
       : Link(id, src, dst, latency), queue_(capacity) {}
 
-  /// @brief Enqueue a message without asserting on a full queue.
+  /// @brief Enqueue a message departing now, without asserting on a full queue.
   /// @param[in] msg The message to enqueue (ownership transferred).
   /// @retval true Message was enqueued successfully.
-  /// @retval false Queue is full; message was not enqueued.
-  bool try_send(std::unique_ptr<Message> msg) {
-    msg->set_latency(latency());
+  /// @retval false Queue is full; the message was destroyed.
+  /// @throws Whatever send_at() throws.
+  bool try_send(std::unique_ptr<Message> msg) { return try_send_at(std::move(msg), depart_now()); }
+
+  /// @brief Enqueue a message departing at @p ready_tick, without asserting on
+  ///        a full queue.
+  /// @param[in] msg The message to enqueue (ownership transferred).
+  /// @param[in] ready_tick Tick the sender makes the message ready.
+  /// @retval true Message was enqueued successfully.
+  /// @retval false Queue is full; the message was destroyed.
+  /// @throws Whatever send_at() throws.
+  bool try_send_at(std::unique_ptr<Message> msg, Tick ready_tick) {
+    stamp_for_send(*msg, ready_tick);
     return queue_.push(std::move(msg));
   }
 
   /// @brief Enqueue a message, asserting the queue is not full.
   /// @param[in] msg The message to enqueue (ownership transferred).
-  void send(std::unique_ptr<Message> msg) override {
-    msg->set_latency(latency());
-    [[maybe_unused]] bool ok = queue_.push(std::move(msg));
+  /// @param[in] ready_tick Tick the sender makes the message ready.
+  void send_at(std::unique_ptr<Message> msg, Tick ready_tick) override {
+    [[maybe_unused]] bool ok = try_send_at(std::move(msg), ready_tick);
     assert(ok && "QueuedLink: send on full queue");
   }
 
