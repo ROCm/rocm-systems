@@ -24,6 +24,8 @@
 
 #include "lib/common/details/mpl.hpp"
 
+#include <rocprofiler-sdk/cxx/details/mpl.hpp>
+
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -174,6 +176,9 @@ using function_traits = impl::function_traits<Tp>;
 
 template <typename Tp>
 using function_args_t = typename impl::function_traits<Tp>::args_type;
+
+template <typename Tp>
+using is_optional = sdk::mpl::is_optional<unqualified_type_t<Tp>>;
 }  // namespace mpl
 }  // namespace common
 }  // namespace rocprofiler

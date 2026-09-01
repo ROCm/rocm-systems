@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import logging
 
@@ -33,6 +16,7 @@ class NodeCommands:
         power_management=None,
         base_board_temps=None,
         gtt=None,
+        tray=None,
     ):
         """List node information
 
@@ -44,6 +28,7 @@ class NodeCommands:
             power_management (bool, optional): Value override for args.power_management. Defaults to None.
             base_board_temps (bool, optional): Value override for args.base_board_temps. Defaults to None.
             gtt (bool, optional): Value override for args.gtt. Defaults to None.
+            tray (bool, optional): Value override for args.tray. Defaults to None.
 
         Returns:
             None: Print output via AMDSMILogger to destination
@@ -53,8 +38,10 @@ class NodeCommands:
             args.nodes = nodes
         if gtt:
             args.gtt = gtt
+        if tray:
+            args.tray = tray
         # Store args that are applicable to the current platform
-        current_platform_args = ["power_management", "base_board_temps", "gtt"]
+        current_platform_args = ["power_management", "base_board_temps", "gtt", "tray"]
 
         # Check if any node-specific options were passed via command line
         current_platform_values = []
@@ -64,6 +51,8 @@ class NodeCommands:
             current_platform_values += [args.base_board_temps]
         if args.gtt:
             current_platform_values += [args.gtt]
+        if args.tray:
+            current_platform_values += [args.tray]
 
         # If no node options are passed, enable all by default
         if not any(current_platform_values):
@@ -82,6 +71,7 @@ class NodeCommands:
         limit = "N/A"
         base_board_temp_dict = {}
         gtt_dict = {}
+        tray_dict = {}
 
         # Get NPM info
         if args.power_management:
@@ -149,6 +139,14 @@ class NodeCommands:
                 logging.debug("Failed to get GTT info | %s", e.get_error_info())
                 gtt_dict = {}
 
+        # Get compute tray type and accelerator count
+        if args.tray:
+            try:
+                tray_dict = amdsmi_interface.amdsmi_get_tray_info()
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Failed to get tray info | %s", e.get_error_info())
+                tray_dict = {}
+
         # Print output
         if self.logger.is_human_readable_format() and self.logger.destination == "stdout":
             node_output = ["NODE:"]
@@ -174,6 +172,12 @@ class NodeCommands:
                     node_output.append(
                         f"        PENDING (after reboot): {p_gb:.2f} GB ({p_pages} pages)"
                     )
+            if args.tray and tray_dict:
+                node_output.append("    TRAY:")
+                node_output.append(
+                    f"        MAX_ACC_PER_TRAY: {tray_dict.get('max_acc_per_tray', 'N/A')}"
+                )
+                node_output.append(f"        TRAY_TYPE: {tray_dict.get('tray_type', 'N/A')}")
             print("\n".join(node_output))
         else:
             if self.logger.is_csv_format():
@@ -190,6 +194,9 @@ class NodeCommands:
                     if "pending_size_gb" in gtt_dict:
                         csv_dict["gtt_pending_gb"] = gtt_dict["pending_size_gb"]
                         csv_dict["gtt_pending_pages"] = gtt_dict["pending_size_pages"]
+                if args.tray and tray_dict:
+                    csv_dict["max_acc_per_tray"] = tray_dict.get("max_acc_per_tray", "N/A")
+                    csv_dict["tray_type"] = tray_dict.get("tray_type", "N/A")
                 self.logger.output = csv_dict
             else:
                 # For JSON and human readable format with file output
@@ -206,6 +213,8 @@ class NodeCommands:
                     node_output["base_board"] = {"temperature": base_board_temp_dict}
                 if args.gtt and gtt_dict:
                     node_output["gtt"] = gtt_dict
+                if args.tray and tray_dict:
+                    node_output["tray"] = tray_dict
                 self.logger.output = {"node": node_output}
                 if multiple_devices:
                     self.logger.store_multiple_device_output()

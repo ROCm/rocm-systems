@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "rocm_smi/rocm_smi_main.h"
 
@@ -29,6 +10,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -74,6 +56,20 @@ static uint32_t GetDeviceIndex(const std::string s) {
 
   assert(stoi(t) >= 0);
   return static_cast<uint32_t>(stoi(t));
+}
+
+// Suppress -Wdeprecated: libstdc++ stable_sort uses get_temporary_buffer,
+// removed in C++26. Drop this wrapper once the toolchain no longer warns.
+template <typename ItrTp, typename CmpTp>
+static inline auto stable_sort_suppress_deprecated(ItrTp first, ItrTp last, CmpTp cmp) -> void {
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+  std::stable_sort(first, last, cmp);
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 }
 
 // Find the drm minor from from sysfs path "/sys/class/drm/cardX/device/drm".
@@ -320,7 +316,7 @@ void RocmSMI::Initialize(uint64_t flags) {
   LOG_DEBUG(ss);
 
   // Stable sort to keep the order if bdf is equal.
-  std::stable_sort(
+  stable_sort_suppress_deprecated(
       dv_to_id.begin(), dv_to_id.end(),
       [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
   devices_.clear();
@@ -444,7 +440,7 @@ void RocmSMI::Initialize(uint64_t flags) {
     LOG_DEBUG(ss);
 
     // Stable sort to keep the order if bdf is equal.
-    std::stable_sort(
+    stable_sort_suppress_deprecated(
         dv_to_id.begin(), dv_to_id.end(),
         [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
     nic_devices_.clear();
@@ -504,7 +500,7 @@ void RocmSMI::Initialize(uint64_t flags) {
     LOG_DEBUG(ss);
 
     // Stable sort to keep the order if bdf is equal.
-    std::stable_sort(
+    stable_sort_suppress_deprecated(
         dv_to_id.begin(), dv_to_id.end(),
         [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
     switch_devices_.clear();
@@ -573,11 +569,9 @@ static uint32_t getRSMIEnvVar_LoggingEnabled(const char* ev_str) {
   return ret;
 }
 
+#ifdef DEBUG
 static inline std::unordered_set<uint32_t> GetEnvVarUIntegerSets(const char* ev_str) {
   std::unordered_set<uint32_t> returnSet;
-#ifndef DEBUG
-  (void)ev_str;
-#else
   ev_str = getenv(ev_str);
   if (ev_str == nullptr) {
     return returnSet;
@@ -591,14 +585,16 @@ static inline std::unordered_set<uint32_t> GetEnvVarUIntegerSets(const char* ev_
 
     while (std::getline(ev_str_ss, parsedVal, ',')) {
       int parsedInt = std::stoi(parsedVal);
-      assert(parsedInt >= 0);
+      if (parsedInt < 0) {
+        continue;
+      }
       uint32_t parsedUInt = static_cast<uint32_t>(parsedInt);
       returnSet.insert(parsedUInt);
     }
   }
-#endif
   return returnSet;
 }
+#endif
 
 // Get and store env. variables in this method
 void RocmSMI::GetEnvVariables(void) {
@@ -1341,16 +1337,21 @@ uint32_t RocmSMI::DiscoverBRCMswitchDevices(void) {
     } while (static_cast<ssize_t>(buf.size()) == len);
 
     if (len > 0) {
-      buf[len] = '\0';
+      buf[static_cast<size_t>(len)] = '\0';
       path = std::string(&(buf[0]));
       std::string suffixDel =
           "host" + std::to_string(cardId) + "/scsi_host/" + "host" + std::to_string(cardId) + "/";
-      path.erase(path.length() - suffixDel.length());
+      if (path.length() >= suffixDel.length()) {
+        path.erase(path.length() - suffixDel.length());
+      }
 
-      auto first = path.begin();
       constexpr auto MAX_BDF_LENGTH = std::size_t(12);
-      auto end = path.begin() + path.length() - MAX_BDF_LENGTH;
-      path.erase(first, end);
+      // Only erase prefix if path is longer than BDF length to avoid iterator UB
+      if (path.length() > MAX_BDF_LENGTH) {
+        auto first = path.begin();
+        auto end = path.begin() + static_cast<std::ptrdiff_t>(path.length() - MAX_BDF_LENGTH);
+        path.erase(first, end);
+      }
 
       std::string prefixAdd = kPathPciDevices;
       path = prefixAdd.append(path);

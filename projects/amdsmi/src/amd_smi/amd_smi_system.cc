@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "amd_smi/impl/amd_smi_system.h"
 
@@ -26,6 +7,7 @@
 
 #include <cassert>
 #include <cerrno>
+#include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -45,6 +27,7 @@
 #include <regex>
 
 #include "amd_smi/impl/amd_smi_common.h"
+#include "amd_smi/impl/amd_smi_nic_testing.h"
 #include "amd_smi/impl/amd_smi_test_flags.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi.h"
@@ -69,14 +52,24 @@ const std::map<int, std::string> smi_nic_status_str = {
     {SMI_NIC_STATUS_DRIVER_NOT_LOADED, "Required driver not loaded"},
 };
 
-#define CHK_AMDNIC_RET(status)                                                                   \
-  if (status != SMI_NIC_STATUS_SUCCESS) {                                                        \
-    std::ostringstream ss;                                                                       \
-    ss << __PRETTY_FUNCTION__ << "[" << __FILE__ << ":" << __LINE__                              \
-       << "] smi_nic_status_t: " << status << ":" << smi_nic_status_str.at(status) << std::endl; \
-    LOG_INFO(ss);                                                                                \
-    return amd::smi::ainic_to_amdsmi_status(status);                                             \
-  }
+// .find() rather than .at(): a status added to smi_nic_interface.h but not to the
+// map above would otherwise throw out of amdsmi_init(), which has no handler on
+// either side of the extern "C" boundary.
+static const char* nic_status_str(smi_nic_status_t status) {
+  const auto it = smi_nic_status_str.find(status);
+  return it == smi_nic_status_str.end() ? "Unrecognized status" : it->second.c_str();
+}
+
+#define CHK_AMDNIC_RET(status)                                                                \
+  do {                                                                                        \
+    if ((status) != SMI_NIC_STATUS_SUCCESS) {                                                 \
+      std::ostringstream ss;                                                                  \
+      ss << __PRETTY_FUNCTION__ << "[" << __FILE__ << ":" << __LINE__                         \
+         << "] smi_nic_status_t: " << (status) << ":" << nic_status_str(status) << std::endl; \
+      LOG_INFO(ss);                                                                           \
+      return amd::smi::ainic_to_amdsmi_status(status);                                        \
+    }                                                                                         \
+  } while (0)
 
 #ifdef ENABLE_ESMI_LIB
 amdsmi_status_t AMDSmiSystem::get_cpu_family(uint32_t* cpu_family) {
@@ -151,7 +144,7 @@ amdsmi_status_t AMDSmiSystem::get_cpu_model_name(uint32_t socket_id, std::string
       if (info.find("model name") != std::string::npos) {
         *model_name = info.substr(info.find(':') + 2);
         if (current_socket_id != -1) {
-          socket_model_map[current_socket_id] = *model_name;
+          socket_model_map[static_cast<uint32_t>(current_socket_id)] = *model_name;
         }
       }
     }
@@ -421,37 +414,85 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   return AMDSMI_STATUS_SUCCESS;
 }
 
-static amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint64_t bdf_int,
-                                                 AMDSmiAINICDevice::AINICInfo& ai_nic_info) {
+static const nic_info_getters_t kRealNicInfoGetters = {
+    smi_get_nic_bus_info,  smi_get_nic_driver_info, smi_get_nic_asic_info,
+    smi_get_nic_numa_info, smi_get_nic_port_info,   smi_get_nic_rdma_dev_info,
+};
+
+// Rebound only by nic_set_info_getters_for_testing(); production never writes it.
+static const nic_info_getters_t* g_nic_info_getters = &kRealNicInfoGetters;
+
+// See amd_smi/impl/amd_smi_nic_testing.h for the contract.
+void nic_set_info_getters_for_testing(const nic_info_getters_t* getters) {
+  g_nic_info_getters = getters ? getters : &kRealNicInfoGetters;
+}
+
+// RDMA device info is optional for an AI-NIC; a missing RDMA/ionic driver or an
+// empty result must not abort discovery of the rest of the NIC. Only meaningful
+// for a status the caller has already found to be non-SUCCESS.
+static bool is_nic_rdma_failure_fatal(smi_nic_status_t status) {
+  return (status != SMI_NIC_STATUS_NO_DATA) && (status != SMI_NIC_STATUS_DRIVER_NOT_LOADED);
+}
+
+amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint64_t bdf_int,
+                                          AMDSmiAINICDevice::AINICInfo& ai_nic_info) {
+  // Each getter writes an smi_nic_* struct through a pointer to its amdsmi_nic_*
+  // mirror. sizeof plus the trailing member's offset catches a reorder that shifts
+  // that member; swapping two same-sized members ahead of it stays invisible.
   static_assert(sizeof(smi_nic_bus_info_t) == sizeof(ai_nic_info.bus));
-  smi_nic_status_t status =
-      smi_get_nic_bus_info(ctx, bdf_int, reinterpret_cast<smi_nic_bus_info_t*>(&ai_nic_info.bus));
-  CHK_AMDNIC_RET(status)
+  static_assert(offsetof(smi_nic_bus_info_t, slot_type) ==
+                offsetof(amdsmi_nic_bus_info_t, slot_type));
+  smi_nic_status_t status = g_nic_info_getters->bus(
+      ctx, bdf_int, reinterpret_cast<smi_nic_bus_info_t*>(&ai_nic_info.bus));
+  CHK_AMDNIC_RET(status);
 
   static_assert(sizeof(smi_nic_driver_info_t) == sizeof(ai_nic_info.driver));
-  status = smi_get_nic_driver_info(ctx, bdf_int,
-                                   reinterpret_cast<smi_nic_driver_info_t*>(&ai_nic_info.driver));
-  CHK_AMDNIC_RET(status)
+  static_assert(offsetof(smi_nic_driver_info_t, version) ==
+                offsetof(amdsmi_nic_driver_info_t, version));
+  status = g_nic_info_getters->driver(
+      ctx, bdf_int, reinterpret_cast<smi_nic_driver_info_t*>(&ai_nic_info.driver));
+  CHK_AMDNIC_RET(status);
 
   static_assert(sizeof(smi_nic_asic_info_t) == sizeof(ai_nic_info.asic));
-  status = smi_get_nic_asic_info(ctx, bdf_int,
-                                 reinterpret_cast<smi_nic_asic_info_t*>(&ai_nic_info.asic));
-  CHK_AMDNIC_RET(status)
+  static_assert(offsetof(smi_nic_asic_info_t, vendor_name) ==
+                offsetof(amdsmi_nic_asic_info_t, vendor_name));
+  status = g_nic_info_getters->asic(ctx, bdf_int,
+                                    reinterpret_cast<smi_nic_asic_info_t*>(&ai_nic_info.asic));
+  CHK_AMDNIC_RET(status);
 
   static_assert(sizeof(smi_nic_numa_info_t) == sizeof(ai_nic_info.numa));
-  status = smi_get_nic_numa_info(ctx, bdf_int,
-                                 reinterpret_cast<smi_nic_numa_info_t*>(&ai_nic_info.numa));
-  CHK_AMDNIC_RET(status)
+  static_assert(offsetof(smi_nic_numa_info_t, affinity) ==
+                offsetof(amdsmi_nic_numa_info_t, affinity));
+  status = g_nic_info_getters->numa(ctx, bdf_int,
+                                    reinterpret_cast<smi_nic_numa_info_t*>(&ai_nic_info.numa));
+  CHK_AMDNIC_RET(status);
 
   static_assert(sizeof(smi_nic_port_info_t) == sizeof(ai_nic_info.port));
-  status = smi_get_nic_port_info(ctx, bdf_int,
-                                 reinterpret_cast<smi_nic_port_info_t*>(&ai_nic_info.port));
+  static_assert(offsetof(smi_nic_port_info_t, ports) == offsetof(amdsmi_nic_port_info_t, ports));
+  status = g_nic_info_getters->port(ctx, bdf_int,
+                                    reinterpret_cast<smi_nic_port_info_t*>(&ai_nic_info.port));
   CHK_AMDNIC_RET(status);
 
   static_assert(sizeof(smi_nic_rdma_devices_info_t) == sizeof(ai_nic_info.rdma_dev));
-  status = smi_get_nic_rdma_dev_info(
+  static_assert(offsetof(smi_nic_rdma_devices_info_t, rdma_dev_info) ==
+                offsetof(amdsmi_nic_rdma_devices_info_t, rdma_dev_info));
+  status = g_nic_info_getters->rdma(
       ctx, bdf_int, reinterpret_cast<smi_nic_rdma_devices_info_t*>(&ai_nic_info.rdma_dev));
-  CHK_AMDNIC_RET(status)
+  if (status != SMI_NIC_STATUS_SUCCESS) {
+    if (is_nic_rdma_failure_fatal(status)) {
+      CHK_AMDNIC_RET(status);
+    }
+    // The zeroed-struct contract published by amdsmi_get_nic_rdma_dev_info() is
+    // guaranteed here, not borrowed from the getter.
+    ai_nic_info.rdma_dev = {};
+    std::ostringstream ss;
+    ss << __func__ << ": RDMA info unavailable for BDF=0x" << std::hex << bdf_int << std::dec
+       << " smi_nic_status_t: " << status << ":" << nic_status_str(status)
+       << " - keeping the NIC with an empty rdma_dev";
+    // LOG_INFO, not LOG_DEBUG: the logger only reaches debug level once
+    // RocmSMI::Initialize() runs, which an NIC-only amdsmi_init never does.
+    LOG_INFO(ss);
+  }
 
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -466,8 +507,10 @@ std::tuple<uint64_t, amdsmi_bdf_t> bdf_to_int(const std::string& bdf) {
     bdf_info.bus_number = std::stoul(matches[2], nullptr, 16) & 0xff;
     bdf_info.device_number = std::stoul(matches[3], nullptr, 16) & 0x1f;
     bdf_info.function_number = std::stoul(matches[4], nullptr, 16) & 0x7;
-    return {(bdf_info.domain_number << 16) | (bdf_info.bus_number << 8) |
-                (bdf_info.device_number << 3) | (bdf_info.function_number << 0),
+    return {(static_cast<uint64_t>(bdf_info.domain_number) << 16) |
+                (static_cast<uint64_t>(bdf_info.bus_number) << 8) |
+                (static_cast<uint64_t>(bdf_info.device_number) << 3) |
+                (static_cast<uint64_t>(bdf_info.function_number) << 0),
             bdf_info};
   }
   return {0, bdf_info};
@@ -487,7 +530,7 @@ amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
 
   for (uint32_t nic_idx = 0; nic_idx < discovery.count; ++nic_idx) {
     const char* bdf_str = discovery.devices[nic_idx].bdf;
-    auto [bdfid, bdf_info] = bdf_to_int(bdf_str);
+    [[maybe_unused]] auto [bdfid, bdf_info] = bdf_to_int(bdf_str);
     AMDSmiAINICDevice::AINICInfo ai_nic_info = {};
     amdsmi_status_t status = populate_amd_ainic_device(ainic_ctx_, bdfid, ai_nic_info);
     if (status != AMDSMI_STATUS_SUCCESS) {
@@ -523,7 +566,7 @@ amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
       sockets_.push_back(socket);
     }
 
-    auto device = std::make_unique<AMDSmiAINICDevice>(nic_idx, bdf_info, ai_nic_info);
+    auto device = std::make_unique<AMDSmiAINICDevice>(ai_nic_info);
     socket->add_processor(device.get());
     ainic_processors_.insert(device.get());
     device.release();

@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import logging
 import os
@@ -106,13 +89,16 @@ class DefaultCommands:
             except amdsmi_exception.AmdSmiLibraryException:
                 current_mem = "N/A"
             try:
-                current_comp = amdsmi_interface.amdsmi_get_gpu_compute_partition(processor)
+                current_accel_profile_dict = (
+                    amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile(processor)
+                )
+                current_accel = current_accel_profile_dict["partition_profile"]["profile_type"]
             except amdsmi_exception.AmdSmiLibraryException:
-                current_comp = "N/A"
-            if current_comp == "N/A" or current_mem == "N/A":
+                current_accel = "N/A"
+            if current_accel == "N/A" or current_mem == "N/A":
                 partition_mode = "N/A"
             else:
-                partition_mode = f"{current_comp}/{current_mem}"
+                partition_mode = f"{current_accel}/{current_mem}"
             gpu_info_dict.update({"partition_mode": partition_mode})
 
             # GPU name market name and OAM ID
