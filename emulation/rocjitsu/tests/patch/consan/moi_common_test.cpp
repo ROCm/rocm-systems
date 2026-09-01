@@ -907,11 +907,17 @@ TEST(ConSanMoi, DynamicRecordAddressExecutesExactStrideOnEveryTarget) {
   constexpr uint16_t kSlotVgpr = 42u;
   constexpr std::array<uint16_t, 3> kUnrelatedVgprs = {43u, 44u, 45u};
   constexpr std::array<uint32_t, 3> kUnrelatedValues = {0x12345678u, 0x90abcdefu, 0x55aa55aau};
-  // Real record strides plus 64, the power-of-two case where no accumulation
-  // add is needed.
-  constexpr std::array<uint32_t, 5> kStrideBytes = {
-      sizeof(ConSanMoiBarrierRecord), sizeof(ConSanMoiFenceRecord),      64u,
-      sizeof(ConSanMoiAccessRecord),  sizeof(ConSanMoiDiagnosticRecord),
+  // Real record and InlineShadow table strides plus 64, the power-of-two case
+  // where no accumulation add is needed.
+  constexpr std::array<uint32_t, 8> kStrideBytes = {
+      sizeof(ConSanMoiBarrierRecord),
+      sizeof(ConSanMoiFenceRecord),
+      64u,
+      sizeof(ConSanMoiAccessRecord),
+      sizeof(ConSanMoiDiagnosticRecord),
+      sizeof(ConSanMoiInlineAtomicReleaseSlot),
+      sizeof(ConSanMoiInlineCausalSnapshot),
+      sizeof(ConSanMoiInlineAcquiredEpochTokenSlot),
   };
   constexpr std::array<uint32_t, 4> kSlots = {0u, 1u, 3u, 1000u};
   constexpr std::array<uint64_t, 3> kFieldAddresses = {
@@ -929,15 +935,14 @@ TEST(ConSanMoi, DynamicRecordAddressExecutesExactStrideOnEveryTarget) {
                        " stride=" + std::to_string(stride_bytes) + " slot=" + std::to_string(slot) +
                        " base=" + std::to_string(field_address));
           std::vector<uint32_t> words;
-          ASSERT_TRUE(
-              consan_detail::append_dynamic_record_address(words,
-                                                           {
-                                                               .field_address = field_address,
-                                                               .stride_bytes = stride_bytes,
-                                                               .address_vgpr = kAddressVgpr,
-                                                               .slot_vgpr = kSlotVgpr,
-                                                           },
-                                                           target));
+          ASSERT_TRUE(consan_detail::append_moi_indexed_address(words,
+                                                                {
+                                                                    .table_address = field_address,
+                                                                    .stride_bytes = stride_bytes,
+                                                                    .address_vgpr = kAddressVgpr,
+                                                                    .index_vgpr = kSlotVgpr,
+                                                                },
+                                                                target));
 
           const std::string component =
               "consan_dynamic_record_address_" + std::to_string(case_index++);
@@ -1002,14 +1007,14 @@ TEST(ConSanMoi, DynamicRecordAddressRejectsInvalidRegistersWithoutPartialOutput)
                                              uint16_t slot_vgpr,
                                              const ConSanTargetProfile &request_target) {
     std::vector<uint32_t> words = {0x12345678u};
-    EXPECT_FALSE(consan_detail::append_dynamic_record_address(words,
-                                                              {
-                                                                  .field_address = kFieldAddress,
-                                                                  .stride_bytes = stride_bytes,
-                                                                  .address_vgpr = address_vgpr,
-                                                                  .slot_vgpr = slot_vgpr,
-                                                              },
-                                                              request_target));
+    EXPECT_FALSE(consan_detail::append_moi_indexed_address(words,
+                                                           {
+                                                               .table_address = kFieldAddress,
+                                                               .stride_bytes = stride_bytes,
+                                                               .address_vgpr = address_vgpr,
+                                                               .index_vgpr = slot_vgpr,
+                                                           },
+                                                           request_target));
     EXPECT_EQ(words, std::vector<uint32_t>{0x12345678u});
   };
 

@@ -412,6 +412,124 @@ if(NOT _moi_sync_emission_owner MATCHES
         "ConSan InlineShadow atomic tables lost their one ABI-typed address mechanism"
     )
 endif()
+# RecordReplay records and dispatch slots, Sampled watchpoint/window tables,
+# dynamic report records, and all three InlineShadow metadata-table ABIs use
+# the same target-normalized base + index * stride operation. Hash/key and bank
+# construction remain with each semantic owner; stride and 64-bit address
+# formation must not regain mode-local copies.
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_internal.h"
+    "MoiDynamicRecordAddressRequest|consan_detail::append_dynamic_record_address"
+    "the shared indexed-address contract must not narrow back to dynamic records"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sync_emission.cpp"
+    "build_v_add_u64_vgpr_offset"
+    "synchronization metadata tables must use the shared indexed-address operation"
+)
+foreach(
+    _source IN ITEMS
+    consan_moi_sampled_access_emission.cpp
+    consan_moi_sampled_atomic_emission.cpp
+    consan_moi_sampled_sync.inc
+    consan_moi_shared_lowering.cpp
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_source}"
+        "build_v_add_u64_vgpr_offset"
+        "mode-owned report tables must use the shared indexed-address operation"
+    )
+endforeach()
+foreach(
+    _source IN ITEMS
+    consan_moi_sampled_access_emission.h
+    consan_moi_sampled_access_emission.cpp
+    consan_moi_sampled_atomic_emission.cpp
+    consan_moi_sampled_sync.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_source}"
+        "append_sampled_indexed_address"
+        "Sampled components must consume the common indexed-address contract directly"
+    )
+endforeach()
+string(
+    REGEX MATCHALL
+    "consan_detail::append_moi_indexed_address"
+    _moi_sync_indexed_address_calls
+    "${_moi_sync_emission_owner}"
+)
+list(LENGTH _moi_sync_indexed_address_calls _moi_sync_indexed_address_call_count)
+if(NOT _moi_sync_indexed_address_call_count EQUAL 2)
+    message(FATAL_ERROR
+        "ConSan release/snapshot and acquired-token tables must share indexed addressing"
+    )
+endif()
+file(READ "${_consan_dir}/consan_moi_dynamic_record_emission.cpp" _moi_dynamic_record_owner)
+string(
+    REGEX MATCHALL
+    "consan_detail::append_moi_indexed_address"
+    _moi_dynamic_indexed_address_calls
+    "${_moi_dynamic_record_owner}"
+)
+list(LENGTH _moi_dynamic_indexed_address_calls _moi_dynamic_indexed_address_call_count)
+if(NOT _moi_dynamic_indexed_address_call_count EQUAL 1)
+    message(FATAL_ERROR
+        "ConSan dynamic records must share the target-normalized indexed-address operation"
+    )
+endif()
+file(READ "${_consan_dir}/consan_moi_sampled_access_emission.cpp" _moi_sampled_access_owner)
+string(
+    REGEX MATCHALL
+    "consan_detail::append_moi_indexed_address"
+    _moi_sampled_indexed_address_calls
+    "${_moi_sampled_access_owner}"
+)
+list(LENGTH _moi_sampled_indexed_address_calls _moi_sampled_indexed_address_call_count)
+if(NOT _moi_sampled_indexed_address_call_count EQUAL 2)
+    message(FATAL_ERROR
+        "ConSan Sampled indexed and banked tables must share indexed addressing"
+    )
+endif()
+file(READ "${_consan_dir}/consan_moi_sampled_atomic_emission.cpp" _moi_sampled_atomic_owner)
+string(
+    REGEX MATCHALL
+    "consan_detail::append_moi_indexed_address"
+    _moi_sampled_atomic_indexed_address_calls
+    "${_moi_sampled_atomic_owner}"
+)
+list(LENGTH _moi_sampled_atomic_indexed_address_calls _moi_sampled_atomic_indexed_address_count)
+if(NOT _moi_sampled_atomic_indexed_address_count EQUAL 6)
+    message(FATAL_ERROR
+        "ConSan Sampled atomic tables must share indexed addressing"
+    )
+endif()
+file(READ "${_consan_dir}/consan_moi_sampled_sync.inc" _moi_sampled_sync_owner)
+string(
+    REGEX MATCHALL
+    "consan_detail::append_moi_indexed_address"
+    _moi_sampled_sync_indexed_address_calls
+    "${_moi_sampled_sync_owner}"
+)
+list(LENGTH _moi_sampled_sync_indexed_address_calls _moi_sampled_sync_indexed_address_count)
+if(NOT _moi_sampled_sync_indexed_address_count EQUAL 5)
+    message(FATAL_ERROR
+        "ConSan Sampled barrier tables must share indexed addressing"
+    )
+endif()
+file(READ "${_consan_dir}/consan_moi_shared_lowering.cpp" _moi_shared_lowering_owner)
+string(
+    REGEX MATCHALL
+    "consan_detail::append_moi_indexed_address"
+    _moi_record_replay_indexed_address_calls
+    "${_moi_shared_lowering_owner}"
+)
+list(LENGTH _moi_record_replay_indexed_address_calls _moi_record_replay_indexed_address_call_count)
+if(NOT _moi_record_replay_indexed_address_call_count EQUAL 2)
+    message(FATAL_ERROR
+        "ConSan RecordReplay access and dispatch tables must share indexed addressing"
+    )
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
     "GFX90A_ACCUM_OFFSET"

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/gfx1250_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "test_paths.h"
@@ -796,11 +797,17 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
   const auto bound_dispatch_directory = instrumentation::build_v_and_b32_literal(
       static_cast<uint16_t>(scratch + 6u), kConSanMoiRecordReplayMaximumDispatchTokenCount - 1u,
       static_cast<uint16_t>(scratch + 6u), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto scale_dispatch_slot = instrumentation::build_v_mul_lo_u32_literal(
-      static_cast<uint16_t>(scratch + 4u), static_cast<uint16_t>(scratch + 5u), sizeof(uint64_t),
-      static_cast<uint16_t>(scratch + 6u), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto add_dispatch_slot = instrumentation::build_v_add_u64_vgpr_offset(
-      scratch, static_cast<uint16_t>(scratch + 4u), ROCJITSU_CODE_ARCH_RDNA4);
+  const ConSanTargetProfile *target = consan_target_profile(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(target, nullptr);
+  std::vector<uint32_t> dispatch_slot_address;
+  ASSERT_TRUE(consan_detail::append_moi_indexed_address(
+      dispatch_slot_address,
+      {.table_address = *options.moi_report_buffer_address +
+                        report_plan.layout.record_replay_dispatch_tokens_offset,
+       .stride_bytes = sizeof(uint64_t),
+       .address_vgpr = scratch,
+       .index_vgpr = static_cast<uint16_t>(scratch + 6u)},
+      *target));
   const auto increment_dispatch_probe = instrumentation::build_v_add_u32_literal(
       static_cast<uint16_t>(scratch + 8u), static_cast<uint16_t>(scratch + 4u), 1u,
       static_cast<uint16_t>(scratch + 8u), ROCJITSU_CODE_ARCH_RDNA4);
@@ -845,11 +852,15 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
   const auto wrap_owner_bank = instrumentation::build_v_and_b32_literal(
       static_cast<uint16_t>(scratch + 7u), access_identity_capacity - 1u,
       static_cast<uint16_t>(scratch + 7u), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto scale_bank = instrumentation::build_v_mul_lo_u32_literal(
-      static_cast<uint16_t>(scratch + 2u), static_cast<uint16_t>(scratch + 3u),
-      sizeof(ConSanMoiAccessRecord), static_cast<uint16_t>(scratch + 7u), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto add_bank = instrumentation::build_v_add_u64_vgpr_offset(
-      scratch, static_cast<uint16_t>(scratch + 2u), ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint32_t> access_bank_address;
+  ASSERT_TRUE(consan_detail::append_moi_indexed_address(
+      access_bank_address,
+      {.table_address =
+           *options.moi_report_buffer_address + report_plan.layout.access_records_offset,
+       .stride_bytes = sizeof(ConSanMoiAccessRecord),
+       .address_vgpr = scratch,
+       .index_vgpr = static_cast<uint16_t>(scratch + 7u)},
+      *target));
   const auto claim = instrumentation::build_flat_atomic_cmpswap_b64(
       scratch, static_cast<uint16_t>(scratch + 2u), static_cast<uint16_t>(scratch + 2u),
       /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
@@ -908,20 +919,17 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
   const auto saturation_or = instrumentation::build_flat_atomic_or_u32(
       scratch, static_cast<uint16_t>(scratch + 2u), static_cast<uint16_t>(scratch + 2u),
       /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(hash_dispatch && bound_dispatch_directory && scale_dispatch_slot &&
-              add_dispatch_slot && increment_dispatch_probe && materialize_dispatch_capacity &&
-              dispatch_probe_in_range && increment_dispatch_bank && wrap_dispatch_directory &&
-              owner_mix && owner_combine && combine_dispatch_identity && bound_owner &&
-              increment_owner_probe && materialize_identity_capacity && owner_probe_in_range &&
-              increment_owner_bank && wrap_owner_bank && scale_bank && add_bank && claim &&
-              commit && branch_on_incomplete && load_workgroup_x && load_workgroup_y &&
-              load_workgroup_z && load_site_token && flags_low && flags_high &&
-              dispatch_saturation_flag && owner_saturation_flag && saturation_or &&
-              compare_workgroup_x);
+  ASSERT_TRUE(hash_dispatch && bound_dispatch_directory && increment_dispatch_probe &&
+              materialize_dispatch_capacity && dispatch_probe_in_range && increment_dispatch_bank &&
+              wrap_dispatch_directory && owner_mix && owner_combine && combine_dispatch_identity &&
+              bound_owner && increment_owner_probe && materialize_identity_capacity &&
+              owner_probe_in_range && increment_owner_bank && wrap_owner_bank && claim && commit &&
+              branch_on_incomplete && load_workgroup_x && load_workgroup_y && load_workgroup_z &&
+              load_site_token && flags_low && flags_high && dispatch_saturation_flag &&
+              owner_saturation_flag && saturation_or && compare_workgroup_x);
   EXPECT_NE(std::ranges::find(access_words, *hash_dispatch), access_words.end());
   EXPECT_TRUE(contains_subsequence(access_words, *bound_dispatch_directory));
-  EXPECT_TRUE(contains_subsequence(access_words, *scale_dispatch_slot));
-  EXPECT_TRUE(contains_subsequence(access_words, *add_dispatch_slot));
+  EXPECT_TRUE(contains_subsequence(access_words, dispatch_slot_address));
   EXPECT_TRUE(contains_subsequence(access_words, *increment_dispatch_probe));
   EXPECT_TRUE(contains_subsequence(access_words, *materialize_dispatch_capacity));
   EXPECT_NE(std::ranges::find(access_words, *dispatch_probe_in_range), access_words.end());
@@ -936,8 +944,7 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
   EXPECT_NE(std::ranges::find(access_words, *owner_probe_in_range), access_words.end());
   EXPECT_TRUE(contains_subsequence(access_words, *increment_owner_bank));
   EXPECT_TRUE(contains_subsequence(access_words, *wrap_owner_bank));
-  EXPECT_TRUE(contains_subsequence(access_words, *scale_bank));
-  EXPECT_TRUE(contains_subsequence(access_words, *add_bank));
+  EXPECT_TRUE(contains_subsequence(access_words, access_bank_address));
   EXPECT_TRUE(contains_subsequence(access_words, *claim));
   EXPECT_TRUE(contains_subsequence(access_words, *commit));
   const auto last_commit_read =
@@ -1095,14 +1102,18 @@ TEST(ConSanMoi, AutoRecordReplayOneByOneHeadroomStillAddressesTheHashedSlot) {
           ? patched_words_at_file_offset(result, 0x100 + access->anchor_offset,
                                          access->original_size)
           : text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
-  const auto scale_slot = instrumentation::build_v_mul_lo_u32_literal(
-      static_cast<uint16_t>(scratch + 2u), static_cast<uint16_t>(scratch + 3u),
-      sizeof(ConSanMoiAccessRecord), static_cast<uint16_t>(scratch + 7u), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto add_slot = instrumentation::build_v_add_u64_vgpr_offset(
-      scratch, static_cast<uint16_t>(scratch + 2u), ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(scale_slot && add_slot);
-  EXPECT_TRUE(contains_subsequence(access_words, *scale_slot));
-  EXPECT_TRUE(contains_subsequence(access_words, *add_slot));
+  const ConSanTargetProfile *target = consan_target_profile(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(target, nullptr);
+  std::vector<uint32_t> slot_address;
+  ASSERT_TRUE(consan_detail::append_moi_indexed_address(
+      slot_address,
+      {.table_address =
+           *options.moi_report_buffer_address + report_plan.layout.access_records_offset,
+       .stride_bytes = sizeof(ConSanMoiAccessRecord),
+       .address_vgpr = scratch,
+       .index_vgpr = static_cast<uint16_t>(scratch + 7u)},
+      *target));
+  EXPECT_TRUE(contains_subsequence(access_words, slot_address));
 }
 
 TEST(ConSanMoi, AutoRecordReplayCapturesDispatchIdentityInPersistentVgprsAtScalarPressure) {

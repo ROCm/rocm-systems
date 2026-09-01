@@ -41,8 +41,7 @@ using consan_moi_detail::ConSanMoiRecordEmitter;
 [[nodiscard]] bool append_sampled_banked_address(std::vector<uint32_t> &words,
                                                  uint64_t first_address, uint32_t element_size,
                                                  uint32_t bank_count, uint16_t bank_vgpr,
-                                                 uint16_t address_vgpr, uint16_t temporary_vgpr,
-                                                 rj_code_arch_t arch);
+                                                 uint16_t address_vgpr, rj_code_arch_t arch);
 
 [[nodiscard]] bool append_direct_sampled_immediate_check(
     std::vector<uint32_t> &words, const ConSanRequest &request,
@@ -78,7 +77,7 @@ using consan_moi_detail::ConSanMoiRecordEmitter;
       /*return_old_value=*/true, kRdna4ScopeDevice, arch);
   if (!zero_low || !zero_high || !atomic_snapshot ||
       !append_sampled_banked_address(words, prior_address, sizeof(uint64_t), window_bank_count,
-                                     bank_vgpr, address_lo_vgpr, tmp_vgpr, arch)) {
+                                     bank_vgpr, address_lo_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled checker could not atomically snapshot the prior slot");
     return false;
   }
@@ -325,48 +324,32 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
   return true;
 }
 
-[[nodiscard]] bool append_sampled_indexed_address(std::vector<uint32_t> &words,
-                                                  uint64_t first_address, uint32_t element_size,
-                                                  uint16_t index_vgpr, uint16_t address_vgpr,
-                                                  uint16_t temporary_vgpr, rj_code_arch_t arch) {
-  const auto low = instrumentation::build_v_mov_b32_literal(
-      address_vgpr, static_cast<uint32_t>(first_address), arch);
-  const auto high = instrumentation::build_v_mov_b32_literal(
-      static_cast<uint16_t>(address_vgpr + 1u), static_cast<uint32_t>(first_address >> 32u), arch);
-  const auto offset = instrumentation::build_v_mul_lo_u32_literal(temporary_vgpr, temporary_vgpr,
-                                                                  element_size, index_vgpr, arch);
-  const auto add = instrumentation::build_v_add_u64_vgpr_offset(address_vgpr, temporary_vgpr, arch);
-  if (!low || !high || !offset || !add)
-    return false;
-  words.insert(words.end(), low->begin(), low->end());
-  words.insert(words.end(), high->begin(), high->end());
-  words.insert(words.end(), offset->begin(), offset->end());
-  words.insert(words.end(), add->begin(), add->end());
-  return true;
-}
-
 [[nodiscard]] bool append_sampled_banked_address(std::vector<uint32_t> &words,
                                                  uint64_t first_address, uint32_t element_size,
                                                  uint32_t bank_count, uint16_t bank_vgpr,
-                                                 uint16_t address_vgpr, uint16_t temporary_vgpr,
-                                                 rj_code_arch_t arch) {
+                                                 uint16_t address_vgpr, rj_code_arch_t arch) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr)
+    return false;
+  if (bank_count != 1u) {
+    return consan_detail::append_moi_indexed_address(words,
+                                                     {.table_address = first_address,
+                                                      .stride_bytes = element_size,
+                                                      .address_vgpr = address_vgpr,
+                                                      .index_vgpr = bank_vgpr},
+                                                     *target);
+  }
+
   const auto low = instrumentation::build_v_mov_b32_literal(
       address_vgpr, static_cast<uint32_t>(first_address), arch);
   const auto high = instrumentation::build_v_mov_b32_literal(
       static_cast<uint16_t>(address_vgpr + 1u), static_cast<uint32_t>(first_address >> 32u), arch);
   if (!low || !high)
     return false;
-  words.insert(words.end(), low->begin(), low->end());
-  words.insert(words.end(), high->begin(), high->end());
-  if (bank_count == 1)
-    return true;
-  const auto offset = instrumentation::build_v_mul_lo_u32_literal(temporary_vgpr, temporary_vgpr,
-                                                                  element_size, bank_vgpr, arch);
-  const auto add = instrumentation::build_v_add_u64_vgpr_offset(address_vgpr, temporary_vgpr, arch);
-  if (!offset || !add)
-    return false;
-  words.insert(words.end(), offset->begin(), offset->end());
-  words.insert(words.end(), add->begin(), add->end());
+  std::vector<uint32_t> emitted;
+  emitted.insert(emitted.end(), low->begin(), low->end());
+  emitted.insert(emitted.end(), high->begin(), high->end());
+  words.insert(words.end(), emitted.begin(), emitted.end());
   return true;
 }
 
@@ -731,13 +714,17 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
       words.insert(words.end(), scale_window->begin(), scale_window->end());
       words.insert(words.end(), owner_bank->begin(), owner_bank->end());
       words.insert(words.end(), combine->begin(), combine->end());
-      if (!append_sampled_indexed_address(words, pending_acquire_address,
-                                          sizeof(ConSanMoiSampledPendingAcquireSlot), low_vgpr,
-                                          scratch_vgpr, high_vgpr, arch))
+      if (!consan_detail::append_moi_indexed_address(
+              words,
+              {.table_address = pending_acquire_address,
+               .stride_bytes = sizeof(ConSanMoiSampledPendingAcquireSlot),
+               .address_vgpr = scratch_vgpr,
+               .index_vgpr = low_vgpr},
+              *target))
         return std::nullopt;
-    } else if (!append_sampled_banked_address(
-                   words, pending_acquire_address, sizeof(ConSanMoiSampledPendingAcquireSlot),
-                   window_bank_count, bank_vgpr, scratch_vgpr, high_vgpr, arch)) {
+    } else if (!append_sampled_banked_address(words, pending_acquire_address,
+                                              sizeof(ConSanMoiSampledPendingAcquireSlot),
+                                              window_bank_count, bank_vgpr, scratch_vgpr, arch)) {
       return std::nullopt;
     }
     if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
@@ -798,8 +785,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
   if (!claim_new || !claim_compare || !claim || !claimed || !narrow_winner ||
       !append_sampled_banked_address(
           words, causal_window_address + offsetof(ConSanMoiSampledCausalWindow, publication_state),
-          sizeof(ConSanMoiSampledCausalWindow), window_bank_count, bank_vgpr, scratch_vgpr,
-          high_vgpr, arch)) {
+          sizeof(ConSanMoiSampledCausalWindow), window_bank_count, bank_vgpr, scratch_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled probe could not claim a causal window slot");
     return std::nullopt;
   }
@@ -815,7 +801,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
 
   if (!append_sampled_banked_address(words, causal_window_address,
                                      sizeof(ConSanMoiSampledCausalWindow), window_bank_count,
-                                     bank_vgpr, scratch_vgpr, high_vgpr, arch))
+                                     bank_vgpr, scratch_vgpr, arch))
     return std::nullopt;
   const auto store_dynamic_record_index = [&]() {
     if (window_bank_count == 1u) {
@@ -925,7 +911,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
       scratch_vgpr, low_vgpr, low_vgpr, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
   if (!atomic_publish ||
       !append_sampled_banked_address(words, sampled_entry_address, sizeof(uint64_t),
-                                     window_bank_count, bank_vgpr, scratch_vgpr, tmp_vgpr, arch)) {
+                                     window_bank_count, bank_vgpr, scratch_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled probe could not atomically publish sampled entry");
     return std::nullopt;
   }
@@ -934,7 +920,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     return std::nullopt;
   if (!append_sampled_banked_address(words, causal_window_address,
                                      sizeof(ConSanMoiSampledCausalWindow), window_bank_count,
-                                     bank_vgpr, scratch_vgpr, tmp_vgpr, arch))
+                                     bank_vgpr, scratch_vgpr, arch))
     return std::nullopt;
   if (!record.store_literal(offsetof(ConSanMoiSampledCausalWindow, publication_state),
                             static_cast<uint32_t>(ConSanMoiSampledCausalPublicationState::Ready))) {
@@ -968,7 +954,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
   // different exact dynamic identity occupying the slot is capacity loss.
   if (!append_sampled_banked_address(words, causal_window_address,
                                      sizeof(ConSanMoiSampledCausalWindow), window_bank_count,
-                                     bank_vgpr, scratch_vgpr, high_vgpr, arch))
+                                     bank_vgpr, scratch_vgpr, arch))
     return std::nullopt;
   const auto reject_unless_equal_vgpr = [&](uint32_t offset, uint16_t expected_vgpr) -> bool {
     if (!record.load(offset, low_vgpr))

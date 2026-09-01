@@ -1054,17 +1054,14 @@ bool apply_moi_descriptor_requirements(
     return true;
   };
   const auto materialize_banked_record_address = [&](uint64_t first_address) {
-    if (!record.materialize_address(first_address))
-      return false;
     if (!automatic_banked_capture)
-      return true;
-    const auto scale_bank = instrumentation::build_v_mul_lo_u32_literal(
-        record_value_vgpr, record_value_high_vgpr, sizeof(ConSanMoiAccessRecord), owner_bank_vgpr,
-        arch);
-    const auto add_bank =
-        instrumentation::build_v_add_u64_vgpr_offset(record_address_vgpr, record_value_vgpr, arch);
-    InstructionSequence append(words);
-    return append.emit_all(scale_bank, add_bank);
+      return record.materialize_address(first_address);
+    return consan_detail::append_moi_indexed_address(words,
+                                                     {.table_address = first_address,
+                                                      .stride_bytes = sizeof(ConSanMoiAccessRecord),
+                                                      .address_vgpr = record_address_vgpr,
+                                                      .index_vgpr = owner_bank_vgpr},
+                                                     *target);
   };
   const auto reload_spilled_lds_byte_offset = [&] {
     if (!spilled_lds_byte_offset_vgpr)
@@ -1246,20 +1243,16 @@ bool apply_moi_descriptor_requirements(
         build_v_mov_b32_e32(bank_probe_count_vgpr, scalar_positive_inline_u32(0), arch));
 
     if (!sequence.bind(dispatch_probe_label) ||
-        !record.materialize_address(base + layout.record_replay_dispatch_tokens_offset)) {
+        !consan_detail::append_moi_indexed_address(
+            words,
+            {.table_address = base + layout.record_replay_dispatch_tokens_offset,
+             .stride_bytes = sizeof(uint64_t),
+             .address_vgpr = record_address_vgpr,
+             .index_vgpr = dispatch_bank_vgpr},
+            *target)) {
       errors.emplace_back("ConSan MOI first-light probe could not address its dispatch table");
       return std::nullopt;
     }
-    const auto scale_dispatch_slot = instrumentation::build_v_mul_lo_u32_literal(
-        record_compare_vgpr, record_compare_high_vgpr, sizeof(uint64_t), dispatch_bank_vgpr, arch);
-    const auto add_dispatch_slot = instrumentation::build_v_add_u64_vgpr_offset(
-        record_address_vgpr, record_compare_vgpr, arch);
-    if (!scale_dispatch_slot || !add_dispatch_slot) {
-      errors.emplace_back("ConSan MOI first-light probe could not select a dispatch slot");
-      return std::nullopt;
-    }
-    words.insert(words.end(), scale_dispatch_slot->begin(), scale_dispatch_slot->end());
-    words.insert(words.end(), add_dispatch_slot->begin(), add_dispatch_slot->end());
     words.push_back(build_v_mov_b32_e32(record_compare_vgpr, scalar_positive_inline_u32(0), arch));
     words.push_back(
         build_v_mov_b32_e32(record_compare_high_vgpr, scalar_positive_inline_u32(0), arch));

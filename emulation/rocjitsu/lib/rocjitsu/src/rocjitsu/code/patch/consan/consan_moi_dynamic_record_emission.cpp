@@ -97,14 +97,14 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
                                                  uint16_t scratch_vgpr, rj_code_arch_t arch) {
   const ConSanTargetProfile *target = consan_target_profile(arch);
   return target != nullptr &&
-         consan_detail::append_dynamic_record_address(words,
-                                                      {
-                                                          .field_address = field_address,
-                                                          .stride_bytes = layout.stride_bytes,
-                                                          .address_vgpr = scratch_vgpr,
-                                                          .slot_vgpr = slot_vgpr,
-                                                      },
-                                                      *target);
+         consan_detail::append_moi_indexed_address(words,
+                                                   {
+                                                       .table_address = field_address,
+                                                       .stride_bytes = layout.stride_bytes,
+                                                       .address_vgpr = scratch_vgpr,
+                                                       .index_vgpr = slot_vgpr,
+                                                   },
+                                                   *target);
 }
 
 [[nodiscard]] bool append_dynamic_record_store_u32_vgpr(std::vector<uint32_t> &words,

@@ -702,7 +702,12 @@ append_inline_atomic_table_address(std::vector<uint32_t> &words, uint64_t table_
                                    uint16_t temporary_vgpr, rj_code_arch_t arch) {
   static_assert(std::is_same_v<Entry, ConSanMoiInlineAtomicReleaseSlot> ||
                 std::is_same_v<Entry, ConSanMoiInlineCausalSnapshot>);
+  static_assert(sizeof(ConSanMoiInlineAtomicReleaseSlot) == 32u);
+  static_assert(sizeof(ConSanMoiInlineCausalSnapshot) == 40u);
   if (table_capacity == 0 || (table_capacity & (table_capacity - 1u)) != 0)
+    return false;
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr)
     return false;
   const auto shifted = instrumentation::build_v_lshrrev_b32(
       hash_vgpr, scalar_positive_inline_u32(2), atomic_address_vgpr, arch);
@@ -725,33 +730,22 @@ append_inline_atomic_table_address(std::vector<uint32_t> &words, uint64_t table_
                                                                     0x85ebca6bu, hash_vgpr, arch);
   const auto masked =
       instrumentation::build_v_and_b32_literal(hash_vgpr, table_capacity - 1u, hash_vgpr, arch);
-  const auto base_lo = instrumentation::build_v_mov_b32_literal(
-      entry_address_vgpr, static_cast<uint32_t>(table_base), arch);
-  const auto base_hi =
-      instrumentation::build_v_mov_b32_literal(static_cast<uint16_t>(entry_address_vgpr + 1u),
-                                               static_cast<uint32_t>(table_base >> 32u), arch);
-  const auto add_offset =
-      instrumentation::build_v_add_u64_vgpr_offset(entry_address_vgpr, hash_vgpr, arch);
-  InstructionSequence sequence(words);
-  if constexpr (std::is_same_v<Entry, ConSanMoiInlineAtomicReleaseSlot>) {
-    static_assert(sizeof(Entry) == 32u);
-    const auto times_entry_size = instrumentation::build_v_lshlrev_b32(
-        hash_vgpr, scalar_positive_inline_u32(5), hash_vgpr, arch);
-    return sequence.emit_all(shifted, mixed, folded, mix_fold, folded_again, mix_fold_again,
-                             folded_final, mix_fold_final, multiply, masked, times_entry_size,
-                             base_lo, base_hi, add_offset);
-  } else {
-    static_assert(sizeof(Entry) == 40u);
-    const auto times_eight = instrumentation::build_v_lshlrev_b32(
-        temporary_vgpr, scalar_positive_inline_u32(3), hash_vgpr, arch);
-    const auto times_thirty_two = instrumentation::build_v_lshlrev_b32(
-        hash_vgpr, scalar_positive_inline_u32(5), hash_vgpr, arch);
-    const auto times_entry_size = instrumentation::build_v_add_u32(
-        hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-    return sequence.emit_all(shifted, mixed, folded, mix_fold, folded_again, mix_fold_again,
-                             folded_final, mix_fold_final, multiply, masked, times_eight,
-                             times_thirty_two, times_entry_size, base_lo, base_hi, add_offset);
+  std::vector<uint32_t> emitted;
+  InstructionSequence sequence(emitted);
+  if (!sequence.emit_all(shifted, mixed, folded, mix_fold, folded_again, mix_fold_again,
+                         folded_final, mix_fold_final, multiply, masked) ||
+      !consan_detail::append_moi_indexed_address(emitted,
+                                                 {
+                                                     .table_address = table_base,
+                                                     .stride_bytes = sizeof(Entry),
+                                                     .address_vgpr = entry_address_vgpr,
+                                                     .index_vgpr = hash_vgpr,
+                                                 },
+                                                 *target)) {
+    return false;
   }
+  words.insert(words.end(), emitted.begin(), emitted.end());
+  return true;
 }
 
 [[nodiscard]] static bool
@@ -894,6 +888,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     uint16_t temporary_vgpr, bool release_sequence, rj_code_arch_t arch) {
   if (table_capacity < 2u || (table_capacity & (table_capacity - 1u)) != 0)
     return false;
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr)
+    return false;
   const uint32_t namespace_capacity = table_capacity / 2u;
   const uint64_t namespace_base =
       table_base + (release_sequence ? static_cast<uint64_t>(namespace_capacity) *
@@ -935,24 +932,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
   const auto masked =
       instrumentation::build_v_and_b32_literal(hash_vgpr, namespace_capacity - 1u, hash_vgpr, arch);
-  const auto times_eight = instrumentation::build_v_lshlrev_b32(
-      slot_address_vgpr, scalar_positive_inline_u32(3), hash_vgpr, arch);
-  const auto times_sixteen = instrumentation::build_v_lshlrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(4), hash_vgpr, arch);
-  const auto times_thirty_two = instrumentation::build_v_lshlrev_b32(
-      hash_vgpr, scalar_positive_inline_u32(5), hash_vgpr, arch);
-  const auto times_forty_eight = instrumentation::build_v_add_u32(
-      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-  const auto times_slot_size = instrumentation::build_v_add_u32(
-      hash_vgpr, vector_source_vgpr(slot_address_vgpr), hash_vgpr, arch);
-  const auto base_lo = instrumentation::build_v_mov_b32_literal(
-      slot_address_vgpr, static_cast<uint32_t>(namespace_base), arch);
-  const auto base_hi =
-      instrumentation::build_v_mov_b32_literal(static_cast<uint16_t>(slot_address_vgpr + 1u),
-                                               static_cast<uint32_t>(namespace_base >> 32u), arch);
-  const auto add_offset =
-      instrumentation::build_v_add_u64_vgpr_offset(slot_address_vgpr, hash_vgpr, arch);
-  InstructionSequence sequence(words);
+  std::vector<uint32_t> emitted;
+  InstructionSequence sequence(emitted);
   if (!sequence.emit_all(mix_workgroup, multiply_consumer, mix_consumer, multiply_producer,
                          mix_producer, multiply_consumer_epoch, mix_consumer_epoch))
     return false;
@@ -963,14 +944,25 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
     if (!salt || !mix_salt)
       return false;
-    words.insert(words.end(), salt->begin(), salt->end());
-    words.push_back(*mix_salt);
+    emitted.insert(emitted.end(), salt->begin(), salt->end());
+    emitted.push_back(*mix_salt);
   }
   if (!sequence.emit_all(fold0, mix_fold0, avalanche0, fold1, mix_fold1, avalanche1, fold2,
                          mix_fold2, masked))
     return false;
-  return sequence.emit_all(times_eight, times_sixteen, times_thirty_two, times_forty_eight,
-                           times_slot_size, base_lo, base_hi, add_offset);
+  if (!consan_detail::append_moi_indexed_address(
+          emitted,
+          {
+              .table_address = namespace_base,
+              .stride_bytes = sizeof(ConSanMoiInlineAcquiredEpochTokenSlot),
+              .address_vgpr = slot_address_vgpr,
+              .index_vgpr = hash_vgpr,
+          },
+          *target)) {
+    return false;
+  }
+  words.insert(words.end(), emitted.begin(), emitted.end());
+  return true;
 }
 
 // Publishes the direct acquire edge and every inherited snapshot edge as one

@@ -3104,3 +3104,88 @@ The broad operating point and transform transaction, remaining placement and
 validation concentrations, physical locality of the complete architecture and
 mode surfaces, surviving mode/target interactions, and the independent
 deep-read completion audit remain open. The goal therefore remains active.
+
+### 16.31 Convergence checkpoint 30: one target-normalized indexed report-table operation
+
+The checkpoint-29 follow-through deep-read traced every device-side
+`table_base + runtime_index * ABI_stride` calculation rather than stopping at
+InlineShadow's atomic tables. RecordReplay access records and dispatch-token
+slots, Sampled access banks, atomic windows, watchpoints, barrier records, and
+epoch tables, dynamic diagnostic records, and InlineShadow release,
+causal-snapshot, and acquired-token tables all require the same target-sensitive
+64-bit address formation. Their semantic owners choose different keys, hashes,
+banks, indices, tables, and ABI entry types, but several of those owners still
+open-coded the identical multiply-and-add lowering. Sampled also exposed a
+mode helper from its access-emission header solely so its atomic and
+synchronization components could forward through that implementation.
+
+Those paths now converge on one internal `MoiIndexedAddressRequest` and
+`append_moi_indexed_address` operation. Its contract is deliberately narrower
+than any mode: materialize a 64-bit table base, multiply one preserved VGPR
+index by an ABI byte stride, and form the target-normalized 64-bit address. It
+constructs the complete sequence before publishing it, clobbers only the
+declared address pair and target-required condition state, and consumes a
+typed `ConSanTargetProfile` rather than rediscovering architecture families.
+Mode owners still own all semantic index construction. RecordReplay still
+selects automatic record banks and dispatch-token slots; Sampled still owns
+its hashes, bank selection, and single-bank shortcut; InlineShadow still owns
+its atomic-key hashes; and the dynamic-record adapter still binds concrete
+record layouts. The common operation therefore shares mechanism without
+creating a mode policy authority.
+
+The Sampled cross-component forwarding declaration and implementation are
+deleted. Its access, atomic, and synchronization owners consume the common
+operation directly, as do the two RecordReplay paths and all three
+InlineShadow table ABIs. The architecture-boundary gate rejects the retired
+dynamic-record-shaped contract and Sampled forwarding name, forbids the
+low-level 64-bit VGPR-offset builder in all migrated semantic owners, and pins
+the expected common-operation consumers. This makes future reintroduction of
+a mode-local address implementation a checked structural failure rather than
+a convention.
+
+The direct simulator regression now exercises the mode-neutral operation over
+gfx1100, gfx1201, gfx942, gfx950, and gfx1250 with eight real ABI strides,
+including the 32-, 40-, and 56-byte InlineShadow entries, four runtime indices,
+and three 64-bit table bases. It proves the exact computed address and
+preservation of the index and unrelated registers. Existing RecordReplay and
+Sampled exact-emission tests were strengthened to require their complete
+shared address sequences at the integration boundary; this discovered no
+behavioral change, but prevents those paths from silently falling back to
+local arithmetic.
+
+| Signal | Checkpoint 30 | Cumulative change | Slice change from checkpoint 29 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,400 | +425 | **+17** |
+| Nonblank production lines | 99,128 | +45 | **+18** |
+| Production implementation lines | 91,419 | **-31** | **+19** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 207 / 56 | **-69 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 206 / 28 | +6 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| Target-normalized indexed-address implementations | 1 | n/a | consolidated |
+| Sampled cross-component indexed-address forwarding APIs | 0 | n/a | **-2** |
+| Migrated owner files with manual VGPR-offset address addition | 0 | n/a | consolidated |
+| Test inventory | 5,378 | +33 | 0 |
+
+Validation includes a full final-tree `-j16` rebuild; the focused common,
+InlineShadow, RecordReplay, Sampled, and architecture-boundary regressions; all
+4,743 nonphysical tests at `-j16` in 194.84 seconds, including the unchanged
+2,908 simulator rows over five targets; and all 635 physical gfx1201 tests
+serialized at `-j1` in 110.01 seconds. No test was removed, renamed, disabled,
+or replaced. The inventory is unchanged because the broader matrix and exact
+integration assertions strengthen existing owning tests.
+
+This checkpoint strengthens Sections 14.1, 14.2, 14.3, 14.6, 14.7, and 14.9:
+one target-normalized operation now composes with three mode-owned policy
+surfaces, and the obsolete Sampled forwarding seam and repeated low-level
+lowering are gone. The nineteen-line slice cost is the explicit common request,
+broader transactional call sites, and structural enforcement; cumulative
+production remains thirty-one implementation lines below baseline. That is
+still not the material whole-refactoring shrinkage required by Section 14.8,
+nor does one cross-axis operation prove architecture or mode locality across
+the whole codebase. The broad operating point and transform transaction,
+remaining placement and validation concentrations, surviving mode/target
+interactions, physical locality of the complete architecture and mode
+surfaces, and the independent deep-read completion audit remain open. The goal
+therefore remains active.

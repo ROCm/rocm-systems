@@ -167,9 +167,13 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
       }
       words.insert(words.end(), absolute_slot->begin(), absolute_slot->end());
     }
-    if (!append_sampled_indexed_address(words, first_window_address,
-                                        sizeof(ConSanMoiSampledCausalWindow), bank_vgpr, base,
-                                        value, arch)) {
+    if (!consan_detail::append_moi_indexed_address(
+            words,
+            {.table_address = first_window_address,
+             .stride_bytes = sizeof(ConSanMoiSampledCausalWindow),
+             .address_vgpr = base,
+             .index_vgpr = bank_vgpr},
+            *target)) {
       errors.emplace_back("ConSan MOI sampled barrier failed at causal-window addressing");
       return std::nullopt;
     }
@@ -334,9 +338,14 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
                                                                     kRdna4ScopeDevice, arch);
   if (!sentinel || !zero || !claim ||
-      !append_sampled_indexed_address(
-          words, first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
-          sizeof(ConSanMoiSampledSyncMetadataPacked), bank_vgpr, base, next_epoch, arch)) {
+      !consan_detail::append_moi_indexed_address(
+          words,
+          {.table_address =
+               first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
+           .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
+           .address_vgpr = base,
+           .index_vgpr = bank_vgpr},
+          *target)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at metadata claim setup");
     return std::nullopt;
   }
@@ -367,9 +376,13 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     return std::nullopt;
   }
   words.insert(words.end(), increment->begin(), increment->end());
-  if (!append_sampled_indexed_address(words, first_metadata_address,
-                                      sizeof(ConSanMoiSampledSyncMetadataPacked), bank_vgpr, base,
-                                      value, arch)) {
+  if (!consan_detail::append_moi_indexed_address(
+          words,
+          {.table_address = first_metadata_address,
+           .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
+           .address_vgpr = base,
+           .index_vgpr = bank_vgpr},
+          *target)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at metadata addressing");
     return std::nullopt;
   }
@@ -395,9 +408,14 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   words.push_back(*wait_store);
   words.insert(words.end(), final_value->begin(), final_value->end());
   words.insert(words.end(), final_expected->begin(), final_expected->end());
-  if (!append_sampled_indexed_address(
-          words, first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
-          sizeof(ConSanMoiSampledSyncMetadataPacked), bank_vgpr, base, next_epoch, arch)) {
+  if (!consan_detail::append_moi_indexed_address(
+          words,
+          {.table_address =
+               first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
+           .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
+           .address_vgpr = base,
+           .index_vgpr = bank_vgpr},
+          *target)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at metadata commit addressing");
     return std::nullopt;
   }
@@ -451,9 +469,13 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::VccZero))
     return std::nullopt;
   words.insert(words.end(), increment->begin(), increment->end());
-  if (!append_sampled_indexed_address(words, first_metadata_address,
-                                      sizeof(ConSanMoiSampledSyncMetadataPacked), bank_vgpr, base,
-                                      value, arch)) {
+  if (!consan_detail::append_moi_indexed_address(
+          words,
+          {.table_address = first_metadata_address,
+           .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
+           .address_vgpr = base,
+           .index_vgpr = bank_vgpr},
+          *target)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at existing metadata addressing");
     return std::nullopt;
   }

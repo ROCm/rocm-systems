@@ -7,11 +7,6 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-[[nodiscard]] bool append_sampled_indexed_address(std::vector<uint32_t> &words,
-                                                  uint64_t first_address, uint32_t element_size,
-                                                  uint16_t index_vgpr, uint16_t address_vgpr,
-                                                  uint16_t temporary_vgpr, rj_code_arch_t arch);
-
 [[nodiscard]] bool
 append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOperatingPoint &point,
                                  const BoundRuntimeResources &resources,

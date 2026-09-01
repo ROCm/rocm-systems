@@ -1347,33 +1347,32 @@ validate_scalar_state_temporaries(const ConSanMoiOperatingPoint &point,
                                                  const ConSanMoiWorkgroupSource &source,
                                                  uint16_t value_vgpr, rj_code_arch_t arch);
 
-/// Semantic request to materialize one dynamically indexed report field.
+/// Semantic request to materialize one indexed table entry.
 ///
-/// `field_address` is the absolute address of field zero, `stride_bytes` is
-/// the report-layout distance between adjacent records, and `slot_vgpr` holds
-/// the runtime record index. `address_vgpr` names the consecutive output pair.
-/// Keeping these roles in one request prevents record kinds from reordering a
-/// positional address/slot pair or supplying an architecture as semantic
-/// input. The report-layout validator guarantees that `slot * stride_bytes`
-/// fits in 32 bits.
-struct MoiDynamicRecordAddressRequest {
-  uint64_t field_address = 0;
+/// `table_address` is the absolute address of entry zero, `stride_bytes` is
+/// the distance between adjacent entries, and `index_vgpr` holds the runtime
+/// index. `address_vgpr` names the consecutive output pair. Keeping these
+/// roles in one request prevents consumers from reordering a positional
+/// address/index pair or supplying an architecture as semantic input. Callers
+/// guarantee that `index * stride_bytes` fits in 32 bits.
+struct MoiIndexedAddressRequest {
+  uint64_t table_address = 0;
   uint32_t stride_bytes = 0;
   uint16_t address_vgpr = 0;
-  uint16_t slot_vgpr = 0;
+  uint16_t index_vgpr = 0;
 
-  bool operator==(const MoiDynamicRecordAddressRequest &) const = default;
+  bool operator==(const MoiIndexedAddressRequest &) const = default;
 };
 
-/// Append the target sequence for `field_address + slot * stride_bytes`.
+/// Append the target sequence for `table_address + index * stride_bytes`.
 ///
-/// The address occupies `address_vgpr:address_vgpr+1`; the slot must be
+/// The address occupies `address_vgpr:address_vgpr+1`; the index must be
 /// distinct from that pair. The operation uses only the address pair as
-/// temporary storage, preserves the slot, and clobbers VCC. Invalid requests
+/// temporary storage, preserves the index, and clobbers VCC. Invalid requests
 /// or target encodings fail transactionally without partial output.
-[[nodiscard]] bool append_dynamic_record_address(std::vector<uint32_t> &words,
-                                                 const MoiDynamicRecordAddressRequest &request,
-                                                 const ConSanTargetProfile &target);
+[[nodiscard]] bool append_moi_indexed_address(std::vector<uint32_t> &words,
+                                              const MoiIndexedAddressRequest &request,
+                                              const ConSanTargetProfile &target);
 
 /// Return the nearest emitted trampoline body strictly after `offset` across
 /// both already committed and current-pass patch inventories. Empty bodies do

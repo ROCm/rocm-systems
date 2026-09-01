@@ -63,15 +63,14 @@ expected_dynamic_fence_vgpr_store(uint64_t field_address, uint16_t value_vgpr, u
   const auto store = instrumentation::build_flat_store_b32(scratch_vgpr, value_vgpr, arch);
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (!store || target == nullptr ||
-      !consan_detail::append_dynamic_record_address(
-          words,
-          {
-              .field_address = field_address,
-              .stride_bytes = sizeof(ConSanMoiFenceRecord),
-              .address_vgpr = scratch_vgpr,
-              .slot_vgpr = slot_vgpr,
-          },
-          *target))
+      !consan_detail::append_moi_indexed_address(words,
+                                                 {
+                                                     .table_address = field_address,
+                                                     .stride_bytes = sizeof(ConSanMoiFenceRecord),
+                                                     .address_vgpr = scratch_vgpr,
+                                                     .index_vgpr = slot_vgpr,
+                                                 },
+                                                 *target))
     return {};
   words.insert(words.end(), store->begin(), store->end());
   return words;
@@ -84,15 +83,15 @@ expected_dynamic_fence_literal_store(uint64_t field_address, uint32_t value, uin
   constexpr uint16_t kValueOffset = 5u;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + kValueOffset);
   const ConSanTargetProfile *target = consan_target_profile(arch);
-  if (target == nullptr || !consan_detail::append_dynamic_record_address(
-                               words,
-                               {
-                                   .field_address = field_address,
-                                   .stride_bytes = sizeof(ConSanMoiFenceRecord),
-                                   .address_vgpr = scratch_vgpr,
-                                   .slot_vgpr = slot_vgpr,
-                               },
-                               *target))
+  if (target == nullptr ||
+      !consan_detail::append_moi_indexed_address(words,
+                                                 {
+                                                     .table_address = field_address,
+                                                     .stride_bytes = sizeof(ConSanMoiFenceRecord),
+                                                     .address_vgpr = scratch_vgpr,
+                                                     .index_vgpr = slot_vgpr,
+                                                 },
+                                                 *target))
     return {};
   const auto materialize = instrumentation::build_v_mov_b32_literal(value_vgpr, value, arch);
   const auto store = instrumentation::build_flat_store_b32(scratch_vgpr, value_vgpr, arch);
@@ -366,24 +365,26 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicTablesUseTheirAbiEntryStrides) {
         text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
 
     const auto release_stride = instrumentation::build_v_lshlrev_b32(
-        /*vdst=*/10u, scalar_positive_inline_u32(5), /*vsrc1=*/10u, target.arch);
+        /*vdst=*/8u, scalar_positive_inline_u32(5), /*vsrc1=*/10u, target.arch);
     ASSERT_TRUE(release_stride);
     EXPECT_GT(count_subsequence(cave_words, std::array{*release_stride}), 0u)
         << "the 32-byte release-slot ABI must determine its address stride";
 
     const bool aligned_cas_pair =
         consan_arch_requires_aligned_flat_compare_swap_data_pair(target.arch);
+    const uint16_t snapshot_address = static_cast<uint16_t>(8u + (aligned_cas_pair ? 18u : 17u));
     const uint16_t snapshot_hash = static_cast<uint16_t>(8u + (aligned_cas_pair ? 17u : 19u));
-    constexpr uint16_t kSnapshotTemporary = 8u + 21u;
     const auto snapshot_times_eight = instrumentation::build_v_lshlrev_b32(
-        kSnapshotTemporary, scalar_positive_inline_u32(3), snapshot_hash, target.arch);
+        static_cast<uint16_t>(snapshot_address + 1u), scalar_positive_inline_u32(3), snapshot_hash,
+        target.arch);
     const auto snapshot_times_thirty_two = instrumentation::build_v_lshlrev_b32(
-        snapshot_hash, scalar_positive_inline_u32(5), snapshot_hash, target.arch);
-    const auto snapshot_stride = instrumentation::build_v_add_u32(
-        snapshot_hash, vector_source_vgpr(kSnapshotTemporary), snapshot_hash, target.arch);
+        snapshot_address, scalar_positive_inline_u32(5), snapshot_hash, target.arch);
+    const auto snapshot_stride =
+        instrumentation::build_v_add_u32(snapshot_address, vector_source_vgpr(snapshot_address),
+                                         static_cast<uint16_t>(snapshot_address + 1u), target.arch);
     ASSERT_TRUE(snapshot_times_eight && snapshot_times_thirty_two && snapshot_stride);
-    std::vector<uint32_t> expected_snapshot_stride = {*snapshot_times_eight,
-                                                      *snapshot_times_thirty_two};
+    std::vector<uint32_t> expected_snapshot_stride = {*snapshot_times_thirty_two,
+                                                      *snapshot_times_eight};
     expected_snapshot_stride.insert(expected_snapshot_stride.end(), snapshot_stride->begin(),
                                     snapshot_stride->end());
     EXPECT_GT(count_subsequence(cave_words, expected_snapshot_stride), 0u)
@@ -3820,32 +3821,32 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
       << "release publication must retain its object identity across predecessor import";
 
   const auto slot_stride = build_v_lshlrev_b32_e32(
-      /*vdst=*/10, scalar_positive_inline_u32(5), /*vsrc1=*/10, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vdst=*/8, scalar_positive_inline_u32(5), /*vsrc1=*/10, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(slot_stride);
   EXPECT_EQ(std::count(release_words.begin(), release_words.end(), *slot_stride), 2)
       << "release publication imports and then replaces its 32-byte predecessor slot";
   EXPECT_EQ(std::count(acquire_words.begin(), acquire_words.end(), *slot_stride), 2)
       << "acquire pre-reads and validates its 32-byte release slot";
-  const auto token_stride_eight = build_v_lshlrev_b32_e32(
-      /*vdst=*/8, scalar_positive_inline_u32(3), /*vsrc1=*/29, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto token_stride_sixteen = build_v_lshlrev_b32_e32(
-      /*vdst=*/27, scalar_positive_inline_u32(4), /*vsrc1=*/29, ROCJITSU_CODE_ARCH_RDNA4);
   const auto token_stride_thirty_two = build_v_lshlrev_b32_e32(
-      /*vdst=*/29, scalar_positive_inline_u32(5), /*vsrc1=*/29, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vdst=*/8, scalar_positive_inline_u32(5), /*vsrc1=*/29, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto token_stride_sixteen = build_v_lshlrev_b32_e32(
+      /*vdst=*/9, scalar_positive_inline_u32(4), /*vsrc1=*/29, ROCJITSU_CODE_ARCH_RDNA4);
   const auto token_stride_forty_eight = build_v_add_nc_u32_e32(
-      /*vdst=*/29, vector_source_vgpr(/*vsrc0=*/27), /*vsrc1=*/29, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vdst=*/8, vector_source_vgpr(/*vsrc0=*/8), /*vsrc1=*/9, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto token_stride_eight = build_v_lshlrev_b32_e32(
+      /*vdst=*/9, scalar_positive_inline_u32(3), /*vsrc1=*/29, ROCJITSU_CODE_ARCH_RDNA4);
   const auto token_stride_fifty_six = build_v_add_nc_u32_e32(
-      /*vdst=*/29, vector_source_vgpr(/*vsrc0=*/8), /*vsrc1=*/29, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vdst=*/8, vector_source_vgpr(/*vsrc0=*/8), /*vsrc1=*/9, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(token_stride_eight);
   ASSERT_TRUE(token_stride_sixteen);
   ASSERT_TRUE(token_stride_thirty_two);
   ASSERT_TRUE(token_stride_forty_eight);
   ASSERT_TRUE(token_stride_fifty_six);
   EXPECT_TRUE(contains_subsequence(
-      acquire_words,
-      std::vector<uint32_t>{*token_stride_eight, *token_stride_sixteen, *token_stride_thirty_two,
-                            *token_stride_forty_eight, *token_stride_fifty_six}))
-      << "56-byte token slots require index*8 + index*16 + index*32";
+      acquire_words, std::vector<uint32_t>{*token_stride_thirty_two, *token_stride_sixteen,
+                                           *token_stride_forty_eight, *token_stride_eight,
+                                           *token_stride_fifty_six}))
+      << "56-byte token slots use the shared index*32 + index*16 + index*8 lowering";
 
   const ConSanMoiReportBufferLayout layout =
       consan_moi_inline_shadow_report_buffer_layout_for_bytes(options.moi_report_buffer_size);

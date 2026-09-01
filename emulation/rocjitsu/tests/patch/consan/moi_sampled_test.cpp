@@ -3,6 +3,7 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
+#include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
@@ -1113,10 +1114,17 @@ TEST(ConSanMoi, SampledAtomicTrackingPublishesQualifiedTypedMetadata) {
   const auto payload_wait = instrumentation::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(payload_wait);
   EXPECT_NE(std::find(trampoline.begin(), trampoline.end(), *payload_wait), trampoline.end());
-  const auto metadata_base = build_v_mov_b32_e64_literal(
-      /*vdst=*/8u, static_cast<uint32_t>(metadata), ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(metadata_base);
-  EXPECT_TRUE(contains_subsequence(trampoline, *metadata_base));
+  const ConSanTargetProfile *target = consan_target_profile(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(target, nullptr);
+  std::vector<uint32_t> metadata_address;
+  ASSERT_TRUE(consan_detail::append_moi_indexed_address(
+      metadata_address,
+      {.table_address = metadata,
+       .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
+       .address_vgpr = *patch->scratch_vgpr,
+       .index_vgpr = static_cast<uint16_t>(*patch->scratch_vgpr + 8u)},
+      *target));
+  EXPECT_TRUE(contains_subsequence(trampoline, metadata_address));
   EXPECT_EQ(count_subsequence(trampoline,
                               make_expected_literal_offset_store_words(
                                   offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), 4u,
@@ -2498,17 +2506,26 @@ TEST(ConSanMoi, SampledAtomicEdgesAssociateWithTheirOrderedAccessWindows) {
   for (uint32_t slot = 0; slot < sync_patches.size(); ++slot) {
     const ConSanPatchInfo &patch = *sync_patches[slot];
     ASSERT_TRUE(patch.scratch_vgpr);
-    // Dynamic banking materializes the first record in the corresponding
-    // array, then adds the workgroup-selected slot and uses field offsets.
+    // Dynamic banking uses the common indexed-address sequence for the first
+    // record in the corresponding array and the selected runtime slot.
     const uint64_t materialized_address =
         *options.moi_report_buffer_address +
         (slot == 1 ? layout.sampled_pending_acquires_offset : layout.sampled_sync_metadata_offset);
-    const auto materialize = build_v_mov_b32_e64_literal(
-        *patch.scratch_vgpr, static_cast<uint32_t>(materialized_address), ROCJITSU_CODE_ARCH_RDNA4);
-    ASSERT_TRUE(materialize);
+    const ConSanTargetProfile *target = consan_target_profile(ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_NE(target, nullptr);
+    std::vector<uint32_t> indexed_address;
+    ASSERT_TRUE(consan_detail::append_moi_indexed_address(
+        indexed_address,
+        {.table_address = materialized_address,
+         .stride_bytes =
+             static_cast<uint32_t>(slot == 1 ? sizeof(ConSanMoiSampledPendingAcquireSlot)
+                                             : sizeof(ConSanMoiSampledSyncMetadataPacked)),
+         .address_vgpr = *patch.scratch_vgpr,
+         .index_vgpr = static_cast<uint16_t>(*patch.scratch_vgpr + (slot == 1 ? 2u : 8u))},
+        *target));
     const std::vector<uint32_t> trampoline =
         text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
-    EXPECT_TRUE(contains_subsequence(trampoline, *materialize));
+    EXPECT_TRUE(contains_subsequence(trampoline, indexed_address));
     if (slot == 0) {
       const uint16_t value_vgpr = static_cast<uint16_t>(*patch.scratch_vgpr + 2u);
       for (const uint16_t dispatch_sgpr :
@@ -5346,13 +5363,21 @@ TEST(ConSanMoi, DirectSampledProbeCanCheckCorrespondingPriorBank) {
   const auto atomic_snapshot = build_flat_atomic_add_u64_vaddr_vsrc_vdst(
       scratch, static_cast<uint16_t>(scratch + 5u), static_cast<uint16_t>(scratch + 5u),
       /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto bank_offset = build_v_mul_lo_u32_vop3_literal(
-      static_cast<uint16_t>(scratch + 4u), sizeof(uint64_t), static_cast<uint16_t>(scratch + 7u),
-      ROCJITSU_CODE_ARCH_RDNA4);
+  const ConSanMoiReportBufferLayout layout =
+      consan_moi_direct_sampled_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
+  const ConSanTargetProfile *target = consan_target_profile(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(target, nullptr);
+  std::vector<uint32_t> prior_bank_address;
+  ASSERT_TRUE(consan_detail::append_moi_indexed_address(
+      prior_bank_address,
+      {.table_address = *options.moi_report_buffer_address + layout.sampled_watchpoints_offset,
+       .stride_bytes = sizeof(uint64_t),
+       .address_vgpr = scratch,
+       .index_vgpr = static_cast<uint16_t>(scratch + 7u)},
+      *target));
   ASSERT_TRUE(atomic_snapshot);
-  ASSERT_TRUE(bank_offset);
   EXPECT_EQ(count_subsequence(patched_words, *atomic_snapshot), 1u);
-  EXPECT_TRUE(contains_subsequence(patched_words, *bank_offset));
+  EXPECT_TRUE(contains_subsequence(patched_words, prior_bank_address));
 }
 
 TEST(ConSanMoi, DirectSampledProbeChecksEveryPriorMultiAddressRange) {

@@ -322,6 +322,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       !address_plan.supported() || !candidate.site.raw_scope || candidate.site.width_bits != 32u ||
       !candidate.kernel_descriptor_file_offset)
     return std::nullopt;
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr)
+    return std::nullopt;
   const auto role = sampled_atomic_role(candidate.event_kind, candidate.is_rmw);
   const auto scope = sampled_atomic_scope(*candidate.site.raw_scope);
   if (!role || !scope ||
@@ -439,9 +442,13 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     } else {
       words.push_back(build_v_mov_b32_e32(value, vector_source_vgpr(bank), arch));
     }
-    return append_sampled_indexed_address(words, first_pending_address,
-                                          sizeof(ConSanMoiSampledPendingAcquireSlot), value, base,
-                                          expected, arch);
+    return consan_detail::append_moi_indexed_address(
+        words,
+        {.table_address = first_pending_address,
+         .stride_bytes = sizeof(ConSanMoiSampledPendingAcquireSlot),
+         .address_vgpr = base,
+         .index_vgpr = value},
+        *target);
   };
   if (!append_pending_address() || !sequence.emit_all(publishing, empty, claim) ||
       !append_moi_global_atomic_wait(words, arch)) {
@@ -620,6 +627,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       selected_slot > layout.sampled_watchpoint_capacity ||
       bank_count > layout.sampled_watchpoint_capacity - selected_slot)
     return std::nullopt;
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr)
+    return std::nullopt;
   if (!address_plan.supported() || !candidate.site.raw_scope || candidate.site.width_bits != 32u)
     return std::nullopt;
   const auto role = sampled_atomic_role(candidate.event_kind, candidate.is_rmw);
@@ -737,9 +747,13 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
   words.push_back(*save_exec);
 
-  if (!append_sampled_indexed_address(words, first_window_address,
-                                      sizeof(ConSanMoiSampledCausalWindow), bank, base, expected,
-                                      arch))
+  if (!consan_detail::append_moi_indexed_address(
+          words,
+          {.table_address = first_window_address,
+           .stride_bytes = sizeof(ConSanMoiSampledCausalWindow),
+           .address_vgpr = base,
+           .index_vgpr = bank},
+          *target))
     return std::nullopt;
 
   const auto narrow_equal_literal = [&](uint32_t offset, uint32_t literal) -> bool {
@@ -809,8 +823,12 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                               workgroup_sources->cluster_workgroup_id))
     return std::nullopt;
 
-  if (!append_sampled_indexed_address(words, first_watchpoint_address, sizeof(uint64_t), bank, base,
-                                      expected, arch))
+  if (!consan_detail::append_moi_indexed_address(words,
+                                                 {.table_address = first_watchpoint_address,
+                                                  .stride_bytes = sizeof(uint64_t),
+                                                  .address_vgpr = base,
+                                                  .index_vgpr = bank},
+                                                 *target))
     return std::nullopt;
   const auto narrow_current_vcc = [&]() -> bool {
     const auto narrow =
@@ -925,10 +943,14 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     const auto zero = instrumentation::build_v_mov_b32_literal(expected, 0, arch);
     const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
                                                                       kRdna4ScopeDevice, arch);
-    if (!append_sampled_indexed_address(
+    if (!consan_detail::append_moi_indexed_address(
             words,
-            first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
-            sizeof(ConSanMoiSampledSyncMetadataPacked), bank, base, expected, arch) ||
+            {.table_address =
+                 first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
+             .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
+             .address_vgpr = base,
+             .index_vgpr = bank},
+            *target) ||
         !sequence.emit_all(sentinel, zero, claim) || !append_moi_global_atomic_wait(words, arch)) {
       return false;
     }
@@ -940,9 +962,13 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       return false;
     if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::SccZero))
       return false;
-    if (!append_sampled_indexed_address(words, first_metadata_address,
-                                        sizeof(ConSanMoiSampledSyncMetadataPacked), bank, base,
-                                        expected, arch) ||
+    if (!consan_detail::append_moi_indexed_address(
+            words,
+            {.table_address = first_metadata_address,
+             .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
+             .address_vgpr = base,
+             .index_vgpr = bank},
+            *target) ||
         !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, address), saved_address) ||
         !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, address) + 4u,
                            static_cast<uint16_t>(saved_address + 1u)) ||
@@ -959,10 +985,14 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
                                                                        kRdna4ScopeDevice, arch);
     if (!sequence.emit(wait) ||
-        !append_sampled_indexed_address(
+        !consan_detail::append_moi_indexed_address(
             words,
-            first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
-            sizeof(ConSanMoiSampledSyncMetadataPacked), bank, base, expected, arch) ||
+            {.table_address =
+                 first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
+             .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
+             .address_vgpr = base,
+             .index_vgpr = bank},
+            *target) ||
         !sequence.emit_all(final_value, final_expected, commit) ||
         !append_moi_global_atomic_wait(words, arch)) {
       return false;
