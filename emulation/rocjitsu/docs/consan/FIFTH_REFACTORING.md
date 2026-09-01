@@ -7177,3 +7177,47 @@ the correct private transaction. The whole-project payoff remains small.
 Remaining broad lowering mutation surfaces, target and mode locality, material
 whole-refactoring shrinkage, and the independent completion audit remain open.
 The goal therefore remains active.
+
+### 16.97 Convergence checkpoint 96: patch-local barrier-reservoir pruning
+
+The Record/Replay barrier trace followed provisional direct reservoirs from
+planning through fixed-point pruning. The pruning helper does not decide mode
+policy, publish lowering state, or consume any other transform result. It
+restores unclaimed guest bytes and relay words, then removes exactly the
+corresponding patch products. Nevertheless, it accepted the whole mutable
+transform transaction in addition to its separate diagnostic sink.
+
+The helper now receives only the patch transaction and diagnostic sink. Its
+caller remains the barrier-record publication owner, while the fixed-point
+algorithm and stable planned offsets are unchanged. The architecture gate caps
+`consan_moi_barrier.inc` at five reviewed broad-transaction sites: the two
+mode-facing publication adapters and the three actual InlineShadow or
+Record/Replay mutation owners. A barrier-local helper therefore cannot regain
+opportunistic access to unrelated lowering state.
+
+| Signal | Checkpoint 96 | Cumulative change | Slice change from checkpoint 95 |
+| --- | ---: | ---: | ---: |
+| Production files | 274 | +45 | 0 |
+| Physical production lines | 102,929 | **-2,047** | **-1** |
+| Nonblank production lines | 96,689 | **-2,395** | **-1** |
+| Production implementation lines | 88,996 | **-2,454** | **-1** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **133 / 49** | **-143 / -8** | **-1 / 0** |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | +1 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Whole-transaction mentions in barrier implementation | **5** | n/a | **-1** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and all **40/40** unique
+barrier-record, reserved-relay, dense-barrier, and architecture-boundary tests.
+In particular, the existing reserved-relay composition regression exercises
+the fixed-point pruning behavior. Checkpoint 92 passed all 1,295 host/component
+tests, and checkpoint 91 passed all 4,776 nonphysical tests across the
+five-target simulator matrix. No test was added, removed, renamed, disabled,
+or replaced, and no physical gfx1201 test was run.
+
+This slice strengthens Sections 14.1 and 14.5 by replacing another broad read
+and mutation capability with an exact product boundary. It deliberately does
+not treat a one-line reduction as material shrinkage. Remaining broad lowering
+mutation surfaces, target and mode locality, larger legacy harvesting, and the
+independent completion audit remain open. The goal therefore remains active.

@@ -522,10 +522,10 @@ build_inline_shadow_private_epoch_barrier_cave_words(
 // removes dependency-only reservoirs whose sole consumer was itself pruned.
 // This preserves stable planned offsets without leaving dead guest-code
 // relocations in the final image.
-[[nodiscard]] bool prune_unused_record_replay_direct_reservoirs(std::vector<uint8_t> &text,
-                                                                rj_code_arch_t arch,
-                                                                ConSanTransformArtifacts &result,
-                                                                std::vector<std::string> &errors) {
+[[nodiscard]] bool
+prune_unused_record_replay_direct_reservoirs(std::vector<uint8_t> &text, rj_code_arch_t arch,
+                                             std::vector<ConSanPatchInfo> &patches,
+                                             std::vector<std::string> &errors) {
   const uint32_t nop = build_s_nop(0u, arch);
   const auto is_direct_reservoir = [](const ConSanPatchLoweringProduct &patch) {
     return patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
@@ -534,22 +534,21 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   };
   bool pruned_any = false;
   for (;;) {
-    const auto unused =
-        std::ranges::find_if(result.patches, [&](const ConSanPatchLoweringProduct &patch) {
-          if (!is_direct_reservoir(patch) || patch.anchor_offset > text.size() ||
-              patch.original_size > text.size() - patch.anchor_offset) {
-            return false;
-          }
-          for (uint64_t offset = patch.anchor_offset + sizeof(uint32_t);
-               offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t)) {
-            uint32_t word = 0u;
-            std::memcpy(&word, text.data() + offset, sizeof(word));
-            if (word != nop)
-              return false;
-          }
-          return true;
-        });
-    if (unused == result.patches.end())
+    const auto unused = std::ranges::find_if(patches, [&](const ConSanPatchLoweringProduct &patch) {
+      if (!is_direct_reservoir(patch) || patch.anchor_offset > text.size() ||
+          patch.original_size > text.size() - patch.anchor_offset) {
+        return false;
+      }
+      for (uint64_t offset = patch.anchor_offset + sizeof(uint32_t);
+           offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t)) {
+        uint32_t word = 0u;
+        std::memcpy(&word, text.data() + offset, sizeof(word));
+        if (word != nop)
+          return false;
+      }
+      return true;
+    });
+    if (unused == patches.end())
       break;
 
     const ConSanPatchInfo reservoir = *unused;
@@ -581,7 +580,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
       }
     }
 
-    std::erase_if(result.patches, [&](const ConSanPatchLoweringProduct &patch) {
+    std::erase_if(patches, [&](const ConSanPatchLoweringProduct &patch) {
       if (is_direct_reservoir(patch) && patch.anchor_offset == reservoir.anchor_offset &&
           patch.trampoline_offset == reservoir.trampoline_offset)
         return true;
@@ -2728,7 +2727,7 @@ void try_apply_record_replay_barrier_record_patch(
   }
 
   const bool pruned_provisional_reservoirs =
-      prune_unused_record_replay_direct_reservoirs(new_text, arch, result, result.errors);
+      prune_unused_record_replay_direct_reservoirs(new_text, arch, result.patches, result.errors);
   if (!result.errors.empty())
     return;
   if (patches.empty()) {
