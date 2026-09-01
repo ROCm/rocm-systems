@@ -7409,3 +7409,47 @@ size payoff is intentionally reported as small. Remaining broad lowering
 mutation surfaces, target and mode locality, larger legacy harvesting,
 material whole-refactoring shrinkage, and the independent completion audit
 remain open. The goal therefore remains active.
+
+### 16.102 Convergence checkpoint 101: test-owned InlineShadow table oracles
+
+The runtime-report contract trace followed every InlineShadow table and token
+helper through device emission, runtime decoding, host analysis, and focused
+tests. The stable acquired-token classifier is a production decoder dependency,
+and the token mixing constants are the shared ABI facts consumed by native
+emission. Six neighboring table-selection, lookup, identity, and simulated
+publication APIs had no production consumer at all. They were host reference
+oracles used only to verify the emitted GPU transaction in focused tests.
+
+Those six APIs and their three result types now live in the existing
+`consan_inline_model_test_support.h` test component. Their implementation and
+all existing adversarial coverage are unchanged, but production no longer
+compiles a second executable model of the GPU-side table transaction. The
+architecture gate prohibits these names from returning to the production
+report helper. This is semantic removal from the production product, not a
+source-file rename or a loss of test coverage.
+
+| Signal | Checkpoint 101 | Cumulative change | Slice change from checkpoint 100 |
+| --- | ---: | ---: | ---: |
+| Production files | 274 | +45 | 0 |
+| Physical production lines | 102,706 | **-2,270** | **-200** |
+| Nonblank production lines | 96,475 | **-2,609** | **-191** |
+| Production implementation lines | 88,789 | **-2,661** | **-187** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Production InlineShadow table/publication oracle APIs | **0** | n/a | **-6** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and all **1,295/1,295**
+`ConSan.*` and `ConSanMoi.*` host/component tests. This includes the direct-map
+lookup, multi-token rollback, dispatch-reuse collision, malformed-token,
+runtime decoder, and architecture-boundary coverage. No test was added,
+removed, renamed, disabled, or replaced, and no physical gfx1201 test was run.
+
+This deletion-bearing slice strengthens Sections 14.3, 14.7, 14.8, and 14.9.
+The surviving mode-specific report layouts and runtime analysis still require
+physical ownership, and cumulative shrinkage remains non-material relative to
+the 91,450-line baseline. Broad lowering mutation surfaces, further legacy
+harvesting, and the independent completion audit also remain open. The goal
+therefore remains active.

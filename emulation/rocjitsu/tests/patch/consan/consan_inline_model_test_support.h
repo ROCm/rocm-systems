@@ -9,6 +9,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -65,6 +66,205 @@ consan_moi_inline_workgroup_key(uint32_t x, uint32_t y, uint32_t z,
                                                                           uint32_t version_after) {
   return version_before == version_after &&
          consan_moi_inline_release_version_is_ready(version_before);
+}
+
+[[nodiscard]] constexpr uint32_t
+consan_moi_inline_atomic_release_slot_index(uint64_t atomic_address, uint32_t table_capacity) {
+  if (table_capacity == 0 || (table_capacity & (table_capacity - 1u)) != 0)
+    return 0;
+  const uint32_t low = static_cast<uint32_t>(atomic_address);
+  const uint32_t high = static_cast<uint32_t>(atomic_address >> 32u);
+  uint32_t hash = (low >> 2u) ^ high;
+  hash ^= hash >> 16u;
+  hash ^= hash >> 8u;
+  hash ^= hash >> 4u;
+  hash *= 0x85ebca6bu;
+  return hash & (table_capacity - 1u);
+}
+
+enum class ConSanMoiInlineAtomicLookup : uint8_t {
+  Empty,
+  ExactSameOwner,
+  ExactOtherOwner,
+  Collision,
+};
+
+/// Test oracle for the direct-mapped InlineShadow atomic table.
+[[nodiscard]] constexpr ConSanMoiInlineAtomicLookup
+consan_moi_inline_atomic_release_lookup(const ConSanMoiInlineAtomicReleaseSlot &slot,
+                                        uint64_t atomic_address, uint32_t owner_id,
+                                        uint32_t workgroup_key = 0) {
+  if (slot.version == 0)
+    return ConSanMoiInlineAtomicLookup::Empty;
+  if (!consan_moi_inline_release_version_is_ready(slot.version))
+    return ConSanMoiInlineAtomicLookup::Collision;
+  if (slot.atomic_address != atomic_address || slot.workgroup_key != workgroup_key)
+    return ConSanMoiInlineAtomicLookup::Collision;
+  return slot.owner_id == owner_id ? ConSanMoiInlineAtomicLookup::ExactSameOwner
+                                   : ConSanMoiInlineAtomicLookup::ExactOtherOwner;
+}
+
+[[nodiscard]] constexpr uint32_t consan_moi_inline_acquired_epoch_token_slot_index(
+    uint32_t workgroup_key, uint32_t consumer_owner_id, uint32_t producer_owner_id,
+    uint32_t consumer_epoch, uint32_t table_capacity, bool release_sequence = false) {
+  if (table_capacity < 2u || (table_capacity & (table_capacity - 1u)) != 0)
+    return 0;
+  const uint32_t namespace_capacity = table_capacity / 2u;
+  uint32_t mixed = workgroup_key * kConSanMoiInlineTokenWorkgroupMultiplier;
+  mixed ^= consumer_owner_id * kConSanMoiInlineTokenConsumerMultiplier;
+  mixed ^= producer_owner_id * kConSanMoiInlineTokenProducerMultiplier;
+  mixed ^= consumer_epoch * kConSanMoiInlineTokenConsumerEpochMultiplier;
+  if (release_sequence)
+    mixed ^= kConSanMoiInlineTokenReleaseSequenceSalt;
+  mixed ^= mixed >> 16u;
+  mixed *= kConSanMoiInlineTokenAvalancheMultiplier0;
+  mixed ^= mixed >> 15u;
+  mixed *= kConSanMoiInlineTokenAvalancheMultiplier1;
+  mixed ^= mixed >> 16u;
+  return (mixed & (namespace_capacity - 1u)) + (release_sequence ? namespace_capacity : 0u);
+}
+
+enum class ConSanMoiInlineAcquiredEpochTokenLookup : uint8_t {
+  Empty,
+  Exact,
+  Collision,
+};
+
+[[nodiscard]] constexpr ConSanMoiInlineAcquiredEpochTokenLookup
+consan_moi_inline_acquired_epoch_token_lookup(const ConSanMoiInlineAcquiredEpochTokenSlot &slot,
+                                              uint32_t workgroup_key, uint32_t consumer_owner_id,
+                                              uint32_t producer_owner_id) {
+  if (slot.version == 0) {
+    return slot.consumer_owner_id == 0 && slot.producer_owner_id == 0 &&
+                   slot.producer_epoch_plus_one == 0 && slot.workgroup_key == 0 && slot.kind == 0 &&
+                   slot.dispatch_id == 0 && slot.source_release_address == 0 &&
+                   slot.source_release_version == 0 && slot.consumer_epoch_plus_one == 0 &&
+                   slot.reservation_version == 0
+               ? ConSanMoiInlineAcquiredEpochTokenLookup::Empty
+               : ConSanMoiInlineAcquiredEpochTokenLookup::Collision;
+  }
+  if (!consan_moi_inline_release_version_is_ready(slot.version))
+    return ConSanMoiInlineAcquiredEpochTokenLookup::Collision;
+  if (slot.consumer_owner_id == 0 || slot.producer_owner_id == 0 ||
+      slot.consumer_owner_id == slot.producer_owner_id ||
+      !consan_moi_inline_causal_epoch_is_valid(slot.producer_epoch_plus_one) ||
+      slot.workgroup_key == 0 ||
+      slot.kind > static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence) ||
+      slot.dispatch_id == 0 || slot.source_release_address == 0 ||
+      !consan_moi_inline_release_version_is_ready(slot.source_release_version) ||
+      !consan_moi_inline_causal_epoch_is_valid(slot.consumer_epoch_plus_one) ||
+      slot.reservation_version != 0)
+    return ConSanMoiInlineAcquiredEpochTokenLookup::Collision;
+  if (slot.kind == static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence) ||
+      slot.workgroup_key != workgroup_key || slot.consumer_owner_id != consumer_owner_id ||
+      slot.producer_owner_id != producer_owner_id)
+    return ConSanMoiInlineAcquiredEpochTokenLookup::Collision;
+  return ConSanMoiInlineAcquiredEpochTokenLookup::Exact;
+}
+
+[[nodiscard]] constexpr bool consan_moi_inline_acquired_token_identity_matches(
+    const ConSanMoiInlineAcquiredEpochTokenSlot &actual,
+    const ConSanMoiInlineAcquiredEpochTokenSlot &expected) {
+  return actual.consumer_owner_id == expected.consumer_owner_id &&
+         actual.producer_owner_id == expected.producer_owner_id &&
+         actual.producer_epoch_plus_one == expected.producer_epoch_plus_one &&
+         actual.workgroup_key == expected.workgroup_key && actual.kind == expected.kind &&
+         actual.dispatch_id == expected.dispatch_id &&
+         actual.source_release_address == expected.source_release_address &&
+         actual.source_release_version == expected.source_release_version &&
+         actual.consumer_epoch_plus_one == expected.consumer_epoch_plus_one &&
+         actual.reservation_version == expected.reservation_version;
+}
+
+struct ConSanMoiInlineAcquiredTokenTransactionResult {
+  bool committed = false;
+  bool collision = false;
+  bool duplicate_destination = false;
+  bool claim_failed = false;
+  bool invalid = false;
+};
+
+/// Test oracle for the all-or-nothing publication of a direct token and its
+/// inherited companions. Every destination is reserved before payload commit.
+[[nodiscard]] constexpr ConSanMoiInlineAcquiredTokenTransactionResult
+consan_moi_inline_publish_acquired_token_transaction(
+    std::span<ConSanMoiInlineAcquiredEpochTokenSlot> table,
+    std::span<const ConSanMoiInlineAcquiredEpochTokenSlot> desired,
+    std::span<const bool> simulated_claim_success = {}) {
+  ConSanMoiInlineAcquiredTokenTransactionResult result;
+  if (desired.empty() || desired.size() > 5 || table.empty() ||
+      (table.size() & (table.size() - 1u)) != 0 ||
+      (!simulated_claim_success.empty() && simulated_claim_success.size() != desired.size())) {
+    result.invalid = true;
+    return result;
+  }
+  std::array<size_t, 5> destinations{};
+  std::array<ConSanMoiInlineAcquiredEpochTokenSlot, 5> originals{};
+  for (size_t i = 0; i < desired.size(); ++i) {
+    const auto &token = desired[i];
+    if (token.version != 0 || token.consumer_owner_id == 0 || token.producer_owner_id == 0 ||
+        token.consumer_owner_id == token.producer_owner_id ||
+        !consan_moi_inline_causal_epoch_is_valid(token.producer_epoch_plus_one) ||
+        token.workgroup_key == 0 ||
+        token.kind > static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence) ||
+        token.dispatch_id == 0 || token.source_release_address == 0 ||
+        !consan_moi_inline_release_version_is_ready(token.source_release_version) ||
+        !consan_moi_inline_causal_epoch_is_valid(token.consumer_epoch_plus_one) ||
+        token.reservation_version != 0) {
+      result.invalid = true;
+      return result;
+    }
+    destinations[i] = consan_moi_inline_acquired_epoch_token_slot_index(
+        token.workgroup_key, token.consumer_owner_id, token.producer_owner_id,
+        token.consumer_epoch_plus_one - 1u, table.size(),
+        token.kind == static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence));
+    for (size_t prior = 0; prior < i; ++prior) {
+      if (destinations[prior] == destinations[i]) {
+        result.duplicate_destination = true;
+        return result;
+      }
+    }
+    originals[i] = table[destinations[i]];
+    const auto classified = consan_moi_inline_classify_acquired_token(
+        {originals[i].version, originals[i], originals[i].version});
+    if (classified.state != ConSanMoiInlineAcquiredTokenState::Empty &&
+        classified.state != ConSanMoiInlineAcquiredTokenState::Stable) {
+      result.collision = true;
+      return result;
+    }
+    if (classified.state == ConSanMoiInlineAcquiredTokenState::Stable &&
+        (classified.token.consumer_owner_id != token.consumer_owner_id ||
+         classified.token.producer_owner_id != token.producer_owner_id ||
+         classified.token.workgroup_key != token.workgroup_key ||
+         classified.token.dispatch_id != token.dispatch_id ||
+         classified.token.consumer_epoch_plus_one != token.consumer_epoch_plus_one)) {
+      result.collision = true;
+      return result;
+    }
+  }
+  size_t reserved = 0;
+  for (; reserved < desired.size(); ++reserved) {
+    if (!simulated_claim_success.empty() && !simulated_claim_success[reserved]) {
+      result.claim_failed = true;
+      break;
+    }
+    auto &slot = table[destinations[reserved]];
+    slot.version = originals[reserved].version == 0 ? 1u : originals[reserved].version + 1u;
+  }
+  if (reserved != desired.size()) {
+    while (reserved != 0) {
+      --reserved;
+      table[destinations[reserved]] = originals[reserved];
+    }
+    return result;
+  }
+  for (size_t i = 0; i < desired.size(); ++i) {
+    const uint32_t committed_version = originals[i].version == 0 ? 2u : originals[i].version + 2u;
+    table[destinations[i]] = desired[i];
+    table[destinations[i]].version = committed_version;
+  }
+  result.committed = true;
+  return result;
 }
 
 /// Test oracle for the byte-provenance word emitted by InlineShadow.

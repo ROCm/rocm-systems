@@ -475,6 +475,11 @@ _consan_assert_no_match(
     "consan_moi_(compact_record_replay_trace|plan_record_replay_capture|replay_record_replay_capture)"
     "host-only Record/Replay capture oracle declarations must remain test-owned"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_report_helpers.h.inc"
+    "ConSanMoiInline(AtomicLookup|AcquiredEpochTokenLookup|AcquiredTokenTransactionResult)|consan_moi_inline_(atomic_release_slot_index|atomic_release_lookup|acquired_epoch_token_slot_index|acquired_token_identity_matches|publish_acquired_token_transaction|acquired_epoch_token_lookup)"
+    "host-only InlineShadow table and publication oracles must remain test-owned"
+)
 foreach(
     _record_replay_capture_type_owner
     IN ITEMS
