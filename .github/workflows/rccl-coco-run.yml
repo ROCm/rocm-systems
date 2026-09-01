@@ -9,9 +9,15 @@ name: RCCL coco run
 # matched pair chosen by the caller: each job is bound internally to the
 # machine it expects, with no way to override that from here, so a job meant
 # for the ruby cluster must always be paired with a ruby runner label.
+# `mode` selects the coco subcommand: run (default) or pr.
 on:
   workflow_call:
     inputs:
+      mode:
+        description: 'coco subcommand: run or pr.'
+        type: string
+        required: false
+        default: 'run'
       runs_on:
         description: 'Runner label to run on.'
         type: string
@@ -38,11 +44,41 @@ on:
         type: string
         required: false
         default: ''
+      pr_number:
+        description: 'Pull request number (mode=pr).'
+        type: string
+        required: false
+        default: ''
+      pr_sha:
+        description: 'PR head SHA, 40 hex (mode=pr).'
+        type: string
+        required: false
+        default: ''
+      pr_repo:
+        description: 'Monorepo slug (mode=pr).'
+        type: string
+        required: false
+        default: 'ROCm/rocm-systems'
+      software:
+        description: 'Component to swap to PR head (mode=pr).'
+        type: string
+        required: false
+        default: 'rccl'
+      pr_stacks:
+        description: 'Optional stack keys, word-split (mode=pr).'
+        type: string
+        required: false
+        default: ''
       timeout_minutes:
         description: 'Job timeout in minutes.'
         type: number
         required: false
         default: 600
+      non_gating:
+        description: 'If true, failures do not fail the workflow.'
+        type: boolean
+        required: false
+        default: false
     # Declared explicitly rather than taking `secrets: inherit` from the caller,
     # so this workflow's credential requirements are visible in its own contract.
     secrets:
@@ -61,7 +97,7 @@ permissions:
 
 jobs:
   coco:
-    name: ${{ inputs.job }}
+    name: ${{ inputs.mode == 'pr' && format('{0} (PR {1})', inputs.job, inputs.pr_number) || inputs.job }}
     # A reusable workflow can be invoked by full reference (owner/repo/path@ref)
     # from any repository, not just this one -- workflow_call has no built-in
     # allow-list of callers. github.repository reflects the caller's repository
@@ -72,6 +108,7 @@ jobs:
     if: github.repository == 'ROCm/rocm-systems'
     runs-on: ${{ inputs.runs_on }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
+    continue-on-error: ${{ inputs.non_gating }}
     # The group is per-input so each caller can serialise its own jobs
     # independently. cancel-in-progress is never true here, not just by
     # default: killing this job would not cancel the cluster allocation coco
@@ -87,9 +124,9 @@ jobs:
       run:
         shell: bash
     env:
-      LOG_FILE: ${{ github.workspace }}/coco-${{ inputs.job }}-${{ github.run_id }}.log
-      # Unique per run + attempt.
+      LOG_FILE: ${{ github.workspace }}/coco-${{ inputs.mode }}-${{ inputs.job }}-${{ github.run_id }}.log
       COCO_DIR: ${{ github.workspace }}/_coco-${{ github.run_id }}-${{ github.run_attempt }}
+      COCO_OUTPUT: ${{ inputs.mode == 'pr' && format('{0}/coco-results-pr-{1}-{2}-{3}', github.workspace, inputs.job, github.run_id, github.run_attempt) || '' }}
     steps:
       # Limit the checkout to the composite action's own directory.
       - name: Checkout rocm-systems
@@ -105,11 +142,20 @@ jobs:
         with:
           ref: ${{ inputs.coco_ref }}
           path: ${{ env.COCO_DIR }}/tRCCL
-          app-id: ${{ secrets.APP_ID }}
+          client-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        env:
+          # Some runners' _work directory lives on an NFS mount that does
+          # unstable (non-sync) writes under load; extracting the Python
+          # toolchain's few thousand small files there has been observed to
+          # silently truncate a file's tail while still reporting the
+          # correct length (e.g. a torn ensurepip pip wheel that fails to
+          # open as a zip). Redirect the tool cache to the runner host's
+          # local disk, which isn't subject to that failure mode.
+          RUNNER_TOOL_CACHE: /tmp/gh-tool-cache-${{ runner.name }}
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -134,38 +180,70 @@ jobs:
         id: launch
         working-directory: ${{ env.COCO_DIR }}/tRCCL
         env:
+          MODE: ${{ inputs.mode }}
           JOB: ${{ inputs.job }}
           TRIGGER_KIND: ${{ inputs.trigger_kind }}
           COCO_ARGS: ${{ inputs.coco_args }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_REPO: ${{ inputs.pr_repo }}
+          PR_SHA: ${{ inputs.pr_sha }}
+          SOFTWARE: ${{ inputs.software }}
+          PR_STACKS: ${{ inputs.pr_stacks }}
           COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
           COCO_VENV: ${{ env.COCO_DIR }}/venv
+          COCO_OUTPUT: ${{ env.COCO_OUTPUT }}
         run: |
           set -euo pipefail
-          # Strip login-node Python from the environment before coco submits
-          # the compute-node SLURM job.
           unset VIRTUAL_ENV PYTHONHOME pythonLocation Python_ROOT_DIR Python3_ROOT_DIR
           PATH="$(printf '%s' "${PATH}" | tr ':' '\n' | grep -vE '/_work/_tool/Python/' | paste -sd: -)"
           export PATH
           if [[ -z "${COCO_DB_URL:-}" ]]; then
             echo "::warning::RCCL_COCO_DB_URL is empty; this run will not publish results to the coco database."
           fi
-          # COCO_ARGS is deliberately word-split: it carries a whole flag list
-          # composed by the caller, not a single argument.
-          echo "==> coco run --job ${JOB} --trigger-kind ${TRIGGER_KIND} ${COCO_ARGS}"
-          # Straight to the file, not teed through the console: at -vv this
-          # can run for hours and risks the platform's per-job log-size limit
-          # and a slow-to-render live log. The tail below and the uploaded
-          # artifact are how this becomes visible instead.
-          "${COCO_VENV}/bin/coco" run \
-            --job "${JOB}" \
-            --trigger-kind "${TRIGGER_KIND}" \
-            ${COCO_ARGS} > "${LOG_FILE}" 2>&1
+
+          if [[ "${MODE}" == 'pr' ]]; then
+            if [[ -z "${PR_NUMBER}" || "${PR_NUMBER}" -le 0 ]]; then
+              echo "::error::mode=pr requires pr_number"
+              exit 1
+            fi
+            if [[ ! "${PR_SHA}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              echo "::error::mode=pr requires a full 40-hex pr_sha"
+              exit 1
+            fi
+            mkdir -p "${COCO_OUTPUT}"
+            stack_args=()
+            if [[ -n "${PR_STACKS}" ]]; then
+              for stack in ${PR_STACKS}; do
+                stack_args+=(--stack "${stack}")
+              done
+            fi
+            echo "==> coco pr --job ${JOB} -o ${COCO_OUTPUT} ..."
+            "${COCO_VENV}/bin/coco" pr \
+              --job "${JOB}" \
+              --repo "${PR_REPO}" \
+              --pr "${PR_NUMBER}" \
+              --sha "${PR_SHA}" \
+              --software "${SOFTWARE}" \
+              --trigger-kind "${TRIGGER_KIND}" \
+              -o "${COCO_OUTPUT}" \
+              "${stack_args[@]}" \
+              ${COCO_ARGS} > "${LOG_FILE}" 2>&1
+          elif [[ "${MODE}" == 'run' ]]; then
+            echo "==> coco run --job ${JOB} --trigger-kind ${TRIGGER_KIND} ${COCO_ARGS}"
+            "${COCO_VENV}/bin/coco" run \
+              --job "${JOB}" \
+              --trigger-kind "${TRIGGER_KIND}" \
+              ${COCO_ARGS} > "${LOG_FILE}" 2>&1
+          else
+            echo "::error::mode must be run or pr, got: ${MODE}"
+            exit 1
+          fi
 
       - name: Upload coco log
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: coco-${{ inputs.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: coco-${{ inputs.mode }}-${{ inputs.job }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.LOG_FILE }}
           if-no-files-found: warn
           retention-days: 14
@@ -173,20 +251,35 @@ jobs:
       - name: Run summary
         if: always()
         env:
+          MODE: ${{ inputs.mode }}
           JOB: ${{ inputs.job }}
           TRIGGER_KIND: ${{ inputs.trigger_kind }}
           COCO_REF: ${{ inputs.coco_ref }}
           COCO_ARGS: ${{ inputs.coco_args }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_REPO: ${{ inputs.pr_repo }}
+          PR_SHA: ${{ inputs.pr_sha }}
+          COCO_OUTPUT: ${{ env.COCO_OUTPUT }}
           LAUNCH_OUTCOME: ${{ steps.launch.outcome }}
         run: |
+          title="${JOB}"
+          if [[ "${MODE}" == 'pr' ]]; then
+            title="${JOB} (PR #${PR_NUMBER})"
+          fi
           {
-            echo "### ${JOB}"
+            echo "### ${title}"
             echo ""
             echo "| | |"
             echo "|---|---|"
+            echo "| mode | \`${MODE}\` |"
             echo "| outcome | \`${LAUNCH_OUTCOME}\` |"
             echo "| trigger kind | \`${TRIGGER_KIND}\` |"
             echo "| coco ref | \`${COCO_REF}\` |"
+            if [[ "${MODE}" == 'pr' ]]; then
+              echo "| output dir | \`${COCO_OUTPUT}\` |"
+              echo "| repo | \`${PR_REPO}\` |"
+              echo "| head sha | \`${PR_SHA}\` |"
+            fi
             echo "| extra flags | \`${COCO_ARGS:-(none)}\` |"
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -202,6 +295,11 @@ jobs:
 
       - name: Clean up harness checkout
         if: always()
+        env:
+          COCO_OUTPUT: ${{ env.COCO_OUTPUT }}
         run: |
           rm -rf "${COCO_DIR}"
+          if [[ -n "${COCO_OUTPUT}" ]]; then
+            rm -rf "${COCO_OUTPUT}"
+          fi
           rm -f "${LOG_FILE}"

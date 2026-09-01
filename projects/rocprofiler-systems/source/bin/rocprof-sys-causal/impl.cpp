@@ -11,7 +11,7 @@
 #include "core/mproc.hpp"
 #include "core/utility.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <timemory/environment.hpp>
 #include <timemory/log/color.hpp>
