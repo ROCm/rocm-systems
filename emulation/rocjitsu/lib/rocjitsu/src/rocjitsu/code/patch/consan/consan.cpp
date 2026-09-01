@@ -17,7 +17,7 @@
 namespace rocjitsu {
 
 ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
-    ConSanTransformArtifacts inventory_artifacts, ConSanOptions options,
+    ConSanMoiRetryInventory retry_inventory, ConSanOptions options,
     std::span<const uint8_t> code_object_bytes, ConSanLoweringExecution *execution,
     const ConSanLoweringObservation *observation) {
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
@@ -26,7 +26,11 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
   try {
     const ConSanMoiOperatingPoint initial_operating_point =
         initial_consan_moi_operating_point(options);
-    ConSanTransformArtifacts inventory = std::move(inventory_artifacts);
+    ConSanTransformArtifacts inventory;
+    inventory.program_inventory = std::move(retry_inventory.program_inventory);
+    inventory.coverage_ledger = std::move(retry_inventory.coverage_ledger);
+    inventory.fault_sites = std::move(retry_inventory.fault_sites);
+    inventory.barrier_move_destinations = std::move(retry_inventory.barrier_move_destinations);
     if (options.flavor != ConSanFlavor::Moi)
       inventory.errors.emplace_back("ConSan MOI inventory retry requires the MOI flavor");
     if (inventory.observation_plan().engine !=
@@ -41,12 +45,6 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
     if (!inventory_id.valid() || inventory_id != make_consan_code_object_id(code_object_bytes)) {
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry does not match the original code-object bytes");
-    }
-    if (inventory.modified() || !inventory.replacement.empty() ||
-        inventory.mutation.fault.applied != 0u || inventory.mutation.perturbation.applied != 0u ||
-        !inventory.fault_plans.empty()) {
-      inventory.errors.emplace_back(
-          "ConSan MOI inventory retry requires an unmodified semantic inventory");
     }
     if (!inventory.errors.empty()) {
       inventory.outcome = ConSanTransformOutcome::Invalid;
@@ -71,10 +69,6 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
                                     execution);
     }
 
-    // The retry replaces diagnostics from the unbound sizing attempt. The
-    // immutable inventory, policy, and coverage records carry its semantic
-    // output without requiring warning provenance in private working state.
-    inventory.warnings.clear();
     const bool has_late_fault = options.has_fault_mutation();
     if (has_late_fault && options.fault_dry_run) {
       inventory.errors.emplace_back(

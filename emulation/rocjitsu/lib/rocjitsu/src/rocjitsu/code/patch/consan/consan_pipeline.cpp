@@ -523,27 +523,7 @@ void TransformResult::publish_lowering_artifacts(ConSanTransformArtifacts loweri
   private_lowering_.barrier_move_destinations = std::move(lowering.barrier_move_destinations);
   private_lowering_.fault_plans = std::move(lowering.fault_plans);
   private_lowering_.resource_plans = std::move(lowering.resource_plans);
-  private_lowering_.moi_operating_point = std::move(lowering.moi_operating_point);
   private_lowering_.patches = std::move(lowering.patches);
-}
-
-ConSanTransformArtifacts TransformResult::take_lowering_artifacts() {
-  ConSanTransformArtifacts lowering;
-  lowering.program_inventory = std::move(program_inventory);
-  lowering.coverage_ledger = std::move(coverage_ledger);
-  lowering.mutation = std::move(mutation);
-  lowering.replacement = std::move(replacement);
-  lowering.outcome = outcome;
-  lowering.transform_failure_cause = transform_failure_cause;
-  lowering.warnings = std::move(warnings);
-  lowering.errors = std::move(errors);
-  lowering.fault_sites = std::move(private_lowering_.fault_sites);
-  lowering.barrier_move_destinations = std::move(private_lowering_.barrier_move_destinations);
-  lowering.fault_plans = std::move(private_lowering_.fault_plans);
-  lowering.resource_plans = std::move(private_lowering_.resource_plans);
-  lowering.moi_operating_point = std::move(private_lowering_.moi_operating_point);
-  lowering.patches = std::move(private_lowering_.patches);
-  return lowering;
 }
 
 bool TransformResult::well_formed() const {
@@ -795,10 +775,13 @@ TransformResult resume_consan_automatic_transform(std::span<const uint8_t> code_
   case ConSanDeferredBinding::ResumeStrategy::RetryMoiInventory: {
     ConSanOptions retry_options(deferred.request_, deferred.transform_policy_, deferred.debug_,
                                 deferred.requested_mutation_, deferred.capabilities_, resources);
-    ConSanTransformArtifacts retry_inventory = result.take_lowering_artifacts();
-    completed =
-        retry_patch_consan_moi_from_inventory(std::move(retry_inventory), std::move(retry_options),
-                                              code_object_bytes, &execution, &observation);
+    completed = retry_patch_consan_moi_from_inventory(
+        {.program_inventory = std::move(result.program_inventory),
+         .coverage_ledger = std::move(result.coverage_ledger),
+         .fault_sites = std::move(result.private_lowering_.fault_sites),
+         .barrier_move_destinations =
+             std::move(result.private_lowering_.barrier_move_destinations)},
+        std::move(retry_options), code_object_bytes, &execution, &observation);
     break;
   }
   case ConSanDeferredBinding::ResumeStrategy::RelowerFromInput: {

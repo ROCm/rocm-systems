@@ -162,6 +162,19 @@ test_lower_consan(std::span<const uint8_t> code_object_bytes, const MoiOptions &
       code_object_bytes, options, options.resolved_operating_point(), inspected_perturbation);
 }
 
+/// Adapt the complete lowerer result used by mechanism tests to the immutable
+/// semantic inventory accepted by production automatic resume.
+[[nodiscard]] inline ConSanTransformArtifacts
+test_retry_consan_moi_from_inventory(ConSanTransformArtifacts inventory, ConSanOptions options,
+                                     std::span<const uint8_t> code_object_bytes) {
+  return retry_patch_consan_moi_from_inventory(
+      {.program_inventory = std::move(inventory.program_inventory),
+       .coverage_ledger = std::move(inventory.coverage_ledger),
+       .fault_sites = std::move(inventory.fault_sites),
+       .barrier_move_destinations = std::move(inventory.barrier_move_destinations)},
+      std::move(options), code_object_bytes);
+}
+
 /// Lower one focused fixture whose input image already contains committed
 /// mutation geometry. This keeps staged-image ownership out of mutable
 /// `MoiOptions` while allowing placement and CFG tests to construct the

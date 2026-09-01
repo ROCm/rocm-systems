@@ -360,16 +360,11 @@ private:
   /// diagnostic storage. Only the transaction publication boundary calls it.
   void publish_lowering_artifacts(ConSanTransformArtifacts lowering);
 
-  /// Reconstitute a lowerer aggregate for the transaction-owned MOI resume
-  /// strategy. The caller consumes this result object completely.
-  [[nodiscard]] ConSanTransformArtifacts take_lowering_artifacts();
-
   struct PrivateLoweringArtifacts {
     std::vector<ConSanFaultSite> fault_sites;
     std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
     std::vector<ConSanFaultMutationPlan> fault_plans;
     std::vector<ConSanCandidateResourcePlan> resource_plans;
-    ConSanMoiOperatingPoint moi_operating_point;
     std::vector<ConSanPatchInfo> patches;
   } private_lowering_;
 };

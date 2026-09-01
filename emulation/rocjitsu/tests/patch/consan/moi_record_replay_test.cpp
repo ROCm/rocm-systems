@@ -615,7 +615,7 @@ TEST(ConSanMoi, ReportBufferRetryMatchesFreshRecordReplayTransform) {
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
   const ConSanTransformArtifacts fresh = test_lower_consan(bytes, options);
   const ConSanTransformArtifacts retried =
-      retry_patch_consan_moi_from_inventory(std::move(inventory), options, bytes);
+      test_retry_consan_moi_from_inventory(std::move(inventory), options, bytes);
 
   ASSERT_TRUE(consan_patch_succeeded(fresh)) << testing::PrintToString(fresh.errors);
   ASSERT_TRUE(consan_patch_succeeded(retried)) << testing::PrintToString(retried.errors);
@@ -658,7 +658,7 @@ TEST(ConSanMoi, ReportBufferRetryHandlesRecordReplaySyncInventory) {
   options.moi_report_layout = *bound_layout;
   const ConSanTransformArtifacts fresh = test_lower_consan(bytes, options);
   const ConSanTransformArtifacts retried =
-      retry_patch_consan_moi_from_inventory(std::move(inventory), options, bytes);
+      test_retry_consan_moi_from_inventory(std::move(inventory), options, bytes);
 
   ASSERT_TRUE(consan_patch_succeeded(fresh)) << testing::PrintToString(fresh.errors);
   ASSERT_TRUE(consan_patch_succeeded(retried)) << testing::PrintToString(retried.errors);
@@ -685,7 +685,7 @@ TEST(ConSanMoi, ReportBufferRetryHandlesRecordReplaySyncInventory) {
   }));
 }
 
-TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
+TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedImmutableInventory) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   MoiOptions inventory_options = moi_options(ConSanMoiEngine::RecordReplay);
   const ConSanTransformArtifacts pristine = test_lower_consan(bytes, inventory_options);
@@ -700,7 +700,7 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
                                   std::span<const uint8_t> retry_bytes,
                                   std::string_view expected_error) {
     const ConSanTransformArtifacts result =
-        retry_patch_consan_moi_from_inventory(std::move(inventory), retry_options, retry_bytes);
+        test_retry_consan_moi_from_inventory(std::move(inventory), retry_options, retry_bytes);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
     EXPECT_TRUE(std::ranges::any_of(result.errors, [&](const std::string &error) {
       return error.find(expected_error) != std::string::npos;
@@ -741,10 +741,6 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
       wrong_arch.program_inventory.target());
   wrong_arch.program_inventory = wrong_arch_inventory.view();
   expect_invalid(std::move(wrong_arch), bytes, "code-object architecture");
-
-  ConSanTransformArtifacts modified = pristine;
-  modified.mark_modified();
-  expect_invalid(std::move(modified), bytes, "unmodified semantic inventory");
 }
 
 TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
@@ -8650,9 +8646,8 @@ TEST(ConSanMoi, Cdna4PrivateDispatchSpillKeepsScalarTupleBelowOrdinaryLimit) {
       << "warnings=" << testing::PrintToString(result.warnings)
       << " errors=" << testing::PrintToString(result.errors)
       << " plans=" << testing::PrintToString(result.resource_plans);
-  ASSERT_TRUE(result.modified())
-      << "warnings=" << testing::PrintToString(result.warnings)
-      << " plans=" << testing::PrintToString(result.resource_plans);
+  ASSERT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
+                                 << " plans=" << testing::PrintToString(result.resource_plans);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_FALSE(test_moi_dispatch_id_sgpr(result));
   EXPECT_FALSE(test_moi_persistent_sgpr_state(result).owner());
@@ -12481,7 +12476,7 @@ TEST(ConSanMoi, FenceRecordPatchRejectsStaleCommunicationIdentityWithoutGuessing
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(3, 0, 0, 0, 0, 3, 3);
 
   const ConSanTransformArtifacts result =
-      retry_patch_consan_moi_from_inventory(std::move(inventory), options, bytes);
+      test_retry_consan_moi_from_inventory(std::move(inventory), options, bytes);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
@@ -12531,7 +12526,7 @@ TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(3, 0, 0, 0, 0, 3, 3);
 
   const ConSanTransformArtifacts result =
-      retry_patch_consan_moi_from_inventory(std::move(inventory), options, bytes);
+      test_retry_consan_moi_from_inventory(std::move(inventory), options, bytes);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,

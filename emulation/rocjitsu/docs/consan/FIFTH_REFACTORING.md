@@ -6026,7 +6026,7 @@ retired Sampled adapters from returning.
 | `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
 | `ConSanTransformArtifacts` references / files | 174 / 52 | **-102 / -5** | +1 / 0 |
 | `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
-| `ConSanMoiOperatingPoint` references / files | 342 / 63 | +52 / +12 | **-13 / +2** |
+| `ConSanMoiOperatingPoint` references / files | 332 / 63 | +42 / +12 | **-13 / +2** |
 | Broad-point / raw-architecture fields in migrated spill contexts | **0 / 0** | n/a | completed |
 | Retired Sampled access-resource adapters | **0** | n/a | **-2** |
 | Test inventory | **5,410** | **+65** | **+1** |
@@ -6095,7 +6095,7 @@ point buses.
 | `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
 | `ConSanTransformArtifacts` references / files | 174 / 52 | **-102 / -5** | 0 / 0 |
 | `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
-| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | **-15 / -2** |
+| `ConSanMoiOperatingPoint` references / files | 317 / 61 | +27 / +10 | **-15 / -2** |
 | Broad-point / complete-target fields in scalar mode callbacks | **0 / 0** | n/a | completed |
 | Mode-local scalar-ABI recomputation inside dense routers | **0** | n/a | **-3** |
 | Test inventory | **5,411** | **+66** | **+1** |
@@ -6119,3 +6119,74 @@ slice must cash in a deletion or sharing opportunity rather than adding another
 contract layer. Remaining broad placement and mutation transactions, both
 extension exercises, larger legacy harvesting, and the independent completion
 audit remain open. The goal therefore remains active.
+
+### 16.77 Convergence checkpoint 76: immutable automatic-resume inventory
+
+The automatic-resume deep read found a reverse transaction adapter at the
+pipeline/lowerer boundary. Initial lowering published a complete
+`ConSanTransformArtifacts` into split public and private pipeline storage.
+`TransformResult::take_lowering_artifacts` later reconstructed that broad
+mutable transaction solely so MOI could repeat planning after runtime report
+resources were bound. The pipeline also retained the initial
+`ConSanMoiOperatingPoint`, but resume never consumed it: lowering replanned from
+the newly bound request and immutable program facts.
+
+Automatic MOI resume now consumes one deliberately narrow
+`ConSanMoiRetryInventory`. It carries only the immutable semantic facts that
+survive resource binding: `ProgramInventory`, `ConSanCoverageLedger`, fault-site
+inventory, and barrier-move destinations. The lowerer creates fresh private
+mutation, resource, patch, candidate-image, outcome, diagnostic, and operating-
+point state at its own boundary. Those mutable products cannot be supplied by a
+pipeline caller through the new type.
+
+The first narrow implementation retained only the program and coverage
+inventories. The existing direct-versus-resume equivalence test immediately
+exposed that late fault diagnostics also require the fault-site and barrier-move
+inventories. Adding exactly those two semantic products restored equivalence;
+no mutation plan, resource attempt, prior patch, candidate bytes, diagnostic,
+outcome, or operating point was added back. Direct lowerer mechanism tests use
+a test-only adapter from their intentionally complete fixture result, while the
+production pipeline constructs the narrow product directly.
+
+The old `take_lowering_artifacts` reverse adapter, its complete-transaction
+reconstruction, the dead retained operating point, mutable-inventory rejection,
+and stale-warning cleanup are deleted. The architecture gate requires the
+narrow resume product, rejects a broad transaction parameter, and prevents both
+the reverse adapter and retained private operating point from returning.
+
+An authoritative revision-by-revision recount also found that checkpoints 74
+and 75 had each transcribed the operating-point reference count ten too high.
+Their rows are corrected from 342 to 332 and from 327 to 317; their file counts
+and slice deltas were already correct. The current count below is taken directly
+from this tree.
+
+| Signal | Checkpoint 76 | Cumulative change | Slice change from checkpoint 75 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 105,261 | +285 | **-19** |
+| Nonblank production lines | 98,909 | **-175** | **-18** |
+| Production implementation lines | 91,145 | **-305** | **-15** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 168 / 52 | **-108 / -5** | **-6 / 0** |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 316 / 60 | +26 / +9 | **-1 / -1** |
+| Reverse lowerer-transaction adapters | **0** | n/a | **-1** |
+| Retained pipeline operating points | **0** | n/a | **-1** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a final-tree `-j16` build; all 19 automatic-resume,
+direct-versus-resume, fault-composition, and architecture-boundary tests; and
+all 4,776 nonphysical tests over the five emulated targets at `-j16`, including
+all 2,918 simulator tests. No test was removed, disabled, renamed, or replaced.
+In accordance with the reduced physical-test cadence, no physical gfx1201 test
+was run for this slice.
+
+This checkpoint strengthens Sections 14.1, 14.5, and 14.7 through 14.9. A
+pipeline component can no longer reverse its result into a lowerer transaction,
+and automatic resume carries only the semantic inventory required across the
+runtime-resource boundary. It also repays 15 of checkpoint 75's 24 added
+implementation lines. Cumulative production remains only 305 implementation
+lines smaller than baseline, however, so Section 14.8 is still materially
+unsatisfied. Other broad placement and mutation transactions, both extension
+exercises, larger legacy harvesting, and the independent completion audit
+remain open. The goal therefore remains active.

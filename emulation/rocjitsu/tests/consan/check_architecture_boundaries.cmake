@@ -1219,6 +1219,25 @@ _consan_assert_no_match(
     "ConSanTransformArtifacts"
     "evidence planning must consume immutable forward products, not the mutable transaction bus"
 )
+file(READ "${_consan_dir}/consan_moi.h" _moi_retry_contract)
+if(NOT _moi_retry_contract MATCHES
+       "struct ConSanMoiRetryInventory" OR
+   NOT _moi_retry_contract MATCHES "ProgramInventory" OR
+   NOT _moi_retry_contract MATCHES "ConSanCoverageLedger" OR
+   _moi_retry_contract MATCHES
+       "retry_patch_consan_moi_from_inventory[^;]*ConSanTransformArtifacts[ \t]+inventory")
+    message(FATAL_ERROR
+        "ConSan MOI resume must consume immutable inventory products, not a reconstructed transaction"
+    )
+endif()
+file(READ "${_consan_dir}/consan_pipeline.h" _pipeline_result_contract)
+if(_pipeline_result_contract MATCHES "take_lowering_artifacts" OR
+   _pipeline_result_contract MATCHES
+       "PrivateLoweringArtifacts[^}]*ConSanMoiOperatingPoint")
+    message(FATAL_ERROR
+        "ConSan pipeline result regained a reverse lowerer transaction or dead operating point"
+    )
+endif()
 foreach(_resource_planning_owner IN ITEMS consan_moi_pipeline.h consan_moi_pipeline.inc)
     _consan_assert_no_match(
         "${_consan_dir}/${_resource_planning_owner}"

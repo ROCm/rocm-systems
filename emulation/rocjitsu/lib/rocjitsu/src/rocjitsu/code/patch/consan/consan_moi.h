@@ -13,18 +13,27 @@ namespace rocjitsu {
 
 struct ConSanLoweringObservation;
 
+/// Immutable semantic state retained while automatic runtime resources are
+/// bound. Mutation plans, resource attempts, emitted patches, candidate bytes,
+/// and operating-point state are deliberately excluded.
+struct ConSanMoiRetryInventory {
+  ProgramInventory program_inventory;
+  ConSanCoverageLedger coverage_ledger;
+  std::vector<ConSanFaultSite> fault_sites;
+  std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
+};
+
 [[nodiscard]] ConSanTransformArtifacts
 try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &options,
                      const ConSanMoiOperatingPoint &initial_operating_point,
                      std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch,
                      ConSanLoweringExecution *execution = nullptr);
 
-/// Re-run only MOI planning, lowering, and validation from a semantic
-/// inventory produced for the same bytes and engine. This is used after a
-/// runtime-sized report buffer and, optionally, a live fault selection become
-/// available.
+/// Re-run only MOI planning, lowering, and validation from the immutable
+/// semantic products prepared for the same bytes and engine. This is used
+/// after a runtime-sized report buffer becomes available.
 [[nodiscard]] ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
-    ConSanTransformArtifacts inventory, ConSanOptions bound_options,
+    ConSanMoiRetryInventory inventory, ConSanOptions bound_options,
     std::span<const uint8_t> code_object_bytes, ConSanLoweringExecution *execution = nullptr,
     const ConSanLoweringObservation *observation = nullptr);
 
