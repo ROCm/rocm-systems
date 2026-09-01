@@ -27,6 +27,8 @@
 #include "lib/rocprofiler-sdk/kernel_replay/utils.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
+#include <rocprofiler-sdk/cxx/operators.hpp>
+
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
@@ -253,7 +255,7 @@ snap_inventory(hsa_agent_t agent)
     alloc_map_t out{};
     inventory().rlock([&](const auto& _map) {
         for(const auto& [ptr, info] : _map)
-            if(info.agent.handle == agent.handle) out.emplace(ptr, info.size);
+            if(info.agent == agent) out.emplace(ptr, info.size);
     });
     return out;
 }
@@ -266,7 +268,7 @@ unsupported_executable(hsa_agent_t agent)
     alloc_map_t out{};
     unsupported_executable_inventory().rlock([&](const auto& _map) {
         for(const auto& [ptr, info] : _map)
-            if(info.agent.handle == agent.handle) out.emplace(ptr, info.size);
+            if(info.agent == agent) out.emplace(ptr, info.size);
     });
     return out;
 }
@@ -281,7 +283,7 @@ agent_has_unsupported_executable(hsa_agent_t agent)
         for(const auto& [ptr, info] : _map)
         {
             (void) ptr;
-            if(info.agent.handle == agent.handle)
+            if(info.agent == agent)
             {
                 found = true;
                 break;
