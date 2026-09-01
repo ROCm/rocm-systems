@@ -559,8 +559,8 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
 
   if (coll == ncclFuncAlltoAll) {
     struct rcclCollDecision decision;
-    NCCLCHECK(rcclSelectAlltoAll(comm, sendbuff, recvbuff, (size_t)count, dataType, /*query=*/true,
-                                 /*graphCapturingHint=*/graphCapturing != 0, &decision));
+    NCCLCHECK(rcclSelectAlltoAll(comm, sendbuff, recvbuff, (size_t)count, dataType, /*stream=*/nullptr,
+                                 /*query=*/true, /*graphCapturingHint=*/graphCapturing != 0, &decision));
     *algo = decision.algo;
     *protocol = decision.protocol;
     *maxChannels = decision.nMaxChannels;
@@ -1752,12 +1752,14 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
 
 // Single source of truth for AlltoAll implementation selection. Runs the full
 // priority chain (Pivot -> GDA -> DDA LL/LL128/VMM/IPC -> CE registered ->
-// HierCE -> CE scratch -> Ring fallback) and returns the decision.
-//   query=false : live dispatch path (ncclAlltoAll_impl).
-//   query=true  : side-effect-free reporting for rcclGetCollImplInfo.
-//   graphCapturingHint (query=true only): suppresses CE paths under graph capture.
+// HierCE -> CE scratch -> Direct p2p) and returns the decision.
+//   query=false : live dispatch path (ncclAlltoAll_impl). ceCapturing is probed
+//                 from `stream`; graphCapturingHint is ignored.
+//   query=true  : side-effect-free reporting for rcclGetCollImplInfo. The stream
+//                 is not probed; graphCapturingHint supplies capture so CE is
+//                 reported as skipped.
 ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                ncclDataType_t datatype, bool query, bool graphCapturingHint,
+                                ncclDataType_t datatype, cudaStream_t stream, bool query, bool graphCapturingHint,
                                 struct rcclCollDecision* decision) {
   memset(decision, 0, sizeof(*decision));
   decision->algo = NCCL_ALGO_RING;
@@ -1845,10 +1847,22 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     }
   }
 
+  // CE is graph-unsafe. Live probes the stream; reporting uses graphCapturingHint.
+  // taskAppend honors this decision, so capture must be recorded here rather than
+  // re-probed at enqueue.
+  bool ceCapturing;
+  if (query) {
+    ceCapturing = graphCapturingHint;
+  } else {
+    struct ncclCudaGraph ceGraph;
+    NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+    ceCapturing = ncclCudaGraphValid(ceGraph);
+  }
+  decision->ceCapturing = ceCapturing;
+
   // (4) CE registered: single-node, symmetric-registered buffers, CTA_POLICY_ZERO.
-  // CE dispatch lives in taskAppend(); live path returns RCCL_CE_REGISTERED and
-  // enqueues normally (mirroring rcclSelectAllGather).
-  const bool ceCapturing = query ? graphCapturingHint : false;  // live: enqueue.cc gates this
+  // Live returns RCCL_CE_REGISTERED / RCCL_CE_SCRATCH and enqueues; taskAppend
+  // dispatches from that algo (mirroring rcclSelectAllGather).
   if (!ceCapturing) {
     // Probe real window registration on both paths so the reported decision and
     // the dispatched one cannot disagree. The lookups are null-safe, so the
@@ -1880,7 +1894,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     // (6) CE scratch: unregistered buffers, RCCL_FORCE_CE, recv fits in DDA scratch.
     if (rcclParamForceCe() && comm->ddaScratch != nullptr && totalBytes <= comm->ddaScratchBytes &&
         ncclCeScratchAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, ncclSymSendNonregRecvNonreg)) {
-      decision->algo = RCCL_CE_REGISTERED;
+      decision->algo = RCCL_CE_SCRATCH;
       return ncclSuccess;
     }
   }

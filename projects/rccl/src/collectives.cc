@@ -394,8 +394,8 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
   NCCLCHECK(Recorder::instance().record(rrAllToAll, sendbuff, recvbuff, count, datatype, comm, stream));
 
   struct rcclCollDecision decision;
-  NCCLCHECK(rcclSelectAlltoAll(comm, sendbuff, recvbuff, count, datatype,
-                               /*query=*/false, /*graphCapturingHint=*/false, &decision));
+  NCCLCHECK(rcclSelectAlltoAll(comm, sendbuff, recvbuff, count, datatype, stream, /*query=*/false,
+                               /*graphCapturingHint=*/false, &decision));
 
   // Canonical selection line for addon backends (CE / DDA / Pivot / GDA /
   // Direct). Native kernels report via the enqueue.cc channel{Lo..Hi} tuning
@@ -438,21 +438,20 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     case RCCL_DDA_IPC:
       return ncclAllToAllDdaIpc(sendbuff, recvbuff, count, datatype, comm, stream);
     case RCCL_CE_REGISTERED:
-      // CE dispatch (registered, hierarchical, or scratch) handled in taskAppend() via ncclEnqueueCheck.
-      // Fall through to the p2p enqueue; enqueue.cc will route to CE.
-      break;
+    case RCCL_CE_SCRATCH:
     case RCCL_DIRECT_ALLTOALL:
-      // No collective kernel: taskAppend() splits this into per-peer Send/Recv.
-      break;
     default:
       break;
   }
 
-  // Direct (per-peer Send/Recv) path, and CE when enqueue.cc gates to it.
+  // CE and Direct (per-peer Send/Recv) share this enqueue; taskAppend honors
+  // info.decision instead of re-selecting.
   struct ncclInfo info = {
     ncclFuncAlltoAll, "AlltoAll", sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
     ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS
   };
+  info.decision = decision;
+  info.decisionValid = true;
   return ncclEnqueueCheck(&info);
 }
 

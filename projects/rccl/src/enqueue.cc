@@ -3850,8 +3850,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // DDA/symmetric/kernel paths.
       bool ceCapturing, ceArGraphAllowed;
       if (info->decisionValid) {
-        // Already computed by ncclAllReduce_impl() / ncclAllGather_impl() via the
-        // corresponding rcclSelect*().
+        // Already computed by ncclAllReduce_impl() / ncclAllGather_impl() /
+        // ncclAlltoAll_impl() via the corresponding rcclSelect*().
         ceCapturing = info->decision.ceCapturing;
         ceArGraphAllowed = info->decision.ceArGraphAllowed;
       } else {
@@ -3927,6 +3927,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         info->coll == ncclFuncAllGather && ceAvailable && !hasSysmemSegment &&
         rcclAllGatherCeRegisteredWindow(comm, recvBytes, winRegType, ceCapturing);
       const bool allGatherDecided = (info->coll == ncclFuncAllGather && info->decisionValid);
+      const bool alltoAllDecided = (info->coll == ncclFuncAlltoAll && info->decisionValid);
       if (info->coll == ncclFuncAllReduce && info->decisionValid) {
         // AllReduce's backend was already chosen once by rcclSelectAllReduce();
         // honor it here instead of recomputing CE eligibility. rcclSelectAllReduce
@@ -3943,17 +3944,18 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         }
         // hierCeAvailable is AllGather/AlltoAll-only (ncclHierCeAvailable rejects
         // AllReduce), so it never affects this AllReduce branch.
-      } else if (allGatherDecided &&
+      } else if ((allGatherDecided || alltoAllDecided) &&
                  (info->decision.algo == RCCL_CE_REGISTERED || info->decision.algo == RCCL_CE_SCRATCH)) {
-        // AllGather CE was chosen once by rcclSelectAllGather(); honor it so
-        // decision and dispatch agree. Non-CE AllGather (Direct / symmetric /
-        // ring) falls through to the shared funnel below.
+        // AllGather / AlltoAll CE was chosen once by rcclSelect*(); honor it so
+        // decision and dispatch agree. Non-CE (Direct) falls through to the
+        // shared funnel below.
+        const char* collName = alltoAllDecided ? "AlltoAll" : "AllGather";
         if (info->decision.algo == RCCL_CE_REGISTERED) {
-          INFO(NCCL_INIT, "Taking CE collective path for AllGather via registered windows");
+          INFO(NCCL_INIT, "Taking CE collective path for %s via registered windows", collName);
           NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                      opDev));
         } else {
-          INFO(NCCL_TUNING, "Taking CE collective path for AllGather via DDA scratch, count=%zu", info->count);
+          INFO(NCCL_TUNING, "Taking CE collective path for %s via DDA scratch, count=%zu", collName, info->count);
           NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr,
                                      comm->ddaScratch, comm->ddaPeerPtrsHost, opDev));
         }
@@ -3963,7 +3965,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         // ncclMakeSymmetricTaskList (collTaskAppend sets symkExtract from decision).
         INFO(NCCL_INIT, "Taking kernel-based collective path for ReduceScatter");
         NCCLCHECK(collTaskAppend(comm, info, opDev));
-      } else if ((!allGatherDecided &&
+      } else if ((!allGatherDecided && !alltoAllDecided &&
                   (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
                   !(rcclNcclAlgoEnvIsSet() && (info->coll == ncclFuncAllGather || info->coll == ncclFuncReduceScatter)) &&
                   (ceAvailable || hierCeAvailable) && !hasSysmemSegment) ||
@@ -3972,7 +3974,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                    opDev));
 
-      } else if (!rcclNcclAlgoEnvIsSet() && !allGatherDecided &&
+      } else if (!rcclNcclAlgoEnvIsSet() && !allGatherDecided && !alltoAllDecided &&
                  rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg &&
                  winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr &&
                  recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {

@@ -190,9 +190,12 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
                                      ncclDataType_t datatype, ncclRedOp_t op, bool query,
                                      struct rcclCollDecision* decision);
 // Single source of truth for AlltoAll selection: Pivot -> GDA -> DDA (LL/LL128/VMM/IPC) ->
-// CE registered -> HierCE -> CE scratch -> Ring fallback.
+// CE registered -> HierCE -> CE scratch -> Direct (per-peer Send/Recv).
+// Live enqueue carries the decision so taskAppend honors CE vs Direct instead of
+// re-deriving it. query=false probes `stream` for capture; query=true uses
+// graphCapturingHint and does not probe the stream.
 ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                ncclDataType_t datatype, bool query, bool graphCapturingHint,
+                                ncclDataType_t datatype, cudaStream_t stream, bool query, bool graphCapturingHint,
                                 struct rcclCollDecision* decision);
 // Selection helpers shared between collectives.cc and the wrapped decision logic.
 // (rcclDdaEnabled is declared below, next to the DDA param decls.)
