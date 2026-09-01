@@ -59,8 +59,18 @@ DL::DL(const char* libpath)
     const auto dir = fs::path(libpath);
 
     std::vector<std::string> lib_names;
-#if defined(ROCPROFILER_ATT_DECODER_SOVERSION)
-    lib_names.emplace_back(std::string{kDecoderBaseName} + "." + ROCPROFILER_ATT_DECODER_SOVERSION);
+    // Major defines ABI compatibility, so probe most-compatible first and narrow. The
+    // unversioned name is last: it is a devel-only symlink to an unknown version.
+#if defined(ROCPROFILER_ATT_DECODER_SOVERSION_MAJOR) &&                                              \
+    defined(ROCPROFILER_ATT_DECODER_SOVERSION_MINOR) &&                                              \
+    defined(ROCPROFILER_ATT_DECODER_SOVERSION_PATCH)
+    const auto base  = std::string{kDecoderBaseName};
+    const auto major = base + "." + std::to_string(ROCPROFILER_ATT_DECODER_SOVERSION_MAJOR);
+    const auto minor = major + "." + std::to_string(ROCPROFILER_ATT_DECODER_SOVERSION_MINOR);
+    const auto patch = minor + "." + std::to_string(ROCPROFILER_ATT_DECODER_SOVERSION_PATCH);
+    lib_names.emplace_back(major);
+    lib_names.emplace_back(minor);
+    lib_names.emplace_back(patch);
 #endif
     lib_names.emplace_back(kDecoderBaseName);
 
