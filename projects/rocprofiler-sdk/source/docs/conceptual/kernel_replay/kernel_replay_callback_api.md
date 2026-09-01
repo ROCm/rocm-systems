@@ -18,9 +18,9 @@ it decides per pass which of its services are active. ``rocprofv3`` wires replay
 collection only; SPM, PC sampling, and thread trace require a custom tool (see
 :ref:`kernel-replay-sdk-api` and the ``samples/kernel_replay/`` examples).
 
-An earlier prototype (`rocprofiler_configure_kernel_replay_counting_service()`) was a dedicated
-counting service mutually exclusive with ordinary dispatch counting. That configure function, a
-pass-count environment variable, and `--kernel-replay-passes` are **not** in this API.
+Replay is **not** a dedicated counting service mutually exclusive with ordinary dispatch counting.
+There is no `rocprofiler_configure_kernel_replay_counting_service()`, no pass-count environment
+variable, and no `--kernel-replay-passes` option in this API.
 
 ## API surface
 
@@ -108,7 +108,7 @@ per pass with identical correlation and dispatch ids but different start/end tim
 
 Do not key side tables on `dispatch_id` alone when storing per-pass counter or trace data — merge
 on `(dispatch_id, current_pass)` or use pass-local state set during `PASS` `PHASE_ENTER`. On
-``rocprofv3``, the counter JSON `replay_pass` field (stacked tool PR) carries the pass index.
+``rocprofv3``, the counter JSON `replay_pass` field carries the pass index.
 
 ## Pass-count semantics
 
@@ -256,8 +256,8 @@ skip on an agent with a different or partial group set.
 
 The payload struct is documented in the `CALLBACK_TRACING_SERVICE` Doxygen group and appears on the
 {ref}`callback_tracing_reference` page along with the rest of the callback tracing API. There is no
-separate kernel replay Doxygen group (the earlier prototype's `kernel_replay_service` group is
-gone). A walkthrough for tool authors is {ref}`kernel-replay-sdk-api`. See
+separate kernel replay Doxygen group. A walkthrough for tool authors is
+{ref}`kernel-replay-sdk-api`. See
 {ref}`using-kernel-replay` for a configure / `replay_pass_count` / local-context how-to.
 
 ## Source reference
