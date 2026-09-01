@@ -8,6 +8,7 @@ on:
     branches: [ develop ]
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - 'shared/sha256/**'
       - '.github/actions/rocprofiler-sdk-util/**'
       - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
@@ -24,6 +25,7 @@ on:
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - 'shared/sha256/**'
       - '.github/actions/rocprofiler-sdk-util/**'
       - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'

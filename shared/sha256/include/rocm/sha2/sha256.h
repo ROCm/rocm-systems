@@ -1,4 +1,4 @@
-// Copyright Advanced Micro Devices, Inc.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 // SHA-256 (FIPS 180-4) and HMAC-SHA-256 (RFC 2104).
