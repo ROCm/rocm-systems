@@ -3257,3 +3257,64 @@ peepholes, mode locality across the complete surface, the broad operating
 point and transform transaction, placement and validation concentrations, and
 the independent deep-read completion audit all remain open. The goal therefore
 remains active.
+
+### 16.33 Convergence checkpoint 32: one Sampled dense synchronization dispatcher
+
+The post-checkpoint mode-locality read traced Sampled barrier and atomic
+synchronization relays through host selection, entry-island construction,
+call-key recovery, dispatcher emission, routed probe bodies, and patch-proof
+publication. The two semantic owners select different synchronization events
+and build different probe bodies, but each independently implemented the same
+dense dispatcher: recover or decode the call key, compare every route, restore
+SCC when the key carries it, jump through the selected target, terminate the
+unmatched path, and publish the same host/dispatcher proof pair.
+
+Those paths now share one private Sampled-owned dispatcher transaction. Each
+owner supplies only typed route identities, caller returns, and targets. The
+common mechanism owns call-key arithmetic, clone-local versus return-derived
+keys, SCC restoration, indirect jumps, and termination. A second private
+helper publishes the identical host and dispatcher proof records. Barrier
+policy, atomic semantics, target-specific direct-call selection, relay-host
+qualification, body construction, and anchor rewriting remain with their
+existing owners; no cross-mode abstraction or compatibility wrapper was
+introduced.
+
+The architecture-boundary gate requires exactly one raw call-key arithmetic
+and SCC-restoration recipe in the Sampled synchronization owner and exactly two
+consumers of the one dispatcher. The focused evidence is the existing 23-test
+matrix: exact dense barrier and atomic routes on RDNA4, gfx1250, CDNA4, gfx942,
+and gfx950; spill-backed and clone-local keys; far targets; mixed direct/dense
+routes; host fallback; and the structural gate. No replacement test was needed
+because both formerly independent implementations already had direct
+behavioral coverage.
+
+| Signal | Checkpoint 32 | Cumulative change | Slice change from checkpoint 31 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,492 | +517 | **-18** |
+| Nonblank production lines | 99,208 | +125 | **-21** |
+| Production implementation lines | 91,491 | **+41** | **-26** |
+| `MoiOptions` references / files | 93 / 28 | +6 / +3 | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 207 / 56 | **-69 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 205 / 28 | +5 / 0 | **-1 / 0** |
+| `ConSanMoiOperatingPoint` references / files | 293 / 53 | +3 / +2 | 0 / 0 |
+| Sampled dense synchronization dispatcher implementations | 1 | n/a | **-1** |
+| Sampled dense relay proof publishers | 1 | n/a | **-1** |
+| Test inventory | 5,379 | +34 | 0 |
+
+Validation includes a full final-tree `-j16` rebuild; all 23 focused dense
+Sampled and architecture-boundary tests; all 4,744 nonphysical tests at `-j16`
+in 195.36 seconds, including the unchanged 2,908 simulator rows over five
+targets; and all 635 physical gfx1201 tests serialized at `-j1` in 109.86
+seconds. No test was removed, renamed, disabled, added, or replaced.
+
+This checkpoint strengthens Sections 14.3, 14.5, 14.7, 14.8, and 14.9. It
+keeps shared mechanics within the Sampled package, preserves the distinct
+barrier and atomic policies, deletes both duplicate recipes and proof
+publication, and pays back 26 of checkpoint 31's added implementation lines.
+Production implementation remains 41 lines above baseline, so this is useful
+deletion evidence rather than the material whole-refactoring shrinkage needed
+for completion. The remaining broad attempt and operating-point surfaces,
+other mode-local duplication, architecture peepholes, placement and validation
+concentrations, and the independent deep-read completion audit remain open.
+The goal therefore remains active.

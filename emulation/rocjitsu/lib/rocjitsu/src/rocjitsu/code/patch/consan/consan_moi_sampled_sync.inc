@@ -12,6 +12,95 @@ struct SampledBarrierCandidate {
   bool uses_cluster_workgroup_id = false;
 };
 
+struct SampledDenseSyncRoute {
+  uint32_t identity = 0;
+  uint64_t caller_return = 0;
+  uint64_t target = 0;
+};
+
+/// Build the one call-key dispatcher shared by Sampled barrier and atomic
+/// synchronization relays. The semantic owners supply only their route list;
+/// key reconstruction, SCC restoration, and indirect return are one mode-local
+/// mechanism.
+[[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_dense_sync_dispatcher(
+    std::span<const SampledDenseSyncRoute> routes, uint16_t jump_pc_sgpr, uint16_t saved_scc_sgpr,
+    uint16_t key_sgpr, uint16_t call_return_sgpr, bool derive_key_at_entry, bool key_encodes_scc,
+    bool clone_local_routes, uint64_t dispatcher_offset, uint64_t island_offset,
+    const ConSanTargetProfile &target, rj_code_arch_t arch) {
+  std::vector<uint32_t> words;
+  if (key_encodes_scc) {
+    words.push_back(build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
+  }
+  if (!derive_key_at_entry && !clone_local_routes) {
+    const auto subtract_pc =
+        instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
+    if (!subtract_pc)
+      return std::nullopt;
+    words.push_back(*subtract_pc);
+    words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
+    words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
+  }
+  for (const SampledDenseSyncRoute &route : routes) {
+    if (clone_local_routes) {
+      const auto compare = instrumentation::build_s_cmp_eq_u32(
+          key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route.identity)), arch);
+      if (!compare)
+        return std::nullopt;
+      words.push_back(*compare);
+    } else {
+      const auto compare = instrumentation::build_s_cmp_eq_u32(
+          key_encodes_scc ? jump_pc_sgpr : key_sgpr, /*literal=*/255u, arch);
+      if (!compare)
+        return std::nullopt;
+      words.push_back(*compare);
+      words.push_back(static_cast<uint32_t>(route.caller_return - island_offset) /
+                      (key_encodes_scc ? 2u : 1u));
+    }
+    std::vector<uint32_t> matched_words;
+    if (key_encodes_scc && !consan_detail::append_restore_moi_scc_from_route_key(
+                               matched_words, {.encoded_sgpr = key_sgpr}, target)) {
+      return std::nullopt;
+    }
+    const uint64_t matched_offset = dispatcher_offset + (words.size() + 1u) * sizeof(uint32_t);
+    if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, route.target,
+                                                 jump_pc_sgpr, saved_scc_sgpr,
+                                                 /*capture_scc=*/false, arch)) {
+      return std::nullopt;
+    }
+    const auto skip =
+        instrumentation::build_s_cbranch_scc0(static_cast<int16_t>(matched_words.size()), arch);
+    if (!skip)
+      return std::nullopt;
+    words.push_back(*skip);
+    words.insert(words.end(), matched_words.begin(), matched_words.end());
+  }
+  words.push_back(build_s_endpgm(arch));
+  return words;
+}
+
+void append_sampled_dense_sync_relay_patches(std::vector<ConSanPatchInfo> &patches,
+                                             uint64_t semantic_anchor, uint64_t host_offset,
+                                             uint32_t host_size, uint64_t host_body_offset,
+                                             uint32_t host_body_size, uint64_t dispatcher_offset,
+                                             uint32_t dispatcher_size,
+                                             const std::vector<uint64_t> &owner_descriptors) {
+  ConSanPatchInfo host;
+  host.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+  host.anchor_offset = host_offset;
+  host.original_size = host_size;
+  host.trampoline_offset = host_body_offset;
+  host.trampoline_size = host_body_size;
+  host.owner_descriptor_file_offsets = owner_descriptors;
+  patches.push_back(std::move(host));
+  ConSanPatchInfo dispatcher;
+  dispatcher.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+  dispatcher.anchor_offset = semantic_anchor;
+  dispatcher.trampoline_offset = dispatcher_offset;
+  dispatcher.trampoline_size = dispatcher_size;
+  dispatcher.owner_descriptor_file_offsets = owner_descriptors;
+  patches.push_back(std::move(dispatcher));
+}
+
 using SampledCfgDistance = MoiCfgDistance;
 
 [[nodiscard]] std::optional<SampledCfgDistance>
@@ -1368,92 +1457,34 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       }
       std::memcpy(new_text.data() + host_offset, &*host_call, sizeof(uint32_t));
 
-      std::vector<uint32_t> dispatcher_words;
-      if (key_encodes_scc) {
-        dispatcher_words.push_back(
-            build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
-      }
-      if (!derive_key_at_entry &&
-          target_profile->direct_call_form != ConSanDirectCallForm::SCallI64) {
-        const auto subtract_pc =
-            instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
-        if (!subtract_pc) {
-          result.errors.emplace_back(
-              "ConSan MOI sampled dense barrier relay could not encode its dispatch key");
-          return;
-        }
-        dispatcher_words.push_back(*subtract_pc);
-        dispatcher_words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
-        dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
-      }
-      const auto append_target = [&](size_t route_id, uint64_t caller_return,
-                                     uint64_t target) -> bool {
-        if (use_clone_local_routes) {
-          const auto compare = instrumentation::build_s_cmp_eq_u32(
-              key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route_id)), arch);
-          if (!compare)
-            return false;
-          dispatcher_words.push_back(*compare);
-        } else {
-          const auto compare = instrumentation::build_s_cmp_eq_u32(
-              key_encodes_scc ? jump_pc_sgpr : key_sgpr, /*literal=*/255u, arch);
-          if (!compare)
-            return false;
-          dispatcher_words.push_back(*compare);
-          dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset) /
-                                     (key_encodes_scc ? 2u : 1u));
-        }
-        std::vector<uint32_t> matched_words;
-        if (key_encodes_scc && !consan_detail::append_restore_moi_scc_from_route_key(
-                                   matched_words, {.encoded_sgpr = key_sgpr}, *target_profile))
-          return false;
-        const uint64_t matched_offset =
-            dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
-        if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, target,
-                                                     jump_pc_sgpr, saved_scc_sgpr,
-                                                     /*capture_scc=*/false, arch))
-          return false;
-        const auto skip =
-            instrumentation::build_s_cbranch_scc0(static_cast<int16_t>(matched_words.size()), arch);
-        if (!skip)
-          return false;
-        dispatcher_words.push_back(*skip);
-        dispatcher_words.insert(dispatcher_words.end(), matched_words.begin(), matched_words.end());
-        return true;
-      };
-      if (!append_target(/*route_id=*/0u, /*caller_return=*/island_offset, host_body_offset))
-        return;
+      std::vector<SampledDenseSyncRoute> routes{
+          {.identity = 0u, .caller_return = island_offset, .target = host_body_offset}};
+      routes.reserve(bodies.size() + 1u);
       for (size_t body_index = 0u; body_index < bodies.size(); ++body_index) {
         const DenseBody &body = bodies[body_index];
         const ConSanBarrierSite &site = selected[body.selected_index].candidate.barrier.site;
-        if (!append_target(body_index + 1u, site.text_offset + sizeof(uint32_t), body.offset))
-          return;
+        routes.push_back({.identity = static_cast<uint32_t>(body_index + 1u),
+                          .caller_return = site.text_offset + sizeof(uint32_t),
+                          .target = body.offset});
       }
-      dispatcher_words.push_back(build_s_endpgm(arch));
-      if (dispatcher_words.size() * sizeof(uint32_t) > dispatcher_reservation) {
+      const auto dispatcher_words = build_sampled_dense_sync_dispatcher(
+          routes, jump_pc_sgpr, saved_scc_sgpr, key_sgpr, call_return_sgpr, derive_key_at_entry,
+          key_encodes_scc, use_clone_local_routes, dispatcher_offset, island_offset,
+          *target_profile, arch);
+      if (!dispatcher_words ||
+          dispatcher_words->size() * sizeof(uint32_t) > dispatcher_reservation) {
         result.errors.emplace_back(
-            "ConSan MOI sampled dense barrier dispatcher exceeds its reserved relay space");
+            "ConSan MOI sampled dense barrier dispatcher could not fit its reserved relay space");
         return;
       }
-      std::memcpy(new_text.data() + dispatcher_offset, dispatcher_words.data(),
-                  dispatcher_words.size() * sizeof(uint32_t));
+      std::memcpy(new_text.data() + dispatcher_offset, dispatcher_words->data(),
+                  dispatcher_words->size() * sizeof(uint32_t));
 
-      ConSanPatchInfo host_info;
-      host_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-      host_info.anchor_offset = host_offset;
-      host_info.original_size = static_cast<uint32_t>(host_bytes);
-      host_info.trampoline_offset = host_body_offset;
-      host_info.trampoline_size = static_cast<uint32_t>(host_words.size() * sizeof(uint32_t));
-      host_info.owner_descriptor_file_offsets = group_owners;
-      patches.push_back(std::move(host_info));
-      ConSanPatchInfo dispatcher_info;
-      dispatcher_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-      dispatcher_info.anchor_offset = selected[indices.front()].candidate.barrier.site.text_offset;
-      dispatcher_info.trampoline_offset = dispatcher_offset;
-      dispatcher_info.trampoline_size =
-          static_cast<uint32_t>(dispatcher_words.size() * sizeof(uint32_t));
-      dispatcher_info.owner_descriptor_file_offsets = group_owners;
-      patches.push_back(std::move(dispatcher_info));
+      append_sampled_dense_sync_relay_patches(
+          patches, selected[indices.front()].candidate.barrier.site.text_offset, host_offset,
+          static_cast<uint32_t>(host_bytes), host_body_offset,
+          static_cast<uint32_t>(host_words.size() * sizeof(uint32_t)), dispatcher_offset,
+          static_cast<uint32_t>(dispatcher_words->size() * sizeof(uint32_t)), group_owners);
       for (size_t body_index = 0u; body_index < bodies.size(); ++body_index) {
         const DenseBody &body = bodies[body_index];
         const Planned &planned = selected[body.selected_index];
@@ -2430,82 +2461,33 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       const auto host_call = build_s_call_b64(call_return_sgpr, /*next instruction=*/0, arch);
       std::memcpy(new_text.data() + host_offset, &host_call, sizeof(uint32_t));
 
-      std::vector<uint32_t> dispatcher_words;
-      if (key_encodes_scc) {
-        dispatcher_words.push_back(
-            build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
-      }
-      if (!derive_key_at_entry) {
-        const auto subtract_pc =
-            instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
-        if (!subtract_pc) {
-          result.errors.emplace_back(
-              "ConSan MOI sampled dense atomic relay could not encode its dispatch key");
-          return;
-        }
-        dispatcher_words.push_back(*subtract_pc);
-        dispatcher_words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
-        dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
-      }
-      const auto append_target = [&](uint64_t caller_return, uint64_t target) {
-        const auto compare = instrumentation::build_s_cmp_eq_u32(
-            key_encodes_scc ? jump_pc_sgpr : key_sgpr, /*literal=*/255u, arch);
-        if (!compare)
-          return false;
-        dispatcher_words.push_back(*compare);
-        dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset) /
-                                   (key_encodes_scc ? 2u : 1u));
-        std::vector<uint32_t> matched_words;
-        if (key_encodes_scc && !consan_detail::append_restore_moi_scc_from_route_key(
-                                   matched_words, {.encoded_sgpr = key_sgpr}, *target_profile))
-          return false;
-        const uint64_t matched_offset =
-            dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
-        if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, target,
-                                                     jump_pc_sgpr, saved_scc_sgpr,
-                                                     /*capture_scc=*/false, arch)) {
-          return false;
-        }
-        const auto skip =
-            instrumentation::build_s_cbranch_scc0(static_cast<int16_t>(matched_words.size()), arch);
-        if (!skip)
-          return false;
-        dispatcher_words.push_back(*skip);
-        dispatcher_words.insert(dispatcher_words.end(), matched_words.begin(), matched_words.end());
-        return true;
-      };
-      if (!append_target(island_offset, host_body_offset))
-        return;
+      std::vector<SampledDenseSyncRoute> routes{
+          {.identity = 0u, .caller_return = island_offset, .target = host_body_offset}};
+      routes.reserve(bodies.size() + 1u);
       for (const DenseBody &body : bodies) {
         const Planned &planned = selected[body.selected_index];
-        if (!append_target(planned.physical_anchor_offset + sizeof(uint32_t), body.offset))
-          return;
+        routes.push_back({.identity = static_cast<uint32_t>(routes.size()),
+                          .caller_return = planned.physical_anchor_offset + sizeof(uint32_t),
+                          .target = body.offset});
       }
-      dispatcher_words.push_back(build_s_endpgm(arch));
-      if (dispatcher_words.size() * sizeof(uint32_t) > dispatcher_reservation) {
+      const auto dispatcher_words = build_sampled_dense_sync_dispatcher(
+          routes, jump_pc_sgpr, saved_scc_sgpr, key_sgpr, call_return_sgpr, derive_key_at_entry,
+          key_encodes_scc, /*clone_local_routes=*/false, dispatcher_offset, island_offset,
+          *target_profile, arch);
+      if (!dispatcher_words ||
+          dispatcher_words->size() * sizeof(uint32_t) > dispatcher_reservation) {
         result.errors.emplace_back(
-            "ConSan MOI sampled dense atomic dispatcher exceeds its reserved relay space");
+            "ConSan MOI sampled dense atomic dispatcher could not fit its reserved relay space");
         return;
       }
-      std::memcpy(new_text.data() + dispatcher_offset, dispatcher_words.data(),
-                  dispatcher_words.size() * sizeof(uint32_t));
+      std::memcpy(new_text.data() + dispatcher_offset, dispatcher_words->data(),
+                  dispatcher_words->size() * sizeof(uint32_t));
 
-      ConSanPatchInfo host_info;
-      host_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-      host_info.anchor_offset = host_offset;
-      host_info.original_size = static_cast<uint32_t>(host_bytes);
-      host_info.trampoline_offset = host_body_offset;
-      host_info.trampoline_size = static_cast<uint32_t>(host_words.size() * sizeof(uint32_t));
-      host_info.owner_descriptor_file_offsets = group_owners;
-      patches.push_back(std::move(host_info));
-      ConSanPatchInfo dispatcher_info;
-      dispatcher_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-      dispatcher_info.anchor_offset = selected[indices.front()].candidate.atomic.site.text_offset;
-      dispatcher_info.trampoline_offset = dispatcher_offset;
-      dispatcher_info.trampoline_size =
-          static_cast<uint32_t>(dispatcher_words.size() * sizeof(uint32_t));
-      dispatcher_info.owner_descriptor_file_offsets = group_owners;
-      patches.push_back(std::move(dispatcher_info));
+      append_sampled_dense_sync_relay_patches(
+          patches, selected[indices.front()].candidate.atomic.site.text_offset, host_offset,
+          static_cast<uint32_t>(host_bytes), host_body_offset,
+          static_cast<uint32_t>(host_words.size() * sizeof(uint32_t)), dispatcher_offset,
+          static_cast<uint32_t>(dispatcher_words->size() * sizeof(uint32_t)), group_owners);
       for (const DenseBody &body : bodies) {
         const Planned &planned = selected[body.selected_index];
         const auto call_delta =

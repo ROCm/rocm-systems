@@ -517,6 +517,30 @@ if(NOT _moi_sampled_sync_indexed_address_count EQUAL 5)
         "ConSan Sampled barrier tables must share indexed addressing"
     )
 endif()
+string(
+    REGEX MATCHALL
+    "build_sampled_dense_sync_dispatcher"
+    _moi_sampled_dense_sync_dispatcher_refs
+    "${_moi_sampled_sync_owner}"
+)
+list(LENGTH _moi_sampled_dense_sync_dispatcher_refs _moi_sampled_dense_sync_dispatcher_ref_count)
+if(NOT _moi_sampled_dense_sync_dispatcher_ref_count EQUAL 3)
+    message(FATAL_ERROR
+        "ConSan Sampled barrier and atomic relays must share one dense dispatcher"
+    )
+endif()
+foreach(_recipe IN ITEMS
+    "dispatcher_offset - island_offset"
+    "append_restore_moi_scc_from_route_key"
+)
+    string(REGEX MATCHALL "${_recipe}" _moi_sampled_dense_recipe_refs "${_moi_sampled_sync_owner}")
+    list(LENGTH _moi_sampled_dense_recipe_refs _moi_sampled_dense_recipe_ref_count)
+    if(NOT _moi_sampled_dense_recipe_ref_count EQUAL 1)
+        message(FATAL_ERROR
+            "ConSan Sampled dense dispatcher recipe '${_recipe}' must have one owner"
+        )
+    endif()
+endforeach()
 file(READ "${_consan_dir}/consan_moi_shared_lowering.cpp" _moi_shared_lowering_owner)
 string(
     REGEX MATCHALL
