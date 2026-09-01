@@ -13,7 +13,7 @@
 #include "core/mproc.hpp"
 #include "core/timemory.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <timemory/log/macros.hpp>
 #include <timemory/signals/signal_handlers.hpp>
