@@ -51,9 +51,10 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
        record.phase != ROCPROFILER_CALLBACK_PHASE_ENTER)
         return;
 
-    // Counters on 0..N-2; PC sampling on the last pass only. Locally stop counters on
-    // the PCS pass; locally stop PCS on counter passes (recorded even though PCS is
-    // agent-wide today). Never enable both services on one pass.
+    // Counters on 0..N-2; PC sampling on the last pass only. Locally stop counters on the
+    // PCS pass and locally stop PC sampling on counter passes, so the two are never enabled
+    // together. Exclusivity is only as strong as the PC sampling service's handling of the
+    // local override.
     if(p->current_pass == kPcsPass)
     {
         if(g_counters_ctx.handle != 0 && p->replay_stop_context)
@@ -133,9 +134,8 @@ configure_pcs()
             g_pcs_ctx, id, cfg.method, cfg.unit, cfg.min_interval, g_pcs_buffer, 0);
         if(st == ROCPROFILER_STATUS_SUCCESS) any = true;
     }
-    // Start globally so replay_local_enable/disable can record sticky overrides. PC sampling
-    // is agent-wide and does not honor local stop yet; counter passes rely on separate
-    // replay passes and locally stopping counters on the PCS pass.
+    // Started here so the agent sessions and buffer stay live for the whole run; which passes
+    // actually sample is decided by the per-pass overrides in kernel_replay_cb.
     if(any) KR_CHECK(rocprofiler_start_context(g_pcs_ctx));
     return any;
 }
