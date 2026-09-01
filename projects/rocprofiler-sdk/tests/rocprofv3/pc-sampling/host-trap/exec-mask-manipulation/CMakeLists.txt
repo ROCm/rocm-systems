@@ -16,6 +16,12 @@ find_package(rocprofiler-sdk REQUIRED)
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
+rocprofiler_add_integration_cleanup_test(
+    rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-output
+    ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input
+    ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input
+    ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input)
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd
     COMMAND
@@ -27,8 +33,10 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ROCPROFV3_TESTS_PC_SAMPLING_ENVIRONMENT}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd
+    FIXTURES_REQUIRED rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-output
     DISABLED "${IS_PC_SAMPLING_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
@@ -61,8 +69,10 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ROCPROFV3_TESTS_PC_SAMPLING_ENVIRONMENT}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-json
+    FIXTURES_REQUIRED rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-output
     DISABLED "${IS_PC_SAMPLING_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
@@ -94,8 +104,10 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ROCPROFV3_TESTS_PC_SAMPLING_ENVIRONMENT}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-yaml
+    FIXTURES_REQUIRED rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-output
     DISABLED "${IS_PC_SAMPLING_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
