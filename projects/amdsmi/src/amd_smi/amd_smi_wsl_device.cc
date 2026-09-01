@@ -295,10 +295,8 @@ amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
     info->device_id = a.device_id;
     info->rev_id = a.rev_id;
     std::snprintf(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, "%016lx", a.asic_serial);
-    // rocdxg_smi_asic_info_t has no OAM/physical-accelerator-ID fields; gpu_id_ is
-    // just an enumeration index, not real hardware data, so report N/A rather than 0.
-    info->oam_id = std::numeric_limits<uint32_t>::max();
-    info->physical_acc_id = std::numeric_limits<uint32_t>::max();
+    // oam_id and physical_acc_id stay N/A from the defaults; gpu_id_ is only an
+    // enumeration index, not real hardware data.
     info->num_of_compute_units = a.num_of_compute_units;
     // Convert IP version (major<<16|minor<<8|stepping) to the nibble-packed
     // hex format Python expects: hex(value)[2:] == "MMSS" (e.g. 0x1100 → "gfx1100").

@@ -32,6 +32,7 @@ TEST(GpuUnit, AsicInfoDefaultsMarkScalarsNotSupported) {
   EXPECT_EQ(info.chip_rev_id, u32_max);
   EXPECT_EQ(info.external_rev_id, u32_max);
   EXPECT_EQ(info.oam_id, u32_max);
+  EXPECT_EQ(info.physical_acc_id, u32_max);
   EXPECT_EQ(info.num_of_compute_units, u32_max);
   EXPECT_EQ(info.subsystem_id, u32_max);
   EXPECT_EQ(info.device_id, std::numeric_limits<uint64_t>::max());

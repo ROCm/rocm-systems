@@ -4,6 +4,8 @@
 
 """CLI leaf test: static command (incl. mem-carveout / node GTT display)."""
 
+import csv
+import io
 import json
 
 from cli.base import TestCliBase
@@ -40,14 +42,13 @@ class TestStatic(TestCliBase):
         cmd = "amd-smi static --asic --csv"
         (rc, data, std_err) = self.util.RunCmdSync(cmd)
         self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
-        rows = data.splitlines()
-        header = rows[0].split(",")
+        # vendor_name carries a comma on some backends, so honour the quoting.
+        reader = csv.DictReader(io.StringIO(data))
+        rows = [row for row in reader]
         # Compare the values, not just the header, so a dropped field is caught.
         for key in keys:
-            self.assertIn(key, header)
-            column = header.index(key)
-            csv_values = [row.split(",")[column] for row in rows[1:] if row.strip()]
-            self.assertEqual(csv_values, json_values[key])
+            self.assertIn(key, reader.fieldnames)
+            self.assertEqual([row[key] for row in rows], json_values[key])
         return
 
     def test_mem_carveout_gtt(self):
