@@ -1055,6 +1055,38 @@ NCCL_PARAM(MNNVLUUID, "MNNVL_UUID", -1);
 NCCL_PARAM(MNNVLCliqueId, "MNNVL_CLIQUE_ID", -1);
 NCCL_PARAM(MNNVLCrossClique, "MNNVL_CROSS_CLIQUE", 0);
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// True only while the physical GPU is carved into logical partitions (DPX/TPX/QPX/CPX).
+// The sysfs attribute exists only on partition-capable ASICs, so an absent attribute and
+// SPX both mean "one whole GPU per device".
+static bool ncclHipIsComputePartitioned(int64_t busId) {
+  // Read the mode on the physical function: a HIP alias BDF (.1-.7) may be a NIC in
+  // sysfs, or missing from it entirely, and would report nothing.
+  char physBusIdStr[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+  if (int64ToBusId(busId & ~0xfLL, physBusIdStr) != ncclSuccess) return false;
+  char mode[MAX_STR_LEN];
+  mode[0] = '\0';
+  if (ncclOsGetComputePartitionMode(physBusIdStr, mode, sizeof(mode)) != ncclSuccess) return false;
+  return mode[0] != '\0' && strcasecmp(mode, "SPX") != 0;
+}
+
+static int ncclHipMloPartForBusId(int64_t busId) {
+  int fn = (int)(busId & 0xf);
+  if (fn >= NCCL_TOPO_MLOPART_DEV_MAX) return NCCL_TOPO_UNDEF;
+  if (!ncclHipIsComputePartitioned(busId)) return NCCL_TOPO_UNDEF;
+
+  char busIdStr[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+  char deviceClass[MAX_STR_LEN];
+  deviceClass[0] = '\0';
+  if (int64ToBusId(busId, busIdStr) != ncclSuccess) return NCCL_TOPO_UNDEF;
+  (void)ncclOsGetPciDeviceClassByBusId(busIdStr, deviceClass, sizeof(deviceClass));
+  int isGpu = strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0 ||
+              strncmp(deviceClass, "0x03", 4) == 0;
+  if (fn == 0) return isGpu ? 0 : NCCL_TOPO_UNDEF;
+  return isGpu ? NCCL_TOPO_UNDEF : fn;
+}
+#endif
+
 static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, uint64_t commHash) {
   cudaDeviceProp prop;
   info->rank = comm->rank;
@@ -1083,30 +1115,7 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
 #endif
   info->busId = comm->busId;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // HIP names do not contain "MLOPart". DPX/XCP/CPX logical GPUs are still
-  // exposed as PCI function .N while sysfs at that BDF is not a GPU (often the
-  // BDF is missing entirely). Use the PCI function as the partition index so
-  // ranks share the physical function-0 PCI node (see ncclTopoFillGpu) with
-  // distinct overlay DEV ids: function 0 is mlopart 0, a fake non-GPU function
-  // is mlopart N (CPX uses N=1..7).
-  if (info->mloPart == NCCL_TOPO_UNDEF) {
-    int fn = (int)(info->busId & 0xf);
-    if (fn < NCCL_TOPO_MLOPART_DEV_MAX) {
-      char busIdStr[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
-      char deviceClass[MAX_STR_LEN];
-      deviceClass[0] = '\0';
-      if (int64ToBusId(info->busId, busIdStr) == ncclSuccess) {
-        (void)ncclOsGetPciDeviceClassByBusId(busIdStr, deviceClass, sizeof(deviceClass));
-        int isGpu = strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0 ||
-                    strncmp(deviceClass, "0x03", 4) == 0;
-        if (fn == 0) {
-          if (isGpu) info->mloPart = 0;
-        } else if (!isGpu) {
-          info->mloPart = fn;
-        }
-      }
-    }
-  }
+  if (info->mloPart == NCCL_TOPO_UNDEF) info->mloPart = ncclHipMloPartForBusId(info->busId);
 #endif
   CUCHECK(cuDeviceGetUuid((CUuuid*)&info->gpuUuid, (CUdevice)comm->cudaDev));
 

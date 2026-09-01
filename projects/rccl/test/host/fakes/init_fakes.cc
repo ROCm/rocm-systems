@@ -179,10 +179,29 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm*, int* gdrSupport) {
   if (gdrSupport) *gdrSupport = g_gdrSupportValue;
   return ncclSuccess;
 }
-// fillInfo MLOPart PCI-function fallback (init.cc ~1093): empty class keeps
-// isGpu=0 so existing tests' default busId=0 path stays a no-op.
+// fillInfo MLOPart stamping (ncclHipMloPartForBusId). Both default to "": an absent
+// partition attribute means "not partitioned", which keeps existing tests' default
+// busId=0 path a no-op regardless of the class.
+const char* g_computePartitionMode = "";
+const char* g_pciDeviceClass = "";
+const char* g_lastPartitionModeBusId = nullptr;
+
+static void copyFakeStr(const char* src, char* dst, size_t maxLen) {
+  if (dst == nullptr || maxLen == 0) return;
+  snprintf(dst, maxLen, "%s", src ? src : "");
+}
+
 ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* /*busId*/, char* deviceClass, size_t maxLen) {
-  if (deviceClass && maxLen > 0) deviceClass[0] = '\0';
+  copyFakeStr(g_pciDeviceClass, deviceClass, maxLen);
+  return ncclSuccess;
+}
+
+ncclResult_t ncclOsGetComputePartitionMode(const char* busId, char* mode, size_t maxLen) {
+  // Retained so a test can assert the physical function is what gets queried.
+  static std::string lastBusId;
+  lastBusId = busId ? busId : "";
+  g_lastPartitionModeBusId = lastBusId.c_str();
+  copyFakeStr(g_computePartitionMode, mode, maxLen);
   return ncclSuccess;
 }
 ncclResult_t rocmLibraryInit(void) { return ncclSuccess; }
@@ -333,6 +352,9 @@ void ResetInitFakes() {
   g_firmwareVersion = 0;
   g_gdrSupportValue = 0;
   g_gdrSupportCalls = 0;
+  g_computePartitionMode = "";
+  g_pciDeviceClass = "";
+  g_lastPartitionModeBusId = nullptr;
   pfn_hsa_amd_portable_export_dmabuf = nullptr;
   g_ncclNetInitResult = ncclSuccess;
   g_ncclGinInitResult = ncclSuccess;

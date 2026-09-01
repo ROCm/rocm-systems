@@ -1938,6 +1938,85 @@ TEST_F(InitMicrotest, InitTransportsRank_NoPeerWithMloPart_LeavesHasMloPartUnset
   EXPECT_FALSE(c.get()->hasMloPart);
 }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// ncclHipMloPartForBusId: the MLOPart index fillInfo stamps for a HIP device.
+// busId packs as domain<<20 | bus<<12 | dev<<4 | fn, so 0x05000 is 0000:05:00.0.
+namespace {
+constexpr int64_t kPhysBusId = 0x05000;  // 0000:05:00.0
+int64_t BusIdWithFn(int fn) { return (kPhysBusId & ~0xfLL) | fn; }
+}  // namespace
+
+// The whole point of the gate: an unpartitioned GPU is fn .0 and IS a GPU in sysfs, so it
+// is indistinguishable from CPX partition 0 by the function nibble alone. Stamping it made
+// ncclTopoCheckGdr() treat every ordinary GPU as an MLOPart and disable GDRDMA (ROCM-30463).
+TEST_F(InitMicrotest, MloPartForBusId_SpxGpu_LeavesUndefined) {
+  g_computePartitionMode = "SPX";
+  g_pciDeviceClass = PCI_ACCELERATOR_CLASS;
+  EXPECT_EQ(NCCL_TOPO_UNDEF, ncclHipMloPartForBusId(kPhysBusId));
+}
+
+TEST_F(InitMicrotest, MloPartForBusId_SpxModeIsCaseInsensitive) {
+  g_computePartitionMode = "spx";
+  g_pciDeviceClass = PCI_ACCELERATOR_CLASS;
+  EXPECT_EQ(NCCL_TOPO_UNDEF, ncclHipMloPartForBusId(kPhysBusId));
+}
+
+// Attribute absent => ASIC cannot be compute-partitioned at all (pre-MI300 parts).
+TEST_F(InitMicrotest, MloPartForBusId_PartitionAttrAbsent_LeavesUndefined) {
+  g_computePartitionMode = "";
+  g_pciDeviceClass = PCI_ACCELERATOR_CLASS;
+  EXPECT_EQ(NCCL_TOPO_UNDEF, ncclHipMloPartForBusId(kPhysBusId));
+}
+
+TEST_F(InitMicrotest, MloPartForBusId_CpxFunctionZero_StampsPartitionZero) {
+  g_computePartitionMode = "CPX";
+  g_pciDeviceClass = PCI_ACCELERATOR_CLASS;
+  EXPECT_EQ(0, ncclHipMloPartForBusId(kPhysBusId));
+}
+
+TEST_F(InitMicrotest, MloPartForBusId_DpxFunctionZero_StampsPartitionZero) {
+  g_computePartitionMode = "DPX";
+  g_pciDeviceClass = "0x03";
+  EXPECT_EQ(0, ncclHipMloPartForBusId(kPhysBusId));
+}
+
+// CPX aliases .1-.7 are missing from sysfs (empty class) or resolve to a NIC.
+TEST_F(InitMicrotest, MloPartForBusId_CpxAliasMissingFromSysfs_StampsFunctionIndex) {
+  g_computePartitionMode = "CPX";
+  g_pciDeviceClass = "";
+  EXPECT_EQ(3, ncclHipMloPartForBusId(BusIdWithFn(3)));
+}
+
+TEST_F(InitMicrotest, MloPartForBusId_CpxAliasIsNic_StampsFunctionIndex) {
+  g_computePartitionMode = "CPX";
+  g_pciDeviceClass = "0x028000";
+  EXPECT_EQ(1, ncclHipMloPartForBusId(BusIdWithFn(1)));
+}
+
+// A non-zero function that really is a GPU is a distinct physical device, not an alias.
+TEST_F(InitMicrotest, MloPartForBusId_NonZeroFunctionIsRealGpu_LeavesUndefined) {
+  g_computePartitionMode = "CPX";
+  g_pciDeviceClass = PCI_ACCELERATOR_CLASS;
+  EXPECT_EQ(NCCL_TOPO_UNDEF, ncclHipMloPartForBusId(BusIdWithFn(1)));
+}
+
+TEST_F(InitMicrotest, MloPartForBusId_FunctionAtOrAboveDevMax_LeavesUndefined) {
+  g_computePartitionMode = "CPX";
+  g_pciDeviceClass = "";
+  EXPECT_EQ(NCCL_TOPO_UNDEF, ncclHipMloPartForBusId(BusIdWithFn(NCCL_TOPO_MLOPART_DEV_MAX)));
+}
+
+// The mode must be read on the physical function: the alias BDF may not exist in sysfs,
+// which would report the attribute as absent and mis-classify a real CPX partition.
+TEST_F(InitMicrotest, MloPartForBusId_QueriesPartitionModeOnPhysicalFunction) {
+  g_computePartitionMode = "CPX";
+  g_pciDeviceClass = "";
+  EXPECT_EQ(5, ncclHipMloPartForBusId(BusIdWithFn(5)));
+  ASSERT_NE(nullptr, g_lastPartitionModeBusId);
+  EXPECT_STREQ("0000:05:00.0", g_lastPartitionModeBusId);
+}
+#endif
+
 // NOT ASSERTABLE FROM THIS RUNG, deliberately: the four `global*Support` accumulators at :1491-1494 are
 // function-locals first read at :2347-2363, ~700 lines past the terminator. They execute (so they count
 // as covered) but nothing here can observe them, and deleting any of the four leaves the suite green.

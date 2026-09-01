@@ -82,6 +82,11 @@ ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, s
 
 ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass, size_t maxLen);
 
+// Reads the AMD compute-partition mode of a PCI device ("SPX", "DPX", "TPX", "QPX", "CPX").
+// Returns an empty string when the attribute does not exist, which is the case for every
+// device that cannot be compute-partitioned at all.
+ncclResult_t ncclOsGetComputePartitionMode(const char* busId, char* mode, size_t maxLen);
+
 #if NCCL_OS_WINDOWS
 // Forward declare nvmlDevice_t to avoid including nvml.h
 struct nvmlDevice_st;

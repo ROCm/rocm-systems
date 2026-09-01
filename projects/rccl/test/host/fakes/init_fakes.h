@@ -44,6 +44,11 @@ extern int g_firmwareVersion;
 extern int g_gdrSupportValue;
 extern int g_gdrSupportCalls;
 
+// fillInfo MLOPart stamping. Empty string = attribute absent / class unreadable.
+extern const char* g_computePartitionMode;  // "" | "SPX" | "CPX" | ...
+extern const char* g_pciDeviceClass;        // "" | "0x1200" | "0x028000" | ...
+extern const char* g_lastPartitionModeBusId;  // busId the mode was last queried for
+
 extern bool g_bootstrapNetInitFail;
 
 extern ncclResult_t g_ncclNetInitResult;

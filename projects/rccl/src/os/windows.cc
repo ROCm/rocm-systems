@@ -1508,6 +1508,13 @@ ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass
   return ncclSuccess;
 }
 
+ncclResult_t ncclOsGetComputePartitionMode(const char* /*busId*/, char* mode, size_t maxLen) {
+  // Windows has no sysfs equivalent of current_compute_partition. Report the
+  // attribute as absent, which callers read as "not compute-partitioned".
+  if (mode && maxLen > 0) mode[0] = '\0';
+  return ncclSuccess;
+}
+
 ncclResult_t ncclOsGetPciDeviceClass(nvmlDevice_t device, char* deviceClass, size_t maxLen) {
   // Get PCI bus ID from NVML device
   nvmlPciInfo_t pciInfo;

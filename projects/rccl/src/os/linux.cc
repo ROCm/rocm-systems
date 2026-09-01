@@ -666,6 +666,20 @@ ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass
   return ret;
 }
 
+ncclResult_t ncclOsGetComputePartitionMode(const char* busId, char* mode, size_t maxLen) {
+  char* path = NULL;
+  NOWARN(ncclOsGetPciPath(busId, &path), NCCL_GRAPH);
+  if (path == NULL) {
+    mode[0] = '\0';
+    return ncclSystemError;
+  }
+  // amdgpu exposes this only on partition-capable ASICs; ncclOsTopoGetStrFromSys
+  // leaves the string empty (and logs at NCCL_GRAPH) when the file is absent.
+  ncclResult_t ret = ncclOsTopoGetStrFromSys(path, "current_compute_partition", mode, maxLen);
+  free(path);
+  return ret;
+}
+
 ncclResult_t ncclOsGetBcmLinks(const char* busId, int* nlinks, char** peers) {
   *nlinks = 0;
   *peers = NULL;
