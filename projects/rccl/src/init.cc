@@ -61,6 +61,7 @@
 #include "git_version.h"
 #include "rccl_vars.h"
 #include "hip_rocm_version_info.h"
+#include "rccl_graph_gen.h"
 // #include <hsa/hsa_ext_amd.h>
 #ifdef USE_AMDSMI
 #include "amdsmi_wrap.h"
@@ -1658,8 +1659,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   ringGraph->maxChannels = MAXCHANNELS / 2;
   NCCLCHECKGOTO(ncclTopoCompute(comm->topo, ringGraph), ret, fail);
   NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, ringGraph), ret, fail);
-
-  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151")) {
+  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151") || rcclParamIntraGraphGen()) { 
     /**
      * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
      * edge-disjoint Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
@@ -1672,6 +1672,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
      * by repairMissingChannels() during Postset.
      * */
     int numChannels = rcclParamInitChannels() > 0 ? rcclParamInitChannels() : 6 /* 2 X (comm->nNodes - 1)  */;
+    INFO(NCCL_ENV,"rcclParamIntraGraphGen(): %d rcclParamInitChannels(): %d ringGraph->minChannels: %d ringGraph->maxChannels: %d", rcclParamIntraGraphGen() , numChannels, ringGraph->minChannels, ringGraph->maxChannels);
+    ringGraph->minChannels = std::min(1,numChannels);
+    ringGraph->maxChannels = std::min(MAXCHANNELS/2,numChannels);
     ringGraph->nChannels = std::max(ringGraph->minChannels, std::min(ringGraph->maxChannels, (int32_t)numChannels));
   }
   INFO(NCCL_INIT, "ringGraph->nChannels = %d ", ringGraph->nChannels);

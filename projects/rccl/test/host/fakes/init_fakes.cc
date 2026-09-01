@@ -88,6 +88,7 @@ int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
 int64_t ncclParamNvtxDisable() { return g_loadParam("NVTX_DISABLE", 0); }
 int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 2); }
 int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 1); }
+int64_t rcclParamIntraGraphGen() {return g_loadParam("INTRA_GRAPH_GEN", 0);}
 
 // -------------------------------------------------------------------------
 // Recorder: pure instrumentation -> no-op fake. Only the overloads reached by

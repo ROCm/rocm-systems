@@ -19,6 +19,7 @@
 #include <stdint.h>     // For uint8_t and other fixed-width types
 #include <string.h>     // For memset()
 #include <limits.h>     // For INT_MAX
+#include "rccl_graph_gen.h"
 
 // Allgather *value across the comm and reduce it to the global minimum. Leak-safe
 // on the allgather error path. See declaration in graph.h for why grow needs this.
@@ -152,10 +153,30 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
     }
   }
 
+  int* localRankOrder = nullptr;
+  int* cutIndices = nullptr;
+  if ( rcclParamIntraGraphGen() ) {
+     NCCLCHECK(ncclCalloc(&localRankOrder, nChannels * localRanks));
+     NCCLCHECK(generateRings(localRanks, nChannels, localRankOrder));
+     for ( int c = 1; c < nChannels ; c++ ) {
+      memcpy(graphs[NCCL_ALGO_RING]->intra+c*localRanks, graphs[NCCL_ALGO_RING]->intra, localRanks*sizeof(int));
+    }
+    if ( rcclParamInterGraphGen() ) {
+      NCCLCHECK(ncclCalloc(&cutIndices,nChannels));
+      findRingCutIndices(nChannels, localRanks, localRankOrder,cutIndices);
+    }
+  }
+
   for (int c = 0; c < nChannels; c++) {
     struct ncclChannel* channel = comm->channels + c;
 
     int* ringIntra = graphs[NCCL_ALGO_RING]->intra + c * localRanks;
+    if ( rcclParamIntraGraphGen() ) {
+      const char* str = ncclGetEnv("NCCL_P2P_DISABLE");
+      int p2_disable = str ? strtol(str, NULL, 0) : 0;
+      int copy_index = c*(1-p2_disable);
+      permute_array_inplace(ringIntra,localRanks,localRankOrder+copy_index*localRanks); /* copy_index -> 0 or c */
+    }
     int* treeIntra = graphs[NCCL_ALGO_TREE]->intra + c * localRanks;
     int* collNetIntra = graphs[NCCL_ALGO_COLLNET_CHAIN]->intra + c * localRanks;
 
@@ -165,6 +186,12 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
         topoRanks->ringSend[c] = ringIntra[localRanks - 1];
         topoRanks->ringPrev[c] = (i == 0) ? -1 : ringIntra[i - 1];
         topoRanks->ringNext[c] = (i == localRanks - 1) ? -1 : ringIntra[i + 1];
+        if ( rcclParamIntraGraphGen() && rcclParamInterGraphGen() ) {
+          topoRanks->ringRecv[c] = ringIntra[ ( cutIndices[c] + 1 ) % localRanks] ; 
+          topoRanks->ringSend[c] = ringIntra[cutIndices[c]];
+          topoRanks->ringPrev[c] = ringIntra[ ( localRanks  +  i-1 ) % localRanks];
+          topoRanks->ringNext[c] = ringIntra[(i+1) % localRanks];
+        }
       }
       if (treeIntra[i] == rank) {
         int parentIndex = 0;
@@ -183,6 +210,8 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
       }
     }
   }
+  free(localRankOrder);
+  free(cutIndices);
   // Duplicate channels trees
   struct ncclChannel* channel0 = comm->channels;
   struct ncclChannel* channel1 = (nChannels > MAXCHANNELS / 2) ? 0 : channel0 + nChannels;
@@ -319,121 +348,6 @@ ncclResult_t ncclTreeBasePostset(struct ncclComm* comm, struct ncclTopoGraph* tr
   return ncclSuccess;
 }
 
-static void generateWalecki(int nNodes, int channel, int* order) {
-  if (nNodes <= 0 || !order) return;
-
-  // For Walecki, if N is even, we treat it as (N-1) nodes + 1 fixed pivot
-  int m = (nNodes % 2) ? nNodes : (nNodes - 1);
-  int left = 0;
-  int right = m - 1;
-
-  for (int i = 0; i < m; i++) {
-    int val;
-    if (i % 2 == 0) {
-      val = (left + channel) % m;
-      left++;
-    } else {
-      val = (right + channel) % m;
-      right--;
-    }
-    order[i] = val;
-  }
-  if (nNodes % 2 == 0) {
-    order[nNodes - 1] = nNodes - 1;
-  }
-}
-
-/**
- * This function takes number of nodes in a fully connected graph and number target channels, and generates upto nChannel Hamiltonian cycles
- * In this function we initially generate Walecki Construction depending on (nNodes mod 2), upto nNodes / 2 channels. Then, based on edge usage
- * heuristic, we construct rest of the cycles.
- *
- * Assumptions : nodeOrder is pointer to flattened 2D array of size nNodes*nChannels*sizeof(int), and is pre-allocated before invoking this function.
- */
-static ncclResult_t generateGreedyNodeOrder(int nNodes, uint8_t nChannels, int* nodeOrder) {
-    // --- SAFETY CHECK: Guard against invalid cluster sizes ---
-  if (nNodes <= 0 || nChannels <= 0 || nodeOrder == NULL) return ncclInvalidArgument;
-    // Handle degenerate cases (N=1, N=2) where Hamiltonian diversity is impossible
-  if (nNodes < 3) {
-    for (int c = 0; c < nChannels; c++) {
-      for (int n = 0; n < nNodes; n++) {
-        nodeOrder[c * nNodes + n] = n;
-      }
-    }
-    return ncclSuccess;
-  }
-
-  if (nChannels <= (nNodes / 2)) {
-    for (int c = 0; c < nChannels; c++) {
-      generateWalecki(nNodes, c, &nodeOrder[c * nNodes]);
-    }
-    return ncclSuccess;
-  }
-
-    // Choose to augment with Greedy approach only if nNodes/2 channels are not sufficient. Most systems
-    // do not execute below code as we have MAXCHANNELS = 128.
-    // Optimization: uint8_t is sufficient for nChannels <= 255, In RCCL we limit it to 128 channels now.
-  uint8_t* edgeUsage = (uint8_t*)calloc(nNodes * nNodes, sizeof(uint8_t));
-  uint8_t* visited = (uint8_t*)malloc(nNodes * sizeof(uint8_t));
-
-  if (!edgeUsage || !visited) {
-    if (edgeUsage) free(edgeUsage);
-    if (visited) free(visited);
-    WARN("Unable to allocate memory with malloc/calloc");
-    return ncclInternalError;
-  }
-
-  int startNode = 0;
-  for (int c = 0; c < nChannels; c++) {
-    if (c < nNodes / 2) {
-      generateWalecki(nNodes, c, &nodeOrder[c * nNodes]);
-      for (int i = 0; i < nNodes; i++) {
-        int u = nodeOrder[c * nNodes + i];
-        int v = nodeOrder[c * nNodes + ((i + 1) % nNodes)];
-        edgeUsage[u * nNodes + v]++;
-      }
-      continue;
-    }
-        // Set all non-visited
-    memset(visited, 0, nNodes * sizeof(uint8_t));
-        // Only to reduce the pressure on starting node
-    startNode = (startNode + 1) % nNodes;
-    int curr = startNode;
-    nodeOrder[c * nNodes + 0] = curr;
-    visited[curr] = 1;
-
-    for (int step = 1; step < nNodes; step++) {
-      int bestNext = -1;
-      int minCost = INT_MAX;
-
-      for (int next = 0; next < nNodes; next++) {
-        if (!visited[next]) {
-          int cost = (int)edgeUsage[curr * nNodes + next];
-
-          // Without this check, a greedy algorithm might pick a "cheap" bestNext for the second-to-last
-          // node, but that node might have a very "expensive" (heavily used) link back to the start.
-          if (step == nNodes - 1) {
-            cost += (int)edgeUsage[next * nNodes + startNode];
-          }
-
-          if (cost < minCost) {
-            minCost = cost;
-            bestNext = next;
-          }
-        }
-      }
-      nodeOrder[c * nNodes + step] = bestNext;
-      visited[bestNext] = 1;
-      edgeUsage[curr * nNodes + bestNext]++;
-      curr = bestNext;
-    }
-    edgeUsage[curr * nNodes + startNode]++;
-  }
-  free(visited);
-  free(edgeUsage);
-  return ncclSuccess;
-}
-
 /**
  * This is a helper function for debug logs
  *
@@ -495,8 +409,9 @@ static ncclResult_t connectRingsLoadBalanced(struct ncclComm* comm, int* ringRec
          nChannels);
   }
 
-  // 2. Populate the Diverse/Greedy Node Order
-  generateGreedyNodeOrder(nNodes, nChannels, nodeOrder);
+  // // 2. Populate the Diverse/Greedy Node Order
+  // generateGreedyNodeOrder(nNodes, nChannels, nodeOrder);
+  NCCLCHECK(generateRings(nNodes, nChannels, nodeOrder));
 
   for (int c = 0; c < nChannels; c++) {
     // Correct offsets for global arrays
@@ -1123,7 +1038,7 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
    * The following if/else assumes cluster is homogeneous w.r.t gfx arch
    * Ideally All the ranks should have consensus on to graphs.
    */
-  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151")) {
+  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151") || rcclParamInterGraphGen()) {
     NCCLCHECK(connectRingsLoadBalanced(comm, ringRecv, ringSend, ringPrev, ringNext));
   } else {
     // Connect rings and trees. This should also duplicate the channels.

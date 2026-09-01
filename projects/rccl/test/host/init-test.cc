@@ -31,6 +31,7 @@
 // Pull in alloc.h now so its macros are visible to be #undef'd before init.cc's
 // transitive includes see them (same rationale as p2p-test.cc).
 #include "alloc.h"
+#include "rccl_graph_gen.h"
 
 // NCCL_PARAM redirector (shared with p2p-test.cc): routes every generated
 // ncclParamXxx() through g_loadParam on each call so tests can flip params
