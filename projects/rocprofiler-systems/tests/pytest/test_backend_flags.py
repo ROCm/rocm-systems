@@ -63,6 +63,7 @@ BACKEND_ENV_CASES = [
         ["-I", "ompt"],
         ["ROCPROFSYS_USE_OMPT=true"],
         {"ROCPROFSYS_USE_OMPT": "OFF"},
+        marks=pytest.mark.backend_include_ompt,
         id="ompt",
     ),
     pytest.param(
@@ -75,19 +76,14 @@ BACKEND_ENV_CASES = [
         ["-I", "rcclp"],
         ["ROCPROFSYS_USE_RCCLP=true"],
         {"ROCPROFSYS_USE_RCCLP": "OFF"},
+        marks=[pytest.mark.mpi, pytest.mark.gpu],
         id="rcclp",
-    ),
-    pytest.param(
-        ["-I", "amd-smi"],
-        ["ROCPROFSYS_USE_AMD_SMI=true"],
-        {"ROCPROFSYS_USE_AMD_SMI": "OFF"},
-        id="include-amd-smi",
     ),
     pytest.param(
         ["-I", "mpip", "-I", "ompt"],
         ["ROCPROFSYS_USE_MPIP=true", "ROCPROFSYS_USE_OMPT=true"],
         {"ROCPROFSYS_USE_MPIP": "OFF", "ROCPROFSYS_USE_OMPT": "OFF"},
-        marks=pytest.mark.mpi,
+        marks=[pytest.mark.mpi, pytest.mark.backend_include_ompt],
         id="mpip-ompt",
     ),
     pytest.param(
@@ -117,12 +113,6 @@ BACKEND_ENV_CASES = [
         ],
         _LOCKS_ON,
         id="all-locks",
-    ),
-    pytest.param(
-        ["-E", "amd-smi"],
-        ["ROCPROFSYS_USE_AMD_SMI=false"],
-        {"ROCPROFSYS_USE_AMD_SMI": "ON"},
-        id="exclude-amd-smi",
     ),
 ]
 

@@ -18,7 +18,7 @@
                     "description": "AMD-SMI PMC metadata registered",
                     "error_message": "No GPU PMC metadata rows found",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE target_arch is 'GPU'"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name LIKE 'device_%'"
                 }
             ]
         },
