@@ -42,26 +42,42 @@ class WorkloadSourceSnapshot(NamedTuple):
     absolute_source_paths: tuple[str, ...]
 
 
-def parse_source_frames(source: Optional[str]) -> list[SourceFrame]:
-    """Split an instruction comment into its frames, innermost first."""
+def parse_source_frames(
+    source: Optional[str],
+    source_path_map: dict[str, str],
+) -> list[SourceFrame]:
+    """Split an instruction comment into its frames, innermost first.
+
+    Each frame names the canonical path of the file it came from, so two raw
+    DWARF paths for one file yield the same path.
+    """
     if not source:
         return []
 
-    return [parse_source_frame(frame) for frame in source.split(SOURCE_FRAME_SEPARATOR)]
+    return [
+        parse_source_frame(frame, source_path_map)
+        for frame in source.split(SOURCE_FRAME_SEPARATOR)
+    ]
 
 
-def parse_source_frame(source_frame: str) -> SourceFrame:
-    """Split one frame into its path and line number.
+def parse_source_frame(
+    source_frame: str,
+    source_path_map: dict[str, str],
+) -> SourceFrame:
+    """Split one frame into its canonical path and line number.
 
     The line number is null for a ":?" frame and for a frame carrying no
-    recognizable line token, which keeps its whole text as the path.
+    recognizable line token, which keeps its whole text as the path. A path
+    the map does not name is kept as the disassembly spells it.
     """
     source_path, separator, line_token = source_frame.rpartition(":")
     if not separator or not is_source_line_token(line_token):
-        return source_frame, None
+        return source_path_map.get(source_frame, source_frame), None
+
+    canonical_path = source_path_map.get(source_path, source_path)
     if line_token == UNKNOWN_SOURCE_LINE_TOKEN:
-        return source_path, None
-    return source_path, int(line_token)
+        return canonical_path, None
+    return canonical_path, int(line_token)
 
 
 def is_source_line_token(token: str) -> bool:
@@ -77,19 +93,13 @@ def load_source_path_map(workload_path: Path) -> dict[str, str]:
     source_path_map: dict[str, str] = {}
     snapshot_directory = workload_path / SOURCE_SNAPSHOT_DIRECTORY_NAME
     for map_path in sorted(snapshot_directory.glob(SOURCE_PATH_MAP_FILE_PATTERN)):
-        source_path_map.update(read_source_path_map_file(map_path))
+        try:
+            with map_path.open(encoding="utf-8") as map_file:
+                source_path_map.update(json.load(map_file).get(SOURCE_PATH_MAP_KEY, {}))
+        except (OSError, ValueError, AttributeError):
+            console_warning(f"Could not read source path map: {map_path}")
 
     return source_path_map
-
-
-def read_source_path_map_file(map_path: Path) -> dict[str, str]:
-    """Read one process's map of raw DWARF path to canonical path."""
-    try:
-        with map_path.open(encoding="utf-8") as map_file:
-            return json.load(map_file).get(SOURCE_PATH_MAP_KEY, {})
-    except (OSError, ValueError, AttributeError):
-        console_warning(f"Could not read source path map: {map_path}")
-        return {}
 
 
 def resolve_snapshot_path(workload_path: Path, absolute_path: str) -> Path:

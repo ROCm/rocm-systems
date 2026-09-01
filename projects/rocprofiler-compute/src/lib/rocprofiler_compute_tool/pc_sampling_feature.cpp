@@ -17,12 +17,10 @@ PcSamplingMode rocprofiler_compute_tool::parse_pc_sampling_mode(const std::strin
 
 pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode        mode,
                                              std::filesystem::path code_object_info_path,
-                                             std::filesystem::path source_snapshot_path,
-                                             std::filesystem::path source_path_map_path)
+                                             std::filesystem::path source_snapshot_path)
     : pc_sampling_feature_t(mode,
                             std::move(code_object_info_path),
                             std::move(source_snapshot_path),
-                            std::move(source_path_map_path),
                             pc_sampling_collector_t::create(),
                             source_snapshotter_t::create())
 {
@@ -31,13 +29,11 @@ pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode        mode,
 pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode               mode,
                                              std::filesystem::path        code_object_info_path,
                                              std::filesystem::path        source_snapshot_path,
-                                             std::filesystem::path        source_path_map_path,
                                              pc_sampling_collector_t::ptr collector,
                                              source_snapshotter_t::ptr    snapshotter)
     : pc_sampling_feature_t(mode,
                             std::move(code_object_info_path),
                             std::move(source_snapshot_path),
-                            std::move(source_path_map_path),
                             std::move(collector),
                             std::move(snapshotter),
                             std::make_shared<code_object_writer_json_t>())
@@ -47,7 +43,6 @@ pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode               mode,
 pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode               mode,
                                              std::filesystem::path        code_object_info_path,
                                              std::filesystem::path        source_snapshot_path,
-                                             std::filesystem::path        source_path_map_path,
                                              pc_sampling_collector_t::ptr collector,
                                              source_snapshotter_t::ptr    snapshotter,
                                              code_object_writer_t::ptr    writer)
@@ -55,7 +50,6 @@ pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode               mode,
     , m_mode(mode)
     , m_code_object_info_path(std::move(code_object_info_path))
     , m_source_snapshot_path(std::move(source_snapshot_path))
-    , m_source_path_map_path(std::move(source_path_map_path))
     , m_collector(std::move(collector))
     , m_snapshotter(std::move(snapshotter))
     , m_writer(std::move(writer))
@@ -75,8 +69,6 @@ void pc_sampling_feature_t::finalize()
     if (!m_writer->empty())
     {
         m_writer->flush(m_code_object_info_path);
-        const auto source_path_map =
-            m_snapshotter->snapshot(m_collector->get_source_paths(), m_source_snapshot_path);
-        m_snapshotter->write_source_path_map(source_path_map, m_source_path_map_path);
+        m_snapshotter->snapshot(m_collector->get_source_paths(), m_source_snapshot_path);
     }
 }

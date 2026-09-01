@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 from typing import Optional
-from unittest.mock import patch
 
 import common
 import pytest
@@ -87,7 +86,18 @@ def create_source_snapshot(
 )
 def test_parse_source_frames(source, expected_frames):
     """Split representative instruction comments into ordered frames."""
-    assert parse_source_frames(source) == expected_frames
+    assert parse_source_frames(source, {}) == expected_frames
+
+
+def test_parse_source_frames_canonicalizes_each_frame():
+    """Every frame of a comment names the canonical path of its file."""
+    source = "/app/bin/../inc/hip.h:12 -> /app/kernel.cpp:7"
+    source_path_map = {"/app/bin/../inc/hip.h": "/app/inc/hip.h"}
+
+    assert parse_source_frames(source, source_path_map) == [
+        ("/app/inc/hip.h", 12),
+        ("/app/kernel.cpp", 7),
+    ]
 
 
 def test_load_source_path_map_without_snapshot(tmp_path):
@@ -106,18 +116,17 @@ def test_load_source_path_map_merges_every_process(tmp_path):
     }
 
 
-def test_load_source_path_map_with_unreadable_map(tmp_path):
+def test_load_source_path_map_with_unreadable_map(tmp_path, monkeypatch):
     """An unreadable map leaves its files to be looked up by raw DWARF path."""
     map_path = tmp_path / "src" / "303_source_map.json"
     map_path.parent.mkdir(parents=True)
     map_path.write_text("{not json", encoding="utf-8")
 
-    with patch(
-        "pc_sampling.source_snapshot_analysis.console_warning"
-    ) as console_warning:
-        assert load_source_path_map(tmp_path) == {}
+    warnings = []
+    monkeypatch.setattr(source_snapshot_analysis, "console_warning", warnings.append)
 
-    console_warning.assert_called_once()
+    assert load_source_path_map(tmp_path) == {}
+    assert len(warnings) == 1
 
 
 def test_resolve_snapshot_path_mirrors_absolute_path(tmp_path):

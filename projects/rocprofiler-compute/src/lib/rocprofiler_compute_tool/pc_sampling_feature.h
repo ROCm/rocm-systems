@@ -18,18 +18,15 @@ public:
     pc_sampling_feature_t() = default;
     pc_sampling_feature_t(PcSamplingMode        mode,
                           std::filesystem::path code_object_info_path,
-                          std::filesystem::path source_snapshot_path,
-                          std::filesystem::path source_path_map_path);
+                          std::filesystem::path source_snapshot_path);
     pc_sampling_feature_t(PcSamplingMode               mode,
                           std::filesystem::path        code_object_info_path,
                           std::filesystem::path        source_snapshot_path,
-                          std::filesystem::path        source_path_map_path,
                           pc_sampling_collector_t::ptr collector,
                           source_snapshotter_t::ptr    snapshotter);
     pc_sampling_feature_t(PcSamplingMode               mode,
                           std::filesystem::path        code_object_info_path,
                           std::filesystem::path        source_snapshot_path,
-                          std::filesystem::path        source_path_map_path,
                           pc_sampling_collector_t::ptr collector,
                           source_snapshotter_t::ptr    snapshotter,
                           code_object_writer_t::ptr    writer);
@@ -42,8 +39,6 @@ public:
 
     const std::filesystem::path& source_snapshot_path() const { return m_source_snapshot_path; }
 
-    const std::filesystem::path& source_path_map_path() const { return m_source_path_map_path; }
-
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info);
     void finalize();
 
@@ -52,7 +47,6 @@ private:
     PcSamplingMode               m_mode    = PcSamplingMode::Disabled;
     std::filesystem::path        m_code_object_info_path;
     std::filesystem::path        m_source_snapshot_path;
-    std::filesystem::path        m_source_path_map_path;
     pc_sampling_collector_t::ptr m_collector;
     source_snapshotter_t::ptr    m_snapshotter;
     code_object_writer_t::ptr    m_writer;

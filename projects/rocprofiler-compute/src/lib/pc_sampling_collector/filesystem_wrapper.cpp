@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 #include "filesystem_wrapper.h"
 
+#include <fstream>
+
 using namespace rocprofiler_compute_tool;
 
 filesystem_wrapper_t::ptr filesystem_wrapper_t::create()
@@ -64,4 +66,18 @@ std::filesystem::path filesystem_wrapper_impl_t::weakly_canonical(const std::fil
 std::filesystem::path filesystem_wrapper_impl_t::relative_path(const std::filesystem::path& path)
 {
     return path.relative_path();
+}
+
+void filesystem_wrapper_impl_t::write_file(const std::filesystem::path& path,
+                                           const std::string&           contents,
+                                           std::error_code&             error)
+{
+    std::ofstream output_file(path, std::ios::out);
+    if (!output_file.is_open())
+    {
+        error = std::make_error_code(std::errc::io_error);
+        return;
+    }
+
+    output_file << contents;
 }

@@ -202,25 +202,11 @@ public:
         std::filesystem::path           destination_root;
     };
 
-    struct write_source_path_map_call_t
-    {
-        rocprofiler_compute_tool::source_path_map_t source_path_map;
-        std::filesystem::path                       output_file_path;
-    };
+    void snapshot(const std::set<std::filesystem::path>& source_paths,
+                  const std::filesystem::path&           destination_root) override;
 
-    rocprofiler_compute_tool::source_path_map_t snapshot(
-        const std::set<std::filesystem::path>& source_paths,
-        const std::filesystem::path&           destination_root) override;
-    void write_source_path_map(const rocprofiler_compute_tool::source_path_map_t& source_path_map,
-                               const std::filesystem::path& output_file_path) override;
-
-    void set_source_path_map(rocprofiler_compute_tool::source_path_map_t source_path_map);
-
-    const std::vector<snapshot_call_t>&                 get_snapshot_calls() const;
-    const std::vector<write_source_path_map_call_t>&    get_write_source_path_map_calls() const;
+    const std::vector<snapshot_call_t>& get_snapshot_calls() const;
 
 private:
-    std::vector<snapshot_call_t>                m_snapshot_calls;
-    std::vector<write_source_path_map_call_t>   m_write_source_path_map_calls;
-    rocprofiler_compute_tool::source_path_map_t m_source_path_map;
+    std::vector<snapshot_call_t> m_snapshot_calls;
 };
