@@ -28,6 +28,8 @@ exclude: |
     | esmi_ib_library/
     | ualoe_lib/
     | third_party/
+    # Verbatim upstream license text; the whitespace is theirs, not ours.
+    | py-interface/THIRD_PARTY_LICENSES/
 fail_fast: false
 
 repos:
