@@ -219,6 +219,18 @@ do_guards() {
 do_coverage() {
   echo "==> Coverage  (out: $COVERAGE_DIR)"
 
+  # Prefer the toolchain's own llvm tools: versions match the build clang by construction.
+  if [ -d "$ROCM_PATH/llvm/bin" ]; then
+    PATH="$ROCM_PATH/llvm/bin:$PATH"
+  fi
+  local tool
+  for tool in llvm-profdata llvm-cov; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "error: $tool not found -- coverage needs the LLVM that built the tests" >&2
+      exit 1
+    fi
+  done
+
   local exe name dir rc=0
   local tracefiles=()
   # Each binary's profraw lives in its own $COVERAGE_DIR/<name>/ subdir, written
