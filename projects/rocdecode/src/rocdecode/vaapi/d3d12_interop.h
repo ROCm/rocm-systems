@@ -37,8 +37,21 @@ THE SOFTWARE.
 #include <dxgi1_2.h>
 #include <vector>
 #include <cstdint>
+#include <sstream>
+#include <iomanip>
 #include "../../commons.h"
 #include "../../../api/rocdecode/rocdecode.h"
+
+// Checks an HRESULT-returning D3D12/Win32 call; on failure logs the call text and the
+// HRESULT (hex) with file:line, then returns ROCDEC_RUNTIME_ERROR. Mirrors CHECK_VAAPI.
+#define CHECK_D3D12(call) {\
+    HRESULT hres = call;\
+    if (FAILED(hres)) {\
+        std::ostringstream hres_oss_; hres_oss_ << std::hex << static_cast<uint32_t>(hres);\
+        CriticalLog(g_rocdec_logger, ROCDEC_STR("D3D12 failure: ") + #call + " failed with 'HRESULT: 0x" + hres_oss_.str() + "' at " + __FILE__ + ":" + ROCDEC_TOSTR(__LINE__));\
+        return ROCDEC_RUNTIME_ERROR;\
+    }\
+}
 
 // Owns all Direct3D12 interop state for the Windows (vaon12) decode path:
 // the D3D12 device, the shared decode textures handed to VA-API as external
