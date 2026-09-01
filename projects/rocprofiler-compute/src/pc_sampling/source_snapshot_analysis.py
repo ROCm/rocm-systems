@@ -11,16 +11,20 @@ source snapshot, and exports captured source files with CSV analysis results.
 """
 
 import hashlib
+import json
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from utils.logger import console_debug
+from utils.logger import console_debug, console_warning
 
 SOURCE_FRAME_SEPARATOR = " -> "
 UNKNOWN_SOURCE_LINE_TOKEN = "?"
 SOURCE_EXPORT_DIRECTORY_NAME = "source"
+SOURCE_SNAPSHOT_DIRECTORY_NAME = "src"
+SOURCE_PATH_MAP_FILE_PATTERN = "*_source_map.json"
+SOURCE_PATH_MAP_KEY = "source_paths"
 
 SourceFrame = tuple[str, Optional[int]]
 
@@ -65,13 +69,40 @@ def is_source_line_token(token: str) -> bool:
     return token == UNKNOWN_SOURCE_LINE_TOKEN or (token.isascii() and token.isdigit())
 
 
+def load_source_path_map(workload_path: Path) -> dict[str, str]:
+    """Return one workload's map of raw DWARF path to canonical path.
+
+    Every process of a run writes its own map, so they are merged here.
+    """
+    source_path_map: dict[str, str] = {}
+    snapshot_directory = workload_path / SOURCE_SNAPSHOT_DIRECTORY_NAME
+    for map_path in sorted(snapshot_directory.glob(SOURCE_PATH_MAP_FILE_PATTERN)):
+        source_path_map.update(read_source_path_map_file(map_path))
+
+    return source_path_map
+
+
+def read_source_path_map_file(map_path: Path) -> dict[str, str]:
+    """Read one process's map of raw DWARF path to canonical path."""
+    try:
+        with map_path.open(encoding="utf-8") as map_file:
+            return json.load(map_file).get(SOURCE_PATH_MAP_KEY, {})
+    except (OSError, ValueError, AttributeError):
+        console_warning(f"Could not read source path map: {map_path}")
+        return {}
+
+
 def resolve_snapshot_path(workload_path: Path, absolute_path: str) -> Path:
     """Return where the profiler copied one source file inside a workload.
 
     The snapshot mirrors absolute paths beneath the workload's "src", so
     /a/b.cpp is copied to <workload>/src/a/b.cpp.
     """
-    return workload_path / "src" / Path(absolute_path).relative_to("/")
+    return (
+        workload_path
+        / SOURCE_SNAPSHOT_DIRECTORY_NAME
+        / Path(absolute_path).relative_to("/")
+    )
 
 
 def read_source_file_digest_and_lines(

@@ -333,13 +333,33 @@ void MockPcSamplingCollector::set_source_paths(const std::set<std::filesystem::p
     m_source_paths = source_paths;
 }
 
-void MockSourceSnapshotter::snapshot(const std::set<std::filesystem::path>& source_paths,
-                                     const std::filesystem::path&           destination_root)
+rocprofiler_compute_tool::source_path_map_t MockSourceSnapshotter::snapshot(
+    const std::set<std::filesystem::path>& source_paths,
+    const std::filesystem::path&           destination_root)
 {
     m_snapshot_calls.push_back({source_paths, destination_root});
+    return m_source_path_map;
+}
+
+void MockSourceSnapshotter::write_source_path_map(
+    const rocprofiler_compute_tool::source_path_map_t& source_path_map,
+    const std::filesystem::path&                       output_file_path)
+{
+    m_write_source_path_map_calls.push_back({source_path_map, output_file_path});
+}
+
+void MockSourceSnapshotter::set_source_path_map(rocprofiler_compute_tool::source_path_map_t source_path_map)
+{
+    m_source_path_map = std::move(source_path_map);
 }
 
 const std::vector<MockSourceSnapshotter::snapshot_call_t>& MockSourceSnapshotter::get_snapshot_calls() const
 {
     return m_snapshot_calls;
+}
+
+const std::vector<MockSourceSnapshotter::write_source_path_map_call_t>&
+MockSourceSnapshotter::get_write_source_path_map_calls() const
+{
+    return m_write_source_path_map_calls;
 }
