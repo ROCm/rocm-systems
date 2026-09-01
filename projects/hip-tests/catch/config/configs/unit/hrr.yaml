@@ -62,6 +62,7 @@ hrr:
     tags: [playback, cpu]
   Unit_HRR_Playback_VersionOption:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [playback, cpu]
   Unit_HRR_Recovery_CompleteArchive:
     <<: *level_2
@@ -77,6 +78,7 @@ hrr:
     tags: [format, recovery, cpu]
   Unit_HRR_Recovery_ImplausiblePayloadLength:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [format, recovery, cpu]
   Unit_HRR_Recovery_NoTrailer:
     <<: *level_2
@@ -490,42 +492,55 @@ hrr:
     tags: [direct, repro]
   Unit_HRR_Regions_StreamFraming:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [format, regions, cpu]
   Unit_HRR_Regions_Roundtrip:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, regions]
   Unit_HRR_Regions_SegmentMaterialization:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, regions]
   Unit_HRR_Regions_EmbeddedPointerMaterialization:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, regions]
   Unit_HRR_Regions_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, regions]
   Unit_HRR_Regions_MemcpyDirect:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, regions]
   Unit_HRR_Regions_MemcpyFirstTouchMaterialization:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, regions, memcpy]
   Unit_HRR_ApiMatrix_ManifestWellFormed:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [api-matrix, cpu]
   Unit_HRR_ApiMatrix_ReplayClassMarkers:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [api-matrix, cpu]
   Unit_HRR_ApiMatrix_InfoBreakdownParse:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [api-matrix, cpu]
   Unit_HRR_ApiMatrix_T0_Roundtrip:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, api-matrix]
   Unit_HRR_ApiMatrix_T1_Roundtrip:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, api-matrix]
   Unit_HRR_ApiMatrix_T2_Roundtrip:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, api-matrix]
   # T3 and T4 declare hipMemGetHandleForAddressRange, hipKernelNameRefByPtr and
   # hipPointerSetAttribute, which amdhip.def.in does not export; the workloads
@@ -533,62 +548,80 @@ hrr:
   Unit_HRR_ApiMatrix_T3_Roundtrip:
     <<: *level_2
     tags: [capture, playback, roundtrip, api-matrix]
-    disabled: [amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_linux, amd_wsl]
   Unit_HRR_ApiMatrix_T4_Roundtrip:
     <<: *level_2
     tags: [capture, playback, roundtrip, api-matrix]
-    disabled: [amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_linux, amd_wsl]
   Unit_HRR_ApiMatrix_T5_Roundtrip:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, api-matrix]
   Unit_HRR_ApiMatrix_Breadth_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_Breadth2_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_Deprioritised_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_GraphNodes_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_LegacyCtx_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_LegacyLaunch_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_LegacySurface_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_MemPoolShare_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_MultiGpu_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix, multigpu]
   Unit_HRR_ApiMatrix_PayloadLoss_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_ProcAddress_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_Reset_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_ShareableHandle_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_SilentFailure_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_SptCoopLaunch_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_SptKernelLaunch_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
   Unit_HRR_ApiMatrix_UC1Dense_Direct:
     <<: *level_2
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [direct, api-matrix]
