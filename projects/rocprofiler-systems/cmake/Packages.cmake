@@ -88,13 +88,19 @@ target_include_directories(
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys-dl>
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys-user>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys-causal-api>
 )
 
 # include threading because of rooflines
+#
+# the common-api target is defined later by add_subdirectory(source); linking it
+# by name here is resolved at generate time and carries its include directory,
+# so this file no longer hard-codes source/lib/rocprof-sys-common-api
 target_link_libraries(
     rocprofiler-systems-headers
-    INTERFACE rocprofiler-systems::rocprofiler-systems-threading
+    INTERFACE
+        rocprofiler-systems::rocprofiler-systems-threading
+        rocprofiler-systems::rocprofiler-systems-common-api-library
 )
 
 # ensure the env overrides the appending /opt/rocm later
@@ -640,23 +646,6 @@ include(NlohmannJson)
 if(ROCPROFSYS_BUILD_TESTING)
     include(GTest)
     include(GhcFilesystem)
-endif()
-
-# ----------------------------------------------------------------------------------------#
-#
-# ELFIO
-#
-# ----------------------------------------------------------------------------------------#
-
-if(ROCPROFSYS_BUILD_DEVICETRACE)
-    rocprofiler_systems_checkout_git_submodule(
-        RELATIVE_PATH external/elfio
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        REPO_URL https://github.com/jrmadsen/ELFIO.git
-        REPO_BRANCH set-offset-support
-    )
-
-    add_subdirectory(external/elfio)
 endif()
 
 # ----------------------------------------------------------------------------------------#

@@ -14,7 +14,7 @@ XML specification via the `amdisa` Python library in `lib/python/amdisa/`.
 | `isa_profile.py` | Per-ISA profile constants and encoding rules |
 | `semantics.py` | Derive instruction semantics from mnemonics |
 | `cross_isa.py` | Cross-ISA instruction overlap analysis |
-| `codegen.py` | Generate C++ decoders, encoders, and instruction execute bodies |
+| `codegen/` | Generate C++ decoders, encoders, and instruction execute bodies |
 | `legalization.py` | Generate cross-ISA legalization tables (Action classification) |
 | `legalization_codegen.py` | Emit C++20 `InstructionLegalization[]` legalization table headers |
 | `encoding_translator_codegen.py` | Emit C++20 neutral field structs + decode/encode functions |
@@ -39,12 +39,92 @@ while its installed dependencies come from the environment.
 rocm-systems/shared/machine-readable-isa/isa/
 ```
 
+## ISA additions
+
+Repository-owned ISA additions can be supplied without modifying the public MR
+ISA XML. Each ISA additions document has this shape:
+
+```xml
+<IsaAdditions Id="example-additions"
+              BaseArchitecture="AMD CDNA 5"
+              BaseSchemaVersion="1.2.0">
+  <EncodingIdentifierAdditions>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_EXAMPLE</EncodingName>
+      <Opcode>7</Opcode>
+      <EncodingIdentifier Radix="2">...complete identifier...</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+  </EncodingIdentifierAdditions>
+  <InstructionAdditions>
+    <Instruction>
+      <!-- One complete MR ISA <Instruction> node. -->
+    </Instruction>
+  </InstructionAdditions>
+</IsaAdditions>
+```
+
+Apply one or more additions documents with a logical ISA name. Repeated
+documents for one ISA are processed in command-line and document order:
+
+```bash
+python -m amdisa \
+  cdna5:/path/to/amdgpu_isa_cdna5.xml \
+  --isa-additions cdna5:/path/to/first-additions.xml \
+  --isa-additions cdna5:/path/to/second-additions.xml \
+  --isa-output /path/to/isa-output \
+  --dbt-output /path/to/dbt-output
+```
+
+The `EncodingIdentifierAdditions` element is optional. `InstructionAdditions`
+is required and may be empty. The additions contract is intentionally narrower
+than a general XML patch:
+
+- Only complete `<Instruction>` nodes and complete identifiers for an existing
+  encoding's `<EncodingIdentifiers>` list are accepted. An additions document
+  cannot replace or delete base definitions, identifier masks, microcode
+  formats, encoding conditions, operand types, or data formats.
+- Added instructions must reference encodings, encoding conditions, operand
+  types, and operand fields already defined by the applicable base encoding
+  layout. Implied-literal operands outside that layout are accepted only when
+  their normalized field, type, direction, and parser-role flags match an
+  implied-literal contract established by the base XML.
+- An identifier addition names its encoding and expected opcode. Its radix and
+  width must match the base encoding; its fixed bits must match an existing
+  identifier layout; and its decoded opcode must equal the declared opcode.
+  Duplicate and colliding decode slots are rejected. Each identifier must be
+  owned by an added instruction. An implied-literal identifier must have the
+  same instruction owner and opcode in its parent encoding.
+- Additions document IDs and instruction names must be valid and unique.
+  Encoding/opcode ownership collisions between different instructions,
+  repeated instruction forms, multiple active forms that generate the same C++
+  instruction symbol, out-of-range opcodes, missing references, unknown root
+  data, and base architecture/schema mismatches are errors. Repetition of one
+  instruction's slot under distinct base-established MR-ISA encoding conditions
+  is allowed only when profile filtering leaves at most one generated form
+  active. Every added instruction must retain at least one active form.
+- Every input document and contained addition validates before the parser-owned
+  tree is changed. Validated identifiers are merged before normal
+  encoding/decode-table parsing, then instructions are appended in deterministic
+  file/document order. A bad later file cannot leave a partially merged
+  specification, and an active added instruction whose final opcode pointer
+  would remain unpopulated is an error.
+- An empty additions document leaves generated output byte-identical to the base
+  XML.
+
+The parsed `IsaSpec.applied_additions` and each added
+`Instruction.source_addition` retain the source document's provenance for later
+generator stages.
+Provenance does not by itself define target availability: a separate variant
+model must also be able to restrict encoding forms already present in the base
+XML.
+
 ## Generated file locations
 
 | Generated files | Location | Generator |
 |---|---|---|
-| ISA decoders, encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<output-directory>/` | `codegen.py` |
-| Shared execute templates | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/` | `codegen.py` |
+| ISA decoders, encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<output-directory>/` | `codegen/` |
+| Shared execute templates | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/` | `codegen/` |
+| ISA files generated at a custom path | A caller-selected tree such as `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/custom/generated/` | `codegen/` |
 | Cross-ISA legalization tables | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `legalization_codegen.py` |
 | Encoding decode/encode functions | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `encoding_translator_codegen.py` |
 
@@ -68,24 +148,34 @@ decode/encode functions and neutral field structs are auto-generated.
 ## CLI reference
 
 ```
-python -m amdisa [--multi NAME:XML ...] [--gen-isas] [--gen-dbt]
-                 [--isa-output DIR] [--dbt-output DIR] [isafile]
+python -m amdisa [--isa-additions NAME:XML] [--gen-isas] [--gen-dbt]
+                 [--isa-output DIR] [--include-root DIR]
+                 [--dbt-output DIR] [NAME:]XML ...
 ```
 
 | Option | Description |
 |---|---|
-| `--multi NAME:XML ...` | Multi-ISA mode: parse all XMLs and generate shared execute templates |
+| `[NAME:]XML ...` | One or more ISA XMLs. A recognized name selects its semantic profile. An unrecognized explicit name is treated as a custom generated identity, with its semantic profile detected from the XML |
+| `--isa-additions NAME:XML` | Apply a validated ISA additions file to the named ISA; may be repeated |
 | `--gen-isas` | Generate ISA C++ files (decoders, encodings, execute bodies) |
 | `--gen-dbt` | Generate DBT legalization tables and encoding translators |
 | `--isa-output DIR` | Output path for generated ISA C++ files |
+| `--include-root DIR` | Compiler include root used to spell relocatable generated includes |
 | `--dbt-output DIR` | Output directory for DBT tables (defaults to `--isa-output`) |
 
 When neither `--gen-isas` nor `--gen-dbt` is specified, both are
-generated.
+generated. DBT generation is skipped when only one ISA is provided.
 
-<!-- \NPI new ISA family: add a `<isa>:$MRISA/amdgpu_isa_<isa>.xml` entry to \
-     each manual `--multi` invocation below and to the supported-ISA list in \
-     scripts/generate-amdisa.sh. -->
+`--isa-output` controls where files are written. Generated include prefixes
+are derived from that path. If `--include-root` is provided, `--isa-output`
+must be beneath it and includes are emitted relative to it. Otherwise, absolute
+include paths are emitted so that a relative output path does not depend on the
+generator's working directory.
+
+The recognized profile names include `cdna1` through `cdna5`, `rdna1` through
+`rdna4`, and both `rdna3.5` and `rdna3_5`. An unrecognized explicit name is
+treated as a custom generated identity; its semantic profile is detected from
+the XML.
 
 ## Regenerating everything
 
@@ -111,7 +201,6 @@ run from the rocjitsu project root. Set `MRISA` to the shared MR ISA directory:
 MRISA=../../shared/machine-readable-isa/isa
 
 python -m amdisa \
-  --multi \
     cdna1:$MRISA/amdgpu_isa_cdna1.xml \
     cdna2:$MRISA/amdgpu_isa_cdna2.xml \
     cdna3:$MRISA/amdgpu_isa_cdna3.xml \
@@ -123,6 +212,7 @@ python -m amdisa \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
+  --include-root lib/rocjitsu/src \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
 
 find lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated lib/rocjitsu/src/rocjitsu/code/dbt/generated \
@@ -133,7 +223,6 @@ find lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated lib/rocjitsu/src/rocjit
 
 ```bash
 python -m amdisa \
-  --multi \
     cdna1:$MRISA/amdgpu_isa_cdna1.xml \
     cdna2:$MRISA/amdgpu_isa_cdna2.xml \
     cdna3:$MRISA/amdgpu_isa_cdna3.xml \
@@ -145,7 +234,8 @@ python -m amdisa \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
   --gen-isas \
-  --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated
+  --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
+  --include-root lib/rocjitsu/src
 
 find lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
   \( -name '*.cpp' -o -name '*.h' \) -exec clang-format -i {} +
@@ -155,7 +245,6 @@ find lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
 
 ```bash
 python -m amdisa \
-  --multi \
     cdna1:$MRISA/amdgpu_isa_cdna1.xml \
     cdna2:$MRISA/amdgpu_isa_cdna2.xml \
     cdna3:$MRISA/amdgpu_isa_cdna3.xml \
@@ -182,7 +271,7 @@ When modifying ISA semantics or adding instruction support:
    `lib/python/amdisa/codegen/execute/`, instruction classification in
    `lib/python/amdisa/semantics.py`, or compatibility inventory logic in
    `lib/python/amdisa/parser.py` as appropriate. Never edit generated C++.
-2. Regenerate with `scripts/generate-amdisa.sh` or `--multi` as shown above
+2. Regenerate with `scripts/generate-amdisa.sh` or the CLI as shown above
 3. If you regenerated manually, format the generated files with `clang-format`
    (the helper formats changed generated files for you)
 4. Stage ALL generated files before committing

@@ -15,6 +15,7 @@ namespace amdgpu {
 
 class GpuMemory;
 class L2Cache;
+class RequestMtypeResolver;
 
 /// @brief L1 Vector Cache (V$) controller for FLAT/MUBUF/MTBUF instructions.
 ///
@@ -70,10 +71,10 @@ public:
 private:
   void invalidate_all_lines();
   void synchronize_epoch();
-  void read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, bool non_temporal,
-                  bool request_l1_bypass, uint32_t vmid);
-  void write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype, bool non_temporal,
-                   uint32_t vmid);
+  void read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, bool non_temporal,
+                  bool request_l1_bypass, uint32_t vmid, RequestMtypeResolver &mtypes);
+  void write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, bool non_temporal,
+                   uint32_t vmid, RequestMtypeResolver &mtypes);
   void ensure_line(uint64_t addr, uint32_t vmid);
 
   CacheStore cache_;
