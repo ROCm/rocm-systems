@@ -55,7 +55,15 @@ EXCLUDE_PREFIX = (
     "include/libdrm/",  # vendored DRM headers, other owners
     "src/nic/brcm-nic/",  # Broadcom-owned NIC implementation
     "include/ras-decode/",  # vendored RAS decode headers, not maintained here
-    "include/ualoe_lib/",  # vendored UALoE library headers, not maintained here
+    # Vendored UALoE library, not maintained here -- both halves are replaced
+    # wholesale by the periodic "sync UALoE lib" drops, so a header rewritten
+    # here is reverted by the next sync. Matches the `ualoe_lib/` entry that
+    # keeps the rest of the pre-commit suite off this code.
+    "include/ualoe_lib/",
+    "src/ualoe_lib/",
+    # Agent tooling, not shipped source: nothing under here is compiled,
+    # installed or distributed, so the header convention does not apply.
+    ".claude/",
 )
 EXCLUDE_EXACT = frozenset(
     {
