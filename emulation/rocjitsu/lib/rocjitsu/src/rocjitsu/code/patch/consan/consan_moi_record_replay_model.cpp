@@ -175,16 +175,6 @@ record_acquired_epoch_components(std::span<ConSanMoiAcquiredEpochToken> tokens,
 
 } // namespace
 
-ConSanMoiAtomicSyncResult
-consan_moi_record_replay_atomic_release(std::span<ConSanMoiAtomicReleaseRecord> release_records,
-                                        uint64_t generation, uint64_t atomic_address,
-                                        uint32_t producer_owner_id, uint32_t producer_epoch,
-                                        uint32_t release_instruction_offset) {
-  return consan_moi_record_replay_atomic_release(
-      release_records, std::span<const ConSanMoiAcquiredEpochToken>{}, generation, atomic_address,
-      producer_owner_id, producer_epoch, release_instruction_offset);
-}
-
 ConSanMoiAtomicSyncResult consan_moi_record_replay_atomic_release(
     std::span<ConSanMoiAtomicReleaseRecord> release_records,
     std::span<const ConSanMoiAcquiredEpochToken> acquired_epoch_tokens, uint64_t generation,

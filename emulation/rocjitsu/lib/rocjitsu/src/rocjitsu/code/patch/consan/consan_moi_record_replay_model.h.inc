@@ -10,12 +10,6 @@ consan_moi_acquired_epoch_orders(std::span<const ConSanMoiAcquiredEpochToken> to
                                  const ConSanMoiExactShadowEntry &current,
                                  const ConSanMoiExactShadowEntry &prior);
 
-[[nodiscard]] ConSanMoiAtomicSyncResult
-consan_moi_record_replay_atomic_release(std::span<ConSanMoiAtomicReleaseRecord> release_records,
-                                        uint64_t generation, uint64_t atomic_address,
-                                        uint32_t producer_owner_id, uint32_t producer_epoch,
-                                        uint32_t release_instruction_offset);
-
 /// Publishes the releasing owner's sparse causal clock at atomic_address. The
 /// own epoch and every imported producer epoch commit together or not at all.
 [[nodiscard]] ConSanMoiAtomicSyncResult consan_moi_record_replay_atomic_release(

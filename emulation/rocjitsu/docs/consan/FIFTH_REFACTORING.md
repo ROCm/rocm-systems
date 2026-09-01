@@ -6896,3 +6896,47 @@ test-only prefix/reference API remains physically mode-local. Broad pipeline
 and validation transactions, further target and mode locality, material
 whole-refactoring shrinkage, and the independent completion audit remain open.
 The goal therefore remains active.
+
+### 16.91 Convergence checkpoint 90: causal-state-aware Record/Replay release
+
+The final shortened Record/Replay synchronization overload followed the same
+production-versus-test split exposed by checkpoint 89. Production replay
+always has the current acquired-epoch-token product and publishes it together
+with the releasing owner's epoch. The overload that silently substituted an
+empty token span had only fixture callers representing a release with no
+imported causal state; it was not a distinct production operation.
+
+Production Record/Replay now declares and implements only the complete atomic
+release boundary. The empty-token convenience lives in
+`consan_record_replay_model_test_support.h`, beside the other test-owned prefix
+operations, and forwards explicitly to that complete boundary. A structural
+check caps the production header at one atomic-release operation so that an
+incomplete forwarding facade cannot quietly return.
+
+| Signal | Checkpoint 90 | Cumulative change | Slice change from checkpoint 89 |
+| --- | ---: | ---: | ---: |
+| Production files | 272 | +43 | 0 |
+| Physical production lines | 102,893 | **-2,083** | **-16** |
+| Nonblank production lines | 96,665 | **-2,419** | **-14** |
+| Production implementation lines | 88,979 | **-2,471** | **-14** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **154 / 47** | **-122 / -10** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 326 / 60 | +36 / +9 | 0 / 0 |
+| Production Record/Replay atomic-release operations | **1** | n/a | **-1** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and all 27 focused
+Record/Replay atomic, causal, acquire/release, and architecture-boundary tests.
+Checkpoint 89 immediately before this slice passed the broader 190-test
+Record/Replay, InlineShadow, hook, and boundary gate, while checkpoint 86
+passed the complete 4,776-test nonphysical matrix. The slice changes no replay
+algorithm or wire format and removes no behavior or inventory. No physical
+gfx1201 test was run.
+
+This deletion-bearing checkpoint strengthens Sections 14.3, 14.5, 14.7, and
+14.8 by requiring the production mode boundary to receive its complete causal
+input instead of manufacturing an implicit empty product. Broad pipeline and
+validation transactions, further target and mode locality, material
+whole-refactoring shrinkage, and the independent completion audit remain open.
+The goal therefore remains active.

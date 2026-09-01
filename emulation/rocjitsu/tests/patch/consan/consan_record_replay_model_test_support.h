@@ -10,6 +10,18 @@
 
 namespace rocjitsu {
 
+/// Test convenience for releases that deliberately start without imported
+/// causal state. Production replay always supplies its current token product.
+[[nodiscard]] inline ConSanMoiAtomicSyncResult
+consan_moi_record_replay_atomic_release(std::span<ConSanMoiAtomicReleaseRecord> release_records,
+                                        uint64_t generation, uint64_t atomic_address,
+                                        uint32_t producer_owner_id, uint32_t producer_epoch,
+                                        uint32_t release_instruction_offset) {
+  return consan_moi_record_replay_atomic_release(
+      release_records, std::span<const ConSanMoiAcquiredEpochToken>{}, generation, atomic_address,
+      producer_owner_id, producer_epoch, release_instruction_offset);
+}
+
 /// Test conveniences for replay fixtures that exercise only a prefix of the
 /// complete Record/Replay event product. Production report analysis calls the
 /// complete boundary directly.

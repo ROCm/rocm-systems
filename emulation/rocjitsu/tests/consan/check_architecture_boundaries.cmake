@@ -305,6 +305,12 @@ _consan_assert_match_count_at_most(
     "production Record/Replay must expose only the complete replay boundary"
 )
 _consan_assert_match_count_at_most(
+    "${_consan_dir}/consan_moi_record_replay_model.h.inc"
+    "consan_moi_record_replay_atomic_release"
+    1
+    "production Record/Replay must expose only the causal-state-aware release boundary"
+)
+_consan_assert_match_count_at_most(
     "${_consan_dir}/consan_moi_record_replay_model.cpp"
     "consan_moi_record_replay_access_records"
     1
