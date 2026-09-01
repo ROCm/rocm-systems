@@ -7,8 +7,14 @@
 
 namespace rocjitsu::consan_moi_detail {
 
-[[nodiscard]] ConSanMoiReportBufferLayout
-resolve_moi_report_layout(const ConSanRequest &request, const BoundRuntimeResources &resources);
+[[nodiscard]] inline ConSanMoiReportBufferLayout
+resolve_moi_report_layout(const BoundRuntimeResources &resources, ConSanMoiEngine engine,
+                          ConSanMoiReportBufferLayout legacy_layout) {
+  return resources.moi_report_layout
+             ? revalidate_consan_moi_report_layout(*resources.moi_report_layout, engine,
+                                                   resources.moi_report_buffer_size)
+             : legacy_layout;
+}
 
 [[nodiscard]] bool
 record_replay_uses_automatic_banked_capture(const ConSanRequest &request,

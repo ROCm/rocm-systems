@@ -10,14 +10,6 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-[[nodiscard]] uint64_t
-sampled_reserved_barrier_island_count(const ConSanObservationPlan &observation_plan,
-                                      const ConSanRequest &request, const TransformPolicy &policy);
-
-[[nodiscard]] uint32_t sampled_reserved_atomic_island_count(
-    const ConSanObservationPlan &observation_plan, const ConSanRequest &request,
-    const BoundRuntimeResources &resources, const TransformPolicy &policy);
-
 void try_apply_direct_sampled_watchpoint_patch(
     std::span<const uint8_t> bytes, const ConSanOptions &options,
     const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,

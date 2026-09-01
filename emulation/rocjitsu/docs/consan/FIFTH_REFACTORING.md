@@ -4188,3 +4188,61 @@ target locality, broad mutable products and transactions, larger legacy
 harvesting, material whole-refactoring shrinkage, the target-side extension
 exercise, and the independent Section 14 completion audit remain open. The
 goal therefore remains active.
+
+### 16.47 Convergence checkpoint 46: mode-owned report ABI selection
+
+Checkpoint 45 made object-mode semantics immutable but exposed why the new
+product had initially cost so much: eleven lowering sites still called a
+central `resolve_moi_report_layout` mode switch to rediscover the same report
+ABI from the request and runtime binding. Sampled access and synchronization
+lowering additionally recomputed the same barrier- and atomic-island reservation
+counts at separate phases.
+
+Each mode planner now selects its legacy raw-buffer geometry beside its other
+object semantics. One small shared operation only chooses between that
+mode-owned legacy geometry and revalidation of an already-bound automatic
+layout; it contains no mode switch. The immutable product carries the selected
+layout through the resource problem to every existing consumer, so lowering no
+longer consults the request to infer an ABI. Sampled planning also selects its
+two bounded island counts once from admitted semantic counts, patch policy, and
+the selected layout. The two late reservation helpers and every repeated call
+are deleted.
+
+The architecture gate permits report-layout assignment only in the three mode
+planners, permits Sampled reservation assignment only in the Sampled planner,
+rejects the retired reservation helpers everywhere, and rejects report-layout
+resolution from all lowering components. A new direct regression checks the
+exact Record/Replay, Sampled, and InlineShadow legacy layouts and Sampled's
+barrier/atomic reservation bounds. The hypothetical fifth-mode registration
+still needs no target-package change.
+
+| Signal | Checkpoint 46 | Cumulative change | Slice change from checkpoint 45 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,453 | +478 | **-22** |
+| Nonblank production lines | 99,166 | +83 | **-17** |
+| Production implementation lines | 91,446 | **-4** | **-18** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 206 / 56 | **-70 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 206 / 28 | +6 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 358 / 63 | +68 / +12 | 0 / 0 |
+| Report-layout resolution calls in lowering components | **0** | n/a | **-11** |
+| Central report-layout mode switches | **0** | n/a | **-1** |
+| Late Sampled island-reservation helpers | **0** | n/a | **-2** |
+| Test inventory | **5,381** | **+36** | **+1** |
+
+Validation includes a final-tree `-j16` build; fifteen direct mode-planning,
+immutable-binding, and scalar-projection tests; the exact architecture-boundary
+test; all 4,746 nonphysical tests at `-j16`; and all 635 physical gfx1201 tests
+serialized at `-j1`. No test was removed, renamed, disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.4, 14.5, 14.6, 14.7,
+14.8, and 14.9. It is the first payback harvested from checkpoint 45's explicit
+immutable path: mode ABI selection is local, consumers cannot rediscover it,
+legacy helpers are gone, coverage grows, and production shrinks by eighteen
+implementation lines. The whole refactoring is again net-negative, but a
+four-line cumulative reduction is not material. Remaining target locality,
+broad mutable products and transactions, larger legacy harvesting, material
+whole-refactoring shrinkage, the target-side extension exercise, and the
+independent Section 14 completion audit remain open. The goal therefore remains
+active.

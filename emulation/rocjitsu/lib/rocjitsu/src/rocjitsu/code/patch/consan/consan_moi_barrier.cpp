@@ -74,7 +74,6 @@ using consan_moi_detail::append_words_bytes;
 using consan_moi_detail::count_nop_padding;
 using consan_moi_detail::decode_relocatable_entry_instruction;
 using consan_moi_detail::plan_prebuilt_appended_cave;
-using consan_moi_detail::resolve_moi_report_layout;
 
 namespace consan_moi_impl {
 

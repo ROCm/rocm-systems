@@ -89,6 +89,8 @@ using consan_moi_detail::resolve_moi_report_layout;
 namespace consan_moi_impl {
 
 MoiObjectModePlan plan_inline_shadow_object_mode(const ConSanRequest &request,
+                                                 const BoundRuntimeResources &resources,
+                                                 const TransformPolicy &,
                                                  const ConSanMoiOperatingPoint &point,
                                                  const MoiObjectFacts &facts,
                                                  const ConSanObservationPlan &observation_plan) {
@@ -120,6 +122,9 @@ MoiObjectModePlan plan_inline_shadow_object_mode(const ConSanRequest &request,
         "atomic sites");
   }
   plan.semantics.inline_access_present = facts.has_access_candidate;
+  plan.semantics.report_layout = resolve_moi_report_layout(
+      resources, ConSanMoiEngine::InlineShadow,
+      consan_moi_inline_shadow_report_buffer_layout_for_bytes(resources.moi_report_buffer_size));
   plan.inline_atomic_without_access =
       !facts.has_access_candidate && plan.track_atomics && facts.has_admitted_atomic;
   return plan;

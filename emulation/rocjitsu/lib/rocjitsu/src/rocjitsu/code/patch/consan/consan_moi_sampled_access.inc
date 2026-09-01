@@ -1,31 +1,3 @@
-[[nodiscard]] uint64_t
-sampled_reserved_barrier_island_count(const ConSanObservationPlan &observation_plan,
-                                      const ConSanRequest &request, const TransformPolicy &policy) {
-  if (!request.moi_track_barriers)
-    return 0u;
-  const uint64_t count =
-      std::ranges::count(observation_plan.probe_intents, ConSanProbeIntentKind::SampledBarrierEpoch,
-                         &ConSanProbeIntent::kind);
-  return std::min<uint64_t>(count, policy.max_patches);
-}
-
-[[nodiscard]] uint32_t sampled_reserved_atomic_island_count(
-    const ConSanObservationPlan &observation_plan, const ConSanRequest &request,
-    const BoundRuntimeResources &resources, const TransformPolicy &policy) {
-  if (!request.moi_track_atomics)
-    return 0u;
-  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(request, resources);
-  const uint32_t patch_budget = policy.max_patches_is_expert_limit
-                                    ? policy.max_patches
-                                    : std::numeric_limits<uint32_t>::max();
-  const size_t planned =
-      std::ranges::count(observation_plan.probe_intents,
-                         ConSanProbeIntentKind::SampledAtomicOrdering, &ConSanProbeIntent::kind);
-  return static_cast<uint32_t>(
-      std::min({static_cast<size_t>(patch_budget),
-                static_cast<size_t>(layout.sampled_watchpoint_capacity), planned}));
-}
-
 [[nodiscard]] ConSanMoiOwnerEpochVgprSources
 materialize_sampled_owner_epoch_tail(uint16_t exclusive_tail, bool needs_owner) {
   std::optional<uint16_t> owner;
@@ -53,9 +25,8 @@ void try_apply_direct_sampled_watchpoint_patch(
       result.warnings.emplace_back(warning);
   };
 
-  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
-  const uint32_t reserved_atomic_slots =
-      sampled_reserved_atomic_island_count(result.observation_plan(), options, options, options);
+  const ConSanMoiReportBufferLayout &layout = mode_semantics.report_layout;
+  const uint32_t reserved_atomic_slots = mode_semantics.reserved_atomic_island_count;
   const uint32_t max_access_record_slots =
       layout.sampled_watchpoint_capacity - reserved_atomic_slots;
   if (max_access_record_slots == 0) {
@@ -196,9 +167,7 @@ void try_apply_direct_sampled_watchpoint_patch(
       (candidates.size() > 8u || has_function_candidate || has_spill_backed_scalar_assignment ||
        has_branch_only_scalar_assignment);
   const uint64_t reserved_barrier_island_count =
-      use_indirect_appended
-          ? sampled_reserved_barrier_island_count(result.observation_plan(), options, options)
-          : 0u;
+      use_indirect_appended ? mode_semantics.reserved_barrier_island_count : 0u;
   const uint64_t reserved_atomic_island_count = use_indirect_appended ? reserved_atomic_slots : 0u;
   const uint64_t reserved_sync_island_bytes =
       reserved_barrier_island_count * kIndirectIslandWords * sizeof(uint32_t) +

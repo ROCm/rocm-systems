@@ -16,7 +16,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     result.warnings.emplace_back("ConSan MOI inline atomic patch requires a MOI report buffer");
     return;
   }
-  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
+  const ConSanMoiReportBufferLayout &layout = semantics.report_layout;
   if (layout.inline_atomic_release_capacity == 0 ||
       layout.inline_acquired_epoch_token_capacity == 0) {
     result.warnings.emplace_back(

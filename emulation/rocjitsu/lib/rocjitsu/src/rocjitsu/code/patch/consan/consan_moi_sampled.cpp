@@ -134,14 +134,17 @@ std::optional<uint16_t> moi_sampled_access_return_scc_sgpr(const ConSanRequest &
   return publication ? std::optional<uint16_t>(publication->guest_scc_snapshot_sgpr) : std::nullopt;
 }
 
-MoiObjectModePlan plan_sampled_object_mode(const ConSanRequest &request,
-                                           const ConSanMoiOperatingPoint &point,
-                                           const MoiObjectFacts &facts,
-                                           const ConSanObservationPlan &) {
+MoiObjectModePlan
+plan_sampled_object_mode(const ConSanRequest &request, const BoundRuntimeResources &resources,
+                         const TransformPolicy &policy, const ConSanMoiOperatingPoint &point,
+                         const MoiObjectFacts &facts, const ConSanObservationPlan &) {
   MoiObjectModePlan plan =
       make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::WorkitemId);
   plan.reserve_dynamic_stack_prologue_entry = true;
   plan.prologue_requires_consumer = true;
+  plan.semantics.report_layout = resolve_moi_report_layout(
+      resources, ConSanMoiEngine::Sampled,
+      consan_moi_direct_sampled_report_buffer_layout_for_bytes(resources.moi_report_buffer_size));
   if (plan.track_atomics && !facts.has_access_candidate) {
     // Sampled atomics publish ordering only into a selected LDS watchpoint's
     // causal window. Without that consumer they do not improve coverage.
@@ -149,6 +152,19 @@ MoiObjectModePlan plan_sampled_object_mode(const ConSanRequest &request,
     plan.warnings.emplace_back(
         "ConSan MOI sampled engine skipped atomic ordering in a code object with no selected "
         "LDS access candidates");
+  }
+  if (plan.track_barriers) {
+    plan.semantics.reserved_barrier_island_count =
+        std::min<uint64_t>(facts.admitted_barrier_count, policy.max_patches);
+  }
+  if (plan.track_atomics) {
+    const uint32_t patch_budget = policy.max_patches_is_expert_limit
+                                      ? policy.max_patches
+                                      : std::numeric_limits<uint32_t>::max();
+    plan.semantics.reserved_atomic_island_count = static_cast<uint32_t>(
+        std::min({static_cast<size_t>(patch_budget),
+                  static_cast<size_t>(plan.semantics.report_layout.sampled_watchpoint_capacity),
+                  facts.admitted_atomic_count}));
   }
   return plan;
 }

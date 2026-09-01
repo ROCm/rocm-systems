@@ -20,7 +20,8 @@ using consan_moi_impl::plan_moi_persistent_state_demand;
 using consan_moi_impl::plan_moi_scalar_abi;
 
 consan_moi_impl::MoiObjectModePlan
-plan_hypothetical_mode(const ConSanRequest &, const ConSanMoiOperatingPoint &,
+plan_hypothetical_mode(const ConSanRequest &, const BoundRuntimeResources &,
+                       const TransformPolicy &, const ConSanMoiOperatingPoint &,
                        const consan_moi_impl::MoiObjectFacts &facts,
                        const ConSanObservationPlan &) {
   consan_moi_impl::MoiObjectModePlan plan;
@@ -53,7 +54,7 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   const auto *selected =
       find_moi_mode_operations<HypotheticalModeKey>(registrations, HypotheticalModeKey::FifthMode);
   ASSERT_EQ(selected, &operations);
-  const auto plan = selected->plan({}, {}, {.has_access_candidate = true}, {});
+  const auto plan = selected->plan({}, {}, {}, {}, {.has_access_candidate = true}, {});
   EXPECT_TRUE(plan.semantics.inline_access_present);
   EXPECT_FALSE(plan.track_atomics);
   EXPECT_EQ(selected->operational_evidence.barrier, ConSanProbeIntentKind::BarrierRecord);
@@ -66,24 +67,69 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsAutomaticOwnerDefault) {
   ConSanRequest request;
+  const BoundRuntimeResources resources;
+  const TransformPolicy policy;
   ConSanMoiOperatingPoint point;
   const MoiObjectFacts facts{.has_access_candidate = true};
   const ConSanObservationPlan observation;
 
   request.moi_engine = ConSanMoiEngine::RecordReplay;
-  EXPECT_EQ(plan_moi_object_mode(request, point, facts, observation).owner_source,
-            ConSanMoiOwnerSource::WorkitemId);
+  EXPECT_EQ(
+      plan_moi_object_mode(request, resources, policy, point, facts, observation).owner_source,
+      ConSanMoiOwnerSource::WorkitemId);
   request.moi_engine = ConSanMoiEngine::Sampled;
-  EXPECT_EQ(plan_moi_object_mode(request, point, facts, observation).owner_source,
-            ConSanMoiOwnerSource::WorkitemId);
+  EXPECT_EQ(
+      plan_moi_object_mode(request, resources, policy, point, facts, observation).owner_source,
+      ConSanMoiOwnerSource::WorkitemId);
   request.moi_engine = ConSanMoiEngine::InlineShadow;
-  EXPECT_EQ(plan_moi_object_mode(request, point, facts, observation).owner_source,
-            ConSanMoiOwnerSource::HwId);
+  EXPECT_EQ(
+      plan_moi_object_mode(request, resources, policy, point, facts, observation).owner_source,
+      ConSanMoiOwnerSource::HwId);
 
   request.moi_owner_source = ConSanMoiOwnerSource::HwId;
   request.moi_engine = ConSanMoiEngine::RecordReplay;
-  EXPECT_EQ(plan_moi_object_mode(request, point, facts, observation).owner_source,
-            ConSanMoiOwnerSource::HwId);
+  EXPECT_EQ(
+      plan_moi_object_mode(request, resources, policy, point, facts, observation).owner_source,
+      ConSanMoiOwnerSource::HwId);
+}
+
+TEST(ConSanMoiModePlanning, EachEngineOwnsItsLegacyReportLayout) {
+  ConSanRequest request;
+  BoundRuntimeResources resources;
+  TransformPolicy policy;
+  const ConSanMoiOperatingPoint point;
+  const MoiObjectFacts facts{
+      .has_access_candidate = true,
+      .has_admitted_atomic = true,
+      .admitted_atomic_count = 4u,
+      .has_admitted_barrier = true,
+      .admitted_barrier_count = 3u,
+  };
+  const ConSanObservationPlan observation;
+  resources.moi_report_buffer_size = 1u << 20u;
+  policy.max_patches = 2u;
+
+  request.moi_engine = ConSanMoiEngine::RecordReplay;
+  request.moi_track_barriers = true;
+  request.moi_track_atomics = true;
+  EXPECT_EQ(plan_moi_object_mode(request, resources, policy, point, facts, observation)
+                .semantics.report_layout,
+            consan_moi_report_buffer_layout_for_bytes(resources.moi_report_buffer_size, true, true,
+                                                      true));
+
+  request.moi_engine = ConSanMoiEngine::Sampled;
+  const auto sampled = plan_moi_object_mode(request, resources, policy, point, facts, observation);
+  EXPECT_EQ(
+      sampled.semantics.report_layout,
+      consan_moi_direct_sampled_report_buffer_layout_for_bytes(resources.moi_report_buffer_size));
+  EXPECT_EQ(sampled.semantics.reserved_barrier_island_count, 2u);
+  EXPECT_EQ(sampled.semantics.reserved_atomic_island_count, 2u);
+
+  request.moi_engine = ConSanMoiEngine::InlineShadow;
+  EXPECT_EQ(
+      plan_moi_object_mode(request, resources, policy, point, facts, observation)
+          .semantics.report_layout,
+      consan_moi_inline_shadow_report_buffer_layout_for_bytes(resources.moi_report_buffer_size));
 }
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsDynamicStackSpillPolicy) {
@@ -229,6 +275,8 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsScalarAbiLayout) {
 
 TEST(ConSanMoiModePlanning, RecordReplaySelectsDenseRoutingFromNormalizedTargetFacts) {
   ConSanRequest request;
+  const BoundRuntimeResources resources;
+  const TransformPolicy policy;
   request.moi_engine = ConSanMoiEngine::RecordReplay;
   ConSanMoiOperatingPoint point;
   const ConSanObservationPlan observation;
@@ -236,22 +284,24 @@ TEST(ConSanMoiModePlanning, RecordReplaySelectsDenseRoutingFromNormalizedTargetF
   MoiObjectFacts facts{.has_admitted_barrier = true,
                        .admitted_barrier_count = 33u,
                        .target_supports_dense_barrier_router = true};
-  EXPECT_TRUE(
-      plan_moi_object_mode(request, point, facts, observation).semantics.dense_barrier_router);
+  EXPECT_TRUE(plan_moi_object_mode(request, resources, policy, point, facts, observation)
+                  .semantics.dense_barrier_router);
 
   facts.target_supports_dense_barrier_router = false;
-  EXPECT_FALSE(
-      plan_moi_object_mode(request, point, facts, observation).semantics.dense_barrier_router);
+  EXPECT_FALSE(plan_moi_object_mode(request, resources, policy, point, facts, observation)
+                   .semantics.dense_barrier_router);
 
   facts.admitted_barrier_count = 1u;
   facts.has_stranded_admitted_barrier = true;
   facts.target_supports_dense_barrier_router = true;
-  EXPECT_TRUE(
-      plan_moi_object_mode(request, point, facts, observation).semantics.dense_barrier_router);
+  EXPECT_TRUE(plan_moi_object_mode(request, resources, policy, point, facts, observation)
+                  .semantics.dense_barrier_router);
 }
 
 TEST(ConSanMoiModePlanning, RecordReplayDropsAutomaticStateOnlyWithoutConsumers) {
   ConSanRequest request;
+  const BoundRuntimeResources resources;
+  const TransformPolicy policy;
   request.moi_engine = ConSanMoiEngine::RecordReplay;
   request.moi_track_atomics = true;
   request.moi_track_barriers = true;
@@ -259,13 +309,14 @@ TEST(ConSanMoiModePlanning, RecordReplayDropsAutomaticStateOnlyWithoutConsumers)
   point.moi_initialize_owner_epoch = true;
   const ConSanObservationPlan observation;
 
-  const auto empty = plan_moi_object_mode(request, point, {}, observation);
+  const auto empty = plan_moi_object_mode(request, resources, policy, point, {}, observation);
   EXPECT_EQ(empty.initialize_owner_epoch, false);
   EXPECT_FALSE(empty.track_barriers);
   ASSERT_EQ(empty.warnings.size(), 1u);
 
   MoiObjectFacts atomic{.has_admitted_atomic = true};
-  const auto consumed = plan_moi_object_mode(request, point, atomic, observation);
+  const auto consumed =
+      plan_moi_object_mode(request, resources, policy, point, atomic, observation);
   EXPECT_EQ(consumed.initialize_owner_epoch, true);
   EXPECT_TRUE(consumed.track_barriers);
   EXPECT_TRUE(consumed.warnings.empty());
@@ -273,62 +324,75 @@ TEST(ConSanMoiModePlanning, RecordReplayDropsAutomaticStateOnlyWithoutConsumers)
 
 TEST(ConSanMoiModePlanning, SampledRequiresAnAccessConsumerForAtomicMetadata) {
   ConSanRequest request;
+  const BoundRuntimeResources resources;
+  const TransformPolicy policy;
   request.moi_engine = ConSanMoiEngine::Sampled;
   request.moi_track_atomics = true;
   const ConSanMoiOperatingPoint point;
   const ConSanObservationPlan observation;
 
-  const auto no_access =
-      plan_moi_object_mode(request, point, {.has_admitted_atomic = true}, observation);
+  const auto no_access = plan_moi_object_mode(request, resources, policy, point,
+                                              {.has_admitted_atomic = true}, observation);
   EXPECT_FALSE(no_access.track_atomics);
   ASSERT_EQ(no_access.warnings.size(), 1u);
 
   const auto access = plan_moi_object_mode(
-      request, point, {.has_access_candidate = true, .has_admitted_atomic = true}, observation);
+      request, resources, policy, point,
+      {.has_access_candidate = true, .has_admitted_atomic = true, .admitted_atomic_count = 1u},
+      observation);
   EXPECT_TRUE(access.track_atomics);
   EXPECT_TRUE(access.warnings.empty());
 }
 
 TEST(ConSanMoiModePlanning, InlineDemandFollowsAdmittedConsumers) {
   ConSanRequest request;
+  const BoundRuntimeResources resources;
+  const TransformPolicy policy;
   request.moi_engine = ConSanMoiEngine::InlineShadow;
   request.moi_track_atomics = true;
   request.moi_track_barriers = true;
   const ConSanMoiOperatingPoint point;
   const ConSanObservationPlan observation;
 
-  const auto empty = plan_moi_object_mode(request, point, {}, observation);
+  const auto empty = plan_moi_object_mode(request, resources, policy, point, {}, observation);
   EXPECT_FALSE(empty.track_atomics);
   EXPECT_FALSE(empty.track_barriers);
   EXPECT_FALSE(empty.semantics.inline_access_present);
   EXPECT_FALSE(empty.inline_atomic_without_access);
   EXPECT_EQ(empty.warnings.size(), 2u);
 
-  const auto atomic_only = plan_moi_object_mode(
-      request, point, {.has_admitted_atomic = true, .has_admitted_barrier = true}, observation);
+  const auto atomic_only = plan_moi_object_mode(request, resources, policy, point,
+                                                {.has_admitted_atomic = true,
+                                                 .admitted_atomic_count = 1u,
+                                                 .has_admitted_barrier = true,
+                                                 .admitted_barrier_count = 1u},
+                                                observation);
   EXPECT_TRUE(atomic_only.track_atomics);
   EXPECT_TRUE(atomic_only.track_barriers);
   EXPECT_TRUE(atomic_only.inline_atomic_without_access);
 
   request.moi_owner_source = ConSanMoiOwnerSource::WorkitemId;
-  EXPECT_EQ(plan_moi_object_mode(request, point, {}, observation).errors.size(), 1u);
+  EXPECT_EQ(plan_moi_object_mode(request, resources, policy, point, {}, observation).errors.size(),
+            1u);
 }
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
   ConSanRequest request;
+  const BoundRuntimeResources resources;
+  const TransformPolicy policy;
   ConSanMoiOperatingPoint point;
   const MoiObjectFacts facts{.has_access_candidate = true};
   const ConSanObservationPlan observation;
 
   request.moi_engine = ConSanMoiEngine::RecordReplay;
-  auto plan = plan_moi_object_mode(request, point, facts, observation);
+  auto plan = plan_moi_object_mode(request, resources, policy, point, facts, observation);
   EXPECT_FALSE(plan.reserve_dynamic_stack_prologue_entry);
   EXPECT_TRUE(plan.prologue_requires_consumer);
 
   MoiObjectFacts buffered_facts = facts;
   buffered_facts.has_report_buffer = true;
-  EXPECT_FALSE(
-      plan_moi_object_mode(request, point, buffered_facts, observation).prologue_requires_consumer);
+  EXPECT_FALSE(plan_moi_object_mode(request, resources, policy, point, buffered_facts, observation)
+                   .prologue_requires_consumer);
   const auto &record_policy = moi_mode_operations(request.moi_engine).prologue;
   EXPECT_FALSE(record_policy.skip_unobserved_barrier_only_initialization);
   EXPECT_TRUE(record_policy.backup_compact_spill_for_runtime_sampling);
@@ -336,7 +400,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
   EXPECT_FALSE(record_policy.persistent_state_requires_in_place_entry);
 
   request.moi_engine = ConSanMoiEngine::Sampled;
-  plan = plan_moi_object_mode(request, point, facts, observation);
+  plan = plan_moi_object_mode(request, resources, policy, point, facts, observation);
   EXPECT_TRUE(plan.reserve_dynamic_stack_prologue_entry);
   EXPECT_TRUE(plan.prologue_requires_consumer);
   const auto &sampled_policy = moi_mode_operations(request.moi_engine).prologue;
@@ -346,7 +410,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
   EXPECT_FALSE(sampled_policy.persistent_state_requires_in_place_entry);
 
   request.moi_engine = ConSanMoiEngine::InlineShadow;
-  plan = plan_moi_object_mode(request, point, facts, observation);
+  plan = plan_moi_object_mode(request, resources, policy, point, facts, observation);
   EXPECT_FALSE(plan.reserve_dynamic_stack_prologue_entry);
   EXPECT_TRUE(plan.prologue_requires_consumer);
   const auto &inline_policy = moi_mode_operations(request.moi_engine).prologue;

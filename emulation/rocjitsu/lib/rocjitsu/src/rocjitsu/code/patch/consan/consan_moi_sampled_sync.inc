@@ -720,7 +720,7 @@ void try_apply_sampled_barrier_sync_patch(
         "ConSan MOI sampled barrier sync requires a supported report-buffer target");
     return;
   }
-  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
+  const ConSanMoiReportBufferLayout &layout = mode_semantics.report_layout;
   struct SelectedWindow {
     const ConSanPatchLoweringProduct *patch = nullptr;
     const ConSanMoiCandidate *access = nullptr;
@@ -1535,7 +1535,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         "ConSan MOI sampled atomic sync requires a supported report-buffer target");
     return;
   }
-  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
+  const ConSanMoiReportBufferLayout &layout = mode_semantics.report_layout;
   const uint32_t selected_window_count = static_cast<uint32_t>(std::count_if(
       result.patches.begin(), result.patches.end(), [](const ConSanPatchLoweringProduct &patch) {
         return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
@@ -2047,10 +2047,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   const uint64_t original_text_size = original_code_object.text_sections().size() == 1
                                           ? original_code_object.text_sections().front()->size()
                                           : 0u;
-  const uint64_t reserved_barrier_island_count =
-      sampled_reserved_barrier_island_count(result.observation_plan(), options, options);
-  const uint64_t reserved_atomic_island_count =
-      sampled_reserved_atomic_island_count(result.observation_plan(), options, options, options);
+  const uint64_t reserved_barrier_island_count = mode_semantics.reserved_barrier_island_count;
+  const uint64_t reserved_atomic_island_count = mode_semantics.reserved_atomic_island_count;
   const uint64_t reserved_atomic_island_begin =
       original_text_size +
       reserved_barrier_island_count * kMoiRecordReplayIndirectIslandWords * sizeof(uint32_t);

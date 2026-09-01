@@ -18,7 +18,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     return;
   }
 
-  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
+  const ConSanMoiReportBufferLayout &layout = semantics.report_layout;
   if (options.max_patches == 0)
     return;
   if (!validate_inline_shadow_exec_save_sgpr(options, options, operating_point, semantics, arch,

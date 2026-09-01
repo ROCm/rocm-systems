@@ -21,27 +21,6 @@ bool record_replay_uses_automatic_banked_capture(const ConSanRequest &request,
          !request.moi_dynamic_access_records && dispatch_token_capacity != 0u;
 }
 
-ConSanMoiReportBufferLayout resolve_moi_report_layout(const ConSanRequest &request,
-                                                      const BoundRuntimeResources &resources) {
-  if (resources.moi_report_layout) {
-    return revalidate_consan_moi_report_layout(*resources.moi_report_layout, request.moi_engine,
-                                               resources.moi_report_buffer_size);
-  }
-  switch (request.moi_engine) {
-  case ConSanMoiEngine::RecordReplay:
-    return consan_moi_report_buffer_layout_for_bytes(
-        resources.moi_report_buffer_size, request.moi_track_barriers, request.moi_track_atomics,
-        request.moi_track_atomics);
-  case ConSanMoiEngine::Sampled:
-    return consan_moi_direct_sampled_report_buffer_layout_for_bytes(
-        resources.moi_report_buffer_size);
-  case ConSanMoiEngine::InlineShadow:
-    return consan_moi_inline_shadow_report_buffer_layout_for_bytes(
-        resources.moi_report_buffer_size);
-  }
-  return {};
-}
-
 bool record_replay_uses_automatic_banked_capture(const ConSanRequest &request,
                                                  const BoundRuntimeResources &resources) {
   return resources.moi_report_layout &&

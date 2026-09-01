@@ -303,6 +303,38 @@ foreach(_file IN LISTS _consan_production_files)
             "InlineShadow access presence must be selected only by InlineShadow planning"
         )
     endif()
+    if(NOT _name STREQUAL "consan_moi_record_replay.cpp" AND
+       NOT _name STREQUAL "consan_moi_sampled.cpp" AND
+       NOT _name STREQUAL "consan_moi_inline_shadow.cpp")
+        _consan_assert_no_match(
+            "${_file}"
+            "semantics[.]report_layout[ \t]*="
+            "report layout must be selected only by mode-owned planning"
+        )
+    endif()
+    if(NOT _name STREQUAL "consan_moi_sampled.cpp")
+        _consan_assert_no_match(
+            "${_file}"
+            "semantics[.]reserved_(barrier|atomic)_island_count[ \t]*="
+            "Sampled island reservations must be selected only by Sampled planning"
+        )
+    endif()
+    _consan_assert_no_match(
+        "${_file}"
+        "sampled_reserved_(barrier|atomic)_island_count"
+        "Sampled lowering must consume its once-selected island reservations"
+    )
+    if(NOT _name STREQUAL "consan_moi_engine_contracts.cpp" AND
+       NOT _name STREQUAL "consan_moi_engine_contracts.h" AND
+       NOT _name STREQUAL "consan_moi_record_replay.cpp" AND
+       NOT _name STREQUAL "consan_moi_sampled.cpp" AND
+       NOT _name STREQUAL "consan_moi_inline_shadow.cpp")
+        _consan_assert_no_match(
+            "${_file}"
+            "resolve_moi_report_layout"
+            "lowering must consume the once-selected object-mode report layout"
+        )
+    endif()
 endforeach()
 
 # Dispatch identity is one typed allocation. Its scalar/vector choice and

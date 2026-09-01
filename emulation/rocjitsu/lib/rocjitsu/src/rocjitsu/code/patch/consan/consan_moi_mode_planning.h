@@ -22,6 +22,7 @@ namespace rocjitsu::consan_moi_impl {
 struct MoiObjectFacts {
   bool has_access_candidate = false;
   bool has_admitted_atomic = false;
+  size_t admitted_atomic_count = 0;
   bool has_admitted_fence = false;
   bool has_admitted_barrier = false;
   size_t admitted_barrier_count = 0;
@@ -216,10 +217,10 @@ make_moi_object_mode_plan(const ConSanRequest &request, const ConSanMoiOperating
 /// The only cross-engine selection point for per-object demand. Adding an MOI
 /// engine requires one engine-owned planner and one entry in this dispatcher;
 /// common resource solving consumes the same narrow product unchanged.
-[[nodiscard]] MoiObjectModePlan plan_moi_object_mode(const ConSanRequest &request,
-                                                     const ConSanMoiOperatingPoint &point,
-                                                     const MoiObjectFacts &facts,
-                                                     const ConSanObservationPlan &observation_plan);
+[[nodiscard]] MoiObjectModePlan
+plan_moi_object_mode(const ConSanRequest &request, const BoundRuntimeResources &resources,
+                     const TransformPolicy &policy, const ConSanMoiOperatingPoint &point,
+                     const MoiObjectFacts &facts, const ConSanObservationPlan &observation_plan);
 
 /// Run the selected engine's lowering sequence. Shared placement has already
 /// accepted an operating point; the engine owns which access and sync
@@ -263,7 +264,8 @@ plan_sampled_evidence_requirements(const MoiEvidencePlanningContext &context);
 plan_inline_shadow_evidence_requirements(const MoiEvidencePlanningContext &context);
 
 struct MoiModeOperations {
-  MoiObjectModePlan (*plan)(const ConSanRequest &, const ConSanMoiOperatingPoint &,
+  MoiObjectModePlan (*plan)(const ConSanRequest &, const BoundRuntimeResources &,
+                            const TransformPolicy &, const ConSanMoiOperatingPoint &,
                             const MoiObjectFacts &, const ConSanObservationPlan &);
   void (*apply)(std::span<const uint8_t>, const ConSanOptions &, ConSanMoiOperatingPoint &,
                 rj_code_arch_t, MoiResourcePlanningState &, std::span<const ConSanMoiCandidate>,

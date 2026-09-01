@@ -34,13 +34,17 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-/// Immutable mode semantics that affect common resource solving and emission.
-/// These decisions are selected once by the mode owner from normalized object
-/// facts. They are not solver choices and therefore must not be copied into or
-/// rediscovered from the mutable operating point.
+/// Immutable mode semantics and ABI facts that affect common resource solving
+/// and emission. These decisions are selected once by the mode owner from
+/// normalized object and runtime-binding facts. They are not solver choices
+/// and therefore must not be copied into or rediscovered from the mutable
+/// operating point.
 struct MoiObjectModeSemantics {
   bool dense_barrier_router = false;
   bool inline_access_present = false;
+  ConSanMoiReportBufferLayout report_layout;
+  uint64_t reserved_barrier_island_count = 0;
+  uint32_t reserved_atomic_island_count = 0;
 
   bool operator==(const MoiObjectModeSemantics &) const = default;
 };

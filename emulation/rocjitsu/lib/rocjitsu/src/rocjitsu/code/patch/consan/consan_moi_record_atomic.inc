@@ -18,7 +18,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
         "ConSan MOI atomic record patch requires room for access and atomic records");
     return;
   }
-  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
+  const ConSanMoiReportBufferLayout &layout = mode_semantics.report_layout;
   const uint32_t max_candidates = std::min(options.max_patches, layout.atomic_record_capacity);
   if (max_candidates == 0) {
     result.warnings.emplace_back("ConSan MOI atomic record patch has no atomic record capacity");

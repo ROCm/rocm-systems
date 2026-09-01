@@ -71,11 +71,12 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   }
   MoiObjectFacts object_facts;
   object_facts.has_access_candidate = !moi_candidates.empty();
-  object_facts.has_admitted_atomic =
-      std::ranges::any_of(result.observation_plan().atomic_site_decisions,
-                          [](const ConSanAtomicSiteDecision &decision) {
-                            return decision.kind == ConSanSiteDecisionKind::Admitted;
-                          });
+  object_facts.admitted_atomic_count =
+      std::ranges::count_if(result.observation_plan().atomic_site_decisions,
+                            [](const ConSanAtomicSiteDecision &decision) {
+                              return decision.kind == ConSanSiteDecisionKind::Admitted;
+                            });
+  object_facts.has_admitted_atomic = object_facts.admitted_atomic_count != 0u;
   object_facts.has_admitted_fence = std::ranges::any_of(
       result.observation_plan().fence_site_decisions, [](const ConSanFenceSiteDecision &decision) {
         return decision.kind == ConSanSiteDecisionKind::Admitted;
@@ -102,8 +103,9 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
                                        decision.semantic_site.physical.original_text_offset,
                                        original_text_size);
                           });
-  MoiObjectModePlan mode_plan = plan_moi_object_mode(effective_options, effective_point,
-                                                     object_facts, result.observation_plan());
+  MoiObjectModePlan mode_plan =
+      plan_moi_object_mode(effective_options, effective_options, effective_options, effective_point,
+                           object_facts, result.observation_plan());
   effective_options.moi_owner_source = mode_plan.owner_source;
   effective_options.moi_track_atomics = mode_plan.track_atomics;
   effective_options.moi_track_barriers = mode_plan.track_barriers;

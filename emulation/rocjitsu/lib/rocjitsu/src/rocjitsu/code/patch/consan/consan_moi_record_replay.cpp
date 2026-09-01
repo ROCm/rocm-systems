@@ -54,10 +54,10 @@ using consan_moi_detail::resolve_moi_report_layout;
 
 namespace consan_moi_impl {
 
-MoiObjectModePlan plan_record_replay_object_mode(const ConSanRequest &request,
-                                                 const ConSanMoiOperatingPoint &point,
-                                                 const MoiObjectFacts &facts,
-                                                 const ConSanObservationPlan &) {
+MoiObjectModePlan
+plan_record_replay_object_mode(const ConSanRequest &request, const BoundRuntimeResources &resources,
+                               const TransformPolicy &, const ConSanMoiOperatingPoint &point,
+                               const MoiObjectFacts &facts, const ConSanObservationPlan &) {
   MoiObjectModePlan plan =
       make_moi_object_mode_plan(request, point, ConSanMoiOwnerSource::WorkitemId);
   const bool atomic_or_fence_relevant =
@@ -74,6 +74,11 @@ MoiObjectModePlan plan_record_replay_object_mode(const ConSanRequest &request,
       facts.target_supports_dense_barrier_router &&
       (facts.admitted_barrier_count > kCompactBarrierMemberLimit ||
        facts.has_stranded_admitted_barrier);
+  plan.semantics.report_layout =
+      resolve_moi_report_layout(resources, ConSanMoiEngine::RecordReplay,
+                                consan_moi_report_buffer_layout_for_bytes(
+                                    resources.moi_report_buffer_size, request.moi_track_barriers,
+                                    request.moi_track_atomics, request.moi_track_atomics));
 
   if (!facts.has_access_candidate && !facts.has_explicit_persistent_state &&
       !facts.has_admitted_barrier && !atomic_or_fence_relevant) {

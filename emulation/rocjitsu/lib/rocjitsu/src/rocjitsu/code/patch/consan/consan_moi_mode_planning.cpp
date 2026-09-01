@@ -45,11 +45,12 @@ const MoiModeOperations &moi_mode_operations(ConSanMoiEngine engine) {
   return *find_moi_mode_operations<ConSanMoiEngine>(registrations, engine);
 }
 
-MoiObjectModePlan plan_moi_object_mode(const ConSanRequest &request,
-                                       const ConSanMoiOperatingPoint &point,
-                                       const MoiObjectFacts &facts,
-                                       const ConSanObservationPlan &observation_plan) {
-  return moi_mode_operations(request.moi_engine).plan(request, point, facts, observation_plan);
+MoiObjectModePlan
+plan_moi_object_mode(const ConSanRequest &request, const BoundRuntimeResources &resources,
+                     const TransformPolicy &policy, const ConSanMoiOperatingPoint &point,
+                     const MoiObjectFacts &facts, const ConSanObservationPlan &observation_plan) {
+  return moi_mode_operations(request.moi_engine)
+      .plan(request, resources, policy, point, facts, observation_plan);
 }
 
 void apply_moi_mode_patches(std::span<const uint8_t> bytes, const ConSanOptions &options,
