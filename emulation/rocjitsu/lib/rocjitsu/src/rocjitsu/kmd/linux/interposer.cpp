@@ -17,6 +17,7 @@
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/guest_kfd.h"
+#include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
@@ -283,6 +284,14 @@ void *raw_mmap_syscall(void *addr, size_t length, int prot, int flags, int fd, o
   // the mapped address; for munmap(2), success returns exactly 0.
   long rc = syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
   if (rc == -1)
+    return MAP_FAILED;
+  return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
+}
+
+void *raw_mremap_syscall(void *old_address, size_t old_size, size_t new_size, int flags,
+                         void *new_address) {
+  long rc = syscall(SYS_mremap, old_address, old_size, new_size, flags, new_address);
+  if (rc < 0)
     return MAP_FAILED;
   return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
 }
@@ -2515,6 +2524,23 @@ __attribute__((constructor)) static void init_interposer() { InterposerContext::
 
 } // namespace
 
+namespace {
+/// @brief Run a bare mapping syscall with the layout held still.
+///
+/// @details An emulated atomic holds a raw pointer across a writability check
+/// and the modify, so the layout must not change under it. Only the bare
+/// syscall is covered: the driver's own mapping paths re-enter the memory model
+/// and take its VMID lock, and the emulated atomic reaches this lock while
+/// already holding that one, so widening the region would invert them.
+/// @pre The caller owns the interposer state. A forked child must not reach
+/// this: the lock is inherited, its holder may not have survived the fork, and
+/// the process contract forbids touching inherited state before exec.
+template <typename F> auto with_host_mapping_held(F &&syscall) {
+  auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
+  return syscall();
+}
+} // namespace
+
 extern "C" {
 
 static std::string redirect_sysfs_path(const char *path);
@@ -3907,6 +3933,8 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
   if (!rj_owns_interposer_state()) {
     if (rj_child_refuses_fd(fd))
       return MAP_FAILED;
+    // A forked child owns none of this state, and the mapping lock is inherited
+    // like any other: its holder may not exist here. Straight to libc.
     return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset);
   }
 
@@ -3982,8 +4010,10 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
         auto total = static_cast<off_t>(length) + memfd_offset;
         [[maybe_unused]] auto ft_rc = ftruncate(memfd_out, total);
         fallocate(memfd_out, 0, memfd_offset, static_cast<off_t>(length));
-        auto *raw = InterposerContext::real().mmap(
-            addr, length, prot, (flags & ~MAP_ANONYMOUS) | MAP_SHARED, memfd_out, memfd_offset);
+        auto *raw = with_host_mapping_held([&] {
+          return InterposerContext::real().mmap(
+              addr, length, prot, (flags & ~MAP_ANONYMOUS) | MAP_SHARED, memfd_out, memfd_offset);
+        });
         // Preserve the mmap errno across close() (which may set its own).
         int mmap_errno = errno;
         InterposerContext::real().close(memfd_out);
@@ -4006,7 +4036,8 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
     if (auto driver = InterposerContext::ctx.driver())
       return driver->mmap_replacing_client_doorbell_views(addr, length, prot, flags, fd, offset);
   }
-  return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset);
+  return with_host_mapping_held(
+      [&] { return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset); });
 }
 
 RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {
@@ -4020,7 +4051,8 @@ RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {
       return -1;
     }
   }
-  return InterposerContext::real().mprotect(addr, length, prot);
+  return with_host_mapping_held(
+      [&] { return InterposerContext::real().mprotect(addr, length, prot); });
 }
 
 RJ_INTERPOSER_EXPORT int madvise(void *addr, size_t length, int advice) {
@@ -4035,6 +4067,28 @@ RJ_INTERPOSER_EXPORT int madvise(void *addr, size_t length, int advice) {
       return 0;
   }
   return InterposerContext::real().madvise(addr, length, advice);
+}
+
+/// @brief mremap moves or resizes an existing mapping, so it can pull an
+/// identity page out from under an in-flight emulated atomic exactly as munmap
+/// and mprotect can. rocjitsu does not redirect it -- no driver mapping is
+/// reachable through it -- but it still has to be serialized.
+RJ_INTERPOSER_EXPORT void *mremap(void *old_address, size_t old_size, size_t new_size, int flags,
+                                  ...) {
+  void *new_address = nullptr;
+  if (flags & MREMAP_FIXED) {
+    va_list ap;
+    va_start(ap, flags);
+    new_address = va_arg(ap, void *);
+    va_end(ap);
+  }
+  if (!InterposerContext::real().ready() || !InterposerContext::real().mremap)
+    return raw_mremap_syscall(old_address, old_size, new_size, flags, new_address);
+  if (!rj_owns_interposer_state())
+    return InterposerContext::real().mremap(old_address, old_size, new_size, flags, new_address);
+  return with_host_mapping_held([&] {
+    return InterposerContext::real().mremap(old_address, old_size, new_size, flags, new_address);
+  });
 }
 
 RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
@@ -4059,7 +4113,7 @@ RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
         return ret;
     }
   }
-  return InterposerContext::real().munmap(addr, length);
+  return with_host_mapping_held([&] { return InterposerContext::real().munmap(addr, length); });
 }
 
 } // extern "C"

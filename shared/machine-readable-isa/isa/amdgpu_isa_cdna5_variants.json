@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "features": [
+    "dpp_64bit",
+    "packed_fp64_single_sgpr_ops",
+    "packed_u64_single_sgpr_ops",
+    "f64_wmma",
+    "setreg_vgpr_msb_fixup"
+  ],
+  "variants": {
+    "gfx1250": [
+      "setreg_vgpr_msb_fixup"
+    ],
+    "gfx1251": [
+      "dpp_64bit",
+      "packed_fp64_single_sgpr_ops",
+      "packed_u64_single_sgpr_ops",
+      "f64_wmma"
+    ]
+  },
+  "instructions": [
+    {
+      "feature": "packed_fp64_single_sgpr_ops",
+      "names": [
+        "V_PK_FMA_F64",
+        "V_PK_MUL_F64",
+        "V_PK_ADD_F64",
+        "V_PK_MAX_NUM_F64",
+        "V_PK_MIN_NUM_F64"
+      ]
+    },
+    {
+      "feature": "packed_u64_single_sgpr_ops",
+      "names": [
+        "V_PK_ADD_NC_U64",
+        "V_PK_SUB_NC_U64",
+        "V_PK_LSHL_ADD_U64"
+      ]
+    },
+    {
+      "feature": "f64_wmma",
+      "names": [
+        "V_WMMA_F64_16X16X4_F64"
+      ]
+    }
+  ],
+  "model_only_instructions": [
+    "V_PK_FMA_F64",
+    "V_PK_MUL_F64",
+    "V_PK_ADD_F64",
+    "V_PK_ADD_NC_U64",
+    "V_PK_SUB_NC_U64",
+    "V_PK_MAX_NUM_F64",
+    "V_PK_MIN_NUM_F64",
+    "V_PK_LSHL_ADD_U64",
+    "V_WMMA_F64_16X16X4_F64"
+  ],
+  "encodings": [
+    {
+      "feature": "dpp_64bit",
+      "encoding": "VOP1_VOP_DPP16",
+      "instructions": [
+        "V_CEIL_F64",
+        "V_CVT_F32_F64",
+        "V_CVT_F64_F32",
+        "V_CVT_F64_I32",
+        "V_CVT_F64_U32",
+        "V_CVT_I32_F64",
+        "V_CVT_U32_F64",
+        "V_FLOOR_F64",
+        "V_FRACT_F64",
+        "V_FREXP_EXP_I32_F64",
+        "V_FREXP_MANT_F64",
+        "V_MOV_B64",
+        "V_RNDNE_F64",
+        "V_TRUNC_F64"
+      ]
+    },
+    {
+      "feature": "dpp_64bit",
+      "encoding": "VOP2_VOP_DPP16",
+      "instructions": [
+        "V_ADD_F64",
+        "V_ADD_NC_U64",
+        "V_FMAC_F64",
+        "V_LSHLREV_B64",
+        "V_MAX_NUM_F64",
+        "V_MIN_NUM_F64",
+        "V_MUL_F64",
+        "V_SUB_NC_U64"
+      ]
+    },
+    {
+      "feature": "dpp_64bit",
+      "encoding": "VOP3_SDST_ENC_VOP_DPP16",
+      "instructions": [
+        "V_DIV_SCALE_F64",
+        "V_MAD_CO_I64_I32",
+        "V_MAD_CO_U64_U32"
+      ]
+    },
+    {
+      "feature": "dpp_64bit",
+      "encoding": "VOP3_VOP_DPP16",
+      "instructions": [
+        "V_ADD_F64",
+        "V_ADD_NC_U64",
+        "V_ASHRREV_I64",
+        "V_CEIL_F64",
+        "V_CVT_F32_F64",
+        "V_CVT_F64_F32",
+        "V_CVT_F64_I32",
+        "V_CVT_F64_U32",
+        "V_CVT_I32_F64",
+        "V_CVT_U32_F64",
+        "V_DIV_FIXUP_F64",
+        "V_DIV_FMAS_F64",
+        "V_FLOOR_F64",
+        "V_FMAC_F64",
+        "V_FMA_F64",
+        "V_FRACT_F64",
+        "V_FREXP_EXP_I32_F64",
+        "V_FREXP_MANT_F64",
+        "V_LDEXP_F64",
+        "V_LSHLREV_B64",
+        "V_LSHL_ADD_U64",
+        "V_LSHRREV_B64",
+        "V_MAD_NC_I64_I32",
+        "V_MAD_NC_U64_U32",
+        "V_MAD_U32",
+        "V_MAXIMUM_F64",
+        "V_MAX_I64",
+        "V_MAX_NUM_F64",
+        "V_MAX_U64",
+        "V_MINIMUM_F64",
+        "V_MIN_I64",
+        "V_MIN_NUM_F64",
+        "V_MIN_U64",
+        "V_MOV_B64",
+        "V_MUL_F64",
+        "V_MUL_HI_I32",
+        "V_MUL_HI_U32",
+        "V_MUL_LO_U32",
+        "V_RNDNE_F64",
+        "V_SUB_NC_U64",
+        "V_TRUNC_F64"
+      ]
+    }
+  ]
+}
