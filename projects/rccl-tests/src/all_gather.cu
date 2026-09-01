@@ -419,7 +419,7 @@ NCCL_WEAK struct testEngine ncclTestEngine = {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
   /* .initCommConfig = */ nullptr,
 #endif
-#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) || (defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0))
   /* .getDevCommRequirements = */ AllGatherGetDevCommRequirements,
 #endif
 };
