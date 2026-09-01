@@ -3628,3 +3628,64 @@ that is parity rather than the material reduction required by Section 14.8.
 Common prologues, orchestration and placement attempts, remaining architecture
 peepholes, extension exercises, and the independent deep-read completion audit
 remain open. The goal therefore remains active.
+
+### 16.39 Convergence checkpoint 38: typed shared prologue boundary
+
+The shared owner/epoch prologue was the final construction component outside
+MOI orchestration that inherited the complete `MoiOptions` attempt. It owns two
+related entry mechanisms: private-state initialization after private-epoch
+access emission and owner/epoch initialization for persistent vector or scalar
+state. Both mechanisms inspect immutable engine and runtime policy, bind the
+accepted allocation to one kernel owner, derive descriptor requirements, and
+emit entry transactions. Their two kernel loops nevertheless copied the whole
+request-plus-operating-point aggregate before applying owner-local persistent
+or transient assignments.
+
+The public and private prologue contracts now receive `ConSanOptions` and
+`ConSanMoiOperatingPoint` separately. Each kernel-local transaction copies only
+the operating point before binding its owner assignment. Engine choice, owner
+source, runtime sampling, dispatch reporting, and bound runtime resources stay
+on the immutable input; resolved EXEC-save, owner/epoch, persistent scalar,
+workgroup, spill, and dispatch-identity choices stay on the kernel-local point.
+Calls to shared requirement and InlineShadow evidence helpers now name those
+two authorities explicitly. No compatibility overload or replacement view was
+introduced, and both whole-attempt prologue copies were deleted.
+
+The architecture-boundary gate rejects `MoiOptions` and inherited input/point
+casts in both the prologue header and implementation. Together with the prior
+mode and barrier gates, every native MOI construction owner below orchestration
+now exposes the same immutable-input/resolved-state split. The remaining broad
+attempt references are confined to attempt construction, placement and mode
+orchestration, the three mode-entry adapters, and the aggregate type itself;
+they are no longer available to prologue mechanics as a convenience bus.
+
+| Signal | Checkpoint 38 | Cumulative change | Slice change from checkpoint 37 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,449 | +474 | 0 |
+| Nonblank production lines | 99,165 | +82 | 0 |
+| Production implementation lines | 91,448 | **-2** | 0 |
+| `MoiOptions` references / files | 26 / 14 | **-61 / -11** | **-5 / -2** |
+| `ConSanTransformArtifacts` references / files | 207 / 56 | **-69 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 205 / 28 | +5 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 342 / 58 | +52 / +7 | **+4 / 0** |
+| `MoiOptions` references in shared prologue construction | 0 | n/a | **-5** |
+| Shared-prologue whole-attempt copy sites | 0 | n/a | **-2** |
+| Test inventory | 5,379 | +34 | 0 |
+
+Validation includes a full final-tree `-j16` rebuild; all 825 `ConSanMoi` and
+architecture-boundary focused tests in 4.6 seconds, plus the broader 874-test
+`ConSanMoi*` superset in 4.8 seconds; all 4,744 nonphysical tests at `-j16` in
+about 178 seconds, including the unchanged 2,908 simulator rows over five
+targets; and all 635 physical gfx1201 tests serialized at `-j1` in about 102
+seconds. No test was removed, renamed, disabled, added, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, and 14.9:
+the exact-subset barrier and common entry mechanisms now obey the same enforced
+construction boundary as every mode package, and no downstream owner retains a
+mixed mutable attempt. It does not improve the implementation-line count, and
+the still-wide operating point remains explicit rather than narrow. Broad
+attempt ownership in placement/composition/orchestration, material code-size
+reduction, the remaining architecture peepholes, extension exercises, and the
+independent deep-read completion audit remain open. The goal therefore remains
+active.

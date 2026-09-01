@@ -613,6 +613,13 @@ foreach(_barrier_owner IN ITEMS consan_moi_barrier.h consan_moi_barrier.inc)
         "shared MOI barrier construction must separate immutable input from operating-point state"
     )
 endforeach()
+foreach(_prologue_owner IN ITEMS consan_moi_prologue.h consan_moi_prologue.cpp)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_prologue_owner}"
+        "MoiOptions|static_cast<const ConSan(Request|MoiOperatingPoint|BoundRuntimeResources)"
+        "shared MOI prologue construction must separate immutable input from operating-point state"
+    )
+endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
     "GFX90A_ACCUM_OFFSET"

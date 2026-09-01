@@ -288,7 +288,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     // owner/epoch prologue. Emit it before the large atomic helpers so the
     // original kernel entry can reach it without consuming a scarce local
     // branch island.
-    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options,
+    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_options,
                                          prologue_scratch_assignments, arch, result);
     owner_epoch_prologue_applied_early =
         std::ranges::any_of(result.patches, [](const ConSanPatchLoweringProduct &patch) {
@@ -300,7 +300,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
                            moi_candidates, object_facts, result);
   if (result.errors.empty() && !owner_epoch_prologue_applied_early &&
       (!mode_plan.prologue_requires_consumer || result.modified()))
-    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options,
+    try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_options,
                                          prologue_scratch_assignments, arch, result);
   if (result.errors.empty())
     result.moi_operating_point = effective_options;

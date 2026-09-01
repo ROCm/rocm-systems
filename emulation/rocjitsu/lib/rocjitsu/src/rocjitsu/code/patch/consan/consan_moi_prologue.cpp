@@ -1802,8 +1802,9 @@ void note_dispatch_id_patch_info(ConSanPatchAbiEffects &effects,
   effects.dispatch_id_preload_inserted = plan.descriptor_change_required();
 }
 
-void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_arch_t arch,
-                                            ConSanTransformArtifacts &result) {
+void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
+                                            const ConSanMoiOperatingPoint &operating_point,
+                                            rj_code_arch_t arch, ConSanTransformArtifacts &result) {
   if (!result.modified() || result.replacement.empty()) {
     result.warnings.emplace_back(
         "ConSan MOI private-epoch prologue skipped because no private-epoch access probe was "
@@ -1864,11 +1865,11 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
 
     if (!access_patch->persistent_epoch_private_offset)
       continue;
-    MoiOptions kernel_options = options;
+    ConSanMoiOperatingPoint kernel_point = operating_point;
     const std::array<uint64_t, 1> kernel_owner = {kernel.descriptor_file_offset};
     if (!result.moi_operating_point.owner_transient_sgprs.empty() &&
-        !apply_moi_transient_sgpr_assignment(kernel_options, kernel_options,
-                                             result.moi_operating_point, kernel_owner)) {
+        !apply_moi_transient_sgpr_assignment(options, kernel_point, result.moi_operating_point,
+                                             kernel_owner)) {
       result.errors.emplace_back(
           "ConSan MOI private-epoch prologue has no transient scalar assignment for kernel '" +
           kernel.name + "'");
@@ -1878,7 +1879,7 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
         access_patch->persistent_dispatch_id_private_offset.has_value();
     const ConSanMoiDispatchIdCapture dispatch_capture =
         has_private_dispatch_id ? ConSanMoiDispatchIdCapture::in_vgprs(*access_patch->scratch_vgpr)
-                                : dispatch_id_capture(kernel_options);
+                                : dispatch_id_capture(kernel_point);
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
     const bool has_kernarg_preload = moi_descriptor_has_kernarg_preload(descriptor);
     if (dispatch_capture.present()) {
@@ -2008,8 +2009,8 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
     }
     const uint16_t prologue_temporary_vgpr_count =
         has_private_workgroup_key ? 3u : (workgroup_shadow ? 2u : 1u);
-    const bool fixed_lane_entry_scalar_reservoir = kernel_options.moi_exec_save_sgpr &&
-                                                   (kernel_options.has_moi_scalar_spill()) &&
+    const bool fixed_lane_entry_scalar_reservoir = kernel_point.moi_exec_save_sgpr &&
+                                                   kernel_point.has_moi_scalar_spill() &&
                                                    !kernel.uses_dynamic_stack.value_or(false);
     std::optional<uint16_t> entry_scalar_reservoir_vgpr;
     uint16_t prologue_spill_vgpr_count = prologue_temporary_vgpr_count;
@@ -2044,16 +2045,15 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
       continue;
     }
     std::optional<SgprSpillSequence> entry_scalar_spill;
-    if (kernel_options.moi_exec_save_sgpr) {
+    if (kernel_point.moi_exec_save_sgpr) {
       const uint16_t guest_entry_sgpr_count =
           static_cast<uint16_t>(moi_descriptor_user_sgpr_count(descriptor) +
                                 moi_descriptor_system_sgpr_count(descriptor));
-      const uint16_t scalar_base = *kernel_options.moi_exec_save_sgpr;
+      const uint16_t scalar_base = *kernel_point.moi_exec_save_sgpr;
       const uint16_t scalar_end = static_cast<uint16_t>(std::min<uint32_t>(
           static_cast<uint32_t>(scalar_base) +
               moi_exec_save_sgpr_count(
-                  resolve_moi_exec_save_requirement(kernel_options, kernel_options, kernel_options),
-                  arch),
+                  resolve_moi_exec_save_requirement(options, options, kernel_point), arch),
           guest_entry_sgpr_count));
       if (scalar_base < scalar_end) {
         entry_scalar_spill =
@@ -2082,7 +2082,7 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
     std::optional<ConSanMoiWorkgroupShadowLayout> prologue_workgroup_shadow = workgroup_shadow;
     if (prologue_workgroup_shadow) {
       prologue_workgroup_shadow->visible_evidence_sgpr =
-          inline_shadow_visible_evidence_sgpr(kernel_options, kernel_options);
+          inline_shadow_visible_evidence_sgpr(options, kernel_point);
     }
     MoiPrivateEpochPrologueEmissionPlan emission{
         .scratch_vgpr = *access_patch->scratch_vgpr,
@@ -2098,10 +2098,10 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
         .dispatch_plan = dispatch_plan,
         .dispatch_capture = dispatch_capture,
         .runtime_workgroup_selection_source = moi_runtime_workgroup_selection_source(),
-        .return_pc_sgpr = kernel_options.moi_exec_save_sgpr,
-        .runtime_sample_stride = kernel_options.moi_runtime_sample_stride,
-        .runtime_sample_offset = kernel_options.moi_runtime_sample_offset,
-        .runtime_report_dispatch_id = kernel_options.moi_report_dispatch_id,
+        .return_pc_sgpr = kernel_point.moi_exec_save_sgpr,
+        .runtime_sample_stride = options.moi_runtime_sample_stride,
+        .runtime_sample_offset = options.moi_runtime_sample_offset,
+        .runtime_report_dispatch_id = options.moi_report_dispatch_id,
     };
     planned.push_back({
         .kernel = &kernel,
@@ -2317,10 +2317,11 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanMoiOperatingPoi
 }
 
 void try_apply_owner_epoch_prologue_patch(
-    std::span<const uint8_t> bytes, const MoiOptions &options,
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &operating_point,
     std::span<const ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments,
     rj_code_arch_t arch, ConSanTransformArtifacts &result) {
-  if (!moi_initializes_owner_epoch(options, options))
+  if (!moi_initializes_owner_epoch(options, operating_point))
     return;
   if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back(
@@ -2332,25 +2333,27 @@ void try_apply_owner_epoch_prologue_patch(
     result.errors.emplace_back("ConSan MOI owner/epoch prologue has no admitted target profile");
     return;
   }
-  if (options.automatic_moi_private_epoch) {
-    try_apply_private_epoch_prologue_patch(options, arch, result);
+  if (operating_point.automatic_moi_private_epoch) {
+    try_apply_private_epoch_prologue_patch(options, operating_point, arch, result);
     if (!result.errors.empty() || result.moi_operating_point.owner_persistent_vgprs.empty())
       return;
   }
-  if (!options.moi_owner_epoch_vgprs.complete() &&
+  if (!operating_point.moi_owner_epoch_vgprs.complete() &&
       result.moi_operating_point.owner_persistent_vgprs.empty() &&
-      !options.moi_persistent_sgprs.complete()) {
+      !operating_point.moi_persistent_sgprs.complete()) {
     result.errors.emplace_back(
         "ConSan MOI owner/epoch prologue requires RJ_CONSAN_MOI_OWNER_VGPR and "
         "RJ_CONSAN_MOI_EPOCH_VGPR");
     return;
   }
-  if (options.moi_owner_epoch_vgprs.complete() &&
-      options.moi_owner_epoch_vgprs->owner == options.moi_owner_epoch_vgprs->epoch) {
+  if (operating_point.moi_owner_epoch_vgprs.complete() &&
+      operating_point.moi_owner_epoch_vgprs->owner ==
+          operating_point.moi_owner_epoch_vgprs->epoch) {
     result.errors.emplace_back("ConSan MOI owner and epoch VGPRs must be distinct");
     return;
   }
-  if (options.moi_owner_source == ConSanMoiOwnerSource::HwId && !options.moi_owner_sgpr.base()) {
+  if (options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
+      !operating_point.moi_owner_sgpr.base()) {
     result.errors.emplace_back("ConSan MOI hw_id owner source requires RJ_CONSAN_MOI_OWNER_SGPR");
     return;
   }
@@ -2374,7 +2377,7 @@ void try_apply_owner_epoch_prologue_patch(
   }
   const uint32_t owner_required_sgpr_count =
       options.moi_owner_source == ConSanMoiOwnerSource::HwId
-          ? static_cast<uint32_t>(*options.moi_owner_sgpr.base()) + 1u
+          ? static_cast<uint32_t>(*operating_point.moi_owner_sgpr.base()) + 1u
           : 0u;
   /// Per-kernel transaction fixed before any descriptor or text mutation.
   ///
@@ -2412,10 +2415,11 @@ void try_apply_owner_epoch_prologue_patch(
     // descriptor/entry that merely owns one of those speculative plans can
     // perturb otherwise untouched kernels and, on real multi-kernel modules,
     // can make execution hang before the selected probe is reached.
-    if ((options.automatic_moi_persistent_vgprs || options.moi_persistent_sgprs.complete()) &&
+    if ((operating_point.automatic_moi_persistent_vgprs ||
+         operating_point.moi_persistent_sgprs.complete()) &&
         !owns_emitted_patch)
       continue;
-    if (moi_has_runtime_hardware_dispatch_id(options) && !owns_emitted_patch &&
+    if (moi_has_runtime_hardware_dispatch_id(operating_point) && !owns_emitted_patch &&
         !owns_planned_site) {
       continue;
     }
@@ -2432,9 +2436,9 @@ void try_apply_owner_epoch_prologue_patch(
     active.descriptor_file_offset = active_kernel->descriptor_file_offset;
     active.entry_text_offset = active_kernel->entry_text_offset;
     active.text_file_offset = active_kernel->text_file_offset;
-    MoiOptions kernel_options = options;
+    ConSanMoiOperatingPoint kernel_point = operating_point;
     const std::array<uint64_t, 1> kernel_owner = {kernel.descriptor_file_offset};
-    if (!apply_moi_persistent_vgpr_assignment(kernel_options, result.moi_operating_point,
+    if (!apply_moi_persistent_vgpr_assignment(kernel_point, result.moi_operating_point,
                                               kernel_owner)) {
       result.errors.emplace_back(
           "ConSan MOI owner/epoch prologue has no persistent assignment for kernel '" +
@@ -2444,20 +2448,20 @@ void try_apply_owner_epoch_prologue_patch(
     // Its access/synchronization probes and entry initialization were already
     // emitted by the private-state path above. The remaining pass is solely
     // for owner components with a persistent VGPR tuple.
-    if (kernel_options.automatic_moi_private_epoch)
+    if (kernel_point.automatic_moi_private_epoch)
       continue;
     if (!result.moi_operating_point.owner_transient_sgprs.empty() &&
-        !apply_moi_transient_sgpr_assignment(kernel_options, kernel_options,
-                                             result.moi_operating_point, kernel_owner)) {
+        !apply_moi_transient_sgpr_assignment(options, kernel_point, result.moi_operating_point,
+                                             kernel_owner)) {
       result.errors.emplace_back(
           "ConSan MOI owner/epoch prologue has no transient scalar assignment for kernel '" +
           kernel.name + "'");
       return;
     }
-    const ConSanMoiDispatchIdCapture dispatch_capture = dispatch_id_capture(kernel_options);
+    const ConSanMoiDispatchIdCapture dispatch_capture = dispatch_id_capture(kernel_point);
     ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs =
-        moi_owner_epoch_vgpr_sources(kernel_options.moi_owner_epoch_vgprs);
-    if (options.moi_persistent_sgprs.complete()) {
+        moi_owner_epoch_vgpr_sources(kernel_point.moi_owner_epoch_vgprs);
+    if (operating_point.moi_persistent_sgprs.complete()) {
       const auto scratch =
           std::ranges::find(prologue_scratch_assignments, kernel.descriptor_file_offset,
                             &ConSanMoiPrologueScratchVgprAssignment::descriptor_file_offset);
@@ -2559,7 +2563,7 @@ void try_apply_owner_epoch_prologue_patch(
                  patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
         });
     if (options.moi_engine == ConSanMoiEngine::InlineShadow &&
-        options.automatic_moi_persistent_vgprs && owns_inline_barrier &&
+        kernel_point.automatic_moi_persistent_vgprs && owns_inline_barrier &&
         !owns_non_barrier_instrumentation) {
       result.warnings.emplace_back(
           "ConSan MOI skipped unobserved owner/epoch initialization for a barrier-only kernel");
@@ -2567,10 +2571,10 @@ void try_apply_owner_epoch_prologue_patch(
     }
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
     const bool has_record_replay_workgroup_tuple =
-        !kernel_options.moi_record_replay_workgroup_vgprs.empty() ||
-        !kernel_options.moi_persistent_sgprs.record_replay_workgroup.empty();
-    if (kernel_options.moi_workgroup_key_vgpr ||
-        kernel_options.moi_persistent_sgprs.workgroup_key || has_record_replay_workgroup_tuple) {
+        !kernel_point.moi_record_replay_workgroup_vgprs.empty() ||
+        !kernel_point.moi_persistent_sgprs.record_replay_workgroup.empty();
+    if (kernel_point.moi_workgroup_key_vgpr || kernel_point.moi_persistent_sgprs.workgroup_key ||
+        has_record_replay_workgroup_tuple) {
       std::vector<std::string> source_errors;
       std::optional<uint16_t> full_payload_user_sgpr_count;
       if (has_record_replay_workgroup_tuple &&
@@ -2588,45 +2592,43 @@ void try_apply_owner_epoch_prologue_patch(
       }
     }
     std::optional<MoiEntryScalarBackup> entry_scalar_backup;
-    const bool needs_branch_only_scalar_backup = kernel_options.moi_branch_only_spill.has_value();
+    const bool needs_branch_only_scalar_backup = kernel_point.moi_branch_only_spill.has_value();
     const bool needs_dynamic_stack_scalar_backup =
-        kernel_options.moi_branch_only_spill &&
-        kernel_options.moi_branch_only_spill->dynamic_stack_borrowed_sgpr.has_value();
+        kernel_point.moi_branch_only_spill &&
+        kernel_point.moi_branch_only_spill->dynamic_stack_borrowed_sgpr.has_value();
     // A spill-backed Record/Replay probe protects its borrowed scalar window
     // at each access body. Sparse workgroup selection uses that same window
     // earlier, in the owner/epoch entry prologue, so it needs an independent
     // entry save before any site-local spill exists. This is equally true for
     // compact and branch-only routers and for every admitted architecture.
     const bool needs_record_replay_runtime_scalar_backup =
-        kernel_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-        kernel_options.has_compact_moi_scalar_spill() &&
-        kernel_options.moi_runtime_sample_stride > 1u;
+        options.moi_engine == ConSanMoiEngine::RecordReplay &&
+        kernel_point.has_compact_moi_scalar_spill() && options.moi_runtime_sample_stride > 1u;
     const bool needs_full_entry_scalar_backup = needs_branch_only_scalar_backup ||
                                                 needs_dynamic_stack_scalar_backup ||
                                                 needs_record_replay_runtime_scalar_backup;
     const bool needs_automatic_owner_scalar_backup =
-        kernel_options.moi_owner_sgpr.automatic() &&
-        kernel_options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
-        kernel_options.moi_owner_sgpr.base().has_value();
+        kernel_point.moi_owner_sgpr.automatic() &&
+        options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
+        kernel_point.moi_owner_sgpr.base().has_value();
     if (needs_full_entry_scalar_backup || needs_automatic_owner_scalar_backup) {
       const bool entry_backup_arch_supported = consan_is_capability_arch(arch);
-      const bool has_scalar_spill_contract = kernel_options.has_moi_scalar_spill();
-      if (!entry_backup_arch_supported || !kernel_options.moi_exec_save_sgpr ||
+      const bool has_scalar_spill_contract = kernel_point.has_moi_scalar_spill();
+      if (!entry_backup_arch_supported || !kernel_point.moi_exec_save_sgpr ||
           !has_scalar_spill_contract ||
-          (needs_dynamic_stack_scalar_backup && !kernel_options.moi_dynamic_stack_spill)) {
+          (needs_dynamic_stack_scalar_backup && !kernel_point.moi_dynamic_stack_spill)) {
         if (needs_full_entry_scalar_backup) {
           result.errors.emplace_back("ConSan MOI entry scalar backup has no valid spill contract");
           return;
         }
       }
       const uint16_t sgpr_base = needs_full_entry_scalar_backup
-                                     ? *kernel_options.moi_exec_save_sgpr
-                                     : *kernel_options.moi_owner_sgpr.base();
+                                     ? *kernel_point.moi_exec_save_sgpr
+                                     : *kernel_point.moi_owner_sgpr.base();
       const uint16_t borrowed_sgpr_count =
           needs_full_entry_scalar_backup
-              ? moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
-                                             kernel_options, kernel_options, kernel_options),
-                                         arch)
+              ? moi_exec_save_sgpr_count(
+                    resolve_moi_exec_save_requirement(options, options, kernel_point), arch)
               : 1u;
       const auto original_descriptor = read_kernel_descriptor(bytes, kernel.descriptor_file_offset);
       if (!original_descriptor) {
@@ -2652,8 +2654,7 @@ void try_apply_owner_epoch_prologue_patch(
       // if the prologue's VALU lane transfers are still retiring. Preserve
       // only the initialized intersection of the borrowed scalar window.
       if (sgpr_count != 0u && !moi_entry_scalar_backup_preserves_persistent_outputs(
-                                  static_cast<const ConSanMoiOperatingPoint &>(kernel_options),
-                                  sgpr_base, sgpr_count)) {
+                                  kernel_point, sgpr_base, sgpr_count)) {
         result.errors.emplace_back(
             "ConSan MOI entry scalar backup overlaps persistent output state");
         return;
@@ -2676,8 +2677,7 @@ void try_apply_owner_epoch_prologue_patch(
         const uint32_t tail_end = has_live_accvgpr_bank ? original_allocation : kMaxVgprs;
         std::optional<uint16_t> backup_vgpr;
         for (uint32_t candidate = tail_begin; candidate < tail_end; ++candidate) {
-          if (!moi_owner_epoch_prologue_uses_vgpr(kernel_options, owner_epoch_vgprs,
-                                                  workgroup_shadow,
+          if (!moi_owner_epoch_prologue_uses_vgpr(kernel_point, owner_epoch_vgprs, workgroup_shadow,
                                                   static_cast<uint16_t>(candidate), arch)) {
             backup_vgpr = static_cast<uint16_t>(candidate);
             break;
@@ -2690,8 +2690,7 @@ void try_apply_owner_epoch_prologue_patch(
         // window is restored before the displaced guest entry executes.
         for (uint32_t candidate = entry_abi_vgpr_count;
              !backup_vgpr && candidate < std::min(original_allocation, kMaxVgprs); ++candidate) {
-          if (!moi_owner_epoch_prologue_uses_vgpr(kernel_options, owner_epoch_vgprs,
-                                                  workgroup_shadow,
+          if (!moi_owner_epoch_prologue_uses_vgpr(kernel_point, owner_epoch_vgprs, workgroup_shadow,
                                                   static_cast<uint16_t>(candidate), arch)) {
             backup_vgpr = static_cast<uint16_t>(candidate);
           }
@@ -2715,59 +2714,59 @@ void try_apply_owner_epoch_prologue_patch(
     std::optional<ConSanMoiWorkgroupShadowLayout> prologue_workgroup_shadow = workgroup_shadow;
     if (prologue_workgroup_shadow) {
       prologue_workgroup_shadow->visible_evidence_sgpr =
-          inline_shadow_visible_evidence_sgpr(kernel_options, kernel_options);
+          inline_shadow_visible_evidence_sgpr(options, kernel_point);
     }
     MoiOwnerEpochPrologueEmissionPlan emission{
         .owner_vgpr = *owner_epoch_vgprs.owner,
         .epoch_vgpr = *owner_epoch_vgprs.epoch,
-        .workgroup_key_vgpr = kernel_options.moi_workgroup_key_vgpr,
+        .workgroup_key_vgpr = kernel_point.moi_workgroup_key_vgpr,
         .owner_shift_bits = owner_shift_bits,
-        .owner_source = kernel_options.moi_owner_source,
-        .owner_sgpr = kernel_options.moi_owner_sgpr.base(),
-        .one_based_owner_ids = kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
-        .persistent_sgprs = kernel_options.moi_persistent_sgprs,
-        .record_replay_workgroup_vgprs = kernel_options.moi_record_replay_workgroup_vgprs,
+        .owner_source = options.moi_owner_source,
+        .owner_sgpr = kernel_point.moi_owner_sgpr.base(),
+        .one_based_owner_ids = options.moi_engine == ConSanMoiEngine::InlineShadow,
+        .persistent_sgprs = kernel_point.moi_persistent_sgprs,
+        .record_replay_workgroup_vgprs = kernel_point.moi_record_replay_workgroup_vgprs,
         .dispatch_plan = dispatch_plan,
         .dispatch_capture = dispatch_capture,
         .runtime_workgroup_selection_source = moi_runtime_workgroup_selection_source(),
-        .return_pc_sgpr = kernel_options.moi_exec_save_sgpr,
-        .runtime_sample_stride = kernel_options.moi_runtime_sample_stride,
-        .runtime_sample_offset = kernel_options.moi_runtime_sample_offset,
-        .runtime_report_dispatch_id = kernel_options.moi_report_dispatch_id,
+        .return_pc_sgpr = kernel_point.moi_exec_save_sgpr,
+        .runtime_sample_stride = options.moi_runtime_sample_stride,
+        .runtime_sample_offset = options.moi_runtime_sample_offset,
+        .runtime_report_dispatch_id = options.moi_report_dispatch_id,
         .entry_scalar_backup = entry_scalar_backup,
         .workgroup_shadow = std::move(prologue_workgroup_shadow),
-        .has_quad_zero_tuple = options.automatic_moi_persistent_vgprs &&
+        .has_quad_zero_tuple = kernel_point.automatic_moi_persistent_vgprs &&
                                moi_workgroup_shadow_preferred_zero_vgpr_count(*target) == 4u,
         .workgroup_sources = std::move(workgroup_sources),
     };
     uint32_t required_vgpr_count =
-        moi_owner_epoch_prologue_required_vgpr_count(kernel_options, emission, arch);
+        moi_owner_epoch_prologue_required_vgpr_count(kernel_point, emission, arch);
     if (entry_scalar_backup) {
       required_vgpr_count = std::max<uint32_t>(required_vgpr_count, entry_scalar_backup->vgpr + 1u);
     }
     uint32_t required_sgpr_count = owner_required_sgpr_count;
-    if (kernel_options.moi_dispatch_identity.sgpr()) {
+    if (kernel_point.moi_dispatch_identity.sgpr()) {
       required_sgpr_count = std::max<uint32_t>(
-          required_sgpr_count, static_cast<uint32_t>(*kernel_options.moi_dispatch_identity.sgpr()) +
+          required_sgpr_count, static_cast<uint32_t>(*kernel_point.moi_dispatch_identity.sgpr()) +
                                    kMoiDispatchStateSgprCount);
     }
-    if (kernel_options.moi_persistent_sgprs.owner()) {
+    if (kernel_point.moi_persistent_sgprs.owner()) {
       required_sgpr_count = std::max<uint32_t>(
           required_sgpr_count,
-          static_cast<uint32_t>(*kernel_options.moi_persistent_sgprs.owner()) + 1u);
+          static_cast<uint32_t>(*kernel_point.moi_persistent_sgprs.owner()) + 1u);
     }
-    if (kernel_options.moi_persistent_sgprs.epoch()) {
+    if (kernel_point.moi_persistent_sgprs.epoch()) {
       required_sgpr_count = std::max<uint32_t>(
           required_sgpr_count,
-          static_cast<uint32_t>(*kernel_options.moi_persistent_sgprs.epoch()) + 1u);
+          static_cast<uint32_t>(*kernel_point.moi_persistent_sgprs.epoch()) + 1u);
     }
-    if (kernel_options.moi_persistent_sgprs.workgroup_key) {
+    if (kernel_point.moi_persistent_sgprs.workgroup_key) {
       required_sgpr_count = std::max<uint32_t>(
           required_sgpr_count,
-          static_cast<uint32_t>(*kernel_options.moi_persistent_sgprs.workgroup_key) + 1u);
+          static_cast<uint32_t>(*kernel_point.moi_persistent_sgprs.workgroup_key) + 1u);
     }
     for (const std::optional<uint16_t> reg :
-         kernel_options.moi_persistent_sgprs.record_replay_workgroup.values()) {
+         kernel_point.moi_persistent_sgprs.record_replay_workgroup.values()) {
       if (reg)
         required_sgpr_count = std::max<uint32_t>(required_sgpr_count, *reg + 1u);
     }
@@ -2775,10 +2774,10 @@ void try_apply_owner_epoch_prologue_patch(
         .kernel = std::move(active),
         .emission = std::move(emission),
         .has_kernarg_preload = has_kernarg_preload,
-        .instrument_entry_in_place =
-            kernel.uses_dynamic_stack.value_or(false) ||
-            (options.moi_engine == ConSanMoiEngine::InlineShadow &&
-             (options.automatic_moi_persistent_vgprs || options.moi_persistent_sgprs.complete())),
+        .instrument_entry_in_place = kernel.uses_dynamic_stack.value_or(false) ||
+                                     (options.moi_engine == ConSanMoiEngine::InlineShadow &&
+                                      (kernel_point.automatic_moi_persistent_vgprs ||
+                                       kernel_point.moi_persistent_sgprs.complete())),
         .required_vgpr_count = required_vgpr_count,
         .required_sgpr_count = static_cast<uint16_t>(required_sgpr_count),
     });

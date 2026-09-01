@@ -54,7 +54,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                                                         ConSanTransformArtifacts &result);
 
 void try_apply_owner_epoch_prologue_patch(
-    std::span<const uint8_t> bytes, const MoiOptions &options,
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &operating_point,
     std::span<const ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments,
     rj_code_arch_t arch, ConSanTransformArtifacts &result);
 
