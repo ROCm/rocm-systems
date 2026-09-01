@@ -56,6 +56,9 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-perfetto
 rocprofiler_systems_add_interface_library(rocprofiler-systems-json
     "Use nlohmann/json for json data handling"
 )
+rocprofiler_systems_add_interface_library(rocprofiler-systems-fmt
+    "Provides fmt library"
+)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-spdlog
     "Provides spdlog library"
 )
@@ -620,6 +623,14 @@ rocprofiler_systems_checkout_git_submodule(
 )
 
 include(Perfetto)
+
+# ----------------------------------------------------------------------------------------#
+#
+# Fmt
+#
+# ----------------------------------------------------------------------------------------#
+
+include(FmtLib)
 
 # ----------------------------------------------------------------------------------------#
 #

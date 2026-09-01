@@ -112,7 +112,28 @@ class AcpiParser {
    *         AMDCUID_STATUS_PERMISSION_DENIED if access denied (need root)
    *         AMDCUID_STATUS_INVALID_FORMAT if table format is invalid
    */
-  static amdcuid_status_t parse_madt(std::vector<AcpiCpuInfo>& cpu_info);
+  [[nodiscard]] static amdcuid_status_t parse_madt(std::vector<AcpiCpuInfo>& cpu_info);
+
+  /**
+   * @brief Parse an in-memory MADT image
+   *
+   * Split out of parse_madt() so the table walker can be exercised against
+   * synthetic (including deliberately malformed) tables without needing root
+   * or a real /sys/firmware/acpi/tables/APIC.
+   *
+   * Every field access is bounds-checked against @p size; a truncated or
+   * self-inconsistent table yields AMDCUID_STATUS_INVALID_FORMAT rather than
+   * reading past the end of the buffer.
+   *
+   * @param data Pointer to the raw table bytes (may be null iff size == 0)
+   * @param size Number of valid bytes at @p data
+   * @param cpu_info Output vector of CPU information structures
+   * @return AMDCUID_STATUS_SUCCESS on success
+   *         AMDCUID_STATUS_INVALID_FORMAT if the table is malformed
+   *         AMDCUID_STATUS_DEVICE_NOT_FOUND if no CPU entries were found
+   */
+  [[nodiscard]] static amdcuid_status_t parse_madt_buffer(const uint8_t* data, size_t size,
+                                                          std::vector<AcpiCpuInfo>& cpu_info);
 
   /**
    * @brief Validate ACPI table header checksum
@@ -134,7 +155,7 @@ class AcpiParser {
    * @param count Output for CPU count
    * @return AMDCUID_STATUS_SUCCESS on success
    */
-  static amdcuid_status_t get_cpu_count(uint32_t& count);
+  [[nodiscard]] static amdcuid_status_t get_cpu_count(uint32_t& count);
 
  private:
   /**
@@ -144,16 +165,19 @@ class AcpiParser {
    * @param data Output buffer for table data
    * @return AMDCUID_STATUS_SUCCESS on success
    */
-  static amdcuid_status_t read_acpi_table(const char* table_name, std::vector<uint8_t>& data);
+  [[nodiscard]] static amdcuid_status_t read_acpi_table(const char* table_name,
+                                                        std::vector<uint8_t>& data);
 
   /**
-   * @brief Parse individual MADT entry
+   * @brief Parse a single MADT interrupt-controller structure
    *
-   * @param entry Pointer to entry data
+   * @param entry Pointer to the entry
+   * @param entry_len Number of bytes available at @p entry; the caller must
+   *        have validated that the entry does not extend past the table
    * @param cpu_info Output CPU info if entry is Local APIC or x2APIC
    * @return true if entry was parsed successfully
    */
-  static bool parse_madt_entry(const uint8_t* entry, AcpiCpuInfo& cpu_info);
+  static bool parse_madt_entry(const uint8_t* entry, size_t entry_len, AcpiCpuInfo& cpu_info);
 };
 
 #endif  // ACPI_PARSER_H

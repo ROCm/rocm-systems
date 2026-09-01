@@ -18,10 +18,6 @@
 #include "include/amd_cuid.h"
 
 // Endianness conversion functions
-uint16_t PciUtil::le16_to_be16(uint16_t value) {
-  return ((value & 0x00FF) << 8) | ((value & 0xFF00) >> 8);
-}
-
 uint64_t PciUtil::le64_to_be64(uint64_t value) {
   return ((value & 0x00000000000000FFULL) << 56) | ((value & 0x000000000000FF00ULL) << 40) |
          ((value & 0x0000000000FF0000ULL) << 24) | ((value & 0x00000000FF000000ULL) << 8) |
@@ -59,18 +55,21 @@ amdcuid_status_t PciUtil::read_pci_config_space(std::string bdf, uint8_t* buffer
     return AMDCUID_STATUS_PCI_ERROR;
   }
 
-  if (static_cast<std::ifstream::pos_type>(offset + buffer_size) > length) {
+  // Written so it cannot wrap: offset + buffer_size would overflow size_t for
+  // a large buffer_size and let an out-of-range read through.
+  const size_t file_size = static_cast<size_t>(length);
+  if (buffer_size > file_size || offset > file_size - buffer_size) {
     config_file.close();
     return AMDCUID_STATUS_PCI_ERROR;
   }
 
-  config_file.seekg(offset, std::ios::beg);
+  config_file.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
   if (!config_file) {
     config_file.close();
     return AMDCUID_STATUS_PCI_ERROR;
   }
 
-  config_file.read(reinterpret_cast<char*>(buffer), buffer_size);
+  config_file.read(reinterpret_cast<char*>(buffer), static_cast<std::streamsize>(buffer_size));
   if (config_file.fail() || static_cast<size_t>(config_file.gcount()) != buffer_size) {
     config_file.close();
     return AMDCUID_STATUS_PCI_ERROR;
@@ -86,8 +85,8 @@ amdcuid_status_t PciUtil::get_pci_dsn_cap_offset(std::string bdf, uint16_t& offs
   if (bdf.empty()) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
   // Get the whole PCI config space header
-  uint8_t config_space[4096] = {0};
-  amdcuid_status_t status = read_pci_config_space(bdf, config_space, 4096, 0);
+  uint8_t config_space[kPciConfigSpaceSize] = {0};
+  amdcuid_status_t status = read_pci_config_space(bdf, config_space, sizeof(config_space), 0);
   if (status != AMDCUID_STATUS_SUCCESS) {
     return status;
   }
@@ -98,7 +97,9 @@ amdcuid_status_t PciUtil::get_pci_dsn_cap_offset(std::string bdf, uint16_t& offs
   // Traverse the extended capability list starting at offset 0x100.
   uint16_t cap_ptr = 0x100;
   for (size_t hops = 0; hops < 1024; ++hops) {
-    if (cap_ptr < 0x100 || cap_ptr + 3 >= sizeof(config_space)) {
+    // Widen to size_t before comparing against sizeof(): cap_ptr promotes to
+    // int, which would otherwise be an implicit signed/unsigned comparison.
+    if (cap_ptr < 0x100 || static_cast<size_t>(cap_ptr) + 3 >= sizeof(config_space)) {
       return AMDCUID_STATUS_UNSUPPORTED;
     }
 
@@ -138,8 +139,8 @@ amdcuid_status_t PciUtil::get_pci_vsec_cap_offset(std::string bdf, uint16_t& off
   if (bdf.empty()) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
   // Get the whole PCI config space header
-  uint8_t config_space[4096] = {0};
-  amdcuid_status_t status = read_pci_config_space(bdf, config_space, 4096, 0);
+  uint8_t config_space[kPciConfigSpaceSize] = {0};
+  amdcuid_status_t status = read_pci_config_space(bdf, config_space, sizeof(config_space), 0);
   if (status != AMDCUID_STATUS_SUCCESS) {
     return status;
   }
@@ -151,7 +152,9 @@ amdcuid_status_t PciUtil::get_pci_vsec_cap_offset(std::string bdf, uint16_t& off
   // Traverse the extended capability list starting at offset 0x100.
   uint16_t cap_ptr = 0x100;
   for (size_t hops = 0; hops < 1024; ++hops) {
-    if (cap_ptr < 0x100 || cap_ptr + 7 >= sizeof(config_space)) {
+    // Widen to size_t before comparing against sizeof(): cap_ptr promotes to
+    // int, which would otherwise be an implicit signed/unsigned comparison.
+    if (cap_ptr < 0x100 || static_cast<size_t>(cap_ptr) + 7 >= sizeof(config_space)) {
       return AMDCUID_STATUS_UNSUPPORTED;
     }
 
