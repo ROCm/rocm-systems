@@ -4,6 +4,7 @@
   "exec_mode": "functional",
   "vm": {
     "arch": "cdna5",
+    "target": "gfx1250",
     "gpu": {
       "device": {
         "gpu_id": 1250,
