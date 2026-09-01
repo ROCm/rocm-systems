@@ -17,20 +17,20 @@ class CodeObjectPatcher;
 
 namespace rocjitsu::consan_moi_impl {
 
-[[nodiscard]] bool append_moi_atomic_lowering_commit(
-    ConSanTransformArtifacts &result, const consan_detail::MoiAtomicEvidenceSitePlan &plan,
+[[nodiscard]] bool append_moi_sync_intent_lowering_commit(
+    ConSanTransformArtifacts &result, std::span<const ConSanProbeIntentId> intent_ids,
     const ConSanCommittedPatchGeometry &patch, std::string_view probe_name,
     std::vector<ConSanCommittedLowering> &commits);
 
-[[nodiscard]] bool append_moi_fence_lowering_commit(
-    ConSanTransformArtifacts &result, const consan_detail::MoiFenceEvidenceSitePlan &plan,
-    const ConSanCommittedPatchGeometry &patch, std::string_view probe_name,
-    std::vector<ConSanCommittedLowering> &commits);
-
-[[nodiscard]] bool append_moi_barrier_lowering_commit(
-    ConSanTransformArtifacts &result, const consan_detail::MoiBarrierEvidenceSitePlan &plan,
-    const ConSanCommittedPatchGeometry &patch, std::string_view probe_name,
-    std::vector<ConSanCommittedLowering> &commits);
+template <typename EvidencePlan>
+[[nodiscard]] bool append_moi_sync_lowering_commit(ConSanTransformArtifacts &result,
+                                                   const EvidencePlan &plan,
+                                                   const ConSanCommittedPatchGeometry &patch,
+                                                   std::string_view probe_name,
+                                                   std::vector<ConSanCommittedLowering> &commits) {
+  return append_moi_sync_intent_lowering_commit(result, plan.intent_ids(), patch, probe_name,
+                                                commits);
+}
 
 /// Atomically publish one completed synchronization mutation. Mode owners
 /// build bytes, patch proof, and intent-bound commits; this shared boundary

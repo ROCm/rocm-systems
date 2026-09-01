@@ -1334,8 +1334,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(
               *local_body_offset +
               (candidate_point.moi_persistent_sgprs.epoch() ? sizeof(uint32_t) : 0u);
           info.owner_descriptor_file_offsets = planned.owner_descriptor_file_offsets;
-          if (!append_moi_barrier_lowering_commit(result, candidate, info, "barrier epoch patch",
-                                                  lowering_commits))
+          if (!append_moi_sync_lowering_commit(result, candidate, info, "barrier epoch patch",
+                                               lowering_commits))
             return;
           patches.push_back(std::move(info));
           continue;
@@ -1481,8 +1481,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(
         cave_text_offset + (candidate_point.moi_persistent_sgprs.epoch() ? sizeof(uint32_t) : 0u),
         emits_barrier_record);
     note_planned_resource_info(info, planned);
-    if (!append_moi_barrier_lowering_commit(result, candidate, info, "barrier epoch patch",
-                                            lowering_commits))
+    if (!append_moi_sync_lowering_commit(result, candidate, info, "barrier epoch patch",
+                                         lowering_commits))
       return;
     patches.push_back(info);
   }
@@ -1744,9 +1744,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(
       for (StagedReusedBarrier &staged : staged_barriers) {
         append_words_bytes(new_text, staged.body_words);
         std::memcpy(new_text.data() + staged.site_offset, &staged.call_word, sizeof(uint32_t));
-        if (!append_moi_barrier_lowering_commit(
-                result, planned_candidates[staged.planned_index].candidate, staged.patch,
-                "barrier epoch patch", lowering_commits))
+        if (!append_moi_sync_lowering_commit(result,
+                                             planned_candidates[staged.planned_index].candidate,
+                                             staged.patch, "barrier epoch patch", lowering_commits))
           return ReusedDenseRelayResult::Failed;
         patches.push_back(std::move(staged.patch));
       }
@@ -2085,8 +2085,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(
                                            body.relocated_guest_instruction_offset,
                                            emits_barrier_record);
         note_planned_resource_info(info, planned);
-        if (!append_moi_barrier_lowering_commit(result, planned.candidate, info,
-                                                "barrier epoch patch", lowering_commits))
+        if (!append_moi_sync_lowering_commit(result, planned.candidate, info, "barrier epoch patch",
+                                             lowering_commits))
           return;
         patches.push_back(std::move(info));
       }
@@ -2720,8 +2720,8 @@ void try_apply_record_replay_barrier_record_patch(
     note_descriptor_requirements(descriptor_requirements, planned.resources);
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, emission, arch);
     note_moi_probe_private_requirements(private_requirements, planned);
-    if (!append_moi_barrier_lowering_commit(result, candidate, info, "barrier record patch",
-                                            lowering_commits))
+    if (!append_moi_sync_lowering_commit(result, candidate, info, "barrier record patch",
+                                         lowering_commits))
       return;
     patches.push_back(info);
   }

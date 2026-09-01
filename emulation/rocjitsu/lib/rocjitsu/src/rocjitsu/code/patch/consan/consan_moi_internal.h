@@ -761,6 +761,9 @@ struct MoiAtomicEvidenceSitePlan {
   std::optional<uint64_t> scalar_clause_text_offset;
 
   /// Verify the cross-stage identities and basic guest-range invariants.
+  [[nodiscard]] std::array<ConSanProbeIntentId, 2> intent_ids() const {
+    return {address_capture_intent, evidence_intent};
+  }
   [[nodiscard]] bool is_well_formed() const {
     return semantic_site.valid() && association.valid() && address_capture_intent.valid() &&
            evidence_intent.valid() && address_capture_intent != evidence_intent &&
@@ -835,6 +838,9 @@ struct MoiFenceEvidenceSitePlan {
 
   /// Verify that policy, graph association, decode, and replacement range all
   /// name one complete lowering operation.
+  [[nodiscard]] std::array<ConSanProbeIntentId, 2> intent_ids() const {
+    return {address_capture_intent, evidence_intent};
+  }
   [[nodiscard]] bool is_well_formed() const {
     return semantic_site.valid() &&
            semantic_site.domain == ConSanSemanticSiteDomain::SynchronizationEvent &&
@@ -892,6 +898,7 @@ struct MoiBarrierEvidenceSitePlan {
 
   /// Verify that the policy intent, graph event, and decoded insertion site
   /// form one complete barrier lowering operation.
+  [[nodiscard]] std::array<ConSanProbeIntentId, 1> intent_ids() const { return {evidence_intent}; }
   [[nodiscard]] bool is_well_formed() const {
     return semantic_site.valid() &&
            semantic_site.domain == ConSanSemanticSiteDomain::SynchronizationEvent &&

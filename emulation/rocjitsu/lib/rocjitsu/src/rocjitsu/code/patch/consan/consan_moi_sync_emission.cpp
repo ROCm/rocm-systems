@@ -96,11 +96,10 @@ make_moi_sync_lowering_commit(const ConSanObservationPlan &observation,
                                         ConSanLoweringOutcomeKind::Instrumented);
 }
 
-[[nodiscard]] bool append_moi_sync_lowering_commit(ConSanTransformArtifacts &result,
-                                                   std::span<const ConSanProbeIntentId> intent_ids,
-                                                   const ConSanCommittedPatchGeometry &patch,
-                                                   std::string_view probe_name,
-                                                   std::vector<ConSanCommittedLowering> &commits) {
+[[nodiscard]] bool append_moi_sync_intent_lowering_commit(
+    ConSanTransformArtifacts &result, std::span<const ConSanProbeIntentId> intent_ids,
+    const ConSanCommittedPatchGeometry &patch, std::string_view probe_name,
+    std::vector<ConSanCommittedLowering> &commits) {
   auto commit = make_moi_sync_lowering_commit(result.observation_plan(), intent_ids, patch);
   if (!commit) {
     result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
@@ -109,33 +108,6 @@ make_moi_sync_lowering_commit(const ConSanObservationPlan &observation,
   }
   commits.push_back(std::move(*commit));
   return true;
-}
-
-[[nodiscard]] bool append_moi_atomic_lowering_commit(
-    ConSanTransformArtifacts &result, const MoiAtomicEvidenceSitePlan &plan,
-    const ConSanCommittedPatchGeometry &patch, std::string_view probe_name,
-    std::vector<ConSanCommittedLowering> &commits) {
-  const std::array<ConSanProbeIntentId, 2> ids = {plan.address_capture_intent,
-                                                  plan.evidence_intent};
-  return append_moi_sync_lowering_commit(result, ids, patch, probe_name, commits);
-}
-
-[[nodiscard]] bool append_moi_fence_lowering_commit(ConSanTransformArtifacts &result,
-                                                    const MoiFenceEvidenceSitePlan &plan,
-                                                    const ConSanCommittedPatchGeometry &patch,
-                                                    std::string_view probe_name,
-                                                    std::vector<ConSanCommittedLowering> &commits) {
-  const std::array<ConSanProbeIntentId, 2> ids = {plan.address_capture_intent,
-                                                  plan.evidence_intent};
-  return append_moi_sync_lowering_commit(result, ids, patch, probe_name, commits);
-}
-
-[[nodiscard]] bool append_moi_barrier_lowering_commit(
-    ConSanTransformArtifacts &result, const MoiBarrierEvidenceSitePlan &plan,
-    const ConSanCommittedPatchGeometry &patch, std::string_view probe_name,
-    std::vector<ConSanCommittedLowering> &commits) {
-  const std::array<ConSanProbeIntentId, 1> ids = {plan.evidence_intent};
-  return append_moi_sync_lowering_commit(result, ids, patch, probe_name, commits);
 }
 
 [[nodiscard]] bool publish_moi_sync_patch(

@@ -267,6 +267,11 @@ foreach(_file IN LISTS _consan_production_files)
     )
     _consan_assert_no_match(
         "${_file}"
+        "append_moi_(atomic|fence|barrier)_lowering_commit"
+        "synchronization evidence plans must publish through one shared commit boundary"
+    )
+    _consan_assert_no_match(
+        "${_file}"
         "moi_(inline|record_replay)_(indirect_(pc|scc)|dispatch_key|call_return)_sgpr|moi_router_(indirect_(pc|scc)|dispatch_key|call_return)_sgpr|moi_inline_(branch_only_scalar_spill|dynamic_stack_borrowed_sgpr)"
         "scalar-router and branch-only preservation state must remain shared typed allocations"
     )
@@ -281,6 +286,13 @@ foreach(_file IN LISTS _consan_production_files)
         "mode semantics must not return to the mutable operating point"
     )
 endforeach()
+file(READ "${_consan_dir}/consan_moi_sync_emission.h" _moi_sync_commit_contract)
+if(NOT _moi_sync_commit_contract MATCHES "append_moi_sync_lowering_commit" OR
+   NOT _moi_sync_commit_contract MATCHES "plan[.]intent_ids[(][)]")
+    message(FATAL_ERROR
+        "ConSan synchronization commit boundary lost its plan-owned intent set"
+    )
+endif()
 
 # Object-wide mode semantics are selected once by their mode owners and then
 # consumed as one immutable product. Common resource and emission components

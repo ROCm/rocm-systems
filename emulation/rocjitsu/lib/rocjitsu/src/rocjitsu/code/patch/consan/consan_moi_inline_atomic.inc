@@ -667,8 +667,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           note_moi_probe_patch_info(info, planned);
           note_moi_persistent_vgpr_state(info, group_point, result.moi_operating_point);
           info.persistent_sgpr_state = group_point.moi_persistent_sgprs;
-          if (!append_moi_atomic_lowering_commit(result, planned.candidate, info,
-                                                 "inline atomic patch", lowering_commits))
+          if (!append_moi_sync_lowering_commit(result, planned.candidate, info,
+                                               "inline atomic patch", lowering_commits))
             return;
           patches.push_back(std::move(info));
           routed_by_dense_relay[body.planned_index] = true;
@@ -777,8 +777,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     note_moi_probe_patch_info(info, planned);
     note_moi_persistent_vgpr_state(info, candidate_point, result.moi_operating_point);
     info.persistent_sgpr_state = candidate_point.moi_persistent_sgprs;
-    if (!append_moi_atomic_lowering_commit(result, candidate, info, "inline atomic patch",
-                                           lowering_commits))
+    if (!append_moi_sync_lowering_commit(result, candidate, info, "inline atomic patch",
+                                         lowering_commits))
       return;
     patches.push_back(info);
   }

@@ -266,8 +266,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.relocated_guest_instruction_offset = cave_text_offset + guest_instruction_offset;
     note_moi_probe_patch_info(info, planned);
-    if (!append_moi_atomic_lowering_commit(result, candidate, info, "atomic record patch",
-                                           lowering_commits))
+    if (!append_moi_sync_lowering_commit(result, candidate, info, "atomic record patch",
+                                         lowering_commits))
       return;
     patches.push_back(info);
     ++record_index;

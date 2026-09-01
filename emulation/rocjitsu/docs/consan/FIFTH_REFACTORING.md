@@ -4308,3 +4308,62 @@ Remaining target locality, operating-point and transaction breadth, larger
 legacy harvesting, material whole-refactoring shrinkage, the target-side
 extension exercise, and the independent Section 14 completion audit remain
 open. The goal therefore remains active.
+
+### 16.49 Convergence checkpoint 48: plan-owned synchronization commits
+
+The resource-planning trace continued through synchronization publication.
+Atomic, fence, and barrier evidence already crossed planning and emission as
+typed products, but three exported commit adapters independently rebuilt the
+intent-ID set belonging to each product. Atomic and fence adapters duplicated
+the same address-capture-plus-evidence pair; the barrier adapter rebuilt its
+single evidence intent. Every Record/Replay, Sampled, and InlineShadow caller
+therefore selected a mechanism-specific adapter even though all three
+ultimately called the same private semantic-commit implementation and mutated
+the same broad transaction.
+
+Each typed evidence plan now publishes its own complete intent set. One shared
+compile-time adapter accepts any such plan and forwards that set to one
+intent-bound commit authority. All twelve call regions across the three modes
+use this operation directly. The atomic, fence, and barrier adapter
+declarations and definitions are deleted; there are no compatibility names or
+mode-local copies. This is mode locality without duplication: policy owns the
+intent membership, each mode owns its byte mechanism, and common
+infrastructure owns exactly one commit construction path.
+
+The architecture gate rejects all three retired adapter names and requires the
+shared contract to obtain IDs from `plan.intent_ids()`. No behavior defect was
+established during the convergence. Existing synchronization coverage tests
+exercise exact intent closure, coalescing, rejection, and publication for all
+three evidence-plan shapes; the structural extension prevents the duplicated
+authorities from returning.
+
+| Signal | Checkpoint 48 | Cumulative change | Slice change from checkpoint 47 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,413 | +438 | **-21** |
+| Nonblank production lines | 99,131 | +48 | **-17** |
+| Production implementation lines | 91,411 | **-39** | **-17** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 196 / 56 | **-80 / -1** | **-4 / 0** |
+| `ConSanPatchInfo` references / files | 206 / 28 | +6 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 357 / 63 | +67 / +12 | 0 / 0 |
+| Mechanism-specific synchronization commit adapters | **0** | n/a | **-3** |
+| Shared plan-owned synchronization commit authorities | **1** | n/a | converged |
+| Test inventory | **5,381** | **+36** | 0 |
+
+Validation includes a final-tree `-j16` build; the exact architecture-boundary
+test; 926 focused MOI, evidence, and observation tests, of which 924 passed and
+the two external benchmark-object cases skipped as designed; and all 4,746
+nonphysical tests over the five emulated targets at `-j16`. No test was
+removed, renamed, disabled, or replaced. The physical byte-emission path did
+not change in this host-side semantic-ownership slice, so the immediately
+preceding checkpoint's complete 635-test serialized gfx1201 result remains the
+periodic physical baseline rather than being repeated here.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, 14.8, and
+14.9. It deletes another duplicated cross-mode mechanism and brings the
+cumulative implementation reduction to thirty-nine lines. That is still not
+material. Remaining target locality, operating-point and transaction breadth,
+larger legacy harvesting, material whole-refactoring shrinkage, the target-side
+extension exercise, and the independent Section 14 completion audit remain
+open. The goal therefore remains active.

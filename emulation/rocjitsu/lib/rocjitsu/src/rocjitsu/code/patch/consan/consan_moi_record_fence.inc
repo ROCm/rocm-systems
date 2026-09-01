@@ -500,8 +500,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     info.original_size = displaced_original_size;
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     note_moi_probe_patch_info(info, planned);
-    if (!append_moi_fence_lowering_commit(result, planned.candidate, info, "fence record patch",
-                                          lowering_commits))
+    if (!append_moi_sync_lowering_commit(result, planned.candidate, info, "fence record patch",
+                                         lowering_commits))
       return;
     patches.push_back(std::move(info));
     ++record_index;
