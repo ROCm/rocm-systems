@@ -21,6 +21,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -1414,10 +1415,10 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   // pp_dpm_* without flagging any level as current ('*' marker absent).
   // Treat that as "current unknown" rather than discarding the parsed
   // table: keep f->num_supported / f->frequency populated and signal
-  // "no current level" via f->current = -1 so callers can still report
+  // "no current level" via f->current = UINT32_MAX so callers can still report
   // the frequency table.
   if (f->current >= f->num_supported) {
-    f->current = -1;
+    f->current = UINT32_MAX;
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -2237,7 +2238,7 @@ rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind, uint32_t* pisolate
     LOG_ERROR(ss);
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
-  *pisolate = partition_status[partition_id];
+  *pisolate = static_cast<uint32_t>(partition_status[partition_id]);
   return RSMI_STATUS_SUCCESS;
 }
 
@@ -2289,7 +2290,7 @@ rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind, uint32_t pisolate)
   }
 
   // (3) Create the complete list with the update
-  partition_status[partition_id] = pisolate;
+  partition_status[partition_id] = static_cast<int>(pisolate);
   std::stringstream result;
   std::copy(partition_status.begin(), partition_status.end(),
             std::ostream_iterator<int>(result, " "));
@@ -2383,7 +2384,7 @@ rsmi_status_t rsmi_dev_xgmi_plpd_get(uint32_t dv_ind, rsmi_dpm_policy_t* policy)
       return RSMI_STATUS_UNEXPECTED_DATA;
     }
 
-    policy->policies[policy->num_supported].policy_id = value;
+    policy->policies[policy->num_supported].policy_id = static_cast<uint32_t>(value);
     std::string description = amd::smi::trim(tokens[1]);
     if (current_line.back() == '*') {  // current policy
       description.pop_back();          // remove last *
@@ -2488,7 +2489,7 @@ rsmi_status_t rsmi_dev_soc_pstate_get(uint32_t dv_ind, rsmi_dpm_policy_t* policy
       return RSMI_STATUS_UNEXPECTED_DATA;
     }
 
-    policy->policies[policy->num_supported].policy_id = value;
+    policy->policies[policy->num_supported].policy_id = static_cast<uint32_t>(value);
     std::string description = amd::smi::trim(tokens[1]);
     if (current_line.back() == '*') {  // current policy
       description.pop_back();          // remove last *
@@ -2627,7 +2628,7 @@ static rsmi_status_t get_dev_name_from_file(uint32_t dv_ind, char* name, size_t 
   rsmi_status_t ret = get_dev_value_line(amd::smi::kDevDevProdName, dv_ind, &val_str);
 
   if (ret != 0) {
-    return amd::smi::ErrnoToRsmiStatus(ret);
+    return amd::smi::ErrnoToRsmiStatus(static_cast<int>(ret));
   }
   size_t ct = val_str.copy(name, len);
 
@@ -3070,7 +3071,7 @@ rsmi_status_t rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t*
       static_cast<uint32_t>(speed_index) * WIDTH_DATA_LENGTH + static_cast<uint32_t>(width_index);
   for (cur_index = 0; cur_index < WIDTH_DATA_LENGTH * SPEED_DATA_LENGTH; cur_index++) {
     b->transfer_rate.frequency[cur_index] =
-        static_cast<long>(link_speed[cur_index / WIDTH_DATA_LENGTH]) * 100 * 1000000L;
+        static_cast<uint64_t>(link_speed[cur_index / WIDTH_DATA_LENGTH]) * 100UL * 1000000UL;
     b->lanes[cur_index] = link_width[cur_index % WIDTH_DATA_LENGTH];
   }
   /*
@@ -5675,6 +5676,8 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   }
 
   bool node_is_find = false;
+  // Keep the matched link alive; io_link_map_tmp.clear() invalidates the iterator.
+  std::shared_ptr<amd::smi::IOLink> found_link;
   std::map<uint32_t, std::shared_ptr<amd::smi::IOLink>> io_link_map_tmp;
   std::map<uint32_t, std::shared_ptr<amd::smi::IOLink>>::iterator it;
   // Iterate over P2P links
@@ -5682,6 +5685,7 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
     for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
       if (it->first == node_ind_dst) {
         node_is_find = true;
+        found_link = it->second;
         break;
       }
     }
@@ -5696,6 +5700,7 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
       for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
         if (it->first == node_ind_dst) {
           node_is_find = true;
+          found_link = it->second;
           break;
         }
       }
@@ -5706,7 +5711,7 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   }
 
   if (node_is_find) {
-    amd::smi::IO_LINK_TYPE io_link_type = it->second->type();
+    amd::smi::IO_LINK_TYPE io_link_type = found_link->type();
     if (io_link_type == amd::smi::IOLINK_TYPE_PCIEXPRESS) {
       *type = RSMI_IOLINK_TYPE_PCIEXPRESS;
     } else if (io_link_type == amd::smi::IOLINK_TYPE_XGMI) {
@@ -5727,7 +5732,7 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
      *          some time to implement and test it, should we consider it is *really necessary*.
      *
      */
-    auto tmp_capability = it->second->get_link_capability();
+    auto tmp_capability = found_link->get_link_capability();
     if (auto link_direction_result =
             amd::smi::DiscoverIOLinkPerNodeDirection(node_ind_src, node_ind_dst);
         link_direction_result == amd::smi::IOLinkDirectionType_t::kBiDirectional) {

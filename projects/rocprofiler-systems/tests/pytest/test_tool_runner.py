@@ -248,6 +248,84 @@ class TestOutputFormatSelection(RocprofsysTest):
         )
         assert result.rocpd_files, "expected at least one rocpd database file"
 
+    @pytest.mark.gpu
+    @pytest.mark.rocm_min_version("7.0")
+    @pytest.mark.parametrize("target", TARGETS)
+    def test_default_produces_rocpd_only(self, target, cpu_workload):
+        """No --output-format flag: library default is rocpd on, Perfetto off.
+
+        Uses no_base_env=True so the framework's ROCPROFSYS_TRACE=ON base env
+        does not interfere with the library default.  ROCPROFSYS_TIME_OUTPUT=OFF
+        and ROCPROFSYS_FILE_OUTPUT=ON are set explicitly because the base env
+        normally provides them and the output helpers (rocpd_files, get_output_file)
+        expect flat output directly in output_dir, not a timestamped subdirectory.
+        """
+        result = self.run_test(
+            "baseline",
+            target=target,
+            no_base_env=True,
+            env={
+                **SAMPLING_NO_DELAY,
+                "ROCPROFSYS_USE_AMD_SMI": "OFF",
+                "ROCPROFSYS_TIME_OUTPUT": "OFF",
+                "ROCPROFSYS_FILE_OUTPUT": "ON",
+            },
+            run_args=parallel_overhead_args(cpu_workload),
+            fail_on_not_found=True,
+        )
+
+        # ROCPROFSYS_USE_ROCPD/TRACE/PROFILE are library defaults here (not
+        # explicit env vars), so they do not appear in the env dump.  Verify
+        # the resolved values from the metadata JSON instead.
+        settings = _resolved_settings(result)
+        assert (
+            settings["ROCPROFSYS_USE_ROCPD"] is True
+        ), "expected ROCPROFSYS_USE_ROCPD to default to true"
+        assert (
+            settings["ROCPROFSYS_TRACE"] is False
+        ), "expected ROCPROFSYS_TRACE to default to false"
+        assert (
+            settings["ROCPROFSYS_PROFILE"] is False
+        ), "expected ROCPROFSYS_PROFILE to default to false"
+        assert result.rocpd_files, "default run should produce a rocpd database"
+        assert result.perfetto_file is None, (
+            f"default run should not produce a perfetto trace, found "
+            f"{result.perfetto_file}"
+        )
+
+    @pytest.mark.parametrize("target", TARGETS)
+    def test_proto_only_disables_rocpd(self, target, cpu_workload):
+        """--output-format proto enables Perfetto and disables the rocpd default."""
+        result = self.run_test(
+            "baseline",
+            target=target,
+            env=SAMPLING_NO_DELAY,
+            run_args=[
+                "--output-format",
+                "proto",
+                *parallel_overhead_args(cpu_workload),
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"ROCPROFSYS_TRACE=true",
+                r"ROCPROFSYS_USE_ROCPD=false",
+                r"ROCPROFSYS_PROFILE=false",
+            ],
+        )
+
+        settings = _resolved_settings(result)
+        assert settings["ROCPROFSYS_TRACE"] is True
+        assert settings["ROCPROFSYS_USE_ROCPD"] is False
+        assert settings["ROCPROFSYS_PROFILE"] is False
+        assert result.perfetto_file is not None, "expected a perfetto trace file"
+        assert not result.rocpd_files, (
+            f"proto-only should not produce a rocpd database, found "
+            f"{result.rocpd_files}"
+        )
+
     @pytest.mark.parametrize(
         "old_style_args",
         [

@@ -39,6 +39,85 @@ while its installed dependencies come from the environment.
 rocm-systems/shared/machine-readable-isa/isa/
 ```
 
+## ISA additions
+
+Repository-owned ISA additions can be supplied without modifying the public MR
+ISA XML. Each ISA additions document has this shape:
+
+```xml
+<IsaAdditions Id="example-additions"
+              BaseArchitecture="AMD CDNA 5"
+              BaseSchemaVersion="1.2.0">
+  <EncodingIdentifierAdditions>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_EXAMPLE</EncodingName>
+      <Opcode>7</Opcode>
+      <EncodingIdentifier Radix="2">...complete identifier...</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+  </EncodingIdentifierAdditions>
+  <InstructionAdditions>
+    <Instruction>
+      <!-- One complete MR ISA <Instruction> node. -->
+    </Instruction>
+  </InstructionAdditions>
+</IsaAdditions>
+```
+
+Apply one or more additions documents with a logical ISA name. Repeated
+documents for one ISA are processed in command-line and document order:
+
+```bash
+python -m amdisa \
+  cdna5:/path/to/amdgpu_isa_cdna5.xml \
+  --isa-additions cdna5:/path/to/first-additions.xml \
+  --isa-additions cdna5:/path/to/second-additions.xml \
+  --isa-output /path/to/isa-output \
+  --dbt-output /path/to/dbt-output
+```
+
+The `EncodingIdentifierAdditions` element is optional. `InstructionAdditions`
+is required and may be empty. The additions contract is intentionally narrower
+than a general XML patch:
+
+- Only complete `<Instruction>` nodes and complete identifiers for an existing
+  encoding's `<EncodingIdentifiers>` list are accepted. An additions document
+  cannot replace or delete base definitions, identifier masks, microcode
+  formats, encoding conditions, operand types, or data formats.
+- Added instructions must reference encodings, encoding conditions, operand
+  types, and operand fields already defined by the applicable base encoding
+  layout. Implied-literal operands outside that layout are accepted only when
+  their normalized field, type, direction, and parser-role flags match an
+  implied-literal contract established by the base XML.
+- An identifier addition names its encoding and expected opcode. Its radix and
+  width must match the base encoding; its fixed bits must match an existing
+  identifier layout; and its decoded opcode must equal the declared opcode.
+  Duplicate and colliding decode slots are rejected. Each identifier must be
+  owned by an added instruction. An implied-literal identifier must have the
+  same instruction owner and opcode in its parent encoding.
+- Additions document IDs and instruction names must be valid and unique.
+  Encoding/opcode ownership collisions between different instructions,
+  repeated instruction forms, multiple active forms that generate the same C++
+  instruction symbol, out-of-range opcodes, missing references, unknown root
+  data, and base architecture/schema mismatches are errors. Repetition of one
+  instruction's slot under distinct base-established MR-ISA encoding conditions
+  is allowed only when profile filtering leaves at most one generated form
+  active. Every added instruction must retain at least one active form.
+- Every input document and contained addition validates before the parser-owned
+  tree is changed. Validated identifiers are merged before normal
+  encoding/decode-table parsing, then instructions are appended in deterministic
+  file/document order. A bad later file cannot leave a partially merged
+  specification, and an active added instruction whose final opcode pointer
+  would remain unpopulated is an error.
+- An empty additions document leaves generated output byte-identical to the base
+  XML.
+
+The parsed `IsaSpec.applied_additions` and each added
+`Instruction.source_addition` retain the source document's provenance for later
+generator stages.
+Provenance does not by itself define target availability: a separate variant
+model must also be able to restrict encoding forms already present in the base
+XML.
+
 ## Generated file locations
 
 | Generated files | Location | Generator |
@@ -69,7 +148,7 @@ decode/encode functions and neutral field structs are auto-generated.
 ## CLI reference
 
 ```
-python -m amdisa [--gen-isas] [--gen-dbt]
+python -m amdisa [--isa-additions NAME:XML] [--gen-isas] [--gen-dbt]
                  [--isa-output DIR] [--include-root DIR]
                  [--dbt-output DIR] [NAME:]XML ...
 ```
@@ -77,6 +156,7 @@ python -m amdisa [--gen-isas] [--gen-dbt]
 | Option | Description |
 |---|---|
 | `[NAME:]XML ...` | One or more ISA XMLs. A recognized name selects its semantic profile. An unrecognized explicit name is treated as a custom generated identity, with its semantic profile detected from the XML |
+| `--isa-additions NAME:XML` | Apply a validated ISA additions file to the named ISA; may be repeated |
 | `--gen-isas` | Generate ISA C++ files (decoders, encodings, execute bodies) |
 | `--gen-dbt` | Generate DBT legalization tables and encoding translators |
 | `--isa-output DIR` | Output path for generated ISA C++ files |
