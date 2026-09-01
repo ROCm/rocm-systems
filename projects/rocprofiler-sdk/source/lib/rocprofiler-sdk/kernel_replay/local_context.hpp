@@ -42,8 +42,9 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/hash.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
-#include <cstdint>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
@@ -54,15 +55,15 @@ namespace kernel_replay
 {
 struct local_context_control_t
 {
-    // context handle -> forced active (true) / inactive (false). An absent entry means "defer to
-    // global context state". Owned by scoped_local_context_control for one replay loop and pointed
-    // to by the thread-local routing while the loop runs.
-    std::unordered_map<uint64_t, bool> overrides{};
+    // context -> forced active (true) / inactive (false). An absent entry means "defer to global
+    // context state". Owned by scoped_local_context_control for one replay loop and pointed to by
+    // the thread-local routing while the loop runs.
+    std::unordered_map<rocprofiler_context_id_t, bool> overrides{};
 
-    // Handles of the contexts globally active when the replay loop began. A local start/stop is
-    // honored only for these; toggling any other context is rejected, so a local start cannot
-    // promote a globally-stopped context.
-    std::unordered_set<uint64_t> pre_active{};
+    // The contexts globally active when the replay loop began. A local start/stop is honored only
+    // for these; toggling any other context is rejected, so a local start cannot promote a
+    // globally-stopped context.
+    std::unordered_set<rocprofiler_context_id_t> pre_active{};
 };
 
 // RAII: owns this replay loop's override map and installs it as the thread's active routing for the
@@ -74,8 +75,8 @@ class scoped_local_context_control
 {
 public:
     // active_contexts = the contexts globally active when the replay loop begins (typically
-    // context::get_active_contexts()). Their handles become the pre-active mask: a local start/stop
-    // is only honored for one of these (see local_context_control_t::pre_active).
+    // context::get_active_contexts()). These become the pre-active mask: a local start/stop is only
+    // honored for one of these (see local_context_control_t::pre_active).
     explicit scoped_local_context_control(const context::context_array_t& active_contexts);
     ~scoped_local_context_control();
 
