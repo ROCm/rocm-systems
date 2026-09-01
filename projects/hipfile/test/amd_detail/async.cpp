@@ -657,6 +657,26 @@ TEST_F(AsyncIoOpCleanup, cleanupInvalidOpSetsError)
     ASSERT_EQ(*op->bytes_transferred, -hipFileInternalError);
 }
 
+TEST_F(AsyncIoOpCleanup, cleanupSkipsResultWriteWhenWriteResultFalse)
+{
+    op->bytes_transferred_internal = 1000;
+    op->write_result               = false;
+    *op->bytes_transferred         = 555;
+    EXPECT_CALL(masync_monitor, completeOp);
+    async_io_cleanup(op.get());
+    ASSERT_EQ(*op->bytes_transferred, 555);
+}
+
+TEST_F(AsyncIoOpCleanup, cleanupSkipsErrorWriteWhenWriteResultFalse)
+{
+    op->bytes_transferred_internal = 1000;
+    op->write_result               = false;
+    *op->bytes_transferred         = 555;
+    EXPECT_CALL(masync_monitor, completeOp).WillOnce(Throw(std::invalid_argument("error")));
+    async_io_cleanup(op.get());
+    ASSERT_EQ(*op->bytes_transferred, 555);
+}
+
 struct AsyncIoOpLimitedSize : public AsyncIoOp {
     void SetUp() override
     {
