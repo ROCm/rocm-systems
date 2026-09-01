@@ -205,11 +205,14 @@ rocDecStatus D3D12Interop::CreateSharedResources(rocDecVideoSurfaceFormat format
         }
     }
 
-    // Release any previously created shared resources (reconfigure path).
+    // Release any previously created shared resources (reconfigure path), then reset every
+    // slot to nullptr. Use assign (not resize) so pre-existing slots are cleared too --
+    // otherwise the just-released pointers would dangle and the slot-0 probe below, or the
+    // destructor, would act on freed resources.
     for (auto* res : d3d12_shared_resources_) {
         if (res) res->Release();
     }
-    d3d12_shared_resources_.resize(num_surfaces, nullptr);
+    d3d12_shared_resources_.assign(num_surfaces, nullptr);
 
     D3D12_RESOURCE_DESC res_desc = {};
     res_desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -306,8 +309,9 @@ rocDecStatus D3D12Interop::CreateStagingInfrastructure(uint32_t num_surfaces) {
         SurfaceLayout layout = GetSurfaceLayout();
         UINT64 staging_size = layout.total_size;
 
+        // assign (not resize) so pre-existing slots are cleared too -- see note above.
         for (auto* buf : d3d12_staging_buffers_) { if (buf) buf->Release(); }
-        d3d12_staging_buffers_.resize(num_surfaces, nullptr);
+        d3d12_staging_buffers_.assign(num_surfaces, nullptr);
 
         D3D12_RESOURCE_DESC buf_desc = {};
         buf_desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
