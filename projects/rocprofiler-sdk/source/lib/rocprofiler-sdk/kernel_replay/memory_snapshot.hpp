@@ -54,9 +54,10 @@ struct mem_block_t
 struct device_snapshot_t
 {
     std::vector<mem_block_t> blocks;
-    // false => capture was incomplete (host memory pressure, or a failed device->host copy). The
-    // snapshot must not be used to restore -- a partial restore corrupts application data -- so the
-    // caller should decline replay and run the dispatch once instead.
+    // false => capture was incomplete: host memory pressure, a failed device->host copy, or HSA
+    // would not enumerate the module-scope variables of every loaded executable. The snapshot must
+    // not be used to restore -- a partial restore corrupts application data -- so the caller should
+    // decline replay and run the dispatch once instead.
     bool ok = true;
 
     bool empty() const { return blocks.empty(); }
@@ -64,9 +65,11 @@ struct device_snapshot_t
 
 // Copy (device->host) every tracked allocation owned by `agent`, plus every module-scope variable
 // (__device__ / __constant__ global) visible to `agent` in the loaded executables. On success the
-// returned snapshot has ok==true; if any region cannot be captured (host memory pressure -- the
-// host buffer allocation fails -- or a failed copy) it returns early with ok==false so the caller
-// can decline replay rather than restore a partial snapshot.
+// returned snapshot has ok==true. It returns early with ok==false, so the caller can decline replay
+// rather than restore a partial snapshot, when a region cannot be captured (host memory pressure --
+// the host buffer allocation fails -- or a failed copy) or when the module-scope variables of a
+// loaded executable cannot be enumerated. Host memory pressure is never fatal: a dispatch that
+// cannot be snapshotted runs once instead of aborting the application.
 device_snapshot_t
 snap(hsa_agent_t agent);
 

@@ -1004,18 +1004,18 @@ WriteInterceptor(const void* packets,
 
             // Save this agent's tracked device allocations so every pass runs against identical
             // inputs. snap() returns ok=false if it could not capture the complete set (host memory
-            // pressure or a failed copy)
+            // pressure, a failed copy, or module-scope variables it could not enumerate). It logs
+            // which of those it hit.
             const auto snapshot = kernel_replay::memory_snapshot::snap(replay_agent);
 
-            // Snapshot incomplete (memory pressure or a failed capture copy): restoring a partial
-            // snapshot between passes would corrupt application data, so decline replay. Close the
-            // CONFIG sequence, free our drain signal, and run this dispatch once still under the
-            // writer lock with its original completion signal, then return.
+            // Snapshot incomplete: restoring a partial snapshot between passes would corrupt
+            // application data, so decline replay. Close the CONFIG sequence, free our drain
+            // signal, and run this dispatch once still under the writer lock with its original
+            // completion signal, then return.
             if(!snapshot.ok)
             {
-                ROCP_WARNING << fmt::format(
-                    "kernel replay: snapshot capture failed (memory pressure or copy error); "
-                    "running this dispatch once without replay");
+                ROCP_WARNING << "kernel replay: snapshot capture incomplete; running this "
+                                "dispatch once without replay";
                 kernel_replay::execute_config_phase_exit(
                     replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
                 if(drain_signal != null_hsa_signal)
