@@ -505,6 +505,11 @@ if(NOT _moi_sampled_atomic_indexed_address_count EQUAL 6)
     )
 endif()
 file(READ "${_consan_dir}/consan_moi_sampled_sync.inc" _moi_sampled_sync_owner)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sampled_sync.inc"
+    "MoiOptions|static_cast<const ConSan(Request|MoiOperatingPoint|BoundRuntimeResources)"
+    "Sampled synchronization must separate immutable input from operating-point state"
+)
 string(
     REGEX MATCHALL
     "consan_detail::append_moi_indexed_address"

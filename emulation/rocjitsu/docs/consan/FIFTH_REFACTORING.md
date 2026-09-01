@@ -3318,3 +3318,64 @@ for completion. The remaining broad attempt and operating-point surfaces,
 other mode-local duplication, architecture peepholes, placement and validation
 concentrations, and the independent deep-read completion audit remain open.
 The goal therefore remains active.
+
+### 16.34 Convergence checkpoint 33: typed Sampled synchronization attempt boundary
+
+Checkpoint 32's dispatcher consolidation exposed the larger dependency around
+it. The Sampled synchronization component accepted inherited `MoiOptions`,
+copied that complete immutable-input-plus-operating-point aggregate for every
+owner, probe, dense group, and ordinary route, and even assigned the immutable
+debug `scratch_vgpr` field to communicate a scratch base that every downstream
+operation already received explicitly. Inheritance made those copies appear
+convenient, but obscured whether each use read caller input or changed resolved
+placement state.
+
+The Sampled barrier and atomic synchronization boundary now receives immutable
+`ConSanOptions` and `ConSanMoiOperatingPoint` separately. Owner-local binding
+copies only the operating point. Immutable request, runtime-resource, policy,
+and delay inputs continue to come from the options aggregate; resolved scalar,
+persistent, private, dispatch, and router state comes from the point. Scratch
+bases remain explicit probe-resource values. The component contains no
+`MoiOptions`, no base-class casts, and no mutation of immutable configuration.
+Its mode entry remains responsible for decomposing the current attempt into
+those two existing products, so no replacement view or compatibility overload
+was introduced.
+
+The boundary gate rejects `MoiOptions` and inherited input/point casts in the
+Sampled synchronization owner. Together with checkpoint 32's one-dispatcher
+rule, this makes the physical mode package express both the semantic split and
+its shared internal mechanism. The increased explicit operating-point count is
+intentional evidence of the dependency that inheritance previously hid; later
+work may narrow that product further, but must not restore the broad attempt
+bus to conceal it.
+
+| Signal | Checkpoint 33 | Cumulative change | Slice change from checkpoint 32 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,479 | +504 | **-13** |
+| Nonblank production lines | 99,195 | +112 | **-13** |
+| Production implementation lines | 91,478 | **+28** | **-13** |
+| `MoiOptions` references / files | 79 / 27 | **-8 / +2** | **-14 / -1** |
+| `ConSanTransformArtifacts` references / files | 207 / 56 | **-69 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 205 / 28 | +5 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 303 / 54 | +13 / +3 | **+10 / +1** |
+| `MoiOptions` references in Sampled synchronization | 0 | n/a | **-12** |
+| Immutable scratch-field assignments in Sampled synchronization | 0 | n/a | deleted |
+| Test inventory | 5,379 | +34 | 0 |
+
+Validation includes a full final-tree `-j16` rebuild; all 23 focused dense
+Sampled and architecture-boundary tests; all 4,744 nonphysical tests at `-j16`
+in 200.64 seconds, including the unchanged 2,908 simulator rows over five
+targets; and all 635 physical gfx1201 tests serialized at `-j1` in 108.33
+seconds. No test was removed, renamed, disabled, added, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.5, 14.7, 14.8, and 14.9:
+one complete mode component now exposes immutable input and mutable resolved
+state as distinct existing products, the broad inherited bus and scratch-field
+side channel are gone from it, and the conversion deletes rather than wraps
+legacy adaptation. Production implementation is still 28 lines above
+baseline, and explicit use of the still-wide operating point is not the final
+narrow component contract. Other Sampled regions, the remaining mode owners,
+common barriers and prologues, architecture peepholes, placement and validation
+concentrations, and the independent completion audit remain open. The goal
+therefore remains active.

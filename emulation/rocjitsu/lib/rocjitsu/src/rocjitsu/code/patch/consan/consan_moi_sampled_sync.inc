@@ -707,7 +707,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   return words;
 }
 
-void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
+void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
+                                          const ConSanOptions &options,
+                                          const ConSanMoiOperatingPoint &operating_point,
                                           rj_code_arch_t arch,
                                           MoiResourcePlanningState &resource_state,
                                           std::span<const ConSanMoiCandidate> admitted,
@@ -812,15 +814,15 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       first_owner = false;
       const auto workgroup_sources = moi_descriptor_workgroup_sources(
           bytes, owner.descriptor_file_offset, arch, result.errors, uses_cluster_workgroup_id);
-      MoiOptions owner_options = options;
+      ConSanMoiOperatingPoint owner_point = operating_point;
       const std::array<uint64_t, 1> owner_descriptor = {owner.descriptor_file_offset};
-      if (!apply_moi_persistent_vgpr_assignment(owner_options, result.moi_operating_point,
+      if (!apply_moi_persistent_vgpr_assignment(owner_point, result.moi_operating_point,
                                                 owner_descriptor)) {
         owner_lowering_failure = "missing owner-local persistent assignment";
         break;
       }
       const auto owner_shift =
-          owner_options.automatic_moi_private_epoch
+          owner_point.automatic_moi_private_epoch
               ? moi_descriptor_owner_shift(bytes, owner.descriptor_file_offset, arch, result.errors)
               : std::optional<uint16_t>(0u);
       if (!workgroup_sources || !owner_shift ||
@@ -960,55 +962,50 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       resource_plan_index = existing->second;
       plan = result.resource_plans[resource_plan_index];
     } else {
-      plan = plan_moi_resource_site(resource_state, options, options, options,
+      plan = plan_moi_resource_site(resource_state, options, options, operating_point,
                                     ConSanResourceSiteKind::Barrier, index, site.text_offset,
                                     candidate.barrier.kernel_descriptor_file_offset,
-                                    options.automatic_moi_private_epoch ? 9u : 7u);
+                                    operating_point.automatic_moi_private_epoch ? 9u : 7u);
       plan.intent_ids = {candidate.barrier.evidence_intent};
       result.resource_plans.push_back(plan);
       resource_plan_index = result.resource_plans.size() - 1u;
       barrier_plan_by_offset.emplace(site.text_offset, resource_plan_index);
     }
-    MoiOptions candidate_options = options;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
-                                             result.moi_operating_point,
+    ConSanMoiOperatingPoint candidate_point = operating_point;
+    if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
                                              plan.owner_descriptor_file_offsets) ||
-        !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
+        !apply_moi_persistent_vgpr_assignment(candidate_point, result.moi_operating_point,
                                               plan.owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI sampled barrier lost its owner-local persistent or transient assignment");
       continue;
     }
-    const uint16_t scratch_count = candidate_options.automatic_moi_private_epoch ||
-                                           candidate_options.moi_persistent_sgprs.complete()
+    const uint16_t scratch_count = candidate_point.automatic_moi_private_epoch ||
+                                           candidate_point.moi_persistent_sgprs.complete()
                                        ? 9u
                                        : 7u;
     if (plan.scratch_vgpr_count != scratch_count) {
-      plan = plan_moi_resource_site(resource_state, candidate_options, candidate_options,
-                                    candidate_options, ConSanResourceSiteKind::Barrier, index,
-                                    site.text_offset,
+      plan = plan_moi_resource_site(resource_state, options, options, candidate_point,
+                                    ConSanResourceSiteKind::Barrier, index, site.text_offset,
                                     candidate.barrier.kernel_descriptor_file_offset, scratch_count);
       plan.intent_ids = {candidate.barrier.evidence_intent};
       result.resource_plans[resource_plan_index] = plan;
     }
-    const auto resources = resolve_moi_scratch_plan(plan, candidate_options,
-                                                    result.moi_operating_point, scratch_count);
+    const auto resources =
+        resolve_moi_scratch_plan(plan, candidate_point, result.moi_operating_point, scratch_count);
     if (!resources)
       continue;
-    candidate_options.scratch_vgpr = resources->base;
     std::optional<MoiPrivateEpochLayout> private_layout;
-    if (candidate_options.automatic_moi_private_epoch) {
+    if (candidate_point.automatic_moi_private_epoch) {
       private_layout = build_sampled_private_epoch_layout(result.program_inventory, *resources,
-                                                          candidate_options, arch, result.warnings);
+                                                          options, arch, result.warnings);
       if (!private_layout)
         continue;
     }
-    auto probe = plan_moi_probe_resources(
-        result.program_inventory, *resources, static_cast<const ConSanRequest &>(candidate_options),
-        static_cast<const BoundRuntimeResources &>(candidate_options),
-        static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
-        std::move(private_layout), candidate_options.has_compact_moi_scalar_spill(),
-        result.warnings);
+    auto probe =
+        plan_moi_probe_resources(result.program_inventory, *resources, options, options,
+                                 candidate_point, spill_managers, arch, std::move(private_layout),
+                                 candidate_point.has_compact_moi_scalar_spill(), result.warnings);
     if (!probe)
       continue;
     note_moi_probe_private_requirements(private_requirements, *probe);
@@ -1041,36 +1038,34 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
     const uint64_t island_offset =
         original_text_size + barrier_index * kIndirectIslandWords * sizeof(uint32_t);
     const uint64_t cave_offset = new_text.size();
-    MoiOptions candidate_options = options;
-    candidate_options.scratch_vgpr = planned.resources.base;
+    ConSanMoiOperatingPoint candidate_point = operating_point;
     if (planned.private_layout) {
-      candidate_options.moi_record_replay_workgroup_private_offsets =
+      candidate_point.moi_record_replay_workgroup_private_offsets =
           planned.private_layout->record_replay_workgroup_offsets;
     }
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
-                                             result.moi_operating_point,
+    if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI sampled barrier sync lost its transient scalar assignment");
       return false;
     }
     ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs;
-    if (planned.private_layout || candidate_options.moi_persistent_sgprs.complete()) {
+    if (planned.private_layout || candidate_point.moi_persistent_sgprs.complete()) {
       owner_epoch_vgprs = {
           .owner = static_cast<uint16_t>(planned.resources.base + 7u),
           .epoch = static_cast<uint16_t>(planned.resources.base + 8u),
       };
     } else if (!apply_moi_persistent_vgpr_assignment(
-                   candidate_options, result.moi_operating_point,
+                   candidate_point, result.moi_operating_point,
                    planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI sampled barrier sync lost its persistent VGPR assignment");
       return false;
     } else
-      owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_options.moi_owner_epoch_vgprs);
+      owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_point.moi_owner_epoch_vgprs);
     auto cave_words = build_sampled_barrier_sync_cave_words(
-        bytes, planned.candidate, candidate_options, candidate_options, candidate_options,
-        owner_epoch_vgprs, planned.resources.base, planned.spill ? &*planned.spill : nullptr,
+        bytes, planned.candidate, options, options, candidate_point, owner_epoch_vgprs,
+        planned.resources.base, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, layout, cave_offset,
         site.text_offset + site.size, planned.private_layout ? &*planned.private_layout : nullptr,
         std::nullopt, result.errors);
@@ -1082,16 +1077,15 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
           (owner_epoch_vgprs.epoch ? std::to_string(*owner_epoch_vgprs.epoch)
                                    : std::string("<unassigned>")) +
           " EXEC-save s" +
-          (candidate_options.moi_exec_save_sgpr
-               ? std::to_string(*candidate_options.moi_exec_save_sgpr)
-               : std::string("<unassigned>")) +
+          (candidate_point.moi_exec_save_sgpr ? std::to_string(*candidate_point.moi_exec_save_sgpr)
+                                              : std::string("<unassigned>")) +
           " across " + std::to_string(planned.candidate.windows.size()) + " owner window(s)");
       return false;
     }
     auto fwd = compute_sopp_branch_simm16(site.text_offset, cave_offset);
     if (!fwd) {
       const auto reserved_fwd = compute_sopp_branch_simm16(site.text_offset, island_offset);
-      const auto indirect_state = moi_indirect_jump_sgprs(candidate_options, candidate_options);
+      const auto indirect_state = moi_indirect_jump_sgprs(options, candidate_point);
       std::vector<uint32_t> island_words;
       const bool reserved_island_valid =
           reserved_fwd && indirect_state &&
@@ -1117,9 +1111,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
                            : std::nullopt;
         if (local_island && fwd) {
           if (!emit_moi_local_indirect_entry_island(
-                  new_text, *local_island, cave_offset, site.text_offset,
-                  static_cast<const ConSanRequest &>(candidate_options),
-                  static_cast<const ConSanMoiOperatingPoint &>(candidate_options),
+                  new_text, *local_island, cave_offset, site.text_offset, options, candidate_point,
                   planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
                   "ConSan MOI sampled barrier sync patch")) {
             return false;
@@ -1254,34 +1246,34 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       }
       std::ranges::sort(group_owners);
       group_owners.erase(std::ranges::unique(group_owners).begin(), group_owners.end());
-      MoiOptions group_options = options;
-      if (!apply_moi_transient_sgpr_assignment(group_options, group_options,
-                                               result.moi_operating_point, group_owners)) {
+      ConSanMoiOperatingPoint group_point = operating_point;
+      if (!apply_moi_transient_sgpr_assignment(options, group_point, result.moi_operating_point,
+                                               group_owners)) {
         result.warnings.emplace_back("ConSan MOI sampled barrier sync skipped dense relay in " +
                                      std::string(container_name) +
                                      ": owners do not share one transient scalar assignment");
         continue;
       }
-      const auto special_state = moi_special_state_sgprs(group_options, group_options);
-      const auto indirect_state = moi_indirect_jump_sgprs(group_options, group_options);
-      const bool spill_backed_router = group_options.has_compact_moi_scalar_spill();
-      if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
-          !indirect_state || (spill_backed_router && !group_options.moi_router_call)) {
+      const auto special_state = moi_special_state_sgprs(options, group_point);
+      const auto indirect_state = moi_indirect_jump_sgprs(options, group_point);
+      const bool spill_backed_router = group_point.has_compact_moi_scalar_spill();
+      if ((!spill_backed_router && (!group_point.moi_exec_save_sgpr || !special_state)) ||
+          !indirect_state || (spill_backed_router && !group_point.moi_router_call)) {
         result.warnings.emplace_back("ConSan MOI sampled barrier sync skipped dense relay in " +
                                      std::string(container_name) +
                                      ": incomplete scalar router state");
         continue;
       }
       const uint16_t jump_pc_sgpr =
-          spill_backed_router ? indirect_state->pc_sgpr : *group_options.moi_exec_save_sgpr;
+          spill_backed_router ? indirect_state->pc_sgpr : *group_point.moi_exec_save_sgpr;
       const uint16_t saved_scc_sgpr =
           spill_backed_router ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
       const uint16_t key_sgpr = spill_backed_router
-                                    ? group_options.moi_router_call->dispatch_key_sgpr
-                                    : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 5u);
+                                    ? group_point.moi_router_call->dispatch_key_sgpr
+                                    : static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 5u);
       const uint16_t call_return_sgpr =
-          spill_backed_router ? group_options.moi_router_call->call_return_sgpr
-                              : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
+          spill_backed_router ? group_point.moi_router_call->call_return_sgpr
+                              : static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 6u);
       // The S_CALL_I64 route uses an explicit key in a clone-local entry stub.
       // S_CALL_B64 routes retain the call-return-derived entry key when their
       // scalar assignment is spill backed.
@@ -1304,7 +1296,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       const uint64_t host_words_count = island_words_count + 1u;
       const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
       const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
-          group_options, group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
+          options, group_point, MoiRelocatableHostScalarState::BarrierRouter, arch);
       std::vector<uint64_t> anchors;
       anchors.reserve(indices.size());
       for (size_t index : indices)
@@ -1352,13 +1344,12 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
       for (size_t index : indices) {
         const Planned &planned = selected[index];
         const ConSanBarrierSite &site = planned.candidate.barrier.site;
-        MoiOptions candidate_options = options;
-        candidate_options.scratch_vgpr = planned.resources.base;
+        ConSanMoiOperatingPoint candidate_point = operating_point;
         if (planned.private_layout) {
-          candidate_options.moi_record_replay_workgroup_private_offsets =
+          candidate_point.moi_record_replay_workgroup_private_offsets =
               planned.private_layout->record_replay_workgroup_offsets;
         }
-        if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
+        if (!apply_moi_transient_sgpr_assignment(options, candidate_point,
                                                  result.moi_operating_point,
                                                  planned.resources.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
@@ -1366,26 +1357,26 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
           return;
         }
         ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs;
-        if (planned.private_layout || candidate_options.moi_persistent_sgprs.complete()) {
+        if (planned.private_layout || candidate_point.moi_persistent_sgprs.complete()) {
           owner_epoch_vgprs = {
               .owner = static_cast<uint16_t>(planned.resources.base + 7u),
               .epoch = static_cast<uint16_t>(planned.resources.base + 8u),
           };
         } else if (!apply_moi_persistent_vgpr_assignment(
-                       candidate_options, result.moi_operating_point,
+                       candidate_point, result.moi_operating_point,
                        planned.resources.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
               "ConSan MOI sampled dense barrier lost its persistent VGPR assignment");
           return;
         } else
-          owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_options.moi_owner_epoch_vgprs);
+          owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_point.moi_owner_epoch_vgprs);
         const uint64_t body_offset = new_text.size();
         const auto vgpr_msb_mode = consan_selectable_vgpr_bank_mode_at(
             arch, active_bytes, planned.candidate.barrier.text_file_offset,
             planned.candidate.barrier.container_entry_text_offset, site.file_offset);
         auto body_words = build_sampled_barrier_sync_cave_words(
-            bytes, planned.candidate, candidate_options, candidate_options, candidate_options,
-            owner_epoch_vgprs, planned.resources.base, planned.spill ? &*planned.spill : nullptr,
+            bytes, planned.candidate, options, options, candidate_point, owner_epoch_vgprs,
+            planned.resources.base, planned.spill ? &*planned.spill : nullptr,
             planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, layout, body_offset,
             site.text_offset + site.size,
             planned.private_layout ? &*planned.private_layout : nullptr, vgpr_msb_mode,
@@ -1531,7 +1522,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
                                std::move(lowering_commits), std::move(patches));
 }
 
-void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const MoiOptions &options,
+void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
+                                         const ConSanOptions &options,
+                                         const ConSanMoiOperatingPoint &operating_point,
                                          rj_code_arch_t arch,
                                          MoiResourcePlanningState &resource_state,
                                          ConSanTransformArtifacts &result) {
@@ -1981,7 +1974,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         result.resource_plans, ConSanResourceSiteKind::Atomic, site.text_offset);
     ConSanCandidateResourcePlan plan =
         existing ? *existing
-                 : plan_moi_resource_site(resource_state, options, options, options,
+                 : plan_moi_resource_site(resource_state, options, options, operating_point,
                                           ConSanResourceSiteKind::Atomic, index, site.text_offset,
                                           candidate.atomic.kernel_descriptor_file_offset,
                                           scratch_count, nullptr, &candidate.atomic.lowering_form);
@@ -1989,22 +1982,20 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     if (!existing)
       result.resource_plans.push_back(plan);
     const auto resources =
-        resolve_moi_scratch_plan(plan, options, result.moi_operating_point, scratch_count);
+        resolve_moi_scratch_plan(plan, operating_point, result.moi_operating_point, scratch_count);
     if (!resources) {
       result.warnings.emplace_back("ConSan MOI sampled atomic sync has no " +
                                    std::to_string(scratch_count) + "-VGPR resource plan in " +
                                    candidate.atomic.container_name);
       continue;
     }
-    MoiOptions candidate_options = options;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
-                                             result.moi_operating_point,
+    ConSanMoiOperatingPoint candidate_point = operating_point;
+    if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
                                              resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync lost its owner-local transient scalar assignment");
       continue;
     }
-    candidate_options.scratch_vgpr = resources->base;
     const bool allow_post_guest_spill_operand_overlap =
         resources->source == ConSanRegisterAllocationSource::SpillRequired &&
         sampled_atomic_guest_preserves_address(candidate.atomic.lowering_form);
@@ -2024,18 +2015,16 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         continue;
     }
     std::optional<MoiPrivateEpochLayout> private_layout;
-    if (options.automatic_moi_private_epoch) {
+    if (operating_point.automatic_moi_private_epoch) {
       private_layout = build_sampled_private_epoch_layout(result.program_inventory, *resources,
-                                                          candidate_options, arch, result.warnings);
+                                                          options, arch, result.warnings);
       if (!private_layout)
         continue;
     }
-    auto probe = plan_moi_probe_resources(
-        result.program_inventory, *resources, static_cast<const ConSanRequest &>(candidate_options),
-        static_cast<const BoundRuntimeResources &>(candidate_options),
-        static_cast<const ConSanMoiOperatingPoint &>(candidate_options), spill_managers, arch,
-        std::move(private_layout), candidate_options.has_compact_moi_scalar_spill(),
-        result.warnings);
+    auto probe =
+        plan_moi_probe_resources(result.program_inventory, *resources, options, options,
+                                 candidate_point, spill_managers, arch, std::move(private_layout),
+                                 candidate_point.has_compact_moi_scalar_spill(), result.warnings);
     if (!probe)
       continue;
     note_moi_probe_private_requirements(private_requirements, *probe);
@@ -2091,28 +2080,26 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
 
   const auto build_atomic_cave =
       [&](const Planned &planned, uint64_t cave_offset, uint32_t &guest_instruction_offset,
-          const MoiOptions *resolved_options = nullptr, bool preserve_guest_at_anchor = false,
-          std::span<const uint32_t> leading_guest_words = {})
+          const ConSanMoiOperatingPoint *resolved_point = nullptr,
+          bool preserve_guest_at_anchor = false, std::span<const uint32_t> leading_guest_words = {})
       -> std::optional<std::vector<uint32_t>> {
-    MoiOptions candidate_options = resolved_options ? *resolved_options : options;
-    candidate_options.scratch_vgpr = planned.resources.base;
+    ConSanMoiOperatingPoint candidate_point = resolved_point ? *resolved_point : operating_point;
     if (planned.private_layout) {
       // Sampled probes run after arbitrary guest code. Use the tuple captured
       // by the automatic private-state prologue instead of descriptor SGPRs
       // whose ABI lifetime ended at kernel entry.
-      candidate_options.moi_record_replay_workgroup_private_offsets =
+      candidate_point.moi_record_replay_workgroup_private_offsets =
           planned.private_layout->record_replay_workgroup_offsets;
     }
-    if (resolved_options == nullptr &&
-        !apply_moi_transient_sgpr_assignment(candidate_options, candidate_options,
-                                             result.moi_operating_point,
+    if (resolved_point == nullptr &&
+        !apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI sampled atomic sync lost its transient scalar assignment");
       return std::nullopt;
     }
     ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs;
-    if (planned.private_layout || candidate_options.moi_persistent_sgprs.complete()) {
+    if (planned.private_layout || candidate_point.moi_persistent_sgprs.complete()) {
       owner_epoch_vgprs = {
           .owner =
               static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kOwner),
@@ -2120,21 +2107,21 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
               static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kEpoch),
       };
     } else if (!apply_moi_persistent_vgpr_assignment(
-                   candidate_options, result.moi_operating_point,
+                   candidate_point, result.moi_operating_point,
                    planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI sampled atomic sync lost its persistent VGPR assignment");
       return std::nullopt;
     } else
-      owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_options.moi_owner_epoch_vgprs);
+      owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(candidate_point.moi_owner_epoch_vgprs);
     const uint64_t return_text_offset =
         preserve_guest_at_anchor ? planned.physical_anchor_offset
                                  : planned.physical_anchor_offset + planned.relocated_guest_size;
     return planned.candidate.deferred_acquire
                ? build_sampled_pending_acquire_cave_words(
-                     bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
-                     candidate_options, candidate_options, owner_epoch_vgprs,
-                     planned.resources.base, planned.spill ? &*planned.spill : nullptr,
+                     bytes, planned.candidate.atomic, planned.address_plan, options, options,
+                     candidate_point, owner_epoch_vgprs, planned.resources.base,
+                     planned.spill ? &*planned.spill : nullptr,
                      planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                      planned.private_layout ? &*planned.private_layout : nullptr, arch,
                      planned.candidate.selected_slot, planned.candidate.bank_count,
@@ -2142,9 +2129,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                      return_text_offset, result.errors, &guest_instruction_offset,
                      planned.trailing_guest_words)
                : build_sampled_atomic_sync_cave_words(
-                     bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
-                     candidate_options, candidate_options, owner_epoch_vgprs,
-                     planned.resources.base, planned.spill ? &*planned.spill : nullptr,
+                     bytes, planned.candidate.atomic, planned.address_plan, options, options,
+                     candidate_point, owner_epoch_vgprs, planned.resources.base,
+                     planned.spill ? &*planned.spill : nullptr,
                      planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                      planned.private_layout ? &*planned.private_layout : nullptr, arch,
                      planned.candidate.selected_slot, planned.candidate.bank_count, layout,
@@ -2261,19 +2248,19 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       }
       std::ranges::sort(group_owners);
       group_owners.erase(std::ranges::unique(group_owners).begin(), group_owners.end());
-      MoiOptions group_options = options;
-      if (!apply_moi_transient_sgpr_assignment(group_options, group_options,
-                                               result.moi_operating_point, group_owners)) {
+      ConSanMoiOperatingPoint group_point = operating_point;
+      if (!apply_moi_transient_sgpr_assignment(options, group_point, result.moi_operating_point,
+                                               group_owners)) {
         result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped dense relay in " +
                                      container +
                                      ": owners do not share one transient scalar assignment");
         continue;
       }
-      const bool spill_backed_router = group_options.has_compact_moi_scalar_spill();
-      auto special_state = moi_special_state_sgprs(group_options, group_options);
-      auto indirect_state = moi_indirect_jump_sgprs(group_options, group_options);
-      if ((!spill_backed_router && (!group_options.moi_exec_save_sgpr || !special_state)) ||
-          !indirect_state || (spill_backed_router && !group_options.moi_router_call)) {
+      const bool spill_backed_router = group_point.has_compact_moi_scalar_spill();
+      auto special_state = moi_special_state_sgprs(options, group_point);
+      auto indirect_state = moi_indirect_jump_sgprs(options, group_point);
+      if ((!spill_backed_router && (!group_point.moi_exec_save_sgpr || !special_state)) ||
+          !indirect_state || (spill_backed_router && !group_point.moi_router_call)) {
         result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped dense relay in " +
                                      container + ": incomplete scalar router state");
         continue;
@@ -2290,19 +2277,19 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         const auto overlaps_optional = [&](std::optional<uint16_t> reg, uint16_t reg_width = 1u) {
           return reg && range_overlaps(base, width, *reg, reg_width);
         };
-        bool overlaps = persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
-                        overlaps_optional(group_options.moi_owner_sgpr.base()) ||
-                        overlaps_optional(group_options.moi_persistent_sgprs.owner()) ||
-                        overlaps_optional(group_options.moi_persistent_sgprs.epoch()) ||
-                        overlaps_optional(group_options.moi_persistent_sgprs.workgroup_key) ||
-                        overlaps_optional(group_options.moi_dispatch_identity.sgpr(),
-                                          kMoiDispatchStateSgprCount);
+        bool overlaps =
+            persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
+            overlaps_optional(group_point.moi_owner_sgpr.base()) ||
+            overlaps_optional(group_point.moi_persistent_sgprs.owner()) ||
+            overlaps_optional(group_point.moi_persistent_sgprs.epoch()) ||
+            overlaps_optional(group_point.moi_persistent_sgprs.workgroup_key) ||
+            overlaps_optional(group_point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
         for (const std::optional<uint16_t> reg :
-             group_options.moi_persistent_sgprs.record_replay_workgroup.values()) {
+             group_point.moi_persistent_sgprs.record_replay_workgroup.values()) {
           overlaps |= overlaps_optional(reg);
         }
-        if (group_options.delay_mode == ConSanDelayMode::SleepVar)
-          overlaps |= range_overlaps(base, width, group_options.delay_var_ssrc, 1u);
+        if (options.delay_mode == ConSanDelayMode::SleepVar)
+          overlaps |= range_overlaps(base, width, options.delay_var_ssrc, 1u);
         return overlaps;
       };
       const auto dead_at_atomic_anchors = [&](uint16_t base, uint16_t width) {
@@ -2329,15 +2316,15 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       };
 
       uint16_t jump_pc_sgpr =
-          spill_backed_router ? indirect_state->pc_sgpr : *group_options.moi_exec_save_sgpr;
+          spill_backed_router ? indirect_state->pc_sgpr : *group_point.moi_exec_save_sgpr;
       uint16_t saved_scc_sgpr =
           spill_backed_router ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
       uint16_t key_sgpr = spill_backed_router
-                              ? group_options.moi_router_call->dispatch_key_sgpr
-                              : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 5u);
-      uint16_t call_return_sgpr =
-          spill_backed_router ? group_options.moi_router_call->call_return_sgpr
-                              : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
+                              ? group_point.moi_router_call->dispatch_key_sgpr
+                              : static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 5u);
+      uint16_t call_return_sgpr = spill_backed_router
+                                      ? group_point.moi_router_call->call_return_sgpr
+                                      : static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 6u);
       if (spill_backed_router &&
           !tuple_is_safe(jump_pc_sgpr, saved_scc_sgpr, key_sgpr, call_return_sgpr)) {
         bool found = false;
@@ -2362,12 +2349,11 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                 jump_pc_sgpr = call_return_sgpr = candidate_pair;
                 saved_scc_sgpr = candidate_scc;
                 key_sgpr = candidate_key;
-                group_options.moi_router_jump =
+                group_point.moi_router_jump =
                     ConSanMoiIndirectJumpSgprs{jump_pc_sgpr, saved_scc_sgpr};
-                group_options.moi_router_call =
-                    ConSanMoiRouterCallSgprs{key_sgpr, call_return_sgpr};
-                special_state = moi_special_state_sgprs(group_options, group_options);
-                indirect_state = moi_indirect_jump_sgprs(group_options, group_options);
+                group_point.moi_router_call = ConSanMoiRouterCallSgprs{key_sgpr, call_return_sgpr};
+                special_state = moi_special_state_sgprs(options, group_point);
+                indirect_state = moi_indirect_jump_sgprs(options, group_point);
                 found = special_state.has_value() && indirect_state.has_value();
                 break;
               }
@@ -2387,7 +2373,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       const uint64_t host_words_count = island_words_count + 1u;
       const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
       const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
-          group_options, group_options, MoiRelocatableHostScalarState::BarrierRouter, arch);
+          options, group_point, MoiRelocatableHostScalarState::BarrierRouter, arch);
       auto dense_host = find_moi_dense_relay_host_for_owners(
           resource_state, old_text,
           {
@@ -2426,8 +2412,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
       for (size_t index : indices) {
         uint32_t guest_instruction_offset = 0u;
         const uint64_t body_offset = new_text.size();
-        auto body_words = build_atomic_cave(selected[index], body_offset, guest_instruction_offset,
-                                            &group_options);
+        auto body_words =
+            build_atomic_cave(selected[index], body_offset, guest_instruction_offset, &group_point);
         if (!body_words)
           return;
         append_words_bytes(new_text, *body_words);
@@ -2585,33 +2571,32 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         }
       }
     }
-    MoiOptions route_options = options;
-    if (!apply_moi_transient_sgpr_assignment(route_options, route_options,
-                                             result.moi_operating_point,
+    ConSanMoiOperatingPoint route_point = operating_point;
+    if (!apply_moi_transient_sgpr_assignment(options, route_point, result.moi_operating_point,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync lost its ordinary-route scalar assignment");
       continue;
     }
-    if (route_options.has_compact_moi_scalar_spill()) {
+    if (route_point.has_compact_moi_scalar_spill()) {
       const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
       const auto route_overlaps_reserved_scalar_state = [&](uint16_t base, uint16_t width) {
         const auto overlaps_optional = [&](std::optional<uint16_t> reg, uint16_t reg_width = 1u) {
           return reg && range_overlaps(base, width, *reg, reg_width);
         };
-        bool overlaps = persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
-                        overlaps_optional(route_options.moi_owner_sgpr.base()) ||
-                        overlaps_optional(route_options.moi_persistent_sgprs.owner()) ||
-                        overlaps_optional(route_options.moi_persistent_sgprs.epoch()) ||
-                        overlaps_optional(route_options.moi_persistent_sgprs.workgroup_key) ||
-                        overlaps_optional(route_options.moi_dispatch_identity.sgpr(),
-                                          kMoiDispatchStateSgprCount);
+        bool overlaps =
+            persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
+            overlaps_optional(route_point.moi_owner_sgpr.base()) ||
+            overlaps_optional(route_point.moi_persistent_sgprs.owner()) ||
+            overlaps_optional(route_point.moi_persistent_sgprs.epoch()) ||
+            overlaps_optional(route_point.moi_persistent_sgprs.workgroup_key) ||
+            overlaps_optional(route_point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
         for (const std::optional<uint16_t> reg :
-             route_options.moi_persistent_sgprs.record_replay_workgroup.values()) {
+             route_point.moi_persistent_sgprs.record_replay_workgroup.values()) {
           overlaps |= overlaps_optional(reg);
         }
-        if (route_options.delay_mode == ConSanDelayMode::SleepVar)
-          overlaps |= range_overlaps(base, width, route_options.delay_var_ssrc, 1u);
+        if (options.delay_mode == ConSanDelayMode::SleepVar)
+          overlaps |= range_overlaps(base, width, options.delay_var_ssrc, 1u);
         return overlaps;
       };
       const auto route_dead_at_anchor = [&](uint16_t base, uint16_t width) {
@@ -2631,7 +2616,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                !moi_resource_owner_ranges_conflict_with_physical_vcc(
                    resource_state, planned.resources.owner_descriptor_file_offsets, ranges, arch);
       };
-      auto route_state = moi_indirect_jump_sgprs(route_options, route_options);
+      auto route_state = moi_indirect_jump_sgprs(options, route_point);
       if (!route_state || !route_tuple_is_safe(route_state->pc_sgpr, route_state->scc_save_sgpr)) {
         bool found = false;
         for (uint32_t pair = 0u; !found && pair + 2u <= ordinary_sgpr_limit; pair += 2u) {
@@ -2642,9 +2627,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
             const uint16_t candidate_scc = static_cast<uint16_t>(scc);
             if (!route_tuple_is_safe(candidate_pair, candidate_scc))
               continue;
-            route_options.moi_router_jump =
-                ConSanMoiIndirectJumpSgprs{candidate_pair, candidate_scc};
-            route_state = moi_indirect_jump_sgprs(route_options, route_options);
+            route_point.moi_router_jump = ConSanMoiIndirectJumpSgprs{candidate_pair, candidate_scc};
+            route_state = moi_indirect_jump_sgprs(options, route_point);
             found = route_state.has_value();
             if (found)
               break;
@@ -2660,7 +2644,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     const uint64_t cave_offset = placement_planner.appended_end();
     uint32_t guest_instruction_offset = 0;
     auto cave_words =
-        build_atomic_cave(planned, cave_offset, guest_instruction_offset, &route_options,
+        build_atomic_cave(planned, cave_offset, guest_instruction_offset, &route_point,
                           preserve_guest_at_anchor, leading_guest_words);
     if (!cave_words) {
       result.warnings.emplace_back(
@@ -2720,11 +2704,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
                 anchor.size() * sizeof(uint32_t));
     if (indirect_entry_island &&
         !emit_moi_local_indirect_entry_island(
-            new_text, *indirect_entry_island, placement->body_offset, entry_anchor_offset,
-            static_cast<const ConSanRequest &>(route_options),
-            static_cast<const ConSanMoiOperatingPoint &>(route_options),
-            planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
-            "ConSan MOI sampled atomic sync patch")) {
+            new_text, *indirect_entry_island, placement->body_offset, entry_anchor_offset, options,
+            route_point, planned.resources.owner_descriptor_file_offsets, arch, patches,
+            result.errors, "ConSan MOI sampled atomic sync patch")) {
       return;
     }
     append_words_bytes(new_text, *cave_words);

@@ -161,9 +161,10 @@ void apply_sampled_mode_patches(std::span<const uint8_t> bytes, MoiOptions &opti
   try_apply_direct_sampled_watchpoint_patch(bytes, options, arch, resource_state, candidates,
                                             result);
   if (result.errors.empty())
-    try_apply_sampled_atomic_sync_patch(bytes, options, arch, resource_state, result);
+    try_apply_sampled_atomic_sync_patch(bytes, options, options, arch, resource_state, result);
   if (result.errors.empty())
-    try_apply_sampled_barrier_sync_patch(bytes, options, arch, resource_state, candidates, result);
+    try_apply_sampled_barrier_sync_patch(bytes, options, options, arch, resource_state, candidates,
+                                         result);
 }
 
 uint16_t sampled_access_scratch_vgpr_count(const ConSanRequest &request,
