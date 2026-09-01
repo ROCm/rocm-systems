@@ -1038,8 +1038,10 @@ void try_apply_sampled_barrier_sync_patch(
       continue;
     std::optional<MoiPrivateEpochLayout> private_layout;
     if (candidate_point.automatic_moi_private_epoch) {
-      private_layout = build_sampled_private_epoch_layout(result.program_inventory, *resources,
-                                                          options, arch, result.warnings);
+      private_layout = build_moi_private_epoch_layout(
+          result.program_inventory, *resources, arch, result.warnings,
+          {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
+           .record_replay_workgroup = true});
       if (!private_layout)
         continue;
     }
@@ -2030,8 +2032,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
     std::optional<MoiPrivateEpochLayout> private_layout;
     if (operating_point.automatic_moi_private_epoch) {
-      private_layout = build_sampled_private_epoch_layout(result.program_inventory, *resources,
-                                                          options, arch, result.warnings);
+      private_layout = build_moi_private_epoch_layout(
+          result.program_inventory, *resources, arch, result.warnings,
+          {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
+           .record_replay_workgroup = true});
       if (!private_layout)
         continue;
     }

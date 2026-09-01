@@ -98,8 +98,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   std::unordered_map<uint64_t, std::optional<ConSanMoiOperatingPoint>> direct_points_by_descriptor;
   std::unordered_map<uint64_t, std::optional<ConSanMoiWorkgroupShadowLayout>>
       direct_workgroup_shadow_by_descriptor;
-  std::unordered_map<uint64_t, std::optional<MoiPrivateEpochLayout>>
-      direct_private_layout_by_descriptor;
+  MoiPrivateEpochLayoutCache direct_private_layout_cache;
   std::unordered_map<uint64_t, std::optional<uint16_t>> direct_owner_shift_by_descriptor;
   std::unordered_map<uint64_t, std::optional<ConSanMoiWorkgroupSources>>
       direct_workgroup_sources_by_descriptor;
@@ -367,8 +366,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::optional<MoiPrivateEpochLayout> private_layout;
     std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
     if (candidate_point.automatic_moi_private_epoch) {
-      const bool persist_workitem_owner =
-          options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
       // Every supported target exposes workgroup identity as an entry ABI
       // value. Preserve the complete key before arbitrary guest code can reuse
       // the ordinary SGPR or TTMP inputs.
@@ -380,30 +377,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       const bool persist_dispatch_id = !moi_has_runtime_hardware_dispatch_id(candidate_point) &&
                                        (candidate_point.moi_dispatch_identity.sgpr() ||
                                         candidate_point.moi_dispatch_identity.private_fallback());
-      if (direct_descriptor) {
-        auto [cached, inserted] =
-            direct_private_layout_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
-        if (inserted) {
-          cached->second = build_moi_private_epoch_layout(result.program_inventory, *resources,
-                                                          arch, result.warnings,
-                                                          /*include_owner=*/persist_workitem_owner,
-                                                          /*include_workgroup_key=*/
-                                                          persist_workgroup_key,
-                                                          /*include_record_replay_workgroup=*/false,
-                                                          /*include_dispatch_id=*/
-                                                          persist_dispatch_id);
-        }
-        private_layout = cached->second;
-      } else {
-        private_layout = build_moi_private_epoch_layout(result.program_inventory, *resources, arch,
-                                                        result.warnings,
-                                                        /*include_owner=*/persist_workitem_owner,
-                                                        /*include_workgroup_key=*/
-                                                        persist_workgroup_key,
-                                                        /*include_record_replay_workgroup=*/false,
-                                                        /*include_dispatch_id=*/
-                                                        persist_dispatch_id);
-      }
+      private_layout = direct_private_layout_cache.resolve(
+          direct_descriptor, result.program_inventory, *resources, arch, result.warnings,
+          {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
+           .workgroup_key = persist_workgroup_key,
+           .dispatch_id = persist_dispatch_id});
       if (!private_layout)
         continue;
       if (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {

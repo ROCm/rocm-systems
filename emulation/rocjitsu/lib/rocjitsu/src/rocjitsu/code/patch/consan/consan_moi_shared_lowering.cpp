@@ -208,10 +208,10 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
   return common;
 }
 
-[[nodiscard]] std::optional<MoiPrivateEpochLayout> build_moi_private_epoch_layout(
-    const ProgramInventory &program_inventory, const ResolvedMoiScratchPlan &resources,
-    rj_code_arch_t arch, std::vector<std::string> &warnings, bool include_owner,
-    bool include_workgroup_key, bool include_record_replay_workgroup, bool include_dispatch_id) {
+[[nodiscard]] std::optional<MoiPrivateEpochLayout>
+build_moi_private_epoch_layout(const ProgramInventory &program_inventory,
+                               const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
+                               std::vector<std::string> &warnings, MoiPrivateStateDemand demand) {
   if (resources.owner_descriptor_file_offsets.empty()) {
     warnings.emplace_back("ConSan MOI private epoch requires an owning kernel descriptor");
     return std::nullopt;
@@ -232,20 +232,20 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
       util::align_up(resources.original_private_segment_size, SpillManager::kDbiZoneAlignment);
   uint64_t persistent_end = epoch_offset + SpillManager::kSlotBytes;
   const std::optional<uint64_t> owner_offset =
-      include_owner ? std::optional<uint64_t>(persistent_end) : std::nullopt;
+      demand.owner ? std::optional<uint64_t>(persistent_end) : std::nullopt;
   if (owner_offset)
     persistent_end += SpillManager::kSlotBytes;
   const std::optional<uint64_t> workgroup_key_offset =
-      include_workgroup_key ? std::optional<uint64_t>(persistent_end) : std::nullopt;
+      demand.workgroup_key ? std::optional<uint64_t>(persistent_end) : std::nullopt;
   if (workgroup_key_offset)
     persistent_end += SpillManager::kSlotBytes;
   const std::optional<uint64_t> dispatch_id_offset =
-      include_dispatch_id ? std::optional<uint64_t>(persistent_end) : std::nullopt;
+      demand.dispatch_id ? std::optional<uint64_t>(persistent_end) : std::nullopt;
   if (dispatch_id_offset)
     persistent_end += 2u * SpillManager::kSlotBytes;
   ConSanMoiPersistentWorkgroupPrivateOffsets record_replay_workgroup_offsets;
   std::optional<std::array<uint64_t, 4>> record_replay_workgroup_offset_values;
-  if (include_record_replay_workgroup) {
+  if (demand.record_replay_workgroup) {
     const bool include_cluster_workgroup_id =
         consan_arch_has_cluster_facilities(arch) &&
         std::ranges::any_of(resources.owner_descriptor_file_offsets,
@@ -304,15 +304,21 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
       .ephemeral_base = *ephemeral_base};
 }
 
-[[nodiscard]] std::optional<MoiPrivateEpochLayout> build_sampled_private_epoch_layout(
-    const ProgramInventory &program_inventory, const ResolvedMoiScratchPlan &resources,
-    const ConSanRequest &request, rj_code_arch_t arch, std::vector<std::string> &warnings) {
-  return build_moi_private_epoch_layout(
-      program_inventory, resources, arch, warnings,
-      /*include_owner=*/request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
-      /*include_workgroup_key=*/false,
-      /*include_record_replay_workgroup=*/
-      record_replay_requires_entry_workgroup_capture(request.moi_engine));
+std::optional<MoiPrivateEpochLayout> MoiPrivateEpochLayoutCache::resolve(
+    std::optional<uint64_t> descriptor, const ProgramInventory &program_inventory,
+    const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
+    std::vector<std::string> &warnings, MoiPrivateStateDemand demand) {
+  if (!descriptor)
+    return build_moi_private_epoch_layout(program_inventory, resources, arch, warnings, demand);
+  const uint8_t demand_key = static_cast<uint8_t>(demand.owner) |
+                             static_cast<uint8_t>(demand.workgroup_key) << 1u |
+                             static_cast<uint8_t>(demand.record_replay_workgroup) << 2u |
+                             static_cast<uint8_t>(demand.dispatch_id) << 3u;
+  auto [cached, inserted] = layouts_.try_emplace(std::pair{*descriptor, demand_key}, std::nullopt);
+  if (inserted)
+    cached->second =
+        build_moi_private_epoch_layout(program_inventory, resources, arch, warnings, demand);
+  return cached->second;
 }
 
 [[nodiscard]] bool append_sampled_private_owner_epoch_load(

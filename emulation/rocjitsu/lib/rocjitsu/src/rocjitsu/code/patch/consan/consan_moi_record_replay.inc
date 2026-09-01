@@ -498,7 +498,7 @@ void try_apply_first_light_access_record_patch(
                              });
   }
   MoiSpillManagers spill_managers;
-  std::unordered_map<uint64_t, std::optional<MoiPrivateEpochLayout>> private_layout_by_descriptor;
+  MoiPrivateEpochLayoutCache private_layout_cache;
   uint64_t planned_anchor_end = 0;
   for (const ConSanMoiCandidate *candidate_ptr : planning_candidates) {
     const ConSanMoiCandidate &candidate = *candidate_ptr;
@@ -548,27 +548,14 @@ void try_apply_first_light_access_record_patch(
     }
     std::optional<MoiPrivateEpochLayout> private_layout;
     if (candidate_point.automatic_moi_private_epoch) {
-      const bool persist_workitem_owner =
-          options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
-      if (resources->owner_descriptor_file_offsets.size() == 1u) {
-        const uint64_t descriptor = resources->owner_descriptor_file_offsets.front();
-        auto [cached, inserted] =
-            private_layout_by_descriptor.try_emplace(descriptor, std::nullopt);
-        if (inserted) {
-          cached->second = build_moi_private_epoch_layout(result.program_inventory, *resources,
-                                                          arch, result.warnings,
-                                                          /*include_owner=*/persist_workitem_owner,
-                                                          /*include_workgroup_key=*/false,
-                                                          /*include_record_replay_workgroup=*/true);
-        }
-        private_layout = cached->second;
-      } else {
-        private_layout = build_moi_private_epoch_layout(result.program_inventory, *resources, arch,
-                                                        result.warnings,
-                                                        /*include_owner=*/persist_workitem_owner,
-                                                        /*include_workgroup_key=*/false,
-                                                        /*include_record_replay_workgroup=*/true);
-      }
+      const std::optional<uint64_t> cache_descriptor =
+          resources->owner_descriptor_file_offsets.size() == 1u
+              ? std::optional{resources->owner_descriptor_file_offsets.front()}
+              : std::nullopt;
+      private_layout = private_layout_cache.resolve(
+          cache_descriptor, result.program_inventory, *resources, arch, result.warnings,
+          {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
+           .record_replay_workgroup = true});
       if (!private_layout) {
         result.warnings.emplace_back(
             "ConSan MOI first-light probe could not build private epoch state");

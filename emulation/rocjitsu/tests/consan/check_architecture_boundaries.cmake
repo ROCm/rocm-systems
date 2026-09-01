@@ -272,6 +272,11 @@ foreach(_file IN LISTS _consan_production_files)
     )
     _consan_assert_no_match(
         "${_file}"
+        "build_sampled_private_epoch_layout"
+        "shared private layout construction must consume mode-supplied typed demand"
+    )
+    _consan_assert_no_match(
+        "${_file}"
         "append_moi_(atomic|fence|barrier)_lowering_commit"
         "synchronization evidence plans must publish through one shared commit boundary"
     )
@@ -291,6 +296,13 @@ foreach(_file IN LISTS _consan_production_files)
         "mode semantics must not return to the mutable operating point"
     )
 endforeach()
+file(READ "${_consan_dir}/consan_moi_shared_lowering.h" _moi_private_layout_contract)
+if(NOT _moi_private_layout_contract MATCHES "struct MoiPrivateStateDemand" OR
+   NOT _moi_private_layout_contract MATCHES "class MoiPrivateEpochLayoutCache")
+    message(FATAL_ERROR
+        "ConSan private-state lowering lost its typed demand or shared descriptor cache"
+    )
+endif()
 file(READ "${_consan_dir}/consan_moi_sync_emission.h" _moi_sync_commit_contract)
 if(NOT _moi_sync_commit_contract MATCHES "append_moi_sync_lowering_commit" OR
    NOT _moi_sync_commit_contract MATCHES "plan[.]intent_ids[(][)]")

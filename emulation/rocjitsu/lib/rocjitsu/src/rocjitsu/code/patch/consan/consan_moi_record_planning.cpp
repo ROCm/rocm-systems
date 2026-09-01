@@ -130,11 +130,10 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 
   std::optional<MoiPrivateEpochLayout> private_layout;
   if (event_point.automatic_moi_private_epoch) {
-    private_layout = build_moi_private_epoch_layout(inventory, resources, arch, warnings,
-                                                    /*include_owner=*/request.moi_owner_source ==
-                                                        ConSanMoiOwnerSource::WorkitemId,
-                                                    /*include_workgroup_key=*/false,
-                                                    /*include_record_replay_workgroup=*/true);
+    private_layout = build_moi_private_epoch_layout(
+        inventory, resources, arch, warnings,
+        {.owner = request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
+         .record_replay_workgroup = true});
     if (!private_layout)
       return std::nullopt;
   }

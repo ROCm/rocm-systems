@@ -182,10 +182,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     if (candidate_point.automatic_moi_private_epoch) {
       private_layout = build_moi_private_epoch_layout(
           result.program_inventory, *resources, arch, result.warnings,
-          /*include_owner=*/options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
-          /*include_workgroup_key=*/true,
-          /*include_record_replay_workgroup=*/false,
-          /*include_dispatch_id=*/candidate_point.moi_dispatch_identity.private_fallback());
+          {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
+           .workgroup_key = true,
+           .dispatch_id = candidate_point.moi_dispatch_identity.private_fallback()});
       if (!private_layout)
         continue;
       if (private_layout->dispatch_id_offset) {

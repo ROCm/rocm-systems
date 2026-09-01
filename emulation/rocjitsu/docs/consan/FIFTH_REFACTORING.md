@@ -4983,3 +4983,67 @@ shrinkage. Remaining target locality, broader operating-point and mutable-
 transaction surfaces, larger legacy harvesting, material Section 14.8
 evidence, and the independent Section 14 completion audit remain open. The
 goal therefore remains active.
+
+### 16.59 Convergence checkpoint 58: typed private-state demand and shared layout cache
+
+The private-state deep read continued from site-local binding into layout
+construction. Record/Replay, Sampled, and Inline all use the same address-free
+private layout mechanism, but its contract took four positional booleans.
+Their meaning was visible only through comments at each call. Shared lowering
+also contained a Sampled-named wrapper that selected one particular boolean
+combination, while the actual Sampled component remained only an indirect
+consumer of that mode choice.
+
+The three access paths also independently implemented the same cache:
+single-owner layouts, including failed resolutions, were memoized by kernel
+descriptor; multi-owner layouts were resolved independently. Record/Replay
+and Sampled spelled that rule against the resource-owner list, while Inline
+spelled it against its already resolved direct descriptor. These were three
+copies of mechanism-neutral infrastructure embedded in mode implementation.
+
+`MoiPrivateStateDemand` now names the four independently meaningful values:
+owner, workgroup key, exact Record/Replay workgroup tuple, and dispatch
+identity. Every mode declares its exact demand at its own call site. The
+Sampled-specific wrapper is deleted from shared lowering. One
+`MoiPrivateEpochLayoutCache` owns descriptor-local success/failure reuse and
+uncached multi-owner resolution. Its key includes both descriptor and demand,
+so the shared mechanism remains correct if a future mode or site requests two
+different layouts for one kernel. Record/Replay, Sampled, and Inline retain
+their distinct cache-key decisions but no longer own map mutation or layout
+construction policy.
+
+The architecture gate requires the typed demand and shared cache contracts and
+rejects restoration of the Sampled-named shared wrapper. Existing tests cover
+private owner/epoch, workgroup tuple, workgroup key, private dispatch identity,
+single- and multi-owner layouts, dynamic-stack rejection, mixed private/VGPR
+components, and every affected access, barrier, and atomic path.
+
+| Signal | Checkpoint 58 | Cumulative change | Slice change from checkpoint 57 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,285 | +310 | **-14** |
+| Nonblank production lines | 98,980 | **-103** | **-17** |
+| Production implementation lines | 91,251 | **-199** | **-15** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **175 / 52** | **-101 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 30 | +10 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 356 / 63 | +66 / +12 | 0 / 0 |
+| Positional private-layout demand flags | **0** | n/a | **-4** |
+| Independent descriptor-layout caches | **1 shared mechanism** | n/a | **-2** |
+| Sampled-named helpers in shared private-layout infrastructure | **0** | n/a | **-1** |
+| Test inventory | **5,388** | **+43** | 0 |
+
+Validation includes a final-tree `-j16` build; 206 focused private-state,
+Record/Replay, Sampled, Inline, dense-route, and architecture-boundary tests;
+all 4,753 nonphysical tests over the five emulated targets at `-j16`; and all
+635 physical gfx1201 tests serialized at `-j1`. No test was removed, renamed,
+disabled, or replaced.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.4, 14.5, 14.6, 14.7,
+14.8, 14.9, and 14.10. Mode-specific demand is explicit and local, while the
+mechanism-neutral cache has one owner and the superseded copies and wrapper are
+deleted. The slice reduces production, but the cumulative 199-line reduction
+is still not material whole-refactoring shrinkage. Remaining target locality,
+broader operating-point and mutable-transaction surfaces, larger legacy
+harvesting, material Section 14.8 evidence, and the independent Section 14
+completion audit remain open. The goal therefore remains active.

@@ -35,15 +35,33 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
     const RuntimeCapabilities &capabilities, std::vector<std::string> &warnings);
 
-[[nodiscard]] std::optional<MoiPrivateEpochLayout> build_moi_private_epoch_layout(
-    const ProgramInventory &program_inventory, const ResolvedMoiScratchPlan &resources,
-    rj_code_arch_t arch, std::vector<std::string> &warnings, bool include_owner = false,
-    bool include_workgroup_key = false, bool include_record_replay_workgroup = false,
-    bool include_dispatch_id = false);
+/// Mode-owned persistent values required in one private entry-state layout.
+struct MoiPrivateStateDemand {
+  bool owner = false;
+  bool workgroup_key = false;
+  bool record_replay_workgroup = false;
+  bool dispatch_id = false;
 
-[[nodiscard]] std::optional<MoiPrivateEpochLayout> build_sampled_private_epoch_layout(
-    const ProgramInventory &program_inventory, const ResolvedMoiScratchPlan &resources,
-    const ConSanRequest &request, rj_code_arch_t arch, std::vector<std::string> &warnings);
+  bool operator==(const MoiPrivateStateDemand &) const = default;
+};
+
+[[nodiscard]] std::optional<MoiPrivateEpochLayout>
+build_moi_private_epoch_layout(const ProgramInventory &program_inventory,
+                               const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
+                               std::vector<std::string> &warnings, MoiPrivateStateDemand demand);
+
+/// Reuse a descriptor-local layout, including a prior failed resolution.
+/// Multi-owner sites omit the key and are resolved independently.
+class MoiPrivateEpochLayoutCache {
+public:
+  [[nodiscard]] std::optional<MoiPrivateEpochLayout>
+  resolve(std::optional<uint64_t> descriptor, const ProgramInventory &program_inventory,
+          const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
+          std::vector<std::string> &warnings, MoiPrivateStateDemand demand);
+
+private:
+  std::map<std::pair<uint64_t, uint8_t>, std::optional<MoiPrivateEpochLayout>> layouts_;
+};
 
 [[nodiscard]] std::optional<VgprSpillSequence> build_moi_spill_sequence(
     const ProgramInventory &program_inventory, const ResolvedMoiScratchPlan &resources,

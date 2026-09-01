@@ -231,7 +231,7 @@ void try_apply_direct_sampled_watchpoint_patch(
   bool capacity_limited = false;
   bool patch_limited = false;
   MoiSpillManagers spill_managers;
-  std::unordered_map<uint64_t, std::optional<MoiPrivateEpochLayout>> private_layout_by_descriptor;
+  MoiPrivateEpochLayoutCache private_layout_cache;
   uint64_t planned_anchor_end = 0;
   for (const ConSanMoiCandidate *candidate_ptr : candidates) {
     const uint32_t current_sample_index = sampled_candidate_index++;
@@ -300,19 +300,14 @@ void try_apply_direct_sampled_watchpoint_patch(
     std::optional<MoiPrivateEpochLayout> private_layout;
     std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
     if (candidate_point.automatic_moi_private_epoch) {
-      if (resources->owner_descriptor_file_offsets.size() == 1u) {
-        const uint64_t descriptor = resources->owner_descriptor_file_offsets.front();
-        auto [cached, inserted] =
-            private_layout_by_descriptor.try_emplace(descriptor, std::nullopt);
-        if (inserted) {
-          cached->second = build_sampled_private_epoch_layout(result.program_inventory, *resources,
-                                                              options, arch, result.warnings);
-        }
-        private_layout = cached->second;
-      } else {
-        private_layout = build_sampled_private_epoch_layout(result.program_inventory, *resources,
-                                                            options, arch, result.warnings);
-      }
+      const std::optional<uint64_t> cache_descriptor =
+          resources->owner_descriptor_file_offsets.size() == 1u
+              ? std::optional{resources->owner_descriptor_file_offsets.front()}
+              : std::nullopt;
+      private_layout = private_layout_cache.resolve(
+          cache_descriptor, result.program_inventory, *resources, arch, result.warnings,
+          {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
+           .record_replay_workgroup = true});
       if (private_layout && private_layout->owner_offset) {
         const auto owner_shift =
             common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
