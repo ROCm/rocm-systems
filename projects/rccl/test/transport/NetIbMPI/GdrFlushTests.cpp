@@ -65,7 +65,7 @@ protected:
 
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+        ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
         const size_t bufferSize = kSmallBufferSize;
         void* buffer = nullptr;

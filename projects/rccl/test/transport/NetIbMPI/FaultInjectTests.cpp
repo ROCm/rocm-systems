@@ -88,7 +88,7 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorIsFatal) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 1024;
     std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
@@ -226,7 +226,7 @@ TEST_F(NetIbMPITest, FaultInjCastSlowQpRebalances) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr int kNMsgs = 500;
     // Keep below splitDataMin so messages take the WRR token path.
@@ -365,7 +365,7 @@ TEST_F(NetIbMPITest, FaultInjCastDelayDataIntegrity) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr int    kNMsgs  = 50;
     constexpr size_t kMsgSz  = 8192;
@@ -436,7 +436,7 @@ TEST_F(NetIbMPITest, FaultInjCastSingleQpErrorIsFatal) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 1024;  // below splitDataMin → single-QP WRR path
     std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
@@ -578,7 +578,7 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
     void* listenComm1 = nullptr;
     void* sendComm1   = nullptr;
     void* recvComm1   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm1, &sendComm1, &recvComm1));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm1, &sendComm1, &recvComm1);
 
     constexpr size_t kMsgSize = 1024;
     std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
@@ -673,7 +673,7 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
     void* listenComm2 = nullptr;
     void* sendComm2   = nullptr;
     void* recvComm2   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm2, &sendComm2, &recvComm2));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm2, &sendComm2, &recvComm2);
 
     void* comm2   = (rank == 0) ? recvComm2 : sendComm2;
     char* regBuf2 = (rank == 0) ? recvBuf2.data() : sendBuf2.data();
@@ -731,7 +731,7 @@ TEST_F(NetIbMPITest, FailoverErrorCodeWhitelist) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     struct WhitelistResult {
         int hasResiliency;
@@ -828,7 +828,7 @@ TEST_F(NetIbMPITest, FailoverCqeErrorRecovered) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 8192;
     std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
@@ -978,7 +978,7 @@ TEST_F(NetIbMPITest, FailoverSingleDeviceTopology) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 4096;
     std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
@@ -1102,7 +1102,7 @@ TEST_F(NetIbMPITest, FailoverAllDevicesFailed) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 4096;
     std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
@@ -1230,7 +1230,7 @@ TEST_F(NetIbMPITest, FailoverLargeMessageDataIntegrity) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
 
     // Large message to ensure data spans multiple QPs
     constexpr size_t kMsgSize = 65536;
@@ -1370,7 +1370,7 @@ TEST_F(NetIbMPITest, FailoverDeviceOneFailure) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 8192;
     std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
@@ -1501,7 +1501,7 @@ TEST_F(NetIbMPITest, FailoverMultiRequestInFlight) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
 
     constexpr int    kNumReqs = 4;
     constexpr size_t kMsgSize = 4096;
@@ -1650,7 +1650,7 @@ TEST_F(NetIbMPITest, RecoveryThreadStartedOnlyWithParam) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     struct RecoveryEnabledResult {
         int recoveryEnabled;
@@ -1733,7 +1733,7 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 8192;
     constexpr int    kPostRecoveryMsgs = 20;
@@ -1968,7 +1968,7 @@ TEST_F(NetIbMPITest, RecoveryPendingWhileLinkDown) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 8192;
     std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
@@ -2131,7 +2131,7 @@ TEST_F(NetIbMPITest, RecoveryDeviceOneFailure) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 8192;
     const size_t     kBufSize = kMsgSize * 2;
@@ -2376,7 +2376,7 @@ TEST_F(NetIbMPITest, RecoveryUdTimeoutExhaustsAttempts) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 8192;
     std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
@@ -2506,7 +2506,7 @@ TEST_F(NetIbMPITest, FaultInjCastOpsPostSendErrno) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 1024;
     std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
@@ -2638,7 +2638,7 @@ TEST_F(NetIbMPITest, FaultInjCastOpsPollCqFlushNonFatal) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 8192;
     std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
@@ -2770,7 +2770,7 @@ TEST_F(NetIbMPITest, FaultInjCastOpsPollCqSynthFatal) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 1024;
     std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
@@ -2888,7 +2888,7 @@ TEST_F(NetIbMPITest, FaultInjCastOpsPostRecvErrno) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 1024;
     std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
@@ -3016,7 +3016,7 @@ TEST_F(NetIbMPITest, FaultInjCastOpsPollCqInjectCountFinite) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 1024;
     std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
@@ -3194,7 +3194,7 @@ TEST_F(NetIbMPITest, FaultInjCastOpsApiInvalidArgs) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 1024;
     std::vector<char> buf(kMsgSize, 0);
