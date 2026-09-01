@@ -6295,3 +6295,54 @@ qualification models still embedded in the InlineShadow production contract;
 those are concrete follow-on harvesting candidates. Section 14.8 is not yet
 materially satisfied, and the other completion-audit gaps remain open. The goal
 therefore remains active.
+
+### 16.80 Convergence checkpoint 79: test-owned InlineShadow causal and evidence oracles
+
+The follow-on InlineShadow deep read traced the causal-snapshot constructor and
+the end-to-end evidence qualifier through every caller. Neither participates in
+GPU construction, report decoding, runtime analysis, or validation. The
+snapshot constructor is a host reference implementation exercised by causal
+model tests; the qualifier combines synthetic releases, tokens, accesses, and
+counters solely to judge focused test fixtures. Their input, expectation,
+failure, and result types likewise had no production consumer.
+
+Both complete oracle regions now live beside the release-transaction oracle in
+`consan_inline_model_test_support.h`. The atomic-model tests include that
+test-owned contract directly. Production retains the real report ABI, evidence
+kind, stable-release identity, snapshot validation/import operations consumed
+by production shadow models, and the encoding helpers used by emission and
+report processing. This is therefore an ownership correction and deletion from
+the production surface, not removal of executable evidence semantics or test
+coverage. The architecture gate rejects the causal-construction and evidence-
+qualification roots from the production InlineShadow report contract.
+
+| Signal | Checkpoint 79 | Cumulative change | Slice change from checkpoint 78 |
+| --- | ---: | ---: | ---: |
+| Production files | 264 | +35 | 0 |
+| Physical production lines | 104,719 | **-257** | **-315** |
+| Nonblank production lines | 98,405 | **-679** | **-296** |
+| Production implementation lines | 90,669 | **-781** | **-289** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 168 / 52 | **-108 / -5** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 30 | +9 / +2 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 316 / 60 | +26 / +9 | 0 / 0 |
+| Host causal/evidence oracle roots in production | **0** | n/a | **-6** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and all 11 causal-snapshot,
+causal-import, evidence-qualification, release-transaction, and architecture-
+boundary tests. Checkpoint 77's immediately preceding periodic gate passed all
+4,776 nonphysical tests over five emulated targets, including all 2,918
+simulator tests. No test was removed, disabled, renamed, or replaced. In
+accordance with the reduced physical-test cadence, no physical gfx1201 test was
+run.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.7, and 14.8. Three related
+host reference models now form one explicitly test-owned InlineShadow support
+surface rather than enlarging a production report contract. Cumulative
+production shrinkage increases from 492 to 781 implementation lines. The
+remaining snapshot validation/import helpers are production dependencies and
+must be assessed together with their shadow-model consumers rather than moved
+by association. Material shrinkage, the larger placement and mutation buses,
+both extension exercises, and the independent completion audit remain open;
+the goal therefore remains active.

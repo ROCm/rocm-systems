@@ -169,4 +169,318 @@ enum class ConSanMoiInlineReleaseTransactionEvent : uint8_t {
          position(ConSanMoiInlineReleaseTransactionEvent::RestorePrior) == events.size();
 }
 
+/// Stable-read token-table view used by release-time reference capture. The
+/// same version must bracket every field; only nonzero even versions are ready.
+struct alignas(8) ConSanMoiInlineCausalTokenView {
+  uint32_t version_before = 0;
+  uint32_t version_after = 0;
+  uint64_t dispatch_id = 0;
+  uint32_t workgroup_key = 0;
+  uint32_t consumer_owner_id = 0;
+  uint32_t producer_owner_id = 0;
+  uint32_t producer_epoch_plus_one = 0;
+  ConSanMoiInlineTokenEvidenceKind kind = ConSanMoiInlineTokenEvidenceKind::Direct;
+  uint64_t source_release_address = 0;
+  uint32_t source_release_version = 0;
+  uint32_t consumer_epoch_plus_one = 0;
+  uint32_t reservation_version = 0;
+};
+/// Captures the exact causal frontier owned by `releaser_owner_id`. Unrelated
+/// ready tokens are ignored. Multiple valid witnesses for the same ancestor
+/// coalesce to its maximum epoch. Any malformed table entry, cyclic ancestry,
+/// incomplete scan, or fifth distinct matching ancestor marks the complete
+/// snapshot nonauthorizing.
+[[nodiscard]] constexpr ConSanMoiInlineCausalSnapshot
+consan_moi_inline_capture_causal_snapshot(std::span<const ConSanMoiInlineCausalTokenView> tokens,
+                                          uint64_t dispatch_id, uint32_t workgroup_key,
+                                          uint32_t releaser_owner_id, bool source_complete = true) {
+  ConSanMoiInlineCausalSnapshot snapshot;
+  if (!source_complete)
+    snapshot.flags |=
+        consan_moi_inline_causal_snapshot_flag(ConSanMoiInlineCausalSnapshotFlag::SourceIncomplete);
+  if (dispatch_id == 0 || workgroup_key == 0 || releaser_owner_id == 0)
+    snapshot.flags |=
+        consan_moi_inline_causal_snapshot_flag(ConSanMoiInlineCausalSnapshotFlag::Malformed);
+
+  for (const auto &token : tokens) {
+    if (token.version_before == 0 && token.version_after == 0 && token.dispatch_id == 0 &&
+        token.workgroup_key == 0 && token.consumer_owner_id == 0 && token.producer_owner_id == 0 &&
+        token.producer_epoch_plus_one == 0 && token.source_release_address == 0 &&
+        token.source_release_version == 0 &&
+        token.kind == ConSanMoiInlineTokenEvidenceKind::Direct &&
+        token.consumer_epoch_plus_one == 0 && token.reservation_version == 0)
+      continue;
+    if (token.version_before != token.version_after || token.version_before == 0 ||
+        (token.version_before & 1u) != 0 || token.dispatch_id == 0 || token.workgroup_key == 0 ||
+        token.consumer_owner_id == 0 || token.producer_owner_id == 0 ||
+        !consan_moi_inline_causal_epoch_is_valid(token.producer_epoch_plus_one) ||
+        (token.kind != ConSanMoiInlineTokenEvidenceKind::Direct &&
+         token.kind != ConSanMoiInlineTokenEvidenceKind::Inherited &&
+         token.kind != ConSanMoiInlineTokenEvidenceKind::ReleaseSequence) ||
+        token.source_release_address == 0 ||
+        !consan_moi_inline_release_version_is_ready(token.source_release_version) ||
+        !consan_moi_inline_causal_epoch_is_valid(token.consumer_epoch_plus_one) ||
+        token.reservation_version != 0) {
+      snapshot.flags |=
+          consan_moi_inline_causal_snapshot_flag(ConSanMoiInlineCausalSnapshotFlag::Malformed);
+      continue;
+    }
+    if (token.dispatch_id != dispatch_id || token.workgroup_key != workgroup_key ||
+        token.consumer_owner_id != releaser_owner_id)
+      continue;
+    if (token.producer_owner_id == releaser_owner_id) {
+      snapshot.flags |=
+          consan_moi_inline_causal_snapshot_flag(ConSanMoiInlineCausalSnapshotFlag::Malformed);
+      continue;
+    }
+
+    uint32_t insertion = 0;
+    while (insertion < snapshot.entry_count &&
+           insertion < kConSanMoiInlineCausalSnapshotEntryCapacity &&
+           snapshot.entries[insertion].ancestor_owner_id < token.producer_owner_id)
+      ++insertion;
+    if (insertion < snapshot.entry_count &&
+        snapshot.entries[insertion].ancestor_owner_id == token.producer_owner_id) {
+      snapshot.entries[insertion].ancestor_epoch_plus_one = std::max(
+          snapshot.entries[insertion].ancestor_epoch_plus_one, token.producer_epoch_plus_one);
+      continue;
+    }
+    if (snapshot.entry_count >= kConSanMoiInlineCausalSnapshotEntryCapacity) {
+      snapshot.flags |= consan_moi_inline_causal_snapshot_flag(
+          ConSanMoiInlineCausalSnapshotFlag::CapacityOverflow);
+      continue;
+    }
+    for (uint32_t move = snapshot.entry_count; move > insertion; --move)
+      snapshot.entries[move] = snapshot.entries[move - 1u];
+    snapshot.entries[insertion] = {token.producer_owner_id, token.producer_epoch_plus_one};
+    ++snapshot.entry_count;
+  }
+  return snapshot;
+}
+struct ConSanMoiInlineStableReleaseEvidence {
+  ConSanMoiInlineVersionedReleaseIdentity identity;
+  uint32_t version_before = 0;
+  uint32_t version_after = 0;
+  uint32_t releaser_owner_id = 0;
+  uint32_t releaser_epoch_plus_one = 0;
+  ConSanMoiInlineCausalSnapshot snapshot;
+};
+
+struct ConSanMoiInlineTokenEvidence {
+  uint64_t dispatch_id = 0;
+  uint32_t workgroup_key = 0;
+  uint32_t consumer_owner_id = 0;
+  uint32_t producer_owner_id = 0;
+  uint32_t producer_epoch_plus_one = 0;
+  ConSanMoiInlineTokenEvidenceKind kind = ConSanMoiInlineTokenEvidenceKind::Direct;
+  ConSanMoiInlineVersionedReleaseIdentity source_release;
+  uint32_t source_release_version = 0;
+};
+
+struct ConSanMoiInlineAccessEvidence {
+  uint64_t dispatch_id = 0;
+  uint32_t workgroup_key = 0;
+  uint32_t owner_id = 0;
+  uint32_t access_count = 0;
+};
+
+struct ConSanMoiInlineEvidenceCounters {
+  uint64_t dispatch_id = 0;
+  uint32_t dispatch_coverage_count = 0;
+  uint32_t undercoverage_count = 0;
+  uint32_t overflow_count = 0;
+  uint32_t unsupported_count = 0;
+  uint32_t consan_diagnostic_count = 0;
+  uint32_t matched_source_diagnostic_count = 0;
+};
+
+enum class ConSanMoiInlineQualificationSemantics : uint8_t {
+  Ordered,
+  NativeRelaxed,
+};
+
+struct ConSanMoiInlineQualificationExpectation {
+  ConSanMoiInlineQualificationSemantics semantics = ConSanMoiInlineQualificationSemantics::Ordered;
+  ConSanMoiInlineVersionedReleaseIdentity release_identity;
+  uint32_t producer_owner_id = 0;
+  uint32_t producer_epoch_plus_one = 0;
+  uint32_t consumer_owner_id = 0;
+  uint32_t required_ancestor_owner_id = 0;
+  uint32_t required_ancestor_epoch_plus_one = 0;
+};
+
+enum class ConSanMoiInlineQualificationFailure : uint32_t {
+  None = 0,
+  InvalidExpectation = 1u << 0u,
+  DispatchCoverage = 1u << 1u,
+  Undercoverage = 1u << 2u,
+  Overflow = 1u << 3u,
+  Unsupported = 1u << 4u,
+  ProducerAccess = 1u << 5u,
+  ConsumerAccess = 1u << 6u,
+  StableRelease = 1u << 7u,
+  DirectToken = 1u << 8u,
+  InheritedToken = 1u << 9u,
+  UnexpectedAuthorization = 1u << 10u,
+  MissingSourceDiagnostic = 1u << 11u,
+  UnexpectedDiagnostic = 1u << 12u,
+  MalformedEvidence = 1u << 13u,
+};
+
+struct ConSanMoiInlineQualificationResult {
+  uint32_t failures = 0;
+
+  [[nodiscard]] constexpr bool accepted() const { return failures == 0; }
+  [[nodiscard]] constexpr bool has(ConSanMoiInlineQualificationFailure failure) const {
+    return (failures & static_cast<uint32_t>(failure)) != 0;
+  }
+};
+
+[[nodiscard]] constexpr ConSanMoiInlineQualificationResult consan_moi_inline_qualify_token_evidence(
+    const ConSanMoiInlineQualificationExpectation &expected,
+    std::span<const ConSanMoiInlineStableReleaseEvidence> releases,
+    std::span<const ConSanMoiInlineTokenEvidence> tokens,
+    std::span<const ConSanMoiInlineAccessEvidence> accesses,
+    const ConSanMoiInlineEvidenceCounters &counters) {
+  ConSanMoiInlineQualificationResult result;
+  const auto fail = [&](ConSanMoiInlineQualificationFailure failure) {
+    result.failures |= static_cast<uint32_t>(failure);
+  };
+  const bool requires_ancestor = expected.required_ancestor_owner_id != 0;
+  if (!expected.release_identity.valid() || expected.producer_owner_id == 0 ||
+      !consan_moi_inline_causal_epoch_is_valid(expected.producer_epoch_plus_one) ||
+      expected.consumer_owner_id == 0 || expected.consumer_owner_id == expected.producer_owner_id ||
+      (requires_ancestor != (expected.required_ancestor_epoch_plus_one != 0)) ||
+      (requires_ancestor &&
+       (expected.required_ancestor_owner_id == expected.producer_owner_id ||
+        expected.required_ancestor_owner_id == expected.consumer_owner_id ||
+        !consan_moi_inline_causal_epoch_is_valid(expected.required_ancestor_epoch_plus_one))))
+    fail(ConSanMoiInlineQualificationFailure::InvalidExpectation);
+
+  if (counters.dispatch_id != expected.release_identity.dispatch_id ||
+      counters.dispatch_coverage_count == 0)
+    fail(ConSanMoiInlineQualificationFailure::DispatchCoverage);
+  if (counters.undercoverage_count != 0)
+    fail(ConSanMoiInlineQualificationFailure::Undercoverage);
+  if (counters.overflow_count != 0)
+    fail(ConSanMoiInlineQualificationFailure::Overflow);
+  if (counters.unsupported_count != 0)
+    fail(ConSanMoiInlineQualificationFailure::Unsupported);
+
+  for (const auto &access : accesses) {
+    if (access.dispatch_id == expected.release_identity.dispatch_id &&
+        access.workgroup_key == expected.release_identity.workgroup_key &&
+        (access.owner_id == 0 || access.access_count == 0))
+      fail(ConSanMoiInlineQualificationFailure::MalformedEvidence);
+  }
+  const auto has_access = [&](uint32_t owner_id) {
+    return std::any_of(accesses.begin(), accesses.end(), [&](const auto &access) {
+      return access.dispatch_id == expected.release_identity.dispatch_id &&
+             access.workgroup_key == expected.release_identity.workgroup_key &&
+             access.owner_id == owner_id && access.access_count != 0;
+    });
+  };
+  if (!has_access(expected.producer_owner_id))
+    fail(ConSanMoiInlineQualificationFailure::ProducerAccess);
+  if (!has_access(expected.consumer_owner_id))
+    fail(ConSanMoiInlineQualificationFailure::ConsumerAccess);
+
+  const ConSanMoiInlineStableReleaseEvidence *matching_release = nullptr;
+  uint32_t relevant_release_count = 0;
+  for (const auto &release : releases) {
+    if (release.identity.dispatch_id != expected.release_identity.dispatch_id ||
+        release.identity.workgroup_key != expected.release_identity.workgroup_key)
+      continue;
+    ++relevant_release_count;
+    const bool structurally_valid =
+        release.identity.valid() &&
+        consan_moi_inline_release_snapshot_is_stable(release.version_before,
+                                                     release.version_after) &&
+        release.releaser_owner_id != 0 &&
+        consan_moi_inline_causal_epoch_is_valid(release.releaser_epoch_plus_one) &&
+        consan_moi_inline_validate_causal_snapshot(release.snapshot, release.releaser_owner_id) ==
+            ConSanMoiInlineCausalSnapshotStatus::Usable;
+    if (!structurally_valid) {
+      fail(ConSanMoiInlineQualificationFailure::MalformedEvidence);
+      continue;
+    }
+    if (release.identity == expected.release_identity &&
+        release.releaser_owner_id == expected.producer_owner_id &&
+        release.releaser_epoch_plus_one == expected.producer_epoch_plus_one) {
+      if (matching_release != nullptr)
+        fail(ConSanMoiInlineQualificationFailure::MalformedEvidence);
+      matching_release = &release;
+    }
+  }
+
+  uint32_t relevant_token_count = 0;
+  uint32_t direct_token_count = 0;
+  uint32_t inherited_token_count = 0;
+  for (const auto &token : tokens) {
+    if (token.dispatch_id != expected.release_identity.dispatch_id ||
+        token.workgroup_key != expected.release_identity.workgroup_key)
+      continue;
+    ++relevant_token_count;
+    const bool structurally_valid =
+        token.consumer_owner_id != 0 && token.producer_owner_id != 0 &&
+        token.consumer_owner_id != token.producer_owner_id &&
+        consan_moi_inline_causal_epoch_is_valid(token.producer_epoch_plus_one) &&
+        (token.kind == ConSanMoiInlineTokenEvidenceKind::Direct ||
+         token.kind == ConSanMoiInlineTokenEvidenceKind::Inherited ||
+         token.kind == ConSanMoiInlineTokenEvidenceKind::ReleaseSequence) &&
+        token.source_release.valid() && token.source_release.dispatch_id == token.dispatch_id &&
+        token.source_release.workgroup_key == token.workgroup_key &&
+        consan_moi_inline_release_version_is_ready(token.source_release_version);
+    if (!structurally_valid) {
+      fail(ConSanMoiInlineQualificationFailure::MalformedEvidence);
+      continue;
+    }
+    const bool expected_source = matching_release != nullptr &&
+                                 token.source_release == matching_release->identity &&
+                                 token.source_release_version == matching_release->version_after;
+    if (expected_source && token.kind == ConSanMoiInlineTokenEvidenceKind::Direct &&
+        token.consumer_owner_id == expected.consumer_owner_id &&
+        token.producer_owner_id == expected.producer_owner_id &&
+        token.producer_epoch_plus_one == expected.producer_epoch_plus_one)
+      ++direct_token_count;
+    if (expected_source && token.kind == ConSanMoiInlineTokenEvidenceKind::Inherited &&
+        token.consumer_owner_id == expected.consumer_owner_id && requires_ancestor &&
+        token.producer_owner_id == expected.required_ancestor_owner_id &&
+        token.producer_epoch_plus_one == expected.required_ancestor_epoch_plus_one)
+      ++inherited_token_count;
+  }
+
+  if (expected.semantics == ConSanMoiInlineQualificationSemantics::NativeRelaxed) {
+    if (relevant_release_count != 0 || relevant_token_count != 0)
+      fail(ConSanMoiInlineQualificationFailure::UnexpectedAuthorization);
+    if (counters.matched_source_diagnostic_count == 0)
+      fail(ConSanMoiInlineQualificationFailure::MissingSourceDiagnostic);
+    if (counters.consan_diagnostic_count != counters.matched_source_diagnostic_count)
+      fail(ConSanMoiInlineQualificationFailure::UnexpectedDiagnostic);
+    return result;
+  }
+
+  if (matching_release == nullptr)
+    fail(ConSanMoiInlineQualificationFailure::StableRelease);
+  if (direct_token_count != 1)
+    fail(ConSanMoiInlineQualificationFailure::DirectToken);
+  if (requires_ancestor) {
+    bool snapshot_contains_ancestor = false;
+    if (matching_release != nullptr) {
+      snapshot_contains_ancestor = std::any_of(
+          matching_release->snapshot.entries.begin(),
+          matching_release->snapshot.entries.begin() + matching_release->snapshot.entry_count,
+          [&](const auto &entry) {
+            return entry.ancestor_owner_id == expected.required_ancestor_owner_id &&
+                   entry.ancestor_epoch_plus_one == expected.required_ancestor_epoch_plus_one;
+          });
+    }
+    if (!snapshot_contains_ancestor || inherited_token_count != 1)
+      fail(ConSanMoiInlineQualificationFailure::InheritedToken);
+  }
+  if (counters.consan_diagnostic_count != 0 || counters.matched_source_diagnostic_count != 0)
+    fail(ConSanMoiInlineQualificationFailure::UnexpectedDiagnostic);
+  return result;
+}
+
 } // namespace rocjitsu
