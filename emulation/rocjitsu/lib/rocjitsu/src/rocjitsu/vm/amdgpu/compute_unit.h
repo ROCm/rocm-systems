@@ -901,6 +901,15 @@ protected:
   /// @param wf The issuing wavefront.
   void route_memory_inst(Instruction *inst, Wavefront &wf);
 
+  /// @brief Tell the plugin group what the memory system is about to be asked
+  ///        for, once routing has settled.
+  /// @param inst The routed instruction.
+  /// @param wf The issuing wavefront.
+  /// @param route_tag The pipeline tag the instruction ended up with.
+  /// @param normalized_to_local Whether a FLAT access was rewritten into LDS.
+  void report_routed_access(const Instruction &inst, const Wavefront &wf, uint8_t route_tag,
+                            bool normalized_to_local);
+
   /// @brief Fire the on_idle callback if registered.
   void notify_idle() {
     if (on_idle_)

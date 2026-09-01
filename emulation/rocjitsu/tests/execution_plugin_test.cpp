@@ -33,6 +33,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
@@ -104,6 +105,11 @@ class ComputeUnitTestAccess {
 public:
   static amdgpu::Wavefront *sgpr_owner(const amdgpu::ComputeUnitCore &cu, uint32_t reg_idx) {
     return cu.sgpr_owner(reg_idx);
+  }
+
+  static void route_memory_inst(amdgpu::ComputeUnitCore &cu, Instruction *inst,
+                                amdgpu::Wavefront &wf) {
+    cu.route_memory_inst(inst, wf);
   }
 };
 
@@ -239,6 +245,103 @@ struct HookEvent {
   std::string mnemonic;
   std::string kernel_name;
   std::string kernel_symbol;
+};
+
+/// @brief One routed access, copied out of the callback's borrowed spans.
+struct CapturedAccess {
+  std::string mnemonic;
+  uint64_t pc = 0;
+  uint32_t compute_unit_id = 0;
+  uint32_t dispatch_id = 0;
+  uint32_t workgroup_id = 0;
+  uint32_t wavefront_id = 0;
+  uint32_t process_id = 0;
+  uint32_t queue_id = 0;
+  MemoryRoute route = MemoryRoute::UNKNOWN;
+  bool normalized_to_local = false;
+  bool is_load = true;
+  AtomicOp atomic_op = AtomicOp::NONE;
+  Mtype mtype = Mtype::RW;
+  WaitCounterType wait_counter = WaitCounterType::VMCNT;
+  bool force_l1_bypass = false;
+  bool lds_destination = false;
+  uint32_t wavefront_size = 0;
+  uint32_t element_size_bytes = 0;
+  uint32_t elements_per_lane = 0;
+  uint64_t bytes_per_lane = 0;
+  uint64_t active_lane_mask = 0;
+  uint64_t valid_lane_mask = 0;
+  uint64_t request_lane_mask = 0;
+  uint64_t inactive_lane_mask = 0;
+  uint64_t unknown_lane_mask = 0;
+  uint64_t scratch_lane_mask = 0;
+  uint32_t scratch_element_stride_bytes = 0;
+  bool non_temporal = false;
+  std::vector<uint64_t> element_lane_masks;
+  std::vector<uint64_t> addresses;
+  std::vector<uint64_t> secondary_addresses;
+};
+
+/// @brief Records both memory hooks, so a test can compare what routing was
+///        told with what routing decided.
+class MemoryObservationPlugin final : public ExecutionPlugin {
+public:
+  MemoryObservationPlugin() : ExecutionPlugin("memory_observation") {}
+
+  bool observes_memory_routing() const override { return true; }
+
+  void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) override {
+    before_tag.push_back(inst.data()->tag());
+    if (inst.data()->tag() != SCALAR_MEM) {
+      const auto &state = *inst.data_as<VectorMemState>();
+      before_first_address.push_back(state.per_lane_addr[0]);
+      before_wait_counter.push_back(state.wait_counter_type);
+    }
+    static_cast<void>(wf);
+  }
+
+  void onAmdgpuMemoryAccessRouted(const MemoryAccessObservation &access) override {
+    CapturedAccess captured;
+    captured.mnemonic = access.mnemonic;
+    captured.pc = access.pc;
+    captured.compute_unit_id = access.compute_unit_id;
+    captured.dispatch_id = access.dispatch_id;
+    captured.workgroup_id = access.workgroup_id;
+    captured.wavefront_id = access.wavefront_id;
+    captured.process_id = access.process_id;
+    captured.queue_id = access.queue_id;
+    captured.route = access.route;
+    captured.normalized_to_local = access.normalized_to_local;
+    captured.is_load = access.is_load;
+    captured.atomic_op = access.atomic_op;
+    captured.mtype = access.mtype;
+    captured.wait_counter = access.wait_counter;
+    captured.force_l1_bypass = access.force_l1_bypass;
+    captured.lds_destination = access.lds_destination;
+    captured.wavefront_size = access.wavefront_size;
+    captured.element_size_bytes = access.element_size_bytes;
+    captured.elements_per_lane = access.elements_per_lane;
+    captured.bytes_per_lane = access.bytes_per_lane();
+    captured.active_lane_mask = access.active_lane_mask;
+    captured.valid_lane_mask = access.valid_lane_mask;
+    captured.request_lane_mask = access.request_lane_mask;
+    captured.inactive_lane_mask = access.inactive_lane_mask();
+    captured.unknown_lane_mask = access.unknown_lane_mask();
+    captured.scratch_lane_mask = access.scratch_lane_mask;
+    captured.scratch_element_stride_bytes = access.scratch_element_stride_bytes;
+    captured.non_temporal = access.non_temporal;
+    captured.element_lane_masks.assign(access.element_lane_masks.begin(),
+                                       access.element_lane_masks.end());
+    captured.addresses.assign(access.addresses.begin(), access.addresses.end());
+    captured.secondary_addresses.assign(access.secondary_addresses.begin(),
+                                        access.secondary_addresses.end());
+    accesses.push_back(std::move(captured));
+  }
+
+  std::vector<CapturedAccess> accesses;
+  std::vector<uint8_t> before_tag;
+  std::vector<uint64_t> before_first_address;
+  std::vector<WaitCounterType> before_wait_counter;
 };
 
 /// A plugin that records an ordered event log for ordering assertions.
@@ -885,6 +988,20 @@ struct PluginFixture {
     mem->load_image(reinterpret_cast<const uint8_t *>(code), num_words * 4,
                     addr + sizeof(kernel_descriptor_t));
     return addr;
+  }
+
+  /// The attached plugin group.
+  ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
+
+  /// Attach a MemoryObservationPlugin, fire onInit, and return a raw pointer.
+  MemoryObservationPlugin *attach_memory_observation_plugin() {
+    plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto plugin = std::make_unique<MemoryObservationPlugin>();
+    auto *p = plugin.get();
+    plugin_group_->add(std::move(plugin));
+    soc->set_plugin_group(plugin_group_);
+    plugin_group_->onInit();
+    return p;
   }
 
   /// Attach an OrderingPlugin, fire onInit, and return a raw pointer to it.
@@ -4190,3 +4307,414 @@ TEST(ExecutionPluginGroupTest, OwnsFileSinkThroughPluginDestruction) {
 }
 
 } // namespace
+
+// ============================================================================
+// Routed memory observation
+// ============================================================================
+
+TEST(RoutedMemoryObservationTest, AScalarAccessCarriesItsFullIdentity) {
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  auto *wave = cu->dispatch_wf_at(/*wf_id=*/3, /*wg_id=*/17, /*pc=*/0x240,
+                                  /*num_sgprs=*/104, /*num_vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_dispatch_id(23);
+  wave->set_queue_id(6);
+  wave->set_process_id(9);
+
+  auto state = std::make_unique<ScalarMemState>();
+  state->addr = 0x4000;
+  state->num_dwords = 4;
+  state->elem_size = 4;
+  state->is_load = true;
+  state->wait_counter_type = WaitCounterType::LGKMCNT;
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
+                                                 *wave);
+
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  const auto &access = plugin->accesses.front();
+  EXPECT_EQ(access.mnemonic, "test_mem");
+  EXPECT_EQ(access.pc, 0x240u);
+  EXPECT_EQ(access.compute_unit_id, cu->id());
+  EXPECT_EQ(access.dispatch_id, 23u);
+  EXPECT_EQ(access.workgroup_id, 17u);
+  EXPECT_EQ(access.wavefront_id, 3u);
+  EXPECT_EQ(access.queue_id, 6u);
+  // The address space the addresses live in, without which two guests' traffic
+  // is indistinguishable.
+  EXPECT_EQ(access.process_id, 9u);
+  EXPECT_EQ(access.route, MemoryRoute::SCALAR);
+  EXPECT_EQ(access.wait_counter, WaitCounterType::LGKMCNT);
+  EXPECT_TRUE(access.is_load);
+  // A scalar access is one address, reported as a one-lane wavefront so that
+  // both routes take the same per-lane arithmetic.
+  EXPECT_EQ(access.wavefront_size, 1u);
+  EXPECT_EQ(access.active_lane_mask, 1u);
+  EXPECT_EQ(access.valid_lane_mask, 1u);
+  EXPECT_EQ(access.request_lane_mask, 1u);
+  EXPECT_EQ(access.inactive_lane_mask, 0u);
+  EXPECT_EQ(access.bytes_per_lane, 16u);
+  ASSERT_EQ(access.addresses.size(), 1u);
+  EXPECT_EQ(access.addresses[0], 0x4000u);
+}
+
+TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAccessItBecame) {
+  // The reason the observation is taken after routing rather than before. This
+  // instruction decodes as global and is issued to the local pipeline with its
+  // addresses rewritten into the workgroup's LDS allocation and its wait
+  // counter changed. An observer that looked before routing would charge it
+  // against the vector cache, at an address the memory system never uses.
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  constexpr uint64_t kSharedBase = 0x1000'0000;
+  cu->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+  auto *wave = cu->dispatch_wf_at(/*wf_id=*/1, /*wg_id=*/7, /*pc=*/0x300,
+                                  /*num_sgprs=*/104, /*num_vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_dispatch_id(31);
+  wave->set_exec(0b1111);
+  wave->set_lds_base(0x400);
+
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->wf_size = wave->wf_size();
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->is_load = false;
+  state->exec_mask = 0b1111;
+  state->lane_mask = 0b0101;
+  state->per_lane_addr[0] = kSharedBase + 0x20;
+  state->per_lane_addr[2] = kSharedBase + 0x28;
+  state->store_data.resize(static_cast<size_t>(state->wf_size) * state->elem_size);
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
+                                                 *wave);
+
+  // What the pre-routing hook was shown.
+  ASSERT_EQ(plugin->before_tag.size(), 1u);
+  EXPECT_EQ(plugin->before_tag[0], GLOBAL_MEM);
+  EXPECT_EQ(plugin->before_first_address[0], kSharedBase + 0x20);
+  EXPECT_EQ(plugin->before_wait_counter[0], WaitCounterType::VMCNT);
+
+  // What the memory system is actually asked for.
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  const auto &access = plugin->accesses.front();
+  EXPECT_EQ(access.route, MemoryRoute::LOCAL);
+  EXPECT_TRUE(access.normalized_to_local);
+  EXPECT_EQ(access.wait_counter, WaitCounterType::LGKMCNT);
+  EXPECT_EQ(access.addresses[0], 0x420u);
+  EXPECT_EQ(access.addresses[2], 0x428u);
+  EXPECT_EQ(access.active_lane_mask, 0b1111u);
+  EXPECT_EQ(access.valid_lane_mask, 0b0101u);
+  EXPECT_EQ(access.unknown_lane_mask, 0b1010u);
+}
+
+TEST(RoutedMemoryObservationTest, AnLdsAccessThatWasAlwaysLdsIsNotMarkedNormalized) {
+  // The counterpart to the case above: a consumer separating "traffic that is
+  // really LDS" from "traffic rewritten into LDS" needs the two to differ.
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  auto *wave = cu->dispatch_wf(/*wg_id=*/5, /*pc=*/0x400, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0b11);
+
+  auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  state->wf_size = wave->wf_size();
+  state->elem_size = 4;
+  state->num_elems = 2;
+  state->is_load = false;
+  state->exec_mask = 0b11;
+  state->lane_mask = 0b01;
+  state->per_lane_addr[0] = 0x40;
+  state->store_data.resize(static_cast<size_t>(state->wf_size) * state->elem_size * 2);
+  state->ds2_active = true;
+  state->ds2_per_lane_addr[0] = 0x80;
+  state->ds2_store_data.resize(static_cast<size_t>(state->wf_size) * state->elem_size * 2);
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
+                                                 *wave);
+
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  const auto &access = plugin->accesses.front();
+  EXPECT_EQ(access.route, MemoryRoute::LOCAL);
+  EXPECT_FALSE(access.normalized_to_local);
+  EXPECT_EQ(access.wait_counter, WaitCounterType::LGKMCNT);
+  EXPECT_EQ(access.bytes_per_lane, 8u);
+  // A wave64 with two lanes on: counting the other sixty-two would report a
+  // full-width access for something that moves two lanes' worth of bytes.
+  EXPECT_EQ(access.inactive_lane_mask, ~uint64_t{0} << 2);
+  EXPECT_EQ(access.unknown_lane_mask, 0b10u);
+  // The second half of a DS dual access is a second set of addresses, not a
+  // second instruction.
+  ASSERT_EQ(access.secondary_addresses.size(), wave->wf_size());
+  EXPECT_EQ(access.secondary_addresses[0], 0x80u);
+}
+
+TEST(RoutedMemoryObservationTest, AGlobalAtomicReportsItsOperationScratchAndPolicy) {
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  auto *wave = cu->dispatch_wf_at(/*wf_id=*/2, /*wg_id=*/11, /*pc=*/0x380,
+                                  /*num_sgprs=*/104, /*num_vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0b1111);
+
+  constexpr uint64_t kAddress = 0x9000;
+  uint32_t initial = 7;
+  fixture.mem->load_image(reinterpret_cast<const uint8_t *>(&initial), sizeof(initial), kAddress);
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->wf_size = wave->wf_size();
+  state->elem_size = sizeof(initial);
+  state->num_elems = 1;
+  state->is_load = false;
+  state->atomic_op = AtomicOp::ADD;
+  state->non_temporal = true;
+  state->exec_mask = 0b1111;
+  state->lane_mask = 0b0001;
+  state->scratch_swizzle = true;
+  state->scratch_lane_mask = 0b0001;
+  state->scratch_addr_stride = 256;
+  state->per_lane_addr[0] = kAddress;
+  state->store_data.resize(static_cast<size_t>(state->wf_size) * sizeof(initial));
+  uint32_t increment = 3;
+  std::memcpy(state->store_data.data(), &increment, sizeof(increment));
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
+                                                 *wave);
+
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  const auto &access = plugin->accesses.front();
+  EXPECT_EQ(access.route, MemoryRoute::GLOBAL);
+  EXPECT_FALSE(access.normalized_to_local);
+  // An atomic is neither a plain load nor a plain store, and a model that
+  // treated it as either would put it on the wrong side of a wait counter.
+  EXPECT_EQ(access.atomic_op, AtomicOp::ADD);
+  EXPECT_FALSE(access.is_load);
+  EXPECT_TRUE(access.non_temporal);
+  EXPECT_EQ(access.active_lane_mask, 0b1111u);
+  EXPECT_EQ(access.valid_lane_mask, 0b0001u);
+  EXPECT_EQ(access.unknown_lane_mask, 0b1110u);
+  // Swizzled scratch is not contiguous, so the stride has to travel with it.
+  EXPECT_EQ(access.scratch_lane_mask, 0b0001u);
+  EXPECT_EQ(access.scratch_element_stride_bytes, 256u);
+  EXPECT_EQ(access.addresses[0], kAddress);
+}
+
+TEST(RoutedMemoryObservationTest, ANonScratchAccessReportsNoSwizzleStride) {
+  // scratch_addr_stride is left set by whatever last used the state, so the
+  // observation has to gate it on the swizzle flag rather than copy it.
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x500, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0b1);
+
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->wf_size = wave->wf_size();
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->exec_mask = 0b1;
+  state->lane_mask = 0b1;
+  state->scratch_swizzle = false;
+  state->scratch_lane_mask = 0b1;
+  state->scratch_addr_stride = 256;
+  state->per_lane_addr[0] = 0xA000;
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
+                                                 *wave);
+
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  EXPECT_EQ(plugin->accesses.front().scratch_lane_mask, 0u);
+  EXPECT_EQ(plugin->accesses.front().scratch_element_stride_bytes, 0u);
+}
+
+TEST(RoutedMemoryObservationTest, TheLaneCountIsTheWavefrontsOwn) {
+  // VectorMemState's wf_size defaults to 64 whatever the target, so a
+  // wave32 access would otherwise be reported with thirty-two lanes of
+  // whatever the array happened to hold.
+  PluginFixture fixture(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32);
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  auto *wave = cu->dispatch_wf(/*wg_id=*/5, /*pc=*/0x440, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_EQ(wave->wf_size(), 32u);
+  wave->set_exec(0b11);
+
+  auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  ASSERT_EQ(state->wf_size, 64u) << "the default this test exists to catch has changed";
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->exec_mask = 0b11;
+  state->lane_mask = 0b11;
+  state->per_lane_addr[0] = 0x10;
+  state->per_lane_addr[1] = 0x14;
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
+                                                 *wave);
+
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  const auto &access = plugin->accesses.front();
+  EXPECT_EQ(access.wavefront_size, 32u);
+  EXPECT_EQ(access.addresses.size(), 32u);
+  // Thirty of thirty-two, not thirty of sixty-four.
+  EXPECT_EQ(access.inactive_lane_mask, 0xFFFF'FFFCu);
+}
+
+TEST(RoutedMemoryObservationTest, ATransposeLoadRequestsFromFewerLanesThanItFills) {
+  // The reason four lane masks exist rather than two. A wave64 B8 transpose
+  // load fills every valid lane but issues its requests through the low half,
+  // so a model that charged traffic per valid lane would double it.
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x700, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_EQ(wave->wf_size(), 64u);
+  wave->set_exec(~uint64_t{0});
+
+  auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  state->wf_size = wave->wf_size();
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->exec_mask = ~uint64_t{0};
+  state->lane_mask = ~uint64_t{0};
+  state->transpose = static_cast<uint8_t>(TransposeKind::WMMA_TR_B8);
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
+                                                 *wave);
+
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  EXPECT_EQ(plugin->accesses.front().valid_lane_mask, ~uint64_t{0});
+  EXPECT_EQ(plugin->accesses.front().request_lane_mask, 0xFFFF'FFFFu);
+}
+
+TEST(RoutedMemoryObservationTest, TheTransposeRequestMaskUsesTheWavefrontsWidth) {
+  // The half-issue rule keys on the wavefront's width, and the width recorded
+  // in VectorMemState is the pipeline's -- set on some paths only after
+  // routing, so it can still hold whatever the last user left. The wavefront
+  // is the authority; the state is not.
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x740, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_EQ(wave->wf_size(), 64u);
+  wave->set_exec(~uint64_t{0});
+
+  auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  state->wf_size = 32; // not yet the pipeline's, and not this wavefront's
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->exec_mask = ~uint64_t{0};
+  state->lane_mask = ~uint64_t{0};
+  state->transpose = static_cast<uint8_t>(TransposeKind::WMMA_TR_B8);
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
+                                                 *wave);
+
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  EXPECT_EQ(plugin->accesses.front().request_lane_mask, 0xFFFF'FFFFu)
+      << "the request mask followed the state's width rather than the wavefront's";
+}
+
+TEST(RoutedMemoryObservationTest, PerElementBoundsAndCachePolicyAreCarried) {
+  // An access whose later elements go out of bounds while its earlier ones do
+  // not moves fewer bytes than its element count suggests, and the cache
+  // policy decides which levels it even touches. Both travel with the access.
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x780, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0b1111);
+
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->wf_size = wave->wf_size();
+  state->elem_size = 4;
+  state->num_elems = 2;
+  state->exec_mask = 0b1111;
+  state->lane_mask = 0b0111;
+  state->element_lane_masks.assign(2, 0);
+  state->element_lane_masks[0] = 0b0111;
+  state->element_lane_masks[1] = 0b0011;
+  state->mtype = Mtype::UC;
+  state->request_force_l1_bypass = true;
+  state->lds_dst = true;
+  state->per_lane_addr[0] = 0xC000;
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
+                                                 *wave);
+
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  const auto &access = plugin->accesses.front();
+  ASSERT_EQ(access.element_lane_masks.size(), 2u);
+  EXPECT_EQ(access.element_lane_masks[0], 0b0111u);
+  EXPECT_EQ(access.element_lane_masks[1], 0b0011u);
+  EXPECT_EQ(access.mtype, Mtype::UC);
+  EXPECT_TRUE(access.force_l1_bypass);
+  EXPECT_TRUE(access.lds_destination);
+}
+
+TEST(RoutedMemoryObservationTest, ASingleAccessCarriesNoSecondAddressSet) {
+  // The counterpart to the DS dual-access case: an ordinary access must report
+  // an empty second set rather than a stale array of zeroes, which a consumer
+  // would otherwise take for sixty-four accesses to address zero.
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x7C0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0b1);
+
+  auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  state->wf_size = wave->wf_size();
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->exec_mask = 0b1;
+  state->lane_mask = 0b1;
+  state->per_lane_addr[0] = 0x20;
+  ASSERT_FALSE(state->ds2_active);
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
+                                                 *wave);
+
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  EXPECT_TRUE(plugin->accesses.front().secondary_addresses.empty());
+  EXPECT_TRUE(plugin->accesses.front().element_lane_masks.empty());
+}
+
+TEST(RoutedMemoryObservationTest, APluginThatDoesNotWantTheHookDoesNotPayForIt) {
+  // Building the observation is real work on the per-instruction path. A
+  // plugin that never implements the hook -- which is every plugin in the tree
+  // but one -- should not be charged for it.
+  PluginFixture fixture;
+  auto *ordering = fixture.attach_ordering_plugin();
+  ASSERT_NE(ordering, nullptr);
+  EXPECT_FALSE(fixture.plugin_group().observes_memory_routing());
+
+  ExecutionPluginGroup empty{PluginSinkConfig{}};
+  EXPECT_FALSE(empty.observes_memory_routing());
+
+  ExecutionPluginGroup wanting{PluginSinkConfig{}};
+  wanting.add(std::make_unique<MemoryObservationPlugin>());
+  EXPECT_TRUE(wanting.observes_memory_routing());
+}
+
+TEST(RoutedMemoryObservationTest, AnUnroutableAccessIsReportedRatherThanDropped) {
+  // No pipeline takes this, so nothing downstream will ever mention it. A
+  // model counting a kernel's memory traffic has to be able to see that there
+  // was an access it cannot account for.
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  auto *wave = cu->dispatch_wf(/*wg_id=*/2, /*pc=*/0x600, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+
+  class UnroutedState : public DynamicInstState {
+  public:
+    UnroutedState() { tag_ = 0; }
+  };
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, new TestMemoryInstruction(std::make_unique<UnroutedState>()), *wave);
+
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  const auto &access = plugin->accesses.front();
+  EXPECT_EQ(access.route, MemoryRoute::UNKNOWN);
+  EXPECT_EQ(std::string(memory_route_name(access.route)), "unknown");
+  EXPECT_EQ(access.pc, 0x600u);
+  EXPECT_TRUE(access.addresses.empty());
+}
