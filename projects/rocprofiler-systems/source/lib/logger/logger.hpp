@@ -41,10 +41,13 @@ struct logger_settings_t
     {
         const char* rocprofsys_monochrome_env = std::getenv(env_vars::MONOCHROME);
         const char* monochrome_env            = std::getenv("MONOCHROME");
-        if(rocprofsys_monochrome_env || monochrome_env)
+        if(rocprofsys_monochrome_env)
         {
-            m_monochrome = utility::string::to_bool(rocprofsys_monochrome_env) ||
-                           utility::string::to_bool(monochrome_env);
+            m_monochrome = utility::string::to_bool(rocprofsys_monochrome_env);
+        }
+        if(monochrome_env)
+        {
+            m_monochrome = m_monochrome || utility::string::to_bool(monochrome_env);
         }
     }
 
