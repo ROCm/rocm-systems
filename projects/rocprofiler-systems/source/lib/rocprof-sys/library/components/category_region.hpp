@@ -34,8 +34,8 @@
 
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/ostr.h>
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ostream.h>
+#include <fmt/ranges.h>
 
 #include <string>
 #include <string_view>
