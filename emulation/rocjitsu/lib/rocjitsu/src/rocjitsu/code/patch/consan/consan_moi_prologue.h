@@ -57,6 +57,7 @@ void try_apply_owner_epoch_prologue_patch(
     std::span<const uint8_t> bytes, const ConSanOptions &options,
     const ConSanMoiOperatingPoint &operating_point,
     std::span<const ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments,
-    rj_code_arch_t arch, ConSanTransformArtifacts &result);
+    const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch,
+    ConSanTransformArtifacts &result);
 
 } // namespace rocjitsu::consan_moi_impl

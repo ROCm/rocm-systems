@@ -1,6 +1,7 @@
 void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
                                   const ConSanMoiOperatingPoint &operating_point,
-                                  rj_code_arch_t arch, ConSanTransformArtifacts &result) {
+                                  const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch,
+                                  ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics)
     return;
   if (!consan_is_capability_arch(arch)) {
@@ -146,10 +147,10 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       }
       candidate.kernel_descriptor_file_offset = resources->owner_descriptor_file_offsets.front();
     }
-    auto record_event =
-        plan_moi_record_event(bytes, result.program_inventory, result.warnings, *resources, options,
-                              options, operating_point, result.moi_operating_point, spill_managers,
-                              arch, "ConSan MOI fence record patch", active_private_size);
+    auto record_event = plan_moi_record_event(
+        bytes, result.program_inventory, result.warnings, *resources, options, options,
+        operating_point, result.moi_operating_point, mode_semantics, spill_managers, arch,
+        "ConSan MOI fence record patch", active_private_size);
     if (!record_event)
       continue;
     note_moi_probe_private_requirements(private_requirements, *record_event);

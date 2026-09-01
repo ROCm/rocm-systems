@@ -70,10 +70,10 @@ MoiObjectModePlan plan_record_replay_object_mode(const ConSanRequest &request,
       !facts.has_report_buffer && !facts.has_explicit_persistent_state;
 
   constexpr size_t kCompactBarrierMemberLimit = 32u;
-  plan.dense_barrier_router =
-      plan.dense_barrier_router || (facts.target_supports_dense_barrier_router &&
-                                    (facts.admitted_barrier_count > kCompactBarrierMemberLimit ||
-                                     facts.has_stranded_admitted_barrier));
+  plan.semantics.dense_barrier_router =
+      facts.target_supports_dense_barrier_router &&
+      (facts.admitted_barrier_count > kCompactBarrierMemberLimit ||
+       facts.has_stranded_admitted_barrier);
 
   if (!facts.has_access_candidate && !facts.has_explicit_persistent_state &&
       !facts.has_admitted_barrier && !atomic_or_fence_relevant) {
@@ -91,11 +91,13 @@ void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, const ConS
                                       MoiResourcePlanningState &resource_state,
                                       std::span<const ConSanMoiCandidate> candidates,
                                       const MoiObjectFacts &facts,
+                                      const MoiObjectModeSemantics &semantics,
                                       ConSanTransformArtifacts &result) {
   MoiRecordReplayAccessOutput access_output;
   if (const ConSanTargetProfile *target = consan_target_profile(arch)) {
     try_apply_first_light_access_record_patch(bytes, options, operating_point, *target,
-                                              resource_state, access_output, candidates, result);
+                                              resource_state, access_output, candidates, semantics,
+                                              result);
   } else if (options.moi_report_buffer_address) {
     result.warnings.emplace_back("ConSan MOI first-light probe does not support this architecture");
   }
@@ -124,12 +126,12 @@ void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, const ConS
         "ConSan MOI record/replay dropped unconsumed automatic state after all access probes "
         "failed placement");
   }
-  try_apply_atomic_record_patch(bytes, options, operating_point, arch, result);
+  try_apply_atomic_record_patch(bytes, options, operating_point, semantics, arch, result);
   if (result.errors.empty())
     try_apply_record_replay_barrier_patch(bytes, options, operating_point, arch, resource_state,
-                                          access_output, result);
+                                          access_output, semantics, result);
   if (result.errors.empty())
-    try_apply_fence_record_patch(bytes, options, operating_point, arch, result);
+    try_apply_fence_record_patch(bytes, options, operating_point, semantics, arch, result);
 }
 
 uint16_t record_replay_access_scratch_vgpr_count(const ConSanRequest &request,

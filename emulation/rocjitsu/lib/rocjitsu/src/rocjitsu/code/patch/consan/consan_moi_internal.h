@@ -32,6 +32,21 @@
 #include <utility>
 #include <vector>
 
+namespace rocjitsu::consan_moi_impl {
+
+/// Immutable mode semantics that affect common resource solving and emission.
+/// These decisions are selected once by the mode owner from normalized object
+/// facts. They are not solver choices and therefore must not be copied into or
+/// rediscovered from the mutable operating point.
+struct MoiObjectModeSemantics {
+  bool dense_barrier_router = false;
+  bool inline_access_present = false;
+
+  bool operator==(const MoiObjectModeSemantics &) const = default;
+};
+
+} // namespace rocjitsu::consan_moi_impl
+
 namespace rocjitsu {
 
 /// Return the current code-object image after any already committed MOI
@@ -53,9 +68,11 @@ public:
                      const ConSanRequest &request, const BoundRuntimeResources &resources,
                      const ProgramInventory &inventory,
                      const ConSanObservationPlan &observation_plan,
-                     std::span<const ConSanMoiCandidate> candidates)
+                     std::span<const ConSanMoiCandidate> candidates,
+                     consan_moi_impl::MoiObjectModeSemantics mode_semantics)
       : image_(image), arch_(arch), request_(&request), resources_(&resources),
-        inventory_(&inventory), observation_plan_(&observation_plan), candidates_(candidates) {}
+        inventory_(&inventory), observation_plan_(&observation_plan), candidates_(candidates),
+        mode_semantics_(mode_semantics) {}
 
   [[nodiscard]] std::span<const uint8_t> image() const { return image_; }
   [[nodiscard]] rj_code_arch_t arch() const { return arch_; }
@@ -64,6 +81,9 @@ public:
   [[nodiscard]] const ProgramInventory &inventory() const { return *inventory_; }
   [[nodiscard]] const ConSanObservationPlan &observation_plan() const { return *observation_plan_; }
   [[nodiscard]] std::span<const ConSanMoiCandidate> candidates() const { return candidates_; }
+  [[nodiscard]] const consan_moi_impl::MoiObjectModeSemantics &mode_semantics() const {
+    return mode_semantics_;
+  }
 
 private:
   std::span<const uint8_t> image_;
@@ -73,6 +93,7 @@ private:
   const ProgramInventory *inventory_ = nullptr;
   const ConSanObservationPlan *observation_plan_ = nullptr;
   std::span<const ConSanMoiCandidate> candidates_;
+  consan_moi_impl::MoiObjectModeSemantics mode_semantics_;
 };
 
 /// Immutable facts that determine the size of MOI's transient scalar-save ABI.
@@ -98,7 +119,8 @@ struct MoiExecSaveRequirement {
 [[nodiscard]] MoiExecSaveRequirement
 resolve_moi_exec_save_requirement(const ConSanRequest &request,
                                   const BoundRuntimeResources &resources,
-                                  const ConSanMoiOperatingPoint &operating_point);
+                                  const ConSanMoiOperatingPoint &operating_point,
+                                  const consan_moi_impl::MoiObjectModeSemantics &mode_semantics);
 
 /// Resolve the solver-owned prologue decision without mutating the request.
 [[nodiscard]] bool moi_initializes_owner_epoch(const ConSanRequest &request,

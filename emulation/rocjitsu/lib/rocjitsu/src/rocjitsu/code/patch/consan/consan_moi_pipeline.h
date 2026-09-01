@@ -28,6 +28,7 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanReq
                                 const BoundRuntimeResources &bound_resources,
                                 const ConSanDebugOverrides &debug,
                                 const ConSanMoiOperatingPoint &point,
+                                const MoiObjectModeSemantics &mode_semantics,
                                 std::span<const ConSanMoiCandidate> candidates,
                                 ConSanTransformArtifacts &result);
 

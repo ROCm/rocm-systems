@@ -44,13 +44,13 @@ struct MoiPlannedRecordEvent : MoiPlannedProbeResources {
   std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
 };
 
-[[nodiscard]] std::optional<MoiPlannedRecordEvent>
-plan_moi_record_event(std::span<const uint8_t> bytes, const ProgramInventory &inventory,
-                      std::vector<std::string> &warnings, const ResolvedMoiScratchPlan &resources,
-                      const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-                      const ConSanMoiOperatingPoint &base_point,
-                      const ConSanMoiOperatingPoint &allocation, MoiSpillManagers &spill_managers,
-                      rj_code_arch_t arch, std::string_view warning_context,
-                      std::optional<uint32_t> active_private_segment_size = std::nullopt);
+[[nodiscard]] std::optional<MoiPlannedRecordEvent> plan_moi_record_event(
+    std::span<const uint8_t> bytes, const ProgramInventory &inventory,
+    std::vector<std::string> &warnings, const ResolvedMoiScratchPlan &resources,
+    const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
+    const ConSanMoiOperatingPoint &base_point, const ConSanMoiOperatingPoint &allocation,
+    const MoiObjectModeSemantics &mode_semantics, MoiSpillManagers &spill_managers,
+    rj_code_arch_t arch, std::string_view warning_context,
+    std::optional<uint32_t> active_private_segment_size = std::nullopt);
 
 } // namespace rocjitsu::consan_moi_impl

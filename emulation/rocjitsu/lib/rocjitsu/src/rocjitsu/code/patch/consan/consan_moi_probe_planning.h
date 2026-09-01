@@ -24,8 +24,10 @@ struct MoiPlannedProbeResources {
 [[nodiscard]] std::optional<MoiPlannedProbeResources>
 plan_moi_probe_resources(const ProgramInventory &inventory, ResolvedMoiScratchPlan resources,
                          const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-                         const ConSanMoiOperatingPoint &point, MoiSpillManagers &spill_managers,
-                         rj_code_arch_t arch, std::optional<MoiPrivateEpochLayout> private_layout,
+                         const ConSanMoiOperatingPoint &point,
+                         const MoiObjectModeSemantics &mode_semantics,
+                         MoiSpillManagers &spill_managers, rj_code_arch_t arch,
+                         std::optional<MoiPrivateEpochLayout> private_layout,
                          bool scalar_spill_required, std::vector<std::string> &warnings,
                          std::optional<uint32_t> active_private_segment_size = std::nullopt);
 

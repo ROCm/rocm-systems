@@ -2,6 +2,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                    const ConSanMoiOperatingPoint &operating_point,
                                    rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
                                    std::span<const ConSanMoiCandidate> admitted,
+                                   const MoiObjectModeSemantics &semantics,
                                    ConSanTransformArtifacts &result) {
   if (!options.moi_report_buffer_address)
     return;
@@ -20,7 +21,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options, options);
   if (options.max_patches == 0)
     return;
-  if (!validate_inline_shadow_exec_save_sgpr(options, options, operating_point, arch,
+  if (!validate_inline_shadow_exec_save_sgpr(options, options, operating_point, semantics, arch,
                                              result.warnings))
     return;
   if (!operating_point.moi_owner_epoch_vgprs.owner() &&
@@ -112,11 +113,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       operating_point.moi_exec_save_sgpr.has_value() &&
       (candidates.size() >= 8u || has_function_candidate || has_branch_only_scalar_assignment);
   const uint64_t reserved_barrier_island_count =
-      use_indirect_appended
-          ? moi_reserved_access_sync_island_count(result.program_inventory,
-                                                  result.observation_plan(), options, options,
-                                                  operating_point)
-          : 0u;
+      use_indirect_appended ? moi_reserved_access_sync_island_count(result.program_inventory,
+                                                                    result.observation_plan(),
+                                                                    options, options, semantics)
+                            : 0u;
   const uint64_t indirect_body_begin =
       original_text_size + reserved_barrier_island_count * kIndirectIslandWords * sizeof(uint32_t) +
       candidates.size() * access_relay_words * sizeof(uint32_t);
@@ -487,7 +487,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount;
         const uint32_t scalar_frame_bytes =
             static_cast<uint32_t>(moi_exec_save_sgpr_count(
-                resolve_moi_exec_save_requirement(options, options, candidate_point), arch)) *
+                resolve_moi_exec_save_requirement(options, options, candidate_point, semantics),
+                arch)) *
             SpillManager::kSlotBytes;
         if (resources->count < reservoir_count) {
           result.warnings.emplace_back(
@@ -508,8 +509,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         spill = borrowed->as_vgpr_spill_sequence();
       } else {
         spill = build_moi_spill_sequence(
-            result.program_inventory, *resources, options, options, candidate_point, spill_managers,
-            arch, result.warnings,
+            result.program_inventory, *resources, options, options, candidate_point, semantics,
+            spill_managers, arch, result.warnings,
             private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base)
                            : std::nullopt);
       }
@@ -519,8 +520,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::optional<SgprSpillSequence> scalar_spill;
     if (candidate_point.has_inline_moi_scalar_spill()) {
       scalar_spill = build_moi_sgpr_spill_sequence(
-          result.program_inventory, *resources, options, options, candidate_point, spill_managers,
-          arch, result.warnings,
+          result.program_inventory, *resources, options, options, candidate_point, semantics,
+          spill_managers, arch, result.warnings,
           private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
           spill ? &*spill : nullptr);
       if (!scalar_spill)
@@ -530,7 +531,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::vector<std::string> candidate_errors;
     uint32_t guest_instruction_word_count = 0;
     auto words = build_inline_shadow_words(
-        bytes, candidate, options, options, candidate_point, resources->base,
+        bytes, candidate, options, options, candidate_point, resources->base, semantics,
         options.moi_partition_mask_debug, arch, layout, *workgroup_sources, workgroup_shadow,
         requires_wave_partitioned_exact_shadow,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
@@ -899,7 +900,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                              planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, options, options,
-                               candidate_point, arch);
+                               candidate_point, semantics, arch);
     if (planned_patch.workgroup_shadow) {
       note_moi_lds_requirements(lds_requirements, planned_patch.resources,
                                 *planned_patch.workgroup_shadow);
@@ -962,13 +963,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       }
       auto words = build_inline_shadow_words(
           bytes, candidate, options, options, candidate_point, planned_patch.resources.base,
-          options.moi_partition_mask_debug, arch, layout, planned_patch.workgroup_sources,
-          planned_patch.workgroup_shadow, requires_wave_partitioned_exact_shadow,
-          planned_patch.private_epoch_offset, planned_patch.owner_derivation,
-          planned_patch.private_workgroup_key_offset, planned_patch.private_dispatch_id_offset,
-          planned_patch.workgroup_shadow_compact_token, planned_patch.resources.count,
-          planned_patch.spill.has_value(), planned_patch.spill ? &*planned_patch.spill : nullptr,
-          result.errors);
+          semantics, options.moi_partition_mask_debug, arch, layout,
+          planned_patch.workgroup_sources, planned_patch.workgroup_shadow,
+          requires_wave_partitioned_exact_shadow, planned_patch.private_epoch_offset,
+          planned_patch.owner_derivation, planned_patch.private_workgroup_key_offset,
+          planned_patch.private_dispatch_id_offset, planned_patch.workgroup_shadow_compact_token,
+          planned_patch.resources.count, planned_patch.spill.has_value(),
+          planned_patch.spill ? &*planned_patch.spill : nullptr, result.errors);
       if (!words)
         return;
 
@@ -1379,8 +1380,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             }
             return build_inline_shadow_words(
                 bytes, *planned_patch.candidate, options, options, candidate_point,
-                planned_patch.resources.base, options.moi_partition_mask_debug, arch, layout,
-                planned_patch.workgroup_sources, planned_patch.workgroup_shadow,
+                planned_patch.resources.base, semantics, options.moi_partition_mask_debug, arch,
+                layout, planned_patch.workgroup_sources, planned_patch.workgroup_shadow,
                 requires_wave_partitioned_exact_shadow, planned_patch.private_epoch_offset,
                 planned_patch.owner_derivation, planned_patch.private_workgroup_key_offset,
                 planned_patch.private_dispatch_id_offset,

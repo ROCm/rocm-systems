@@ -34,13 +34,11 @@ materialize_sampled_owner_epoch_tail(uint16_t exclusive_tail, bool needs_owner) 
   return {.owner = owner, .epoch = --exclusive_tail};
 }
 
-void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
-                                               const ConSanOptions &options,
-                                               const ConSanMoiOperatingPoint &operating_point,
-                                               rj_code_arch_t arch,
-                                               MoiResourcePlanningState &resource_state,
-                                               std::span<const ConSanMoiCandidate> admitted,
-                                               ConSanTransformArtifacts &result) {
+void try_apply_direct_sampled_watchpoint_patch(
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
+    MoiResourcePlanningState &resource_state, std::span<const ConSanMoiCandidate> admitted,
+    const MoiObjectModeSemantics &mode_semantics, ConSanTransformArtifacts &result) {
   if (!options.moi_report_buffer_address)
     return;
   const ConSanTargetProfile *target = consan_target_profile(arch);
@@ -382,8 +380,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           private_layout->record_replay_workgroup_offsets;
     }
     auto probe = plan_moi_probe_resources(
-        result.program_inventory, *resources, options, options, candidate_point, spill_managers,
-        arch, private_layout, candidate_point.has_compact_moi_scalar_spill(), result.warnings);
+        result.program_inventory, *resources, options, options, candidate_point, mode_semantics,
+        spill_managers, arch, private_layout, candidate_point.has_compact_moi_scalar_spill(),
+        result.warnings);
     if (!probe)
       continue;
     auto &spill = probe->spill;
@@ -690,7 +689,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, options, options,
-                               candidate_point, arch);
+                               candidate_point, mode_semantics, arch);
     note_moi_access_private_requirements(private_requirements, planned_patch);
   }
 

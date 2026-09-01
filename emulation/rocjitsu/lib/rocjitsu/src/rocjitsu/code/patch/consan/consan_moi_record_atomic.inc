@@ -1,5 +1,6 @@
 void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
                                    const ConSanMoiOperatingPoint &operating_point,
+                                   const MoiObjectModeSemantics &mode_semantics,
                                    rj_code_arch_t arch, ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics)
     return;
@@ -139,8 +140,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     }
     auto record_event =
         plan_moi_record_event(bytes, result.program_inventory, result.warnings, *resources, options,
-                              options, operating_point, result.moi_operating_point, spill_managers,
-                              arch, "ConSan MOI atomic record patch");
+                              options, operating_point, result.moi_operating_point, mode_semantics,
+                              spill_managers, arch, "ConSan MOI atomic record patch");
     if (!record_event)
       continue;
     selected_candidates.push_back(

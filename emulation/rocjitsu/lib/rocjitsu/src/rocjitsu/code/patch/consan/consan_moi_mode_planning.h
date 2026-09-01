@@ -39,8 +39,7 @@ struct MoiObjectModePlan {
   bool track_atomics = false;
   bool track_barriers = false;
   std::optional<bool> initialize_owner_epoch;
-  bool dense_barrier_router = false;
-  bool inline_access_present = false;
+  MoiObjectModeSemantics semantics;
   bool inline_atomic_without_access = false;
   bool reserve_dynamic_stack_prologue_entry = false;
   bool prologue_requires_consumer = false;
@@ -229,7 +228,8 @@ void apply_moi_mode_patches(std::span<const uint8_t> bytes, const ConSanOptions 
                             ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
                             MoiResourcePlanningState &resource_state,
                             std::span<const ConSanMoiCandidate> candidates,
-                            const MoiObjectFacts &facts, ConSanTransformArtifacts &result);
+                            const MoiObjectFacts &facts, const MoiObjectModeSemantics &semantics,
+                            ConSanTransformArtifacts &result);
 
 [[nodiscard]] MoiPersistentStateDemand plan_moi_persistent_state_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
@@ -267,7 +267,7 @@ struct MoiModeOperations {
                             const MoiObjectFacts &, const ConSanObservationPlan &);
   void (*apply)(std::span<const uint8_t>, const ConSanOptions &, ConSanMoiOperatingPoint &,
                 rj_code_arch_t, MoiResourcePlanningState &, std::span<const ConSanMoiCandidate>,
-                const MoiObjectFacts &, ConSanTransformArtifacts &);
+                const MoiObjectFacts &, const MoiObjectModeSemantics &, ConSanTransformArtifacts &);
   uint16_t (*access_scratch_vgpr_count)(const ConSanRequest &, const BoundRuntimeResources &,
                                         const ConSanMoiOperatingPoint &, const ConSanMoiCandidate &,
                                         rj_code_arch_t);

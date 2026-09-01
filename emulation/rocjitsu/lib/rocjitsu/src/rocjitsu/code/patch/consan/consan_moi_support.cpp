@@ -454,7 +454,8 @@ std::optional<uint16_t> moi_dynamic_stack_frame_save_sgpr_offset(ConSanMoiEngine
 MoiExecSaveRequirement
 resolve_moi_exec_save_requirement(const ConSanRequest &request,
                                   const BoundRuntimeResources &resources,
-                                  const ConSanMoiOperatingPoint &operating_point) {
+                                  const ConSanMoiOperatingPoint &operating_point,
+                                  const consan_moi_impl::MoiObjectModeSemantics &mode_semantics) {
   return MoiExecSaveRequirement{
       .engine = request.moi_engine,
       .has_report_buffer = resources.moi_report_buffer_address.has_value(),
@@ -464,8 +465,8 @@ resolve_moi_exec_save_requirement(const ConSanRequest &request,
       .runtime_sample_stride = request.moi_runtime_sample_stride,
       .scalar_spill = operating_point.has_compact_moi_scalar_spill(),
       .dynamic_stack_spill = operating_point.moi_dynamic_stack_spill,
-      .inline_access_present = operating_point.moi_inline_access_present,
-      .dense_record_barrier_router = operating_point.moi_record_replay_dense_barrier_router,
+      .inline_access_present = mode_semantics.inline_access_present,
+      .dense_record_barrier_router = mode_semantics.dense_barrier_router,
   };
 }
 

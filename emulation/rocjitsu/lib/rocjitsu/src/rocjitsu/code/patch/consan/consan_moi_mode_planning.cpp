@@ -33,7 +33,6 @@ MoiObjectModePlan make_moi_object_mode_plan(const ConSanRequest &request,
   plan.track_atomics = request.moi_track_atomics;
   plan.track_barriers = request.moi_track_barriers;
   plan.initialize_owner_epoch = point.moi_initialize_owner_epoch;
-  plan.dense_barrier_router = point.moi_record_replay_dense_barrier_router;
   return plan;
 }
 
@@ -57,9 +56,11 @@ void apply_moi_mode_patches(std::span<const uint8_t> bytes, const ConSanOptions 
                             ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
                             MoiResourcePlanningState &resource_state,
                             std::span<const ConSanMoiCandidate> candidates,
-                            const MoiObjectFacts &facts, ConSanTransformArtifacts &result) {
+                            const MoiObjectFacts &facts, const MoiObjectModeSemantics &semantics,
+                            ConSanTransformArtifacts &result) {
   moi_mode_operations(options.moi_engine)
-      .apply(bytes, options, operating_point, arch, resource_state, candidates, facts, result);
+      .apply(bytes, options, operating_point, arch, resource_state, candidates, facts, semantics,
+             result);
 }
 
 MoiPersistentStateDemand plan_moi_persistent_state_demand(const ConSanRequest &request,

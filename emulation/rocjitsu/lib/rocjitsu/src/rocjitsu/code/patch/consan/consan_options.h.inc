@@ -982,21 +982,12 @@ struct ConSanMoiOperatingPoint {
   /// transient window exists. Inline and compact Record/Replay-style layouts
   /// have different ABI fields and are mutually exclusive.
   ConSanMoiScalarSpillLayout automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::None;
-  /// Internal operating-point marker for RDNA-family and CDNA4 Record/Replay objects
-  /// whose barrier inventory can require the relocated dense router. Such
-  /// objects reserve a dispatch key and call-return pair in addition to the
-  /// ordinary five-register EXEC/VCC/SCC window.
-  bool moi_record_replay_dense_barrier_router = false;
   /// Internal proof marker set only when the automatic EXEC-save window lies
   /// above every guest-referenced SGPR and can retain cross-site wave state.
   bool moi_exec_save_sgprs_persistent = false;
   /// Internal marker set when a probe needs the base scalar save slot for a
   /// site-local dynamic-stack spill frame.
   bool moi_dynamic_stack_spill = false;
-  /// Internal marker set after inventory proves that Inline will emit at
-  /// least one ordinary access probe. Atomic-only objects need fewer
-  /// transient EXEC pairs than access probes with causal-token lookup.
-  bool moi_inline_access_present = false;
   /// Explicit scalar-router ABI selected when a spill-backed transient window
   /// cannot use the mode's fixed register layout. The indirect jump, dispatch
   /// key, and call-return pair are one shared routing mechanism used by Inline,

@@ -12,24 +12,22 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-[[nodiscard]] std::optional<uint16_t>
-operational_barrier_scratch_count(ConSanProbeIntentKind evidence,
-                                  const BoundRuntimeResources &resources,
-                                  const ConSanMoiOperatingPoint &point);
+[[nodiscard]] std::optional<uint16_t> operational_barrier_scratch_count(
+    ConSanProbeIntentKind evidence, const BoundRuntimeResources &resources,
+    const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &semantics);
 
 void try_apply_inline_shadow_barrier_patch(std::span<const uint8_t> bytes,
                                            const ConSanOptions &options,
                                            const ConSanMoiOperatingPoint &operating_point,
                                            rj_code_arch_t arch,
                                            MoiResourcePlanningState &resource_state,
+                                           const MoiObjectModeSemantics &semantics,
                                            ConSanTransformArtifacts &result);
 
-void try_apply_record_replay_barrier_patch(std::span<const uint8_t> bytes,
-                                           const ConSanOptions &options,
-                                           const ConSanMoiOperatingPoint &operating_point,
-                                           rj_code_arch_t arch,
-                                           MoiResourcePlanningState &resource_state,
-                                           const MoiRecordReplayAccessOutput &access_output,
-                                           ConSanTransformArtifacts &result);
+void try_apply_record_replay_barrier_patch(
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
+    MoiResourcePlanningState &resource_state, const MoiRecordReplayAccessOutput &access_output,
+    const MoiObjectModeSemantics &semantics, ConSanTransformArtifacts &result);
 
 } // namespace rocjitsu::consan_moi_impl

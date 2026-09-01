@@ -1805,6 +1805,7 @@ void note_dispatch_id_patch_info(ConSanPatchAbiEffects &effects,
 
 void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
                                             const ConSanMoiOperatingPoint &operating_point,
+                                            const MoiObjectModeSemantics &mode_semantics,
                                             rj_code_arch_t arch, ConSanTransformArtifacts &result) {
   if (!result.modified() || result.replacement.empty()) {
     result.warnings.emplace_back(
@@ -2054,7 +2055,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
       const uint16_t scalar_end = static_cast<uint16_t>(std::min<uint32_t>(
           static_cast<uint32_t>(scalar_base) +
               moi_exec_save_sgpr_count(
-                  resolve_moi_exec_save_requirement(options, options, kernel_point), arch),
+                  resolve_moi_exec_save_requirement(options, options, kernel_point, mode_semantics),
+                  arch),
           guest_entry_sgpr_count));
       if (scalar_base < scalar_end) {
         entry_scalar_spill =
@@ -2321,7 +2323,8 @@ void try_apply_owner_epoch_prologue_patch(
     std::span<const uint8_t> bytes, const ConSanOptions &options,
     const ConSanMoiOperatingPoint &operating_point,
     std::span<const ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments,
-    rj_code_arch_t arch, ConSanTransformArtifacts &result) {
+    const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch,
+    ConSanTransformArtifacts &result) {
   if (!moi_initializes_owner_epoch(options, operating_point))
     return;
   if (!consan_is_capability_arch(arch)) {
@@ -2336,7 +2339,7 @@ void try_apply_owner_epoch_prologue_patch(
   }
   const MoiPrologueModePolicy &mode_policy = moi_mode_operations(options.moi_engine).prologue;
   if (operating_point.automatic_moi_private_epoch) {
-    try_apply_private_epoch_prologue_patch(options, operating_point, arch, result);
+    try_apply_private_epoch_prologue_patch(options, operating_point, mode_semantics, arch, result);
     if (!result.errors.empty() || result.moi_operating_point.owner_persistent_vgprs.empty())
       return;
   }
@@ -2628,8 +2631,9 @@ void try_apply_owner_epoch_prologue_patch(
                                      : *kernel_point.moi_owner_sgpr.base();
       const uint16_t borrowed_sgpr_count =
           needs_full_entry_scalar_backup
-              ? moi_exec_save_sgpr_count(
-                    resolve_moi_exec_save_requirement(options, options, kernel_point), arch)
+              ? moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
+                                             options, options, kernel_point, mode_semantics),
+                                         arch)
               : 1u;
       const auto original_descriptor = read_kernel_descriptor(bytes, kernel.descriptor_file_offset);
       if (!original_descriptor) {

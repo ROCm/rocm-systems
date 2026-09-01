@@ -108,8 +108,6 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   effective_options.moi_track_atomics = mode_plan.track_atomics;
   effective_options.moi_track_barriers = mode_plan.track_barriers;
   effective_point.moi_initialize_owner_epoch = mode_plan.initialize_owner_epoch;
-  effective_point.moi_record_replay_dense_barrier_router = mode_plan.dense_barrier_router;
-  effective_point.moi_inline_access_present = mode_plan.inline_access_present;
   result.warnings.insert(result.warnings.end(), std::make_move_iterator(mode_plan.warnings.begin()),
                          std::make_move_iterator(mode_plan.warnings.end()));
   result.errors.insert(result.errors.end(), std::make_move_iterator(mode_plan.errors.begin()),
@@ -121,15 +119,16 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   // chosen. The code bytes, decoded CFG, ownership scopes, and liveness facts
   // do not change during those iterations; retain one analysis state instead
   // of rebuilding the full instruction graph for every option refinement.
-  const MoiResourceProblem resource_problem(code_object_bytes, arch, effective_options,
-                                            effective_options, result.program_inventory,
-                                            result.observation_plan(), moi_candidates);
+  const MoiResourceProblem resource_problem(
+      code_object_bytes, arch, effective_options, effective_options, result.program_inventory,
+      result.observation_plan(), moi_candidates, mode_plan.semantics);
   MoiResourcePlanningStatePtr resource_planning_state_owner =
       make_moi_resource_planning_state(resource_problem, effective_point, result.resource_plans);
   MoiResourcePlanningState &resource_planning_state = *resource_planning_state_owner;
   const auto rebuild_resource_plans = [&] {
     rebuild_moi_resource_plans(resource_planning_state, effective_options, effective_options,
-                               effective_options, effective_point, moi_candidates, result);
+                               effective_options, effective_point, mode_plan.semantics,
+                               moi_candidates, result);
   };
   rebuild_resource_plans();
   const MoiDynamicStackSpillPolicy dynamic_stack_spill =
@@ -199,11 +198,11 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
     result.moi_operating_point = effective_point;
   std::optional<ConSanMoiScalarValidationFailure> scalar_validation_failure;
   if (result.outcome != ConSanTransformOutcome::Unsupported) {
-    scalar_validation_failure =
-        validate_moi_dispatch_id_sgprs(effective_options, effective_options, effective_point, arch);
+    scalar_validation_failure = validate_moi_dispatch_id_sgprs(
+        effective_options, effective_options, effective_point, mode_plan.semantics, arch);
     if (!scalar_validation_failure) {
       scalar_validation_failure = validate_moi_ordinary_scalar_state(
-          effective_options, effective_options, effective_point, arch);
+          effective_options, effective_options, effective_point, mode_plan.semantics, arch);
     }
   }
   if (scalar_validation_failure) {
@@ -285,7 +284,8 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
     // original kernel entry can reach it without consuming a scarce local
     // branch island.
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_point,
-                                         prologue_scratch_assignments, arch, result);
+                                         prologue_scratch_assignments, mode_plan.semantics, arch,
+                                         result);
     owner_epoch_prologue_applied_early =
         std::ranges::any_of(result.patches, [](const ConSanPatchLoweringProduct &patch) {
           return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
@@ -293,11 +293,13 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   }
   if (result.errors.empty())
     apply_moi_mode_patches(code_object_bytes, effective_options, effective_point, arch,
-                           resource_planning_state, moi_candidates, object_facts, result);
+                           resource_planning_state, moi_candidates, object_facts,
+                           mode_plan.semantics, result);
   if (result.errors.empty() && !owner_epoch_prologue_applied_early &&
       (!mode_plan.prologue_requires_consumer || result.modified()))
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_point,
-                                         prologue_scratch_assignments, arch, result);
+                                         prologue_scratch_assignments, mode_plan.semantics, arch,
+                                         result);
   if (result.errors.empty())
     result.moi_operating_point = effective_point;
   if (result.outcome == ConSanTransformOutcome::Unsupported || !result.errors.empty()) {

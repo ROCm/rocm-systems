@@ -349,8 +349,9 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
 [[nodiscard]] std::optional<VgprSpillSequence> build_moi_spill_sequence(
     const ProgramInventory &program_inventory, const ResolvedMoiScratchPlan &resources,
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-    const ConSanMoiOperatingPoint &point, MoiSpillManagers &managers, rj_code_arch_t arch,
-    std::vector<std::string> &warnings, std::optional<uint32_t> private_layout_base) {
+    const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &mode_semantics,
+    MoiSpillManagers &managers, rj_code_arch_t arch, std::vector<std::string> &warnings,
+    std::optional<uint32_t> private_layout_base) {
   if (resources.owner_descriptor_file_offsets.empty()) {
     warnings.emplace_back("ConSan MOI spill requires an owning kernel descriptor");
     return std::nullopt;
@@ -427,7 +428,8 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
         (!saved_frame_offset ||
          *saved_frame_offset >=
              moi_exec_save_sgpr_count(
-                 resolve_moi_exec_save_requirement(request, bound_resources, point), arch))) {
+                 resolve_moi_exec_save_requirement(request, bound_resources, point, mode_semantics),
+                 arch))) {
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no reserved frame-base save slot");
       return std::nullopt;
     }
@@ -436,11 +438,12 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
             ? indirect_state->pc_sgpr
             : static_cast<uint16_t>(*point.moi_exec_save_sgpr + *saved_frame_offset);
     const uint32_t additional_frame_bytes =
-        spill_backed_scalar_window
-            ? static_cast<uint32_t>(moi_exec_save_sgpr_count(
-                  resolve_moi_exec_save_requirement(request, bound_resources, point), arch)) *
-                  SpillManager::kSlotBytes
-            : 0u;
+        spill_backed_scalar_window ? static_cast<uint32_t>(moi_exec_save_sgpr_count(
+                                         resolve_moi_exec_save_requirement(request, bound_resources,
+                                                                           point, mode_semantics),
+                                         arch)) *
+                                         SpillManager::kSlotBytes
+                                   : 0u;
     auto spill = build_dynamic_stack_vgpr_spill_sequence(
         resources.base, resources.count, kDynamicStackTopSgpr, kDynamicFrameBaseSgpr,
         saved_frame_base_sgpr, saved_scc_sgpr, arch, additional_frame_bytes);

@@ -275,6 +275,34 @@ foreach(_file IN LISTS _consan_production_files)
         "(^|[^A-Za-z0-9_])moi_(owner|epoch)_vgpr[(]"
         "accepted owner and epoch projections must stay on the typed pair"
     )
+    _consan_assert_no_match(
+        "${_file}"
+        "moi_(record_replay_dense_barrier_router|inline_access_present)"
+        "mode semantics must not return to the mutable operating point"
+    )
+endforeach()
+
+# Object-wide mode semantics are selected once by their mode owners and then
+# consumed as one immutable product. Common resource and emission components
+# must not become a second authority for either decision.
+foreach(_file IN LISTS _consan_production_files)
+    get_filename_component(_name "${_file}" NAME)
+    if(NOT _name STREQUAL "consan_moi_internal.h" AND
+       NOT _name STREQUAL "consan_moi_record_replay.cpp")
+        _consan_assert_no_match(
+            "${_file}"
+            "semantics[.]dense_barrier_router[ \t]*="
+            "dense barrier routing must be selected only by RecordReplay planning"
+        )
+    endif()
+    if(NOT _name STREQUAL "consan_moi_internal.h" AND
+       NOT _name STREQUAL "consan_moi_inline_shadow.cpp")
+        _consan_assert_no_match(
+            "${_file}"
+            "semantics[.]inline_access_present[ \t]*="
+            "InlineShadow access presence must be selected only by InlineShadow planning"
+        )
+    endif()
 endforeach()
 
 # Dispatch identity is one typed allocation. Its scalar/vector choice and

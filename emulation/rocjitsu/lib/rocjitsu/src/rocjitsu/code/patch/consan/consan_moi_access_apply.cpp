@@ -371,9 +371,9 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ProgramInventory &inventory,
 [[nodiscard]] std::optional<SgprSpillSequence> build_moi_sgpr_spill_sequence(
     const ProgramInventory &inventory, const ResolvedMoiScratchPlan &resources,
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-    const ConSanMoiOperatingPoint &point, MoiSpillManagers &managers, rj_code_arch_t arch,
-    std::vector<std::string> &warnings, std::optional<uint32_t> private_layout_base,
-    const VgprSpillSequence *vgpr_spill) {
+    const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &mode_semantics,
+    MoiSpillManagers &managers, rj_code_arch_t arch, std::vector<std::string> &warnings,
+    std::optional<uint32_t> private_layout_base, const VgprSpillSequence *vgpr_spill) {
   if ((!point.has_moi_scalar_spill()) || !point.moi_exec_save_sgpr)
     return std::nullopt;
   if (!consan_is_capability_arch(arch) || resources.owner_descriptor_file_offsets.empty()) {
@@ -387,7 +387,7 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ProgramInventory &inventory,
     return std::nullopt;
   }
   const uint16_t count = moi_exec_save_sgpr_count(
-      resolve_moi_exec_save_requirement(request, bound_resources, point), arch);
+      resolve_moi_exec_save_requirement(request, bound_resources, point, mode_semantics), arch);
   if (moi_scalar_spill_requires_dynamic_vgpr_frame(inventory, resources, point)) {
     if (vgpr_spill == nullptr || !vgpr_spill->uses_dynamic_stack_frame) {
       warnings.emplace_back(

@@ -174,10 +174,9 @@ private:
       persistent_access_patches_by_owner_;
 };
 
-[[nodiscard]] std::optional<uint16_t>
-operational_barrier_scratch_count(ConSanProbeIntentKind evidence,
-                                  const BoundRuntimeResources &resources,
-                                  const ConSanMoiOperatingPoint &point) {
+[[nodiscard]] std::optional<uint16_t> operational_barrier_scratch_count(
+    ConSanProbeIntentKind evidence, const BoundRuntimeResources &resources,
+    const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &semantics) {
   if (evidence == ConSanProbeIntentKind::BarrierRecord)
     return 6u;
   if (evidence == ConSanProbeIntentKind::SampledBarrierEpoch)
@@ -189,7 +188,7 @@ operational_barrier_scratch_count(ConSanProbeIntentKind evidence,
   // address pair for one aggregate event-counter publication. Ordinary
   // access-bearing objects publish through their access probes and retain the
   // single-register epoch-only barrier plan.
-  return resources.moi_report_buffer_address && !point.moi_inline_access_present ? 3u : 1u;
+  return resources.moi_report_buffer_address && !semantics.inline_access_present ? 3u : 1u;
 }
 
 void note_relocated_barrier_instruction(ConSanPatchInfo &patch,
@@ -773,13 +772,11 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
   return std::nullopt;
 }
 
-void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
-                                                 const ConSanOptions &options,
-                                                 const ConSanMoiOperatingPoint &operating_point,
-                                                 rj_code_arch_t arch,
-                                                 MoiResourcePlanningState &resource_state,
-                                                 const MoiRecordReplayAccessOutput &access_output,
-                                                 ConSanTransformArtifacts &result) {
+void try_apply_inline_shadow_barrier_epoch_patch(
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
+    MoiResourcePlanningState &resource_state, const MoiRecordReplayAccessOutput &access_output,
+    const MoiObjectModeSemantics &semantics, ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers)
     return;
   const ConSanTargetProfile *target = consan_target_profile(arch);
@@ -984,16 +981,16 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
             moi_scalar_spill_requires_dynamic_vgpr_frame(result.program_inventory, *resources,
                                                          candidate_point)) {
-          spill = build_moi_spill_sequence(result.program_inventory, *resources, options, options,
-                                           candidate_point, visible_evidence_spill_managers, arch,
-                                           result.warnings, persistent_end);
+          spill = build_moi_spill_sequence(
+              result.program_inventory, *resources, options, options, candidate_point, semantics,
+              visible_evidence_spill_managers, arch, result.warnings, persistent_end);
           if (!spill)
             continue;
         }
         std::optional<SgprSpillSequence> scalar_spill;
         if (candidate_point.has_compact_moi_scalar_spill()) {
           scalar_spill = build_moi_sgpr_spill_sequence(
-              result.program_inventory, *resources, options, options, candidate_point,
+              result.program_inventory, *resources, options, options, candidate_point, semantics,
               visible_evidence_spill_managers, arch, result.warnings, persistent_end,
               spill ? &*spill : nullptr);
           if (!scalar_spill)
@@ -1112,7 +1109,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     std::optional<MoiRecordEventEmissionPlan> record_emission;
     uint32_t required_private_bytes = 0u;
     const std::optional<uint16_t> scratch_count =
-        operational_barrier_scratch_count(evidence_kind, options, candidate_point);
+        operational_barrier_scratch_count(evidence_kind, options, candidate_point, semantics);
     if (!scratch_count) {
       result.errors.emplace_back(
           "ConSan MOI exact barrier lowering lost its evidence resource contract");
@@ -1148,8 +1145,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           moi_scalar_spill_requires_dynamic_vgpr_frame(result.program_inventory, *resources,
                                                        candidate_point)) {
         spill = build_moi_spill_sequence(result.program_inventory, *resources, options, options,
-                                         candidate_point, visible_evidence_spill_managers, arch,
-                                         result.warnings);
+                                         candidate_point, semantics,
+                                         visible_evidence_spill_managers, arch, result.warnings);
         if (!spill)
           continue;
         required_private_bytes = spill->total_private_bytes;
@@ -1157,10 +1154,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                            *spill);
       }
       if (needs_scalar_spill) {
-        scalar_spill =
-            build_moi_sgpr_spill_sequence(result.program_inventory, *resources, options, options,
-                                          candidate_point, visible_evidence_spill_managers, arch,
-                                          result.warnings, std::nullopt, spill ? &*spill : nullptr);
+        scalar_spill = build_moi_sgpr_spill_sequence(
+            result.program_inventory, *resources, options, options, candidate_point, semantics,
+            visible_evidence_spill_managers, arch, result.warnings, std::nullopt,
+            spill ? &*spill : nullptr);
         if (!scalar_spill)
           continue;
         required_private_bytes =
@@ -1171,7 +1168,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       note_descriptor_requirements(visible_evidence_vgpr_requirements, *resources);
       note_moi_sgpr_requirements(visible_evidence_sgpr_requirements, *resources, options, options,
-                                 candidate_point, arch);
+                                 candidate_point, semantics, arch);
     }
     if (emits_barrier_record) {
       if (!scratch_vgpr) {
@@ -1230,7 +1227,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                 old_text, result, arch, access_output, planned_candidates.size(),
                 moi_reserved_access_sync_island_count(result.program_inventory,
                                                       result.observation_plan(), options, options,
-                                                      operating_point))
+                                                      semantics))
           : std::nullopt;
   if (barrier_island_layout) {
     const uint64_t reserved_words =
@@ -1403,7 +1400,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             consan_arch_has_selectable_vgpr_bank(arch) ||
             (consan_is_capability_arch(arch) &&
              ((updates_exact_epoch && !consan_uses_gfx11_encoding(arch)) ||
-              (emits_barrier_record && candidate_point.moi_record_replay_dense_barrier_router)));
+              (emits_barrier_record && semantics.dense_barrier_router)));
         if (has_dense_router &&
             (candidate_point.moi_exec_save_sgpr || has_spill_backed_dense_router) &&
             !planned.owner_descriptor_file_offsets.empty()) {
@@ -2133,19 +2130,18 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                std::move(lowering_commits), std::move(patches));
 }
 
-void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes,
-                                                  const ConSanOptions &options,
-                                                  const ConSanMoiOperatingPoint &operating_point,
-                                                  rj_code_arch_t arch,
-                                                  const MoiRecordReplayAccessOutput &access_output,
-                                                  std::vector<std::string> &warnings,
-                                                  ConSanTransformArtifacts &result);
+void try_apply_record_replay_barrier_record_patch(
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
+    const MoiRecordReplayAccessOutput &access_output, const MoiObjectModeSemantics &semantics,
+    std::vector<std::string> &warnings, ConSanTransformArtifacts &result);
 
 void try_apply_inline_shadow_barrier_patch(std::span<const uint8_t> bytes,
                                            const ConSanOptions &options,
                                            const ConSanMoiOperatingPoint &operating_point,
                                            rj_code_arch_t arch,
                                            MoiResourcePlanningState &resource_state,
+                                           const MoiObjectModeSemantics &semantics,
                                            ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers)
     return;
@@ -2153,22 +2149,20 @@ void try_apply_inline_shadow_barrier_patch(std::span<const uint8_t> bytes,
   if (barrier_point.has_inline_moi_scalar_spill())
     barrier_point.moi_exec_save_sgpr.reset();
   try_apply_inline_shadow_barrier_epoch_patch(bytes, options, barrier_point, arch, resource_state,
-                                              {}, result);
+                                              {}, semantics, result);
 }
 
-void try_apply_record_replay_barrier_patch(std::span<const uint8_t> bytes,
-                                           const ConSanOptions &options,
-                                           const ConSanMoiOperatingPoint &operating_point,
-                                           rj_code_arch_t arch,
-                                           MoiResourcePlanningState &resource_state,
-                                           const MoiRecordReplayAccessOutput &access_output,
-                                           ConSanTransformArtifacts &result) {
+void try_apply_record_replay_barrier_patch(
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
+    MoiResourcePlanningState &resource_state, const MoiRecordReplayAccessOutput &access_output,
+    const MoiObjectModeSemantics &semantics, ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers)
     return;
 
   std::vector<std::string> record_warnings;
   try_apply_record_replay_barrier_record_patch(bytes, options, operating_point, arch, access_output,
-                                               record_warnings, result);
+                                               semantics, record_warnings, result);
   const auto publish_record_warnings = [&](bool omit_recovered_route_failures) {
     for (std::string &warning : record_warnings) {
       const bool recovered_route_failure =
@@ -2198,7 +2192,7 @@ void try_apply_record_replay_barrier_patch(std::span<const uint8_t> bytes,
   const size_t barrier_count_before = std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   try_apply_inline_shadow_barrier_epoch_patch(bytes, options, operating_point, arch, resource_state,
-                                              access_output, result);
+                                              access_output, semantics, result);
   const size_t barrier_count_after = std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   if (!result.errors.empty() || barrier_count_after - barrier_count_before < failed_entry_count) {
@@ -2211,13 +2205,11 @@ void try_apply_record_replay_barrier_patch(std::span<const uint8_t> bytes,
   }
 }
 
-void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes,
-                                                  const ConSanOptions &options,
-                                                  const ConSanMoiOperatingPoint &operating_point,
-                                                  rj_code_arch_t arch,
-                                                  const MoiRecordReplayAccessOutput &access_output,
-                                                  std::vector<std::string> &warnings,
-                                                  ConSanTransformArtifacts &result) {
+void try_apply_record_replay_barrier_record_patch(
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
+    const MoiRecordReplayAccessOutput &access_output, const MoiObjectModeSemantics &semantics,
+    std::vector<std::string> &warnings, ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers)
     return;
   if (!consan_is_capability_arch(arch)) {
@@ -2331,9 +2323,10 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       planned_candidate.kernel_descriptor_file_offset =
           resources->owner_descriptor_file_offsets.front();
     }
-    auto record_event = plan_moi_record_event(
-        bytes, result.program_inventory, warnings, *resources, options, options, operating_point,
-        result.moi_operating_point, spill_managers, arch, "ConSan MOI barrier record patch");
+    auto record_event =
+        plan_moi_record_event(bytes, result.program_inventory, warnings, *resources, options,
+                              options, operating_point, result.moi_operating_point, semantics,
+                              spill_managers, arch, "ConSan MOI barrier record patch");
     if (!record_event)
       continue;
     selected_candidates.push_back({std::move(*record_event), std::move(planned_candidate)});
@@ -2353,7 +2346,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     const auto reserved_barrier_island_layout = find_record_replay_reserved_barrier_island_begin(
         old_text, result, arch, access_output, selected_candidates.size(),
         moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan(),
-                                              options, options, operating_point));
+                                              options, options, semantics));
     if (reserved_barrier_island_layout) {
       const uint64_t reserved_words = reserved_barrier_island_layout->reserved_slot_count *
                                       reserved_barrier_island_layout->slot_words;

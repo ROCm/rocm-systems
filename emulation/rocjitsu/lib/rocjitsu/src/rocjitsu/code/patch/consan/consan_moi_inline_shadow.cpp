@@ -119,7 +119,7 @@ MoiObjectModePlan plan_inline_shadow_object_mode(const ConSanRequest &request,
         "ConSan MOI skipped atomic ordering instrumentation for a code object with no relevant "
         "atomic sites");
   }
-  plan.inline_access_present = facts.has_access_candidate;
+  plan.semantics.inline_access_present = facts.has_access_candidate;
   plan.inline_atomic_without_access =
       !facts.has_access_candidate && plan.track_atomics && facts.has_admitted_atomic;
   return plan;
@@ -129,15 +129,18 @@ void apply_inline_shadow_mode_patches(std::span<const uint8_t> bytes, const ConS
                                       ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
                                       MoiResourcePlanningState &resource_state,
                                       std::span<const ConSanMoiCandidate> candidates,
-                                      const MoiObjectFacts &, ConSanTransformArtifacts &result) {
+                                      const MoiObjectFacts &,
+                                      const MoiObjectModeSemantics &semantics,
+                                      ConSanTransformArtifacts &result) {
   try_apply_inline_shadow_patch(bytes, options, operating_point, arch, resource_state, candidates,
-                                result);
+                                semantics, result);
   if (!result.errors.empty())
     return;
   try_apply_inline_shadow_barrier_patch(bytes, options, operating_point, arch, resource_state,
-                                        result);
+                                        semantics, result);
   if (result.errors.empty())
-    try_apply_inline_atomic_ordering_patch(bytes, options, operating_point, arch, result);
+    try_apply_inline_atomic_ordering_patch(bytes, options, operating_point, arch, semantics,
+                                           result);
 }
 
 uint16_t inline_shadow_access_scratch_vgpr_count(const ConSanRequest &request,

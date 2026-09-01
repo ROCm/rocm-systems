@@ -227,7 +227,7 @@ order_moi_replay_access_candidates(std::span<const ConSanMoiCandidate> admitted,
 moi_reserved_access_sync_island_count(const ProgramInventory &program_inventory,
                                       const ConSanObservationPlan &observation_plan,
                                       const ConSanRequest &request, const TransformPolicy &policy,
-                                      const ConSanMoiOperatingPoint &point);
+                                      const MoiObjectModeSemantics &mode_semantics);
 
 [[nodiscard]] std::span<const ConSanPreappliedReservedRange>
 moi_resource_reserved_ranges(const MoiResourcePlanningState &state);
@@ -394,15 +394,16 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
 
 [[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
 validate_moi_dispatch_id_sgprs(const ConSanRequest &request, const BoundRuntimeResources &resources,
-                               const ConSanMoiOperatingPoint &point, rj_code_arch_t arch);
+                               const ConSanMoiOperatingPoint &point,
+                               const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch);
 
 [[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
 validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point);
 
-[[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
-validate_moi_ordinary_scalar_state(const ConSanRequest &request,
-                                   const BoundRuntimeResources &resources,
-                                   const ConSanMoiOperatingPoint &point, rj_code_arch_t arch);
+[[nodiscard]] std::optional<ConSanMoiScalarValidationFailure> validate_moi_ordinary_scalar_state(
+    const ConSanRequest &request, const BoundRuntimeResources &resources,
+    const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &mode_semantics,
+    rj_code_arch_t arch);
 
 [[nodiscard]] ConSanMoiPersistentPlacementUpdate configure_automatic_moi_persistent_vgprs(
     const ConSanMoiOperatingPoint &base, const MoiResourceProblem &problem,
@@ -511,7 +512,8 @@ void note_descriptor_requirements(MoiDescriptorVgprRequirements &requirements,
 void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
                                 const ResolvedMoiScratchPlan &plan, const ConSanRequest &request,
                                 const BoundRuntimeResources &resources,
-                                const ConSanMoiOperatingPoint &point, rj_code_arch_t arch);
+                                const ConSanMoiOperatingPoint &point,
+                                const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch);
 
 void note_spill_descriptor_requirements(MoiDescriptorPrivateRequirements &requirements,
                                         const ResolvedMoiScratchPlan &plan,

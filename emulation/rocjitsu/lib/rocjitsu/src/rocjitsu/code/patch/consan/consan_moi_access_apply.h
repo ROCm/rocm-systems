@@ -393,8 +393,8 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ProgramInventory &inventory,
 [[nodiscard]] std::optional<SgprSpillSequence> build_moi_sgpr_spill_sequence(
     const ProgramInventory &inventory, const ResolvedMoiScratchPlan &resources,
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-    const ConSanMoiOperatingPoint &point, MoiSpillManagers &managers, rj_code_arch_t arch,
-    std::vector<std::string> &warnings, std::optional<uint32_t> private_layout_base,
-    const VgprSpillSequence *vgpr_spill = nullptr);
+    const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &mode_semantics,
+    MoiSpillManagers &managers, rj_code_arch_t arch, std::vector<std::string> &warnings,
+    std::optional<uint32_t> private_layout_base, const VgprSpillSequence *vgpr_spill = nullptr);
 
 } // namespace rocjitsu::consan_moi_impl

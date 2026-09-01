@@ -4118,3 +4118,73 @@ still not material for a 91-thousand-line implementation, however. Remaining
 target locality, broad mutable products, larger deletion opportunities, the
 target-side extension exercise, and the independent Section 14 completion
 audit remain open. The goal therefore remains active.
+
+### 16.46 Convergence checkpoint 45: immutable object-mode semantics
+
+A definition-to-runtime trace of the broad MOI operating point found two facts
+that were not resource-solver choices at all. Record/Replay planning selected
+whether a normalized object and target require the dense barrier router, while
+InlineShadow planning selected whether the admitted object contains an ordinary
+access probe. The top-level coordinator then copied both facts into
+`ConSanMoiOperatingPoint`, after which common resource sizing, placement,
+prologue construction, and emission read them as though they were mutable
+solver results. This created a second authority-shaped representation for mode
+semantics and made retries carry facts that never participate in retry
+selection.
+
+`MoiObjectModePlan` now publishes one narrow `MoiObjectModeSemantics` value.
+Record/Replay is the sole production writer of `dense_barrier_router`, deriving
+it from normalized target support and barrier inventory; InlineShadow is the
+sole writer of `inline_access_present`, deriving it from admitted object
+inventory. The coordinator selects that value once, `MoiResourceProblem`
+captures it by value with the other immutable solver inputs, and common
+resource and emission components receive it through const interfaces. The
+operating point retains only selections that the resource/placement pipeline
+can actually refine. No common component rediscovers either fact from a mode
+enumerator or concrete architecture identity.
+
+The two operating-point fields and all fourteen production references to their
+old names are deleted. The architecture gate requires those names to remain
+absent from every production file and rejects either semantic assignment
+outside its one mode-owned planner (apart from the product's field definition).
+Existing focused tests now prove that the resource problem binds the immutable
+value, scalar-ABI projection consumes it separately from the operating point,
+all normalized dense-router cases remain mode-owned, InlineShadow access
+presence remains inventory-driven, and shared barrier sizing consumes the
+selected semantics. The hypothetical fifth-mode fixture continues to publish
+object semantics without target-package changes.
+
+| Signal | Checkpoint 45 | Cumulative change | Slice change from checkpoint 44 |
+| --- | ---: | ---: | ---: |
+| Production files | 262 | +33 | 0 |
+| Physical production lines | 105,475 | +500 | +66 |
+| Nonblank production lines | 99,183 | +100 | +62 |
+| Production implementation lines | 91,464 | **+14** | +66 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | 206 / 56 | **-70 / -1** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 206 / 28 | +6 / 0 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 358 / 63 | +68 / +12 | **-2 / 0** |
+| Mode-semantic facts stored in the mutable operating point | **0** | n/a | **-2** |
+| Production assignments of each object-mode semantic | **1 mode owner** | n/a | exact owner gate added |
+| Retired operating-point semantic-name references | **0** | n/a | **-14** |
+| Test inventory | **5,380** | **+35** | 0 |
+
+Validation includes a final-tree `-j16` build; sixteen direct mode-planning,
+immutable-binding, scalar-projection, and barrier-sizing regressions; the exact
+architecture-boundary test; all 4,745 nonphysical tests at `-j16`; and all 635
+physical gfx1201 tests serialized at `-j1`. No test was removed, renamed,
+disabled, added, or replaced; existing tests were strengthened at the changed
+ownership boundary.
+
+This checkpoint strengthens Sections 14.1, 14.3, 14.4, 14.5, 14.6, 14.7, and
+14.9. It removes duplicate mutable authority and leaves a small, explicit
+mode-to-common semantic product. The explicit const threading across the
+existing wide call graph costs 66 implementation lines, however, erasing the
+previous cumulative 52-line reduction and leaving production fourteen lines
+above the starting baseline. That is an honestly recorded migration cost, not
+Section 14.8 progress, and it increases the urgency of converging or deleting
+the wide plumbing that made a two-field product expensive to carry. Remaining
+target locality, broad mutable products and transactions, larger legacy
+harvesting, material whole-refactoring shrinkage, the target-side extension
+exercise, and the independent Section 14 completion audit remain open. The
+goal therefore remains active.

@@ -2,7 +2,8 @@ void try_apply_first_light_access_record_patch(
     std::span<const uint8_t> bytes, const ConSanOptions &options,
     const ConSanMoiOperatingPoint &operating_point, const ConSanTargetProfile &target,
     MoiResourcePlanningState &resource_state, MoiRecordReplayAccessOutput &access_output,
-    std::span<const ConSanMoiCandidate> admitted, ConSanTransformArtifacts &result) {
+    std::span<const ConSanMoiCandidate> admitted, const MoiObjectModeSemantics &mode_semantics,
+    ConSanTransformArtifacts &result) {
   const rj_code_arch_t arch = target.arch;
   if (!options.moi_report_buffer_address)
     return;
@@ -145,7 +146,7 @@ void try_apply_first_light_access_record_patch(
       use_indirect_appended
           ? moi_reserved_access_sync_island_count(result.program_inventory,
                                                   result.observation_plan(), options, options,
-                                                  operating_point)
+                                                  mode_semantics)
           : 0u;
   const uint64_t reserved_sync_slot_words =
       has_branch_only_scalar_assignment
@@ -618,8 +619,9 @@ void try_apply_first_light_access_record_patch(
         moi_scalar_spill_requires_dynamic_vgpr_frame(result.program_inventory, *resources,
                                                      candidate_point);
     auto probe = plan_moi_probe_resources(
-        result.program_inventory, *resources, options, options, candidate_point, spill_managers,
-        arch, private_layout, candidate_point.has_compact_moi_scalar_spill(), result.warnings);
+        result.program_inventory, *resources, options, options, candidate_point, mode_semantics,
+        spill_managers, arch, private_layout, candidate_point.has_compact_moi_scalar_spill(),
+        result.warnings);
     if (!probe) {
       if (needs_vgpr_spill) {
         result.warnings.emplace_back(
@@ -1061,7 +1063,7 @@ void try_apply_first_light_access_record_patch(
   // every planned reservoir when synchronization is enabled; otherwise an
   // access batch that happens not to claim one can strand a later pass.
   if (moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan(),
-                                            options, options, operating_point) != 0u) {
+                                            options, options, mode_semantics) != 0u) {
     for (BranchOnlyDirectRelayReservoir &reservoir : direct_branch_reservoirs.reservoirs)
       reservoir.used = true;
   }
@@ -1120,7 +1122,7 @@ void try_apply_first_light_access_record_patch(
             planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, options, options,
-                               candidate_point, arch);
+                               candidate_point, mode_semantics, arch);
     note_moi_access_private_requirements(private_requirements, planned_patch);
   }
 

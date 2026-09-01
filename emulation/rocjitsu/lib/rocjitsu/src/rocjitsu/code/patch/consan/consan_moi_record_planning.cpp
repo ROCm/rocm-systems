@@ -103,14 +103,14 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 /// VGPR/SGPR preservation sequences needed by emission. Failure rejects only
 /// the current event and appends the same contextual warning used by its
 /// event-specific planner.
-[[nodiscard]] std::optional<MoiPlannedRecordEvent>
-plan_moi_record_event(std::span<const uint8_t> bytes, const ProgramInventory &inventory,
-                      std::vector<std::string> &warnings, const ResolvedMoiScratchPlan &resources,
-                      const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-                      const ConSanMoiOperatingPoint &base_point,
-                      const ConSanMoiOperatingPoint &allocation, MoiSpillManagers &spill_managers,
-                      rj_code_arch_t arch, std::string_view warning_context,
-                      std::optional<uint32_t> active_private_segment_size) {
+[[nodiscard]] std::optional<MoiPlannedRecordEvent> plan_moi_record_event(
+    std::span<const uint8_t> bytes, const ProgramInventory &inventory,
+    std::vector<std::string> &warnings, const ResolvedMoiScratchPlan &resources,
+    const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
+    const ConSanMoiOperatingPoint &base_point, const ConSanMoiOperatingPoint &allocation,
+    const MoiObjectModeSemantics &mode_semantics, MoiSpillManagers &spill_managers,
+    rj_code_arch_t arch, std::string_view warning_context,
+    std::optional<uint32_t> active_private_segment_size) {
   ConSanMoiOperatingPoint event_point = base_point;
   if (!apply_moi_transient_sgpr_assignment(request, event_point, allocation,
                                            resources.owner_descriptor_file_offsets)) {
@@ -171,16 +171,16 @@ plan_moi_record_event(std::span<const uint8_t> bytes, const ProgramInventory &in
     if (!derived_owner)
       return std::nullopt;
   }
-  auto probe = plan_moi_probe_resources(inventory, resources, request, bound_resources, event_point,
-                                        spill_managers, arch, std::move(private_layout),
-                                        event_point.has_compact_moi_scalar_spill(), warnings,
-                                        active_private_segment_size);
+  auto probe = plan_moi_probe_resources(
+      inventory, resources, request, bound_resources, event_point, mode_semantics, spill_managers,
+      arch, std::move(private_layout), event_point.has_compact_moi_scalar_spill(), warnings,
+      active_private_segment_size);
   if (!probe)
     return std::nullopt;
 
   MoiDescriptorSgprRequirements scalar_requirements;
   note_moi_sgpr_requirements(scalar_requirements, resources, request, bound_resources, event_point,
-                             arch);
+                             mode_semantics, arch);
   uint16_t required_sgpr_count = 0u;
   for (const auto &[descriptor, count] : scalar_requirements) {
     (void)descriptor;

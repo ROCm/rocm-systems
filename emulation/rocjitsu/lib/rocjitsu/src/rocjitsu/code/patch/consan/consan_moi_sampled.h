@@ -18,27 +18,24 @@ sampled_reserved_barrier_island_count(const ConSanObservationPlan &observation_p
     const ConSanObservationPlan &observation_plan, const ConSanRequest &request,
     const BoundRuntimeResources &resources, const TransformPolicy &policy);
 
-void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
-                                               const ConSanOptions &options,
-                                               const ConSanMoiOperatingPoint &operating_point,
-                                               rj_code_arch_t arch,
-                                               MoiResourcePlanningState &resource_state,
-                                               std::span<const ConSanMoiCandidate> admitted,
-                                               ConSanTransformArtifacts &result);
+void try_apply_direct_sampled_watchpoint_patch(
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
+    MoiResourcePlanningState &resource_state, std::span<const ConSanMoiCandidate> admitted,
+    const MoiObjectModeSemantics &mode_semantics, ConSanTransformArtifacts &result);
 
-void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
-                                          const ConSanOptions &options,
-                                          const ConSanMoiOperatingPoint &operating_point,
-                                          rj_code_arch_t arch,
-                                          MoiResourcePlanningState &resource_state,
-                                          std::span<const ConSanMoiCandidate> admitted,
-                                          ConSanTransformArtifacts &result);
+void try_apply_sampled_barrier_sync_patch(
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
+    MoiResourcePlanningState &resource_state, std::span<const ConSanMoiCandidate> admitted,
+    const MoiObjectModeSemantics &mode_semantics, ConSanTransformArtifacts &result);
 
 void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                                          const ConSanOptions &options,
                                          const ConSanMoiOperatingPoint &operating_point,
                                          rj_code_arch_t arch,
                                          MoiResourcePlanningState &resource_state,
+                                         const MoiObjectModeSemantics &mode_semantics,
                                          ConSanTransformArtifacts &result);
 
 } // namespace rocjitsu::consan_moi_impl

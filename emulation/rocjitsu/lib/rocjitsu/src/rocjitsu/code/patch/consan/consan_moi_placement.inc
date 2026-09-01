@@ -83,7 +83,7 @@ first_admitted_moi_register_range(uint32_t begin, uint16_t width, uint16_t limit
 moi_reserved_access_sync_island_count(const ProgramInventory &program_inventory,
                                       const ConSanObservationPlan &observation_plan,
                                       const ConSanRequest &request, const TransformPolicy &policy,
-                                      const ConSanMoiOperatingPoint &point) {
+                                      const MoiObjectModeSemantics &mode_semantics) {
   const SynchronizationInventoryView synchronization = program_inventory.sync();
   const uint64_t barrier_count =
       request.moi_track_barriers
@@ -94,7 +94,7 @@ moi_reserved_access_sync_island_count(const ProgramInventory &program_inventory,
                       if (decision.reason == ConSanBarrierPolicyReason::RuntimeKernelExcluded) {
                         return false;
                       }
-                      if (!point.moi_record_replay_dense_barrier_router) {
+                      if (!mode_semantics.dense_barrier_router) {
                         return true;
                       }
                       const ConSanSyncEvent *event = synchronization.find_unique_event(
@@ -1014,7 +1014,7 @@ struct MoiResourcePlanningState {
                            const ConSanRequest &request, const BoundRuntimeResources &resources,
                            const ConSanMoiOperatingPoint &point)
       : MoiResourcePlanningState(MoiResourceProblem(input, arch, request, resources,
-                                                    program_inventory, observation_plan, {}),
+                                                    program_inventory, observation_plan, {}, {}),
                                  point, site_plans) {}
 
   [[nodiscard]] MoiDenseOwnerLivenessProof
@@ -3103,15 +3103,15 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
 [[nodiscard]] bool moi_sgpr_range_overlaps_transient_state(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &point, const ConSanMoiOperatingPoint &allocation, uint16_t base,
-    uint16_t width, rj_code_arch_t arch) {
+    uint16_t width, const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch) {
   const auto overlaps = [&](std::optional<uint16_t> state_base, uint16_t state_width = 1u) {
     return state_base && range_overlaps(base, width, *state_base, state_width);
   };
   const auto overlaps_assignment = [&](const ConSanMoiTransientSgprAssignment &assignment) {
-    return range_overlaps(
-               base, width, assignment.exec_save_sgpr,
-               moi_exec_save_sgpr_count(
-                   resolve_moi_exec_save_requirement(request, resources, point), arch)) ||
+    return range_overlaps(base, width, assignment.exec_save_sgpr,
+                          moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
+                                                       request, resources, point, mode_semantics),
+                                                   arch)) ||
            overlaps(assignment.owner_sgpr) ||
            overlaps(assignment.dispatch_id_sgpr, kMoiDispatchStateSgprCount) ||
            (assignment.router_jump && (overlaps(assignment.router_jump->pc_sgpr, 2u) ||
@@ -3129,7 +3129,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       });
   return overlaps(point.moi_exec_save_sgpr,
                   moi_exec_save_sgpr_count(
-                      resolve_moi_exec_save_requirement(request, resources, point), arch)) ||
+                      resolve_moi_exec_save_requirement(request, resources, point, mode_semantics),
+                      arch)) ||
          overlaps(point.moi_owner_sgpr.base()) ||
          overlaps(point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount) ||
          overlaps_auxiliary_state ||
@@ -3262,7 +3263,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   }
 
   const uint16_t count = moi_exec_save_sgpr_count(
-      resolve_moi_exec_save_requirement(request, resources, options), arch);
+      resolve_moi_exec_save_requirement(request, resources, options, problem.mode_semantics()),
+      arch);
   const uint16_t limit = moi_ordinary_sgpr_limit(arch);
   const auto overlaps_architectural_state = [&](uint16_t base, uint16_t width) {
     return persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch);
@@ -3816,7 +3818,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   if (options.moi_exec_save_sgpr)
     return false;
   const uint16_t count = moi_exec_save_sgpr_count(
-      resolve_moi_exec_save_requirement(request, resources, options), arch);
+      resolve_moi_exec_save_requirement(request, resources, options, problem.mode_semantics()),
+      arch);
   if (count == 0)
     return false;
 
@@ -3886,7 +3889,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       continue;
     }
     options.moi_exec_save_sgpr = base;
-    options.moi_exec_save_sgprs_persistent = inline_layout && options.moi_inline_access_present;
+    options.moi_exec_save_sgprs_persistent =
+        inline_layout && problem.mode_semantics().inline_access_present;
     warnings.emplace_back("ConSan MOI automatically assigned EXEC-save SGPRs s" +
                           std::to_string(base) + ":s" + std::to_string(base + count - 1u));
     return true;
@@ -4103,8 +4107,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   // can preserve a transient window in private memory, but entry islands and
   // cross-site visible-evidence state still require genuinely dead/fresh
   // registers outside that window.
-  if (consan_uses_gfx12_encoding(arch) && inline_layout && options.moi_inline_access_present &&
-      state.valid && saw_site) {
+  if (consan_uses_gfx12_encoding(arch) && inline_layout &&
+      problem.mode_semantics().inline_access_present && state.valid && saw_site) {
     const size_t ordinary_access_count =
         std::ranges::count_if(candidates, [](const ConSanMoiCandidate &candidate) {
           return candidate.kind == ConSanLdsAccessKind::Read ||
@@ -4308,9 +4312,10 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   for (uint32_t sgpr = scalar_contexts.tail_floor; sgpr < moi_ordinary_sgpr_limit(arch); ++sgpr) {
     if (point.moi_exec_save_sgpr &&
         range_overlaps(static_cast<uint16_t>(sgpr), 1u, *point.moi_exec_save_sgpr,
-                       moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
-                                                    problem.request(), problem.resources(), point),
-                                                arch))) {
+                       moi_exec_save_sgpr_count(
+                           resolve_moi_exec_save_requirement(problem.request(), problem.resources(),
+                                                             point, problem.mode_semantics()),
+                           arch))) {
       continue;
     }
     if (!moi_scalar_contexts_admit_reserved_window(scalar_contexts.summaries,
@@ -4448,8 +4453,9 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
         if (options.moi_exec_save_sgpr &&
             range_overlaps(
                 candidate, dispatch_state_count, *options.moi_exec_save_sgpr,
-                moi_exec_save_sgpr_count(
-                    resolve_moi_exec_save_requirement(request, resources, options), arch)))
+                moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
+                                             request, resources, options, problem.mode_semantics()),
+                                         arch)))
           return false;
         return true;
       });
@@ -4496,8 +4502,9 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
       if (options.moi_exec_save_sgpr &&
           range_overlaps(
               static_cast<uint16_t>(base), dispatch_state_count, *options.moi_exec_save_sgpr,
-              moi_exec_save_sgpr_count(
-                  resolve_moi_exec_save_requirement(request, resources, options), arch))) {
+              moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
+                                           request, resources, options, problem.mode_semantics()),
+                                       arch))) {
         continue;
       }
       options.moi_dispatch_identity.set_sgpr(static_cast<uint16_t>(base), true);
@@ -4554,9 +4561,10 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
                                     1u)) &&
                    (!options.moi_exec_save_sgpr ||
                     !range_overlaps(candidate, dispatch_state_count, *options.moi_exec_save_sgpr,
-                                    moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
-                                                                 request, resources, options),
-                                                             arch))) &&
+                                    moi_exec_save_sgpr_count(
+                                        resolve_moi_exec_save_requirement(
+                                            request, resources, options, problem.mode_semantics()),
+                                        arch))) &&
                    (!has_dynamic_stack_owner ||
                     !moi_sgpr_range_overlaps_dynamic_stack_state(candidate, dispatch_state_count));
           });
@@ -4688,7 +4696,8 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
           if (!owner_contexts ||
               !moi_scalar_contexts_admit_reserved_window(
                   owner_contexts->summaries, *point.moi_exec_save_sgpr,
-                  moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(input, input, point),
+                  moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
+                                               input, input, point, problem.mode_semantics()),
                                            arch),
                   arch)) {
             continue;
@@ -4725,7 +4734,8 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
 
 [[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
 validate_moi_dispatch_id_sgprs(const ConSanRequest &request, const BoundRuntimeResources &resources,
-                               const ConSanMoiOperatingPoint &point, rj_code_arch_t arch) {
+                               const ConSanMoiOperatingPoint &point,
+                               const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch) {
   if (!point.moi_dispatch_identity.sgpr())
     return std::nullopt;
   const uint16_t base = *point.moi_dispatch_identity.sgpr();
@@ -4735,9 +4745,10 @@ validate_moi_dispatch_id_sgprs(const ConSanRequest &request, const BoundRuntimeR
       range_overlaps(base, dispatch_state_count, *point.moi_owner_sgpr.base(), 1u);
   const bool overlaps_exec =
       point.moi_exec_save_sgpr &&
-      range_overlaps(base, dispatch_state_count, *point.moi_exec_save_sgpr,
-                     moi_exec_save_sgpr_count(
-                         resolve_moi_exec_save_requirement(request, resources, point), arch));
+      range_overlaps(
+          base, dispatch_state_count, *point.moi_exec_save_sgpr,
+          moi_exec_save_sgpr_count(
+              resolve_moi_exec_save_requirement(request, resources, point, mode_semantics), arch));
   const bool below_entry_window = base < 20u;
   const bool unaligned = base % 2u != 0u;
   const bool beyond_ordinary_file =
@@ -4800,10 +4811,10 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
-validate_moi_ordinary_scalar_state(const ConSanRequest &request,
-                                   const BoundRuntimeResources &resources,
-                                   const ConSanMoiOperatingPoint &point, rj_code_arch_t arch) {
+[[nodiscard]] std::optional<ConSanMoiScalarValidationFailure> validate_moi_ordinary_scalar_state(
+    const ConSanRequest &request, const BoundRuntimeResources &resources,
+    const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &mode_semantics,
+    rj_code_arch_t arch) {
   const ConSanMoiOperatingPoint &options = point;
   const uint16_t limit = moi_ordinary_sgpr_limit(arch);
   const bool inline_layout =
@@ -4816,12 +4827,14 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
       options.moi_exec_save_sgpr &&
       (static_cast<uint32_t>(*options.moi_exec_save_sgpr) +
                moi_exec_save_sgpr_count(
-                   resolve_moi_exec_save_requirement(request, resources, point), arch) >
+                   resolve_moi_exec_save_requirement(request, resources, point, mode_semantics),
+                   arch) >
            limit ||
        overlaps_architectural_state(
            options.moi_exec_save_sgpr,
-           moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(request, resources, point),
-                                    arch)));
+           moi_exec_save_sgpr_count(
+               resolve_moi_exec_save_requirement(request, resources, point, mode_semantics),
+               arch)));
   const bool owner_invalid = options.moi_owner_sgpr.base() &&
                              (*options.moi_owner_sgpr.base() >= limit ||
                               overlaps_architectural_state(options.moi_owner_sgpr.base(), 1u));
@@ -4866,7 +4879,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
       return false;
     const uint16_t base = *options.moi_branch_only_spill->dynamic_stack_borrowed_sgpr;
     const uint16_t exec_count = moi_exec_save_sgpr_count(
-        resolve_moi_exec_save_requirement(request, resources, point), arch);
+        resolve_moi_exec_save_requirement(request, resources, point, mode_semantics), arch);
     const bool overlaps_persistent =
         (options.moi_persistent_sgprs.owner() &&
          range_overlaps(base, 2u, *options.moi_persistent_sgprs.owner(), 1u)) ||
@@ -5143,10 +5156,11 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
           resolved_contexts ? resolved_contexts->tail_floor : moi_ordinary_sgpr_limit(arch);
       const auto unavailable = [&](uint16_t base) {
         if ((options.moi_exec_save_sgpr &&
-             range_overlaps(
-                 base, scalar_count, *options.moi_exec_save_sgpr,
-                 moi_exec_save_sgpr_count(
-                     resolve_moi_exec_save_requirement(request, resources, options), arch))) ||
+             range_overlaps(base, scalar_count, *options.moi_exec_save_sgpr,
+                            moi_exec_save_sgpr_count(
+                                resolve_moi_exec_save_requirement(request, resources, options,
+                                                                  problem.mode_semantics()),
+                                arch))) ||
             (options.moi_dispatch_identity.sgpr() &&
              range_overlaps(base, scalar_count, *options.moi_dispatch_identity.sgpr(),
                             kMoiDispatchStateSgprCount)) ||
@@ -5241,7 +5255,8 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
           }
         }
         if (moi_sgpr_range_overlaps_transient_state(request, resources, scalar_options, options,
-                                                    base, scalar_count, arch)) {
+                                                    base, scalar_count, problem.mode_semantics(),
+                                                    arch)) {
           return true;
         }
         return std::ranges::any_of(scalar_contexts,
@@ -5291,7 +5306,8 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
             }
           }
           if (moi_sgpr_range_overlaps_transient_state(request, resources, scalar_options, options,
-                                                      base, kWorkgroupScalarCount, arch) ||
+                                                      base, kWorkgroupScalarCount,
+                                                      problem.mode_semantics(), arch) ||
               persistent_sgpr_range_overlaps_reserved_ordinary_range(base, kWorkgroupScalarCount,
                                                                      arch)) {
             return true;
@@ -5473,7 +5489,7 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
       const uint16_t scalar_limit = moi_ordinary_sgpr_limit(arch);
       const auto unavailable = [&](uint16_t base) {
         if (moi_sgpr_range_overlaps_transient_state(request, resources, options, options, base,
-                                                    scalar_count, arch) ||
+                                                    scalar_count, problem.mode_semantics(), arch) ||
             moi_sgpr_range_overlaps_dynamic_stack_state(base, scalar_count)) {
           return true;
         }
@@ -5745,7 +5761,8 @@ validate_moi_ordinary_scalar_state(const ConSanRequest &request,
     }
     const auto overlaps_reserved_state = [&](uint16_t base) {
       return moi_sgpr_range_overlaps_transient_state(request, resources, options, options, base,
-                                                     scalar_count, arch) ||
+                                                     scalar_count, problem.mode_semantics(),
+                                                     arch) ||
              (has_dynamic_stack_owner &&
               (range_overlaps(base, scalar_count, kDynamicStackTopSgpr, 1u) ||
                range_overlaps(base, scalar_count, kDynamicFrameBaseSgpr, 1u))) ||
@@ -5877,11 +5894,12 @@ void note_descriptor_requirements(MoiDescriptorVgprRequirements &requirements,
 void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
                                 const ResolvedMoiScratchPlan &plan, const ConSanRequest &request,
                                 const BoundRuntimeResources &resources,
-                                const ConSanMoiOperatingPoint &point, rj_code_arch_t arch) {
+                                const ConSanMoiOperatingPoint &point,
+                                const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch) {
   uint16_t required_count = 0;
   if (point.moi_exec_save_sgpr) {
     const uint16_t count = moi_exec_save_sgpr_count(
-        resolve_moi_exec_save_requirement(request, resources, point), arch);
+        resolve_moi_exec_save_requirement(request, resources, point, mode_semantics), arch);
     required_count = static_cast<uint16_t>(*point.moi_exec_save_sgpr + count);
   }
   if (request.moi_owner_source == ConSanMoiOwnerSource::HwId && point.moi_owner_sgpr.base()) {

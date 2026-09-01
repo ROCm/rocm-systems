@@ -48,8 +48,9 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
 [[nodiscard]] std::optional<VgprSpillSequence> build_moi_spill_sequence(
     const ProgramInventory &program_inventory, const ResolvedMoiScratchPlan &resources,
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-    const ConSanMoiOperatingPoint &point, MoiSpillManagers &managers, rj_code_arch_t arch,
-    std::vector<std::string> &warnings, std::optional<uint32_t> private_layout_base = std::nullopt);
+    const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &mode_semantics,
+    MoiSpillManagers &managers, rj_code_arch_t arch, std::vector<std::string> &warnings,
+    std::optional<uint32_t> private_layout_base = std::nullopt);
 
 [[nodiscard]] bool apply_moi_descriptor_requirements(
     CodeObjectPatcher &patcher, const AmdGpuCodeObject &active_code_object,

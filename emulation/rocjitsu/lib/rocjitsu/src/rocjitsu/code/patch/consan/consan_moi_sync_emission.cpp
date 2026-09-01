@@ -1584,7 +1584,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     uint16_t workgroup_key_vgpr, uint16_t producer_owner_vgpr, uint16_t token_value_vgpr,
     uint16_t temporary_vgpr, uint64_t snapshot_table_base, uint32_t snapshot_table_capacity,
     uint64_t token_table_base, uint32_t token_table_capacity, bool source_slot_claimed,
-    bool release_sequence_only, rj_code_arch_t arch, std::vector<std::string> &errors) {
+    bool release_sequence_only, bool inline_access_present, rj_code_arch_t arch,
+    std::vector<std::string> &errors) {
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 2u);
   const uint16_t exec_base = *point.moi_exec_save_sgpr;
   const auto narrow_if_valid =
@@ -1895,7 +1896,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // Scalar persistent state is already wave-uniform and needs no widening.
     // Saturation stays fail-closed in the token readers.
     const bool widen_consumer_segment =
-        point.moi_inline_access_present && !point.moi_persistent_sgprs.epoch();
+        inline_access_present && !point.moi_persistent_sgprs.epoch();
     const auto widen_exec =
         widen_consumer_segment
             ? instrumentation::build_s_mov_b64(kRdna4ExecLo, kScalarInlineNegativeOneOperand, arch)
@@ -2479,10 +2480,10 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &point,
     uint16_t scratch_vgpr, rj_code_arch_t arch, uint64_t release_table_base,
     uint32_t release_capacity, uint64_t snapshot_table_base, uint32_t snapshot_capacity,
-    uint64_t token_table_base, uint32_t token_capacity, bool emit_guest_instruction,
-    bool import_claimed_predecessor, bool predicate_on_compare_exchange_success,
-    uint32_t &guest_instruction_offset, std::vector<std::string> &errors,
-    std::span<const uint32_t> trailing_guest_words = {}) {
+    uint64_t token_table_base, uint32_t token_capacity, bool inline_access_present,
+    bool emit_guest_instruction, bool import_claimed_predecessor,
+    bool predicate_on_compare_exchange_success, uint32_t &guest_instruction_offset,
+    std::vector<std::string> &errors, std::span<const uint32_t> trailing_guest_words = {}) {
   struct FailureStage {
     std::vector<std::string> &errors;
     std::string_view stage = "preflight";
@@ -2829,7 +2830,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
             token_table_base, token_capacity,
             /*source_slot_claimed=*/true,
             /*release_sequence_only=*/
-            candidate.event_kind == ConSanMoiAtomicEventKind::Release, arch, errors))
+            candidate.event_kind == ConSanMoiAtomicEventKind::Release, inline_access_present, arch,
+            errors))
       return false;
     // Acquire import reuses the release slot-address and scratch+20 source
     // version for its token transaction. That transaction journals the source
@@ -3158,13 +3160,14 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const ConSanRequest &request,
     const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &input_point,
-    uint16_t scratch_vgpr, const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
-    const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch,
-    size_t inline_atomic_release_slots_offset, uint32_t inline_atomic_release_capacity,
-    size_t inline_causal_snapshots_offset, uint32_t inline_causal_snapshot_capacity,
-    size_t inline_acquired_token_slots_offset, uint32_t inline_acquired_token_capacity,
-    uint64_t cave_text_offset, uint64_t return_text_offset, uint32_t &guest_instruction_offset,
-    std::vector<std::string> &errors, std::span<const uint32_t> trailing_guest_words) {
+    const MoiObjectModeSemantics &semantics, uint16_t scratch_vgpr, const VgprSpillSequence *spill,
+    const SgprSpillSequence *scalar_spill, const MoiPrivateEpochLayout *private_layout,
+    rj_code_arch_t arch, size_t inline_atomic_release_slots_offset,
+    uint32_t inline_atomic_release_capacity, size_t inline_causal_snapshots_offset,
+    uint32_t inline_causal_snapshot_capacity, size_t inline_acquired_token_slots_offset,
+    uint32_t inline_acquired_token_capacity, uint64_t cave_text_offset, uint64_t return_text_offset,
+    uint32_t &guest_instruction_offset, std::vector<std::string> &errors,
+    std::span<const uint32_t> trailing_guest_words) {
   ConSanMoiOperatingPoint point = input_point;
   const uint16_t scratch_count = address_plan.scratch_vgpr_count;
   const uint16_t required_scratch_count = inline_shadow_atomic_scratch_count(arch);
@@ -3400,7 +3403,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
             words, bytes, candidate, address_plan, *workgroup_sources, request, bound_resources,
             point, scratch_vgpr, arch, slot_base, inline_atomic_release_capacity,
             snapshot_table_base, inline_causal_snapshot_capacity, token_table_base,
-            inline_acquired_token_capacity,
+            inline_acquired_token_capacity, semantics.inline_access_present,
             /*emit_guest_instruction=*/true, import_claimed_predecessor,
             /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors)) {
       errors.emplace_back(
@@ -3437,7 +3440,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
             words, bytes, candidate, address_plan, *workgroup_sources, request, bound_resources,
             point, scratch_vgpr, arch, slot_base, inline_atomic_release_capacity,
             snapshot_table_base, inline_causal_snapshot_capacity, token_table_base,
-            inline_acquired_token_capacity,
+            inline_acquired_token_capacity, semantics.inline_access_present,
             /*emit_guest_instruction=*/true,
             /*import_claimed_predecessor=*/true,
             /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors)) {
@@ -3467,7 +3470,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
             words, bytes, candidate, address_plan, *workgroup_sources, request, bound_resources,
             point, scratch_vgpr, arch, slot_base, inline_atomic_release_capacity,
             snapshot_table_base, inline_causal_snapshot_capacity, token_table_base,
-            inline_acquired_token_capacity,
+            inline_acquired_token_capacity, semantics.inline_access_present,
             /*emit_guest_instruction=*/true,
             /*import_claimed_predecessor=*/true,
             /*predicate_on_compare_exchange_success=*/true, guest_instruction_offset, errors)) {
@@ -3496,7 +3499,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
             words, bytes, candidate, address_plan, *workgroup_sources, request, bound_resources,
             point, scratch_vgpr, arch, slot_base, inline_atomic_release_capacity,
             snapshot_table_base, inline_causal_snapshot_capacity, token_table_base,
-            inline_acquired_token_capacity,
+            inline_acquired_token_capacity, semantics.inline_access_present,
             /*emit_guest_instruction=*/true,
             /*import_claimed_predecessor=*/true,
             /*predicate_on_compare_exchange_success=*/false, guest_instruction_offset, errors,
@@ -3643,7 +3646,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
           producer_owner_vgpr, token_value_vgpr, temporary_vgpr, snapshot_table_base,
           inline_causal_snapshot_capacity, token_table_base, inline_acquired_token_capacity,
           /*source_slot_claimed=*/false,
-          /*release_sequence_only=*/false, arch, errors)) {
+          /*release_sequence_only=*/false, semantics.inline_access_present, arch, errors)) {
     return std::nullopt;
   }
 
@@ -3658,7 +3661,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
             words, bytes, candidate, address_plan, *workgroup_sources, request, bound_resources,
             point, scratch_vgpr, arch, slot_base, inline_atomic_release_capacity,
             snapshot_table_base, inline_causal_snapshot_capacity, token_table_base,
-            inline_acquired_token_capacity,
+            inline_acquired_token_capacity, semantics.inline_access_present,
             /*emit_guest_instruction=*/false,
             /*import_claimed_predecessor=*/false,
             /*predicate_on_compare_exchange_success=*/is_compare_exchange, guest_instruction_offset,

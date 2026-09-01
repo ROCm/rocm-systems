@@ -1,7 +1,9 @@
 void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                             const ConSanOptions &options,
                                             const ConSanMoiOperatingPoint &operating_point,
-                                            rj_code_arch_t arch, ConSanTransformArtifacts &result) {
+                                            rj_code_arch_t arch,
+                                            const MoiObjectModeSemantics &semantics,
+                                            ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics)
     return;
   const ConSanTargetProfile *target = consan_target_profile(arch);
@@ -213,10 +215,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         continue;
       }
     }
-    auto probe =
-        plan_moi_probe_resources(result.program_inventory, *resources, options, options,
-                                 candidate_point, spill_managers, arch, std::move(private_layout),
-                                 candidate_point.has_inline_moi_scalar_spill(), result.warnings);
+    auto probe = plan_moi_probe_resources(
+        result.program_inventory, *resources, options, options, candidate_point, semantics,
+        spill_managers, arch, std::move(private_layout),
+        candidate_point.has_inline_moi_scalar_spill(), result.warnings);
     if (!probe)
       continue;
     planned_candidates.push_back({std::move(*probe), std::move(planned_candidate), address_plan,
@@ -250,7 +252,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     if (planned.private_layout && planned.private_layout->dispatch_id_offset)
       candidate_point.moi_dispatch_identity.set_sgpr(candidate_point.moi_router_jump->pc_sgpr);
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, options, options,
-                               candidate_point, arch);
+                               candidate_point, semantics, arch);
   }
   if (!apply_moi_descriptor_requirements(patcher, code_object, result, descriptor_requirements,
                                          scalar_requirements, private_requirements, nullptr,
@@ -476,7 +478,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           uint32_t guest_instruction_offset = 0u;
           auto cave_words = build_inline_atomic_ordering_cave_words(
               active_bytes, planned.candidate, planned.address_plan, options, options,
-              candidate_point, planned.resources.base, planned.spill ? &*planned.spill : nullptr,
+              candidate_point, semantics, planned.resources.base,
+              planned.spill ? &*planned.spill : nullptr,
               planned.scalar_spill ? &*planned.scalar_spill : nullptr,
               planned.private_layout ? &*planned.private_layout : nullptr, arch,
               layout.inline_atomic_release_slots_offset, layout.inline_atomic_release_capacity,
@@ -701,7 +704,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       candidate_point.moi_dispatch_identity.set_sgpr(candidate_point.moi_router_jump->pc_sgpr);
     uint32_t guest_instruction_offset = 0;
     auto cave_words = build_inline_atomic_ordering_cave_words(
-        active_bytes, candidate, planned.address_plan, options, options, candidate_point,
+        active_bytes, candidate, planned.address_plan, options, options, candidate_point, semantics,
         planned.resources.base, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr,
         planned.private_layout ? &*planned.private_layout : nullptr, arch,

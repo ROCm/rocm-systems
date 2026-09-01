@@ -131,10 +131,8 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .automatic_moi_private_epoch = true,
       .automatic_moi_partial_exec_save_sgprs = true,
       .automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline,
-      .moi_record_replay_dense_barrier_router = true,
       .moi_exec_save_sgprs_persistent = true,
       .moi_dynamic_stack_spill = true,
-      .moi_inline_access_present = true,
       .moi_router_jump = ConSanMoiIndirectJumpSgprs{2u, 7u},
       .moi_router_call = ConSanMoiRouterCallSgprs{12u, 14u},
       .moi_inline_visible_evidence_sgpr = 8u,
@@ -179,11 +177,8 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   expect_field_participates([](auto &value) {
     value.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
   });
-  expect_field_participates(
-      [](auto &value) { value.moi_record_replay_dense_barrier_router = false; });
   expect_field_participates([](auto &value) { value.moi_exec_save_sgprs_persistent = false; });
   expect_field_participates([](auto &value) { value.moi_dynamic_stack_spill = false; });
-  expect_field_participates([](auto &value) { value.moi_inline_access_present = false; });
   expect_field_participates([](auto &value) { value.moi_owner_sgpr.set(3u, false); });
   expect_field_participates([](auto &value) { value.moi_dispatch_identity.set_sgpr(16u, false); });
   expect_field_participates(
@@ -242,10 +237,12 @@ TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
   ConSanMoiOperatingPoint point;
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
   point.moi_dynamic_stack_spill = true;
-  point.moi_inline_access_present = true;
-  point.moi_record_replay_dense_barrier_router = true;
+  const consan_moi_impl::MoiObjectModeSemantics mode_semantics{
+      .dense_barrier_router = true,
+      .inline_access_present = true,
+  };
 
-  EXPECT_EQ(resolve_moi_exec_save_requirement(request, resources, point),
+  EXPECT_EQ(resolve_moi_exec_save_requirement(request, resources, point, mode_semantics),
             (MoiExecSaveRequirement{
                 .engine = ConSanMoiEngine::RecordReplay,
                 .has_report_buffer = true,
@@ -259,8 +256,8 @@ TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
             }));
 
   request.moi_dynamic_access_records = true;
-  EXPECT_FALSE(
-      resolve_moi_exec_save_requirement(request, resources, point).automatic_banked_record_capture);
+  EXPECT_FALSE(resolve_moi_exec_save_requirement(request, resources, point, mode_semantics)
+                   .automatic_banked_record_capture);
 }
 
 TEST(ConSan, MoiOwnerEpochInitializationIsAnOperatingPointDecision) {
@@ -290,9 +287,12 @@ TEST(ConSan, MoiResourceProblemBindsImmutableSolverInputs) {
   ProgramInventory inventory;
   ConSanObservationPlan observation_plan;
   const std::array<ConSanMoiCandidate, 1> candidates{};
+  const consan_moi_impl::MoiObjectModeSemantics mode_semantics{
+      .inline_access_present = true,
+  };
 
   const MoiResourceProblem problem(image, ROCJITSU_CODE_ARCH_CDNA5, request, resources, inventory,
-                                   observation_plan, candidates);
+                                   observation_plan, candidates, mode_semantics);
   EXPECT_EQ(problem.image().data(), image.data());
   EXPECT_EQ(problem.image().size(), image.size());
   EXPECT_EQ(problem.arch(), ROCJITSU_CODE_ARCH_CDNA5);
@@ -302,6 +302,7 @@ TEST(ConSan, MoiResourceProblemBindsImmutableSolverInputs) {
   EXPECT_EQ(&problem.observation_plan(), &observation_plan);
   EXPECT_EQ(problem.candidates().data(), candidates.data());
   EXPECT_EQ(problem.candidates().size(), candidates.size());
+  EXPECT_EQ(problem.mode_semantics(), mode_semantics);
 }
 
 TEST(ConSan, MoiExecSaveRequirementOwnsTargetAndFallbackSizing) {

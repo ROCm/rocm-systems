@@ -25,7 +25,7 @@ plan_hypothetical_mode(const ConSanRequest &, const ConSanMoiOperatingPoint &,
                        const ConSanObservationPlan &) {
   consan_moi_impl::MoiObjectModePlan plan;
   plan.track_atomics = facts.has_admitted_atomic;
-  plan.inline_access_present = facts.has_access_candidate;
+  plan.semantics.inline_access_present = facts.has_access_candidate;
   return plan;
 }
 
@@ -54,7 +54,7 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
       find_moi_mode_operations<HypotheticalModeKey>(registrations, HypotheticalModeKey::FifthMode);
   ASSERT_EQ(selected, &operations);
   const auto plan = selected->plan({}, {}, {.has_access_candidate = true}, {});
-  EXPECT_TRUE(plan.inline_access_present);
+  EXPECT_TRUE(plan.semantics.inline_access_present);
   EXPECT_FALSE(plan.track_atomics);
   EXPECT_EQ(selected->operational_evidence.barrier, ConSanProbeIntentKind::BarrierRecord);
   EXPECT_EQ(selected->operational_evidence.atomic, ConSanProbeIntentKind::SampledAtomicOrdering);
@@ -236,15 +236,18 @@ TEST(ConSanMoiModePlanning, RecordReplaySelectsDenseRoutingFromNormalizedTargetF
   MoiObjectFacts facts{.has_admitted_barrier = true,
                        .admitted_barrier_count = 33u,
                        .target_supports_dense_barrier_router = true};
-  EXPECT_TRUE(plan_moi_object_mode(request, point, facts, observation).dense_barrier_router);
+  EXPECT_TRUE(
+      plan_moi_object_mode(request, point, facts, observation).semantics.dense_barrier_router);
 
   facts.target_supports_dense_barrier_router = false;
-  EXPECT_FALSE(plan_moi_object_mode(request, point, facts, observation).dense_barrier_router);
+  EXPECT_FALSE(
+      plan_moi_object_mode(request, point, facts, observation).semantics.dense_barrier_router);
 
   facts.admitted_barrier_count = 1u;
   facts.has_stranded_admitted_barrier = true;
   facts.target_supports_dense_barrier_router = true;
-  EXPECT_TRUE(plan_moi_object_mode(request, point, facts, observation).dense_barrier_router);
+  EXPECT_TRUE(
+      plan_moi_object_mode(request, point, facts, observation).semantics.dense_barrier_router);
 }
 
 TEST(ConSanMoiModePlanning, RecordReplayDropsAutomaticStateOnlyWithoutConsumers) {
@@ -297,7 +300,7 @@ TEST(ConSanMoiModePlanning, InlineDemandFollowsAdmittedConsumers) {
   const auto empty = plan_moi_object_mode(request, point, {}, observation);
   EXPECT_FALSE(empty.track_atomics);
   EXPECT_FALSE(empty.track_barriers);
-  EXPECT_FALSE(empty.inline_access_present);
+  EXPECT_FALSE(empty.semantics.inline_access_present);
   EXPECT_FALSE(empty.inline_atomic_without_access);
   EXPECT_EQ(empty.warnings.size(), 2u);
 

@@ -86,12 +86,13 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const ConSanRequest &request,
     const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &input_point,
-    uint16_t scratch_vgpr, const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
-    const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch,
-    size_t inline_atomic_release_slots_offset, uint32_t inline_atomic_release_capacity,
-    size_t inline_causal_snapshots_offset, uint32_t inline_causal_snapshot_capacity,
-    size_t inline_acquired_token_slots_offset, uint32_t inline_acquired_token_capacity,
-    uint64_t cave_text_offset, uint64_t return_text_offset, uint32_t &guest_instruction_offset,
-    std::vector<std::string> &errors, std::span<const uint32_t> trailing_guest_words = {});
+    const MoiObjectModeSemantics &semantics, uint16_t scratch_vgpr, const VgprSpillSequence *spill,
+    const SgprSpillSequence *scalar_spill, const MoiPrivateEpochLayout *private_layout,
+    rj_code_arch_t arch, size_t inline_atomic_release_slots_offset,
+    uint32_t inline_atomic_release_capacity, size_t inline_causal_snapshots_offset,
+    uint32_t inline_causal_snapshot_capacity, size_t inline_acquired_token_slots_offset,
+    uint32_t inline_acquired_token_capacity, uint64_t cave_text_offset, uint64_t return_text_offset,
+    uint32_t &guest_instruction_offset, std::vector<std::string> &errors,
+    std::span<const uint32_t> trailing_guest_words = {});
 
 } // namespace rocjitsu::consan_moi_impl

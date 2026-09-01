@@ -72,10 +72,11 @@ uint16_t inline_shadow_loop_scratch_count(const ConSanMoiCandidate &candidate) {
 bool validate_inline_shadow_exec_save_sgpr(const ConSanRequest &request,
                                            const BoundRuntimeResources &resources,
                                            const ConSanMoiOperatingPoint &point,
+                                           const MoiObjectModeSemantics &semantics,
                                            rj_code_arch_t arch, std::vector<std::string> &errors) {
   if (!point.moi_exec_save_sgpr)
     return true;
-  if (point.has_inline_moi_scalar_spill() && point.moi_inline_access_present &&
+  if (point.has_inline_moi_scalar_spill() && semantics.inline_access_present &&
       (!point.moi_router_call && !point.moi_branch_only_spill)) {
     errors.emplace_back(
         "ConSan MOI spill-backed inline-shadow probes require a dense router or branch-only "
@@ -83,8 +84,8 @@ bool validate_inline_shadow_exec_save_sgpr(const ConSanRequest &request,
     return false;
   }
   const uint16_t ordinary_sgpr_count = consan_uses_gfx9_cdna_encoding(arch) ? 102u : kMaxSgprs;
-  const uint16_t required_sgpr_count =
-      moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(request, resources, point), arch);
+  const uint16_t required_sgpr_count = moi_exec_save_sgpr_count(
+      resolve_moi_exec_save_requirement(request, resources, point, semantics), arch);
   const uint16_t max_exec_save_sgpr =
       static_cast<uint16_t>(ordinary_sgpr_count - required_sgpr_count);
   if (*point.moi_exec_save_sgpr > max_exec_save_sgpr || *point.moi_exec_save_sgpr % 2u != 0u) {
@@ -2548,9 +2549,9 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, bool partition_mask_debug,
-    rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout,
-    const ConSanMoiWorkgroupSources &workgroup_sources,
+    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr,
+    const MoiObjectModeSemantics &semantics, bool partition_mask_debug, rj_code_arch_t arch,
+    const ConSanMoiReportBufferLayout &layout, const ConSanMoiWorkgroupSources &workgroup_sources,
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
     bool byte_granular_external_shadow, std::optional<uint32_t> private_epoch_offset,
     const std::optional<MoiWorkitemOwnerDerivationPlan> &owner_derivation,
@@ -2594,7 +2595,8 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     errors.emplace_back("ConSan MOI inline-shadow probe scratch VGPR window exceeds the limit");
     return std::nullopt;
   }
-  if (!validate_inline_shadow_exec_save_sgpr(request, bound_resources, point, arch, errors))
+  if (!validate_inline_shadow_exec_save_sgpr(request, bound_resources, point, semantics, arch,
+                                             errors))
     return std::nullopt;
   auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
   if (!lds_byte_offset_vgpr)

@@ -707,13 +707,11 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   return words;
 }
 
-void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
-                                          const ConSanOptions &options,
-                                          const ConSanMoiOperatingPoint &operating_point,
-                                          rj_code_arch_t arch,
-                                          MoiResourcePlanningState &resource_state,
-                                          std::span<const ConSanMoiCandidate> admitted,
-                                          ConSanTransformArtifacts &result) {
+void try_apply_sampled_barrier_sync_patch(
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
+    MoiResourcePlanningState &resource_state, std::span<const ConSanMoiCandidate> admitted,
+    const MoiObjectModeSemantics &mode_semantics, ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers)
     return;
   const ConSanTargetProfile *target_profile = consan_target_profile(arch);
@@ -1002,10 +1000,10 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       if (!private_layout)
         continue;
     }
-    auto probe =
-        plan_moi_probe_resources(result.program_inventory, *resources, options, options,
-                                 candidate_point, spill_managers, arch, std::move(private_layout),
-                                 candidate_point.has_compact_moi_scalar_spill(), result.warnings);
+    auto probe = plan_moi_probe_resources(
+        result.program_inventory, *resources, options, options, candidate_point, mode_semantics,
+        spill_managers, arch, std::move(private_layout),
+        candidate_point.has_compact_moi_scalar_spill(), result.warnings);
     if (!probe)
       continue;
     note_moi_probe_private_requirements(private_requirements, *probe);
@@ -1527,6 +1525,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                                          const ConSanMoiOperatingPoint &operating_point,
                                          rj_code_arch_t arch,
                                          MoiResourcePlanningState &resource_state,
+                                         const MoiObjectModeSemantics &mode_semantics,
                                          ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics)
     return;
@@ -2021,10 +2020,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       if (!private_layout)
         continue;
     }
-    auto probe =
-        plan_moi_probe_resources(result.program_inventory, *resources, options, options,
-                                 candidate_point, spill_managers, arch, std::move(private_layout),
-                                 candidate_point.has_compact_moi_scalar_spill(), result.warnings);
+    auto probe = plan_moi_probe_resources(
+        result.program_inventory, *resources, options, options, candidate_point, mode_semantics,
+        spill_managers, arch, std::move(private_layout),
+        candidate_point.has_compact_moi_scalar_spill(), result.warnings);
     if (!probe)
       continue;
     note_moi_probe_private_requirements(private_requirements, *probe);
