@@ -12,6 +12,37 @@
 #ifndef _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP8_H_
 #define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP8_H_
 
+#if !defined(__cplusplus)
+typedef enum __hip_fp8_interpretation_t {
+  __HIP_E4M3 = 0,
+  __HIP_E5M2 = 1,
+  __HIP_E4M3_FNUZ = 2,
+  __HIP_E5M2_FNUZ = 3,
+} __hip_fp8_interpretation_t;
+typedef enum __hip_saturation_t {
+  __HIP_NOSAT = 0,
+  __HIP_SATFINITE = 1,
+} __hip_saturation_t;
+
+typedef unsigned char __hip_fp8_storage_t;
+typedef unsigned short int __hip_fp8x2_storage_t;
+typedef unsigned int __hip_fp8x4_storage_t;
+
+typedef struct { __hip_fp8_storage_t __x; } __hip_fp8_e8m0;
+typedef struct { __hip_fp8_storage_t __x; } __hip_fp8_e4m3_fnuz;
+typedef struct { __hip_fp8x2_storage_t __x; } __hip_fp8x2_e4m3_fnuz;
+typedef struct { __hip_fp8x4_storage_t __x; } __hip_fp8x4_e4m3_fnuz;
+typedef struct { __hip_fp8_storage_t __x; } __hip_fp8_e5m2_fnuz;
+typedef struct { __hip_fp8x2_storage_t __x; } __hip_fp8x2_e5m2_fnuz;
+typedef struct { __hip_fp8x4_storage_t __x; } __hip_fp8x4_e5m2_fnuz;
+typedef struct { __hip_fp8_storage_t __x; } __hip_fp8_e4m3;
+typedef struct { __hip_fp8x2_storage_t __x; } __hip_fp8x2_e4m3;
+typedef struct { __hip_fp8x4_storage_t __x; } __hip_fp8x4_e4m3;
+typedef struct { __hip_fp8_storage_t __x; } __hip_fp8_e5m2;
+typedef struct { __hip_fp8x2_storage_t __x; } __hip_fp8x2_e5m2;
+typedef struct { __hip_fp8x4_storage_t __x; } __hip_fp8x4_e5m2;
+#else  // !defined(__cplusplus)
+
 #if (defined(__gfx942__) || defined(__gfx1200__) || defined(__gfx1201__) ||                        \
      defined(__gfx950__) || defined (__gfx1250__)) &&                                              \
     __HIP_DEVICE_COMPILE__
@@ -3506,4 +3537,5 @@ struct __hip_fp8x4_e5m2 {
 }
 ;
 #endif  // ENABLE_OCP_HIPRTC
+#endif  // !defined(__cplusplus)
 #endif  // _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP8_H_
