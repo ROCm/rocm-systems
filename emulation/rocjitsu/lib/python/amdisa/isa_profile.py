@@ -456,6 +456,11 @@ class IsaProfile(ABC):
         return {}
 
     @property
+    def compatibility_instruction_slots(self) -> dict[tuple[str, int], str]:
+        """Opcode slots owned by instructions synthesized after XML parsing."""
+        return {}
+
+    @property
     def vop3px2_prefix_opcode(self) -> int | None:
         """VOP3P opcode slot for a VOP3PX2 prefix decoder, if any."""
         return None
@@ -2327,6 +2332,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return Rdna3Profile.waitcnt_decode.fget(self)
 
     @property
+    def compatibility_instruction_slots(self) -> dict[tuple[str, int], str]:
+        return {('ENC_SOPP', 9): 'S_WAITCNT'}
+
+    @property
     def supported_versions(self) -> list[str]:
         return ['1.1.0', '1.1.1']
 
@@ -2677,6 +2686,10 @@ class Cdna5Profile(Rdna4Profile):
         renames = dict(super().field_renames(enc_name))
         renames['literal'] = 'simm32'
         return renames
+
+    @property
+    def compatibility_instruction_slots(self) -> dict[tuple[str, int], str]:
+        return {('ENC_VOP1', 103): 'V_PERMLANE64_B32'}
 
     def normalize_operand_field_name(self, enc_name: str, field_name: str) -> str:
         # Keep the concrete gfx1250 operand identity distinct from earlier

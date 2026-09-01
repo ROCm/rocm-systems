@@ -8,17 +8,10 @@ if(EXISTS "${_prerm}")
     message(STATUS "Running pre-removal script: ${_prerm}")
     execute_process(COMMAND sh "${_prerm}" RESULT_VARIABLE _prerm_result)
     if(NOT _prerm_result EQUAL 0)
-        message(
-            WARNING
-            "Pre-removal script exited with code ${_prerm_result}. "
-            "Continuing with file removal anyway."
-        )
+        message(WARNING "Pre-removal script exited with code ${_prerm_result}. " "Continuing with file removal anyway.")
     endif()
 else()
-    message(
-        STATUS
-        "Pre-removal script not found (${_prerm}); skipping daemon teardown."
-    )
+    message(STATUS "Pre-removal script not found (${_prerm}); skipping daemon teardown.")
 endif()
 
 # Remove all files tracked by cmake --install via install_manifest.txt

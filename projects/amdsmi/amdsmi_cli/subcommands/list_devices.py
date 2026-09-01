@@ -93,6 +93,7 @@ class ListDevicesCommands:
                     "hip_id": "N/A",
                     "hip_uuid": "N/A",
                     "oam_id": "N/A",
+                    "physical_acc_id": "N/A",
                 }
 
             # now store all the fields exactly once:
@@ -110,6 +111,9 @@ class ListDevicesCommands:
             self.logger.store_output(args.gpu, "hip_id", enumeration_info["hip_id"])
             self.logger.store_output(args.gpu, "hip_uuid", enumeration_info["hip_uuid"])
             self.logger.store_output(args.gpu, "oam_id", enumeration_info["oam_id"])
+            self.logger.store_output(
+                args.gpu, "physical_acc_id", enumeration_info["physical_acc_id"]
+            )
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
