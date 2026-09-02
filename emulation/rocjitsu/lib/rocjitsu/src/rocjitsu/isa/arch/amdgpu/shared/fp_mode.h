@@ -15,6 +15,10 @@
 #include <cmath>
 #include <cstdint>
 
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#include <xmmintrin.h>
+#endif
+
 namespace rocjitsu::amdgpu::fp_mode {
 
 namespace detail {
@@ -54,9 +58,18 @@ inline int host_round_mode(uint32_t round_mode) {
 
 class ScopedFenv {
 public:
-  explicit ScopedFenv(uint32_t round_mode) : saved_(std::feholdexcept(&environment_) == 0) {
+  explicit ScopedFenv(uint32_t round_mode) {
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+    saved_mxcsr_ = _mm_getcsr();
+#endif
+    saved_ = std::feholdexcept(&environment_) == 0;
     if (saved_)
       std::fesetround(host_round_mode(round_mode));
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+    constexpr uint32_t kDazMask = 1u << 6;
+    constexpr uint32_t kFtzMask = 1u << 15;
+    _mm_setcsr(_mm_getcsr() & ~(kDazMask | kFtzMask));
+#endif
   }
 
   ScopedFenv(const ScopedFenv &) = delete;
@@ -65,11 +78,17 @@ public:
   ~ScopedFenv() {
     if (saved_)
       std::fesetenv(&environment_);
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+    _mm_setcsr(saved_mxcsr_);
+#endif
   }
 
 private:
   std::fenv_t environment_{};
-  bool saved_;
+  bool saved_ = false;
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+  uint32_t saved_mxcsr_ = 0;
+#endif
 };
 
 struct ExactF64Sum {
@@ -210,12 +229,12 @@ inline uint16_t finalize_omod_bf16(uint16_t value, uint32_t omod) {
   return (value & 0x7fffu) == 0 ? 0 : value;
 }
 
-/// @brief Execute an F32-source fused multiply-add and round once to BF16.
-/// @details An F32 product is exact in F64. The error-free sum retains the exact addend residual,
-/// which is needed when the rounded F64 value lands on a BF16 boundary or midpoint.
-inline uint16_t fma_f32_to_bf16(float multiplicand, float multiplier, float addend,
-                                uint32_t round_mode, bool clamp, bool clamp_nan_to_zero) {
-  detail::ScopedFenv nearest_environment(0);
+namespace detail {
+
+/// @brief Execute F32-source fused multiply-add in an established clean nearest environment.
+inline uint16_t fma_f32_to_bf16_nearest_environment(float multiplicand, float multiplier,
+                                                    float addend, uint32_t round_mode, bool clamp,
+                                                    bool clamp_nan_to_zero) {
   if (!std::isfinite(multiplicand) || !std::isfinite(multiplier) || !std::isfinite(addend)) {
     float result = std::fma(multiplicand, multiplier, addend);
     if (clamp) {
@@ -242,6 +261,18 @@ inline uint16_t fma_f32_to_bf16(float multiplicand, float multiplier, float adde
       return 0x3f80u;
   }
   return detail::round_exact_to_bf16(exact, round_mode);
+}
+
+} // namespace detail
+
+/// @brief Execute an F32-source fused multiply-add and round once to BF16.
+/// @details An F32 product is exact in F64. The error-free sum retains the exact addend residual,
+/// which is needed when the rounded F64 value lands on a BF16 boundary or midpoint.
+inline uint16_t fma_f32_to_bf16(float multiplicand, float multiplier, float addend,
+                                uint32_t round_mode, bool clamp, bool clamp_nan_to_zero) {
+  detail::ScopedFenv nearest_environment(0);
+  return detail::fma_f32_to_bf16_nearest_environment(multiplicand, multiplier, addend, round_mode,
+                                                     clamp, clamp_nan_to_zero);
 }
 
 inline float finalize_omod_f32(float value, uint32_t omod) {

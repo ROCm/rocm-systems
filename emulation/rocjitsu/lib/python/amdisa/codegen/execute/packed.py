@@ -875,6 +875,8 @@ def gen_mad_mix_bf16(
     """Generate gfx1250 BF16 FMA_MIX variants."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
     L = []
+    if result != 'f32':
+        L.append('  amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);')
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -938,7 +940,7 @@ def gen_mad_mix_bf16(
         )
     else:
         L.append(
-            '    uint16_t h = amdgpu::fp_mode::fma_f32_to_bf16('
+            '    uint16_t h = amdgpu::fp_mode::detail::fma_f32_to_bf16_nearest_environment('
             'a, b, c, wf.fp_round_mode_f16_f64(), inst_.clamp, '
             'amdgpu::floating_clamp_nan_to_zero(wf));'
         )

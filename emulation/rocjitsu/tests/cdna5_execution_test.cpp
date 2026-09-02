@@ -73,6 +73,17 @@ private:
   bool saved_;
 };
 
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+class HostMxcsrGuard {
+public:
+  HostMxcsrGuard() : saved_(_mm_getcsr()) {}
+  ~HostMxcsrGuard() { _mm_setcsr(saved_); }
+
+private:
+  uint32_t saved_;
+};
+#endif
+
 TEST(FpModePolicyTest, F16OmodFollowsProfileDenormIeeeAndPackedRules) {
   using amdgpu::fp_mode::effective_f16_omod;
 
@@ -187,6 +198,19 @@ TEST(FpModePolicyTest, F32ToBf16FmaRestoresAmbientHostEnvironment) {
   EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(-0.0f, 1.0f, -0.0f, 2, true, true), 0u);
   EXPECT_EQ(std::fegetround(), FE_UPWARD);
 }
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFtzDaz) {
+  HostMxcsrGuard environment_guard;
+  constexpr uint32_t kDazMask = 1u << 6;
+  constexpr uint32_t kFtzMask = 1u << 15;
+  _mm_setcsr(_mm_getcsr() | kDazMask | kFtzMask);
+
+  const float subnormal = std::bit_cast<float>(0x00018000u);
+  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(subnormal, 1.0f, 0.0f, 0, false, true), 0x0002u);
+  EXPECT_EQ(_mm_getcsr() & (kDazMask | kFtzMask), kDazMask | kFtzMask);
+}
+#endif
 
 TEST(FpModePolicyTest, F64ClampCanonicalizesNanAndNonpositiveValues) {
   constexpr uint64_t kPositiveZero = 0x0000000000000000ULL;
