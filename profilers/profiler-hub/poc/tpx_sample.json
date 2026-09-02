@@ -1,0 +1,6 @@
+[
+  {"pid":1,"tid":1,"ts":1000,"dur":500,"ph":"X","name":"main_kernel","cat":"rocm_kernel_dispatch"},
+  {"pid":1,"tid":1,"ts":2000,"dur":300,"ph":"X","name":"copy_htod","cat":"rocm_memory_copy"},
+  {"pid":1,"tid":2,"ts":1200,"dur":800,"ph":"X","name":"hip_api_call","cat":"rocm_hip_api"},
+  {"pid":2,"tid":3,"ts":3000,"dur":100,"ph":"X","name":"barrier_sync","cat":"rocm_kernel_dispatch"}
+]

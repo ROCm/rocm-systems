@@ -16,6 +16,12 @@ struct reader_t;
 class storage_t
 {
 public:
+    /**
+     * @brief Open or create a rocpd database at the given path
+     * @param database_path Filesystem path to the SQLite database file
+     * @param uuid Session UUID used to scope table names; pass empty string for
+     *             reader use (read-only opens ignore this value)
+     */
     explicit storage_t(const std::string& database_path, const std::string& uuid);
     ~storage_t();
 

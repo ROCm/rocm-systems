@@ -12,7 +12,7 @@
 namespace profiler_hub::shared_types
 {
 
-using timestamp_ns_t = size_t;
+using timestamp_t = size_t;
 
 // --------------------- Call Stack & Line Info Abstract Data Types ------------------
 

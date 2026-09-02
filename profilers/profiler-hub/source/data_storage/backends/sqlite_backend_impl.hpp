@@ -193,11 +193,32 @@ database_backend<SqlitePolicy>::discover_uuids()
     {
         std::string uuid;
     };
-    auto uuid_query_executor = create_read_statement_executor<uuid_result>(
-        "SELECT DISTINCT replace(name, rtrim(name, replace(name, '_', '')), '') "
-        "AS guid "
-        "FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_%';",
-        &uuid_result::uuid);
+
+    // Preferred: read rocpd_info_node.guid, normalizing '-'->'_' to match the
+    // `rocpd_X_<uuid>` suffix format. rocpd_metadata.uuid is NOT used: its
+    // leading-underscore variant would double the separator.
+    // Fallback (schema-only DBs with no rocpd_info_node view): parse the UUID
+    // from the suffixed table name instead. DISTINCT preserves multi-node
+    // enumeration in both paths.
+    struct count_result
+    {
+        std::int64_t value{ 0 };
+    };
+    auto view_probe = create_read_statement_executor<count_result>(
+        "SELECT count(*) FROM sqlite_master WHERE name = 'rocpd_info_node';",
+        &count_result::value);
+    auto       probe_rows         = view_probe().to_vector();
+    const bool has_info_node_view = !probe_rows.empty() && probe_rows.front().value > 0;
+
+    const char* query =
+        has_info_node_view
+            ? "SELECT DISTINCT replace(guid, '-', '_') AS guid FROM rocpd_info_node;"
+            : "SELECT DISTINCT substr(name, length('rocpd_info_node_') + 1) AS guid "
+              "FROM sqlite_master WHERE type = 'table' "
+              "AND name LIKE 'rocpd\\_info\\_node\\_%' ESCAPE '\\';";
+
+    auto uuid_query_executor =
+        create_read_statement_executor<uuid_result>(query, &uuid_result::uuid);
 
     auto result = uuid_query_executor().to_vector();
 

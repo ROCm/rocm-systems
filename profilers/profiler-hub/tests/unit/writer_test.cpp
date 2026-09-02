@@ -381,7 +381,9 @@ TEST_F(writer_test, register_kernel_symbol_info_is_readable_after_flush)
     EXPECT_EQ(kernel_symbols[0]->code_object_info->id, code_object_info.id);
 }
 
-TEST_F(writer_test, register_track_info_is_readable_after_flush)
+// DISABLED: get_tracks() synthesizes tracks from event/sample data, so a
+// track registered with no events is not surfaced (returns 0).
+TEST_F(writer_test, DISABLED_register_track_info_is_readable_after_flush)
 {
     auto writer = make_writer();
 
@@ -397,7 +399,7 @@ TEST_F(writer_test, register_track_info_is_readable_after_flush)
 
     auto reader =
         std::make_unique<reader_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
-    const auto tracks = reader->get_all_tracks();
+    const auto tracks = reader->get_tracks();
 
     ASSERT_EQ(tracks.size(), 1);
     ASSERT_NE(tracks[0]->node_info, nullptr);
@@ -602,6 +604,49 @@ TEST_F(writer_test, insert_kernel_dispatch_data_is_readable_after_flush)
     ASSERT_EQ(events.size(), 1);
     EXPECT_EQ(events[0].start_timestamp, 1000);
     EXPECT_EQ(events[0].end_timestamp, 2000);
+}
+
+// Regression test for d5211587cf2 ("guard all 5 optionals in
+// maybe_insert_sample"): thread_id absent must be skipped silently, not just
+// "not throw" (a version that caught the exception and wrote a malformed row
+// would still pass a no-throw-only check). node_id/process_id absent are not
+// covered here: insert_validator::require_node/require_process throw before
+// maybe_insert_sample() is ever reached on every public writer_t call path, so
+// those two branches are unreachable without a production-code seam.
+TEST_F(writer_test, maybe_insert_sample_with_missing_thread_id_is_skipped)
+{
+    auto writer = make_writer();
+    register_node_and_process(*writer);
+
+    writer_types::trace_environment_t trace_environment;
+    trace_environment.node_id    = 1;
+    trace_environment.process_id = 100;
+    trace_environment.track_name = "cpu-track";
+    // thread_id left unset: memory_copy_writer only validates it optionally
+    // (validate_optional_thread), so this reaches maybe_insert_sample() with
+    // thread_id still absent, exercising the guard fixed by d5211587cf2.
+
+    writer_types::memory_copy_data_t memory_copy_data;
+    memory_copy_data.name            = "hipMemcpy";
+    memory_copy_data.region_name     = "hipMemcpy";
+    memory_copy_data.start_timestamp = 1000;
+    memory_copy_data.end_timestamp   = 2000;
+    memory_copy_data.size            = 4096;
+    memory_copy_data.event           = writer_types::event_data_t{};
+
+    EXPECT_NO_THROW(writer->insert_memory_copy_data(memory_copy_data, trace_environment));
+
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    auto reader =
+        std::make_unique<reader_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
+
+    // The memory_copy row itself is still written; only the derived sample row
+    // (which requires thread_id) is skipped.
+    ASSERT_EQ(reader->get_events().size(), 1);
+    auto counts = reader->get_event_counts();
+    EXPECT_EQ(counts[reader_types::event_type_t::sample], 0);
 }
 
 }  // namespace

@@ -26,6 +26,29 @@ downstream consumer of the library.
   `libprofiler-hub.so.0.1.0` actual file) so consumers can pin to a specific ABI.
 - New cache var `FMT_VERSION` (default `11.2.0`). When the system fmt is missing,
   the build fetches `fmtlib/fmt` at this version.
+- Track-based reading on `reader_t`: `get_interval_track()` returns a track's interval
+  events ordered by start, each carrying a packing lane, a nesting level and a containment
+  `parent_id`; `get_scalar_track()` returns a counter or sample track's
+  `(timestamp, value)` samples ordered by timestamp; `get_track_stats()` returns
+  count/extent statistics for one track over an optional window.
+- `get_event_info(event_id_t)` on `reader_t` — one per-event detail call covering every
+  event type. It returns a fixed common header (name, category, start, end) plus a generic
+  `properties` bag of named, typed values, so a consumer can render an event's detail
+  without switching on its type.
+- Directed, typed flow edges and four selectors to retrieve them: `get_flows()` for every
+  edge in the capture, `get_flows_for_event()` for the edges touching one event,
+  `get_flows_for_chain()` for one causal chain, and `get_flows_in_window()` for the edges
+  intersecting a time window on a set of tracks, with an optional cap that keeps the
+  highest-latency edges and is stable across pans.
+- Opaque handle types `track_id_t` and `event_id_t`. They are copyable, comparable and
+  hashable, and they round-trip through the reader; their integer content is a
+  profiler-hub-private database identity and is not part of the public contract.
+- Reader type vocabulary for the above: `event_info_t`, `arg_t` / `arg_value_t`,
+  `interval_entry_t`, `scalar_sample_t`, `track_stats_t`, `flow_edge_t`, `flow_kind_t`,
+  `track_type_t`, `region_track_kind_t`, `nesting_model_t`.
+- `get_call_stack()`, `get_source_context()` and `get_arguments()` gained `event_id_t`
+  overloads, so a consumer holding only an opaque handle can reach the per-event data
+  without reconstructing a typed event.
 
 ### Changed
 
@@ -46,6 +69,21 @@ downstream consumer of the library.
   too old to satisfy the requirement falls back to FetchContent. A system
   spdlog is additionally accepted only when it was built with
   `SPDLOG_FMT_EXTERNAL`, to avoid linking two fmt copies into one binary.
+- All track kinds are described by a single `track_info_t`, discriminated by
+  `track_type_t`, instead of one struct per track kind. A consumer enumerates tracks once
+  and dispatches on the type field.
+- `reader_t::get_all_tracks()` is now `reader_t::get_tracks()`, and
+  `reader_t::get_data_time_range()` is now `reader_t::get_time_range()`.
+- Tracks and events are addressed by opaque handle rather than by a raw database row id,
+  so no reader signature exposes the underlying capture's schema. Code that passed row ids
+  must carry the handle returned by `get_tracks()`, `get_interval_track()`,
+  `get_scalar_track()` or a flow edge instead.
+- Flow edges are derived from an event's `stack_id` / `parent_stack_id` rather than its
+  `correlation_id`, which is empty on captures produced by current ROCm releases. Captures
+  that previously yielded no flows now yield the parent/child and sibling edges implied by
+  their call stacks.
+- `timestamp_ns_t` is now `timestamp_t` in `reader_types`, `writer_types` and
+  `shared_types`. The underlying type and nanosecond unit are unchanged.
 
 ### Removed
 
@@ -54,6 +92,10 @@ downstream consumer of the library.
   were always-on toggles that only suppressed the system `find_package` lookup;
   callers that need bundled builds can simply remove the system package or set
   `CMAKE_DISABLE_FIND_PACKAGE_<name>=ON`.
+- The seven typed per-event detail accessors on `reader_t` — `get_event_details()`,
+  `get_region_details()`, `get_kernel_dispatch_details()`, `get_memory_copy_details()`,
+  `get_memory_alloc_details()`, `get_sample_details()` and `get_pmc_event_details()`.
+  `get_event_info()` replaces all seven.
 
 ### Changed
 

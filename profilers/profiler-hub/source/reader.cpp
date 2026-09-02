@@ -72,9 +72,9 @@ reader_t::get_all_kernel_symbols() const
 }
 
 reader_types::track_info_list_t
-reader_t::get_all_tracks() const
+reader_t::get_tracks() const
 {
-    return m_impl->get_all_tracks();
+    return m_impl->get_tracks();
 }
 
 reader_types::timeline_event_list_t
@@ -96,42 +96,56 @@ reader_t::get_event_count(const reader_types::event_filter_t& filter) const
     return m_impl->get_event_count(filter);
 }
 
-std::optional<reader_types::region_data_t>
-reader_t::get_region_details(const reader_types::timeline_event_t& event) const
+reader_types::interval_entry_list_t
+reader_t::get_interval_track(reader_types::track_id_t            track_id,
+                             const reader_types::event_filter_t& filter) const
 {
-    return m_impl->get_region_details(event);
+    return m_impl->get_interval_track(track_id.value, filter);
 }
 
-std::optional<reader_types::kernel_dispatch_data_t>
-reader_t::get_kernel_dispatch_details(const reader_types::timeline_event_t& event) const
+reader_types::scalar_sample_list_t
+reader_t::get_scalar_track(reader_types::track_id_t            track_id,
+                           const reader_types::event_filter_t& filter) const
 {
-    return m_impl->get_kernel_dispatch_details(event);
+    return m_impl->get_scalar_track(track_id.value, filter);
 }
 
-std::optional<reader_types::memory_copy_data_t>
-reader_t::get_memory_copy_details(const reader_types::timeline_event_t& event) const
+reader_types::track_stats_t
+reader_t::get_track_stats(reader_types::track_id_t track_id) const
 {
-    return m_impl->get_memory_copy_details(event);
+    return m_impl->get_track_stats(track_id.value);
 }
 
-std::optional<reader_types::memory_alloc_data_t>
-reader_t::get_memory_alloc_details(const reader_types::timeline_event_t& event) const
+reader_types::flow_list_t
+reader_t::get_flows(const reader_types::event_filter_t& filter) const
 {
-    return m_impl->get_memory_alloc_details(event);
+    return m_impl->get_flows(filter);
 }
 
-std::optional<reader_types::sample_data_t>
-reader_t::get_sample_details(const reader_types::timeline_event_t& event) const
+reader_types::flow_list_t
+reader_t::get_flows_for_event(const reader_types::event_id_t& id) const
 {
-    (void) event;
-    return std::nullopt;
+    return m_impl->get_flows_for_event(id);
 }
 
-std::optional<reader_types::pmc_event_data_t>
-reader_t::get_pmc_event_details(const reader_types::timeline_event_t& event) const
+reader_types::flow_list_t
+reader_t::get_flows_for_chain(const reader_types::flow_id_t& flow_id) const
 {
-    (void) event;
-    return std::nullopt;
+    return m_impl->get_flows_for_chain(flow_id);
+}
+
+reader_types::flow_list_t
+reader_t::get_flows_in_window(const std::vector<reader_types::track_id_t>& tracks,
+                              const reader_types::time_window_t&           window,
+                              uint32_t max_edges) const
+{
+    return m_impl->get_flows_in_window(tracks, window, max_edges);
+}
+
+std::optional<reader_types::event_info_t>
+reader_t::get_event_info(const reader_types::event_id_t& id) const
+{
+    return m_impl->get_event_info(id);
 }
 
 reader_types::call_stack_t
@@ -146,10 +160,28 @@ reader_t::get_source_context(const reader_types::timeline_event_t& event) const
     return m_impl->get_source_context(event);
 }
 
+reader_types::call_stack_t
+reader_t::get_call_stack(const reader_types::event_id_t& id) const
+{
+    return m_impl->get_call_stack(id);
+}
+
+reader_types::source_context_list_t
+reader_t::get_source_context(const reader_types::event_id_t& id) const
+{
+    return m_impl->get_source_context(id);
+}
+
 reader_types::arg_data_list_t
 reader_t::get_arguments(const reader_types::timeline_event_t& event) const
 {
     return m_impl->get_arguments(event);
+}
+
+reader_types::arg_data_list_t
+reader_t::get_arguments(const reader_types::event_id_t& id) const
+{
+    return m_impl->get_arguments(id);
 }
 
 reader_types::timeline_event_list_t
@@ -161,21 +193,19 @@ reader_t::get_correlated_events(const reader_types::timeline_event_t& event) con
 reader_types::event_summary_list_t
 reader_t::get_kernel_summary(const reader_types::time_window_t& window) const
 {
-    (void) window;
-    return {};
+    return m_impl->get_kernel_summary(window);
 }
 
 reader_types::event_summary_list_t
 reader_t::get_region_summary(const reader_types::time_window_t& window) const
 {
-    (void) window;
-    return {};
+    return m_impl->get_region_summary(window);
 }
 
 reader_types::time_window_t
-reader_t::get_data_time_range() const
+reader_t::get_time_range() const
 {
-    return m_impl->get_data_time_range();
+    return m_impl->get_time_range();
 }
 
 reader_types::event_counts_t

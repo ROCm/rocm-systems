@@ -84,7 +84,7 @@ using queue_id_t = size_t;
  */
 using track_name_t = std::string_view;
 
-using timestamp_ns_t = size_t;
+using timestamp_t = size_t;
 
 constexpr std::string_view empty_json = "{}";
 
@@ -439,8 +439,8 @@ struct region_data_t
 {
     std::optional<event_data_t> event;  ///< Common event metadata
 
-    timestamp_ns_t   start_timestamp;  ///< Region start time (nanoseconds)
-    timestamp_ns_t   end_timestamp;    ///< Region end time (nanoseconds)
+    timestamp_t      start_timestamp;  ///< Region start time (nanoseconds)
+    timestamp_t      end_timestamp;    ///< Region end time (nanoseconds)
     std::string_view name;             ///< Region name (e.g., function name, annotation)
     std::string_view extdata = empty_json;
 
@@ -454,7 +454,7 @@ struct region_data_t
  */
 struct sample_data_t
 {
-    timestamp_ns_t   timestamp{};  ///< Sample time (nanoseconds)
+    timestamp_t      timestamp{};  ///< Sample time (nanoseconds)
     track_info_t     track;
     std::string_view extdata = empty_json;
 };
@@ -483,8 +483,8 @@ struct kernel_dispatch_data_t
 {
     std::optional<event_data_t> event;               ///< Common event metadata
     size_t                      dispatch_id{};       ///< Unique dispatch identifier
-    timestamp_ns_t              start_timestamp{};   ///< Kernel start time (nanoseconds)
-    timestamp_ns_t              end_timestamp{};     ///< Kernel end time (nanoseconds)
+    timestamp_t                 start_timestamp{};   ///< Kernel start time (nanoseconds)
+    timestamp_t                 end_timestamp{};     ///< Kernel end time (nanoseconds)
     kernel_symbol_id_t          kernel_symbol_id{};  ///< Kernel symbol id
     code_object_id_t            code_object_id{};    ///< Code object id
     size_t private_segment_size{};  ///< Private memory per work-item (bytes)
@@ -509,8 +509,8 @@ struct kernel_dispatch_data_t
 struct memory_copy_data_t
 {
     std::optional<event_data_t> event;              ///< Common event metadata
-    timestamp_ns_t              start_timestamp{};  ///< Copy start time (nanoseconds)
-    timestamp_ns_t              end_timestamp{};    ///< Copy end time (nanoseconds)
+    timestamp_t                 start_timestamp{};  ///< Copy start time (nanoseconds)
+    timestamp_t                 end_timestamp{};    ///< Copy end time (nanoseconds)
     std::optional<agent_unique_id_t> dst_agent_id;  ///< Destination agent id
     std::optional<size_t>            dst_address;   ///< Destination memory address
     std::optional<agent_unique_id_t> src_agent_id;  ///< Source agent id
@@ -535,8 +535,8 @@ struct memory_alloc_data_t
         type;  ///< Allocation type (e.g., "hipMalloc", "hipHostMalloc")
     std::optional<std::string_view>
                           level;  ///< Memory level (e.g., "device", "host", "managed")
-    timestamp_ns_t        start_timestamp{};  ///< Allocation start time (nanoseconds)
-    timestamp_ns_t        end_timestamp{};    ///< Allocation end time (nanoseconds)
+    timestamp_t           start_timestamp{};  ///< Allocation start time (nanoseconds)
+    timestamp_t           end_timestamp{};    ///< Allocation end time (nanoseconds)
     std::optional<size_t> address;            ///< Allocated memory address
     size_t                size{};             ///< Allocation size (bytes)
     std::string_view      extdata = empty_json;

@@ -80,6 +80,16 @@ target_link_libraries(your_target PRIVATE profiler-hub::profiler-hub)
 <!-- | Benchmark           | Description                   | Time (ns) | -->
 <!-- |---------------------|-------------------------------|-----------| -->
 
+## Track-Based Reader API
+
+profiler-hub exposes a type-aware reader API for retrieving profiling events by track. Eight track types are defined (`cpu_thread`, `gpu_queue`, `dma`, `counter`, `stream`, `memory`, `kernel_dispatch_pmc`, `memory_activity`), each fully described by `track_info_t` without side queries. Three methods cover the full event surface:
+
+- `get_interval_track(track_id)` — interval events with correct per-track scoping and pre-computed nesting level/parent
+- `get_scalar_track(track_id)` — scalar/PMC sample events with deterministic per-metric resolution
+- `get_flows()` — causal flow edges between events (CPU→GPU correlations)
+
+Both rocpd v3 and v4.0 schema backends are supported.
+
 ## License
 
 MIT License — Copyright (c) 2025 Advanced Micro Devices, Inc.

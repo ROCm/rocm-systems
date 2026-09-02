@@ -79,9 +79,6 @@ struct writer_t
     /**
      * @brief Insert track info into rocpd
      * @param track Track info which will be inserted into rocpd
-     * @param node_id_value Node Id Value - which will uniquely identify the node
-     * @param process_id_value Process Id Value - which will uniquely identify the process
-     * @param thread_id_value Thread Id Value - which will uniquely identify the thread
      */
     void register_track_info(const writer_types::track_info_t& track);
 
