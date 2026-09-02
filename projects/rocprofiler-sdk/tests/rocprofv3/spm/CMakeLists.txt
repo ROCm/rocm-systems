@@ -14,6 +14,17 @@ find_package(Python3 REQUIRED)
 set(COUNTER_LIST SQ_CYCLES SQ_WAVES TCC_HIT TCC_MISS TCC_REQ CPC_CPC_STAT_BUSY
                  CPC_CPC_STAT_IDLE)
 
+if(NOT ROCPROFILER_MEMCHECK STREQUAL "")
+    set(SANITIZER True)
+else()
+    set(SANITIZER False)
+endif()
+
+rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
+if(${SANITIZER})
+    set(IS_SPM_DISABLED True)
+endif()
+
 set(IS_DISABLED True)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
