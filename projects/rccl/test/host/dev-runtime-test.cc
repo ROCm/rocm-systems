@@ -415,7 +415,11 @@ TEST_F(DevrFinalizeTest, StreamCallsFail_StillCompletes) {
 
   EXPECT_EQ(ncclDevrFinalize(comm), ncclSuccess);
   EXPECT_GT(create.calls, 0);
-  EXPECT_EQ(capture.calls, 1);
+  // Twice: swapped in on entry (dev_runtime.cc:217) and restored on exit
+  // (:295). The restore was added by the graph-capture hang fix (#9334); a
+  // count of 1 here would mean finalize left the caller's capture mode
+  // clobbered.
+  EXPECT_EQ(capture.calls, 2);
 }
 
 // Branch: stream creation succeeds but synchronize and destroy fail, so the
