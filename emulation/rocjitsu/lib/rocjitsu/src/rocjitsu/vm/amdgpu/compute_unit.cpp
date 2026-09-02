@@ -740,10 +740,8 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, const Wavefr
     break;
   }
   default:
-    // No pipeline will take this. Reported anyway, with the route left UNKNOWN
-    // and every other field at its default, so that a consumer counting the
-    // kernel's memory traffic can see there was an access it cannot account
-    // for rather than never hearing about it.
+    // Left UNKNOWN, so a consumer counting the kernel's memory traffic sees an
+    // access it cannot account for rather than never hearing about it.
     break;
   }
 
