@@ -532,8 +532,9 @@ if(NOT _target_extension_test MATCHES
        "HypotheticalModeRegistersWithoutConcreteTargetChanges")
     message(FATAL_ERROR "ConSan extension-axis exercises are missing")
 endif()
-if(NOT _mode_extension_test MATCHES "barrier_scratch_vgpr_count")
-    message(FATAL_ERROR "ConSan hypothetical mode must publish barrier scratch demand")
+if(NOT _mode_extension_test MATCHES "barrier_scratch_vgpr_count" OR
+   NOT _mode_extension_test MATCHES "atomic_scratch_vgpr_count")
+    message(FATAL_ERROR "ConSan hypothetical mode must publish synchronization scratch demand")
 endif()
 foreach(_barrier_scratch_mode IN ITEMS record_replay sampled inline_shadow)
     file(
@@ -548,16 +549,81 @@ foreach(_barrier_scratch_mode IN ITEMS record_replay sampled inline_shadow)
         )
     endif()
 endforeach()
+foreach(_atomic_scratch_mode IN ITEMS record_replay sampled inline_shadow)
+    file(
+        READ "${_consan_dir}/consan_moi_${_atomic_scratch_mode}.cpp"
+        _atomic_scratch_mode_owner
+    )
+    if(NOT _atomic_scratch_mode_owner MATCHES
+       "[.]atomic_scratch_vgpr_count[ ]*=")
+        message(
+            FATAL_ERROR
+            "ConSan ${_atomic_scratch_mode} must own its atomic scratch demand"
+        )
+    endif()
+endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_pipeline.inc"
     "ConSanProbeIntentKind::(BarrierRecord|SampledBarrierEpoch|ExactBarrierEpoch)|operational_barrier_scratch_count"
     "common MOI resource solving must consume mode-owned barrier scratch demand"
 )
 _consan_assert_no_match(
+    "${_consan_dir}/consan_moi_pipeline.inc"
+    "ConSanProbeIntentKind::(AtomicRecord|SampledAtomicOrdering|ExactAtomicOrdering)|operational_atomic_scratch_count"
+    "common MOI resource solving must compose mode-owned atomic scratch demand"
+)
+_consan_assert_no_match(
     "${_consan_dir}/consan_moi_barrier.inc"
     "operational_barrier_scratch_count"
     "exact-subset barrier lowering must consume the mode-owned scratch contract"
 )
+file(READ "${_consan_dir}/consan_moi_inline_shadow.cpp" _inline_shadow_mode_owner)
+if(NOT _inline_shadow_mode_owner MATCHES
+   "inline_shadow_atomic_scratch_vgpr_count[^}]*MoiTargetFacts")
+    message(
+        FATAL_ERROR
+        "InlineShadow must own atomic scratch policy over normalized target facts"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sync_emission.cpp"
+    "inline_shadow_atomic_scratch_vgpr_count"
+    "shared synchronization emission must not own InlineShadow scratch policy"
+)
+file(READ "${_consan_dir}/consan_moi_mode_planning.cpp" _moi_mode_target_owner)
+string(FIND "${_moi_mode_target_owner}" "resolve_moi_target_facts" _moi_target_facts_begin)
+string(FIND "${_moi_mode_target_owner}" "make_exact_workgroup_capture_demand"
+       _moi_target_facts_end)
+if(_moi_target_facts_begin LESS 0 OR
+   _moi_target_facts_end LESS_EQUAL _moi_target_facts_begin)
+    message(FATAL_ERROR "MOI normalized target-facts boundary could not be located")
+endif()
+math(EXPR _moi_target_facts_length
+     "${_moi_target_facts_end} - ${_moi_target_facts_begin}")
+string(SUBSTRING "${_moi_mode_target_owner}" ${_moi_target_facts_begin}
+       ${_moi_target_facts_length} _moi_target_facts_projection)
+if(NOT _moi_target_facts_projection MATCHES "consan_target_profile" OR
+   _moi_target_facts_projection MATCHES "ConSanMoiEngine")
+    message(
+        FATAL_ERROR
+        "MOI target facts must be normalized without selecting a mode"
+    )
+endif()
+file(READ "${_consan_dir}/consan_moi_mode_planning.h" _moi_mode_planning_contract)
+if(NOT _moi_mode_planning_contract MATCHES
+       "struct MoiTargetFacts[^}]*requires_aligned_flat_compare_swap_data_pair")
+    message(
+        FATAL_ERROR
+        "MOI mode contracts lost the normalized atomic-alignment target fact"
+    )
+endif()
+foreach(_file IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_file}"
+        "consan_arch_requires_aligned_flat_compare_swap_data_pair"
+        "MOI consumers must use the normalized atomic-alignment target fact"
+    )
+endforeach()
 
 # Dispatch placement composes one mode-owned demand with one target-owned
 # capability. The shared register search must not rediscover either axis from
@@ -737,7 +803,7 @@ foreach(_callback IN ITEMS scalar_abi dense_router)
     endif()
 endforeach()
 if(NOT _moi_mode_planning_contract MATCHES
-       "dense_router[^;]*MoiScalarAbiPlan[^;]*MoiScalarRoutingState[^;]*MoiScalarTargetFacts" OR
+       "dense_router[^;]*MoiScalarAbiPlan[^;]*MoiScalarRoutingState[^;]*MoiTargetFacts" OR
    NOT _moi_mode_planning_implementation MATCHES
        "dense_router\\(operations\\.scalar_abi\\(routing_state\\),[ \t\n]*routing_state")
     message(FATAL_ERROR
@@ -1992,10 +2058,17 @@ if(_moi_sync_emission_contract MATCHES
         "ConSan InlineShadow atomic emission must consume its retained exact plan"
     )
 endif()
+if(NOT _moi_inline_emission_contract MATCHES
+       "struct MoiInlineAtomicEmissionPlan[^}]*scratch_vgpr_count[^}]*requires_aligned_flat_compare_swap_data_pair")
+    message(
+        FATAL_ERROR
+        "ConSan InlineShadow atomic bodies lost their retained scratch and target ABI facts"
+    )
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_sync_emission.cpp"
-    "ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|MoiObjectModeSemantics|moi_special_state_sgprs|moi_target_dispatch_id_sources|moi_workgroup_key_register_plan|validate_inline_atomic_exec_save_sgpr"
-    "InlineShadow atomic body emission may not rediscover retained mode, resource, or placement facts"
+    "ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|MoiObjectModeSemantics|moi_special_state_sgprs|moi_target_dispatch_id_sources|moi_workgroup_key_register_plan|validate_inline_atomic_exec_save_sgpr|resolve_moi_target_facts"
+    "InlineShadow atomic body emission may not rediscover retained mode, resource, placement, or target facts"
 )
 file(READ "${_consan_dir}/consan_moi_inline_atomic.inc" _moi_inline_atomic_owner)
 foreach(_inline_atomic_assignment IN ITEMS

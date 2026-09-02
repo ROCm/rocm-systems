@@ -198,6 +198,11 @@ uint16_t sampled_barrier_scratch_vgpr_count(const MoiBarrierScratchFacts &facts)
   return facts.automatic_private_epoch || facts.persistent_scalar_state_complete ? 9u : 7u;
 }
 
+uint16_t sampled_atomic_scratch_vgpr_count(const ConSanAtomicLoweringForm &,
+                                           const MoiTargetFacts &) {
+  return sampled_atomic_scratch_count();
+}
+
 MoiPersistentStateDemand plan_sampled_persistent_state_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts) {
@@ -285,7 +290,7 @@ MoiScalarAbiPlan plan_sampled_scalar_abi(const MoiScalarRoutingState &routing_st
 std::optional<MoiDenseRouterPlan>
 plan_sampled_dense_router(const MoiScalarAbiPlan &scalar_abi,
                           const MoiScalarRoutingState &routing_state,
-                          const MoiScalarTargetFacts &target) {
+                          const MoiTargetFacts &target) {
   auto plan = make_recording_moi_dense_router_plan(scalar_abi, routing_state, target);
   if (plan && routing_state.has_compact_spill() &&
       plan->call_return_sgpr == plan->indirect_jump.pc_sgpr) {
@@ -295,7 +300,7 @@ plan_sampled_dense_router(const MoiScalarAbiPlan &scalar_abi,
 }
 
 uint16_t sampled_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
-                                      const MoiScalarTargetFacts &target) {
+                                      const MoiTargetFacts &target) {
   if (!requirement.has_report_buffer)
     return 0u;
   if (requirement.scalar_spill)
@@ -314,6 +319,7 @@ const MoiModeOperations kSampledModeOperations = {
     .operational_evidence = {ConSanProbeIntentKind::SampledBarrierEpoch,
                              ConSanProbeIntentKind::SampledAtomicOrdering, false},
     .barrier_scratch_vgpr_count = sampled_barrier_scratch_vgpr_count,
+    .atomic_scratch_vgpr_count = sampled_atomic_scratch_vgpr_count,
     .dynamic_stack_frame_save_sgpr_offset = 8u,
     .exec_save_sgpr_count = sampled_exec_save_sgpr_count,
     .prologue = {},

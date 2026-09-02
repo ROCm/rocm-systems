@@ -71,7 +71,6 @@ sampled_atomic_semantics_reason_name(SampledAtomicSemanticsReason reason);
 
 [[nodiscard]] uint16_t fence_record_scratch_count(const ConSanAtomicLoweringForm &form);
 [[nodiscard]] uint16_t atomic_record_scratch_count(const ConSanAtomicLoweringForm &form);
-[[nodiscard]] uint16_t inline_shadow_atomic_scratch_count(rj_code_arch_t arch);
 
 [[nodiscard]] bool neutralize_atomic_scalar_clause(
     std::vector<uint8_t> &text, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,

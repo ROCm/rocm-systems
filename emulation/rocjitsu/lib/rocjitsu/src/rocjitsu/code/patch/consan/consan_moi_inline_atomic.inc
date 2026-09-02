@@ -3,7 +3,7 @@
     const ConSanOptions &options, const ConSanMoiOperatingPoint &point,
     const ConSanMoiOperatingPoint &allocation, const MoiObjectModeSemantics &semantics,
     uint16_t scratch_vgpr, uint16_t scratch_count, const MoiPrivateEpochLayout *private_layout,
-    rj_code_arch_t arch, std::vector<std::string> &errors) {
+    const MoiTargetFacts &target_facts, rj_code_arch_t arch, std::vector<std::string> &errors) {
   if (!options.moi_report_buffer_address || !point.moi_exec_save_sgpr ||
       !candidate.kernel_descriptor_file_offset)
     return std::nullopt;
@@ -21,7 +21,8 @@
                                             scratch_count, "MOI workgroup key", errors))
     return std::nullopt;
 
-  const uint16_t required_scratch_count = inline_shadow_atomic_scratch_count(arch);
+  const uint16_t required_scratch_count =
+      inline_shadow_atomic_scratch_vgpr_count(candidate.lowering_form, target_facts);
   ConSanMoiOwnerEpochRegisterState owner_epoch_vgprs = point.moi_owner_epoch_vgprs;
   consan_detail::MoiWorkgroupKeyRegisterPlan workgroup_key_registers =
       moi_workgroup_key_register_plan(point);
@@ -91,6 +92,9 @@
       .report_layout = layout,
       .inline_access_present = semantics.inline_access_present,
       .scratch_vgpr = scratch_vgpr,
+      .scratch_vgpr_count = required_scratch_count,
+      .requires_aligned_flat_compare_swap_data_pair =
+          target_facts.requires_aligned_flat_compare_swap_data_pair,
       .exec_save_sgpr = *point.moi_exec_save_sgpr,
       .owner_epoch_vgprs = *owner_epoch_vgprs.operator->(),
       .persistent_sgprs = point.moi_persistent_sgprs,
@@ -121,6 +125,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         "ConSan MOI inline atomic patch does not support this architecture");
     return;
   }
+  const MoiTargetFacts target_facts = resolve_moi_target_facts(arch);
   if (!options.moi_report_buffer_address) {
     result.warnings.emplace_back("ConSan MOI inline atomic patch requires a MOI report buffer");
     return;
@@ -229,7 +234,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     }
     const ConSanCandidateResourcePlan *existing_plan = resource_plan_for_site(
         result.resource_plans, ConSanResourceSiteKind::Atomic, site.text_offset);
-    const uint16_t scratch_count = inline_shadow_atomic_scratch_count(arch);
+    const uint16_t scratch_count =
+        inline_shadow_atomic_scratch_vgpr_count(candidate.lowering_form, target_facts);
     if (existing_plan && existing_plan->scratch_vgpr_count != scratch_count)
       existing_plan = nullptr;
     ConSanCandidateResourcePlan plan =
@@ -327,7 +333,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     auto emission = plan_inline_atomic_emission(
         active_bytes, planned_candidate, options, candidate_point, result.moi_operating_point,
         semantics, resources->base, address_plan.scratch_vgpr_count,
-        private_layout ? &*private_layout : nullptr, arch, result.errors);
+        private_layout ? &*private_layout : nullptr, target_facts, arch, result.errors);
     if (!emission)
       return;
     auto probe = plan_moi_probe_resources(
@@ -577,7 +583,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           auto emission = plan_inline_atomic_emission(
               active_bytes, planned.candidate, options, candidate_point, result.moi_operating_point,
               semantics, planned.resources.base, planned.address_plan.scratch_vgpr_count,
-              planned.private_layout ? &*planned.private_layout : nullptr, arch, result.errors);
+              planned.private_layout ? &*planned.private_layout : nullptr, target_facts, arch,
+              result.errors);
           if (!emission) {
             result.errors.emplace_back(
                 "ConSan MOI inline atomic dense body lost its exact emission plan");

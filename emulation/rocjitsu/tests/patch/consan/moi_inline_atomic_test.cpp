@@ -373,8 +373,8 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicTablesUseTheirAbiEntryStrides) {
     EXPECT_GT(count_subsequence(cave_words, std::array{*release_stride}), 0u)
         << "the 32-byte release-slot ABI must determine its address stride";
 
-    const bool aligned_cas_pair =
-        consan_arch_requires_aligned_flat_compare_swap_data_pair(target.arch);
+    const bool aligned_cas_pair = consan_moi_impl::resolve_moi_target_facts(target.arch)
+                                      .requires_aligned_flat_compare_swap_data_pair;
     const uint16_t snapshot_address = static_cast<uint16_t>(8u + (aligned_cas_pair ? 18u : 17u));
     const uint16_t snapshot_hash = static_cast<uint16_t>(8u + (aligned_cas_pair ? 17u : 19u));
     const auto snapshot_times_eight = instrumentation::build_v_lshlrev_b32(

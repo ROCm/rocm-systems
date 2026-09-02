@@ -34,7 +34,7 @@ plan_hypothetical_mode(const ConSanRequest &, const BoundRuntimeResources &,
 }
 
 uint16_t hypothetical_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
-                                           const consan_moi_impl::MoiScalarTargetFacts &target) {
+                                           const consan_moi_impl::MoiTargetFacts &target) {
   return requirement.has_report_buffer
              ? (target.direct_call_form == ConSanDirectCallForm::SCallI64 ? 3u : 2u)
              : 0u;
@@ -49,6 +49,11 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   operations.barrier_scratch_vgpr_count =
       [](const consan_moi_impl::MoiBarrierScratchFacts &facts) -> uint16_t {
     return facts.has_report_buffer ? 4u : 2u;
+  };
+  operations.atomic_scratch_vgpr_count =
+      [](const ConSanAtomicLoweringForm &,
+         const consan_moi_impl::MoiTargetFacts &target) -> uint16_t {
+    return target.requires_aligned_flat_compare_swap_data_pair ? 9u : 7u;
   };
   operations.dynamic_stack_frame_save_sgpr_offset = 1u;
   operations.exec_save_sgpr_count = hypothetical_exec_save_sgpr_count;
@@ -67,6 +72,9 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   EXPECT_EQ(selected->operational_evidence.barrier, ConSanProbeIntentKind::BarrierRecord);
   EXPECT_EQ(selected->operational_evidence.atomic, ConSanProbeIntentKind::SampledAtomicOrdering);
   EXPECT_EQ(selected->barrier_scratch_vgpr_count({.has_report_buffer = true}), 4u);
+  EXPECT_EQ(selected->atomic_scratch_vgpr_count(
+                {}, {.requires_aligned_flat_compare_swap_data_pair = true}),
+            9u);
   EXPECT_EQ(selected->exec_save_sgpr_count({.has_report_buffer = true},
                                            {.direct_call_form = ConSanDirectCallForm::SCallI64}),
             3u);

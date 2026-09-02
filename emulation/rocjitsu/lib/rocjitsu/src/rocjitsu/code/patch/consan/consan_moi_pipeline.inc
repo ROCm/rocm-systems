@@ -1,18 +1,3 @@
-[[nodiscard]] std::optional<uint16_t>
-operational_atomic_scratch_count(ConSanProbeIntentKind evidence,
-                                 const ConSanAtomicLoweringForm &form, rj_code_arch_t arch) {
-  switch (evidence) {
-  case ConSanProbeIntentKind::AtomicRecord:
-    return atomic_record_scratch_count(form);
-  case ConSanProbeIntentKind::SampledAtomicOrdering:
-    return sampled_atomic_scratch_count();
-  case ConSanProbeIntentKind::ExactAtomicOrdering:
-    return inline_shadow_atomic_scratch_count(arch);
-  default:
-    return std::nullopt;
-  }
-}
-
 void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                                            const ConSanDebugOverrides &debug,
                                            const ConSanMoiOperatingPoint &point,
@@ -56,21 +41,18 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
     }
   }
   if (request.moi_track_atomics) {
+    const MoiTargetFacts target_facts = resolve_moi_target_facts(moi_resource_arch(state));
     std::vector<MoiAtomicEvidenceSitePlan> candidates = build_moi_atomic_evidence_site_plans(
         problem.inventory(), problem.observation_plan(), evidence.atomic, errors);
     if (!errors.empty())
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
       const MoiAtomicEvidenceSitePlan &candidate = candidates[index];
-      const std::optional<uint16_t> scratch_count = operational_atomic_scratch_count(
-          evidence.atomic, candidate.lowering_form, moi_resource_arch(state));
-      if (!scratch_count) {
-        errors.emplace_back("ConSan MOI mode selected an invalid atomic evidence operation");
-        return;
-      }
+      const uint16_t scratch_count =
+          mode.atomic_scratch_vgpr_count(candidate.lowering_form, target_facts);
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
           state, request, debug, point, ConSanResourceSiteKind::Atomic, index,
-          candidate.site.text_offset, candidate.kernel_descriptor_file_offset, *scratch_count,
+          candidate.site.text_offset, candidate.kernel_descriptor_file_offset, scratch_count,
           nullptr, &candidate.lowering_form);
       plan.intent_ids = {candidate.address_capture_intent, candidate.evidence_intent};
       plans.push_back(std::move(plan));

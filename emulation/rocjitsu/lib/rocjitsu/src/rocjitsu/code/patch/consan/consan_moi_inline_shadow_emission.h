@@ -65,6 +65,8 @@ struct MoiInlineAtomicEmissionPlan {
   ConSanMoiReportBufferLayout report_layout;
   bool inline_access_present = false;
   uint16_t scratch_vgpr = 0;
+  uint16_t scratch_vgpr_count = 0;
+  bool requires_aligned_flat_compare_swap_data_pair = false;
   uint16_t exec_save_sgpr = 0;
   ConSanMoiOwnerEpochRegisters owner_epoch_vgprs;
   ConSanMoiPersistentSgprState persistent_sgprs;

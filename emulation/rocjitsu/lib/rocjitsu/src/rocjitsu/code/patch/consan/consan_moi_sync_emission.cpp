@@ -468,18 +468,6 @@ build_moi_fence_evidence_site_plans(const ProgramInventory &inventory,
   return std::max<uint16_t>(inline_atomic_scratch_count(form), record_minimum);
 }
 
-[[nodiscard]] uint16_t inline_shadow_atomic_scratch_count(rj_code_arch_t arch) {
-  // Acquire import now retains the release version across the guest, captures
-  // its causal snapshot, and transactionally publishes up to five full ABI-v6
-  // tokens. Release-capable events use the same window for frontier capture.
-  // Every target retains a stable copy of the guest atomic address across the
-  // guest RMW, predecessor import, and causal-snapshot scan. Targets whose
-  // FLAT compare-swap data pair has legacy even alignment also keep producer
-  // state and scalar persistent owner/epoch materialization ahead of that
-  // final aligned address pair.
-  return consan_arch_requires_aligned_flat_compare_swap_data_pair(arch) ? 28u : 26u;
-}
-
 [[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
 moi_atomic_event_kind(ConSanSyncMemoryRole role) {
   switch (role) {
@@ -926,7 +914,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     uint32_t token_table_capacity, bool release_sequence,
     std::optional<uint16_t> inherited_first_exec, rj_code_arch_t arch) {
   const uint16_t base = scratch_vgpr;
-  const bool aligned_cas_pair = consan_arch_requires_aligned_flat_compare_swap_data_pair(arch);
+  const bool aligned_cas_pair = plan.requires_aligned_flat_compare_swap_data_pair;
   const uint16_t value = static_cast<uint16_t>(base + (aligned_cas_pair ? 18u : 19u));
   const uint16_t expected = static_cast<uint16_t>(base + (aligned_cas_pair ? 19u : 20u));
   const uint16_t hash = static_cast<uint16_t>(base + 21u);
@@ -1674,7 +1662,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   // Swap address and temporary lifetimes when the target requires the address
   // pair to remain even-aligned. The token transaction reuses this space only
   // after the snapshot loads have completed.
-  const bool aligned_cas_pair = consan_arch_requires_aligned_flat_compare_swap_data_pair(arch);
+  const bool aligned_cas_pair = plan.requires_aligned_flat_compare_swap_data_pair;
   const uint16_t snapshot_address =
       static_cast<uint16_t>(scratch_vgpr + (aligned_cas_pair ? 18u : 17u));
   const uint16_t snapshot_temporary =
@@ -1916,7 +1904,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       (snapshot_table_capacity & (snapshot_table_capacity - 1u)) != 0u)
     return false;
   const uint16_t base = scratch_vgpr;
-  const bool aligned_cas_pair = consan_arch_requires_aligned_flat_compare_swap_data_pair(arch);
+  const bool aligned_cas_pair = plan.requires_aligned_flat_compare_swap_data_pair;
   const uint16_t snapshot_address = static_cast<uint16_t>(base + (aligned_cas_pair ? 6u : 5u));
   const uint16_t count = static_cast<uint16_t>(base + (aligned_cas_pair ? 5u : 7u));
   const uint16_t flags = static_cast<uint16_t>(base + 8u);
@@ -2377,7 +2365,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                             std::string(stage));
     }
   } failure{errors};
-  const uint16_t required_scratch_count = inline_shadow_atomic_scratch_count(arch);
+  const uint16_t required_scratch_count = plan.scratch_vgpr_count;
   const uint16_t scratch_vgpr = plan.scratch_vgpr;
   const uint64_t release_table_base =
       plan.report_buffer_address + plan.report_layout.inline_atomic_release_slots_offset;
@@ -2395,7 +2383,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const uint16_t workgroup_key = static_cast<uint16_t>(base + 3u);
   // These three registers are recomputed after causal-snapshot capture, so
   // rotating them for a target's aligned CAS pair extends no live range.
-  const bool aligned_cas_pair = consan_arch_requires_aligned_flat_compare_swap_data_pair(arch);
+  const bool aligned_cas_pair = plan.requires_aligned_flat_compare_swap_data_pair;
   const uint16_t temporary = static_cast<uint16_t>(base + (aligned_cas_pair ? 6u : 4u));
   const uint16_t cas_new = static_cast<uint16_t>(base + (aligned_cas_pair ? 4u : 5u));
   const uint16_t cas_expected = static_cast<uint16_t>(base + (aligned_cas_pair ? 5u : 6u));
@@ -3010,7 +2998,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     uint64_t cave_text_offset, uint64_t return_text_offset, uint32_t &guest_instruction_offset,
     std::vector<std::string> &errors, std::span<const uint32_t> trailing_guest_words) {
   const uint16_t scratch_vgpr = plan.scratch_vgpr;
-  const uint16_t required_scratch_count = inline_shadow_atomic_scratch_count(arch);
+  const uint16_t required_scratch_count = plan.scratch_vgpr_count;
   const bool scalar_persistent = plan.persistent_sgprs.complete();
 
   const uint64_t slot_base =

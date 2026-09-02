@@ -712,12 +712,6 @@ consan_normalize_address_free_private_size(rj_code_arch_t arch, uint32_t request
   return profile && profile->has_selectable_vgpr_bank;
 }
 
-[[nodiscard]] constexpr bool
-consan_arch_requires_aligned_flat_compare_swap_data_pair(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && profile->flat_compare_swap_data_pair_alignment > 1u;
-}
-
 /// Some ConSan probes use the code-object dispatch identity literal instead of
 /// reserving a guest SGPR pair. The availability is an immutable target fact;
 /// the decision to consume it remains engine policy.

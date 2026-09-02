@@ -148,6 +148,22 @@ TEST(ConSanPipeline, BarrierScratchSizingIsModeOwned) {
   EXPECT_EQ(scratch_count(ConSanMoiEngine::Sampled), 9u);
 }
 
+TEST(ConSanPipeline, AtomicScratchSizingComposesModeAndNormalizedTarget) {
+  ConSanAtomicLoweringForm form;
+  consan_moi_impl::MoiTargetFacts target;
+  const auto scratch_count = [&](ConSanMoiEngine engine) {
+    return consan_moi_impl::moi_mode_operations(engine).atomic_scratch_vgpr_count(form, target);
+  };
+
+  EXPECT_EQ(scratch_count(ConSanMoiEngine::RecordReplay), 7u);
+  EXPECT_EQ(scratch_count(ConSanMoiEngine::Sampled), 11u);
+  EXPECT_EQ(scratch_count(ConSanMoiEngine::InlineShadow), 26u);
+  form.compare_exchange = true;
+  EXPECT_EQ(scratch_count(ConSanMoiEngine::RecordReplay), 8u);
+  target.requires_aligned_flat_compare_swap_data_pair = true;
+  EXPECT_EQ(scratch_count(ConSanMoiEngine::InlineShadow), 28u);
+}
+
 TEST(ConSanPipeline, MoiLoweringSummaryConsumesOnlyTypedPatchKindInventory) {
   const std::vector patches{
       ConSanPatchKind::InlineMoiAccessRecordStore,

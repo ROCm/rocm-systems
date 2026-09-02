@@ -214,13 +214,18 @@ project_moi_barrier_scratch_facts(const BoundRuntimeResources &resources,
           point.automatic_moi_private_epoch, point.moi_persistent_sgprs.complete()};
 }
 
-/// Narrow target facts that affect a mode's transient scalar ABI and dense
-/// routing. Modes see the semantic facility, not an architecture identity or
-/// complete capability profile; adding a target therefore does not require
-/// editing a mode.
-struct MoiScalarTargetFacts {
+/// Narrow facts that affect a mode's resource and routing contracts. Modes
+/// see semantic target facilities, not an architecture identity or complete
+/// capability profile; adding a target therefore does not require editing a
+/// mode.
+struct MoiTargetFacts {
+  bool available = false;
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
+  bool supports_dense_s_call_b64 = false;
+  bool requires_aligned_flat_compare_swap_data_pair = false;
 };
+
+[[nodiscard]] MoiTargetFacts resolve_moi_target_facts(rj_code_arch_t arch);
 
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.
 [[nodiscard]] MoiPersistentStateDemand make_exact_workgroup_capture_demand(
@@ -275,7 +280,7 @@ make_moi_scalar_abi_plan(const MoiScalarRoutingState &routing_state,
 [[nodiscard]] std::optional<MoiDenseRouterPlan>
 make_recording_moi_dense_router_plan(const MoiScalarAbiPlan &scalar_abi,
                                      const MoiScalarRoutingState &routing_state,
-                                     const MoiScalarTargetFacts &target);
+                                     const MoiTargetFacts &target);
 
 /// Resolve the selected mode's dense-router mechanics at the narrow mode
 /// registry boundary. Consumers never branch on the engine themselves.
@@ -306,8 +311,9 @@ struct MoiModeOperations {
                                         const MoiAccessResourceFacts &, const ConSanMoiCandidate &);
   MoiOperationalEvidenceKinds operational_evidence;
   uint16_t (*barrier_scratch_vgpr_count)(const MoiBarrierScratchFacts &);
+  uint16_t (*atomic_scratch_vgpr_count)(const ConSanAtomicLoweringForm &, const MoiTargetFacts &);
   std::optional<uint16_t> dynamic_stack_frame_save_sgpr_offset;
-  uint16_t (*exec_save_sgpr_count)(const MoiExecSaveRequirement &, const MoiScalarTargetFacts &);
+  uint16_t (*exec_save_sgpr_count)(const MoiExecSaveRequirement &, const MoiTargetFacts &);
   MoiPrologueModePolicy prologue;
   MoiPersistentStateDemand (*persistent_state_demand)(const ConSanRequest &,
                                                       const BoundRuntimeResources &,
@@ -324,7 +330,7 @@ struct MoiModeOperations {
   MoiDenseAccessRouteTraits dense_access_route;
   std::optional<MoiDenseRouterPlan> (*dense_router)(const MoiScalarAbiPlan &,
                                                     const MoiScalarRoutingState &,
-                                                    const MoiScalarTargetFacts &);
+                                                    const MoiTargetFacts &);
   ConSanEvidenceRequirements (*plan_evidence)(const MoiEvidencePlanningContext &);
   bool (*plan_report_layout)(const ConSanMoiAutoReportInventory &, ConSanMoiAutoReportPlan &,
                              uint64_t &cursor);

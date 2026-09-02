@@ -252,6 +252,14 @@ uint16_t inline_shadow_barrier_scratch_vgpr_count(const MoiBarrierScratchFacts &
   return facts.has_report_buffer && !facts.inline_access_present ? 3u : 1u;
 }
 
+uint16_t inline_shadow_atomic_scratch_vgpr_count(const ConSanAtomicLoweringForm &,
+                                                 const MoiTargetFacts &target) {
+  // Acquire import retains the release version, causal snapshot, and up to
+  // five ABI-v6 tokens. The legacy aligned FLAT CAS pair additionally keeps
+  // producer and scalar owner/epoch state ahead of the final address pair.
+  return target.requires_aligned_flat_compare_swap_data_pair ? 28u : 26u;
+}
+
 MoiPersistentStateDemand
 plan_inline_shadow_persistent_state_demand(const ConSanRequest &, const BoundRuntimeResources &,
                                            const ConSanMoiOperatingPoint &point,
@@ -318,7 +326,7 @@ MoiScalarAbiPlan plan_inline_shadow_scalar_abi(const MoiScalarRoutingState &rout
 std::optional<MoiDenseRouterPlan>
 plan_inline_shadow_dense_router(const MoiScalarAbiPlan &scalar_abi,
                                 const MoiScalarRoutingState &routing_state,
-                                const MoiScalarTargetFacts &target) {
+                                const MoiTargetFacts &target) {
   if (routing_state.has_branch_only_spill)
     return std::nullopt;
   if (!scalar_abi.indirect_jump)
@@ -357,7 +365,7 @@ plan_inline_shadow_dense_router(const MoiScalarAbiPlan &scalar_abi,
 }
 
 uint16_t inline_shadow_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
-                                            const MoiScalarTargetFacts &) {
+                                            const MoiTargetFacts &) {
   if (!requirement.has_report_buffer)
     return 0u;
   const uint16_t engine_count =
@@ -373,6 +381,7 @@ const MoiModeOperations kInlineShadowModeOperations = {
     .operational_evidence = {ConSanProbeIntentKind::ExactBarrierEpoch,
                              ConSanProbeIntentKind::ExactAtomicOrdering, false},
     .barrier_scratch_vgpr_count = inline_shadow_barrier_scratch_vgpr_count,
+    .atomic_scratch_vgpr_count = inline_shadow_atomic_scratch_vgpr_count,
     .dynamic_stack_frame_save_sgpr_offset = 24u,
     .exec_save_sgpr_count = inline_shadow_exec_save_sgpr_count,
     .prologue =

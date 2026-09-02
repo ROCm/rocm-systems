@@ -150,6 +150,11 @@ uint16_t record_replay_access_scratch_vgpr_count(const ConSanRequest &request,
 
 uint16_t record_replay_barrier_scratch_vgpr_count(const MoiBarrierScratchFacts &) { return 6u; }
 
+uint16_t record_replay_atomic_scratch_vgpr_count(const ConSanAtomicLoweringForm &form,
+                                                 const MoiTargetFacts &) {
+  return atomic_record_scratch_count(form);
+}
+
 MoiPersistentStateDemand plan_record_replay_persistent_state_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts) {
@@ -215,12 +220,12 @@ MoiScalarAbiPlan plan_record_replay_scalar_abi(const MoiScalarRoutingState &rout
 std::optional<MoiDenseRouterPlan>
 plan_record_replay_dense_router(const MoiScalarAbiPlan &scalar_abi,
                                 const MoiScalarRoutingState &routing_state,
-                                const MoiScalarTargetFacts &target) {
+                                const MoiTargetFacts &target) {
   return make_recording_moi_dense_router_plan(scalar_abi, routing_state, target);
 }
 
 uint16_t record_replay_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,
-                                            const MoiScalarTargetFacts &) {
+                                            const MoiTargetFacts &) {
   if (requirement.automatic_banked_record_capture)
     return 14u;
 
@@ -243,6 +248,7 @@ const MoiModeOperations kRecordReplayModeOperations = {
     .operational_evidence = {ConSanProbeIntentKind::BarrierRecord,
                              ConSanProbeIntentKind::AtomicRecord, true},
     .barrier_scratch_vgpr_count = record_replay_barrier_scratch_vgpr_count,
+    .atomic_scratch_vgpr_count = record_replay_atomic_scratch_vgpr_count,
     .dynamic_stack_frame_save_sgpr_offset = 5u,
     .exec_save_sgpr_count = record_replay_exec_save_sgpr_count,
     .prologue = {.backup_compact_spill_for_runtime_sampling = true},
