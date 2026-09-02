@@ -38,6 +38,8 @@
 
 #include "rocjitsu/code/patch/consan/consan_options.h.inc"
 
+#include "rocjitsu/code/patch/consan/consan_moi_vgpr_state_effect.h.inc"
+
 #include "rocjitsu/code/patch/consan/consan_moi_private_state_layout.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_request_contract.h.inc"

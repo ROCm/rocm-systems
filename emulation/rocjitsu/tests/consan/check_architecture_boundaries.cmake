@@ -1217,6 +1217,43 @@ _consan_assert_no_match(
     "private-state layout must remain independent of mode and report policy"
 )
 
+# Owner/epoch vector state is one indivisible pair with one explicit lifetime.
+# Workgroup destinations travel with that effect rather than through a patch
+# field list, and entry-local scratch cannot masquerade as a persistent ABI.
+file(READ
+    "${_consan_dir}/consan_moi_vgpr_state_effect.h.inc"
+    _moi_vgpr_state_effect_contract
+)
+file(READ "${_consan_dir}/consan_moi_internal.h" _moi_vgpr_prologue_contract)
+if(NOT _shared_aggregate_contract MATCHES
+       "consan_moi_vgpr_state_effect[.]h[.]inc" OR
+   NOT _moi_vgpr_state_effect_contract MATCHES
+       "enum class ConSanMoiOwnerEpochVgprLifetime" OR
+   NOT _moi_vgpr_state_effect_contract MATCHES
+       "struct ConSanMoiVgprStateEffect" OR
+   NOT _patch_proof_contract MATCHES
+       "std::optional<ConSanMoiVgprStateEffect>[ \t]+moi_vgpr_state" OR
+   NOT _moi_vgpr_prologue_contract MATCHES
+       "ConSanMoiVgprStateEffect[ \t]+vgpr_state" OR
+   NOT _consan_validation MATCHES
+       "moi_vgpr_state->is_well_formed")
+    message(FATAL_ERROR
+        "ConSan MOI prologue and patch proof lost their typed VGPR-state effect"
+    )
+endif()
+foreach(_moi_vgpr_state_owner IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_moi_vgpr_state_owner}"
+        "(^|[^A-Za-z0-9_])persistent_(owner|epoch|workgroup_key)_vgpr([^A-Za-z0-9_]|$)|persistent_record_replay_workgroup_vgprs|persistent_vgpr_state_(owner_local|is_abi)"
+        "MOI VGPR state must retain its typed pair, destinations, and lifetime"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_vgpr_state_effect.h.inc"
+    "rj_code_arch|ConSanMoiEngine|ConSanCapabilityEngine|ConSanFlavor|ConSanMoiReport|consan_moi_(sampled|record_replay|inline|report|shadow)"
+    "MOI VGPR-state effects must remain independent of target, mode, and report policy"
+)
+
 # Scalar allocations carry their selection provenance. The owner scalar must
 # not return to a loose optional plus a separately mutable automatic marker.
 _consan_assert_no_match(

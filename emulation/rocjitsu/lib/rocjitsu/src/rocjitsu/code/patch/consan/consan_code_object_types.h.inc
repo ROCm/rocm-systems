@@ -604,18 +604,11 @@ struct ConSanPatchAbiEffects {
   /// reservoirs, or four dynamic-stack bootstrap reservoirs. Zero means the
   /// scalar-pressure fallback was unused.
   uint16_t scalar_vcc_spill_vgpr_count = 0;
-  std::optional<uint16_t> persistent_owner_vgpr;
-  std::optional<uint16_t> persistent_epoch_vgpr;
-  std::optional<uint16_t> persistent_workgroup_key_vgpr;
-  ConSanMoiPersistentWorkgroupRegisters persistent_record_replay_workgroup_vgprs;
-  /// Whether the vector-persistent tuple was selected for this owner rather
-  /// than as the code-object-wide register ABI. This keeps derived reporting
-  /// from conflating one per-owner prologue with a global selection.
-  bool persistent_vgpr_state_owner_local = false;
-  /// Whether owner/epoch in this patch remain live as the persistent vector
-  /// ABI after entry. Scalar-persistent prologues use entry-local VGPR scratch
-  /// for initialization and therefore leave this false.
-  bool persistent_vgpr_state_is_abi = false;
+  /// Complete vector-register state initialized or consumed by this patch.
+  /// The typed lifetime distinguishes persistent state from entry-only
+  /// owner/epoch scratch and prevents an incomplete pair or contradictory
+  /// owner-local/ABI flags.
+  std::optional<ConSanMoiVgprStateEffect> moi_vgpr_state;
   /// Scalar-persistent state initialized by this entry prologue. Access and
   /// synchronization patches consume this exact ABI; other patch kinds leave
   /// the aggregate empty.

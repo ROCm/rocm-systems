@@ -560,9 +560,10 @@ TEST(ConSanMoi, Gfx1250DenseSampledFastGateIncludesClusterWorkgroupId) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  ASSERT_TRUE(prologue->persistent_record_replay_workgroup_vgprs.cluster_workgroup_id());
+  ASSERT_TRUE(prologue->moi_vgpr_state);
+  ASSERT_TRUE(prologue->moi_vgpr_state->record_replay_workgroup.cluster_workgroup_id());
   const uint16_t persistent_cluster =
-      *prologue->persistent_record_replay_workgroup_vgprs.cluster_workgroup_id();
+      *prologue->moi_vgpr_state->record_replay_workgroup.cluster_workgroup_id();
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
   EXPECT_NE(std::ranges::find(prologue_words,
@@ -5701,13 +5702,14 @@ TEST(ConSanMoi, SampledRuntimeGateUsesExpandedBranchIslands) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  ASSERT_TRUE(prologue->persistent_record_replay_workgroup_vgprs.complete());
+  ASSERT_TRUE(prologue->moi_vgpr_state);
+  ASSERT_TRUE(prologue->moi_vgpr_state->record_replay_workgroup.complete());
   const auto dependency_wait =
       instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(dependency_wait);
-  for (uint16_t coordinate : {*prologue->persistent_record_replay_workgroup_vgprs.x(),
-                              *prologue->persistent_record_replay_workgroup_vgprs.y(),
-                              *prologue->persistent_record_replay_workgroup_vgprs.z()}) {
+  for (uint16_t coordinate : {*prologue->moi_vgpr_state->record_replay_workgroup.x(),
+                              *prologue->moi_vgpr_state->record_replay_workgroup.y(),
+                              *prologue->moi_vgpr_state->record_replay_workgroup.z()}) {
     const auto read = instrumentation::build_v_readfirstlane_b32(
         /*sdst=*/85u, coordinate, ROCJITSU_CODE_ARCH_RDNA4);
     const auto mix =
@@ -7458,7 +7460,8 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyRuntimeSelectionUsesBodyGate) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end()) << testing::PrintToString(result.patches);
-  EXPECT_TRUE(prologue->persistent_record_replay_workgroup_vgprs.complete());
+  ASSERT_TRUE(prologue->moi_vgpr_state);
+  EXPECT_TRUE(prologue->moi_vgpr_state->record_replay_workgroup.complete());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning ==
            "ConSan MOI sampled runtime workgroup selection uses the spill-safe body gate";
@@ -8129,11 +8132,12 @@ TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareG
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  ASSERT_TRUE(prologue->persistent_record_replay_workgroup_vgprs.complete());
+  ASSERT_TRUE(prologue->moi_vgpr_state);
+  ASSERT_TRUE(prologue->moi_vgpr_state->record_replay_workgroup.complete());
   const std::array<uint16_t, 3> persistent_grid = {
-      *prologue->persistent_record_replay_workgroup_vgprs.x(),
-      *prologue->persistent_record_replay_workgroup_vgprs.y(),
-      *prologue->persistent_record_replay_workgroup_vgprs.z(),
+      *prologue->moi_vgpr_state->record_replay_workgroup.x(),
+      *prologue->moi_vgpr_state->record_replay_workgroup.y(),
+      *prologue->moi_vgpr_state->record_replay_workgroup.z(),
   };
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);

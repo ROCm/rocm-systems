@@ -1016,9 +1016,9 @@ build_owner_epoch_prologue_words(uint64_t prologue_text_offset, uint64_t origina
     errors.emplace_back("ConSan MOI owner/epoch prologue has an invalid emission plan");
     return std::nullopt;
   }
-  const uint16_t owner_vgpr = plan.owner_vgpr;
-  const uint16_t epoch_vgpr = plan.epoch_vgpr;
-  const std::optional<uint16_t> workgroup_key_vgpr = plan.workgroup_key_vgpr;
+  const uint16_t owner_vgpr = plan.vgpr_state.owner_epoch.owner;
+  const uint16_t epoch_vgpr = plan.vgpr_state.owner_epoch.epoch;
+  const std::optional<uint16_t> workgroup_key_vgpr = plan.vgpr_state.workgroup_key;
   const uint16_t owner_shift_bits = plan.owner_shift_bits;
   const ConSanMoiOwnerSource owner_source = plan.owner_source;
   const std::optional<uint16_t> owner_sgpr = plan.owner_sgpr;
@@ -1029,7 +1029,7 @@ build_owner_epoch_prologue_words(uint64_t prologue_text_offset, uint64_t origina
   const ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_sgprs =
       plan.persistent_sgprs.record_replay_workgroup;
   const ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_vgprs =
-      plan.record_replay_workgroup_vgprs;
+      plan.vgpr_state.record_replay_workgroup;
   const std::optional<ConSanMoiDispatchIdPreloadPlan> &dispatch_plan = plan.dispatch_plan;
   const ConSanMoiDispatchIdCapture dispatch_capture = plan.dispatch_capture;
   const std::optional<ConSanMoiWorkgroupSource> &runtime_workgroup_selection_source =
@@ -2153,18 +2153,12 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
 
 [[nodiscard]] uint32_t
 moi_owner_epoch_prologue_required_vgpr_count(const MoiOwnerEpochPrologueEmissionPlan &emission) {
-  uint32_t required = std::max<uint32_t>(emission.owner_vgpr, emission.epoch_vgpr) + 1u;
+  uint32_t required = emission.vgpr_state.required_vgpr_count();
   if (emission.workgroup_shadow)
-    required = std::max<uint32_t>(required,
-                                  emission.epoch_vgpr + (emission.has_quad_zero_tuple ? 4u : 2u));
-  if (emission.workgroup_key_vgpr)
-    required = std::max<uint32_t>(required, *emission.workgroup_key_vgpr + 1u);
+    required = std::max<uint32_t>(required, emission.vgpr_state.owner_epoch.epoch +
+                                                (emission.has_quad_zero_tuple ? 4u : 2u));
   if (emission.dispatch_capture.vgpr())
     required = std::max<uint32_t>(required, *emission.dispatch_capture.vgpr() + 2u);
-  for (const std::optional<uint16_t> reg : emission.record_replay_workgroup_vgprs.values()) {
-    if (reg)
-      required = std::max<uint32_t>(required, *reg + 1u);
-  }
   return required;
 }
 
@@ -2191,16 +2185,17 @@ moi_owner_epoch_prologue_uses_vgpr(const MoiOwnerEpochPrologueEmissionPlan &emis
   const auto overlaps = [vgpr](std::optional<uint16_t> base, uint16_t width = 1u) {
     return base && range_overlaps(vgpr, 1u, *base, width);
   };
-  if (overlaps(emission.owner_vgpr))
+  if (overlaps(emission.vgpr_state.owner_epoch.owner))
     return true;
   const uint16_t epoch_width = emission.workgroup_shadow
                                    ? static_cast<uint16_t>(emission.has_quad_zero_tuple ? 4u : 2u)
                                    : 1u;
-  if (overlaps(emission.epoch_vgpr, epoch_width) || overlaps(emission.workgroup_key_vgpr) ||
+  if (overlaps(emission.vgpr_state.owner_epoch.epoch, epoch_width) ||
+      overlaps(emission.vgpr_state.workgroup_key) ||
       overlaps(emission.dispatch_capture.vgpr(), 2u)) {
     return true;
   }
-  for (const std::optional<uint16_t> reg : emission.record_replay_workgroup_vgprs.values()) {
+  for (const std::optional<uint16_t> reg : emission.vgpr_state.record_replay_workgroup.values()) {
     if (overlaps(reg))
       return true;
   }
@@ -2471,15 +2466,22 @@ void try_apply_owner_epoch_prologue_patch(
           inline_shadow_visible_evidence_sgpr(project_inline_shadow_scalar_state(kernel_point));
     }
     MoiOwnerEpochPrologueEmissionPlan emission{
-        .owner_vgpr = *owner_epoch_vgprs.owner,
-        .epoch_vgpr = *owner_epoch_vgprs.epoch,
-        .workgroup_key_vgpr = kernel_point.moi_workgroup_key_vgpr,
+        .vgpr_state =
+            {
+                .owner_epoch = {*owner_epoch_vgprs.owner, *owner_epoch_vgprs.epoch},
+                .workgroup_key = kernel_point.moi_workgroup_key_vgpr,
+                .record_replay_workgroup = kernel_point.moi_record_replay_workgroup_vgprs,
+                .owner_epoch_lifetime = kernel_point.moi_persistent_sgprs.complete()
+                                            ? ConSanMoiOwnerEpochVgprLifetime::EntryLocal
+                                        : result.moi_operating_point.owner_persistent_vgprs.empty()
+                                            ? ConSanMoiOwnerEpochVgprLifetime::CodeObjectPersistent
+                                            : ConSanMoiOwnerEpochVgprLifetime::OwnerLocalPersistent,
+            },
         .owner_shift_bits = owner_shift_bits,
         .owner_source = options.moi_owner_source,
         .owner_sgpr = kernel_point.moi_owner_sgpr.base(),
         .one_based_owner_ids = mode_policy.one_based_owner_ids,
         .persistent_sgprs = kernel_point.moi_persistent_sgprs,
-        .record_replay_workgroup_vgprs = kernel_point.moi_record_replay_workgroup_vgprs,
         .dispatch_plan = dispatch_plan,
         .dispatch_capture = dispatch_capture,
         .runtime_workgroup_selection_source = moi_runtime_workgroup_selection_source(),
@@ -3006,13 +3008,7 @@ void try_apply_owner_epoch_prologue_patch(
     info.entry_prologue_chained_trampoline_offset = composed_entry_trampoline_offset;
     info.dispatch_id_primary_prologue_offset = dispatch_id_primary_prologue_offset;
     info.dispatch_id_secondary_prologue_offset = dispatch_id_secondary_prologue_offset;
-    info.persistent_owner_vgpr = prologue_plan.owner_vgpr;
-    info.persistent_epoch_vgpr = prologue_plan.epoch_vgpr;
-    info.persistent_workgroup_key_vgpr = prologue_plan.workgroup_key_vgpr;
-    info.persistent_record_replay_workgroup_vgprs = prologue_plan.record_replay_workgroup_vgprs;
-    info.persistent_vgpr_state_owner_local =
-        !result.moi_operating_point.owner_persistent_vgprs.empty();
-    info.persistent_vgpr_state_is_abi = !prologue_plan.persistent_sgprs.complete();
+    info.moi_vgpr_state = prologue_plan.vgpr_state;
     info.persistent_sgpr_state = prologue_plan.persistent_sgprs;
     info.required_sgpr_count = item.required_sgpr_count;
     info.entry_scalar_backup = prologue_plan.entry_scalar_backup;

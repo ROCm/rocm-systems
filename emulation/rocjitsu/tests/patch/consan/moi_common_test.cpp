@@ -714,6 +714,39 @@ TEST(ConSanMoi, PrivateStateLayoutOwnsRangesAndDistinctAllocationBoundaries) {
   EXPECT_FALSE(malformed.is_well_formed());
 }
 
+TEST(ConSanMoi, VgprStateEffectOwnsPairLifetimeAndDistinctRanges) {
+  const ConSanMoiVgprStateEffect valid{
+      .owner_epoch = {10u, 11u},
+      .workgroup_key = 12u,
+      .record_replay_workgroup = ConSanMoiPersistentWorkgroupRegisters{20u, 21u, 22u, 23u},
+      .owner_epoch_lifetime = ConSanMoiOwnerEpochVgprLifetime::OwnerLocalPersistent,
+  };
+  EXPECT_TRUE(valid.is_well_formed());
+  EXPECT_TRUE(valid.owner_epoch_is_abi());
+  EXPECT_TRUE(valid.owner_local());
+  EXPECT_EQ(valid.required_vgpr_count(), 24u);
+
+  ConSanMoiVgprStateEffect code_object_persistent = valid;
+  code_object_persistent.owner_epoch_lifetime =
+      ConSanMoiOwnerEpochVgprLifetime::CodeObjectPersistent;
+  EXPECT_TRUE(code_object_persistent.is_well_formed());
+  EXPECT_TRUE(code_object_persistent.owner_epoch_is_abi());
+  EXPECT_FALSE(code_object_persistent.owner_local());
+
+  ConSanMoiVgprStateEffect entry_local = valid;
+  entry_local.owner_epoch_lifetime = ConSanMoiOwnerEpochVgprLifetime::EntryLocal;
+  EXPECT_TRUE(entry_local.is_well_formed());
+  EXPECT_FALSE(entry_local.owner_epoch_is_abi());
+  EXPECT_FALSE(entry_local.owner_local());
+
+  ConSanMoiVgprStateEffect malformed = valid;
+  malformed.workgroup_key = valid.owner_epoch.epoch;
+  EXPECT_FALSE(malformed.is_well_formed());
+  malformed = valid;
+  malformed.owner_epoch_lifetime = static_cast<ConSanMoiOwnerEpochVgprLifetime>(99u);
+  EXPECT_FALSE(malformed.is_well_formed());
+}
+
 TEST(ConSanMoi, PrivateEpochProloguePlanTypesScratchAndDispatchRequirements) {
   consan_detail::MoiPrivateEpochPrologueEmissionPlan plan;
   plan.scratch_vgpr = 255u;
@@ -787,15 +820,14 @@ TEST(ConSanMoi, PrivateEpochProloguePlanValidatesRuntimeSelectionDomain) {
 
 TEST(ConSanMoi, OwnerEpochProloguePlanValidatesResolvedOwnerAndEntrySources) {
   consan_detail::MoiOwnerEpochPrologueEmissionPlan plan;
-  plan.owner_vgpr = 20u;
-  plan.epoch_vgpr = 21u;
+  plan.vgpr_state.owner_epoch = {20u, 21u};
   plan.owner_shift_bits = 6u;
   plan.owner_source = ConSanMoiOwnerSource::WorkitemId;
   EXPECT_TRUE(plan.is_well_formed());
 
-  plan.epoch_vgpr = plan.owner_vgpr;
+  plan.vgpr_state.owner_epoch.epoch = plan.vgpr_state.owner_epoch.owner;
   EXPECT_FALSE(plan.is_well_formed());
-  plan.epoch_vgpr = 21u;
+  plan.vgpr_state.owner_epoch.epoch = 21u;
   plan.owner_shift_bits = 32u;
   EXPECT_FALSE(plan.is_well_formed());
   plan.owner_shift_bits = 6u;
@@ -947,11 +979,15 @@ TEST(ConSanMoi, FullWorkgroupPayloadRequirementUsesMoiPatchSemantics) {
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
       engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
   patch.persistent_sgpr_state = {};
-  patch.persistent_record_replay_workgroup_vgprs =
-      ConSanMoiPersistentWorkgroupRegisters{20u, 21u, 22u};
+  patch.moi_vgpr_state = ConSanMoiVgprStateEffect{
+      .owner_epoch = {18u, 19u},
+      .workgroup_key = std::nullopt,
+      .record_replay_workgroup = ConSanMoiPersistentWorkgroupRegisters{20u, 21u, 22u},
+      .owner_epoch_lifetime = ConSanMoiOwnerEpochVgprLifetime::CodeObjectPersistent,
+  };
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
       engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
-  patch.persistent_record_replay_workgroup_vgprs = {};
+  patch.moi_vgpr_state.reset();
   patch.private_state_layout = ConSanMoiPrivateStateLayout{
       .epoch_offset = 12u,
       .owner_offset = std::nullopt,
@@ -3926,6 +3962,19 @@ TEST(ConSanMoi, InlineShadowHwIdOwnerPrologueRemapsReservedZero) {
   const std::vector<uint32_t> actual_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
   EXPECT_TRUE(contains_subsequence(actual_words, expected_prefix));
+
+  EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
+  ConSanTransformArtifacts corrupted = result;
+  const auto corrupted_prologue = std::ranges::find(
+      corrupted.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(corrupted_prologue, corrupted.patches.end());
+  ASSERT_TRUE(corrupted_prologue->moi_vgpr_state);
+  corrupted_prologue->moi_vgpr_state->owner_epoch.epoch =
+      corrupted_prologue->moi_vgpr_state->owner_epoch.owner;
+  const std::vector<std::string> validation_errors = validate_consan_modified_elf(bytes, corrupted);
+  EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
+    return error.find("invalid MOI VGPR-state effect") != std::string::npos;
+  })) << testing::PrintToString(validation_errors);
 }
 
 TEST(ConSanMoi, AutomaticPersistentProloguesOnlyTargetEmittedProbeOwners) {

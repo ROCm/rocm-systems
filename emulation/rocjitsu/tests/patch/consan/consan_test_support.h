@@ -374,33 +374,35 @@ test_moi_persistent_vgpr_assignments(const ConSanTransformArtifacts &result) {
 [[nodiscard]] const ConSanPatchInfo *
 test_moi_global_persistent_vgpr_patch(const ConSanTransformArtifacts &result) {
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
-    return candidate.persistent_vgpr_state_is_abi && !candidate.persistent_vgpr_state_owner_local &&
-           candidate.persistent_owner_vgpr && candidate.persistent_epoch_vgpr;
+    return candidate.moi_vgpr_state && candidate.moi_vgpr_state->owner_epoch_is_abi() &&
+           !candidate.moi_vgpr_state->owner_local();
   });
   return patch == result.patches.end() ? nullptr : &*patch;
 }
 
 [[nodiscard]] std::optional<uint16_t> test_moi_owner_vgpr(const ConSanTransformArtifacts &result) {
   const ConSanPatchInfo *patch = test_moi_global_persistent_vgpr_patch(result);
-  return patch == nullptr ? std::nullopt : patch->persistent_owner_vgpr;
+  return patch == nullptr ? std::nullopt
+                          : std::optional<uint16_t>{patch->moi_vgpr_state->owner_epoch.owner};
 }
 
 [[nodiscard]] std::optional<uint16_t> test_moi_epoch_vgpr(const ConSanTransformArtifacts &result) {
   const ConSanPatchInfo *patch = test_moi_global_persistent_vgpr_patch(result);
-  return patch == nullptr ? std::nullopt : patch->persistent_epoch_vgpr;
+  return patch == nullptr ? std::nullopt
+                          : std::optional<uint16_t>{patch->moi_vgpr_state->owner_epoch.epoch};
 }
 
 [[nodiscard]] std::optional<uint16_t>
 test_moi_workgroup_key_vgpr(const ConSanTransformArtifacts &result) {
   const ConSanPatchInfo *patch = test_moi_global_persistent_vgpr_patch(result);
-  return patch == nullptr ? std::nullopt : patch->persistent_workgroup_key_vgpr;
+  return patch == nullptr ? std::nullopt : patch->moi_vgpr_state->workgroup_key;
 }
 
 [[nodiscard]] ConSanMoiPersistentWorkgroupRegisters
 test_moi_record_replay_workgroup_vgprs(const ConSanTransformArtifacts &result) {
   const ConSanPatchInfo *patch = test_moi_global_persistent_vgpr_patch(result);
   return patch == nullptr ? ConSanMoiPersistentWorkgroupRegisters{}
-                          : patch->persistent_record_replay_workgroup_vgprs;
+                          : patch->moi_vgpr_state->record_replay_workgroup;
 }
 
 /// Return the code-object-wide transient EXEC-save base frozen after register

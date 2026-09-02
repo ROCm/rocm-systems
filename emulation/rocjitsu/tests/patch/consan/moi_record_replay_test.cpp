@@ -1994,11 +1994,12 @@ TEST(ConSanMoi, CdnaRecordReplayEnablesAndCapturesEveryLaunchCoordinate) {
               prologue_words.end());
         }
       } else {
-        ASSERT_TRUE(prologue->persistent_record_replay_workgroup_vgprs.complete());
+        ASSERT_TRUE(prologue->moi_vgpr_state);
+        ASSERT_TRUE(prologue->moi_vgpr_state->record_replay_workgroup.complete());
         const std::array<uint16_t, 3> destinations = {
-            *prologue->persistent_record_replay_workgroup_vgprs.x(),
-            *prologue->persistent_record_replay_workgroup_vgprs.y(),
-            *prologue->persistent_record_replay_workgroup_vgprs.z(),
+            *prologue->moi_vgpr_state->record_replay_workgroup.x(),
+            *prologue->moi_vgpr_state->record_replay_workgroup.y(),
+            *prologue->moi_vgpr_state->record_replay_workgroup.z(),
         };
         for (uint16_t dimension = 0; dimension < 3u; ++dimension) {
           EXPECT_NE(
@@ -8472,8 +8473,11 @@ TEST(ConSanMoi, Cdna4FullPressureUsesProvenHybridPersistentRegisterHoles) {
   const uint32_t scratch_end = scratch_begin + plan->scratch_vgpr_count;
   EXPECT_TRUE(*test_moi_epoch_vgpr(result) < scratch_begin ||
               *test_moi_owner_vgpr(result) >= scratch_end);
-  EXPECT_EQ(prologue->persistent_owner_vgpr, test_moi_owner_vgpr(result));
-  EXPECT_EQ(prologue->persistent_epoch_vgpr, test_moi_epoch_vgpr(result));
+  ASSERT_TRUE(prologue->moi_vgpr_state);
+  EXPECT_EQ(std::optional<uint16_t>{prologue->moi_vgpr_state->owner_epoch.owner},
+            test_moi_owner_vgpr(result));
+  EXPECT_EQ(std::optional<uint16_t>{prologue->moi_vgpr_state->owner_epoch.epoch},
+            test_moi_epoch_vgpr(result));
 
   MoiOptions colliding_options = options;
   colliding_options.scratch_vgpr = 8u;

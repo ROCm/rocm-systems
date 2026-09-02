@@ -333,14 +333,8 @@ struct MoiPrivateEpochPrologueEmissionPlan {
 /// The native emitter therefore cannot consult full request/operating-point state, patch metadata,
 /// or a kernel descriptor to rediscover any initialization decision.
 struct MoiOwnerEpochPrologueEmissionPlan {
-  /// VGPR receiving the owner identity when no persistent owner SGPR exists.
-  uint16_t owner_vgpr = 0;
-
-  /// VGPR receiving epoch zero when no persistent epoch SGPR exists.
-  uint16_t epoch_vgpr = 0;
-
-  /// Optional persistent VGPR receiving the compact workgroup key.
-  std::optional<uint16_t> workgroup_key_vgpr;
+  /// Complete vector destinations and the lifetime of the owner/epoch pair.
+  ConSanMoiVgprStateEffect vgpr_state;
 
   /// Logical shift converting entry workitem-x into a wave owner.
   uint16_t owner_shift_bits = 0;
@@ -358,10 +352,6 @@ struct MoiOwnerEpochPrologueEmissionPlan {
   /// Persistent scalar destinations selected for owner, epoch, workgroup key,
   /// and exact Record/Replay workgroup identity.
   ConSanMoiPersistentSgprState persistent_sgprs;
-
-  /// Persistent vector destinations selected for exact Record/Replay
-  /// workgroup identity.
-  ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_vgprs;
 
   /// Descriptor-derived dispatch preload transformation fixed by planning.
   std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
@@ -401,8 +391,8 @@ struct MoiOwnerEpochPrologueEmissionPlan {
 
   /// Return whether all target-independent invariants are safe to lower.
   [[nodiscard]] bool is_well_formed() const {
-    if (owner_vgpr >= 256u || epoch_vgpr >= 256u || owner_vgpr == epoch_vgpr ||
-        owner_shift_bits >= 32u || owner_source == ConSanMoiOwnerSource::Automatic ||
+    if (!vgpr_state.is_well_formed() || owner_shift_bits >= 32u ||
+        owner_source == ConSanMoiOwnerSource::Automatic ||
         (owner_source == ConSanMoiOwnerSource::HwId && !owner_sgpr) ||
         (workgroup_sources && !workgroup_sources->is_well_formed())) {
       return false;
@@ -1177,7 +1167,7 @@ patch_requires_full_workgroup_id_payload(ConSanCapabilityEngine engine, rj_code_
                                patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
     return entry_capture &&
            (patch.persistent_sgpr_state.record_replay_workgroup.complete() ||
-            patch.persistent_record_replay_workgroup_vgprs.complete() ||
+            (patch.moi_vgpr_state && patch.moi_vgpr_state->record_replay_workgroup.complete()) ||
             (patch.private_state_layout &&
              patch.private_state_layout->record_replay_workgroup_offsets.complete()));
   }

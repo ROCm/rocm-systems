@@ -3528,8 +3528,8 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
       // resource plan. Derive the owner from that plan rather than duplicating
       // an architecture-specific scratch-window size in validation.
       owner_vgpr = static_cast<uint16_t>(scratch + resource_plan->scratch_vgpr_count - 4u);
-    } else if (patch.persistent_owner_vgpr) {
-      owner_vgpr = *patch.persistent_owner_vgpr;
+    } else if (patch.moi_vgpr_state) {
+      owner_vgpr = patch.moi_vgpr_state->owner_epoch.owner;
     } else {
       errors.emplace_back(
           "ConSan final validation could not resolve release-transaction owner state");
@@ -3787,6 +3787,13 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
             "requirement");
       }
     }
+    if (patch.moi_vgpr_state && !patch.moi_vgpr_state->is_well_formed()) {
+      errors.emplace_back("ConSan final validation found an invalid MOI VGPR-state effect");
+    }
+    if (patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue && !patch.moi_vgpr_state) {
+      errors.emplace_back("ConSan final validation found an owner/epoch prologue without its "
+                          "VGPR-state effect");
+    }
     if (patch.dynamic_private_segment_addend != 0) {
       if (patch.required_private_segment_size < patch.dynamic_private_segment_addend) {
         errors.emplace_back(
@@ -3826,35 +3833,14 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
             patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
             patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
         if (patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue) {
-          const auto owner_vgpr = patch.persistent_owner_vgpr;
-          const auto epoch_vgpr = patch.persistent_epoch_vgpr;
-          const auto workgroup_key_vgpr = patch.persistent_workgroup_key_vgpr;
-          if (owner_vgpr) {
+          if (patch.moi_vgpr_state && patch.moi_vgpr_state->is_well_formed())
             requirement.required_vgpr_count = std::max<uint16_t>(
-                requirement.required_vgpr_count, static_cast<uint16_t>(*owner_vgpr + 1u));
-          }
-          if (epoch_vgpr) {
-            requirement.required_vgpr_count = std::max<uint16_t>(
-                requirement.required_vgpr_count, static_cast<uint16_t>(*epoch_vgpr + 1u));
-          }
-          if (workgroup_key_vgpr) {
-            requirement.required_vgpr_count = std::max<uint16_t>(
-                requirement.required_vgpr_count, static_cast<uint16_t>(*workgroup_key_vgpr + 1u));
-          }
+                requirement.required_vgpr_count,
+                static_cast<uint16_t>(patch.moi_vgpr_state->required_vgpr_count()));
           if (patch.entry_scalar_backup) {
             requirement.required_vgpr_count =
                 std::max<uint16_t>(requirement.required_vgpr_count,
                                    static_cast<uint16_t>(patch.entry_scalar_backup->vgpr + 1u));
-          }
-          const ConSanMoiPersistentWorkgroupRegisters &workgroup_vgprs =
-              patch.persistent_record_replay_workgroup_vgprs;
-          if (!workgroup_vgprs.empty()) {
-            for (const std::optional<uint16_t> reg : workgroup_vgprs.values()) {
-              if (!reg)
-                continue;
-              requirement.required_vgpr_count = std::max<uint16_t>(
-                  requirement.required_vgpr_count, static_cast<uint16_t>(*reg + 1u));
-            }
           }
         }
         if (patch.dispatch_id_prologue) {
