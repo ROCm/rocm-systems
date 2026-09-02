@@ -55,8 +55,10 @@ TEST_F(GpuFunctionalReadWrite, MemoryPartition_SetVerifyRestore) {
                        "gpu=" + std::to_string(i) + " set=" + target, kVerbose);
     amdsmi_status_t err = amdsmi_set_gpu_memory_partition(gpus()[i], target_enum);
     ++attempted;
-    // The driver rejects a partition change while any client holds the device open.
-    if (err == AMDSMI_STATUS_BUSY) {
+    // The driver rejects a partition change while any client holds the device
+    // open, and reports SETTING_UNAVAILABLE when the requested mode is not
+    // reachable from the current one. Neither is a defect; move to the next GPU.
+    if (err == AMDSMI_STATUS_BUSY || err == AMDSMI_STATUS_SETTING_UNAVAILABLE) {
       ++busy;
       continue;
     }
@@ -123,8 +125,10 @@ TEST_F(GpuFunctionalReadWrite, ComputePartition_SetVerifyRestore) {
                        "gpu=" + std::to_string(i) + " set=" + target, kVerbose);
     amdsmi_status_t err = amdsmi_set_gpu_compute_partition(gpus()[i], target_enum);
     ++attempted;
-    // The driver rejects a partition change while any client holds the device open.
-    if (err == AMDSMI_STATUS_BUSY) {
+    // The driver rejects a partition change while any client holds the device
+    // open, and reports SETTING_UNAVAILABLE when the requested mode is not
+    // reachable from the current one. Neither is a defect; move to the next GPU.
+    if (err == AMDSMI_STATUS_BUSY || err == AMDSMI_STATUS_SETTING_UNAVAILABLE) {
       ++busy;
       continue;
     }

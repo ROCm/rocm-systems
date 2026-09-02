@@ -3,6 +3,7 @@
 
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "api_test_framework.h"
 
@@ -98,14 +99,21 @@ TEST_F(GpuIntegration, GetBadPageInfo_AllGpus) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_bad_page_info");
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   for (size_t i = 0; i < gpus().size(); ++i) {
-    uint32_t num = 16;
-    amdsmi_retired_page_record_t recs[16];
-    memset(recs, 0, sizeof(recs));
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_bad_page_info", "gpu=" + std::to_string(i), kVerbose);
-    amdsmi_status_t err = amdsmi_get_gpu_bad_page_info(gpus()[i], &num, recs);
+    const std::string in = "gpu=" + std::to_string(i);
+    // Two-call pattern per amdsmi.h: size first, then fill a buffer of that
+    // size. A fixed array would overflow on a GPU with more bad pages than it
+    // holds, because the API reports the true count rather than clamping.
+    uint32_t num = 0;
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_bad_page_info", in + " out=nullptr", kVerbose);
+    amdsmi_status_t err = amdsmi_get_gpu_bad_page_info(gpus()[i], &num, nullptr);
+    if (err == AMDSMI_STATUS_SUCCESS && num > 0) {
+      std::vector<amdsmi_retired_page_record_t> recs(num);
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_bad_page_info", in, kVerbose);
+      err = amdsmi_get_gpu_bad_page_info(gpus()[i], &num, recs.data());
+    }
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.RecordPositive("gpu=" + std::to_string(i), err);
+    amdsmi_col.RecordPositive(in, err);
   }
   AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }

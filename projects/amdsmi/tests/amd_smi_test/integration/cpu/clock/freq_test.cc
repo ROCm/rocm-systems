@@ -61,13 +61,19 @@ TEST_F(CpuIntegration, GetCclkLimit_AllCpus) {
   AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
+// ESMI writes one source name per set bit of the HSMP limit mask, so the array
+// must hold every name in the published table, not just the first.
+constexpr size_t kFreqLimitSourceSlots =
+    sizeof(amdsmi_hsmp_freqlimit_src_names) / sizeof(amdsmi_hsmp_freqlimit_src_names[0]);
+static_assert(kFreqLimitSourceSlots >= 11, "HSMP frequency-limit source table is short");
+
 // ---- amdsmi_get_cpu_socket_current_active_freq_limit (handle guarded only) ----
 TEST_F(CpuIntegration, GetSocketActiveFreqLimit_InvalidHandle) {
   uint16_t freq = 0;
-  char* src_type = nullptr;
+  char* src_type[kFreqLimitSourceSlots] = {};
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_socket_current_active_freq_limit", "handle=invalid", kVerbose);
   amdsmi_status_t err =
-      amdsmi_get_cpu_socket_current_active_freq_limit(kInvalidHandle, &freq, &src_type);
+      amdsmi_get_cpu_socket_current_active_freq_limit(kInvalidHandle, &freq, src_type);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
   AMDSMI_EXPECT_INVALID_HANDLE(err);
@@ -77,11 +83,11 @@ TEST_F(CpuIntegration, GetSocketActiveFreqLimit_AllCpus) {
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   for (size_t i = 0; i < cpus().size(); ++i) {
     uint16_t freq = 0;
-    char* src_type = nullptr;
+    char* src_type[kFreqLimitSourceSlots] = {};
     DISPLAY_AMDSMI_API("amdsmi_get_cpu_socket_current_active_freq_limit",
                        "cpu=" + std::to_string(i), kVerbose);
     amdsmi_status_t err =
-        amdsmi_get_cpu_socket_current_active_freq_limit(cpus()[i], &freq, &src_type);
+        amdsmi_get_cpu_socket_current_active_freq_limit(cpus()[i], &freq, src_type);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
     amdsmi_col.RecordPositive("cpu=" + std::to_string(i), err);

@@ -14,12 +14,10 @@ static constexpr amdsmi_reg_type_t kRegTypes[] = {AMDSMI_REG_XGMI, AMDSMI_REG_WA
 
 // ---------------- amdsmi_get_gpu_metrics_header_info ----------------
 TEST_F(GpuIntegration, GetMetricsHeaderInfo_NullOutput) {
-  AMDSMI_SKIP_KNOWN_FAILURE()
-      << "amdsmi_get_gpu_metrics_header_info crashes on a null output pointer; proper return "
-         "should be AMDSMI_STATUS_INVAL";
-  // Proper contract once fixed:
-  //   amdsmi_status_t err = amdsmi_get_gpu_metrics_header_info(gpus()[0], nullptr);
-  //   AMDSMI_EXPECT_NULL_ARG(err);
+  DISPLAY_AMDSMI_API("amdsmi_get_gpu_metrics_header_info", "gpu=0 out=nullptr", kVerbose);
+  amdsmi_status_t err = amdsmi_get_gpu_metrics_header_info(any_gpu(), nullptr);
+  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  AMDSMI_EXPECT_NULL_ARG(err);
 }
 TEST_F(GpuIntegration, GetMetricsHeaderInfo_InvalidHandle) {
   amd_metrics_table_header_t header;

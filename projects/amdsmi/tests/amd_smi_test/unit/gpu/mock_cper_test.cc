@@ -23,7 +23,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_cper.h"
-#include "api_test_framework.h"
+#include "unit_fixtures.h"
 
 #ifndef AMDSMI_TEST_MOCK_DIR
 #error "AMDSMI_TEST_MOCK_DIR must be defined by the build"

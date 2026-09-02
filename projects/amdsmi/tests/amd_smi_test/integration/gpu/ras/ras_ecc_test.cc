@@ -240,11 +240,13 @@ TEST_F(GpuIntegration, GetCperEntries_NullOutput) {
   AMDSMI_SKIP_KNOWN_FAILURE()
       << "amdsmi_get_gpu_cper_entries returns OUT_OF_RESOURCES instead of INVAL for null "
          "pointer; library input-validation bug";
-  // Proper contract once fixed:
-  //   char cper_data[4096]; memset(cper_data, 0, sizeof(cper_data));
-  //   amdsmi_status_t err = amdsmi_get_gpu_cper_entries(gpus()[0], 0xFFFFFFFF,
-  //       cper_data, nullptr, nullptr, nullptr, nullptr);
-  //   AMDSMI_EXPECT_NULL_ARG(err);
+  char cper_data[4096];
+  memset(cper_data, 0, sizeof(cper_data));
+  DISPLAY_AMDSMI_API("amdsmi_get_gpu_cper_entries", "gpu=0 out=nullptr", kVerbose);
+  amdsmi_status_t err = amdsmi_get_gpu_cper_entries(any_gpu(), 0xFFFFFFFF, cper_data, nullptr,
+                                                    nullptr, nullptr, nullptr);
+  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  AMDSMI_EXPECT_NULL_ARG(err);
 }
 TEST_F(GpuIntegration, GetCperEntries_InvalidHandle) {
   char cper_data[4096];

@@ -18,7 +18,7 @@
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_wsl_device.h"
-#include "api_test_framework.h"
+#include "unit_fixtures.h"
 
 using amd::smi::AMDSmiProcessor;
 using amd::smi::AMDSmiSocket;

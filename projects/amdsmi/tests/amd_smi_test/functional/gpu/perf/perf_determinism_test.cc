@@ -55,6 +55,10 @@ void TestPerfDeterminism::Run(void) {
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(processor_handles_[i]);
+    // Put back the level this GPU arrived with; it is not always AUTO.
+    amdsmi_dev_perf_level_t entry_pfl = AMDSMI_DEV_PERF_LEVEL_AUTO;
+    const bool have_entry_pfl =
+        amdsmi_get_gpu_perf_level(processor_handles_[i], &entry_pfl) == AMDSMI_STATUS_SUCCESS;
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_od_volt_info", "gpu=" + std::to_string(i), VERB(STANDARD));
     err = amdsmi_get_gpu_od_volt_info(processor_handles_[i], &odv);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
@@ -88,7 +92,8 @@ void TestPerfDeterminism::Run(void) {
 
       std::cout << "\t**Resetting performance determinism" << std::endl;
       DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu=" + std::to_string(i), VERB(STANDARD));
-      err = amdsmi_set_gpu_perf_level(processor_handles_[i], AMDSMI_DEV_PERF_LEVEL_AUTO);
+      err = amdsmi_set_gpu_perf_level(processor_handles_[i],
+                                      have_entry_pfl ? entry_pfl : AMDSMI_DEV_PERF_LEVEL_AUTO);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(err)
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu=" + std::to_string(i), VERB(STANDARD));
