@@ -1458,8 +1458,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   // Same-owner predecessors remain eligible because their immutable snapshot
   // can carry the head of a release sequence. Skip the complete causal-import
   // transaction when no lane has either form of authority.
-  const size_t empty_import_skip = words.size();
-  if (!sequence.emit(instrumentation::build_s_cbranch_execz(0, arch)))
+  const InstructionSequence::Label restore_workgroup = sequence.make_label();
+  if (!sequence.emit_branch(restore_workgroup, InstructionSequence::BranchKind::ExecZero))
     return false;
 
   if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
@@ -1600,8 +1600,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                            arch)))
     return false;
 
-  const size_t empty_validated_import_skip = words.size();
-  if (!sequence.emit(instrumentation::build_s_cbranch_execz(0, arch)))
+  if (!sequence.emit_branch(restore_workgroup, InstructionSequence::BranchKind::ExecZero))
     return false;
 
   if (!release_sequence_only) {
@@ -1647,22 +1646,18 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       // before returning to guest control, rather than relying on elapsed
       // instructions in this cave to resolve the dependency.
     }
-    if (advance_words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
-      errors.emplace_back("ConSan MOI inline acquire consumer segment guard exceeds branch range");
-      return false;
-    }
     if (widen_consumer_segment &&
         !sequence.emit(instrumentation::build_s_mov_b64(static_cast<uint16_t>(exec_base + 16u),
                                                         kAmdGpuExecLo, arch))) {
       errors.emplace_back("ConSan MOI inline acquire could not save its validated lanes");
       return false;
     }
-    if (!sequence.emit(instrumentation::build_s_cbranch_execz(
-            static_cast<int16_t>(advance_words.size()), arch))) {
+    const InstructionSequence::Label consumer_segment_done = sequence.make_label();
+    if (!sequence.emit_branch(consumer_segment_done, InstructionSequence::BranchKind::ExecZero) ||
+        !sequence.emit(advance_words) || !sequence.bind(consumer_segment_done)) {
       errors.emplace_back("ConSan MOI inline acquire could not guard its consumer segment");
       return false;
     }
-    words.insert(words.end(), advance_words.begin(), advance_words.end());
   }
 
   if (!append_inline_acquired_token_transaction(
@@ -1671,28 +1666,10 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
           static_cast<uint16_t>(scratch_vgpr + 9u), static_cast<uint16_t>(scratch_vgpr + 13u),
           token_table_base, token_table_capacity, release_sequence_only, same_owner_exec, arch))
     return false;
-  const size_t restore_workgroup_index = words.size();
-  const int64_t empty_import_delta =
-      static_cast<int64_t>(restore_workgroup_index) - static_cast<int64_t>(empty_import_skip + 1u);
-  if (empty_import_delta < std::numeric_limits<int16_t>::min() ||
-      empty_import_delta > std::numeric_limits<int16_t>::max())
-    return false;
-  const auto empty_import_branch =
-      instrumentation::build_s_cbranch_execz(static_cast<int16_t>(empty_import_delta), arch);
-  const int64_t empty_validated_import_delta =
-      static_cast<int64_t>(restore_workgroup_index) -
-      static_cast<int64_t>(empty_validated_import_skip + 1u);
-  if (empty_validated_import_delta < std::numeric_limits<int16_t>::min() ||
-      empty_validated_import_delta > std::numeric_limits<int16_t>::max())
-    return false;
-  const auto empty_validated_import_branch = instrumentation::build_s_cbranch_execz(
-      static_cast<int16_t>(empty_validated_import_delta), arch);
-  if (!empty_import_branch || !empty_validated_import_branch)
-    return false;
-  words[empty_import_skip] = *empty_import_branch;
-  words[empty_validated_import_skip] = *empty_validated_import_branch;
-  return sequence.emit(instrumentation::build_s_mov_b64(
-      kAmdGpuExecLo, static_cast<uint16_t>(exec_base + 12u), arch));
+  return sequence.bind(restore_workgroup) &&
+         sequence.emit(instrumentation::build_s_mov_b64(
+             kAmdGpuExecLo, static_cast<uint16_t>(exec_base + 12u), arch)) &&
+         sequence.resolve_branches(arch);
 }
 
 // Capture the complete stable causal frontier for the currently active
@@ -1739,10 +1716,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   // The vector loop counter cannot advance with EXEC empty. Branch around the
   // complete scan in that case; scalar execution resumes at the caller with
   // the same empty EXEC mask.
-  if (!sequence.emit(instrumentation::build_s_cbranch_execnz(/*offset_dwords=*/1, arch)))
+  const InstructionSequence::Label scan_done = sequence.make_label();
+  if (!sequence.emit_branch(scan_done, InstructionSequence::BranchKind::ExecZero))
     return false;
-  const size_t empty_exec_skip = words.size();
-  words.push_back(build_s_branch(/*offset_dwords=*/0, arch));
   if (!sequence.emit(instrumentation::build_s_mov_b64(scan_exec, kAmdGpuExecLo, arch)))
     return false;
 
@@ -1808,7 +1784,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                              static_cast<uint32_t>(token_table_base >> 32u), arch)))
     return false;
 
-  const size_t loop_begin = words.size();
+  const InstructionSequence::Label loop_begin = sequence.mark_label();
   if (!restore_exec(scan_exec) ||
       !append_load_u32_vgpr_at_offset(words, snapshot_address,
                                       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version),
@@ -2013,12 +1989,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
           instrumentation::build_v_mov_b32_literal(temporary, token_table_capacity, arch),
           instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(temporary), loop_index, arch)))
     return false;
-  const int64_t loop_delta =
-      static_cast<int64_t>(loop_begin) - static_cast<int64_t>(words.size()) - 1;
-  if (loop_delta < std::numeric_limits<int16_t>::min() ||
-      loop_delta > std::numeric_limits<int16_t>::max())
-    return false;
-  if (!sequence.emit(instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(loop_delta), arch)))
+  if (!sequence.emit_branch(loop_begin, InstructionSequence::BranchKind::VccZero))
     return false;
 
   if (!restore_exec(scan_exec) ||
@@ -2040,13 +2011,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                          static_cast<uint16_t>(epochs + i), arch))
       return false;
   }
-  const int64_t skip_delta =
-      static_cast<int64_t>(words.size()) - static_cast<int64_t>(empty_exec_skip) - 1;
-  if (skip_delta < std::numeric_limits<int16_t>::min() ||
-      skip_delta > std::numeric_limits<int16_t>::max())
-    return false;
-  words[empty_exec_skip] = build_s_branch(static_cast<int16_t>(skip_delta), arch);
-  return true;
+  return sequence.bind(scan_done) && sequence.resolve_branches(arch);
 }
 
 [[nodiscard]] bool append_inline_versioned_release_transaction(
@@ -2199,7 +2164,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   constexpr uint16_t kScalarLiteralSource = 255u;
   words.push_back(build_s_mov_b32(retry_count_sgpr, kScalarLiteralSource, arch));
   words.push_back(kConSanMoiInlineMetadataPublicationRetryLimit);
-  const size_t retry_begin = words.size();
+  const InstructionSequence::Label retry_begin = sequence.mark_label();
   if (!append_atomic_load_u32(words, slot_address, prior_version, arch)) {
     errors.emplace_back("ConSan MOI inline release could not begin its version retry");
     return false;
@@ -2250,8 +2215,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
           instrumentation::build_s_andn2_b64(committed_exec, eligible_exec, claimed_exec, arch),
           instrumentation::build_s_mov_b64(kAmdGpuExecLo, claimed_exec, arch)))
     return false;
-  const size_t claimed_exit_branch = words.size();
-  words.push_back(build_s_branch(/*offset_dwords=*/0, arch));
+  const InstructionSequence::Label claimed_exit = sequence.make_label();
+  if (!sequence.emit_branch(claimed_exit, InstructionSequence::BranchKind::ExecNonzero))
+    return false;
   if (!sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec, arch)))
     return false;
   words.push_back(build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, arch));
@@ -2261,25 +2227,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                                              scalar_positive_inline_u32(0), arch),
                          instrumentation::build_s_cbranch_scc0(/*simm16=*/1, arch)))
     return false;
-  const size_t retry_branch = words.size();
-  const int64_t retry_delta =
-      static_cast<int64_t>(retry_begin) - static_cast<int64_t>(retry_branch + 1u);
-  if (retry_delta < std::numeric_limits<int16_t>::min() ||
-      retry_delta > std::numeric_limits<int16_t>::max())
+  if (!sequence.emit_branch(retry_begin, InstructionSequence::BranchKind::ExecNonzero) ||
+      !sequence.bind(claimed_exit))
     return false;
-  if (!sequence.emit(
-          instrumentation::build_s_cbranch_execnz(static_cast<int16_t>(retry_delta), arch)))
-    return false;
-  const int64_t claimed_exit_delta =
-      static_cast<int64_t>(words.size()) - static_cast<int64_t>(claimed_exit_branch + 1u);
-  if (claimed_exit_delta < std::numeric_limits<int16_t>::min() ||
-      claimed_exit_delta > std::numeric_limits<int16_t>::max())
-    return false;
-  const auto claimed_exit =
-      instrumentation::build_s_cbranch_execnz(static_cast<int16_t>(claimed_exit_delta), arch);
-  if (!claimed_exit)
-    return false;
-  words[claimed_exit_branch] = *claimed_exit;
 
   failure.stage = "reservation outcome journaling";
   if (import_claimed_predecessor) {
@@ -2487,8 +2437,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     words.push_back(publisher_handoff);
     if (!append_restore_moi_special_state(words, plan.special_state, arch))
       return false;
-    failure.succeeded = true;
-    return true;
+    failure.succeeded = sequence.resolve_branches(arch);
+    return failure.succeeded;
   }
 
   failure.stage = "causal snapshot capture";
@@ -2624,8 +2574,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       !restore_exec(original_exec) ||
       !append_restore_moi_special_state(words, plan.special_state, arch))
     return false;
-  failure.succeeded = true;
-  return true;
+  failure.succeeded = sequence.resolve_branches(arch);
+  return failure.succeeded;
 }
 
 [[nodiscard]] bool
@@ -2913,9 +2863,9 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     // the still-active publisher. The bounded retry preserves fail-closed
     // behavior for malformed or abandoned odd slots.
     constexpr uint16_t kScalarLiteralSource = 255u;
-    words.push_back(build_s_mov_b32(version_retry_count, kScalarLiteralSource, arch));
-    words.push_back(kConSanMoiInlineMetadataPublicationRetryLimit);
-    const size_t version_retry_begin = words.size();
+    (void)sequence.emit_all(build_s_mov_b32(version_retry_count, kScalarLiteralSource, arch),
+                            kConSanMoiInlineMetadataPublicationRetryLimit);
+    const InstructionSequence::Label version_retry_begin = sequence.mark_label();
     if (!append_atomic_load_u32(words, scratch_vgpr, version_before, arch)) {
       errors.emplace_back("ConSan MOI inline acquire could not load its release version");
       return std::nullopt;
@@ -2927,45 +2877,20 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       errors.emplace_back("ConSan MOI inline acquire could not encode its version retry");
       return std::nullopt;
     }
-    const size_t version_even_exit = words.size();
-    if (!sequence.emit(instrumentation::build_s_cbranch_vccnz(/*simm16=*/0, arch)))
+    const InstructionSequence::Label version_retry_exit = sequence.make_label();
+    if (!sequence.emit_branch(version_retry_exit, InstructionSequence::BranchKind::VccNonzero))
       return std::nullopt;
-    words.push_back(build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, arch));
     if (!sequence.emit_all(
+            build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, arch),
             instrumentation::build_s_sub_u32(version_retry_count, version_retry_count,
                                              scalar_positive_inline_u32(1), arch),
             instrumentation::build_s_cmp_lg_u32(version_retry_count, scalar_positive_inline_u32(0),
                                                 arch)))
       return std::nullopt;
-    const size_t version_exhausted_exit = words.size();
-    if (!sequence.emit(instrumentation::build_s_cbranch_scc0(/*simm16=*/0, arch)))
-      return std::nullopt;
-    const size_t version_retry_branch = words.size();
-    const int64_t retry_delta =
-        static_cast<int64_t>(version_retry_begin) - static_cast<int64_t>(version_retry_branch + 1u);
-    if (retry_delta < std::numeric_limits<int16_t>::min() ||
-        retry_delta > std::numeric_limits<int16_t>::max()) {
-      errors.emplace_back("ConSan MOI inline acquire version retry is out of branch range");
-      return std::nullopt;
-    }
-    words.push_back(build_s_branch(static_cast<int16_t>(retry_delta), arch));
-    const size_t version_retry_exit = words.size();
-    const auto patch_exit = [&](size_t branch_index, bool vcc) -> bool {
-      const int64_t delta =
-          static_cast<int64_t>(version_retry_exit) - static_cast<int64_t>(branch_index + 1u);
-      if (delta < std::numeric_limits<int16_t>::min() ||
-          delta > std::numeric_limits<int16_t>::max())
-        return false;
-      const auto branch =
-          vcc ? instrumentation::build_s_cbranch_vccnz(static_cast<int16_t>(delta), arch)
-              : instrumentation::build_s_cbranch_scc0(static_cast<int16_t>(delta), arch);
-      if (!branch)
-        return false;
-      words[branch_index] = *branch;
-      return true;
-    };
-    if (!patch_exit(version_even_exit, /*vcc=*/true) ||
-        !patch_exit(version_exhausted_exit, /*vcc=*/false)) {
+    if (!sequence.emit_branch(version_retry_exit, InstructionSequence::BranchKind::SccZero) ||
+        !sequence.emit_branch(version_retry_begin,
+                              InstructionSequence::BranchKind::Unconditional) ||
+        !sequence.bind(version_retry_exit) || !sequence.resolve_branches(arch)) {
       errors.emplace_back("ConSan MOI inline acquire version exit is out of branch range");
       return std::nullopt;
     }
