@@ -752,7 +752,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         )";
 
                 execute_raw_sql_statements(conn, create_pmc_event_view);
-                
+
                 auto nodes = rocpd::read<rocpd::types::node>(conn);
 
                 for(const auto& nitr : nodes)
@@ -821,7 +821,6 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
                         auto regions = rocpd::sql_generator<rocpd::types::region>{
                             conn, select_guid_nid_pid("regions"), region_order_by};
-
 
                         auto samples = rocpd::sql_generator<rocpd::types::sample>{
                             conn,
