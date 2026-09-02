@@ -64,7 +64,7 @@ hipError_t hipBindTextureToArray(const textureReference* tex, hipArray_const_t a
 hipError_t hipBindTextureToMipmappedArray(const textureReference* tex,
                                           hipMipmappedArray_const_t mipmappedArray,
                                           const hipChannelFormatDesc* desc);
-hipError_t hipChooseDevice(int* device, const hipDeviceProp_t* prop);
+hipError_t hipChooseDeviceR0600(int* device, const hipDeviceProp_tR0600* prop);
 hipError_t hipChooseDeviceR0000(int* device, const hipDeviceProp_tR0000* properties);
 hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream);
 hipError_t hipCreateTextureObject(hipTextureObject_t* pTexObject, const hipResourceDesc* pResDesc,
@@ -975,7 +975,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipBindTexture2D_fn = hip::hipBindTexture2D;
   ptrDispatchTable->hipBindTextureToArray_fn = hip::hipBindTextureToArray;
   ptrDispatchTable->hipBindTextureToMipmappedArray_fn = hip::hipBindTextureToMipmappedArray;
-  ptrDispatchTable->hipChooseDevice_fn = hip::hipChooseDevice;
+  ptrDispatchTable->hipChooseDevice_fn = hip::hipChooseDeviceR0600;
   ptrDispatchTable->hipChooseDeviceR0000_fn = hip::hipChooseDeviceR0000;
   ptrDispatchTable->hipConfigureCall_fn = hip::hipConfigureCall;
   ptrDispatchTable->hipCreateSurfaceObject_fn = hip::hipCreateSurfaceObject;
