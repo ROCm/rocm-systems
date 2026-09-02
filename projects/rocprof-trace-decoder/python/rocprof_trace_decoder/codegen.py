@@ -35,6 +35,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .bindings import _therock_package_roots
 from .code_index import CodeIndex
 
 TOOL_VERSION = "snapshot_dwarf-1.1"
@@ -97,6 +98,14 @@ def _rocm_roots() -> list[Path]:
             if root not in seen:
                 roots.append(root)
                 seen.add(root)
+
+    # ROCm installed as Python wheels: the tools live under the platform
+    # package, e.g. <site-packages>/_rocm_sdk_core/lib/llvm/bin.
+    for package_root in _therock_package_roots():
+        root = package_root / "lib"
+        if root not in seen:
+            roots.append(root)
+            seen.add(root)
 
     default = Path("/opt/rocm")
     if default not in seen:
