@@ -18,7 +18,10 @@ This library is part of the [rocm-systems](https://github.com/ROCm/rocm-systems)
 
 - CMake 3.21+
 - C++17 compatible compiler
-- SQLite3 (bundled via CMake module)
+- SQLite3 — always bundled, and built from the pre-generated amalgamation committed
+  at [`external/sqlite3/`](external/sqlite3/README.md). No network access, no git
+  clone and no `tclsh` are needed to build it. See that README before bumping the
+  bundled SQLite version.
 - spdlog (for logging)
 - Optional: `rocprofiler-sdk-rocpd` for schema compatibility
 
