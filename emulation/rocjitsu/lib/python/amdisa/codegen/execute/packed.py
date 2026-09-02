@@ -935,7 +935,9 @@ def gen_mad_mix_bf16(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(result));'
         )
     else:
-        L.append(f'    uint16_t h = util::f32_to_bf16_rne(result);')
+        L.append(
+            f'    uint16_t h = util::f32_to_bf16_round(result, wf.fp_round_mode_f16_f64());'
+        )
         if result == 'lo':
             L.append(
                 f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, 0u, h);'

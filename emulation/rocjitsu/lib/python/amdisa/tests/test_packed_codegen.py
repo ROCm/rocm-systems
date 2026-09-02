@@ -429,7 +429,7 @@ def test_mad_mixlo_bf16_uses_true16_low_write():
     assert 'vdst.write_lane(wf, lane, (prev & 0xFFFF0000u)' not in cpp
 
 
-def test_gfx1250_bf16_mad_mix_variants_use_rne_helper():
+def test_gfx1250_bf16_mad_mix_variants_use_mode_rounding_helper():
     cpp_f32 = gen_mad_mix_bf16(
         ['vdst'],
         ['src0', 'src1', 'src2'],
@@ -457,7 +457,8 @@ def test_gfx1250_bf16_mad_mix_variants_use_rne_helper():
 
     assert 'read_fma_mix_bf16_source_f32(src0, wf, lane' in cpp_f32
     assert 'std::bit_cast<uint32_t>(result)' in cpp_f32
-    assert 'util::f32_to_bf16_rne(result)' in cpp_lo
-    assert 'util::f32_to_bf16_rne(result)' in cpp_hi
+    mode_round = 'util::f32_to_bf16_round(result, wf.fp_round_mode_f16_f64())'
+    assert mode_round in cpp_lo
+    assert mode_round in cpp_hi
     assert 'util::f32_to_bf16(result)' not in cpp_lo
     assert 'util::f32_to_bf16(result)' not in cpp_hi
