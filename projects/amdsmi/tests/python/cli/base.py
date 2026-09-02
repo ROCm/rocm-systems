@@ -74,7 +74,10 @@ class TestCliBase(unittest.TestCase):
 
         # TODO: Remove this condition when CLI supports User automated input
         # Commands that need User permission to run
-        cls.cmds_need_permission = {"set": ["--fan", "--memory-partition", "--compute-partition"]}
+        TestCliBase.cmds_need_permission = {
+            "set": ["--fan", "--memory-partition", "--compute-partition"],
+            "reset": ["--gtt"],
+        }
 
     @classmethod
     def _build_baseline(cls):
@@ -697,6 +700,7 @@ class TestCliBase(unittest.TestCase):
                 cmds[index] = (cmd, cond)
 
         # Remove commands requiring input
+        _skipped_cmds = []
         for index, cmd_cond in enumerate(cmds):
             cmd, cond = cmd_cond
             if not cmd:
@@ -704,9 +708,13 @@ class TestCliBase(unittest.TestCase):
             items = cmd.split()
             if len(items) < 3:
                 continue
-            if items[1] == "set":
-                if items[2] in self.cmds_need_permission["set"]:
+            if items[1] in self.cmds_need_permission:
+                if items[2] in self.cmds_need_permission[items[1]]:
                     cmd = ""
+                    key = f"{items[1]}_{items[2]}"
+                    if key not in _skipped_cmds:
+                        print(f"TODO: Skip needs permission: {items[1]} {items[2]}")
+                        _skipped_cmds.append(key)
             # Update cmds when cmd has changed
             if not cmd:
                 cmds[index] = (cmd, cond)

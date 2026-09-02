@@ -74,6 +74,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/smem.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
@@ -2131,16 +2132,18 @@ TEST(GpuMemoryTest, CopyBlockTransfersPageableClientMemoryAcrossPageBoundaries) 
   for (size_t i = 0; i < source.size(); ++i)
     source[i] = static_cast<uint8_t>((i * 37 + 11) & 0xff);
 
-  ASSERT_TRUE(
-      mem.copy_block(kGpuAddr, reinterpret_cast<uint64_t>(source.data()), source.size(), kVmid));
+  ASSERT_EQ(
+      mem.copy_block(kGpuAddr, reinterpret_cast<uint64_t>(source.data()), source.size(), kVmid),
+      amdgpu::CopyOutcome::Complete);
   std::vector<uint8_t> gpu_result(kSize);
   mem.read_block(kGpuAddr, std::span<uint8_t>(gpu_result), kVmid);
   EXPECT_TRUE(std::equal(source.begin(), source.end(), gpu_result.begin()));
 
   std::vector<uint8_t> host_destination(kSize + 23, 0);
   auto destination = std::span<uint8_t>(host_destination).subspan(13, kSize);
-  ASSERT_TRUE(mem.copy_block(reinterpret_cast<uint64_t>(destination.data()), kGpuAddr,
-                             destination.size(), kVmid));
+  ASSERT_EQ(mem.copy_block(reinterpret_cast<uint64_t>(destination.data()), kGpuAddr,
+                           destination.size(), kVmid),
+            amdgpu::CopyOutcome::Complete);
   EXPECT_TRUE(std::equal(source.begin(), source.end(), destination.begin()));
 }
 
@@ -6527,6 +6530,80 @@ TEST(Gfx1250AddrCalcTest, VbufferZeroNumRecordsMasksAllLanes) {
   EXPECT_EQ(null_range_state.lane_mask, 0ULL);
   EXPECT_EQ(null_range_state.per_lane_addr[0], 0ULL);
   EXPECT_EQ(null_range_state.per_lane_addr[1], 0ULL);
+}
+
+TEST(Gfx1250AddrCalcTest, DescriptorCannotMixAdjacentWaveSgprs) {
+  amdgpu::GpuMemory mem("gfx1250_vbuffer_cross_wave_sgpr_mem");
+  amdgpu::L2Cache l2("gfx1250_vbuffer_cross_wave_sgpr_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_vbuffer_cross_wave_sgpr_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *executing_wave = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  auto *adjacent_wave = cu->dispatch_wf(1, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(executing_wave, nullptr);
+  ASSERT_NE(adjacent_wave, nullptr);
+  executing_wave->set_exec(1ULL);
+  ASSERT_EQ(adjacent_wave->sgpr_alloc().base, executing_wave->sgpr_alloc().base + cfg.sgprs_per_wf);
+
+  constexpr uint64_t kBase = 0x2'0000'1000ULL;
+  const uint32_t descriptor = executing_wave->sgpr_alloc().base + cfg.sgprs_per_wf - 2;
+  cu->write_sgpr(descriptor, static_cast<uint32_t>(kBase));
+  // Keep the base address unchanged while making the in-range descriptor
+  // words describe one record. The complete descriptor still must be denied.
+  cu->write_sgpr(descriptor + 1, static_cast<uint32_t>(kBase >> 32) | (1u << 25));
+  cu->write_sgpr(adjacent_wave->sgpr_alloc().base, 1u);
+  cu->write_sgpr(adjacent_wave->sgpr_alloc().base + 1, 0u);
+
+  cdna5::VbufferMachineInst inst{};
+  inst.rsrc = cfg.sgprs_per_wf - 2;
+  inst.soffset = cdna5::OPR_SREG_NULL;
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  d.elem_size = 4;
+  d.num_elems = 1;
+  cdna5::mubuf_calculate_addresses(inst, *executing_wave, d);
+  EXPECT_EQ(d.lane_mask, 0ULL);
+  EXPECT_EQ(d.per_lane_addr[0], 0ULL);
+}
+
+TEST(RdnaAddrCalcTest, SmemBasePairCannotCrossWaveSgprBoundary) {
+  amdgpu::GpuMemory mem("rdna4_smem_cross_wave_sgpr_mem");
+  amdgpu::L2Cache l2("rdna4_smem_cross_wave_sgpr_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 105;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_smem_cross_wave_sgpr_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *executing_wave = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  auto *adjacent_wave = cu->dispatch_wf(1, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(executing_wave, nullptr);
+  ASSERT_NE(adjacent_wave, nullptr);
+  ASSERT_EQ(adjacent_wave->sgpr_alloc().base, executing_wave->sgpr_alloc().base + cfg.sgprs_per_wf);
+
+  const uint32_t base = adjacent_wave->sgpr_alloc().base - 1;
+  cu->write_sgpr(base, 0x12345678u);
+  cu->write_sgpr(adjacent_wave->sgpr_alloc().base, 0x00000002u);
+
+  rdna4::SmemMachineInst inst{};
+  inst.sbase = 52; // logical s[104:105], which straddles this 105-register block.
+  inst.sdata = 4;
+  inst.soffset = rdna4::OPR_SMEM_OFFSET_NULL;
+
+  EXPECT_FALSE(rdna4::smem_calculate_address(inst, *executing_wave).has_value());
+
+  rdna4::SLoadB32Smem load(reinterpret_cast<const rdna4::MachineInst *>(&inst));
+  load.execute_impl(*executing_wave);
+  EXPECT_EQ(load.data(), nullptr);
 }
 
 TEST(Gfx1250AddrCalcTest, VbufferStructuredStrideChecksIndexBounds) {

@@ -12,7 +12,7 @@ from datetime import datetime
 from enum import IntEnum, Enum
 from pathlib import Path
 from time import asctime, localtime, time
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from . import amdsmi_wrapper
 from .amdsmi_exception import *
@@ -613,6 +613,26 @@ class AmdSmiGpuBlock(IntEnum):
     JPEG = amdsmi_wrapper.AMDSMI_GPU_BLOCK_JPEG
     IH = amdsmi_wrapper.AMDSMI_GPU_BLOCK_IH
     MPIO = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPIO
+    MMSCH = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MMSCH
+    MP5 = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MP5
+    ATU = amdsmi_wrapper.AMDSMI_GPU_BLOCK_ATU
+    DACC_BE = amdsmi_wrapper.AMDSMI_GPU_BLOCK_DACC_BE
+    ECLR = amdsmi_wrapper.AMDSMI_GPU_BLOCK_ECLR
+    KPX_SERDES = amdsmi_wrapper.AMDSMI_GPU_BLOCK_KPX_SERDES
+    LSDMA = amdsmi_wrapper.AMDSMI_GPU_BLOCK_LSDMA
+    MPART = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPART
+    MPIFOE = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPIFOE
+    MPRAS = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPRAS
+    NBIF = amdsmi_wrapper.AMDSMI_GPU_BLOCK_NBIF
+    NBIO = amdsmi_wrapper.AMDSMI_GPU_BLOCK_NBIO
+    OXRP = amdsmi_wrapper.AMDSMI_GPU_BLOCK_OXRP
+    PCIE_PL = amdsmi_wrapper.AMDSMI_GPU_BLOCK_PCIE_PL
+    PCS_XGMI = amdsmi_wrapper.AMDSMI_GPU_BLOCK_PCS_XGMI
+    PIE = amdsmi_wrapper.AMDSMI_GPU_BLOCK_PIE
+    CS = amdsmi_wrapper.AMDSMI_GPU_BLOCK_CS
+    SHUB = amdsmi_wrapper.AMDSMI_GPU_BLOCK_SHUB
+    SSBDCI = amdsmi_wrapper.AMDSMI_GPU_BLOCK_SSBDCI
+    UCIE_PCS = amdsmi_wrapper.AMDSMI_GPU_BLOCK_UCIE_PCS
     RESERVED = amdsmi_wrapper.AMDSMI_GPU_BLOCK_RESERVED
 
 
@@ -2815,6 +2835,9 @@ def amdsmi_get_gpu_enumeration_info(processor_handle: processor_handle_t) -> Dic
         "hip_id": _validate_if_max_uint(enumeration_info.hip_id, MaxUIntegerTypes.UINT32_T),
         "hip_uuid": enumeration_info.hip_uuid.decode("utf-8"),
         "oam_id": _validate_if_max_uint(enumeration_info.oam_id, MaxUIntegerTypes.UINT32_T),
+        "physical_acc_id": _validate_if_max_uint(
+            enumeration_info.physical_acc_id, MaxUIntegerTypes.UINT32_T
+        ),
     }
 
     return enumeration_info
@@ -2871,6 +2894,9 @@ def amdsmi_get_gpu_asic_info(processor_handle: processor_handle_t) -> Dict[str, 
         "rev_id": _pad_hex_value(hex(asic_info_struct.rev_id), 2),
         "asic_serial": asic_info_struct.asic_serial.decode("utf-8"),
         "oam_id": _validate_if_max_uint(asic_info_struct.oam_id, MaxUIntegerTypes.UINT32_T),
+        "physical_acc_id": _validate_if_max_uint(
+            asic_info_struct.physical_acc_id, MaxUIntegerTypes.UINT32_T
+        ),
         "num_compute_units": _validate_if_max_uint(
             asic_info_struct.num_of_compute_units, MaxUIntegerTypes.UINT32_T
         ),
@@ -3653,7 +3679,7 @@ def amdsmi_get_gpu_ras_block_features_enabled(
             continue
         gpu_block_name = gpu_block.name
         if gpu_block.name == "LAST":
-            gpu_block_name = "MPIO"
+            gpu_block_name = "UCIE_PCS"
         _check_res(
             amdsmi_wrapper.amdsmi_get_gpu_ras_block_features_enabled(
                 processor_handle,
@@ -5346,6 +5372,33 @@ def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
     return dict_ret
 
 
+def amdsmi_get_tray_info(
+    node_handle: Optional[amdsmi_wrapper.amdsmi_node_handle] = None,
+) -> Dict[str, Any]:
+    """
+    Return tray-wide compute-tray type and accelerator count from UALoE.
+
+    node_handle is reserved for future use and MUST be NULL.
+
+    Raises AmdSmiLibraryException (AMDSMI_STATUS_NOT_SUPPORTED) when no
+    UALoE session is active.
+    """
+    if node_handle is not None and not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
+        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
+
+    tray_info = amdsmi_wrapper.amdsmi_tray_info_t()
+    _check_res(amdsmi_wrapper.amdsmi_get_tray_info(node_handle, ctypes.byref(tray_info)))
+
+    return {
+        "max_acc_per_tray": _validate_if_max_uint(
+            tray_info.max_acc_per_tray, MaxUIntegerTypes.UINT32_T
+        ),
+        "tray_type": amdsmi_wrapper.amdsmi_compute_tray_type_t__enumvalues.get(
+            tray_info.tray_type, "AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN"
+        ).replace("AMDSMI_COMPUTE_TRAY_TYPE_", ""),
+    }
+
+
 def amdsmi_get_temp_metric(
     processor_handle: processor_handle_t,
     sensor_type: AmdSmiTemperatureType,
@@ -5435,10 +5488,7 @@ def amdsmi_get_utilization_count(
             counter_type = "AMDSMI_COARSE_GRAIN_GPU_ACTIVITY"
         if counter_type == "AMDSMI_UTILIZATION_COUNTER_LAST":
             counter_type = "AMDSMI_FINE_DECODER_ACTIVITY"
-        counter_value = _validate_if_max_uint(
-            util_counter_list[index].value, MaxUIntegerTypes.UINT64_T
-        )
-        result.append({"type": counter_type, "value": counter_value})
+        result.append({"type": counter_type, "value": util_counter_list[index].value})
 
     return result
 
@@ -7116,7 +7166,7 @@ def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_busy_percent(processor_handle, ctypes.byref(gpu_busy_percent))
     )
-    return _validate_if_max_uint(gpu_busy_percent.value, MaxUIntegerTypes.UINT32_T)
+    return gpu_busy_percent.value
 
 
 def amdsmi_get_vcn_busy_percent(processor_handle: processor_handle_t):

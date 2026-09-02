@@ -32,12 +32,18 @@ If you just want to *run* it, jump to [Running and rebuilding](#running-and-rebu
 
 ## Units under test
 
-Each production `.cc` gets its own binary so that `#include`-ing it cannot
-collide with another unit's file-scope state (`static` globals, `std::once_flag`,
-translation-unit anonymous namespaces):
+Units sharing a binary must be `#include`d from *different* test TUs and must not
+export colliding non-`static` symbols; otherwise a unit needs its own binary:
 
-- **`rccl-UnitTestsMicro`** — `p2p.cc` (via `P2P_CC_PATH`); suites `P2pMicrotest.*`,
-  `FreshRegistration*`.
+- **`rccl-UnitTestsMicro`** — one unit per test TU:
+  - `p2p.cc` (`P2P_CC_PATH`, from `p2p-test.cc`); suites `P2pMicrotest.*`,
+    `FreshRegistration*`.
+  - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
+    `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
+  - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
+    (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
+    `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
+    covered yet.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**) — `init.cc` (via `INIT_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
   `HIP_HOST_UNCACHED_MEMORY`/`HIP_UNCACHED_MEMORY` to cover the alternate host-alloc
@@ -104,20 +110,21 @@ The unit-under-test is the production `.cc` that the test TU `#include`s via a
 build-time path macro (e.g. `P2P_CC_PATH` → the hipified `p2p.cc`). To add a
 test:
 
-1. **Pick the unit.** If it lives in a `.cc` that is already `#include`d
-   (currently `p2p.cc` or `init.cc`), skip to step 3. Otherwise add a new path
+1. **Pick the unit.** If it lives in a `.cc` that is already `#include`d (see
+   [Units under test](#units-under-test)), skip to step 3. Otherwise add a new path
    macro in `CMakeLists.txt` (mirror `P2P_CC_PATH`/`INIT_CC_PATH`) pointing at the
    hipified copy, and `#include` it from the test TU *after* the fakes/macro shims
    are in scope. A new unit generally warrants its own binary (see
    [Units under test](#units-under-test)) so its file-scope state stays isolated.
 2. **Register the source.** Add the test `.cc` to the target's source list in
-   `test/host/CMakeLists.txt` — both the in-build source list and the standalone
-   list for that target. If you add a new gtest suite, add its pattern to the
+   `test/host/CMakeLists.txt` (`RCCL_MICRO_TEST_SOURCES` for
+   `rccl-UnitTestsMicro`). If you add a new gtest suite, add its pattern to the
    target's `test/test_categories_micro*.yaml` so CTest runs it.
-3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls
-   `ResetP2pFakes()` so hooks do not leak between tests. Install per-test
-   behaviour by overwriting a `std::function` hook rather than editing a fake's
-   default. Prefer the `ScopedHook` helper in `ScopedHook.h` (see
+3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls the
+   unit's reset entry point (e.g. `ResetP2pFakes()`) so hooks do not leak
+   between tests. Install per-test behaviour by overwriting a
+   `std::function` hook rather than editing a fake's default. Prefer the
+   `ScopedHook` helper in `ScopedHook.h` (see
    [Installing per-test behaviour with `ScopedHook`](#installing-per-test-behaviour-with-scopedhook)),
    which installs the hook, counts calls, and restores the previous behaviour
    automatically on scope exit.

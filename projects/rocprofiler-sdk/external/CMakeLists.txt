@@ -65,7 +65,7 @@ if(ROCPROFILER_BUILD_TESTS)
         mark_as_advanced(BUILD_GMOCK)
         mark_as_advanced(GTEST_HAS_ABSL)
     else()
-        find_package(GTest REQUIRED)
+        find_package(GTest REQUIRED GLOBAL)
         target_link_libraries(rocprofiler-sdk-gtest INTERFACE GTest::gtest)
     endif()
 endif()
@@ -118,7 +118,7 @@ if(ROCPROFILER_BUILD_FMT)
         rocprofiler-sdk-fmt SYSTEM
         INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/fmt/include>)
 else()
-    find_package(fmt REQUIRED)
+    find_package(fmt REQUIRED GLOBAL)
     target_link_libraries(rocprofiler-sdk-fmt INTERFACE fmt::fmt)
 endif()
 
@@ -154,7 +154,7 @@ if(ROCPROFILER_BUILD_YAML_CPP)
         rocprofiler-sdk-yaml-cpp
         INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/yaml-cpp/include>)
 else()
-    find_package(yaml-cpp 0.8.0 REQUIRED)
+    find_package(yaml-cpp 0.8.0 REQUIRED GLOBAL)
     target_link_libraries(rocprofiler-sdk-yaml-cpp INTERFACE yaml-cpp::yaml-cpp)
 endif()
 
@@ -208,41 +208,59 @@ target_link_libraries(
     INTERFACE $<BUILD_INTERFACE:rocprofiler-sdk-perfetto-static-library>)
 
 # ELFIO
-rocprofiler_checkout_git_submodule(
-    RECURSIVE
-    RELATIVE_PATH external/elfio
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    REPO_URL https://github.com/serge1/ELFIO.git
-    REPO_BRANCH "Release_3.12")
+if(ROCPROFILER_BUILD_ELFIO)
+    rocprofiler_checkout_git_submodule(
+        RECURSIVE
+        RELATIVE_PATH external/elfio
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        REPO_URL https://github.com/serge1/ELFIO.git
+        REPO_BRANCH "Release_3.12")
 
-set(ELFIO_BUILD_EXAMPLES OFF)
-set(ELFIO_BUILD_TESTS OFF)
-add_subdirectory(elfio EXCLUDE_FROM_ALL)
-if(TARGET rocprofiler-sdk-elfio)
-    get_target_property(ELFIO_INCLUDE_DIR elfio::elfio INTERFACE_INCLUDE_DIRECTORIES)
-    target_include_directories(rocprofiler-sdk-elfio SYSTEM
-                               INTERFACE ${ELFIO_INCLUDE_DIR})
+    set(ELFIO_BUILD_EXAMPLES OFF)
+    set(ELFIO_BUILD_TESTS OFF)
+    add_subdirectory(elfio EXCLUDE_FROM_ALL)
+    if(TARGET rocprofiler-sdk-elfio)
+        get_target_property(ELFIO_INCLUDE_DIR elfio::elfio INTERFACE_INCLUDE_DIRECTORIES)
+        target_include_directories(rocprofiler-sdk-elfio SYSTEM
+                                   INTERFACE ${ELFIO_INCLUDE_DIR})
+    endif()
+else()
+    find_package(elfio REQUIRED GLOBAL)
+    target_link_libraries(rocprofiler-sdk-elfio INTERFACE elfio::elfio)
 endif()
 
 #
 # OTF2
 #
-add_subdirectory(otf2)
-
-rocprofiler_checkout_git_submodule(
-    RECURSIVE
-    RELATIVE_PATH external/json
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    REPO_URL https://github.com/nlohmann/json.git
-    REPO_BRANCH "develop")
+if(ROCPROFILER_BUILD_OTF2)
+    add_subdirectory(otf2)
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(OTF2 REQUIRED IMPORTED_TARGET otf2>=3.0)
+    add_library(otf2 INTERFACE)
+    add_library(otf2::otf2 ALIAS otf2)
+    target_link_libraries(otf2 INTERFACE PkgConfig::OTF2)
+endif()
 
 #
 # JSON
 #
-add_subdirectory(json)
-target_include_directories(
-    rocprofiler-sdk-json SYSTEM
-    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/json/include>)
+if(ROCPROFILER_BUILD_JSON)
+    rocprofiler_checkout_git_submodule(
+        RECURSIVE
+        RELATIVE_PATH external/json
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        REPO_URL https://github.com/nlohmann/json.git
+        REPO_BRANCH "develop")
+
+    add_subdirectory(json)
+    target_include_directories(
+        rocprofiler-sdk-json SYSTEM
+        INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/json/include>)
+else()
+    find_package(nlohmann_json 3.9.0 REQUIRED GLOBAL)
+    target_link_libraries(rocprofiler-sdk-json INTERFACE nlohmann_json::nlohmann_json)
+endif()
 
 #
 # SQLite3

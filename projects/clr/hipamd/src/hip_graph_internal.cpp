@@ -603,13 +603,13 @@ void GraphExecSegmented::BuildSyncPlan() {
 
       sync_plan_.patch_list.push_back(
           {completion_barrier, nullptr, hw_slot,
-           amd::Device::HwEventPatch::kCompletionSignal, segment.id});
+           amd::Device::HwEventPatch::kCompletionSignal});
     } else if (!lastBatch.dispatchPackets.empty() && completion_signal_needed) {
       // Safe to patch the last kernel dispatch directly
       uint8_t* last_pkt = lastBatch.dispatchPackets.back();
       sync_plan_.patch_list.push_back(
           {last_pkt, nullptr, hw_slot,
-           amd::Device::HwEventPatch::kCompletionSignal, segment.id});
+           amd::Device::HwEventPatch::kCompletionSignal});
       // The completion signal is embedded on this specific kernel packet. If the
       // owning node is later disabled (hipGraphNodeSetEnabled), that packet is
       // filtered out of the dispatch buffer and the signal would be lost,
@@ -2542,23 +2542,15 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
 
   // Apply pre-computed patches -- writes HW events directly into flatPacketData
   // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
-  // Resolve each completion-signal patch's segment_id (set at BuildSyncPlan time) to
-  // the actual stream's queue index now that streams are available.
   if (!sync_plan_.patch_list.empty()) {
-    for (auto& patch : sync_plan_.patch_list) {
-      if (patch.dep_slot == amd::Device::HwEventPatch::kCompletionSignal &&
-          patch.segment_id >= 0 &&
-          patch.segment_id < static_cast<int>(segments_.size())) {
-        patch.queue_index = resolveSegmentStream(segments_[patch.segment_id])->vdev()->index();
-      }
-    }
     device->ApplyHwEventPatches(sync_plan_.patch_list, segment_hw_events);
   }
 
   // Single AccumulateCommand on launch_stream manages all HW event lifetimes
   // and serves as the dispatch anchor for all segments across all streams.
-  // Kernel names are copied into the command at dispatch time (via addKernelName
-  // in dispatchAqlPacketBatchFlat) — no string borrowing, no GraphExecBase pin.
+  // Kernel dispatch records are added to the command at dispatch time (via
+  // addKernelDispatch in dispatchAqlPacketBatchFlat) — no string borrowing,
+  // no GraphExecBase pin.
   auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
 
   // Register HW events with graph_accumulate so profiling can read them.

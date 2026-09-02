@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(rocprofiler-sdk-samples LANGUAGES C CXX)
 
@@ -51,3 +51,4 @@ add_subdirectory(external_correlation_id_request)
 add_subdirectory(pc_sampling)
 add_subdirectory(openmp_target)
 add_subdirectory(thread_trace)
+add_subdirectory(kernel_replay)
