@@ -82,7 +82,7 @@ class TestRevisionIdReporting(unittest.TestCase):
             self.assertEqual(asic_info[key], "N/A")
 
     def test_zero_is_a_real_value_not_na(self):
-        # A0 silicon reports chip_rev 0, so zero must stay distinct from N/A.
+        # Hardware really does report chip_rev 0, so zero must stay distinct from N/A.
         asic_info = _asic_info_with(0x0, 0x0)
         for key in _REVISION_KEYS:
             self.assertEqual(asic_info[key], "0x00")

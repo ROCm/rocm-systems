@@ -1140,8 +1140,8 @@ typedef struct {
   uint32_t subsystem_id;             //!> The subsystem ID
   uint64_t flags;                    //!< Chip flags
   uint32_t physical_acc_id;          //!< Physical accelerator ID, 0xFFFFFFFF if not supported
-  uint32_t chip_rev_id;              /**< amdgpu chip_rev: internal chip revision (stepping),
-                                          numbered A0 = 0, A1 = 1 by AMD convention.
+  uint32_t chip_rev_id;              /**< amdgpu chip_rev: internal chip revision (stepping)
+                                          as the driver reports it, not decoded.
                                           0xFFFFFFFF if not supported */
   uint32_t external_rev_id;          /**< amdgpu external_rev. Family-scoped, so the same value
                                           recurs across unrelated ASIC families; pair it with
