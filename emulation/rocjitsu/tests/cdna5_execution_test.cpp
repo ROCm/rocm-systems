@@ -379,14 +379,17 @@ TEST(Gfx1250ExecutionTest, Vop3Mad64ClampSaturatesAndPreservesCarryNormalAndDpp)
     uint32_t src1;
     uint64_t src2;
     uint64_t expected;
+    bool expected_carry;
   };
   constexpr std::array kCases{
-      TestCase{false, false, UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX},
-      TestCase{false, true, UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX},
+      TestCase{false, false, UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX, false},
+      TestCase{false, true, UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX, true},
+      TestCase{false, true, 2u, 3u, 4u, 10u, false},
       TestCase{true, false, static_cast<uint32_t>(INT32_MAX), static_cast<uint32_t>(INT32_MAX),
-               static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX)},
+               static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX), false},
       TestCase{true, true, static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(INT32_MAX),
-               static_cast<uint64_t>(INT64_MIN), static_cast<uint64_t>(INT64_MIN)},
+               static_cast<uint64_t>(INT64_MIN), static_cast<uint64_t>(INT64_MIN), true},
+      TestCase{true, true, static_cast<uint32_t>(-2), 3u, 10u, 4u, false},
   };
 
   for (bool dpp : {false, true}) {
@@ -403,7 +406,8 @@ TEST(Gfx1250ExecutionTest, Vop3Mad64ClampSaturatesAndPreservesCarryNormalAndDpp)
       cu->write_vgpr(base + 3, 0, static_cast<uint32_t>(test.src2 >> 32));
       cu->write_vgpr(base + 4, 0, 0u);
       cu->write_vgpr(base + 5, 0, 0u);
-      write_wave_sgpr(*cu, *wf, 2, 0u);
+      // Seed CO with a stale set bit so non-overflowing cases prove it is replaced.
+      write_wave_sgpr(*cu, *wf, 2, test.writes_carry ? 1u : 0u);
 
       if (!dpp) {
         std::array<uint32_t, 2> words;
@@ -469,7 +473,7 @@ TEST(Gfx1250ExecutionTest, Vop3Mad64ClampSaturatesAndPreservesCarryNormalAndDpp)
       EXPECT_EQ(result, test.expected)
           << "signed " << test.is_signed << " co " << test.writes_carry << " dpp " << dpp;
       if (test.writes_carry)
-        EXPECT_EQ(read_wave_sgpr(*cu, *wf, 2) & 1u, 1u);
+        EXPECT_EQ(read_wave_sgpr(*cu, *wf, 2) & 1u, test.expected_carry);
     }
   }
 
