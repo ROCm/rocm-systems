@@ -11783,3 +11783,48 @@ inventing a forwarding adapter.  More importantly, the neutral boundary makes
 the next deep read sharper: any remaining Record/Replay/Sampled interaction can
 now be judged as a real mode-specific dependency, an exact-coordinate subset,
 or a candidate for deletion rather than being obscured by inherited names.
+
+### 16.177 Convergence checkpoint 176: Sampled-owned workgroup-source fallback
+
+The newly neutral exact-entry vocabulary made one apparent shared helper easy
+to classify correctly.  `moi_persistent_or_descriptor_workgroup_sources` had
+exactly two production callers: Sampled access planning and Sampled
+synchronization planning.  Its choice between the accepted exact-entry tuple
+and the descriptor ABI was Sampled fallback policy, not common placement or a
+general probe contract.  No Record/Replay, InlineShadow, placement, prologue,
+or low-level emitter consumed it.
+
+That choice is now the private `sampled_workgroup_sources` operation in the
+Sampled translation unit.  Both Sampled regions call it directly.  The public
+declaration in `consan_moi_probe_contracts.h` and the common placement
+implementation are deleted; the underlying exact-entry and descriptor-source
+mechanisms remain shared and unchanged.  The architecture gate fixes all
+three parts of the boundary: no Sampled fallback in common placement, no
+shared declaration, and one Sampled owner composing the two narrow mechanisms.
+
+| Signal | Checkpoint 176 | Cumulative change | Slice change from checkpoint 175 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,172 | **-2,804** | **-7** |
+| Nonblank production lines | 95,764 | **-3,320** | **-6** |
+| Production implementation lines | 88,028 | **-3,422** | **-7** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Shared APIs whose only consumers are Sampled | **0 / 1** | n/a | **-1** |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The implementation is committed as `c580d8e9acf`.  Validation includes a
+successful full `-j16` build and **160/160** nonphysical Sampled-named and
+architecture-boundary tests.  The first boundary run correctly found one older
+assertion that still required the common helper; after converting it to require
+the Sampled-private operation, the boundary test passed.  This follows the
+complete 828-case MOI host gate at checkpoint 175.  All invocations used
+`-LE physical`; no physical GPU test was run.
+
+This slice turns semantic clarification into both locality and deletion: a
+mode-only decision leaves the common component, the shared header loses an API,
+and seven implementation lines disappear.  The exact-entry and raw descriptor
+mechanisms are still shared once each, so mode locality has not reintroduced
+code duplication.
