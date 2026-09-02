@@ -420,7 +420,7 @@ void run_tier(const std::string& tier) {
  *     the substrate every Instinct serving deployment depends on cannot land
  *     silently.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_T0_Roundtrip", "[hrr][api-matrix]") {
+TEST_CASE("Unit_HRR_ApiMatrix_T0_Roundtrip", "[.][hrr][api-matrix]") {
   run_tier("T0");
 }
 
@@ -438,7 +438,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_T0_Roundtrip", "[hrr][api-matrix]") {
  *     report rather than PASS: they turn into XPASS the day P2 lands, which is
  *     the signal to update api_matrix.yaml.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_T1_Roundtrip", "[hrr][api-matrix]") {
+TEST_CASE("Unit_HRR_ApiMatrix_T1_Roundtrip", "[.][hrr][api-matrix]") {
   run_tier("T1");
 }
 
@@ -458,7 +458,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_T1_Roundtrip", "[hrr][api-matrix]") {
  *   - Runs under the replay watchdog, so the H2 hang fails the test in bounded
  *     time instead of wedging the job.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_T2_Roundtrip", "[hrr][api-matrix]") {
+TEST_CASE("Unit_HRR_ApiMatrix_T2_Roundtrip", "[.][hrr][api-matrix]") {
   run_tier("T2");
 }
 
@@ -474,7 +474,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_T2_Roundtrip", "[hrr][api-matrix]") {
  *     HIP_VISIBLE_DEVICES=6,7. Skips cleanly on a single-GPU host rather than
  *     failing, so the rest of the matrix stays runnable anywhere.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_T3_Roundtrip", "[hrr][api-matrix]") {
+TEST_CASE("Unit_HRR_ApiMatrix_T3_Roundtrip", "[.][hrr][api-matrix]") {
   run_tier("T3");
 }
 
@@ -490,7 +490,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_T3_Roundtrip", "[hrr][api-matrix]") {
  *     point: a NOOP that quietly became a real handler, or the reverse,
  *     changes what every existing recording means.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_T4_Roundtrip", "[hrr][api-matrix]") {
+TEST_CASE("Unit_HRR_ApiMatrix_T4_Roundtrip", "[.][hrr][api-matrix]") {
   run_tier("T4");
 }
 
@@ -521,7 +521,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_T5_Roundtrip", "[.][hrr][api-matrix]") {
  *   - This is what catches a bad regeneration before a GPU run wastes time on
  *     it, and it is why the header is generated rather than hand-written.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_ManifestWellFormed", "[hrr][api-matrix][cpu]") {
+TEST_CASE("Unit_HRR_ApiMatrix_ManifestWellFormed", "[.][hrr][api-matrix][cpu]") {
   REQUIRE(kHrrApiMatrixCount > 500);
   REQUIRE(kHrrTierFloorCount >= 1);
 
@@ -560,7 +560,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_ManifestWellFormed", "[hrr][api-matrix][cpu]") {
  *     between hrr-playback and this matrix, and nothing else in the build
  *     would notice if the wording changed, so pin the exact shapes here.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[hrr][api-matrix][cpu]") {
+TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[.][hrr][api-matrix][cpu]") {
   const std::string noop_line =
       "[HRR] NOOP playback handler called for hipHostAlloc \xE2\x80\x94 this "
       "API is not replayed; results may differ from capture.\n";
@@ -685,7 +685,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[hrr][api-matrix][cpu]") {
  *     APIs. The sample below is a verbatim `hrr-playback --info` report,
  *     including the surrounding sections the parser has to stop at.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_InfoBreakdownParse", "[hrr][api-matrix][cpu]") {
+TEST_CASE("Unit_HRR_ApiMatrix_InfoBreakdownParse", "[.][hrr][api-matrix][cpu]") {
   const std::string sample =
       "HRR Archive: /tmp/cap/pid-7\n"
       "========================================\n"
