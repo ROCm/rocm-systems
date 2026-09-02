@@ -322,3 +322,63 @@ Macro-checkpoints will be appended here. Each entry records the deletion
 thesis, structural result, gross and net size change, validation evidence,
 unexpected bugs and regression tests, and the whole-codebase evidence used to
 select the next macro-slice.
+
+### 10.1 Macro-slice 1 (active): one MOI access transaction
+
+The bounded candidate comparison rejected two tempting file-size arguments.
+SuperCollider LDS and FLAT lowering share mismatch reporting and low-level
+scratch mechanics, but their bulk is different: LDS owns dense routing,
+relay-reservoir convergence, multi-owner placement, and two-address replay,
+whereas FLAT owns a smaller direct/local/appended placement problem. Merging
+the two large functions would create a union-shaped framework without yet
+identifying 500 deletable lines. The 2,542-line branch-only relay router also
+does not currently admit the hoped-for replacement by one ordinary polynomial
+flow solver. Its fixed source/destination pairs form capacity-sharing routing
+commodities, and its deferred-owner objective is a group-activation cost, not
+an additive edge cost. Its exact-batch, exact-pair, and greedy tiers preserve
+different feasibility and bounded-work contracts covered by 90 focused tests.
+It remains a candidate for a smaller representation, but no deletion thesis
+currently justifies rewriting it.
+
+The selected opportunity is the complete MOI access transaction shared by
+Record/Replay, Sampled, and InlineShadow. A deep read of
+`consan_moi_record_replay.inc`, `consan_moi_sampled_access.inc`, and
+`consan_moi_inline_shadow.inc` found three parallel orchestration bodies around
+the already-common `MoiPlannedAccessPatch`, dense-route, relay-reservoir,
+descriptor-growth, appended-body, lowering-commit, and direct-patch contracts.
+The modes genuinely differ in evidence selection, report allocation, probe
+words, entry-gate details, return ABI, and runtime mapping. They do not differ
+in ownership of the placement transaction that applies those products.
+
+The deletion thesis is:
+
+- replace the three mode-owned route/application skeletons with one shared MOI
+  access transaction;
+- make each mode supply typed planning and emission facets rather than a mode
+  enum, a shared switch, or a copied end-to-end loop;
+- move code-object/text setup, local-island and dense-route setup, direct-relay
+  reservoir ownership, descriptor-requirement application, appended image
+  initialization, anchor/island publication, inline byte replacement,
+  lowering commit publication, relay commit, dense-host emission, and final
+  text replacement behind that transaction;
+- retain Record/Replay's banked records and borrowed entry, Sampled's static
+  filter/windows and runtime gate, and InlineShadow's shadow layouts and
+  deferred-guest ordering in their mode files; and
+- delete the displaced per-mode orchestration immediately, including wrappers
+  or duplicated state that become unnecessary after all three consumers
+  converge.
+
+The conservative target is at least 900 gross deleted production
+implementation lines, no more than 300 new shared and mode-adapter lines, and
+therefore at least 600 net deleted lines. The attempt is abandoned rather than
+recorded as a macro-checkpoint if the common transaction needs an engine
+switch, exposes one mode's evidence vocabulary to another, leaves old and new
+application paths live, or cannot realize at least 500 net deleted lines after
+the complete legacy harvest.
+
+Focused validation covers common access-application contracts, each of the
+three MOI access engines, dense and branch-only routing, spill and selectable-
+VGPR-bank paths, lowering/runtime mapping publication, and the architecture
+boundary. The cutover gate covers the complete nonphysical ConSan/RocJitsu
+matrix, including all five emulated targets. Any behavioral discrepancy found
+during convergence receives a regression test before the macro-slice closes.
