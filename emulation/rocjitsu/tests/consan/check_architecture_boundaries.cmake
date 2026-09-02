@@ -625,6 +625,27 @@ foreach(_file IN LISTS _consan_production_files)
     )
 endforeach()
 
+# Flavor-specific probe names, report-facing evidence roles, and cardinality
+# form one semantic vocabulary row per engine. Report planning may switch on a
+# normalized evidence role, but it must not maintain parallel engine matrices
+# for classification, validation, and sizing.
+file(READ "${_consan_dir}/consan_moi_report_plan.cpp" _evidence_vocabulary_owner)
+if(NOT _evidence_vocabulary_owner MATCHES "struct EngineEvidenceVocabulary" OR
+   NOT _evidence_vocabulary_owner MATCHES "kEngineEvidenceVocabularies" OR
+   NOT _evidence_vocabulary_owner MATCHES "barrier_elements_per_semantic_site")
+    message(FATAL_ERROR "ConSan report planning lost its single engine evidence vocabulary")
+endif()
+foreach(_engine IN ITEMS SuperCollider RecordReplay Sampled InlineShadow)
+    if(NOT _evidence_vocabulary_owner MATCHES "Engine::${_engine}")
+        message(FATAL_ERROR "ConSan evidence vocabulary is missing ${_engine}")
+    endif()
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_report_plan.cpp"
+    "engine_accepts_evidence_kind|expected_evidence_element_count|valid_evidence_intent_kind|switch[ ]*[(]engine[)]"
+    "report planning must not restore parallel engine/evidence authorities"
+)
+
 # Dispatch placement composes one mode-owned demand with one target-owned
 # capability. The shared register search must not rediscover either axis from
 # product/encoding predicates or a second mode-registry lookup.

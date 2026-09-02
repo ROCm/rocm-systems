@@ -205,92 +205,63 @@ bool ConSanMoiEvidenceRequirements::common_well_formed(ConSanMoiEngine expected_
 
 namespace {
 
-[[nodiscard]] constexpr bool valid_evidence_engine(ConSanCapabilityEngine engine) {
-  return static_cast<uint8_t>(engine) < static_cast<uint8_t>(ConSanCapabilityEngine::Count);
+using Engine = ConSanCapabilityEngine;
+using Probe = ConSanProbeIntentKind;
+using Evidence = ConSanEvidenceIntentKind;
+
+struct EngineEvidenceVocabulary {
+  Engine engine;
+  Probe access;
+  Evidence access_evidence;
+  Probe barrier;
+  Probe atomic;
+  Probe fence;
+  bool address_capture;
+  bool barrier_elements_per_semantic_site;
+};
+
+constexpr std::array<EngineEvidenceVocabulary, static_cast<size_t>(Engine::Count)>
+    kEngineEvidenceVocabularies = {{
+        {Engine::SuperCollider, Probe::RedundantAccessObservation, Evidence::StickyMarker,
+         Probe::Count, Probe::Count, Probe::Count, false, false},
+        {Engine::RecordReplay, Probe::AccessRecord, Evidence::Access, Probe::BarrierRecord,
+         Probe::AtomicRecord, Probe::FenceRecord, true, false},
+        {Engine::Sampled, Probe::SampledAccess, Evidence::Access, Probe::SampledBarrierEpoch,
+         Probe::SampledAtomicOrdering, Probe::Count, true, true},
+        {Engine::InlineShadow, Probe::ExactShadowAccess, Evidence::Access, Probe::ExactBarrierEpoch,
+         Probe::ExactAtomicOrdering, Probe::Count, true, true},
+    }};
+
+[[nodiscard]] constexpr const EngineEvidenceVocabulary *engine_evidence_vocabulary(Engine engine) {
+  const size_t index = static_cast<size_t>(engine);
+  if (index >= kEngineEvidenceVocabularies.size())
+    return nullptr;
+  const EngineEvidenceVocabulary &vocabulary = kEngineEvidenceVocabularies[index];
+  return vocabulary.engine == engine ? &vocabulary : nullptr;
 }
 
-[[nodiscard]] constexpr bool valid_evidence_intent_kind(ConSanEvidenceIntentKind kind) {
-  return static_cast<uint8_t>(kind) < static_cast<uint8_t>(ConSanEvidenceIntentKind::Count);
-}
-
-[[nodiscard]] constexpr bool engine_accepts_evidence_kind(ConSanCapabilityEngine engine,
-                                                          ConSanEvidenceIntentKind kind) {
-  switch (engine) {
-  case ConSanCapabilityEngine::SuperCollider:
-    return kind == ConSanEvidenceIntentKind::StickyMarker;
-  case ConSanCapabilityEngine::RecordReplay:
-    return kind == ConSanEvidenceIntentKind::Access || kind == ConSanEvidenceIntentKind::Barrier ||
-           kind == ConSanEvidenceIntentKind::Atomic || kind == ConSanEvidenceIntentKind::Fence ||
-           kind == ConSanEvidenceIntentKind::AddressCapture;
-  case ConSanCapabilityEngine::Sampled:
-  case ConSanCapabilityEngine::InlineShadow:
-    return kind == ConSanEvidenceIntentKind::Access || kind == ConSanEvidenceIntentKind::Barrier ||
-           kind == ConSanEvidenceIntentKind::Atomic ||
-           kind == ConSanEvidenceIntentKind::AddressCapture;
-  case ConSanCapabilityEngine::Count:
-    break;
-  }
-  return false;
-}
-
-[[nodiscard]] std::optional<ConSanEvidenceIntentKind>
-classify_evidence_intent(ConSanCapabilityEngine engine, ConSanProbeIntentKind kind) {
-  switch (kind) {
-  case ConSanProbeIntentKind::RedundantAccessObservation:
-    if (engine == ConSanCapabilityEngine::SuperCollider)
-      return ConSanEvidenceIntentKind::StickyMarker;
-    break;
-  case ConSanProbeIntentKind::AccessRecord:
-    if (engine == ConSanCapabilityEngine::RecordReplay)
-      return ConSanEvidenceIntentKind::Access;
-    break;
-  case ConSanProbeIntentKind::SampledAccess:
-    if (engine == ConSanCapabilityEngine::Sampled)
-      return ConSanEvidenceIntentKind::Access;
-    break;
-  case ConSanProbeIntentKind::ExactShadowAccess:
-    if (engine == ConSanCapabilityEngine::InlineShadow)
-      return ConSanEvidenceIntentKind::Access;
-    break;
-  case ConSanProbeIntentKind::BarrierRecord:
-    if (engine == ConSanCapabilityEngine::RecordReplay)
-      return ConSanEvidenceIntentKind::Barrier;
-    break;
-  case ConSanProbeIntentKind::SampledBarrierEpoch:
-    if (engine == ConSanCapabilityEngine::Sampled)
-      return ConSanEvidenceIntentKind::Barrier;
-    break;
-  case ConSanProbeIntentKind::ExactBarrierEpoch:
-    if (engine == ConSanCapabilityEngine::InlineShadow)
-      return ConSanEvidenceIntentKind::Barrier;
-    break;
-  case ConSanProbeIntentKind::AtomicAddressCapture:
-    if (engine == ConSanCapabilityEngine::RecordReplay ||
-        engine == ConSanCapabilityEngine::Sampled ||
-        engine == ConSanCapabilityEngine::InlineShadow) {
-      return ConSanEvidenceIntentKind::AddressCapture;
-    }
-    break;
-  case ConSanProbeIntentKind::AtomicRecord:
-    if (engine == ConSanCapabilityEngine::RecordReplay)
-      return ConSanEvidenceIntentKind::Atomic;
-    break;
-  case ConSanProbeIntentKind::SampledAtomicOrdering:
-    if (engine == ConSanCapabilityEngine::Sampled)
-      return ConSanEvidenceIntentKind::Atomic;
-    break;
-  case ConSanProbeIntentKind::ExactAtomicOrdering:
-    if (engine == ConSanCapabilityEngine::InlineShadow)
-      return ConSanEvidenceIntentKind::Atomic;
-    break;
-  case ConSanProbeIntentKind::FenceRecord:
-    if (engine == ConSanCapabilityEngine::RecordReplay)
-      return ConSanEvidenceIntentKind::Fence;
-    break;
-  case ConSanProbeIntentKind::Count:
-    break;
-  }
+[[nodiscard]] constexpr std::optional<Evidence>
+classify_evidence_intent(const EngineEvidenceVocabulary &vocabulary, Probe kind) {
+  if (kind == vocabulary.access)
+    return vocabulary.access_evidence;
+  if (kind == Probe::AtomicAddressCapture && vocabulary.address_capture)
+    return Evidence::AddressCapture;
+  if (kind == vocabulary.barrier && kind != Probe::Count)
+    return Evidence::Barrier;
+  if (kind == vocabulary.atomic && kind != Probe::Count)
+    return Evidence::Atomic;
+  if (kind == vocabulary.fence && kind != Probe::Count)
+    return Evidence::Fence;
   return std::nullopt;
+}
+
+[[nodiscard]] constexpr bool accepts_evidence_intent(const EngineEvidenceVocabulary &vocabulary,
+                                                     Evidence kind) {
+  return kind == vocabulary.access_evidence ||
+         (kind == Evidence::AddressCapture && vocabulary.address_capture) ||
+         (kind == Evidence::Barrier && vocabulary.barrier != Probe::Count) ||
+         (kind == Evidence::Atomic && vocabulary.atomic != Probe::Count) ||
+         (kind == Evidence::Fence && vocabulary.fence != Probe::Count);
 }
 
 [[nodiscard]] constexpr ConSanSemanticSiteDomain
@@ -300,20 +271,20 @@ evidence_intent_domain(ConSanEvidenceIntentKind kind) {
              : ConSanSemanticSiteDomain::SynchronizationEvent;
 }
 
-[[nodiscard]] uint64_t
-expected_evidence_element_count(ConSanCapabilityEngine engine, ConSanEvidenceIntentKind kind,
-                                std::span<const SemanticSiteId> semantic_sites) {
+[[nodiscard]] uint64_t evidence_element_count(const EngineEvidenceVocabulary &vocabulary,
+                                              Evidence kind,
+                                              std::span<const SemanticSiteId> semantic_sites) {
   switch (kind) {
-  case ConSanEvidenceIntentKind::Access:
+  case Evidence::Access:
     return semantic_sites.size();
-  case ConSanEvidenceIntentKind::Barrier:
-    return engine == ConSanCapabilityEngine::RecordReplay ? 1u : semantic_sites.size();
-  case ConSanEvidenceIntentKind::Atomic:
-  case ConSanEvidenceIntentKind::Fence:
-  case ConSanEvidenceIntentKind::StickyMarker:
+  case Evidence::Barrier:
+    return vocabulary.barrier_elements_per_semantic_site ? semantic_sites.size() : 1u;
+  case Evidence::Atomic:
+  case Evidence::Fence:
+  case Evidence::StickyMarker:
     return 1u;
-  case ConSanEvidenceIntentKind::AddressCapture:
-  case ConSanEvidenceIntentKind::Count:
+  case Evidence::AddressCapture:
+  case Evidence::Count:
     return 0u;
   }
   return 0u;
@@ -322,12 +293,13 @@ expected_evidence_element_count(ConSanCapabilityEngine engine, ConSanEvidenceInt
 } // namespace
 
 bool ConSanEvidenceIntentPlan::well_formed() const {
-  if (reason != ConSanEvidenceRequirementReason::None || !valid_evidence_engine(engine))
+  const EngineEvidenceVocabulary *vocabulary = engine_evidence_vocabulary(engine);
+  if (reason != ConSanEvidenceRequirementReason::None || vocabulary == nullptr)
     return false;
   for (size_t index = 0; index < intents.size(); ++index) {
     const ConSanEvidenceIntent &intent = intents[index];
-    if (intent.source_intent.value != index || !valid_evidence_intent_kind(intent.kind) ||
-        !engine_accepts_evidence_kind(engine, intent.kind) || intent.semantic_sites.empty() ||
+    if (intent.source_intent.value != index || !accepts_evidence_intent(*vocabulary, intent.kind) ||
+        intent.semantic_sites.empty() ||
         std::ranges::any_of(intent.semantic_sites,
                             [](const SemanticSiteId &site) { return !site.valid(); }) ||
         std::ranges::any_of(intent.semantic_sites,
@@ -335,7 +307,7 @@ bool ConSanEvidenceIntentPlan::well_formed() const {
                               return site.domain != evidence_intent_domain(intent.kind);
                             }) ||
         intent.element_count !=
-            expected_evidence_element_count(engine, intent.kind, intent.semantic_sites)) {
+            evidence_element_count(*vocabulary, intent.kind, intent.semantic_sites)) {
       return false;
     }
   }
@@ -350,11 +322,15 @@ plan_consan_evidence_intents(const ConSanObservationPlan &observation_plan) {
     plan.reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
     return plan;
   }
+  const EngineEvidenceVocabulary *vocabulary = engine_evidence_vocabulary(observation_plan.engine);
+  if (vocabulary == nullptr) {
+    plan.reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+    return plan;
+  }
 
   plan.intents.reserve(observation_plan.probe_intents.size());
   for (const ConSanProbeIntent &probe : observation_plan.probe_intents) {
-    const std::optional<ConSanEvidenceIntentKind> kind =
-        classify_evidence_intent(observation_plan.engine, probe.kind);
+    const std::optional<Evidence> kind = classify_evidence_intent(*vocabulary, probe.kind);
     if (!kind) {
       plan.intents.clear();
       plan.reason = ConSanEvidenceRequirementReason::UnexpectedIntentKind;
@@ -365,8 +341,7 @@ plan_consan_evidence_intents(const ConSanObservationPlan &observation_plan) {
         .kind = *kind,
         .semantic_sites = probe.covered_semantic_sites,
     };
-    intent.element_count =
-        expected_evidence_element_count(plan.engine, intent.kind, intent.semantic_sites);
+    intent.element_count = evidence_element_count(*vocabulary, intent.kind, intent.semantic_sites);
     if (std::ranges::any_of(intent.semantic_sites, [&](const SemanticSiteId &site) {
           return site.domain != evidence_intent_domain(intent.kind);
         })) {
