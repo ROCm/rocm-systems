@@ -102,6 +102,8 @@ std::string reg_name(RegisterRef ref) {
     return "v" + std::to_string(ref.index);
   case RegClass::ACC_VGPR:
     return "acc" + std::to_string(ref.index);
+  case RegClass::TTMP:
+    return "ttmp" + std::to_string(ref.index);
   case RegClass::EXEC:
     return "exec";
   case RegClass::VCC:

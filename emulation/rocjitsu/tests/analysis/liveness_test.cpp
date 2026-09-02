@@ -585,12 +585,29 @@ TEST(RegisterSetSpecial, ClassifiesSpecialVersusOrdinaryClasses) {
   EXPECT_FALSE(is_special_reg_class(RegClass::SGPR));
   EXPECT_FALSE(is_special_reg_class(RegClass::VGPR));
   EXPECT_FALSE(is_special_reg_class(RegClass::ACC_VGPR));
+  EXPECT_FALSE(is_special_reg_class(RegClass::TTMP)); // per-index, untracked, not in the mask
   EXPECT_TRUE(is_special_reg_class(RegClass::EXEC));
   EXPECT_TRUE(is_special_reg_class(RegClass::VCC));
   EXPECT_TRUE(is_special_reg_class(RegClass::SCC));
   EXPECT_TRUE(is_special_reg_class(RegClass::M0));
   EXPECT_TRUE(is_special_reg_class(RegClass::FLAT_SCRATCH));
   EXPECT_TRUE(is_special_reg_class(RegClass::PC));
+}
+
+// TTMP is a known register class that this set deliberately does not track:
+// no bitset, no special-mask bit. Adding one never makes the set non-empty and
+// never reports the register as present, and removal paths are safe no-ops.
+TEST(RegisterSetSpecial, TtmpIsUntracked) {
+  RegisterSet s;
+  s.expand({RegClass::TTMP, 0, 1});
+  EXPECT_FALSE(s.contains({RegClass::TTMP, 0, 1}));
+  EXPECT_FALSE(s.contains({RegClass::TTMP, 15, 1}));
+  EXPECT_TRUE(s.none());
+  EXPECT_EQ(s.ordinary_size(), 0u);
+  EXPECT_FALSE(s.has_specials());
+  s.erase({RegClass::TTMP, 15, 1});
+  s.clear_class(RegClass::TTMP);
+  EXPECT_TRUE(s.none());
 }
 
 TEST(RegisterSetSpecial, OrdinaryAndSpecialInsertionCoexist) {

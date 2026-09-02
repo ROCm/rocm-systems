@@ -56,6 +56,11 @@ void RegisterSet::expand(RegisterRef ref) {
   case RegClass::ACC_VGPR:
     set_range(acc_vgprs_, ref.index, width);
     break;
+  case RegClass::TTMP:
+    // Trap temporaries are known to the ISA but not tracked by this set: no
+    // bitset and no mask bit, so index/width are dropped (as they are on the
+    // general def/use path). Explicit arm keeps the switch exhaustive.
+    break;
   case RegClass::EXEC:
   case RegClass::VCC:
   case RegClass::SCC:
@@ -80,6 +85,8 @@ void RegisterSet::erase(RegisterRef ref) {
   case RegClass::ACC_VGPR:
     reset_range(acc_vgprs_, ref.index, width);
     break;
+  case RegClass::TTMP: // untracked: nothing to clear
+    break;
   case RegClass::EXEC:
   case RegClass::VCC:
   case RegClass::SCC:
@@ -102,6 +109,8 @@ void RegisterSet::clear_class(RegClass cls) {
   case RegClass::ACC_VGPR:
     acc_vgprs_.reset();
     break;
+  case RegClass::TTMP: // untracked: nothing to clear
+    break;
   case RegClass::EXEC:
   case RegClass::VCC:
   case RegClass::SCC:
@@ -122,6 +131,8 @@ bool RegisterSet::contains(RegisterRef ref) const {
     return contains_range(vgprs_, ref.index, width);
   case RegClass::ACC_VGPR:
     return contains_range(acc_vgprs_, ref.index, width);
+  case RegClass::TTMP: // untracked: never present
+    return false;
   case RegClass::EXEC:
   case RegClass::VCC:
   case RegClass::SCC:

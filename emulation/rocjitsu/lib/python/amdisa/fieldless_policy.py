@@ -76,11 +76,12 @@ class SpecialRegClass(enum.Enum):
     Mirrors the special (non-indexed) members of the C++ ``RegClass`` enum
     (``register_set.h``): each value's name is the C++ enumerator (so generator
     lowers ``SpecialRegClass.VCC`` to ``RegClass::VCC``). Only the classes a
-    fieldless operand currently denotes are listed. FLAT_SCRATCH is the one
-    remaining special ``RegClass`` value not produced here yet: its operand
-    (``OPR_FLAT_SCRATCH``) classifies as ``SPECIAL_REGISTER`` in the policy
-    table but supplies no ``FieldlessEffect.special_reg``, so no fieldless
-    operand lowers to it.
+    fieldless operand currently denotes are listed. Two C++ ``RegClass`` values
+    are not produced here: FLAT_SCRATCH (its operand ``OPR_FLAT_SCRATCH``
+    classifies as ``SPECIAL_REGISTER`` in the policy table but supplies no
+    ``FieldlessEffect.special_reg``) and TTMP (a per-index trap-temporary file
+    that is not a fieldless operand at all), so no fieldless operand lowers to
+    either.
     """
 
     EXEC = 'EXEC'

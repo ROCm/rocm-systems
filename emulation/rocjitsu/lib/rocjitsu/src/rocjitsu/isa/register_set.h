@@ -50,13 +50,14 @@ inline constexpr size_t REGISTER_SET_ALLOCATABLE_SGPRS =
 /// enum is deliberately small and hardware-oriented; operands that are literals,
 /// labels, waitcnt immediates, message IDs, and other non-register values should
 /// not produce a RegisterRef.
-/// @details The first three classes (SGPR, VGPR, ACC_VGPR) are ordinary
-/// indexed register files with a per-index bitset. The remainder are
-/// architectural special registers: they are singletons (there is one EXEC,
-/// one SCC, ...), are not used for scratch allocation, and are stored in a
-/// compact membership mask. `is_special_reg_class()` distinguishes the two
-/// groups; keep the ordinary classes first so that predicate stays a simple
-/// partition.
+/// @details SGPR, VGPR, and ACC_VGPR are ordinary indexed register files with a
+/// per-index bitset. EXEC, VCC, SCC, M0, FLAT_SCRATCH, and PC are architectural
+/// special registers: singletons (there is one EXEC, one SCC, ...), not used for
+/// scratch allocation, stored in a compact membership mask. TTMP is a per-index
+/// trap-temporary file that this set deliberately does not track — it has
+/// neither a bitset nor a mask bit. `is_special_reg_class()` therefore names
+/// specifically "held in the special mask" (true for EXEC..PC), not "is it
+/// indexed": it is false for TTMP just as for the ordinary classes.
 enum class RegClass : uint8_t {
   SGPR,         ///< Scalar general-purpose register, indexed as sN. Ordinary, per-index.
   VGPR,         ///< Vector general-purpose register, indexed as vN. Ordinary, per-index.
@@ -66,6 +67,7 @@ enum class RegClass : uint8_t {
   SCC,          ///< Scalar condition code bit. Special singleton register.
   M0,           ///< M0 special scalar register. Special singleton register.
   FLAT_SCRATCH, ///< Flat-scratch base pair. Special singleton register.
+  TTMP,         ///< Trap-temporary file (ttmpN). Per-index, but untracked here.
   PC,           ///< Program counter/control-flow dep. Special singleton register.
 };
 
@@ -85,6 +87,7 @@ enum class RegClass : uint8_t {
   case RegClass::SGPR:
   case RegClass::VGPR:
   case RegClass::ACC_VGPR:
+  case RegClass::TTMP: // per-index, but held in no mask: untracked, not special
     return false;
   }
   return false;
