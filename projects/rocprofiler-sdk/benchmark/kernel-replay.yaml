@@ -1,0 +1,178 @@
+# Kernel replay overhead benchmark configuration.
+#
+# Kernel replay collects N counter groups from a single application run by re-executing each
+# dispatch N times, snapshotting and restoring the agent's tracked device memory around each pass.
+# The alternative it replaces -- application replay -- runs the whole application N times, once per
+# group. Which one is cheaper is entirely a property of the workload, and this configuration is
+# built to measure where the crossover is rather than to assert a number.
+#
+# The cost model the jobs are laid out against is:
+#
+#   bytes moved  =  dispatches  x  tracked device footprint  x  passes
+#
+# One snapshot per replayed dispatch, one restore per subsequent pass, full copies with no dirty
+# tracking. So replay wins when the application is expensive to start and cheap per dispatch, and
+# loses when it has a large resident footprint or a very high dispatch count. The sweeps below vary
+# each of those three terms independently so the resulting numbers can be attributed.
+#
+# transpose takes: nthreads, iterations, sync-interval, matrix-rows, matrix-cols. Iterations set the
+# dispatch count and the matrix dimensions set the footprint, which is why it is used for the
+# sweeps.
+#
+# Run with:
+#   rocprofv3-benchmark.py -i kernel-replay.yaml
+#   rocprofv3-benchmark.py -i kernel-replay.yaml --filter-rocprofv3 replay_4_groups app_replay
+#
+# See docs/conceptual/kernel_replay/kernel_replay_performance.md for what the numbers mean.
+
+defaults:
+  rocprofv3:
+    # The comparison that matters. Both collect the same four counter groups; replay_4_groups does
+    # it in one application run, app_replay in four. Filter to just these two for the headline
+    # number.
+    replay_4_groups:
+      [
+        --kernel-replay-beta-enabled,
+        --pmc,
+        SQ_WAVES,
+        --pmc,
+        GRBM_COUNT,
+        --pmc,
+        SQ_INSTS_VALU,
+        --pmc,
+        SQ_BUSY_CYCLES,
+      ]
+    app_replay:
+      [--pmc, SQ_WAVES, --pmc, GRBM_COUNT, --pmc, SQ_INSTS_VALU, --pmc, SQ_BUSY_CYCLES]
+
+    # Pass-count sweep at fixed footprint and dispatch count. Wall time should grow roughly
+    # linearly in the number of groups; super-linear growth means per-pass fixed cost, which the
+    # cost model does not account for and which would be a regression.
+    replay_1_group: [--kernel-replay-beta-enabled, --pmc, SQ_WAVES]
+    replay_2_groups: [--kernel-replay-beta-enabled, --pmc, SQ_WAVES, --pmc, GRBM_COUNT]
+    replay_8_groups:
+      [
+        --kernel-replay-beta-enabled,
+        --pmc,
+        SQ_WAVES,
+        --pmc,
+        GRBM_COUNT,
+        --pmc,
+        SQ_INSTS_VALU,
+        --pmc,
+        SQ_BUSY_CYCLES,
+        --pmc,
+        SQ_WAVE_CYCLES,
+        --pmc,
+        SQ_INSTS_SALU,
+        --pmc,
+        SQ_INSTS_VMEM,
+        --pmc,
+        SQ_INSTS_SMEM,
+      ]
+
+    # Counter collection without replay, as the floor: whatever this costs is attributable to
+    # counter collection rather than to the replay machinery.
+    counters_only: [--pmc, SQ_WAVES]
+
+  benchmark:
+    - baseline
+    - disabled-sdk-contexts
+    - sdk-buffer-overhead
+    - sdk-callback-overhead
+    - tool-runtime-overhead
+
+  group:
+    - kernel-replay
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Pass-count axis: same workload, more groups.
+  # ---------------------------------------------------------------------------
+  - name: replay-pass-sweep
+    group: [kernel-replay, pass-sweep]
+    command: [transpose, 1, 100, 10, 2048, 2048]
+    rocprofv3:
+      - [--kernel-replay-beta-enabled, --pmc, SQ_WAVES]
+      - [--kernel-replay-beta-enabled, --pmc, SQ_WAVES, --pmc, GRBM_COUNT]
+      - [
+          --kernel-replay-beta-enabled,
+          --pmc,
+          SQ_WAVES,
+          --pmc,
+          GRBM_COUNT,
+          --pmc,
+          SQ_INSTS_VALU,
+          --pmc,
+          SQ_BUSY_CYCLES,
+        ]
+
+  # ---------------------------------------------------------------------------
+  # Footprint axis: same dispatch count and pass count, more resident memory.
+  #
+  # This is the sweep that exposes the full-footprint-versus-working-set problem. The snapshot
+  # covers everything the agent has tracked, not what the kernel touches, so a workload whose
+  # resident memory grows while its kernels stay the same size should still get more expensive.
+  # If it does not, the snapshot is not doing what the cost model says.
+  # ---------------------------------------------------------------------------
+  - name: replay-footprint-small
+    group: [kernel-replay, footprint-sweep]
+    command: [transpose, 1, 100, 10, 1024, 1024]
+
+  - name: replay-footprint-medium
+    group: [kernel-replay, footprint-sweep]
+    command: [transpose, 1, 100, 10, 4096, 4096]
+
+  - name: replay-footprint-large
+    group: [kernel-replay, footprint-sweep]
+    command: [transpose, 1, 100, 10, 8192, 8192]
+
+  # ---------------------------------------------------------------------------
+  # Dispatch-count axis: same footprint and pass count, more dispatches.
+  #
+  # One snapshot per replayed dispatch, so per-dispatch fixed cost shows up here and nowhere else.
+  # The existing CI perf tests top out around 16 dispatches, where a per-dispatch regression is
+  # diluted below the noise floor; these run two orders of magnitude higher.
+  # ---------------------------------------------------------------------------
+  - name: replay-dispatch-count-low
+    group: [kernel-replay, dispatch-sweep]
+    command: [transpose, 1, 100, 10, 2048, 2048]
+
+  - name: replay-dispatch-count-high
+    group: [kernel-replay, dispatch-sweep]
+    command: [transpose, 1, 2000, 100, 2048, 2048]
+
+  # ---------------------------------------------------------------------------
+  # Application shapes.
+  # ---------------------------------------------------------------------------
+
+  # Multi-threaded and multi-stream. Replay drains the agent and holds an exclusive per-agent
+  # writer lock across the whole window, so a workload that overlaps work across streams should
+  # lose that overlap. This job is here to quantify how much.
+  - name: replay-multistream
+    group: [kernel-replay, multistream]
+    command: [transpose, 4, 500, 10, 2048, 2048]
+
+  - name: replay-multistream-standalone
+    group: [kernel-replay, multistream]
+    command: [multistream]
+
+  # HIP graphs decline replay: a graph launch is not a single-packet single-dispatch submission.
+  # This job is expected to show replay costing approximately nothing, because it is doing
+  # approximately nothing. That is the point of measuring it -- a graph-capturing application gets
+  # no replay at all, and the benchmark should make that visible rather than leaving it to be
+  # discovered in production.
+  - name: replay-hip-graph-declines
+    group: [kernel-replay, declines]
+    command: [hip-graph, 8, 500]
+
+  # A workload with a deterministic dispatch count, so replay's effect on dispatch accounting can
+  # be checked rather than inferred.
+  - name: replay-reproducible-dispatch-count
+    group: [kernel-replay, correctness-adjacent]
+    command: [reproducible-dispatch-count]
+
+  # Library-dispatched kernels, which is the shape most real applications actually have.
+  - name: replay-hip-in-libraries
+    group: [kernel-replay, real-shape]
+    command: [hip-in-libraries]

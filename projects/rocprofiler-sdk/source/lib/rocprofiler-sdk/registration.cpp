@@ -49,6 +49,7 @@
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
@@ -1537,6 +1538,8 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->core_, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->amd_ext_, lib_instance);
+        rocprofiler::kernel_replay::memory_tracker_init(hsa_api_table->core_, lib_instance);
+        rocprofiler::kernel_replay::memory_tracker_init(hsa_api_table->amd_ext_, lib_instance);
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         if(runtime_pc_sampling_table)
             rocprofiler::pc_sampling::code_object::initialize(hsa_api_table);
@@ -1559,6 +1562,8 @@ rocprofiler_set_api_table(const char* name,
                             ctx->dispatch_thread_trace != nullptr || ctx->pc_sampler != nullptr ||
                             ctx->dispatch_spm != nullptr ||
                             ctx->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH) ||
+                            ctx->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY) ||
+                            ctx->is_tracing(ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY) ||
                             (ctx->device_thread_trace != nullptr &&
                              ctx->device_thread_trace->requires_queue_intercept()));
                 });

@@ -1149,6 +1149,25 @@ In multi-pass counter collection, each pass generates its output in a separate `
 
    - Each pass runs the application from start to finish.
 
+Kernel replay (beta)
+++++++++++++++++++++
+
+By default, multiple ``--pmc`` groups are collected using *application replay*: the application is re-run from start to finish once per counter group (as described in the preceding section). The ``--kernel-replay-beta-enabled`` flag switches to *kernel replay* instead, collecting all ``--pmc`` groups within a **single** application run. Each kernel dispatch is replayed once per counter group in-process, and the device memory it touches is snapshotted and restored between passes so every group observes identical inputs.
+
+This is useful when re-running the whole application per group is expensive or non-deterministic. Without the flag, multiple ``--pmc`` groups use application replay as usual.
+
+.. code-block:: shell
+
+   rocprofv3 --pmc SQ_WAVES GRBM_COUNT --pmc GRBM_GUI_ACTIVE --kernel-replay-beta-enabled -- <application_path>
+
+The preceding command collects both counter groups in a single run of ``<application_path>``, replaying each dispatch once per group instead of running the application twice.
+
+.. note::
+
+   - ``--kernel-replay-beta-enabled`` requires ``--pmc``.
+
+   - This feature is in beta.
+
 .. _extra-counters:
 
 Extra counters

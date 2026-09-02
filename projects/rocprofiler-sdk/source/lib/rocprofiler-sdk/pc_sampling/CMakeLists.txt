@@ -4,6 +4,12 @@
 #
 add_subdirectory(parser)
 
+# queue_hooks provides always-linkable shims (is_configured_on_agent /
+# signal_completion_hook) that the HSA queue interceptor calls unconditionally, so it must
+# compile even when PC sampling HSA support is unavailable (its body is guarded by
+# ROCPROFILER_SDK_HSA_PC_SAMPLING). Add it before the early return.
+target_sources(rocprofiler-sdk-object-library PRIVATE queue_hooks.cpp queue_hooks.hpp)
+
 if(hsa-runtime64_VERSION AND hsa-runtime64_VERSION VERSION_LESS 1.14.0)
     return()
 endif()

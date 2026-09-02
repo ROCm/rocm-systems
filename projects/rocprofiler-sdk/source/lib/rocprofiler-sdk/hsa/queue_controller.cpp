@@ -677,26 +677,36 @@ common::Synchronized<hsa::profiler_serializer>&
 QueueController::serializer(const Queue* queue)
 {
     CHECK(queue);
+    const auto agent_id = queue->get_agent().get_rocp_agent()->id;
+
     common::Synchronized<hsa::profiler_serializer>* ret = nullptr;
-    _profiler_serializer.ulock(
-        [&](const auto& m) {
-            if(auto ptr = m.find(queue->get_agent().get_rocp_agent()->id); ptr != m.end())
-            {
-                ret = ptr->second.get();
+    // Hold the refcount read lock across the lookup/insertion so that a concurrent
+    // update_serialization() cannot run between reading the refcount and inserting the
+    // entry: if it did, it would find no serializer to transition and the new entry would
+    // be created in the wrong state.  update_serialization() holds the refcount write lock
+    // then the serializer write lock, so taking them in the same order here is deadlock-free.
+    _serialization_refcount.rlock([&](const auto& state) {
+        const bool should_serialize = state.enabled(agent_id);
+        _profiler_serializer.ulock(
+            [&](const auto& m) {
+                if(auto ptr = m.find(agent_id); ptr != m.end())
+                {
+                    ret = ptr->second.get();
+                    return true;
+                }
+                return false;
+            },
+            [&](auto& m) {
+                ret = m.emplace(agent_id,
+                                std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
+                          .first->second.get();
+                if(should_serialize)
+                {
+                    ret->wlock([&](auto& serializer) { serializer.enable({}); });
+                }
                 return true;
-            }
-            return false;
-        },
-        [&](auto& m) {
-            ret = m.emplace(queue->get_agent().get_rocp_agent()->id,
-                            std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
-                      .first->second.get();
-            if(_serialized_enabled.load() == true)
-            {
-                ret->wlock([&](auto& serializer) { serializer.enable({}); });
-            }
-            return true;
-        });
+            });
+    });
     return *ret;
 }
 
@@ -715,47 +725,103 @@ per_dev_map(const QueueController::queue_map_t& _queues_v)
 };  // namespace
 
 void
-QueueController::disable_serialization()
+QueueController::update_serialization(const agent_handle_set_t& agents, bool enable)
 {
     _queues.rlock([&](const queue_map_t& _queues_v) {
-        _serialized_enabled.store(false);
         auto pd_map = per_dev_map(_queues_v);
-        _profiler_serializer.wlock([&](auto& m) {
-            for(auto& [k, v] : m)
+
+        // Agents whose effective refcount crossed zero in this call; only those get their
+        // serializer toggled. Both refcount mutation and serializer transitions happen
+        // together inside the refcount lock to prevent concurrent calls from interleaving.
+        bool any_enabled = false;
+
+        _serialization_refcount.wlock([&](auto& state) {
+            // An agent can be covered by `all` and by an explicit entry at the same time, so
+            // the transition has to be decided by comparing effective counts across the
+            // update rather than by watching a single counter hit zero.
+            auto was_enabled = std::unordered_map<rocprofiler_agent_id_t, bool>{};
+            _profiler_serializer.rlock([&](const auto& serializers) {
+                for(const auto& [agent_id, _] : serializers)
+                    was_enabled.emplace(agent_id, state.enabled(agent_id));
+            });
+
+            if(agents.empty())
             {
-                if(auto it = pd_map.find(k); it != pd_map.end())
+                if(enable)
+                    ++state.all;
+                else if(state.all > 0)
+                    --state.all;
+            }
+            else
+            {
+                for(const auto& agent_id : agents)
                 {
-                    v->wlock([&](auto& serializer) { serializer.disable(it->second); });
-                }
-                else
-                {
-                    v->wlock([&](auto& serializer) { serializer.disable({}); });
+                    auto& count = state.per_agent[agent_id];
+                    if(enable)
+                        ++count;
+                    else if(count > 0)
+                        --count;
                 }
             }
+
+            _profiler_serializer.wlock([&](auto& serializers) {
+                for(const auto& [agent_id, _] : serializers)
+                {
+                    auto itr = was_enabled.find(agent_id);
+                    if(itr == was_enabled.end()) continue;
+                    if(itr->second == state.enabled(agent_id)) continue;
+
+                    auto queues = hsa_barrier::queue_map_ptr_t{};
+                    if(auto it = pd_map.find(agent_id); it != pd_map.end()) queues = it->second;
+
+                    auto ser_itr = serializers.find(agent_id);
+                    if(ser_itr == serializers.end() || !ser_itr->second) continue;
+                    ser_itr->second->wlock([&](auto& serializer) {
+                        if(enable)
+                            serializer.enable(queues);
+                        else
+                            serializer.disable(queues);
+                    });
+                }
+            });
+
+            any_enabled = state.any();
         });
+
+        _serialized_enabled.store(any_enabled);
     });
+}
+
+void
+QueueController::disable_serialization()
+{
+    update_serialization({}, false);
 }
 
 void
 QueueController::enable_serialization()
 {
-    _queues.rlock([&](const queue_map_t& _queues_v) {
-        _serialized_enabled.store(true);
-        auto pd_map = per_dev_map(_queues_v);
-        _profiler_serializer.wlock([&](auto& m) {
-            for(auto& [k, v] : m)
-            {
-                if(auto it = pd_map.find(k); it != pd_map.end())
-                {
-                    v->wlock([&](auto& serializer) { serializer.enable(it->second); });
-                }
-                else
-                {
-                    v->wlock([&](auto& serializer) { serializer.enable({}); });
-                }
-            }
-        });
-    });
+    update_serialization({}, true);
+}
+
+void
+QueueController::disable_serialization(const agent_handle_set_t& agents)
+{
+    update_serialization(agents, false);
+}
+
+void
+QueueController::enable_serialization(const agent_handle_set_t& agents)
+{
+    update_serialization(agents, true);
+}
+
+bool
+QueueController::is_serialization_enabled(rocprofiler_agent_id_t agent_id) const
+{
+    bool enabled = false;
+    _serialization_refcount.rlock([&](const auto& state) { enabled = state.enabled(agent_id); });
+    return enabled;
 }
 
 void
@@ -849,10 +915,19 @@ enable_queue_intercept()
         // Keep interception active for HIP_GRAPH subscribers (drives kernel_dispatch_count).
         bool has_hip_graph_tracing = itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH);
 
+        // Kernel replay drives its multi-pass loop from WriteInterceptor, so it needs the queue
+        // interceptor even when no other service is configured.
+        bool has_kernel_replay = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY);
+
+        // Range replay records the dispatches inside a range from WriteInterceptor and re-submits
+        // them through it, so it needs the interceptor for the same reason.
+        bool has_range_replay = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY);
+
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
            itr->dispatch_spm || has_scratch_reporting || itr->device_counter_collection ||
            (itr->device_thread_trace && itr->device_thread_trace->requires_queue_intercept()) ||
-           itr->dispatch_thread_trace || has_hip_graph_tracing)
+           itr->dispatch_thread_trace || has_hip_graph_tracing || has_kernel_replay ||
+           has_range_replay)
             return true;
     }
     return false;
@@ -864,7 +939,8 @@ context_needs_queue_interposition_tracing(const context::context* ctx)
     return ctx != nullptr && ctx->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                                                     ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                                     ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
-                                                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
+                                                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+                                                    ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY);
 }
 
 void

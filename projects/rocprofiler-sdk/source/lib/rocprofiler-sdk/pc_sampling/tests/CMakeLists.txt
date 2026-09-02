@@ -8,7 +8,9 @@ set(ROCPROFILER_LIB_PC_SAMPLING_TEST_SOURCES
     # samples_processing.cpp
     pc_sampling_vs_counter_collection.cpp
     query_configuration.cpp
-    multiple_contexts_one_per_agent.cpp)
+    multiple_contexts_one_per_agent.cpp
+    local_context.cpp
+    queue_hooks_test.cpp)
 set(ROCPROFILER_LIB_PC_SAMPLING_TEST_HEADERS pc_sampling_internals.hpp)
 
 add_executable(pcs-test)
