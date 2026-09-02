@@ -1424,7 +1424,30 @@ std::string cuid_sysfs_root() {
 // library's own computation share one store, which the library writes computed
 // values back into, so nothing outside a library call can tell them apart.
 // Report UNKNOWN for those rather than guessing.
-amdsmi_cuid_source_t cuid_source_for(const std::string& bdf) {
+// Which stage of the staged lookup produced the value just returned.
+//
+// The library records it as it derives, so this reports what actually happened
+// rather than what a second look would guess. That matters most where the two
+// differ: amd-smi used to answer this by testing whether the driver's sysfs
+// attribute existed, which says the driver *could* have answered, not that it
+// did, and could say nothing at all about the record store or the library --
+// so on a node whose driver publishes no CUIDs, which is every node until the
+// kernel series ships, every device was reported as UNKNOWN.
+//
+// amdcuid_source_t and amdsmi_cuid_source_t are defined with the same four
+// values in the same order, so the mapping is a cast and stays a cast.
+amdsmi_cuid_source_t cuid_source_for(const amdcuid_id_t& handle, const std::string& bdf) {
+  amdcuid_source_t source = AMDCUID_SOURCE_UNKNOWN;
+  uint32_t length = sizeof(source);
+  if (amdcuid_query_device_property(handle, AMDCUID_QUERY_SOURCE, &source, &length) ==
+          AMDCUID_STATUS_SUCCESS &&
+      source != AMDCUID_SOURCE_UNKNOWN) {
+    return static_cast<amdsmi_cuid_source_t>(source);
+  }
+
+  // The library is older than AMDCUID_QUERY_SOURCE, or has not derived on this
+  // device. Fall back to what amd-smi can see for itself, which is the driver
+  // attribute and nothing else.
   if (bdf.empty()) {
     return AMDSMI_CUID_SOURCE_UNKNOWN;
   }
@@ -1520,7 +1543,7 @@ amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handl
   }
   info->auxiliary = temporary ? 1 : 0;
 
-  info->source = cuid_source_for(bdf_str);
+  info->source = cuid_source_for(handle, bdf_str);
   return AMDSMI_STATUS_SUCCESS;
 #else
   (void)processor_handle;

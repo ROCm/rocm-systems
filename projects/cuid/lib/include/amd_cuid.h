@@ -279,6 +279,19 @@ amdcuid_status_t amdcuid_refresh(void);
  * Some properties may require elevated permissions to access. Not all device
  * types will support all properties.
  */
+/**
+ * @brief Which stage of the staged lookup produced a device's derived CUID.
+ *
+ * The values match ::amdsmi_cuid_source_t one for one, so a consumer that
+ * reports both does not have to translate.
+ */
+typedef enum {
+  AMDCUID_SOURCE_UNKNOWN = 0,  ///< No derivation has been performed yet
+  AMDCUID_SOURCE_DRIVER = 1,   ///< Read from the driver's sysfs attribute
+  AMDCUID_SOURCE_STORE = 2,    ///< Read from the local record store
+  AMDCUID_SOURCE_LIBRARY = 3   ///< Computed by this library
+} amdcuid_source_t;
+
 typedef enum {
   AMDCUID_QUERY_NONE = 0,  ///< No query
   AMDCUID_QUERY_PRIMARY_CUID =
@@ -319,6 +332,9 @@ typedef enum {
            ///< payload bit 117, the Auxiliary Value Identifier. A temporary
            ///< CUID is not unique across nodes and changes if the OS
            ///< installation or the device topology changes.
+  AMDCUID_QUERY_SOURCE =
+      17,  ///< Query which stage answered the last derivation
+           ///< (::amdcuid_source_t). Supported by all device types.
   AMDCUID_QUERY_LAST
 } amdcuid_query_t;
 

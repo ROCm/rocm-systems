@@ -41,6 +41,9 @@ class CuidDevice {
                                             cuid_hmac* hmac = nullptr) const;
   amdcuid_status_t is_temporary_cuid(bool* is_temporary) const;
 
+  // AMDCUID_SOURCE_UNKNOWN until a derivation has been performed.
+  amdcuid_source_t derived_source() const { return last_source_; }
+
   // Stage 1 of the staged lookup: read `attribute` (one of
   // CuidUtilities::kDriverPrimaryAttribute / kDriverSecondaryAttribute) for
   // this device's BDF, where it has one.
@@ -109,6 +112,16 @@ class CuidDevice {
     path.clear();
     return AMDCUID_STATUS_WRONG_DEVICE_TYPE;
   }
+
+ protected:
+  // Which stage answered the last get_derived_cuid() on this device.
+  //
+  // Recorded rather than recomputed: asking the question a second time would
+  // repeat the sysfs read and the record search, and could answer differently
+  // from the call that produced the value the caller is holding -- a device
+  // provisioned between the two would be reported as driver-sourced for a
+  // value this library computed.
+  mutable amdcuid_source_t last_source_ = AMDCUID_SOURCE_UNKNOWN;
 };
 
 typedef std::shared_ptr<CuidDevice> DevicePtr;

@@ -224,6 +224,32 @@ amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count)
 
 namespace {
 
+// Enumerate the system the way every other entry point does, before falling
+// back to discovering one device by hand.
+//
+// Three things come out of this that the by-name discovery below does not give.
+// The device is indexed by build_cuid_index(), so the handle that comes back
+// can be used -- the by-name path did its own indexing and got it wrong, and a
+// correct handle that no property query accepted is how amd-smi came to report
+// nothing on a node where every layer worked. The record store is written, so a
+// node with no store becomes a node with one after a single privileged call:
+// nothing else does that any more, because libamdcuid ships inside AMD SMI and
+// has no package of its own left to run a post-install step, and an
+// unprivileged caller cannot derive anything without a store. And there is one
+// discovery implementation being exercised rather than two, the second of which
+// ran only on a cold library and was therefore the one nothing tested.
+//
+// Bounded: discover_devices() reads the store first and enumerates only when it
+// is empty, so this costs an enumeration once per node and nothing thereafter.
+// The single-device discovery is kept below it for what enumeration does not
+// reach, such as a GIM-only device.
+bool enumerate_into_manager() {
+  if (!mgr.devices().empty()) {
+    return true;
+  }
+  return mgr.discover_devices() == AMDCUID_STATUS_SUCCESS;
+}
+
 // helper function to discover device given dev_path
 DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t device_type) {
   DevicePtr device = nullptr;
@@ -436,6 +462,31 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
     return AMDCUID_STATUS_SUCCESS;
   }
 
+  // Nothing known locally and nothing recorded: enumerate, then look again.
+  // See enumerate_into_manager() for why this sits ahead of the by-name
+  // discovery rather than instead of it.
+  if (enumerate_into_manager()) {
+    for (const auto& enumerated : mgr.devices()) {
+      std::string device_path;
+      if (enumerated->get_device_path(device_path) != AMDCUID_STATUS_SUCCESS) {
+        continue;
+      }
+      const std::string device_real_path = CuidUtilities::get_real_path(device_path);
+      if ((device_path == input_dev_path || device_path == real_dev_path ||
+           (!device_real_path.empty() && device_real_path == real_dev_path)) &&
+          enumerated->type() == device_type) {
+        amdcuid_derived_id derived;
+        const amdcuid_status_t derived_status =
+            enumerated->get_derived_cuid(derived, derivation_key());
+        if (derived_status != AMDCUID_STATUS_SUCCESS) {
+          return derived_status;
+        }
+        std::memcpy(handle->bytes, &derived.UUIDv8_representation, 16);
+        return AMDCUID_STATUS_SUCCESS;
+      }
+    }
+  }
+
   // finally, attempt to discover device, this would require elevated
   // permissions since it will require reading of protected hardware info
   if (geteuid() == 0) {
@@ -498,6 +549,26 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_
     }
     std::memcpy(handle->bytes, &derived.UUIDv8_representation, 16);
     return AMDCUID_STATUS_SUCCESS;
+  }
+
+  // Nothing known locally and nothing recorded: enumerate, then look again.
+  if (enumerate_into_manager()) {
+    for (const auto& enumerated : mgr.devices()) {
+      std::string device_bdf;
+      if (enumerated->get_bdf(device_bdf) != AMDCUID_STATUS_SUCCESS) {
+        continue;
+      }
+      if (device_bdf == bdf && enumerated->type() == device_type) {
+        amdcuid_derived_id derived;
+        const amdcuid_status_t derived_status =
+            enumerated->get_derived_cuid(derived, derivation_key());
+        if (derived_status != AMDCUID_STATUS_SUCCESS) {
+          return derived_status;
+        }
+        std::memcpy(handle->bytes, &derived.UUIDv8_representation, 16);
+        return AMDCUID_STATUS_SUCCESS;
+      }
+    }
   }
 
   // finally, attempt to discover device, this would require elevated
@@ -651,6 +722,17 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
       }
       *length = required_length;
     } break;
+    case AMDCUID_QUERY_SOURCE: {
+      if (*length < sizeof(amdcuid_source_t)) {
+        return AMDCUID_STATUS_INSUFFICIENT_SIZE;
+      }
+      if (data != nullptr) {
+        const amdcuid_source_t source = device->derived_source();
+        std::memcpy(data, &source, sizeof(source));
+      }
+      *length = sizeof(amdcuid_source_t);
+      break;
+    }
     case AMDCUID_QUERY_DEVICE_TYPE: {
       if (*length < sizeof(amdcuid_device_type_t)) {
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;

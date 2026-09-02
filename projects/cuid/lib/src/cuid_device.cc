@@ -122,6 +122,7 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac*
     if (drv == AMDCUID_STATUS_SUCCESS) {
       cuid::get_hash_from_raw(published.raw_bits, published.hash);
       id = published;
+      last_source_ = AMDCUID_SOURCE_DRIVER;
       return AMDCUID_STATUS_SUCCESS;
     }
     if (drv != AMDCUID_STATUS_UNSUPPORTED) {
@@ -133,6 +134,10 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac*
   CuidFile derived_file(CuidUtilities::cuid_file(), false);
   amdcuid_status_t status = derived_file.load();
 
+  // Set here and cleared below rather than at each of the eight places the
+  // block that follows returns from: every one of them is the record store
+  // answering, and the value is only read after a successful derivation.
+  last_source_ = AMDCUID_SOURCE_STORE;
   if (status == AMDCUID_STATUS_SUCCESS) {
     amdcuid_device_type_t type = this->type();
     // there's only 1 platform entry, so handle that case first
@@ -211,6 +216,10 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac*
   // takes the same position (amdgpu_cuid.c): with no serial it publishes
   // nothing. A device class that can build an auxiliary identifier does so
   // inside its own get_primary_cuid().
+  // Fell through the record search: nothing was recorded, so this library is
+  // about to compute the value itself.
+  last_source_ = AMDCUID_SOURCE_LIBRARY;
+
   amdcuid_primary_id primary = {};
   status = get_primary_cuid(primary);
   if (status != AMDCUID_STATUS_SUCCESS) {
@@ -244,11 +253,10 @@ amdcuid_status_t CuidDevice::is_temporary_cuid(bool* is_temp) const {
   }
   amdcuid_derived_id derived = {};
   amdcuid_status_t status = get_derived_cuid(derived);
-  if (status != AMDCUID_STATUS_SUCCESS) {
-    return status;
+  if (status == AMDCUID_STATUS_SUCCESS) {
+    *is_temp = id_is_auxiliary(derived);
+    return AMDCUID_STATUS_SUCCESS;
   }
 
-  *is_temp = id_is_auxiliary(derived);
-
-  return AMDCUID_STATUS_SUCCESS;
+  return status;
 }

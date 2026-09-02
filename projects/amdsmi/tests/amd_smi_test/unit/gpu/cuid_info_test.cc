@@ -656,6 +656,53 @@ TEST(GpuUnit, CuidDriverPublishedValueIsUsedVerbatim) {
   if (checked == 0) GTEST_SKIP() << "no device publishes cuid_secondary";
 }
 
+// The source field names a stage, on every node, not only the ones whose driver
+// publishes CUIDs.
+//
+// It used to be resolved by testing whether the driver's sysfs attribute
+// existed, which says the driver *could* have answered rather than that it did,
+// and could say nothing at all about the other two stages. On a node with no
+// CUID support in the driver -- which is every node until the kernel series
+// ships -- that made the field UNKNOWN for every device, so the one output that
+// tells an operator where an identity came from told them nothing in the
+// configuration they actually have.
+TEST(GpuUnit, CuidSourceNamesTheStageThatAnswered) {
+  if (!kCuidBuiltIn) GTEST_SKIP() << "built without CUID support";
+
+  const AmdSmiSession session;
+  ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
+
+  const auto handles = GpuHandles();
+  if (handles.empty()) GTEST_SKIP() << "no GPU present";
+
+  size_t answered = 0;
+  for (auto handle : handles) {
+    amdsmi_bdf_t bdf = {};
+    ASSERT_EQ(amdsmi_get_gpu_device_bdf(handle, &bdf), AMDSMI_STATUS_SUCCESS);
+    const std::string bdf_str = BdfString(bdf);
+
+    amdsmi_cuid_info_t info = {};
+    const amdsmi_status_t status = amdsmi_get_gpu_cuid_info(handle, &info);
+    if (status == AMDSMI_STATUS_NOT_SUPPORTED || status == AMDSMI_STATUS_NO_PERM) continue;
+    ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS) << bdf_str;
+    ++answered;
+
+    EXPECT_NE(info.source, AMDSMI_CUID_SOURCE_UNKNOWN)
+        << bdf_str << ": a snapshot that succeeded should say which stage produced it";
+
+    // DRIVER exactly when the driver published one. Both directions: reporting
+    // DRIVER where the kernel published nothing would be a claim that the
+    // kernel and this library agree about a value the kernel never had.
+    const bool driver_published = !DriverPublished(bdf_str, "cuid_secondary").empty();
+    EXPECT_EQ(info.source == AMDSMI_CUID_SOURCE_DRIVER, driver_published)
+        << bdf_str << ": source=" << static_cast<int>(info.source)
+        << " while the driver " << (driver_published ? "does" : "does not")
+        << " publish cuid_secondary";
+  }
+
+  if (answered == 0) GTEST_SKIP() << "no device reported a CUID";
+}
+
 // amd-smi's own resolution of the source field, against a fabricated sysfs
 // tree: with the attribute present it must say DRIVER, and with the attribute
 // absent it must not.
