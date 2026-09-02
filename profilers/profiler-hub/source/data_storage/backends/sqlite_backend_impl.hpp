@@ -53,6 +53,7 @@ create_directory_for_database_file(const std::string& db_file)
 get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
 {
     std::string_view schema_content;
+
     switch(schema_kind)
     {
         case ROCPD_SQL_SCHEMA_ROCPD_TABLES:
@@ -74,6 +75,7 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
             throw std::runtime_error("Unknown schema kind: " +
                                      std::to_string(schema_kind));
     }
+
     std::string query_str = std::string(schema_content);
 
     std::regex upid_pattern("\\{\\{uuid\\}\\}");
@@ -218,10 +220,8 @@ database_backend<SqlitePolicy>::initialize_schema()
     }
 
     const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
-        ROCPD_SQL_SCHEMA_ROCPD_TABLES,
-        ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
-        ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
-        ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
+        ROCPD_SQL_SCHEMA_ROCPD_TABLES,     ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
+        ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS, ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
         ROCPD_SQL_SCHEMA_ROCPD_METADATA,
     };
 

@@ -20,10 +20,12 @@ downstream consumer of the library.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-02
+
 ### Added
 
 - `libprofiler-hub.so` now ships with a SOVERSION (`libprofiler-hub.so.0` symlink and
-  `libprofiler-hub.so.0.1.0` actual file) so consumers can pin to a specific ABI.
+  `libprofiler-hub.so.0.2.0` actual file) so consumers can pin to a specific ABI.
 - New cache var `FMT_VERSION` (default `11.2.0`). When the system fmt is missing,
   the build fetches `fmtlib/fmt` at this version.
 - `writer_t` now accepts `NIC` as an agent type and as a PMC `target_arch`,
@@ -32,11 +34,11 @@ downstream consumer of the library.
 
 ### Changed
 
-- Bundled RocPD schema bumped to 3.0.1 for the NIC support above.
-- Schema SQL always comes from the bundled files under
-  `source/data_storage/schema/` now, generated at configure time. No more
-  choosing between that and an externally installed schema package at build
-  time.
+- RocPD schema target version is 3.0.1 (includes NIC agent support above).
+- Schema SQL is obtained at configure time by cloning `rocprofiler-sdk-rocpd` from
+  `rocm-systems` (`versions/3.0.1` by default) and embedding it as generated headers,
+  instead of using local bundled `.sql` files or an installed `rocprofiler-sdk-rocpd`
+  package at build time.
 - spdlog is now built with `SPDLOG_FMT_EXTERNAL=ON`. fmt is resolved as an
   independent dependency (via `find_package(fmt)` or FetchContent) rather than
   through spdlog's vendored copy. Internal includes switched from
@@ -62,13 +64,9 @@ downstream consumer of the library.
   were always-on toggles that only suppressed the system `find_package` lookup;
   callers that need bundled builds can simply remove the system package or set
   `CMAKE_DISABLE_FIND_PACKAGE_<name>=ON`.
-- Build option `USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD`. profiler-hub no longer
-  loads schema SQL from an externally installed `rocprofiler-sdk-rocpd`
-  package; it always uses its own bundled schema now (see "Changed" above).
-- `PRAGMA foreign_keys = ON;` from the bundled schema. Foreign-key constraints
-  and `ON DELETE`/`ON UPDATE CASCADE` behavior are off by default now, same as
-  vanilla SQLite. This is intentional for production use; we may add a way to
-  turn it back on for debugging later.
+
+### Changed
+
 - `libprofiler-hub.so` no longer exports the bundled `sqlite3_*` symbols (sealed via
   hidden visibility + `--exclude-libs`), preventing collisions with other SQLite versions.
 
@@ -102,5 +100,6 @@ Initial release.
 - Cobertura code coverage reports via the `coverage-xml` CMake target.
 - clang-tidy custom target using the bundled `.clang-tidy` configuration.
 
-[Unreleased]: https://github.com/ROCm/rocm-systems/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ROCm/rocm-systems/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ROCm/rocm-systems/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ROCm/rocm-systems/releases/tag/v0.1.0
