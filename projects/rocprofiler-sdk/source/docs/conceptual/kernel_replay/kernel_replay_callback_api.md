@@ -126,9 +126,15 @@ on `(dispatch_id, current_pass)` or use pass-local state set during `PASS` `PHAS
 | returns `0` | provided | Indefinite loop until `replay_continue` returns zero. `total_passes` is reported as `0`. |
 | returns `0` | `NULL` | Rejected: the SDK warns and the dispatch is not replayed. |
 
-`replay_continue` is consulted after each pass completes and after that pass's `PHASE_EXIT`.
-Returning non-zero continues the loop; returning zero breaks out. Because the break happens before
-`restore()`, the last executed pass leaves device memory in the state the application expects.
+`replay_continue` is consulted after a pass completes and after that pass's `PHASE_EXIT`, to decide
+whether a further pass follows. Returning non-zero continues the loop; returning zero breaks out.
+Because the break happens before `restore()`, the last executed pass leaves device memory in the
+state the application expects.
+
+Since it only ever decides whether a *further* pass runs, a fixed loop of `N` passes does not
+consult it after the final pass — it sees `current_pass` `0` through `N-2`. An indefinite loop does
+consult it after every pass, including the one that ends the loop. Per-pass bookkeeping belongs in
+the `PASS` `PHASE_EXIT` callback, which fires for every pass in both modes.
 
 ``rocprofv3`` never sets ``replay_continue``; early exit and indefinite loops are custom-tool
 features only.

@@ -128,17 +128,25 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     /// then calls it (if non-null) to obtain the pass count for this dispatch:
     ///  - left NULL     => dispatch is NOT replayed; it runs once and execution
     ///                     continues as usual (no snapshot, per-dispatch opt-out)
-    ///  - returns N > 0 => fixed loop of N passes (optional @c replay_continue honored)
+    ///  - returns 1     => dispatch is NOT replayed either: one pass needs no snapshot, so
+    ///                     it takes the ordinary single-dispatch path and no PASS callbacks
+    ///                     are issued (a second per-dispatch opt-out)
+    ///  - returns N > 1 => fixed loop of N passes (optional @c replay_continue honored)
     ///  - returns 0     => indefinite loop (requires @c replay_continue)
     /// @c dispatch_info and @c user_data are provided so the tool can pick the count
     /// per dispatch and thread per-dispatch state through the callbacks.
     ///
     /// @var replay_continue
-    /// @brief [CONFIG] Optional tool-provided callback invoked after each pass completes.
-    /// Return non-zero to continue the replay loop, zero to break out.
-    /// Required when @c replay_pass_count returns 0; if it returns N > 0, allows early exit
-    /// only — it cannot extend the loop past N. @c rocprofv3 does not set this callback;
-    /// adaptive or early-exit control is a custom-tool feature.
+    /// @brief [CONFIG] Optional tool-provided callback invoked after a pass completes to decide
+    /// whether another one follows. Return non-zero to continue the replay loop, zero to break
+    /// out. Required when @c replay_pass_count returns 0; with a fixed count N > 1 it allows
+    /// early exit only -- it cannot extend the loop past N. Because it only ever decides whether
+    /// a *further* pass runs, it is not consulted after the final pass of a fixed loop: for
+    /// N passes it sees @c current_pass 0 through N-2. An indefinite loop consults it after
+    /// every pass, including the one that ends the loop. It is therefore not a reliable
+    /// per-pass hook; use PASS @ref ROCPROFILER_CALLBACK_PHASE_EXIT for per-pass bookkeeping.
+    /// @c rocprofv3 does not set this callback; adaptive or early-exit control is a
+    /// custom-tool feature.
     /// @c dispatch_info and @c user_data (the per-dispatch user data set during CONFIG
     /// PHASE_ENTER) are provided; the same @c user_data is threaded through all callbacks
     /// for this dispatch.
