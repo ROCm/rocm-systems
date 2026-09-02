@@ -12,11 +12,11 @@ cd plugins/profiler/proxytrace
 make
 ```
 
-Requires a C++17 compiler. `fmt/format.h` is taken from the headers the CMake build
-fetches (`$(RCCL_BUILD)/_deps/fmt-src/include`), so no system `libfmt` is needed;
-override `FMT_INC` to point elsewhere. The plugin does not use
-`plugins/profiler/example/`; minimal NCCL plugin types live in
-`proxytrace_plugin_shim.h` next to the source.
+Requires a C++17 compiler and ROCm (`ROCM_PATH`, default `/opt/rocm`). The
+standalone Makefile does not depend on a configured RCCL CMake build: plugin
+ABI headers live in `nccl/` next to the source, and `proxy_trace.cc` is
+compiled from this directory. Minimal extra types live in
+`proxytrace_plugin_shim.h`.
 
 Output: `librccl-profiler-proxytrace.so`
 

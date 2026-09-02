@@ -57,6 +57,7 @@ static struct proxyOp* detachPool;
 
 ncclDebugLogger_t logFn;
 #define INFO(FLAGS, ...) logFn(NCCL_LOG_INFO, (FLAGS), __func__, __LINE__, __VA_ARGS__)
+#define WARN(...) do { if (logFn) logFn(NCCL_LOG_WARN, NCCL_ALL, __func__, __LINE__, __VA_ARGS__); } while (0)
 
 __hidden double gettime(void) {
   using namespace std::chrono;
@@ -81,8 +82,12 @@ static void deferContextFree(struct context* ctx) {
   pthread_mutex_lock(&deferredCtxLock);
   if (deferredCtxCount < 1024) {
     deferredCtxList[deferredCtxCount++] = ctx;
+    pthread_mutex_unlock(&deferredCtxLock);
+  } else {
+    pthread_mutex_unlock(&deferredCtxLock);
+    freeContextPools(ctx);
+    free(ctx);
   }
-  pthread_mutex_unlock(&deferredCtxLock);
 }
 
 static void freeDeferredContexts() {
@@ -286,6 +291,8 @@ static ncclResult_t initGlobalProfiler(int* eActivationMask) {
       (ceCollPoolSize > 0 || ceSyncPoolSize > 0 || ceBatchPoolSize > 0)) {
     ncclResult_t ret = ceProfilerInitGlobal();
     if (ret != ncclSuccess) {
+      free(detachPool);
+      detachPool = NULL;
       return ret;
     }
   }
@@ -298,18 +305,16 @@ __hidden ncclResult_t exampleProfilerInit(void** context, uint64_t commId,
                                           const char* commName, int nNodes,
                                           int nranks, int rank,
                                           ncclDebugLogger_t logfn) {
-  if (pthread_mutex_trylock(&lock) != 0) {
-    *context = NULL;
-    return ncclSuccess;
-  }
+  pthread_mutex_lock(&lock);
 
-  if (__atomic_fetch_add(&initialized, 1, __ATOMIC_RELAXED) == 0) {
+  if (__atomic_load_n(&initialized, __ATOMIC_RELAXED) == 0) {
     ncclResult_t ret = initGlobalProfiler(eActivationMask);
     if (ret != ncclSuccess) {
       pthread_mutex_unlock(&lock);
       return ret;
     }
   }
+  __atomic_fetch_add(&initialized, 1, __ATOMIC_RELAXED);
   pthread_mutex_unlock(&lock);
 
   eActivationMaskPtr = eActivationMask;
@@ -430,15 +435,37 @@ __hidden ncclResult_t exampleProfilerFinalize(void* context) {
   // Stop accepting any further updates for this context while dumping.
   __atomic_store_n(&ctx->finalizing, 1, __ATOMIC_RELAXED);
 
-  // Wait for poller to complete pending events
-  usleep(10000);
+  // Wait for the CE poller to mark all pending events complete, up to 500 ms.
+  {
+    const int kMaxWaitUs = 500000;
+    const int kPollIntervalUs = 1000;
+    int waitedUs = 0;
+    bool allComplete = true;
+    if (ctx->ceCollPool && ctx->ceCollPoolSize > 0) {
+      while (waitedUs < kMaxWaitUs) {
+        allComplete = true;
+        int start = (ctx->ceCollPoolIndex - ctx->ceCollPoolSize >= 0) ? ctx->ceCollPoolIndex - ctx->ceCollPoolSize : 0;
+        for (int i = start; i < ctx->ceCollPoolIndex; i++) {
+          struct ceColl* ev = &ctx->ceCollPool[i % ctx->ceCollPoolSize];
+          if (!ev->stopCompleted) { allComplete = false; break; }
+        }
+        if (allComplete) break;
+        usleep(kPollIntervalUs);
+        waitedUs += kPollIntervalUs;
+      }
+      if (!allComplete) {
+        WARN("PROFILER/Plugin: CE events not all complete after %d ms, some may be missing from trace",
+             kMaxWaitUs / 1000);
+      }
+    }
+  }
 
-  // Check how many completed events we have
+  // Log completion stats
   int completedCount = 0;
-  int totalCount = 0;
-  for (int i = 0; i < ctx->ceCollPoolSize && i < ctx->ceCollPoolIndex; i++) {
-    totalCount++;
-    if (ctx->ceCollPool[i].stopCompleted) completedCount++;
+  int totalCount = (ctx->ceCollPoolIndex < ctx->ceCollPoolSize) ? ctx->ceCollPoolIndex : ctx->ceCollPoolSize;
+  int startIdx = (ctx->ceCollPoolIndex - totalCount + ctx->ceCollPoolSize) % ctx->ceCollPoolSize;
+  for (int i = 0; i < totalCount; i++) {
+    if (ctx->ceCollPool[(startIdx + i) % ctx->ceCollPoolSize].stopCompleted) completedCount++;
   }
   INFO(NCCL_INIT, "PROFILER/Plugin: CeColl events - total=%d completed=%d", totalCount, completedCount);
 
@@ -726,6 +753,8 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
       // The MAX_CHANNELS arrays below can be smaller than the channel limit; drop
       // out-of-range channels.
       if (channelId < 0 || channelId >= MAX_CHANNELS) return ncclSuccess;
+      int opIdx = parent->nProxyOps[channelId];
+      if (opIdx >= 2 * MAX_OPS) return ncclSuccess;
       struct proxyOp* event = &parent->op[channelId][parent->nProxyOps[channelId]++];
 
       event->type = ncclProfileProxyOp;
@@ -818,7 +847,12 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     if (type == NCCL_PROFILER_NET_TYPE_IB) {
       if (ver == 1) {
         ncclProfilerNetIbDescr_v1_t* descr = (ncclProfilerNetIbDescr_v1_t *)eDescr->netPlugin.data;
-        struct netPlugin* event = parent->net + __atomic_fetch_add(&parent->nNetEvents, 1, __ATOMIC_RELAXED);
+        int netIdx = __atomic_fetch_add(&parent->nNetEvents, 1, __ATOMIC_RELAXED);
+        if (netIdx >= MAX_EVENTS_PER_REQ) {
+          __atomic_fetch_sub(&parent->nNetEvents, 1, __ATOMIC_RELAXED);
+          return ncclSuccess;
+        }
+        struct netPlugin* event = parent->net + netIdx;
         event->type = ncclProfileNetPlugin;
         event->pluginType = type;
         event->pluginVer = ver;
@@ -837,7 +871,12 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     } else if (type == NCCL_PROFILER_NET_TYPE_SOCK) {
       if (ver == 1) {
         ncclProfilerNetSockDescr_v1_t* descr = (ncclProfilerNetSockDescr_v1_t *)eDescr->netPlugin.data;
-        struct netPlugin* event = parent->net + __atomic_fetch_add(&parent->nNetEvents, 1, __ATOMIC_RELAXED);
+        int netIdx = __atomic_fetch_add(&parent->nNetEvents, 1, __ATOMIC_RELAXED);
+        if (netIdx >= MAX_EVENTS_PER_REQ) {
+          __atomic_fetch_sub(&parent->nNetEvents, 1, __ATOMIC_RELAXED);
+          return ncclSuccess;
+        }
+        struct netPlugin* event = parent->net + netIdx;
         event->type = ncclProfileNetPlugin;
         event->pluginType = type;
         event->pluginVer = ver;
@@ -1005,9 +1044,9 @@ __hidden ncclResult_t exampleProfilerRecordEventState(void* eHandle, ncclProfile
   uint64_t type = *(uint64_t *)eHandle;
   if (type == ncclProfileGroupApi) {
     struct groupApi* event = (struct groupApi*) eHandle;
-    if (eState == ncclProfilerGroupEndApiStart) {
+    if (eState == ncclProfilerGroupStartApiStop) {
       event->endOfncclGroupStartTs = gettime() - startTime;
-    } else if (eState == ncclProfilerGroupStartApiStop) {
+    } else if (eState == ncclProfilerGroupEndApiStart) {
       event->startOfncclGroupEndTs = gettime() - startTime;
     }
   } else if (type == ncclProfileProxyOp) {
@@ -1149,4 +1188,3 @@ ncclProfiler_v6_t ncclProfiler_v6 = {
   exampleProfilerRecordEventState_v6,
   exampleProfilerFinalize,
 };
-

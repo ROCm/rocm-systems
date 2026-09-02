@@ -16,8 +16,8 @@ This document describes the API structure to be implemented by an external tuner
     if (table[a][p] == NCCL_ALGO_PROTO_IGNORE) continue;
     ```
 ---
-# API Description 
-The `ncclTuner_v4_t` structure must be implemented to build a custom tuner. 
+# API Description
+The `ncclTuner_v4_t` structure must be implemented to build a custom tuner.
 
 ## Structure: `ncclTuner_v4_t`
 
@@ -89,7 +89,7 @@ Terminates the plugin and cleans up any resources allocated by the tuner.
 # Build instructions and usage
 
 - The way to use the external plugin is to implement the desired algorithm/protocol selection technique using the API described above. `plugins/tuner/model_demo/plugin.c` is an example based on MI300 tuning table by default as a reference for customers in `plugin.c`.
-- Build the `librccl-tuner.so` file following [the Makefile example](model_demo/Makefile). 
+- Build the `librccl-tuner.so` file following [the Makefile example](model_demo/Makefile).
 
 ## Building and using example librccl-tuner.so
 ```bash

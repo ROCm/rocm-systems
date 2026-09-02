@@ -362,12 +362,13 @@ static void printCeCollEvent(FILE* fh, struct ceColl* event) {
 static int ceSyncId = 0;
 static void printCeSyncEvent(FILE* fh, struct ceSync* event) {
   const char* syncTypeStr = event->isComplete ? "Complete" : "Ready";
+  const char* strategy = (event->parent && event->parent->syncStrategy) ? event->parent->syncStrategy : "unknown";
   if (event->timingMode == CE_TIMING_GPU) {
     fprintf(fh, "{\"name\": \"CeSync\", \"cat\": \"CE_SYNC\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"eventId\": %lu, \"type\": \"%s\", \"strategy\": \"%s\", \"nRanks\": %d, \"start_ts_cpu\": %f, \"stop_ts_cpu\": %f, \"duration_cpu_us\": %f, \"duration_gpu_us\": %lu}},\n",
-            ceSyncId, getpid(), 1, event->base.startTs, event->eventId, syncTypeStr, event->parent->syncStrategy, event->nRanks, event->cpuStartTime, event->cpuStopTime, event->cpuDuration, event->elapsedTime);
+            ceSyncId, getpid(), 1, event->base.startTs, event->eventId, syncTypeStr, strategy, event->nRanks, event->cpuStartTime, event->cpuStopTime, event->cpuDuration, event->elapsedTime);
   } else {
     fprintf(fh, "{\"name\": \"CeSync\", \"cat\": \"CE_SYNC\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"eventId\": %lu, \"type\": \"%s\", \"strategy\": \"%s\", \"nRanks\": %d, \"start_ts_cpu\": %f, \"stop_ts_cpu\": %f, \"duration_cpu_us\": %f}},\n",
-            ceSyncId, getpid(), 1, event->base.startTs, event->eventId, syncTypeStr, event->parent->syncStrategy, event->nRanks, event->cpuStartTime, event->cpuStopTime, event->cpuDuration);
+            ceSyncId, getpid(), 1, event->base.startTs, event->eventId, syncTypeStr, strategy, event->nRanks, event->cpuStartTime, event->cpuStopTime, event->cpuDuration);
   }
   fprintf(fh, "{\"name\": \"CeSync\", \"cat\": \"CE_SYNC\", \"ph\": \"e\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f},\n",
           ceSyncId++, getpid(), 1, event->base.stopTs);
