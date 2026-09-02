@@ -133,4 +133,17 @@ TEST_F(GinNicFusionMPITest, HostRmaSurvivesNicFusion) {
     << " LSA teams, so the host RMA proxy must still be available to GIN";
 }
 
+// The other half of the same guarantee: fusion must not knock the communicator
+// down to ginType NONE, which is what ncclDevCommCreate checks before handing
+// out any GIN resource.
+TEST_F(GinNicFusionMPITest, GinTypeSurvivesNicFusion) {
+  ASSERT_MPI_TRUE(validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 2));
+
+  ncclCommProperties_t props{};
+  if (!setUpFusedComm(&props)) RETURN_OR_SKIP();
+
+  EXPECT_NE(NCCL_GIN_TYPE_NONE, props.ginType)
+    << "NIC fusion is active, but the communicator reports no usable GIN backend";
+}
+
 #endif  // MPI_TESTS_ENABLED
