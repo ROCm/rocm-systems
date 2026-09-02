@@ -9636,3 +9636,59 @@ acceptable. Full target and mode locality, remaining broad transaction and
 operating-point surfaces, material additional shrinkage, final extension-proof
 revalidation, and the independent Section 14 audit remain open, so the goal
 remains active.
+
+### 16.138 Convergence checkpoint 137: route presence has one authority
+
+The checkpoint-136 deep read continued across the SuperCollider FLAT and LDS
+candidate lifecycles. FLAT candidate state stored a
+`branch_only_continuation` boolean before routing, copied it into the emitted
+plan, and later checked both that boolean and the optional committed route.
+The separate branch-only candidate collection already owns the pre-routing
+selection preference, and successful selection atomically installs the exact
+route. The preference is now a call-local argument to the selection attempt;
+after that attempt, route presence is the sole durable fact. The copied plan
+boolean and a consequently dead route-presence check are deleted.
+
+LDS candidates likewise stored `requires_branch_only_route` beside the exact
+route that the complete batch planner installs before candidates enter the
+selected set. No caller could independently change the boolean, and the only
+consumer immediately required the optional route as well. LDS lowering now
+dispatches directly on the committed route and the duplicate boolean, its two
+publishers, and its unreachable "lost route" reconstruction branch are
+deleted. The planning-to-effect projection is also expressed as the direct
+two-member aggregate it has always been rather than a multiline field-copy
+adapter. Structural enforcement rejects either retired stored boolean anywhere
+in production while still permitting a transient pre-routing selection
+argument.
+
+| Signal | Checkpoint 137 | Cumulative change | Slice change from checkpoint 136 |
+| --- | ---: | ---: | ---: |
+| Production files | 305 | +76 | 0 |
+| Physical production lines | 102,752 | **-2,224** | **-14** |
+| Nonblank production lines | 96,331 | **-2,753** | **-14** |
+| Production implementation lines | 88,552 | **-2,898** | **-14** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **269 / 51** | **-21 / 0** | 0 / 0 |
+| Stored branch-only presence booleans | **0** | n/a | **-2** |
+| Test inventory | **5,421** | **+76** | 0 |
+
+The implementation is committed as `c788d69fc48`. Validation includes a
+successful full `-j16` build, the architecture-boundary gate, all
+**1,301/1,301** nonphysical `ConSan.*` and `ConSanMoi.*` host/component tests,
+and all **552/552** SuperCollider-matching simulator-device tests across gfx942,
+gfx950, gfx1100, gfx1201, and gfx1250. The latter consists of the complete 542
+SuperCollider rows plus ten matching baseline rows. No test was removed,
+renamed, disabled, or replaced, and no physical test was run.
+
+This deletion-bearing checkpoint repays 14 of the previous checkpoint's 27
+added implementation lines and removes two parallel authorities rather than
+merely shortening syntax. The exact-route work across checkpoints 134 through
+137 remains 35 lines larger than checkpoint 133, however. The next checkpoint
+must continue harvesting this investment or delete a larger adjacent
+transaction surface; a new growth-only route representation would still
+violate the anti-circling rule. Full target and mode locality, remaining broad
+transaction and operating-point surfaces, material additional shrinkage,
+final extension-proof revalidation, and the independent Section 14 audit remain
+open, so the goal remains active.
