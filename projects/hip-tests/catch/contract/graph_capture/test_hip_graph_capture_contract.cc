@@ -40,7 +40,7 @@ HIP_TEST_CASE(Contract_GraphCapture_HipStreamEndCapture_BeginEndEmptyStream_Prod
 }
 
 // @asserts: hipStreamBeginCapture - a captured H2D/D2H memcpy graph, once instantiated and launched, round-trips bytes intact
-HIP_TEST_CASE(Contract_GraphCapture_HipStreamBeginCapture_dMemcpy_RoundTripsBytes) {
+HIP_TEST_CASE(Contract_GraphCapture_HipStreamBeginCapture_Memcpy_RoundTripsBytes) {
   hip::contract::ContractCleanup cleanup;
   const auto src = MakePattern(0x27);
   std::array<uint8_t, kElementCount> dst{};

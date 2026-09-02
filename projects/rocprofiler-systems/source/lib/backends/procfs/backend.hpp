@@ -5,7 +5,7 @@
 
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <charconv>
@@ -144,7 +144,7 @@ read_socket_topology(size_t cpu_count)
     {
         const auto path = fmt::format(
             "/sys/devices/system/cpu/cpu{}/topology/physical_package_id", cpu);
-        unique_file fd{ std::fopen(path.c_str(), "r") };
+        const unique_file fd{ std::fopen(path.c_str(), "r") };
         if(!fd)
         {
             LOG_DEBUG("Could not read CPU {} topology, defaulting to socket 0", cpu);

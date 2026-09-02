@@ -22,7 +22,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
             -DMODEL_BINARY=$<TARGET_FILE:rj_decode_fuzz>
-            -DREQUIRED_MODEL_ARCHES=cdna1,cdna2,cdna3,cdna4,rdna1,rdna2,rdna3,rdna3_5,rdna4,gfx1250
+            -DREQUIRED_MODEL_ARCHES=cdna1,cdna2,cdna3,cdna4,cdna5,rdna1,rdna2,rdna3,rdna3_5,rdna4
             -P
             ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/check_model_only_symbols.cmake
     )

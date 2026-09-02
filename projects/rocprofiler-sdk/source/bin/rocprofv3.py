@@ -51,6 +51,7 @@ CONST_VERSION_INFO = {
 # source/lib/output/output_config.hpp) so both validation paths agree.
 PERFETTO_BUFFER_SIZE_KB_MIN = 1
 PERFETTO_BUFFER_SIZE_KB_MAX = ((1 << 32) - 1) // 1024
+DEPRECATED_DIRECT_OUTPUT_FORMATS = ("csv", "pftrace", "otf2")
 
 
 class dotdict(dict):
@@ -98,6 +99,30 @@ def warning(msg, *args):
     msg = patch_message(msg, *args)
     sys.stderr.write(f"[rocprofv3] Warning: {msg}\n")
     sys.stderr.flush()
+
+
+def warn_deprecated_output_formats(output_formats):
+    requested_formats = {
+        str(itr).strip().lower() for itr in (output_formats or []) if str(itr).strip()
+    }
+    deprecated_formats = [
+        itr for itr in DEPRECATED_DIRECT_OUTPUT_FORMATS if itr in requested_formats
+    ]
+
+    if deprecated_formats:
+        display_names = {
+            "csv": "CSV",
+            "pftrace": "PFTrace (Perfetto)",
+            "otf2": "OTF2",
+        }
+        warning(
+            "The following direct rocprofv3 output format(s) are deprecated: "
+            f"{', '.join(display_names[itr] for itr in deprecated_formats)}. "
+            "Some tracing features, including hipFILE and rocSHMEM tracing, might not "
+            "produce output in these formats. Use `--output-format rocpd` (the default), "
+            "then run `rocpd convert -i <database>.db --output-format csv` when CSV "
+            "output is needed."
+        )
 
 
 def format_help(formatter, w=120, h=40):
@@ -327,7 +352,12 @@ def get_att_paths(args):
     if args.att_library_path:
         library_paths.extend(args.att_library_path)
     elif os.environ.get("ROCPROF_ATT_LIBRARY_PATH"):
-        return os.environ.get("ROCPROF_ATT_LIBRARY_PATH")
+        # Return a list (not a bare str) so the caller iterates over paths and
+        # not over the individual characters of the string. Support a
+        # colon-separated list for consistency with LD_LIBRARY_PATH.
+        for itr in os.environ["ROCPROF_ATT_LIBRARY_PATH"].split(":"):
+            if itr and itr not in library_paths:
+                library_paths += [itr]
     else:
         default_lib_path_env = os.environ.get("LD_LIBRARY_PATH", "").split(":") + [
             f"{ROCM_DIR}/lib"
@@ -344,6 +374,11 @@ def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
     library_paths = get_att_paths(args)
 
     for path in library_paths:
+        # Skip entries that are not existing directories so a stray value (e.g.
+        # an empty string, a file, or a bad path) cannot become an os.walk()
+        # root and silently trigger a full "/" scan.
+        if not path or not os.path.isdir(path):
+            continue
         for root, dirs, files in os.walk(path, topdown=True):
             for itr in files:
                 if att_lib_name in itr:
@@ -515,7 +550,7 @@ For attachment profiling of running processes:
     io_options.add_argument(
         "-f",
         "--output-format",
-        help="For adding output format (supported formats: csv, json, pftrace, otf2, rocpd)",
+        help="For adding output format (supported formats: csv, json, pftrace, otf2, rocpd). Direct csv, pftrace, and otf2 output is deprecated; use rocpd and rocpd convert",
         nargs="+",
         default=None,
         choices=("csv", "json", "pftrace", "otf2", "rocpd"),
@@ -1221,6 +1256,12 @@ For attachment profiling of running processes:
         help="Serialize all kernels, not just the traced ones.",
     )
 
+    add_parser_bool_argument(
+        att_options,
+        "--att-no-detail",
+        help="Collect occupancy data without instruction-level detail.",
+    )
+
     return (parser.parse_args(rocp_args), app_args)
 
 
@@ -1693,6 +1734,13 @@ def run(app_args, args, **kwargs):
 
     if not args.output_format:
         args.output_format = ["rocpd"]
+
+    effective_output_formats = list(args.output_format)
+    effective_output_formats.extend(
+        re.split(r"[\s,;:]+", app_env.get("ROCPROF_OUTPUT_FORMAT", ""))
+    )
+    if args.hipfile_trace or args.rocshmem_trace:
+        warn_deprecated_output_formats(effective_output_formats)
 
     if args.kokkos_trace:
         update_env("KOKKOS_TOOLS_LIBS", ROCPROF_KOKKOSP_LIBRARY, append=True)
@@ -2272,6 +2320,12 @@ def run(app_args, args, **kwargs):
             update_env(
                 "ROCPROF_ATT_PARAM_SERIALIZE_ALL",
                 args.att_serialize_all,
+                overwrite=True,
+            )
+        if args.att_no_detail:
+            update_env(
+                "ROCPROF_ATT_PARAM_NO_DETAIL",
+                args.att_no_detail,
                 overwrite=True,
             )
         if args.att_gpu_index:

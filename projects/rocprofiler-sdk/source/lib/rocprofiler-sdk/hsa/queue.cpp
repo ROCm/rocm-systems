@@ -168,14 +168,11 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             }
         });
 
-        if(packet.is_serialized)
-        {
-            CHECK_NOTNULL(hsa::get_queue_controller())
-                ->serializer(&queue_info_session.queue)
-                .wlock([&](auto& serializer) {
-                    serializer.kernel_completion_signal(queue_info_session.queue);
-                });
-        }
+        CHECK_NOTNULL(hsa::get_queue_controller())
+            ->serializer(&queue_info_session.queue)
+            .wlock([&](auto& serializer) {
+                serializer.kernel_completion_signal(queue_info_session.queue, packet.is_serialized);
+            });
 
         auto _should_destroy_signal = [&packet](auto _hsa_signal) {
             // if there is a pooled signal, make sure we return value if the .handle matches.

@@ -69,13 +69,32 @@ class Flag {
 
   // Lift limit for 2.10 release RCCL workaround. This limit is not used when asynchronous scratch
   // reclaim is supported
-  const size_t DEFAULT_SCRATCH_SINGLE_LIMIT = (140 * (1UL<<20));  // small_limit >> 2;
-  const size_t DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC = (3 * (1UL<<30));  // 3 GB
-  const size_t DEFAULT_PCS_MAX_DEVICE_BUFFER_SIZE = (256 * (1UL<<20)); //256 MB
+  const size_t DEFAULT_SCRATCH_SINGLE_LIMIT = (140 * (1UL << 20));              // small_limit >> 2;
+  const size_t DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC = (3 * (1UL << 30));  // 3 GB
+  const size_t DEFAULT_PCS_MAX_DEVICE_BUFFER_SIZE = (256 * (1UL << 20));        // 256 MB
 
   Flag() {}
 
   virtual ~Flag() {}
+
+  // True when the variable is set to anything other than a spelled-out
+  // negative. An unset or empty variable reads as false.
+  static bool IsEnvVarTruthy(const char* name) {
+    // No IsEnvVarSet() pre-check: GetEnvVar returns an empty string for an unset
+    // variable on both platforms, and the !value.empty() guard below already maps
+    // that to false. The pre-check was a second lookup that changed no outcome.
+    //
+    // Folded in ASCII rather than with tolower(): the accepted spellings are all
+    // ASCII keywords, so this stays independent of the active locale and of
+    // whichever header happens to declare tolower here.
+    std::string value = os::GetEnvVar(name);
+    for (char& c : value) {
+      if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+
+    return !value.empty() && value != "0" && value != "off" && value != "false" && value != "no" &&
+        value != "n" && value != "f";
+  }
 
   void Refresh() {
     std::string var = os::GetEnvVar("HSA_CHECK_FLAT_SCRATCH");
@@ -115,17 +134,16 @@ class Flag {
     enable_peer_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
     var = os::GetEnvVar("HSA_ENABLE_SDMA_GANG");
-    enable_sdma_gang_ = (var == "0") ? SDMA_DISABLE :
-                       ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+    enable_sdma_gang_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
     if (enable_sdma_ == SDMA_DISABLE) enable_sdma_gang_ = SDMA_DISABLE;
 
     var = os::GetEnvVar("HSA_ENABLE_SDMA_COPY_SIZE_OVERRIDE");
-    enable_sdma_copy_size_override_ = (var == "0") ? SDMA_DISABLE :
-                                      ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+    enable_sdma_copy_size_override_ =
+        (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
     var = os::GetEnvVar("HSA_ENABLE_SDMA_RECOMMENDED_ENG");
-    enable_sdma_recommended_eng_ = (var == "0") ? SDMA_DISABLE :
-                                   ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+    enable_sdma_recommended_eng_ =
+        (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
     visible_gpus_ = os::GetEnvVar("ROCR_VISIBLE_DEVICES");
     filter_visible_gpus_ = os::IsEnvVarSet("ROCR_VISIBLE_DEVICES");
@@ -190,9 +208,8 @@ class Flag {
 
     var = os::GetEnvVar("HSA_TOOLS_REPORT_LOAD_FAILURE");
 
-    ifdebug {
-      report_tool_load_failures_ = (var == "1") ? true : false;
-    } else {
+    ifdebug { report_tool_load_failures_ = (var == "1") ? true : false; }
+    else {
       report_tool_load_failures_ = (var == "0") ? false : true;
     }
 
@@ -201,6 +218,12 @@ class Flag {
 
     var = os::GetEnvVar("HSA_TOOLS_REPORT_REGISTER_FAILURE");
     report_tool_register_failures_ = (var == "1") ? true : false;
+
+    // Kill switch for the rocjitsu hotswap tool. Unlike most flags here it
+    // accepts the spelled-out negatives, because the scripts that set it were
+    // written against the retired hotswap implementation and pass "0"/"false"
+    // to mean "leave hotswap on".
+    hotswap_disable_ = IsEnvVarTruthy("HSA_HOTSWAP_DISABLE");
 
     var = os::GetEnvVar("HSA_DISABLE_FRAGMENT_ALLOCATOR");
     disable_fragment_alloc_ = (var == "1") ? true : false;
@@ -225,6 +248,11 @@ class Flag {
 
     var = os::GetEnvVar("HSA_DISABLE_PC_SAMPLING");
     disable_pc_sampling_ = (var == "1") ? true : false;
+
+    // Kill switch for reporting the "strict" ISA variant on A0 silicon. When set,
+    // the agent keeps the base target instead of re-pointing to the strict variant.
+    var = os::GetEnvVar("HSA_DISABLE_GFX12_STRICT");
+    disable_gfx12_strict_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_LOADER_ENABLE_MMAP_URI");
     loader_enable_mmap_uri_ = (var == "1") ? true : false;
@@ -324,9 +352,7 @@ class Flag {
     //   HSA_ENABLE_DTIF_FAST_COPY=0 -> off
     //   unset -> on if HSA_MODEL_TOPOLOGY is set (FFM model mode default).
     var = os::GetEnvVar("HSA_ENABLE_DTIF_FAST_COPY");
-    enable_dtif_fast_copy_ = var.empty()
-        ? os::IsEnvVarSet("HSA_MODEL_TOPOLOGY")
-        : (var == "1");
+    enable_dtif_fast_copy_ = var.empty() ? os::IsEnvVarSet("HSA_MODEL_TOPOLOGY") : (var == "1");
 
     var = os::GetEnvVar("HSA_DTIF_SKIP_INV_CODE_CACHE");
     enable_dtif_skip_inv_code_cache_ = (var == "1") ? true : false;
@@ -336,7 +362,7 @@ class Flag {
     enable_dxg_detection_ = (var == "0") ? false : true;
 
     var = os::GetEnvVar("HSA_CO_DMACOPY_SIZE");
-    co_dmacopy_size_ = var.empty() ? 1024*1024 : atoi(var.c_str());
+    co_dmacopy_size_ = var.empty() ? 1024 * 1024 : atoi(var.c_str());
 
     var = os::GetEnvVar("HSA_COREDUMP_SHOW_PROGRESS");
     enable_core_dump_progress_ = (var == "1");
@@ -368,7 +394,6 @@ class Flag {
     // unset=auto (use multicast up to kMulticastMaxSize, fan-out above).
     var = os::GetEnvVar("HSA_SDMA_MULTICAST");
     sdma_multicast_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
-
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -397,6 +422,8 @@ class Flag {
   bool sdma_wait_idle() const { return sdma_wait_idle_; }
 
   bool report_tool_load_failures() const { return report_tool_load_failures_; }
+
+  bool hotswap_disable() const { return hotswap_disable_; }
 
   bool report_tool_register_failures() const { return report_tool_register_failures_; }
 
@@ -449,6 +476,8 @@ class Flag {
   void set_ipc_mode_legacy(bool enable) { enable_ipc_mode_legacy_ = enable; }
 
   bool disable_pc_sampling() const { return disable_pc_sampling_; }
+
+  bool disable_gfx12_strict() const { return disable_gfx12_strict_; }
 
   bool loader_enable_mmap_uri() const { return loader_enable_mmap_uri_; }
 
@@ -518,15 +547,19 @@ class Flag {
   SDMA_OVERRIDE sdma_multicast() const { return sdma_multicast_; }
 
   [[nodiscard]]
-  bool core_dump_disable() const { return core_dump_disable_; }
+  bool core_dump_disable() const {
+    return core_dump_disable_;
+  }
 
   [[nodiscard]]
   bool enable_core_dump_progress() const {
-                                       return enable_core_dump_progress_; }
+    return enable_core_dump_progress_;
+  }
 
   [[nodiscard]]
   const std::string& core_dump_pattern() const {
-                                         return core_dump_pattern_; }
+    return core_dump_pattern_;
+  }
 
   [[nodiscard]]
   bool lightweight_core_dump_enable() const {
@@ -540,7 +573,7 @@ class Flag {
 
   void disable_scratch() {
     scratch_single_limit_ = 0;
-    //scratch_single_limit_async_ = 0;
+    // scratch_single_limit_async_ = 0;
     enable_scratch_async_reclaim_ = false;
     enable_scratch_alt_ = false;
     enable_scratch_ = false;
@@ -559,7 +592,7 @@ class Flag {
 
   void set_disable_tool_register(bool disable) { disable_tool_register_ = disable; }
 
-  private:
+ private:
   bool check_flat_scratch_;
   bool enable_vm_fault_message_;
   bool enable_interrupt_;
@@ -570,6 +603,7 @@ class Flag {
   bool poison_sigbus_delay_set_ = false;
   uint32_t poison_sigbus_delay_ms_ = 0;
   bool report_tool_load_failures_;
+  bool hotswap_disable_ = false;
   bool report_tool_register_failures_ = false;
   bool disable_tool_register_ = false;
   bool disable_fragment_alloc_;
@@ -579,6 +613,7 @@ class Flag {
   bool no_scratch_thread_limit_;
   bool disable_image_;
   bool disable_pc_sampling_;
+  bool disable_gfx12_strict_ = false;
   bool loader_enable_mmap_uri_;
   bool check_sramecc_validity_;
   bool debug_;
@@ -592,7 +627,7 @@ class Flag {
   bool wait_any_;
   bool dev_mem_queue_buf_;
   uint32_t signal_abort_timeout_;
-  int  async_events_thread_priority_;
+  int async_events_thread_priority_;
   bool enable_3d_swizzle_ = false;
   bool enable_dtif_;
   bool enable_dtif_fast_copy_;

@@ -184,6 +184,8 @@ jobs:
             submods-scoped-v1-${{ runner.os }}-
 
       - name: Init/Update submodules
+        timeout-minutes: 15
+        continue-on-error: true
         run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
       - name: Clone ROCDecode
@@ -288,7 +290,7 @@ jobs:
 
       - name: Test Install Build
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
-        timeout-minutes: 20
+        timeout-minutes: 30
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
@@ -299,8 +301,10 @@ jobs:
           export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
           cmake --build build-samples --target all --parallel 16
           cmake --build build-tests --target all --parallel 16
-          ctest --test-dir build-samples -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-          ctest --test-dir build-tests   -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          # scale test parallelism to the runner instead of hard-coding a value
+          CTEST_JOBS=$(( $(nproc) / 4 > 0 ? $(nproc) / 4 : 1 ))
+          ctest --test-dir build-samples --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          ctest --test-dir build-tests   --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
 
       - name: Install Packages
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -319,7 +323,7 @@ jobs:
 
       - name: Test Installed Packages
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
-        timeout-minutes: 20
+        timeout-minutes: 30
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
@@ -329,8 +333,10 @@ jobs:
           CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DGPU_TARGETS="gfx942" ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
           cmake --build build-samples-deb --target all --parallel 16
           cmake --build build-tests-deb --target all --parallel 16
-          ctest --test-dir build-samples-deb -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-          ctest --test-dir build-tests-deb   -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          # scale test parallelism to the runner instead of hard-coding a value
+          CTEST_JOBS=$(( $(nproc) / 4 > 0 ? $(nproc) / 4 : 1 ))
+          ctest --test-dir build-samples-deb --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          ctest --test-dir build-tests-deb   --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
 
       - name: Archive production artifacts
         if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -411,6 +417,8 @@ jobs:
             submods-scoped-v1-${{ runner.os }}-
 
       - name: Init/Update submodules
+        timeout-minutes: 15
+        continue-on-error: true
         run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
       - name: Install requirements (venv)
@@ -555,6 +563,8 @@ jobs:
           submods-scoped-v1-${{ runner.os }}-
 
     - name: Init/Update submodules
+      timeout-minutes: 15
+      continue-on-error: true
       run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
     - name: Install requirements

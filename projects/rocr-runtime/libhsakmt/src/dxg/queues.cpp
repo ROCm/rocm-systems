@@ -214,6 +214,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfo(HSA_QUEUEID QueueId,
   return HSAKMT_STATUS_SUCCESS;
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetKernelQueueId(HSA_QUEUEID QueueId,
+                                               HSAuint32 *KernelInternalQueueId) {
+  CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandler(HSAuint32 Node,
                                              void *TrapHandlerBaseAddress,
                                              HSAuint64 TrapHandlerSizeInBytes,

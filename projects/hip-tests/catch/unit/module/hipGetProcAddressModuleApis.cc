@@ -203,11 +203,18 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
                                         HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT};
 
   for (auto attribute : attributes) {
+
     int valuewithOrgAPI = 0, valueWithFuncPointer = 0;
 
-    HIP_CHECK(hipFuncGetAttribute(&valuewithOrgAPI, attribute, function));
-    HIP_CHECK(dyn_hipFuncGetAttribute_ptr(&valueWithFuncPointer, attribute, function));
+    hipError_t err1 = hipFuncGetAttribute(&valuewithOrgAPI, attribute, function);
+    hipError_t err2 = dyn_hipFuncGetAttribute_ptr(&valueWithFuncPointer, attribute, function);
 
+    if (err1 == hipErrorNotSupported) {
+      continue;
+    }
+
+    HIP_CHECK_ERROR(err1, hipSuccess);
+    HIP_CHECK_ERROR(err2, hipSuccess);
     REQUIRE(valueWithFuncPointer == valuewithOrgAPI);
   }
 

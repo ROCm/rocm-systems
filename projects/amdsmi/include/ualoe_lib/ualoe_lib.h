@@ -19,7 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
 #ifndef UALOE_LIB_H
 #define UALOE_LIB_H
 
@@ -30,50 +29,44 @@
 #include "ifoe_telemetry_hostapp.h"
 #include "ualoe_mcdi_defs.h"
 
-/* UALoE library source compatibility version. This is incremented
- * whenever a definition is added, removed or changed such that a
- * client might need to guard its use with a compile-time check.
- */
-#define UALOE_LIB_VERSION_MAJOR 0
-#define UALOE_LIB_VERSION_MINOR 1
-#define UALOE_LIB_VERSION_PATCH 0
-
-/* ----------------- */
-/* Types and Defines */
-/* ----------------- */
-
-/** Handle of an UALoE driver instance */
-typedef int ualoe_handle_t;
-
-/** Size of an IFoE textual label */
-#define UALOE_LABEL_SIZE (32)
-
-/** Maximum number of Network Ports per IFoE Station */
-#define UALOE_MAX_NETPORTS_PER_IFOE_STATION (4)
-
-/** Defines size of a crypto key */
-#define UALOE_CRYPTO_KEY_SIZE (8)
-
-/** Size of a MAC address */
-#define UALOE_MAC_ADDRESS_SIZE (6)
-
-/** Maximum number of pings supported per path for the L2Ping mechanism */
-#define UALOE_L2PING_MAX_PINGS (255)
-
-/** Enum defining different configuration phases for UALoE. Note that UALoE
- * enforces a strict order of phases
+/**
+ * Infinity Fabric over Ethernet (IFoE) provides Scale-Up network connectivity
+ * within AMD GPU clusters. AMD GPU chipsets contain multiple instances of the
+ * IFoE datapath and GPU remote memory transactions are hashed to spread traffic
+ * the different instances of IFoE to maximize bandwidth. Within each IFoE
+ * datapath,there is an IFoE Station which handles the encapsulation of
+ * Infinity Fabric into ethernet frames and also a series of Ethernet Network
+ * Ports. Traffic is spread between Network Ports within each IFoE Station
+ * using another hashing algorithm.
  *
- *        System -> Provider -> Tenant -> Showtime
- *                    \
- *                     \-> Diagnostics
+ * @section IFoE Configuration Phases
  *
- * The only transitions permitted are to the next phase via an explicit
- * call to ualoe_next_config_phase() or by an entity reset which will
- * reset back to the Provider or Tenant configuration phase, depending
- * on whether a handle to the PF or VF is being used
+ * Configuration of the IFoE datapath takes place in phases where traffic flow
+ * is only enabled after the completion of the configuration. The following
+ * phases are defined:
+ *   - System. Pre-OS configuration info from BIOS/APCP tokens
+ *   - Provider. IFoE Datapath configuration carried out by the datacentre provider
+ *   - Tenant. IFoE datapath configuration carried out by the datacentre tenant
+ *   - Showtime. IFoE datapath active, GPU traffic flowing
+ *   - Diagnostics. IFoE datapath not operational. Used to support diagnostics
+ *       operations such as PRBS testing.
  *
+ * Configuration phase transitions follow a restricted state transition
+ * diagram:
+ *
+ *               /----------------------\
+ *               v  |         |         |
+ *   System -> Provider -> Tenant -> Showtime
+ *                ^          ^ |        |
+ *                |          \----------/
+ *                v
+ *           Diagnostics
+ *
+ * Clients transition between phases via a call to ualoe_next_config_phase()
+ * or a call to ualoe_reset(), which will reset back to the Provider or Tenant
+ * configuration phase, depending on the role of the client.
  * Additionally a diagnostics mode is supported to allow offline diagnostics
- * tests to be carried out e.g. Network Port PRBS. A PF FLR or entity reset
+ * tests to be carried out e.g. Network Port PRBS. A PF FLR or ualoe_reset()
  * will reset back to the Provider configuration phase.
  *
  * System
@@ -100,7 +93,7 @@ typedef int ualoe_handle_t;
  * ------
  * After the core Provider configuration is complete, the firmware enters this
  * state waiting to receive the Tenant configuration. Configuration that the
- * Tenant should perform via the VF in virtualized mode of via the PF in Bare
+ * Tenant should perform via the VF in virtualized mode or via the PF in Bare
  * Metal mode...
  *   ualoe_config_crypto()
  *   ualoe_enable_accelerators()
@@ -110,9 +103,166 @@ typedef int ualoe_handle_t;
  * Configuration is complete and the UALoE datapath is active.
  *
  * Diagnostics
- * -----
+ * -----------
  * Offline diagnostics mode
+ *
+ * @section IFoE Client Roles
+ *
+ * IFoE can be deployed in different configurations depending on whether
+ * virtualization is being used and whether the customer is managing IFoE
+ * through the PCI interface or via the IFoE network itself. To support
+ * this API introduces the concept of Roles. The following Roles are
+ * defined:
+ *   - Provider. Role of datacentre provider. A client with this Role is
+ *       responsible for configuration of the IFoE datapath including the
+ *       local accelerator ID, the set of accelerators active within the
+ *       GPU cluster, the MAC address tables etc.
+ *   - Tenant. Role of datacentre tenant. A client with this Role is
+ *       responsible for configuration of datapath encryption, validation
+ *       of the configuration put in place by the Provider and carrying
+ *       out the final step of enabling the IFoE datapath for traffic
+ *       flow.
+ * IFoE client (PCI PF and VF) typically have different roles depending on
+ * the way the GPU cluster is being managed. For example:
+ *   - In a virtualized environment where cluster management is over PCI,
+ *     the PF has the role of Provider and the VF has the role of Tenant.
+ *   - In a bare-metal environment where cluster management is over PCI,
+ *     the PF has the roles of Provider and Tenant.
+ *   - Where cluster management is in-band over the IFoE network, no
+ *     PCI client will have the Provider role and the Tenant role may be
+ *     the PF or VF depending on the whether virtualization is in use.
+ *
+ * @section IFoE Station Administration
+ *
+ * IFoE Stations have the following administrative states defined:
+ *   - Disabled. IFoE datapath in reset / low-power state
+ *   - Stopped. IFoE datapath not in use for IFoE traffic
+ *   - Active. Configured and usable for IFoE traffic
+ *
+ * The state of an IFoE Station can only be changed administratively during
+ * the Provider phase by clients who have the role of datacentre Provider.
+ *
+ * @section Network Port Administration
+ *
+ * Network ports have the following administrative states defined:
+ *   - Enabled. Port is enabled and link may be up depending on the link
+ *       partner and link settings
+ *   - Link Disabled. Network Port in idle state, powered on but with the
+ *       link administratively down
+ *   - Power Off. Link is down and network port hardware is in lower power state
+ *
+ * Network port states can be changed in any configuration phase (with the
+ * exception of System) by clients who have the role of datacentre Provider.
+ *
+ * @section Default States
+ *
+ * After the pre-OS phase, where the set of configured IFoE stations and the
+ * network port mode is configured via APCB tokens and the configuration phase
+ * transitions to Provider, the default states are:
+ *   - All configured IFoE Stations: Active
+ *   - All configured Network Ports: Enabled
+ *
+ * @section IFoE Configuration Phase Transitions
+ *
+ * The following table shows how IFoE Config Phase transitions affect IFoE
+ * station and Netport state. In the table below, changes only apply to those
+ * instances that are configured during the boot / pre-OS phase. Stations and
+ * associated Network Ports not enabled for the platform will remain disabled
+ * and powered down at all times and are not visible to the user via the API below.
+ *
+ * -----------------------------------------------------------------------------------
+ * | Config Phase | Config Phase | Station State | Netport State |       Notes       |
+ * |     From     |      To      |     Effect    |    Effect     |                   |
+ * |---------------------------------------------------------------------------------|
+ * | System       | Provider     | -> Active     | -> Enabled    | Only happens once |
+ * |              |              |               |               | on system boot    |
+ * |---------------------------------------------------------------------------------|
+ * | Provider     | Tenant       | no change     | no change     |                   |
+ * |---------------------------------------------------------------------------------|
+ * | Tenant       | Showtime     | no change     | no change     |                   |
+ * |---------------------------------------------------------------------------------|
+ * | Provider,    | Provider     | -> Active     | no change     | Provider config   |
+ * | Tenant,      |              |               |               | reset             |
+ * | Showtime,    |              |               |               |                   |
+ * | Diagnostics   |              |               |               |                   |
+ * |---------------------------------------------------------------------------------|
+ * | Tenant,      | Tenant       | no change     | no change     | Tenant config     |
+ * | Showtime     |              |               |               | reset             |
+ * |---------------------------------------------------------------------------------|
+ * | Provider     | Diagnostics  | no change     | no change     |                   |
+ * -----------------------------------------------------------------------------------
+ *
+ * @section PCI Function Level Reset (FLR)
+ *
+ * FLR operations are equivalent to IFOE Configuration Reset operations i.e. the
+ * behaviour depends on the Role of the PCI function. For example in a virtualized
+ * scenario where the PF has the role of Provider and the VF has the role of Tenant:
+ *   - PF FLR is equivalent to a Provider Configuration Reset
+ *   - VF FLR is equivalent to a Tenant Configuration Reset
+ * In the case where a client has both Provider and Tenant roles, a configuration
+ * reset or FLR will perform an Provider Configuration Reset.
+ *
+ * @section IFoE Station State Changes
+ *
+ * The state of individual IFoE stations can only be changed in the Provider
+ * configuration phase by a client with the Provider role.
+ *
+ * IFoE Station State change events are sent in the following scenarios
+ *   - Network Port state change i.e. one of the network ports used by the IFoE
+ *     station is administratively enabled/disabled or the link status changes
+ *   - The IFoE administrative state changes i.e. the station is enabled or
+ *     disabled
+ *   - There is a fault with an IFoE datastream i.e. one of the streams failed
+ *     over (or was paused if failover was not possible)
+ *   - There is a fault causing the IFoE datapath to go into DX isolation
+ *     (disconnection from SDP switch).
+ *
+ * @section Network Port State Changes
+ *
+ * The state of Network Ports can be changed in any configuration phase
+ * (except the System pre-OS phase). Only clients with Provider role are
+ * permitted to change the state. Note that disabling a Network Port during
+ * showtime while GPU traffic is flowing is dangerous and could result in a
+ * GPU remote memory access timing out.
+ *
+ * Network Port state change events are sent in the following scenarios:
+ *   - Network Port administrative state change i.e. a network port is
+ *     disabled or powered off or
+ *   - The link status of a network port changes i.e. a network cable is
+ *     unplugged or a link comes up.
  */
+
+/** UALoE library source compatibility version. This is incremented
+ * whenever a definition is added, removed or changed such that a
+ * client might need to guard its use with a compile-time check.
+ */
+#define UALOE_LIB_VERSION_MAJOR 0
+#define UALOE_LIB_VERSION_MINOR 2
+#define UALOE_LIB_VERSION_PATCH 0
+
+/* ----------------- */
+/* Types and Defines */
+/* ----------------- */
+
+/** Handle of an UALoE driver instance */
+typedef int ualoe_handle_t;
+
+/** Size of an IFoE textual label */
+#define UALOE_LABEL_SIZE (32)
+
+/** Maximum number of Network Ports per IFoE Station */
+#define UALOE_MAX_NETPORTS_PER_IFOE_STATION (4)
+
+/** Defines size of a crypto key */
+#define UALOE_CRYPTO_KEY_SIZE (8)
+
+/** Size of a MAC address */
+#define UALOE_MAC_ADDRESS_SIZE (6)
+
+/** Maximum number of pings supported per path for the L2Ping mechanism */
+#define UALOE_L2PING_MAX_PINGS (255)
+
+/** Enum defining the different Configuration Phases for IFoE */
 typedef enum ualoe_config_phase {
   UALOE_CONFIG_PHASE_SYSTEM,
   UALOE_CONFIG_PHASE_PROVIDER,
@@ -188,8 +338,8 @@ typedef enum ualoe_crypto_key_id {
 
 /** Enum defining the state of an IFoE Station */
 typedef enum ifoe_station_state {
-  /** In this state a station is disabled and Network Ports owned by the IFoE
-   * station will be powered off */
+  /** In this state an IFoE station is disabled and the datapath hardware
+   * logic placed into reset */
   IFOE_STATION_DISABLED,
   /** In this state, the IFoE station is in a state where the datapath is not
    * not active and traffic originating from both SDP and the network will be
@@ -229,9 +379,16 @@ typedef struct ualoe_capabilities_s {
   unsigned num_configured_stations;
   /** Number of accelerators supported by the device */
   unsigned max_accelerators;
-  /** Number of Network Ports configured for each IFoE Station */
+  /** Number of Network Ports per configured IFoE station. Note that this gives
+   * the maximum number of network ports. Certain GPU cluster configurations
+   * have some IFoE stations with fewer functional network ports.
+   */
   unsigned num_netports_per_station;
-  /** Number of IFoE Paths configured for each IFoE station */
+  /** Number of IFoE paths per configured IFoE station. Note that this gives
+   * the maximum number of paths available. Where an IFoE station has a reduced
+   * number of functional network ports, the number of paths will also be
+   * reduced and will equal the number of ports.
+   */
   unsigned num_paths_per_station;
 } ualoe_capabilities_t;
 
@@ -301,7 +458,6 @@ typedef struct ifoe_station_desc_s {
  * each IFoE Station at the start of the Provider phase is as follows:
  *   .state = IFOE_STATION_ACTIVE
  *   .dx_isolated = FALSE
- *   .netports[].fault = FALSE
  *   .netports[].streams_failover = 0
  *   .netports[].streams_paused = 0
  * The value of other fields depends on the station instance and the state of
@@ -327,7 +483,8 @@ typedef struct ifoe_station_state_s {
   unsigned logical_idx;
   /** Physical index of the IFoE Station within the device */
   unsigned physical_idx;
-  /** Number of Network Port structures populated */
+  /** Number of Network Ports configured for the IFoE station. Note that this
+   * will be greater than 0. */
   unsigned netport_count;
   /** Array of Network Port information */
   struct {
@@ -379,7 +536,7 @@ typedef struct ifoe_netport_desc_s {
  * The set of Network Ports is configured in the BIOS based on the port mode
  * and the number of configured IFoE stations and will be set before IFoE
  * transitions to the Provider configuration phase. The initial state of each
- * Network Port at the start of the Provider phase is as follows:
+ * Network Port after boot is as follows:
  *   .state = IFOE_NETPORT_ENABLED
  *   .autoneg_enabled = TRUE
  *   .parallel_detect_enabled = TRUE
@@ -410,6 +567,121 @@ typedef struct ifoe_netport_state_s {
   uint8_t permanent_mac_addr[UALOE_MAC_ADDRESS_SIZE];
 } ifoe_netport_state_t;
 
+/** Structure containing the IFCP per-netport state.
+ *
+ * The peer_* fields below (peer_device_id, peer_port_id, peer_enabled,
+ * peer_in_error, peer_encrypt_mode, peer_mac_addr, peer_mtu) are only
+ * valid when the local link is up (i.e. local_link_up == true). When
+ * local_link_up is false the peer fields are not populated by firmware
+ * and should be considered invalid.
+ */
+typedef struct ifoe_ifcp_netport_state_s {
+  /** Local IFCP port id (logical netport index used in IFCP Discovery) */
+  uint32_t local_port_id;
+  /** Local physical link is up. This value is derived from the Network Port
+   * state (see ifoe_netport_state_t) — the IFCP layer reports the link as up
+   * only when the underlying netport reports the link as up. */
+  bool local_link_up;
+  /** Local IFCP port reports an error */
+  bool local_in_error;
+  /** Local IFCP link-level (LL) protocol is up. Only meaningful when
+   * local_link_up is true: the LL protocol cannot come up while the
+   * underlying physical link is down. */
+  bool local_ll_up;
+  /** Source MAC used in IFCP packets transmitted on this port. This is the
+   * same MAC address as ifoe_netport_state_t::ifoe_mac_addr — the IFCP layer
+   * uses the IFoE source MAC configured via ifoe_netport_set_addr() as the
+   * source address for IFCP discovery and link-level traffic. */
+  uint8_t local_mac_addr[UALOE_MAC_ADDRESS_SIZE];
+  /** Peer device identity received in IFCP Discovery.
+   * Only valid when local_link_up is true. */
+  uint64_t peer_device_id;
+  /** Peer port id received in IFCP Discovery.
+   * Only valid when local_link_up is true. */
+  uint32_t peer_port_id;
+  /** Peer reports port enabled in IFCP Discovery.
+   * Only valid when local_link_up is true. */
+  bool peer_enabled;
+  /** Peer reports an error in IFCP Discovery.
+   * Only valid when local_link_up is true. */
+  bool peer_in_error;
+  /** Peer encryption mode reported in IFCP Discovery.
+   * Only valid when local_link_up is true. */
+  ualoe_crypto_mode_e peer_encrypt_mode;
+  /** Peer port MAC address received in IFCP Discovery. This is the MAC
+   * address of the switch port that is directly connected to this netport.
+   * Only valid when local_link_up is true. */
+  uint8_t peer_mac_addr[UALOE_MAC_ADDRESS_SIZE];
+  /** Peer port maximum MTU received in IFCP Discovery.
+   * Only valid when local_link_up is true. */
+  uint32_t peer_mtu;
+} ifoe_ifcp_netport_state_t;
+
+/** Structure containing IFCP per-netport packet statistics. */
+typedef struct ifoe_ifcp_netport_stats_s {
+  /** Number of IFCP packets received on this port */
+  uint64_t rx_count;
+  /** Number of IFCP packets transmitted on this port */
+  uint64_t tx_count;
+  /** Number of IFCP packet transmit errors */
+  uint64_t tx_errors;
+  /** Number of received IFCP packets dropped */
+  uint64_t rx_dropped;
+} ifoe_ifcp_netport_stats_t;
+
+/** Size in bytes of the scale-up fabric physical pod identity. */
+#define UALOE_SCALEUP_FABRIC_POD_ID_SIZE 16
+/** Maximum number of local accelerators in ualoe_scaleup_fabric_config_t.
+ * Matches the MCDI2 protocol maximum (MAXNUM_MCDI2) the driver emits.
+ */
+#define UALOE_SCALEUP_FABRIC_MAX_LOCAL_ACCELERATORS 250
+
+/** Structure containing GPU scale-up fabric pod parameters. */
+typedef struct ualoe_scaleup_fabric_config_s {
+  /** Identity of the scale-up fabric pod to which this device belongs */
+  uint8_t physical_pod_id[UALOE_SCALEUP_FABRIC_POD_ID_SIZE];
+  /** Maximum number of accelerators in the scale-up fabric pod */
+  uint32_t physical_pod_size;
+  /** Number of valid entries in local_accelerators */
+  uint32_t num_local_accelerators;
+  /** Accelerator IDs that are local to the host on which this device resides */
+  uint32_t local_accelerators[UALOE_SCALEUP_FABRIC_MAX_LOCAL_ACCELERATORS];
+} ualoe_scaleup_fabric_config_t;
+
+/** Structure containing GPU scale-up fabric virtual pod parameters. */
+typedef struct ualoe_scaleup_fabric_vpod_config_s {
+  /** Identity of the virtual pod to which this device belongs */
+  uint32_t virtual_pod_id;
+  /** GPU Network physical addressing mode */
+  uint32_t npa_address_mode;
+} ualoe_scaleup_fabric_vpod_config_t;
+
+/** Maximum number of stations in ualoe_scaleup_fabric_station_info_t.
+ * Matches the MCDI2 protocol maximum (MAXNUM_MCDI2) the driver emits.
+ */
+#define UALOE_SCALEUP_FABRIC_MAX_STATIONS 1016
+
+/** Structure containing GPU scale-up fabric station info. */
+typedef struct ualoe_scaleup_fabric_station_info_s {
+  /** Number of valid entries in station_bandwidth */
+  uint32_t num_stations;
+  /** Scale-up fabric bandwidth of each station in Gbit/s, indexed by station
+   * logical index (0 .. num_stations-1). */
+  uint8_t station_bandwidth[UALOE_SCALEUP_FABRIC_MAX_STATIONS];
+} ualoe_scaleup_fabric_station_info_t;
+
+/** Structure containing GPU identity parameters. */
+typedef struct ualoe_gpu_identity_s {
+  /** Physical ID of the GPU */
+  uint32_t phys_id;
+  /** Number of GPUs in the compute tray */
+  uint32_t num_gpus;
+  /** Compute tray type */
+  ualoe_compute_tray_type_e tray_type;
+  /** Per-tray logical ID of the GPU */
+  uint32_t oam_id;
+} ualoe_gpu_identity_t;
+
 /** Enum defining the type of used network address */
 typedef enum ifoe_network_addr_type {
   IFOE_NETWORK_ADDR_TYPE_MAC,
@@ -423,7 +695,7 @@ typedef struct ifoe_accelerator_addr_map_s {
   unsigned accelerator_id;
   /** MAC address */
   uint8_t mac_addr[UALOE_MAC_ADDRESS_SIZE];
-  /** IP address (in Network byte order) */
+  /** IP address (in host byte order) */
   uint32_t ip_addr;
 } ifoe_accelerator_addr_map_t;
 
@@ -436,6 +708,8 @@ typedef enum ualoe_telemetry_category {
   UALOE_TELEMETRY_CATEGORY_NETPORT,
   UALOE_TELEMETRY_CATEGORY_DERIVED_IFOE,
   UALOE_TELEMETRY_CATEGORY_DERIVED_NETPORT,
+  UALOE_TELEMETRY_CATEGORY_IFOE_DEBUG,
+  UALOE_TELEMETRY_CATEGORY_PHY,
   UALOE_TELEMETRY_CATEGORY_MAX
 } ualoe_telemetry_category_e;
 
@@ -519,6 +793,40 @@ typedef struct ualoe_telemetry_s {
   ualoe_telemetry_dataset_t* datasets[UALOE_TELEMETRY_CATEGORY_MAX];
 } ualoe_telemetry_t;
 
+/** CPER severity levels */
+typedef enum ualoe_cper_severity {
+  /** Non-fatal uncorrected error */
+  UALOE_CPER_SEV_NON_FATAL_UNCORRECTED = 0,
+  /** Fatal error */
+  UALOE_CPER_SEV_FATAL = 1,
+  /** Non-fatal corrected error */
+  UALOE_CPER_SEV_NON_FATAL_CORRECTED = 2,
+  /** Number of valid severity levels */
+  UALOE_CPER_SEV_NUM = 3,
+} ualoe_cper_severity_e;
+
+/** Construct a severity bitmask for ualoe_get_ifoe_cper_entries() */
+#define UALOE_CPER_SEV_MASK(sev) (1U << (sev))
+
+/** CPER (Common Platform Error Record) entry header for IFoE. Each CPER record
+ * in the cper_data buffer returned by ualoe_get_ifoe_cper_entries() begins with
+ * this header. The record_length field gives the total size of the record
+ * including this header, which allows the buffer to be walked entry by entry.
+ *
+ * Alignment: Each record in cper_data is aligned to alignof(ualoe_cper_hdr_t).
+ * The driver pads record_length to a multiple of this alignment so that
+ * successive headers are always correctly aligned when the caller provides a
+ * suitably aligned cper_data buffer (e.g. allocated via malloc).
+ */
+typedef struct ualoe_cper_hdr_s {
+  /** UTC timestamp at which the error was recorded */
+  struct timespec timestamp;
+  /** Severity level of this CPER entry (one of ualoe_cper_severity_e) */
+  ualoe_cper_severity_e severity;
+  /** Total length of this CPER record in bytes, including this header */
+  uint32_t record_length;
+} ualoe_cper_hdr_t;
+
 /** Type for an L2Ping handle. */
 typedef unsigned ualoe_ping_handle_t;
 
@@ -545,6 +853,10 @@ typedef struct ualoe_ping_spec_s {
   unsigned num_pings;
 } ualoe_ping_spec_t;
 
+/** Set in ualoe_ping_netport_result_t.flags when the netport result does not
+ * reflect a real test and must be ignored (e.g. netport not bonded). */
+#define UALOE_PING_NETPORT_INVALID_RESULT (1U << 0)
+
 /** Structure holding a single ping result for a specific accelerator and
  * netport. */
 typedef struct ualoe_ping_netport_results_s {
@@ -554,9 +866,11 @@ typedef struct ualoe_ping_netport_results_s {
   /** Count of ping failures on the IFoE Response PFC channel. A value of 0
    * indicates all pings completed successfully. */
   uint8_t resp_failures;
-  /** Count of non-IFOE failures on the non-IFoE traffic PFC channel. A value
+  /** Count of non-IFoE failures on the non-IFoE traffic PFC channel. A value
    * of 0 indicates all pings completed successfully. */
   uint8_t non_ifoe_failures;
+  /** Result flags (see UALOE_PING_NETPORT_*). */
+  uint8_t flags;
 } ualoe_ping_netport_result_t;
 
 /** Structure holding a set of ping results for a specific accelerator. This
@@ -603,6 +917,9 @@ typedef enum {
   UALOE_EVENT_CONFIG_PHASE_CHANGE,
   /** Notification that the current L2 ping test is complete */
   UALOE_EVENT_L2PING_COMPLETE,
+  /** Notification that a new telemetry snapshot is ready. TELEMETRY_READY
+   * events are only expected when telemetry is allocated. */
+  UALOE_EVENT_TELEMETRY_READY,
 } ualoe_event_id_e;
 
 /** Structure defining an UALoE event. This is passed to the caller
@@ -666,6 +983,12 @@ typedef struct ualoe_event_s {
       /** Handle associated with the ping test */
       ualoe_ping_handle_t handle;
     } l2ping_complete;
+
+    /** Data associated with the event UALOE_EVENT_TELEMETRY_READY */
+    struct {
+      /** Telemetry generation count */
+      uint64_t generation_count;
+    } telemetry_ready;
   } u;
 } ualoe_event_t;
 
@@ -824,6 +1147,10 @@ int ualoe_get_ifoe_config(ualoe_handle_t handle, ifoe_config_t* config, unsigned
  * this does not match the strict ordering enforced by the firmware, the
  * request will fail with ERANGE. See the UALoE configuration phases definition
  * above for notes on the transition order.
+ * This function can be used to return from the current to an earlier
+ * configuration phase. Performing such a transition is equivalent to performing
+ * a configuration reset ualoe_reset() i.e. transitioning backwards will result
+ * in the configuration being reset.
  *
  * @param handle UALoE driver handle
  * @param next_phase Configuration phase to transition to
@@ -973,20 +1300,22 @@ int ifoe_station_get_state(ualoe_handle_t handle, unsigned station_idx,
  * @brief Set the Path to Port mapping for the IFoE datapath. This can be done
  * globally, per IFoE Station and per Accelerator ID, depending on the selected
  * flags.
- * This command is permitted in the Provider, Tenant and Showtime phases.
+ * This operation is only permitted for clients with the Provider role and is
+ * only permitted in the Showtime phase.
  *
  * @param handle UALoE driver handle
  * @param specify_station Boolean indicating if the mapping should be set for a
- * specific IFoE Station
+ * specific IFoE Station. Note that support to set the path to port map for all
+ * stations is not supportable so this field must always be set to true.
  * @param specify_accelerator Boolean indicating if the mapping should be set
  * for a specific Accelerator.
  * @param reenable_streams Boolean indicating that any disabled streams
  * affected by this mapping request should be re-enabled.
  * @param station_idx Logical index of IFoE station
  * @param accelerator_id Accelerator ID
- * @param path_count Number of entries in paths array provided by the
- * caller. This must match the number IFoE Paths as returned by
- * ualoe_get_capabilities().
+ * @param path_count Number of entries in map array provided by the
+ * caller. This must be equal to the number of network ports connected to the
+ * specified IFoE station as reported by ifoe_station_get_state().
  * @param map Array of Network Port logical indices, indexed by the IFoE Path.
  * @return 0 on success. errno on failure
  */
@@ -997,14 +1326,15 @@ int ifoe_set_path_to_port_map(ualoe_handle_t handle, bool specify_station, bool 
 /**
  * @brief Get the Path to Port mapping for a specified IFoE Station and
  * Accelerator.
- * This command is permitted in the Provider, Tenant and Showtime phases.
+ * This operation is permitted for all clients, but only in the Showtime
+ * phase.
  *
  * @param handle UALoE driver handle
  * @param station_idx Logical index of IFoE station
  * @param accelerator_id Accelerator ID
- * @param path_count Number of entries in paths array provided by the
- * caller. This must match the number IFoE Paths as returned by
- * ualoe_get_capabilities().
+ * @param path_count Number of entries in map array provided by the
+ * caller. This must be equal to the number of network ports connected to the
+ * specified IFoE station as reported by ifoe_station_get_state().
  * @param map Array of Network Port logical indices, indexed by IFoE Path.
  * @return 0 on success. errno on failure
  */
@@ -1025,16 +1355,18 @@ int ifoe_get_netport_properties(ualoe_handle_t handle, ualoe_netport_properties_
 
 /**
  * @brief Get a set of descriptors for the Network Ports associated with the
- * IFoE device. Each descriptor contain information about the location network
- * port i.e. the IFoE station that it belongs to and it's station-relative
- * index.
+ * IFoE device. Each descriptor contain information about a network port i.e.
+ * the IFoE station that it belongs to and its station-relative index.
  * This command is permitted in the Provider, Tenant, Showtime and Diagnostics
  * phases.
  *
  * @param handle UALoE driver handle
  * @param desc_count Number of entries in descriptor array provided by the
- * caller. This should match the number of configured network ports- refer to
- * ualoe_get_capabilities().
+ * caller. This should match the number of configured network ports otherwise
+ * the call will fail. For most platforms this is the number of stations
+ * multiplied by the max ports per station (see ualoe_get_capabilities()).
+ * However, this is not true for all platforms and therefore a version 2 of
+ * the API is defined below which is more user friendly.
  * @param descs Array of descriptors. This memory should be allocated by the
  * caller and will be populated by this function.
  * @return 0 on success. errno on failure
@@ -1042,10 +1374,34 @@ int ifoe_get_netport_properties(ualoe_handle_t handle, ualoe_netport_properties_
 int ifoe_get_netport_list(ualoe_handle_t handle, unsigned desc_count, ifoe_netport_desc_t descs[]);
 
 /**
+ * @brief Get a set of descriptors for the Network Ports associated with the
+ * IFoE device. Each descriptor contains information about a network port i.e.
+ * the IFoE station that it belongs to and its station-relative index. This
+ * is version 2 of the function which is modified to support a product variant
+ * where the number of network ports is reduced for some IFoE stations.
+ * This command is permitted in the Provider, Tenant, Showtime and Diagnostics
+ * phases.
+ *
+ * @param handle UALoE driver handle
+ * @param desc_count Pointer to variable specifying the number of entries in
+ * the descriptor array descs[]. This should be large enough to hold the
+ * maximum number of the Network Ports (refer to ualoe_get_capabilities())
+ * otherwise the function will fail with ENOSPC. As a result of the call
+ * desc_count will be updated with total number of configured network ports.
+ * This also provides the number of descriptors populated.
+ * @param descs Array of descriptors. This memory should be allocated by the
+ * caller and will be populated by this function.
+ * @return 0 on success. errno on failure
+ */
+int ifoe_get_netport_list_v2(ualoe_handle_t handle, unsigned* desc_count,
+                             ifoe_netport_desc_t descs[]);
+
+/**
  * @brief Function to control a Network Port. This can be used to disable a
  * Network Port and remove it as a part of the logical link of the associated
  * IFoE Station.
- * This command is only permitted in the Provider configuration phase.
+ * This command is permitted in the Provider, Tenant, Showtime and Diagnostics
+ * phases. This operation is only permitted for clients with the Provider role.
  *
  * @param handle UALoE driver handle
  * @param netport_idx Logical index of the Network Port
@@ -1061,8 +1417,8 @@ int ifoe_netport_ctrl(ualoe_handle_t handle, unsigned netport_idx, ifoe_netport_
  * negotiated depending on the link parter's capabilities. With AN enabled,
  * parallel detect can used in which case the local link will attempt to
  * determine the link configuration being used by the partner.
- * This command is only permitted in the Provider and Diagnostics configuration
- * phases.
+ * This command is permitted in the Provider, Tenant, Showtime and Diagnostics
+ * phases. This operation is only permitted for clients with the Provider role.
  *
  * @param handle UALoE driver handle
  * @param netport_idx Logical index of the Network Port
@@ -1079,8 +1435,8 @@ int ifoe_netport_config_link_auto(ualoe_handle_t handle, unsigned netport_idx,
  * @brief Function to configure a Network Port link with Auto-Negotiation
  * disabled and a fixed link configuration. The caller should specify the
  * ethernet technology, FEC mode and the loopback mode (can be none).
- * This command is only permitted in the Provider and Diagnostics configuration
- * phases.
+ * This command is permitted in the Provider, Tenant, Showtime and Diagnostics
+ * phases. This operation is only permitted for clients with the Provider role.
  *
  * @param handle UALoE driver handle
  * @param netport_idx Logical index of the Network Port
@@ -1106,7 +1462,7 @@ int ifoe_netport_config_link_manual(ualoe_handle_t handle, unsigned netport_idx,
  * @param netport_idx Logical index of the Network Port
  * @param addr_type The type of network address to use for IFoE traffic
  * @param mac_addr The MAC address to use for IFoE traffic
- * @param ip_addr The IP address to use for IFoE traffic in Network byte order
+ * @param ip_addr The IP address to use for IFoE traffic (in host byte order)
  * @return 0 on success. errno on failure
  *
  * @note addr_type must match the configured encapsulation mode:
@@ -1143,6 +1499,20 @@ int ifoe_netport_set_accelerator_addr_map(ualoe_handle_t handle, unsigned netpor
                                           unsigned map_count, ifoe_accelerator_addr_map_t map[]);
 
 /**
+ * @brief Function to get the Accelerator to destination address mapping for a
+ * Network Port.
+ * This command is permitted in the Provider, Tenant and Showtime configuration
+ * phases.
+ *
+ * @param handle UALoE driver handle
+ * @param netport_idx Logical index of the Network Port
+ * @param map_count Number of mapping entries provided
+ * @param map Array of accelerator to address mappings to be populated
+ */
+int ifoe_netport_get_accelerator_addr_map(ualoe_handle_t handle, unsigned netport_idx,
+                                          unsigned map_count, ifoe_accelerator_addr_map_t map[]);
+
+/**
  * @brief Function to get IFoE-specific state of a Network Port.
  * This command is permitted in the Provider, Tenant, Showtime and Diagnostics
  * phases.
@@ -1154,6 +1524,120 @@ int ifoe_netport_set_accelerator_addr_map(ualoe_handle_t handle, unsigned netpor
  */
 int ifoe_netport_get_state(ualoe_handle_t handle, unsigned netport_idx,
                            ifoe_netport_state_t* state);
+
+/**
+ * @brief Function to get the IFCP per-netport state for the specified network
+ * port, returning the local and peer IFCP state.
+ * This command is permitted in the Provider, Tenant, Showtime and
+ * Diagnostics phases, and is accessible to both the PF (Provider) and the
+ * VF (Tenant).
+ *
+ * @param handle UALoE driver handle
+ * @param netport_idx Logical index of the Network Port
+ * @param state Pointer to structure to store the IFCP per-port state
+ * @return 0 on success. errno on failure
+ */
+int ifoe_ifcp_netport_get_state(ualoe_handle_t handle, unsigned netport_idx,
+                                ifoe_ifcp_netport_state_t* state);
+
+/**
+ * @brief Function to get the IFCP per-netport packet statistics for the
+ * specified network port, returning the IFCP packet RX/TX counters and
+ * error/drop counters.
+ * This command is permitted in the Provider, Tenant, Showtime and
+ * Diagnostics phases, and is accessible to both the PF (Provider) and the
+ * VF (Tenant).
+ *
+ * @param handle UALoE driver handle
+ * @param netport_idx Logical index of the Network Port
+ * @param stats Pointer to structure to store the IFCP per-port statistics
+ * @return 0 on success. errno on failure
+ */
+int ifoe_ifcp_netport_get_stats(ualoe_handle_t handle, unsigned netport_idx,
+                                ifoe_ifcp_netport_stats_t* stats);
+
+/**
+ * @brief Get the GPU scale-up fabric parameters for this device.
+ *
+ * @param handle UALoE driver handle
+ * @param config Pointer to structure to store the scale-up fabric config
+ * @return 0 on success. errno on failure
+ */
+int ualoe_get_scaleup_fabric_config(ualoe_handle_t handle, ualoe_scaleup_fabric_config_t* config);
+
+/**
+ * @brief Get the GPU scale-up fabric virtual pod parameters for this device.
+ *
+ * @param handle UALoE driver handle
+ * @param config Pointer to structure to store the scale-up fabric vpod config
+ * @return 0 on success. errno on failure
+ */
+int ualoe_get_scaleup_fabric_vpod_config(ualoe_handle_t handle,
+                                         ualoe_scaleup_fabric_vpod_config_t* config);
+
+/**
+ * @brief Get the GPU scale-up fabric station info for this device.
+ *
+ * @param handle UALoE driver handle
+ * @param info Pointer to structure to store the scale-up fabric station info
+ * @return 0 on success. errno on failure
+ */
+int ualoe_get_scaleup_fabric_station_info(ualoe_handle_t handle,
+                                          ualoe_scaleup_fabric_station_info_t* info);
+
+/**
+ * @brief Set the GPU scale-up fabric parameters for this device.
+ *
+ * Programs the physical pod identity, the pod size and the list of
+ * accelerators local to this host.
+ *
+ * @param handle UALoE driver handle
+ * @param config Pointer to the scale-up fabric config to program
+ * @return 0 on success. errno on failure
+ */
+int ualoe_set_scaleup_fabric_config(ualoe_handle_t handle,
+                                    const ualoe_scaleup_fabric_config_t* config);
+
+/**
+ * @brief Set the GPU scale-up fabric virtual pod parameters for this device.
+ *
+ * Programs the virtual pod identity and the GPU network physical
+ * addressing mode.
+ *
+ * @param handle UALoE driver handle
+ * @param config Pointer to the scale-up fabric vpod config to program
+ * @return 0 on success. errno on failure
+ */
+int ualoe_set_scaleup_fabric_vpod_config(ualoe_handle_t handle,
+                                         const ualoe_scaleup_fabric_vpod_config_t* config);
+
+/**
+ * @brief Set the GPU scale-up fabric station info for this device.
+ *
+ * Programs the station count and the per-station scale-up bandwidth,
+ * indexed by station logical index.
+ *
+ * @param handle UALoE driver handle
+ * @param info Pointer to the scale-up fabric station info to program
+ * @return 0 on success. errno on failure
+ */
+int ualoe_set_scaleup_fabric_station_info(ualoe_handle_t handle,
+                                          const ualoe_scaleup_fabric_station_info_t* info);
+
+/**
+ * @brief Get the GPU identity for this device.
+ *
+ * Returns the physical ID, number of GPUs, tray type and OAM ID
+ * of the GPU to which this device is attached.
+ * This command is permitted in the Provider, Tenant, Showtime and
+ * Diagnostics phases, and is accessible to both the PF (Provider) and the
+ * VF (Tenant).
+ *
+ * @param handle UALoE driver handle
+ * @param identity Pointer to structure to store the GPU identity
+ * @return 0 on success. errno on failure
+ */
+int ualoe_get_gpu_identity(ualoe_handle_t handle, ualoe_gpu_identity_t* identity);
 
 /**
  * @brief Allocate storage for Telemetry. This is called specify a set of
@@ -1200,15 +1684,26 @@ int ualoe_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry);
 int ualoe_telemetry_free(ualoe_handle_t handle, ualoe_telemetry_t* telemetry);
 
 /**
+ * @brief Query the telemetry categories available
+ * This command is permitted in Provider, Tenant, Showtime and Diagnostics
+ * phases.
+ *
+ * @param handle UALoE driver handle
+ * @param category_mask Pointer to receive the supported category bitmask
+ * @return 0 on success. errno on failure
+ */
+int ualoe_telemetry_get_category_mask(ualoe_handle_t handle, unsigned* category_mask);
+
+/**
  * @brief Configure an L2 Ping test, allocate the context for the test and
  * memory required to hold the results before starting the test. The test will
  * take some time and continue in the background. When the test is complete,
  * the notification UALOE_EVENT_L2PING_COMPLETE will be sent.
  * ualoe_l2ping_update() can be called during the ping test to get an update
  * on progress and to retrieve the full results at the end of the test.
- * ualoe_l2ping_free() must be called at the end of the test to free the
+ * ualoe_l2ping_fini() must be called at the end of the test to free the
  * allocated resources.
- * This command is only permitted in Showtime and Diagnostics phases.
+ * This command is only permitted in the Showtime phase.
  *
  * @param handle UALoE driver handle
  * @param spec Specification for the ping test
@@ -1221,7 +1716,7 @@ int ualoe_l2ping_start(ualoe_handle_t handle, ualoe_ping_spec_t* spec, ualoe_pin
  * @brief Update the ping context with the status and progress. If the ping
  * test is complete the context will be marked as such and the full results
  * populated.
- * This command is only permitted in Showtime and Diagnostics phases.
+ * This command is only permitted in the Showtime phase.
  *
  * @param handle UALoE driver handle
  * @param ping Pointer to the context for the ping currently in progress
@@ -1232,7 +1727,7 @@ int ualoe_l2ping_update(ualoe_handle_t handle, ualoe_ping_t* ping);
 /**
  * @brief Stop the current ping test if not already finished and free the
  * resources allocated for the test.
- * This command is allowed in all phases.
+ * This command is only permitted in the Showtime phase.
  *
  * @param handle UALoE driver handle
  * @param ping Pointer to the ping context to be freed
@@ -1368,5 +1863,48 @@ int ualoe_diag_config_prbs_rx(ualoe_handle_t handle, unsigned netport_idx, unsig
  */
 int ualoe_diag_get_prbs_results(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
                                 ualoe_prbs_results_t* results);
+
+/**
+ * @brief Retrieve CPER entries cached in the IFoE driver.
+ *
+ * The user passes pre-allocated buffers to hold the raw CPER data and an array
+ * of pointers to hold parsed CPER headers. The library fills cper_data with
+ * raw records matching severity_mask and fills cper_hdrs with pointers into
+ * cper_data, one per record. A cursor is returned for paginated retrieval.
+ *
+ * If all available entries fit in the supplied buffers the function returns 0
+ * and cursor is set to 0. If more entries remain (buf_size or entry_count was
+ * the limiting factor), the function returns ENOBUFS and cursor is set to a
+ * non-zero value; the caller should call the function again with that cursor
+ * to retrieve subsequent entries. If the buffers are too small to hold even a
+ * single entry, the function returns ENOSPC.
+ *
+ * A call using a non-zero cursor may return entry_count == 0 if the driver
+ * cache contains no further entries matching severity_mask; in that case 0 is
+ * returned so the caller knows iteration is complete.
+ *
+ * @param handle UALoE driver handle
+ * @param severity_mask Bitmask of CPER severity levels to retrieve
+ * @param cper_data Caller-allocated buffer to receive raw CPER records. Must be
+ *                  aligned to at least alignof(ualoe_cper_hdr_t) (satisfied by
+ *                  malloc). Records are padded so that each header is naturally
+ *                  aligned within the buffer
+ * @param buf_size On input, size of cper_data in bytes; on return, number of
+ *                 bytes written to cper_data
+ * @param cper_hdrs Array of pointers to ualoe_cper_hdr_t. The caller must
+ *                  allocate the array of pointers. The library fills the array
+ *                  with pointers to the parsed headers within cper_data. Each
+ *                  pointer is guaranteed to be correctly aligned
+ * @param entry_count On input, length of the cper_hdrs array; on return, number
+ *                    of entries written
+ * @param cursor On input, cursor from the previous call (0 for the first call);
+ *               on return, cursor for the next call (0 means no more data)
+ * @return 0 on success. ENOBUFS if more entries are available (call again with
+ *         the returned cursor). ENOSPC if the buffers are too small for one
+ *         entry. errno on other failure
+ */
+int ualoe_get_ifoe_cper_entries(ualoe_handle_t handle, uint32_t severity_mask, char* cper_data,
+                                uint64_t* buf_size, ualoe_cper_hdr_t** cper_hdrs,
+                                uint64_t* entry_count, uint64_t* cursor);
 
 #endif  // UALOE_LIB_H

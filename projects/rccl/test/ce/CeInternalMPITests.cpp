@@ -29,14 +29,10 @@ using namespace MPITestConstants;
 // Internal CE helpers not in ce_coll.h; accessible in Debug builds (-fvisibility=hidden not applied).
 ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
                             hipStreamBatchMemOpParams* batchParams,
-                            size_t* opIdx);
+                            size_t* opIdx, hipStream_t stream);
 
 ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int nRanks);
 void         ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params);
-ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm,
-                                  struct ncclCeCollArgs* args,
-                                  struct ncclCeBatchOpsParams* params,
-                                  hipStream_t stream);
 
 // Fixture: skip if no CE driver; create comm; warmup AllGather → ncclCeInit; TearDown destroys comm.
 class CeInternalMPITest : public MPITestBase
@@ -125,7 +121,8 @@ protected:
     {
         PrepSyncResult res;
         res.batch = makePrepSyncBatch();
-        EXPECT_EQ(ncclPrepUCSync(ceComm, isComplete, res.batch.data(), &res.opIdx),
+        EXPECT_EQ(ncclPrepUCSync(ceComm, isComplete, res.batch.data(), &res.opIdx,
+                                 getActiveStream()),
                   ncclSuccess);
         return res;
     }
@@ -352,7 +349,8 @@ TEST_F(CeInternalMPITest, PrepUCSyncIncrementsCeSeqNum)
     for(int n = 1; n <= kCallCount; ++n)
     {
         size_t opIdx = 0;
-        ASSERT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx), ncclSuccess)
+        ASSERT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
+                  ncclSuccess)
             << "call " << n;
         EXPECT_EQ(ceComm->ceColl.ceSeqNum, initialSeq + static_cast<uint32_t>(n))
             << "ceSeqNum should increment by 1 per call, call " << n << "/" << kCallCount;
@@ -462,7 +460,7 @@ TEST_F(CeInternalMPITest, LaunchEmptyBatchSucceeds)
 {
     ncclCeBatchOpsParams params{};
     ncclCeCollArgs collArgs{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()), ncclSuccess);
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs), ncclSuccess);
     EXPECT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
 }
 
@@ -504,7 +502,7 @@ TEST_F(CeInternalMPITest, LaunchFourOpsSucceeds)
     params.numOps = kOps;
 
     ncclCeCollArgs collArgs{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()), ncclSuccess);
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs), ncclSuccess);
     ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
 
     for(int i = 0; i < kOps; ++i)
@@ -564,7 +562,7 @@ TEST_F(CeInternalMPITest, LaunchFourOpsNullStreamSucceeds)
     params.numOps = kOps;
 
     ncclCeCollArgs collArgs{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, nullStream), ncclSuccess)
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, nullStream, &collArgs), ncclSuccess)
         << "ncclCeLaunchBatchOps must succeed on the legacy null stream";
     ASSERT_EQ(hipStreamSynchronize(nullStream), hipSuccess);
 
@@ -611,9 +609,18 @@ TEST(CeInternalNeg, CeImplementedReturnsTrueOnSupportedDriver)
 
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAllGather, ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAlltoAll,  ncclDevSum, ncclFloat32));
+    EXPECT_TRUE(ncclCeImplemented(ncclFuncAlltoAllv, ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncScatter,   ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncGather,    ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat32));
+}
+
+// NEG-03: ncclCeAlltoAllv rejects missing size metadata before launching transfers.
+TEST_F(CeInternalMPITest, AlltoAllvMissingSizesReturnsInvalidUsage)
+{
+    ncclCeCollArgs args{};
+    args.sizes = nullptr;
+    EXPECT_EQ(ncclCeAlltoAllv(ceComm, &args, getActiveStream()), ncclInvalidUsage);
 }
 
 // ===========================================================================
@@ -645,13 +652,14 @@ TEST_F(CeFaultInjTest, SyncPrepErrorPropagates)
     size_t opIdx = 0;
 
     ASSERT_EQ(ncclCeFaultSet(ceComm, CE_FAULT_SYNC_PREP), ncclSuccess);
-    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx),
+    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
               ncclSystemError)
         << "Expected ncclSystemError when CE_FAULT_SYNC_PREP is armed";
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);
     opIdx = 0;
-    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx), ncclSuccess)
+    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
+              ncclSuccess)
         << "Expected ncclSuccess after fault cleared";
 }
 
@@ -687,12 +695,12 @@ TEST_F(CeFaultInjTest, LaunchBatchOpsErrorPropagates)
 
     ncclCeCollArgs collArgs{};
     ASSERT_EQ(ncclCeFaultSet(ceComm, CE_FAULT_LAUNCH_OP), ncclSuccess);
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs),
               ncclSystemError)
         << "Expected ncclSystemError when CE_FAULT_LAUNCH_OP is armed";
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs),
               ncclSuccess)
         << "Expected ncclSuccess after fault cleared";
     EXPECT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
@@ -732,20 +740,21 @@ TEST_F(CeFaultInjTest, MultipleFaultsArmedAndCleared)
 
     auto   batch = makePrepSyncBatch();
     size_t opIdx = 0;
-    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx),
+    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
               ncclSystemError);
 
     ncclCeBatchOpsParams emptyParams{};
     emptyParams.numOps = 1; // non-zero to bypass the early-out
     ncclCeCollArgs collArgs{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &emptyParams, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &emptyParams, getActiveStream(), &collArgs),
               ncclSystemError);
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);
     EXPECT_EQ(ncclCeFaultGet(ceComm), 0u) << "All faults should be cleared";
 
     opIdx = 0;
-    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx), ncclSuccess);
+    EXPECT_EQ(ncclPrepUCSync(ceComm, false, batch.data(), &opIdx, getActiveStream()),
+              ncclSuccess);
 }
 
 #endif // ENABLE_FAULT_INJECTION

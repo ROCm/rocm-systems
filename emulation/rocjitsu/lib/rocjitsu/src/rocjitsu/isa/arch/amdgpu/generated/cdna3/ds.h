@@ -238,6 +238,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsPkAddBf16Ds : public Ds {
@@ -246,6 +248,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsWriteAddtidB32Ds : public Ds {
@@ -836,7 +840,6 @@ class DsReadU8D16Ds : public Ds {
 public:
   DsReadU8D16Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -846,7 +849,6 @@ class DsReadU8D16HiDs : public Ds {
 public:
   DsReadU8D16HiDs(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -856,7 +858,6 @@ class DsReadI8D16Ds : public Ds {
 public:
   DsReadI8D16Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -866,7 +867,6 @@ class DsReadI8D16HiDs : public Ds {
 public:
   DsReadI8D16HiDs(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -876,7 +876,6 @@ class DsReadU16D16Ds : public Ds {
 public:
   DsReadU16D16Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -886,7 +885,6 @@ class DsReadU16D16HiDs : public Ds {
 public:
   DsReadU16D16HiDs(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -1231,6 +1229,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsPkAddRtnBf16Ds : public Ds {
@@ -1240,6 +1240,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsConsumeDs : public Ds {

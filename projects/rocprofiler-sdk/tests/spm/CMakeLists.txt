@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-spm-counter-collection
@@ -31,7 +31,7 @@ set(IS_DISABLED True)
 
 rocprofiler_add_integration_execute_test(
     test-spm-dispatch-collection-execute
-    TARGET simple-transpose
+    TARGET vector-ops
     TIMEOUT 60
     LABELS "integration-tests"
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
@@ -45,7 +45,7 @@ rocprofiler_add_integration_execute_test(
 
 rocprofiler_add_integration_execute_test(
     test-spm-dispatch-buffer-collection-execute
-    TARGET simple-transpose
+    TARGET vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"

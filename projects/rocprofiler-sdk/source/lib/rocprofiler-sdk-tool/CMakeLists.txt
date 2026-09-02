@@ -4,11 +4,19 @@
 
 rocprofiler_activate_clang_tidy()
 
-set(TOOL_HEADERS att_no_intercept.hpp att_no_intercept_impl.hpp config.hpp
-                 execution_profile.hpp graph_stack.hpp helper.hpp stream_stack.hpp)
+set(TOOL_HEADERS
+    att_no_intercept.hpp
+    att_no_intercept_impl.hpp
+    config.hpp
+    execution_profile.hpp
+    graph_stack.hpp
+    helper.hpp
+    kernel_filter_range.hpp
+    kernel_iteration_filter.hpp
+    stream_stack.hpp)
 
-set(TOOL_SOURCES att_no_intercept.cpp config.cpp graph_stack.cpp main.c tool.cpp
-                 stream_stack.cpp)
+set(TOOL_SOURCES att_no_intercept.cpp config.cpp graph_stack.cpp kernel_filter_range.cpp
+                 kernel_iteration_filter.cpp main.c stream_stack.cpp tool.cpp)
 
 if(rocprof-trace-decoder_FOUND)
     list(APPEND TOOL_SOURCES att_no_intercept_quick_scan.cpp)

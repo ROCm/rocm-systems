@@ -131,12 +131,19 @@ To use ``rocprofv3`` for application tracing, run:
     rocprofv3 <tracing_option> -- <application_path>
 
 
-.. note::
+.. warning::
 
-  All the tracing examples below use the ``--output-format csv`` option to generate output in CSV format.
-  However, the default output format is ``rocpd`` (SQLite3 database). You can simply omit the ``--output-format`` option to generate output in the default format.
-  ``rocpd`` format can be converted to other formats such as CSV, OTF2, and PFTrace using the ``rocpd`` module.
-  To understand how to convert ``rocpd`` output to other formats, see :ref:`using-rocpd-output-format`.
+  The tracing examples below use ``--output-format csv`` to demonstrate the CSV data layout.
+  Direct CSV, PFTrace (Perfetto), and OTF2 output from ``rocprofv3`` is deprecated and might omit data for some tracing features, including hipFILE and rocSHMEM tracing.
+  Use the default ``rocpd`` format for data collection, then use ``rocpd convert`` when CSV output is needed:
+
+  .. code-block:: bash
+
+     rocprofv3 <tracing_option> --output-format rocpd -- <application_path>
+     rocpd convert -i <output-file>_results.db --output-format csv
+
+  You can omit ``--output-format rocpd`` because ``rocpd`` is the default.
+  For more conversion options, see :ref:`using-rocpd-output-format`.
 
 HIP trace
 +++++++++++
@@ -612,9 +619,11 @@ hipFILE trace
 
 .. code-block:: shell
 
-    rocprofv3 --hipfile-trace --output-format json rocpd -- <application_path>
+    rocprofv3 --hipfile-trace -- <application_path>
+    rocpd convert -i <output-file>_results.db --output-format csv
 
-The above command stores hipFILE API records in the JSON results file and the rocpd database file.
+The first command stores hipFILE API records in the default rocpd database.
+hipFILE is emitted directly only to the JSON and ``rocpd`` formats; use ``rocpd convert`` to produce CSV, Perfetto, or OTF2 output from the database.
 
 The hipFILE records include API arguments. Pointers are not dereferenced unless argument
 iteration is configured to do so.
@@ -953,7 +962,7 @@ Sample output for the list-avail command:
 
 You can also customize the counters according to the requirement. Such counters are named :ref:`extra-counters`.
 
-For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/conceptual/gpu-arch/mi300-mi200-performance-counters.html>`_.
+For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/reference/gpu-arch/mi300-mi200-performance-counters.html>`_.
 
 .. note::
 
@@ -1491,27 +1500,38 @@ Output formats
 ----------------
 
 - rocpd (SQLite3 Database (Default))
-- CSV
+- CSV (direct output is deprecated)
 - JSON (Custom format for programmatic analysis only)
-- PFTrace (Perfetto trace for visualization with Perfetto)
-- OTF2 (Open Trace Format for visualization with compatible third-party tools)
+- PFTrace (Perfetto trace; direct output is deprecated)
+- OTF2 (Open Trace Format; direct output is deprecated)
 
 
-The default output format is ``rocpd``. To know more about the rocpd format, see :ref:`using-rocpd-output-format`.
+The default and recommended output format is ``rocpd``. To know more about the rocpd format, see :ref:`using-rocpd-output-format`.
 To specify the particular output format, use the ``--output-format`` option followed by the desired format.
 
-.. code-block::
+.. warning::
+
+   Direct CSV, PFTrace, and OTF2 generation by ``rocprofv3`` is deprecated.
+   These direct generators might not produce output for every tracing feature, including hipFILE and rocSHMEM tracing.
+   Collect to rocpd and convert the database instead:
+
+   .. code-block:: bash
+
+      rocprofv3 <tracing_option> --output-format rocpd -- <application_path>
+      rocpd convert -i <output-file>_results.db --output-format csv
+
+.. code-block:: bash
 
    rocprofv3 -i input.txt --output-format json -- <application_path>
 
-Format selection is case-insensitive and multiple output formats are supported. While ``--output-format json`` exclusively enables JSON output, ``--output-format csv json pftrace otf2, rocpd`` enables all four output formats for the run.
+Format selection is case-insensitive and multiple output formats are supported. For example, ``--output-format json rocpd`` enables both JSON and rocpd output for the run.
 
-For PFTrace trace visualization, use the PFTrace format and open the trace in `ui.perfetto.dev <https://ui.perfetto.dev/>`_.
+For PFTrace trace visualization, convert the rocpd database using ``rocpd convert -i <output-file>_results.db --output-format pftrace`` and open the trace in `ui.perfetto.dev <https://ui.perfetto.dev/>`_.
 
-For OTF2 trace visualization, open the trace in `vampir.eu <https://vampir.eu/>`_ or any supported visualizer.
+For OTF2 trace visualization, convert the rocpd database using ``rocpd convert -i <output-file>_results.db --output-format otf2`` and open the trace in `vampir.eu <https://vampir.eu/>`_ or any supported visualizer.
 
 .. note::
-  For large trace files (> 10GB), it's recommended to use OTF2 format.
+  For large converted trace files (> 10GB), it's recommended to use OTF2 format.
 
 JSON output schema
 ++++++++++++++++++++

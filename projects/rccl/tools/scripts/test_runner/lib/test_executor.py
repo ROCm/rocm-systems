@@ -622,6 +622,11 @@ class TestExecutor:
                 print("SKIP: Build step skipped (--no-build)")
             return True
 
+        if not self.build_config.get("enabled", True):
+            if self.args.verbose:
+                print("SKIP: librccl build disabled (build_configuration.enabled=false)")
+            return True
+
         print("="*80)
         print("BUILDING RCCL")
         print("="*80)
@@ -2129,6 +2134,20 @@ class TestExecutor:
                 object_files.extend(["--object", binary_path])
                 if self.args.verbose:
                     print(f"Found binary: {binary_path}")
+
+        # Add host-only microtest binaries (test/host). Unlike the binaries above
+        # they don't link librccl.so -- they compile their unit-under-test
+        # (p2p.cc/init.cc + oracle TUs from the hipify tree) directly, so their
+        # counters live in the binary itself and must be listed as --object for
+        # llvm-cov to attribute that coverage.
+        host_test_dir = os.path.join(test_dir, "host")
+        for binary in ["rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit",
+                       "rccl-UnitTestsMicroInit-uncached"]:
+            binary_path = os.path.join(host_test_dir, binary)
+            if os.path.isfile(binary_path):
+                object_files.extend(["--object", binary_path])
+                if self.args.verbose:
+                    print(f"Found microtest binary: {binary_path}")
 
         # Add rccl-tests perf binaries so their host coverage mapping is attributed.
         if rccl_tests_build_dir and os.path.isdir(rccl_tests_build_dir):

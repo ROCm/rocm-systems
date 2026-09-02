@@ -31,9 +31,15 @@ public:
   /// @param text Raw .text image, used to read S_SETREG_IMM32_B32 literals safely
   ///        at src_loc()+4. Empty is tolerated: such writes then mark the affected
   ///        banks ambiguous rather than reading a literal.
+  /// @param additional_entries Further blocks that are entered with the same
+  ///        architectural state as @p entry rather than through a CFG edge. A
+  ///        device function whose address is only ever taken has no decoded edge
+  ///        into it, so without this its blocks stay unreachable and every bank
+  ///        query over them answers nullopt. See the note on entry_state().
   Gfx1250VgprMsbAnalysis(KernelBlockScope blocks, BasicBlock *entry,
                          std::span<const ScopedCfgEdge> extra_edges = {},
-                         std::span<const uint8_t> text = {});
+                         std::span<const uint8_t> text = {},
+                         std::span<BasicBlock *const> additional_entries = {});
   ~Gfx1250VgprMsbAnalysis();
 
   Gfx1250VgprMsbAnalysis(const Gfx1250VgprMsbAnalysis &) = delete;

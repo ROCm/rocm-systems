@@ -14,6 +14,7 @@
 /// EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
 /// In-process inactive SGPR-pair bits must be zeroed.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -149,7 +150,7 @@ void check_case(const Case &c, uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_cmp_encode(c.opcode, /*vdst=*/kVccSdst, /*src0=*/256, /*src1=*/257, abs, neg, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed (abs=" << abs << " neg=" << neg << ")";
     uint64_t vcc = fx.run(inst, rot, exec, vcc_in);
     delete inst;

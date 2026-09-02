@@ -6,6 +6,7 @@ This document outlines coding conventions and best practices for Python developm
 
 - [Function Length](#function-length)
 - [Naming Conventions](#naming-conventions)
+- [Python 3.8 Compatible Syntax](#python-38-compatible-syntax)
 - [I/O and Computation Separation](#io-and-computation-separation)
 - [File I/O Encoding](#file-io-encoding)
 - [Nested Functions](#nested-functions)
@@ -15,6 +16,7 @@ This document outlines coding conventions and best practices for Python developm
 - [Levels of Abstraction](#levels-of-abstraction)
 - [Avoiding Deep Nesting](#avoiding-deep-nesting)
 - [Code Organization](#code-organization)
+- [Testing Conventions](#testing-conventions)
 - [Key Principles Summary](#key-principles-summary)
 
 ## Function Length
@@ -117,6 +119,54 @@ def resolve_library_path(library_path: Optional[str]) -> Optional[str]:
     # ... 50+ lines of logic including version parsing, comparison,
     # and selection all in one function.
     # This makes the function hard to test and understand.
+```
+
+## Python 3.8 Compatible Syntax
+
+Profile mode runs on Python 3.8, so every module must parse and execute there.
+`from __future__ import annotations` makes newer syntax appear to work by
+deferring annotation evaluation, which hides 3.8 breakage until a runtime that
+actually evaluates the annotation reaches it. Write the 3.8 form directly
+instead, so the syntax a module uses is the syntax it supports.
+
+### Rules
+
+- Never add `from __future__ import annotations`, or any other `__future__` import.
+- Use `typing.List`, `typing.Dict`, `typing.Tuple`, and `typing.Set` for annotations, not the builtin generics `list[...]`, `dict[...]`, `tuple[...]`, `set[...]`.
+- Use `typing.Optional[X]` and `typing.Union[X, Y]`, not `X | None` or `X | Y`.
+- Do not use 3.9+ library additions such as `dict` merge with `|`, `str.removeprefix`, or `str.removesuffix`.
+
+### Example
+
+**Good:** Annotations a 3.8 interpreter evaluates without help
+
+```python
+from pathlib import Path
+from typing import List, Optional
+
+
+def find_csvs(directory: Path, pattern: str) -> List[Path]:
+    ...
+
+
+def resolve_csv(path: Optional[Path]) -> Path:
+    ...
+```
+
+**Bad:** Builtin generics propped up by a `__future__` import
+
+```python
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def find_csvs(directory: Path, pattern: str) -> list[Path]:
+    ...
+
+
+def resolve_csv(path: Path | None) -> Path:
+    ...
 ```
 
 ## I/O and Computation Separation
@@ -381,12 +431,11 @@ def create_df_pmc(
     raw_data_dir: str,
     kernel_verbose: int,
     verbose: int,
-    config_dict: dict[str, Any],
 ) -> pd.DataFrame:
     """Load all raw pmc counters and join into one dataframe."""
     # Single responsibility: load counters into a DataFrame and return it.
     df = pd.read_csv(Path(raw_data_dir) / "pmc_perf.csv")
-    if config_dict.get("format_rocprof_output") == "rocpd":
+    if {"Counter_Name", "Counter_Value"}.issubset(df.columns):
         df = utils_analysis.process_rocpd_csv(df)
     kernel_name_shortener(df, kernel_verbose)
     return df
@@ -731,8 +780,6 @@ Usage:
     python hash_manager.py --compute-all <configs_dir>
 """
 
-from __future__ import annotations
-
 import argparse
 import hashlib
 import json
@@ -781,6 +828,17 @@ def compute_hash():
 def _other_helper():
     pass
 ```
+
+## Testing Conventions
+
+Before adding or modifying tests, read the existing test modules to understand the project's conventions for class-vs-function grouping, marker usage, import style, and helper naming. Identify whether the change calls for a unit test or an integration test and place it in the appropriate module — do not mix the two in the same file.
+
+### Rules
+
+- Unit test module names must correspond 1:1 with the source file's leaf name (e.g. source `parser.py` maps to test file `test_parser.py`).
+- Integration test modules are named after the user-facing feature or workflow they exercise end-to-end (e.g. `test_roofline_workflow.py`, `test_profile_export.py`), not after a single source file. The name should tell a reader what scenario is being validated without opening the file.
+- Prefer `monkeypatch` (pytest fixture) over `unittest.mock.Mock` / `MagicMock` — `monkeypatch` integrates with pytest's fixture lifecycle and is the dominant pattern in this project. Reserve `Mock` / `MagicMock` for cases that genuinely need call tracking or attribute auto-creation.
+- Use `types.SimpleNamespace` or `argparse.Namespace` for plain attribute bags instead of mock objects.
 
 ## Key Principles Summary
 

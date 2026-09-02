@@ -254,7 +254,7 @@ pthread_create_gotcha::wrapper::operator()() const
         }
         if(bundles && bundles_mutex)
         {
-            std::unique_lock<std::mutex> _lk{ *bundles_mutex };
+            const std::unique_lock<std::mutex> _lk{ *bundles_mutex };
             _bundle = bundles->emplace(_tid, std::make_shared<bundle_t>("start_thread"))
                           .first->second;
         }
@@ -420,9 +420,9 @@ pthread_create_gotcha::shutdown()
             // skip sending signals to internal threads
             if(internal_native_handles.count(itr) != 0) continue;
 
-            bool                         has_bundle = false;
-            std::unique_lock<std::mutex> _bundle_lk{ *bundles_mutex };
-            const auto&                  thread_info = thread_info::get(itr);
+            bool                               has_bundle = false;
+            const std::unique_lock<std::mutex> _bundle_lk{ *bundles_mutex };
+            const auto&                        thread_info = thread_info::get(itr);
             // Check if this thread has a corresponding bundle entry
             // With the new gotcha update more external threads are tracked
             // but we only want to send signals to threads that have bundles
@@ -476,7 +476,7 @@ pthread_create_gotcha::shutdown()
     _ndangling -= shutdown_signals_delivered;
 
     // stop any remaining dangling bundles on this thread
-    std::unique_lock<std::mutex> _lk{ *bundles_mutex };
+    const std::unique_lock<std::mutex> _lk{ *bundles_mutex };
     for(auto itr : *bundles)
     {
         if(itr.second)
@@ -504,8 +504,8 @@ pthread_create_gotcha::shutdown(std::int64_t _tid)
 
     if(!bundles_mutex || !bundles) return;
 
-    std::unique_lock<std::mutex> _lk{ *bundles_mutex };
-    auto                         itr = bundles->find(_tid);
+    const std::unique_lock<std::mutex> _lk{ *bundles_mutex };
+    auto                               itr = bundles->find(_tid);
     if(itr != bundles->end())
     {
         if(itr->second) stop_bundle(*itr->second, itr->first);
@@ -519,13 +519,13 @@ std::mutex pthread_create_gotcha::s_mutex = {};
 void
 pthread_create_gotcha::pause()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    const std::scoped_lock<std::mutex> _lk{ s_mutex };
     pthread_create_gotcha_t::set_ready(false);
 }
 void
 pthread_create_gotcha::resume()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    const std::scoped_lock<std::mutex> _lk{ s_mutex };
     pthread_create_gotcha_t::set_ready(true);
 }
 
@@ -559,7 +559,7 @@ is_rocm_internal_thread(void* func_ptr)
         return false;
     }
 
-    std::string_view lib_name{ info.dli_fname };
+    const std::string_view lib_name{ info.dli_fname };
 
     for(const auto* lib : rocm_internal_libraries)
     {
@@ -616,7 +616,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     auto _enable_causal =
         (_use_causal && _sample_child && _active && !_coverage && !_offset);
 
-    static bool debug_threading_get_id =
+    static const bool debug_threading_get_id =
         get_env<bool>(TIMEMORY_SETTINGS_PREFIX "DEBUG_THREADING_GET_ID", false);
 
     if(debug_threading_get_id)

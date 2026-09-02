@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 # run-clang-tidy.sh - Clang-tidy runner
 # Usage: ./run-clang-tidy.sh [-j N] [--dry-run] [--no-fix]

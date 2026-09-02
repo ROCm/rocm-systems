@@ -5,7 +5,7 @@
 
 #include "common/defines.h"
 #include "common/delimit.hpp"
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <cstdint>
 #include <cstdlib>
@@ -79,12 +79,9 @@ inline std::string
 get_origin(const std::string&,
            std::vector<int>&& = { (RTLD_LAZY | RTLD_NOLOAD) }) ROCPROFSYS_INTERNAL_API;
 
-inline bool
-exists(const std::string& _fname) ROCPROFSYS_INTERNAL_API;
-
 inline std::string
-find_path(const std::string& _path, int _verbose,
-          const std::string& _search_paths) ROCPROFSYS_INTERNAL_API;
+find_library(const std::string& _path, int _verbose,
+             const std::string& _search_paths) ROCPROFSYS_INTERNAL_API;
 
 [[nodiscard]] inline std::string
 parent_path(std::string_view fpath, std::uint16_t levels = 1) ROCPROFSYS_INTERNAL_API;
@@ -103,6 +100,9 @@ read_symlink(const std::string& path) ROCPROFSYS_INTERNAL_API;
 
 [[nodiscard]] inline bool
 is_directory(std::string_view path) ROCPROFSYS_INTERNAL_API;
+
+[[nodiscard]] inline bool
+is_regular_file(std::string_view path) ROCPROFSYS_INTERNAL_API;
 
 inline std::string
 get_rocprofsys_root() ROCPROFSYS_INTERNAL_API;
@@ -160,20 +160,13 @@ path_type::path_type(const std::string& _fname)
     }
 }
 
-bool
-exists(const std::string& _fname)
-{
-    struct stat _buffer;
-    if(lstat(_fname.c_str(), &_buffer) == 0)
-        return (S_ISDIR(_buffer.st_mode) != 0 || S_ISREG(_buffer.st_mode) != 0 ||
-                S_ISLNK(_buffer.st_mode) != 0);
-    return false;
-}
-
 std::string
-find_path(const std::string& _path, int _verbose, const std::string& _search_paths)
+find_library(const std::string& _path, int _verbose, const std::string& _search_paths)
 {
-    if(exists(_path) && !_path.empty() && _path.at(0) == '/') return _path;
+    if(!_path.empty() && _path.at(0) == '/' && is_regular_file(_path))
+    {
+        return _path;
+    }
 
     auto _paths = delimit(_search_paths, ":");
 
@@ -184,7 +177,7 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
         ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
                             "searching for '%s' in '%s' ...\n", _path.c_str(),
                             itr.c_str());
-        if(exists(_f))
+        if(is_regular_file(_f))
         {
             ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl, "found '%s' in '%s' ...\n",
                                 _path.c_str(), itr.c_str());
@@ -203,7 +196,7 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
                 ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
                                     "searching for '%s' in '%s' ...\n", _path.c_str(),
                                     fmt::format("{}/{}", itr, sitr).c_str());
-                if(exists(_f))
+                if(is_regular_file(_f))
                 {
                     ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl,
                                         "found '%s' in '%s' ...\n", _path.c_str(),
@@ -285,6 +278,24 @@ is_directory(std::string_view path)
 }
 
 /**
+ * @brief Check whether a path exists and is a regular file.
+ *
+ * Follows symbolic links: a link that resolves to a regular file returns true,
+ * a broken link returns false. Directories, device nodes, FIFOs and sockets are
+ * not regular files and yield false. Never throws; any filesystem error
+ * (missing path, permission failure) yields false.
+ *
+ * @param path Filesystem path to test.
+ * @return true if @p path resolves to a regular file, false otherwise.
+ */
+[[nodiscard]] bool
+is_regular_file(std::string_view path)
+{
+    std::error_code unused_error_code;
+    return std::filesystem::is_regular_file(path, unused_error_code);
+}
+
+/**
  * Resolve @p path to its canonical absolute form.
  * Filesystem operation: follows symlinks and collapses '.'/'..'; the path
  * must exist. On any error (missing path, permission denied) @p path is
@@ -315,7 +326,7 @@ is_text_file(const std::string& filename)
     char             buffer[buffer_size];
     while(_file.read(buffer, sizeof(buffer)))
     {
-        for(char itr : buffer)
+        for(const char itr : buffer)
         {
             if(itr == '\0') return false;
         }
@@ -350,14 +361,14 @@ get_link_map(const char* _name, std::vector<int>&& _open_modes, bool _include_se
         struct link_map* _link_map = nullptr;
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         // if include_self is false, start at next library
-        struct link_map* _next = (_include_self) ? _link_map : _link_map->l_next;
-        while(_next)
+        const struct link_map* next = _include_self ? _link_map : _link_map->l_next;
+        while(next)
         {
-            if(_next->l_name != nullptr && !std::string_view{ _next->l_name }.empty())
+            if(next->l_name != nullptr && !std::string_view{ next->l_name }.empty())
             {
-                _chain.emplace_back(_next->l_name);
+                _chain.emplace_back(next->l_name);
             }
-            _next = _next->l_next;
+            next = next->l_next;
         }
 
         if(_noload == false) dlclose(_handle);
@@ -391,7 +402,7 @@ get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
         if(dlinfo(_handle, RTLD_DI_ORIGIN, &_buffer) == 0)
         {
             auto _origin = std::string{ _buffer };
-            if(exists(_origin)) return _origin;
+            if(is_directory(_origin)) return _origin;
         }
 
         if(_noload == false) dlclose(_handle);
@@ -414,7 +425,7 @@ get_internal_libpath(const std::string& _lib)
     for(const auto* libdir : { "lib", "lib64" })
     {
         auto _candidate = fmt::format("{}/{}/{}", _root, libdir, _lib);
-        if(exists(_candidate)) return _candidate;
+        if(is_regular_file(_candidate)) return _candidate;
     }
     return fmt::format("{}/lib/{}", _root, _lib);
 }

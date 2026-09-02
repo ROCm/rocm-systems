@@ -2,11 +2,11 @@
 errorHandling:
   Unit_hipGetErrorName_Positive_Basic:
     <<: *level_2
-    tags: [smoke]
+    tags: [smoke, P0]
   Unit_hipGetErrorName_Negative_Parameters: *level_2
   Unit_hipGetErrorString_Positive_Basic:
     <<: *level_2
-    tags: [smoke]
+    tags: [smoke, P0]
   Unit_hipGetErrorString_Negative_Parameters: *level_2
   Unit_hipDrvGetErrorName_Positive_Basic: *level_2
   Unit_hipDrvGetErrorName_Negative_Parameters: *level_2
@@ -14,7 +14,7 @@ errorHandling:
   Unit_hipDrvGetErrorString_Negative_Parameters: *level_2
   Unit_hipGetLastError_Positive_Basic:
     <<: *level_2
-    tags: [smoke]
+    tags: [smoke, P0]
   Unit_hipGetLastError_Positive_Threaded: *level_2
   Unit_hipGetLastError_with_hipMemcpyPeerAsync:
     <<: *level_2
@@ -52,7 +52,7 @@ errorHandling:
   Unit_hipGetLastError_Kernel_Invalid_Config: *level_2
   Unit_hipPeekAtLastError_Positive_Basic:
     <<: *level_2
-    tags: [smoke]
+    tags: [smoke, P0]
   Unit_hipPeekAtLastError_Positive_Threaded: *level_2
   Unit_hipPeekAtLastError_Positive: *level_2
   Unit_hipPeekAtLastError_Chk_Updated_Status: *level_2
@@ -69,7 +69,9 @@ errorHandling:
     <<: *level_2
     # Test causes error state in the runtime and prevents resource cleanup.
     disabled: [asan]
-  Unit_hipExtGetLastError_Positive_Basic: *level_2
+  Unit_hipExtGetLastError_Positive_Basic:
+    <<: *level_2
+    tags: [P0]
   Unit_hipExtGetLastError_Positive_Threaded: *level_2
   Unit_hipExtGetLastError_with_hipMemcpyPeerAsync:
     <<: *level_2

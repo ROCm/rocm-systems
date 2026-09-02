@@ -1,4 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
+
 # UALOE Library CMake configuration
 
 # Netlink dependencies (LIBNL3/LIBNLGENL3/LIBMNL) are resolved once by the
@@ -8,7 +10,13 @@
 # when the libs live outside the default linker path (e.g. rocm_sysdeps).
 
 # Define source files for ualoe library
-set(UALOE_SRC_LIST ualoe_lib.c ualoe_cdev.c ualoe_cb.c ualoe_nl.c)
+set(UALOE_SRC_LIST
+    ualoe_lib.c
+    ualoe_cdev.c
+    ualoe_cb.c
+    ualoe_nl.c
+    ualoe_telem.c
+)
 
 # Convert relative paths to absolute paths
 set(UALOE_ABS_SRC_LIST)

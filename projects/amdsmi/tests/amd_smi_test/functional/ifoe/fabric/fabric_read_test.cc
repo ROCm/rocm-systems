@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "fabric_read.h"
 
@@ -270,4 +251,39 @@ void TestFabricRead::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
+}
+
+// amdsmi_fabric_telem_id_to_string() is a pure lookup over a static id->name
+// table generated from the vendored IFOE_TELEM_ID_* headers, so these run
+// without a device and catch id->name drift when the headers are re-synced.
+
+// Literals (independent of the vendored macros) spanning the table — first,
+// mid-table, and last entry — so a reorder or drop anywhere is caught.
+static constexpr uint64_t kFirstTelemId = 0x1;
+static constexpr uint64_t kMidTelemId = 0x6000001;
+static constexpr uint64_t kLastTelemId = 0x6001011;
+
+TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringMapsKnownIds) {
+  const char* name = nullptr;
+
+  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kFirstTelemId, &name), AMDSMI_STATUS_SUCCESS);
+  ASSERT_STREQ(name, "IFOE_SDP_TX_PACK_WR_REQ");
+
+  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kMidTelemId, &name), AMDSMI_STATUS_SUCCESS);
+  ASSERT_STREQ(name, "NETPORT_LINK_STATUS");
+
+  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kLastTelemId, &name), AMDSMI_STATUS_SUCCESS);
+  ASSERT_STREQ(name, "NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE");
+}
+
+TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringRejectsNullName) {
+  amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(kFirstTelemId, nullptr);
+  ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+}
+
+TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringUnknownIdReportsUnknown) {
+  const char* name = nullptr;
+  amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(UINT64_MAX, &name);
+  ASSERT_EQ(err, AMDSMI_STATUS_NOT_FOUND);
+  ASSERT_STREQ(name, "UNKNOWN");
 }

@@ -99,6 +99,14 @@ struct RecoveredIndirectFixup {
   bool is_call = false;     ///< True for swappc-like calls, false for setpc jumps.
   /// Preserve a marked generated long transfer instead of choosing a compact branch.
   bool preserve_marked_long_transfer = false;
+  /// @brief Re-emit the original dynamic transfer instead of growing a long window.
+  ///
+  /// @details Set when the builder immediately ahead of the consumer was rewritten in place to the
+  /// relocated target, so the original transfer already lands correctly. The long window would
+  /// cost five extra words AND leave an unmarked getpc/add/consumer triple that the next pass
+  /// recognizes as wrappable and wraps again -- moving every delta measured past it and making
+  /// translation a two-pass fixed point instead of a one-pass one.
+  bool keep_dynamic_when_long = false;
 };
 
 enum class ControlFlowWindowKind : uint8_t {
@@ -139,6 +147,14 @@ struct TextRelocationResult {
   uint64_t source_offset = 0;
   std::vector<ControlFlowWindowRequirement> required_windows;
   std::string message;
+  /// @brief Consumer offsets whose rewritten builder fell back to the compact add form.
+  ///
+  /// @details The wide literal64 form is requested so the builder stays visible to the relocation
+  /// lattice on a later pass. When it does not fit its source range the compact form is emitted
+  /// instead: correct, but invisible. That only matters if an unrecovered indirect transfer also
+  /// survives into the object, in which case a LATER translation refuses it -- with nothing
+  /// pointing back to where the visibility was lost. Reporting the offsets closes that gap.
+  std::vector<uint64_t> compact_builder_fallbacks;
 };
 
 /// @brief One insertion made while growing a direct-branch patch window.
@@ -257,6 +273,21 @@ grow_control_flow_windows(std::vector<uint8_t> &text, KernelTextLayout &layout,
 
 /// @brief Rebase one offset through a sorted set of text insertions.
 void rebase_text_offset(uint64_t &offset, std::span<const TextLayoutInsertion> insertions);
+
+/// @brief rebase_text_offset() with the insertion prefix sums computed once.
+///
+/// @details Identical result, O(log n) per offset instead of O(n). Build one per insertion list
+/// and reuse it across every offset being rebased; the scanning free function above remains for
+/// one-off callers.
+class TextOffsetRebaser {
+public:
+  explicit TextOffsetRebaser(std::span<const TextLayoutInsertion> insertions);
+  void rebase(uint64_t &offset) const;
+
+private:
+  std::vector<uint64_t> offsets_;
+  std::vector<uint64_t> shifts_;
+};
 
 /// @brief First body offset at which an SGPR-free branch-island pool should appear.
 [[nodiscard]] uint64_t first_direct_branch_island_pool_offset();

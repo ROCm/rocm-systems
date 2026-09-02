@@ -129,9 +129,6 @@ dump_log_abort(int _v);
 std::string
 remove(std::string inp, const std::set<std::string>& entries);
 
-bool
-file_exists(const std::string&);
-
 // ROCm operation-list settings follow the env-var shape
 // ROCPROFSYS_ROCM_<DOMAIN>_OPERATIONS. These helpers are the single source of
 // truth for that mapping; do not reconstruct the prefix/suffix elsewhere.

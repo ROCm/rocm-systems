@@ -95,7 +95,6 @@ class Analyzer(OmniAnalyze_Base):
                 path_info[0],
                 args.kernel_verbose,
                 args.verbose,
-                self._profiling_config,
             )
 
             path_suffix_base = "_".join(Path(path_info[0]).parts[-2:])

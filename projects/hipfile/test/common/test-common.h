@@ -8,6 +8,7 @@
 #include "hipfile.h"
 #include "magic-word.h"
 
+#include <bit>
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
@@ -99,3 +100,16 @@ struct Tmpfile {
         close(fd);
     }
 };
+
+/// @brief Round value to the next multiple of align. Align _must_ be a power of 2.
+/// @param value The value to round up.
+/// @param align Value will be rounded up to a multiple of align.
+/// @return Value rounded up to a multiple of align.
+static inline size_t
+align_up(size_t value, size_t align)
+{
+    if (std::popcount(align) != 1) {
+        throw std::invalid_argument("align must be a power of 2");
+    }
+    return (value + align - 1) & ~(align - 1);
+}

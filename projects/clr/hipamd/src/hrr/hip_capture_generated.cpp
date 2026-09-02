@@ -1073,42 +1073,8 @@ static hipError_t capture_hipDrvGraphAddMemcpyNode(hipGraphNode_t* phGraphNode, 
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipDrvMemcpy2DUnaligned(const hip_Memcpy2D* pCopy) {
-  hipError_t r = g_real_table.hipDrvMemcpy2DUnaligned_fn(pCopy);
-  if (r == hipSuccess) {
-    hrr_args_hipDrvMemcpy2DUnaligned a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.pCopy = reinterpret_cast<uint64_t>(pCopy);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVMEMCPY2DUNALIGNED, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
-// Generated shim
-static hipError_t capture_hipDrvMemcpy3D(const HIP_MEMCPY3D* pCopy) {
-  hipError_t r = g_real_table.hipDrvMemcpy3D_fn(pCopy);
-  if (r == hipSuccess) {
-    hrr_args_hipDrvMemcpy3D a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.pCopy = reinterpret_cast<uint64_t>(pCopy);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVMEMCPY3D, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
-// Generated shim
-static hipError_t capture_hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream) {
-  hipError_t r = g_real_table.hipDrvMemcpy3DAsync_fn(pCopy, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipDrvMemcpy3DAsync a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.pCopy = reinterpret_cast<uint64_t>(pCopy);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVMEMCPY3DASYNC, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipDrvPointerGetAttributes(unsigned int numAttributes, hipPointer_attribute* attributes, void** data, hipDeviceptr_t ptr) {
@@ -7433,6 +7399,9 @@ static hipError_t capture_hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEve
 // Forward declarations for hand-written shims (non-static in hip_capture.cpp)
 extern hipError_t capture_hipArray3DCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray);
 extern hipError_t capture_hipArrayCreate(hipArray_t* pHandle, const HIP_ARRAY_DESCRIPTOR* pAllocateArray);
+extern hipError_t capture_hipDrvMemcpy2DUnaligned(const hip_Memcpy2D* pCopy);
+extern hipError_t capture_hipDrvMemcpy3D(const HIP_MEMCPY3D* pCopy);
+extern hipError_t capture_hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream);
 extern hipError_t capture_hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags);
 extern hipError_t capture_hipHostUnregister(void* hostPtr);
 extern hipError_t capture_hipLaunchByPtr(const void* func);

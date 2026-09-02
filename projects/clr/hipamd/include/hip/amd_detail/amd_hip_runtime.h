@@ -412,13 +412,13 @@ inline __device__ __attribute__((always_inline)) unsigned int hc_get_workitem_ab
 #pragma push_macro("__CUDA__")
 #define __CUDA__
 #include <__clang_cuda_math_forward_declares.h>
-#include <__clang_cuda_complex_builtins.h>
 // Workaround for using libc++ with HIP-Clang.
 // The following headers requires clang include path before standard C++ include path.
 // However libc++ include path requires to be before clang include path.
 // To workaround this, we pass -isystem with the parent directory of clang include
 // path instead of the clang include path itself.
 #include <include/cuda_wrappers/algorithm>
+#include <__clang_cuda_complex_builtins.h>
 #include <include/cuda_wrappers/complex>
 #include <include/cuda_wrappers/new>
 #undef __CUDA__

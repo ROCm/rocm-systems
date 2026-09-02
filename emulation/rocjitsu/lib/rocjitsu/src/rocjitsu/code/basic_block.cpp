@@ -12,7 +12,6 @@
 #include "util/except.h"
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <memory>
 #include <optional>
@@ -55,12 +54,6 @@ bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
   if (inst.size() != sizeof(uint32_t) || (mnemonic != "s_setpc_b64" && mnemonic != "s_set_pc_i64"))
     return false;
   return static_cast<uint16_t>(word & 0xffu) == ssrc0;
-}
-
-bool has_exact_words(const Instruction &inst, std::span<const uint32_t> words) {
-  if (inst.size() != static_cast<int>(words.size_bytes()) || inst.raw_encoding() == nullptr)
-    return false;
-  return std::equal(words.begin(), words.end(), inst.raw_encoding());
 }
 
 std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
@@ -110,23 +103,6 @@ const Instruction *BasicBlock::terminator() const {
   return storage_.back().get();
 }
 
-bool BasicBlock::is_gfx1250_clang_unreachable_stub() const {
-  // clang emits two known rocPRIM target-specialization stubs for a source body
-  // ending in __builtin_unreachable(). Neither has an architectural terminator;
-  // its trailing zero is function-alignment padding. Match the complete decoded
-  // body so an arbitrary reachable instruction followed by zero remains invalid.
-  constexpr std::array<uint32_t, 2> kSetReplayMode = {0xb9800641u, 1u};
-  if (storage_.size() == 1)
-    return has_exact_words(*storage_[0], kSetReplayMode);
-
-  if (storage_.size() != 3)
-    return false;
-  constexpr std::array<uint32_t, 3> kGlobalPrefetchB8 = {0xee174000u, 0x00040000u, 0u};
-  constexpr std::array<uint32_t, 1> kVNop = {0x7e000000u};
-  return has_exact_words(*storage_[0], kGlobalPrefetchB8) && has_exact_words(*storage_[1], kVNop) &&
-         has_exact_words(*storage_[2], kSetReplayMode);
-}
-
 void BasicBlock::add_successor(BasicBlock &successor) {
   if (std::ranges::find(successors_, &successor) != successors_.end())
     return;
@@ -169,10 +145,10 @@ void BasicBlock::add_static_pc_address_builder(PcAddressBuilder builder) {
   static_pc_address_builders_.push_back(builder);
 }
 
-std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co, Decoder &decoder,
-                                                           rj_code_arch_t arch,
-                                                           std::span<const uint64_t> extra_leaders,
-                                                           ExternalEntryPolicy entry_policy) {
+FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
+BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+                  DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
+                  ExternalEntryPolicy entry_policy, std::span<const uint64_t> extra_split_points) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
 
   for (const auto *sec : co.text_sections()) {
@@ -184,25 +160,24 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
     std::vector<std::unique_ptr<Instruction>> decoded;
 
     while (pc < inst_data_size) {
-      // gfx1250 code objects place zero-filled alignment holes between function
-      // bodies. Zero is not an instruction, so skip it before decoding. Block
-      // construction below still fails closed if a reachable path enters the
-      // hole, except for the exact clang unreachable-stub bodies recognized
-      // there.
-      if (arch == ROCJITSU_CODE_ARCH_GFX1250 && inst_data[pc] == 0) {
+      // gfx1250 code objects use zero-filled alignment between function bodies.
+      // Zero is not an instruction; block construction below treats sequential
+      // fallthrough into it as an implicit unreachable boundary.
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && inst_data[pc] == 0) {
         ++pc;
         byte_offset += sizeof(uint32_t);
         continue;
       }
 
-      Instruction *raw_inst = nullptr;
-      try {
-        raw_inst = decoder.decode(&inst_data[pc], byte_offset);
-      } catch (const util::InvalidInst &error) {
-        throw util::InvalidInst(
-            std::string(error.what()) + " at .text byte offset " + std::to_string(byte_offset), "");
-      }
-      std::unique_ptr<Instruction> inst(raw_inst);
+      auto emit_at_offset = [&](std::string_view message) {
+        emit_error.emit() << message << " at .text byte offset " << byte_offset;
+      };
+      const DecodeErrorEmitter decode_error =
+          emit_error.ignores_messages() ? DecodeErrorEmitter{} : DecodeErrorEmitter(emit_at_offset);
+      DecodeResult decode_result = decoder.decode(&inst_data[pc], byte_offset, decode_error);
+      if (decode_result.failed())
+        return Result::failure();
+      std::unique_ptr<Instruction> inst = std::move(decode_result).value();
       uint32_t inst_size_bytes = static_cast<uint32_t>(inst->size());
       uint32_t inst_words = inst_size_bytes / sizeof(uint32_t);
 
@@ -230,14 +205,22 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
     const auto decoded_span =
         std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size());
     std::vector<PcAddressBuilder> pc_address_builders;
-    std::vector<IndirectCallFixup> recovered_indirect_targets = discover_indirect_branch_edges(
-        decoded_span, text, arch, extra_leaders, entry_policy, &pc_address_builders);
+    std::vector<IndirectCallFixup> recovered_indirect_targets =
+        discover_indirect_branch_edges(decoded_span, text, arch, extra_leaders, entry_policy,
+                                       &pc_address_builders, extra_split_points);
 
     std::set<uint64_t> leaders;
     leaders.insert(decoded.front()->src_loc());
     for (uint64_t leader : extra_leaders) {
       if (leader < section_end)
         leaders.insert(leader);
+    }
+    // Split points shape the block graph only. They are deliberately absent from the external-entry
+    // set built below, so a helper named by a function symbol keeps the caller facts it is entered
+    // with.
+    for (uint64_t split : extra_split_points) {
+      if (split < section_end)
+        leaders.insert(split);
     }
     for (const IndirectCallFixup &fixup : recovered_indirect_targets) {
       if (fixup.source_call_offset < section_end)
@@ -286,24 +269,25 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
         current->add_instruction(std::move(decoded[i]));
         ++i;
 
-        const bool decoded_section_end = i >= decoded.size() && next_offset == section_end;
         const bool decode_gap =
             i >= decoded.size() ? next_offset < section_end : decoded[i]->src_loc() != next_offset;
-        if (!terminates) {
-          const bool reaches_gfx1250_zero = decode_gap && arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-                                            next_offset < section_end &&
-                                            inst_data[next_offset / sizeof(uint32_t)] == 0;
-          const bool is_gfx1250_section_end_stub =
-              decoded_section_end && arch == ROCJITSU_CODE_ARCH_GFX1250;
-          if ((reaches_gfx1250_zero || is_gfx1250_section_end_stub) &&
-              current->is_gfx1250_clang_unreachable_stub()) {
-            current->has_terminator_ = true;
-            current->has_implicit_terminator_ = true;
-          } else if (decode_gap) {
-            current->falls_through_to_undecodable_text_ = true;
-          }
+        const Instruction &last = *current->terminator();
+        const bool can_fall_through = !is_program_path_terminator(last) &&
+                                      !is_unconditional_branch(last) &&
+                                      (last.flags() & INDIRECT_BRANCH) == 0;
+        const bool reaches_gfx1250_zero = decode_gap && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+                                          next_offset < section_end &&
+                                          inst_data[next_offset / sizeof(uint32_t)] == 0;
+        // Running off the end of `.text` is the same boundary as running into padding: there is no
+        // next instruction either way. Requiring padding to be present would make the result
+        // depend on whether the linker happened to align the section, so an unterminated tail
+        // would be translated verbatim in one build and given a terminator in the next.
+        const bool reaches_section_end =
+            arch == ROCJITSU_CODE_ARCH_CDNA5 && i >= decoded.size() && next_offset >= section_end;
+        if (can_fall_through && (reaches_gfx1250_zero || reaches_section_end)) {
+          current->has_terminator_ = true;
+          current->has_implicit_terminator_ = true;
         }
-
         if (terminates || decode_gap || (i < decoded.size() && leaders.contains(next_offset)))
           break;
       }
@@ -514,12 +498,17 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
           continue;
         }
 
-        if (block->falls_through_to_undecodable_text())
-          has_unknown_exit = true;
-
-        const bool is_program_exit =
-            block->has_implicit_terminator() || is_program_path_terminator(*term);
         const uint64_t flags = term->flags();
+        // An implicit terminator cuts the FALLTHROUGH edge only: the padding after this block is
+        // not code, so control cannot continue past it. A branch terminator still has its taken
+        // edge, and that edge's target must still be proven present. Treating the whole block as a
+        // program exit would skip both missing-target checks below, and an unresolved taken target
+        // would then leave has_unknown_exit false -- classifying the callee NonReturning and
+        // deleting the caller's continuation.
+        const bool has_branch_exit = term->branch_offset_bytes().has_value() ||
+                                     (flags & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0;
+        const bool is_program_exit = (block->has_implicit_terminator() && !has_branch_exit) ||
+                                     is_program_path_terminator(*term);
         if ((flags & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0) {
           const auto &fixups = block->static_indirect_call_fixups();
           if (fixups.empty() || std::ranges::any_of(fixups, &IndirectCallFixup::source_incomplete))

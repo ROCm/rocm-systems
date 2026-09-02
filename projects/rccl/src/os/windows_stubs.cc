@@ -14,10 +14,18 @@
 #include "env.h"
 #include "tuner.h"
 #include "gin/gin_host_win_stub.h"
+#include "rma.h"
 #include "device.h"
 
 #include <cstring>
 #include <cstdlib>
+#include <mutex>
+
+/* Cached socket transport device counts (populated during ncclNetInit) */
+static int winNetPhysDev = 0;
+static int winNetVirtDev = -1;  /* NCCL_UNDEF_DEV_COUNT */
+static bool winNetInitialized = false;
+static std::mutex winNetInitMutex;
 
 /* --------------------------------------------------------------------------
  * RAS (Linux-only) stubs
@@ -45,8 +53,23 @@ ncclResult_t ncclRasCommFini(const struct ncclComm* comm) {
 ncclResult_t ncclNetInit(struct ncclComm* comm) {
   comm->ncclNet = &ncclNetSocket;
   comm->ncclCollNet = nullptr;
-  comm->netContext = nullptr;
   comm->netPluginIndex = -1;
+
+  // Initialize the socket transport to enumerate network interfaces.
+  ncclNetCommConfig_t commConfig = {};
+  commConfig.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
+  NCCLCHECK(comm->ncclNet->init(&comm->netContext, comm->commHash, &commConfig, ncclDebugLog, NULL));
+
+  {
+    std::lock_guard<std::mutex> lock(winNetInitMutex);
+    if (!winNetInitialized) {
+      int ndev = 0;
+      NCCLCHECK(comm->ncclNet->devices(&ndev));
+      winNetPhysDev = ndev;
+      winNetInitialized = true;
+    }
+  }
+
   return ncclSuccess;
 }
 
@@ -90,14 +113,14 @@ const char* ncclEnvPluginGetEnv(const char* name) {
  * -------------------------------------------------------------------------- */
 ncclResult_t ncclNetGetDevCount(int netPluginIndex, int* nPhysDev, int* nVirtDev) {
   (void)netPluginIndex;
-  *nPhysDev = 0;
-  *nVirtDev = 0;
+  *nPhysDev = winNetPhysDev;
+  *nVirtDev = winNetVirtDev;
   return ncclSuccess;
 }
 
 ncclResult_t ncclNetSetVirtDevCount(int netPluginIndex, int nVirtDev) {
   (void)netPluginIndex;
-  (void)nVirtDev;
+  winNetVirtDev = nVirtDev;
   return ncclSuccess;
 }
 
@@ -115,13 +138,8 @@ ncclResult_t ncclCollNetSetVirtDevCount(int netPluginIndex, int nVirtDev) {
 }
 
 /* --------------------------------------------------------------------------
- * GIN additional stubs (getGlobalGinType, ConnectOnce, Register, etc.)
+ * GIN additional stubs (GetGinType, ConnectOnce, Register, etc.)
  * -------------------------------------------------------------------------- */
-ncclResult_t getGlobalGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
-  (void)comm;
-  *ginType = (ncclGinType_t)0;  /* NCCL_GIN_TYPE_NONE */
-  return ncclSuccess;
-}
 
 /* GIN requirement/create stubs (implemented in gin_barrier.cc and gin_scratch.cc on Linux only) */
 ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t comm, ncclTeam_t team, int nBarriers,
@@ -153,7 +171,13 @@ ncclResult_t ncclGinInboxA2ACreateRequirement(ncclTeam peers, int nBlocks, int s
   return ncclSuccess;
 }
 
-ncclResult_t getGlobalRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
+ncclResult_t ncclGetGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
+  (void)comm;
+  *ginType = (ncclGinType_t)0;  /* NCCL_GIN_TYPE_NONE */
+  return ncclSuccess;
+}
+
+ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
   (void)comm;
   *ginType = (ncclGinType_t)0;  /* NCCL_GIN_TYPE_NONE */
   return ncclSuccess;
@@ -505,6 +529,29 @@ ncclResult_t ncclGinInitFromParent(struct ncclComm* comm, struct ncclComm* paren
 }
 
 ncclResult_t ncclGinFinalize(struct ncclComm* comm) {
+  (void)comm;
+  return ncclSuccess;
+}
+
+/* --------------------------------------------------------------------------
+ * RMA stubs
+ * -------------------------------------------------------------------------- */
+ncclResult_t ncclRmaInit(struct ncclComm* comm) {
+  (void)comm;
+  return ncclSuccess;
+}
+ncclResult_t ncclRmaInitFromParent(struct ncclComm* comm, struct ncclComm* parent) {
+  (void)comm;
+  (void)parent;
+  return ncclSuccess;
+}
+ncclResult_t ncclRmaGetDevCount(int rmaPluginIndex, int* nPhysDev, int* nVirtDev) {
+  (void)rmaPluginIndex;
+  if (nPhysDev) *nPhysDev = 0;
+  if (nVirtDev) *nVirtDev = -1;
+  return ncclSuccess;
+}
+ncclResult_t ncclRmaFinalize(struct ncclComm* comm) {
   (void)comm;
   return ncclSuccess;
 }

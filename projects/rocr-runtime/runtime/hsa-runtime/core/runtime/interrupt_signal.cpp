@@ -134,6 +134,10 @@ void InterruptSignal::StoreRelease(hsa_signal_value_t value) {
   atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
   SetEvent();
 }
+void InterruptSignal::StoreReleaseAndNotify(hsa_signal_value_t value) {
+  atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
+  if (event_ != nullptr) HSAKMT_CALL(hsaKmtSetEvent(event_));
+}
 
 hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition,
                                                hsa_signal_value_t compare_value,
