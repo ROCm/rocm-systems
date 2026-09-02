@@ -220,6 +220,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         candidate_point.has_inline_moi_scalar_spill(), result.warnings);
     if (!probe)
       continue;
+    note_moi_probe_private_requirements(private_requirements, *probe);
+    note_descriptor_requirements(descriptor_requirements, probe->resources);
+    note_moi_sgpr_requirements(scalar_requirements, probe->resources, options, options,
+                               candidate_point, semantics, arch);
     planned_candidates.push_back({std::move(*probe), std::move(planned_candidate), address_plan,
                                   relocated_guest_size, std::move(trailing_guest_words)});
   }
@@ -230,28 +234,6 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   if (planned_candidates.empty()) {
     result.warnings.emplace_back("ConSan MOI inline atomic patch found no patchable atomics");
     return;
-  }
-  for (const PlannedInlineAtomic &planned : planned_candidates) {
-    note_moi_probe_private_requirements(private_requirements, planned);
-    note_descriptor_requirements(descriptor_requirements, planned.resources);
-    ConSanMoiOperatingPoint candidate_point = operating_point;
-    if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
-                                             planned.resources.owner_descriptor_file_offsets)) {
-      result.errors.emplace_back(
-          "ConSan MOI inline atomic patch lost its planned transient SGPR assignment");
-      return;
-    }
-    if (!result.moi_operating_point.owner_persistent_vgprs.empty() &&
-        !apply_moi_persistent_vgpr_assignment(candidate_point, result.moi_operating_point,
-                                              planned.resources.owner_descriptor_file_offsets)) {
-      result.errors.emplace_back(
-          "ConSan MOI inline atomic patch lost its planned persistent VGPR assignment");
-      return;
-    }
-    if (planned.private_layout && planned.private_layout->dispatch_id_offset)
-      candidate_point.moi_dispatch_identity.set_sgpr(candidate_point.moi_router_jump->pc_sgpr);
-    note_moi_sgpr_requirements(scalar_requirements, planned.resources, options, options,
-                               candidate_point, semantics, arch);
   }
   if (!apply_moi_descriptor_requirements(patcher, code_object, result.program_inventory,
                                          descriptor_requirements, scalar_requirements,
