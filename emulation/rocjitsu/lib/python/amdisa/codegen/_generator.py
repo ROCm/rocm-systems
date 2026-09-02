@@ -36,6 +36,8 @@ from amdisa.gpuisa import (
     IsaSpec,
     Operand,
     OperandNamePattern,
+    opcode_constant_base_name,
+    opcode_name_fragment,
 )
 from amdisa.fieldless_policy import (
     FieldlessCategory,
@@ -122,6 +124,7 @@ _SIMM32_64BIT_WIDENING = {
     'FMT_NUM_PK16_U4': _Literal32Widening.ZERO_EXTEND,
     'FMT_NUM_PK2_B32': _Literal32Widening.ZERO_EXTEND,
     'FMT_NUM_PK2_F32': _Literal32Widening.REPLICATE_32,
+    'FMT_NUM_PK2_U32': _Literal32Widening.REPLICATE_32,
     'FMT_NUM_PK4_BF16': _Literal32Widening.ZERO_EXTEND,
     'FMT_NUM_PK4_F16': _Literal32Widening.ZERO_EXTEND,
     'FMT_NUM_PK8_BF8': _Literal32Widening.ZERO_EXTEND,
@@ -475,20 +478,11 @@ class CodeGenerator:
         meant to be read and used directly by handwritten DBT code, so split a
         few packed ISA abbreviations that commonly appear inside one XML token.
         """
-        token = token.lower()
-        if token.endswith('exec') and len(token) > len('exec'):
-            return f'{token[:-4].capitalize()}Exec'
-        if token.endswith('pc') and len(token) > len('pc'):
-            return f'{token[:-2].capitalize()}Pc'
-        return token.capitalize()
+        return opcode_name_fragment(token)
 
     @classmethod
     def _opcode_const_base_name(cls, mnemonic: str) -> str:
-        return 'k' + ''.join(
-            cls._opcode_name_fragment(token)
-            for token in mnemonic.lower().split('_')
-            if token
-        )
+        return opcode_constant_base_name(mnemonic)
 
     @staticmethod
     def _emit_opcode_constant(name: str, value: int) -> str:
@@ -1576,6 +1570,30 @@ class CodeGenerator:
             return self.isa_spec.profile.derive_parent_enc_name(inst.enc_name)
         return inst.enc_name
 
+    def _modifier_feature_mask(
+        self, inst: Instruction, parent_enc_name: str, modifier: str
+    ) -> int:
+        """Return requirements attached to a runtime modifier encoding."""
+        mask = 0
+        parent_upper = parent_enc_name.upper()
+        for enc_name, feature_mask in inst.encoding_feature_masks.items():
+            enc_upper = enc_name.upper()
+            if modifier == 'dpp':
+                matches = '_VOP_DPP' in enc_upper and '_VOP_DPP8' not in enc_upper
+            elif modifier == 'dpp8':
+                matches = '_VOP_DPP8' in enc_upper
+            elif modifier == 'sdwa':
+                matches = '_VOP_SDWA' in enc_upper
+            else:
+                raise ValueError(f'unknown VOP modifier encoding: {modifier}')
+            if (
+                matches
+                and self.isa_spec.profile.derive_parent_enc_name(enc_name).upper()
+                == parent_upper
+            ):
+                mask |= feature_mask
+        return mask
+
     def _uses_full_dpp_write_mask(self, enc_name: str) -> bool:
         return self._supports_dpp_for_encoding(enc_name)
 
@@ -1622,8 +1640,56 @@ class CodeGenerator:
         self.gen_vopd()
         self.gen_insts()
         self.gen_execution_backend()
+        self.gen_isa_features()
         self.gen_decoder()
         self.gen_test_encodings()
+
+    def gen_isa_features(self) -> None:
+        """Emit stable feature and concrete-variant masks for this ISA input."""
+        if not self.isa_spec.isa_features and not self.isa_spec.isa_variants:
+            return
+        guard = (
+            f'ROCJITSU_ISA_ARCH_AMDGPU_GENERATED_'
+            f'{self.generated_dir_name.upper()}_ISA_FEATURES_H_'
+        )
+        lines = CppFile._prologue_comment().splitlines()
+        lines += [
+            f'#ifndef {guard}',
+            f'#define {guard}',
+            '',
+            '#include <cstdint>',
+            '',
+            f'namespace rocjitsu::{self.cpp_namespace} {{',
+            '',
+        ]
+
+        def cpp_name(name: str) -> str:
+            return ''.join(part[:1].upper() + part[1:] for part in name.split('_'))
+
+        for index, feature in enumerate(self.isa_spec.isa_features):
+            lines.append(
+                f'inline constexpr uint64_t kIsaFeature{cpp_name(feature)} = '
+                f'uint64_t{{1}} << {index};'
+            )
+        if self.isa_spec.isa_features:
+            lines.append('')
+        for variant, mask in self.isa_spec.isa_variants.items():
+            lines.append(
+                f'inline constexpr uint64_t k{cpp_name(variant)}IsaFeatures = '
+                f'uint64_t{{{mask}}};'
+            )
+        lines += [
+            '',
+            f'}} // namespace rocjitsu::{self.cpp_namespace}',
+            '',
+            f'#endif // {guard}',
+            '',
+        ]
+        out_path = os.path.join(
+            self.out_path, self.generated_dir_name, 'isa_features.h'
+        )
+        with open(out_path, 'w') as output:
+            output.write('\n'.join(lines))
 
     def gen_execution_backend(self) -> None:
         """Emit one immutable execution descriptor for a split ISA profile."""
@@ -1938,7 +2004,7 @@ class CodeGenerator:
                     ('VopdCndmaskB32',),
                     '''
                     {
-                      uint64_t condition = slot.uses_vcc ? wf.vcc() : amdgpu::RegisterAccess(wf).read_scalar64(*slot.src2);
+                      uint64_t condition = slot.uses_vcc ? wf.vcc() : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
                       return ((condition >> lane) & 1u) ? src1 : src0;
                     }
                     ''',
@@ -2785,6 +2851,7 @@ class CodeGenerator:
                 '// See lib/python/amdisa/README.md for regeneration instructions.\n\n'
                 f'#include "{self.config.generated_include(self.generated_dir_name, "vopd.h")}"\n'
                 '#include "util/except.h"\n'
+                '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"\n'
                 '#include "rocjitsu/vm/amdgpu/register_access.h"\n'
                 '#include "rocjitsu/vm/amdgpu/wavefront.h"\n'
                 '#include <algorithm>\n'
@@ -3477,8 +3544,14 @@ class CodeGenerator:
                             if self.semantics
                             else None
                         )
-                        if sem is not None and sem.semantic_class.startswith(
-                            ('pk_', 'dot2_')
+                        # Packed disassembly defaults are part of the ISA
+                        # encoding, not its execution implementation.  A
+                        # model-only V_PK_* instruction intentionally has no
+                        # semantic class, but still defaults OP_SEL_HI to one
+                        # for every encoded source.
+                        if inst.name.startswith('V_PK_') or (
+                            sem is not None
+                            and sem.semantic_class.startswith(('pk_', 'dot2_'))
                         ):
                             packed_default_opcodes.append(inst.opcode)
                         if inst.name in profile.vop3p_source_modifier_omissions:
@@ -9881,9 +9954,10 @@ class CodeGenerator:
                         [cgen.Value('const MachineInst *', 'inst')],
                     )
                     public_members.append(class_ctor_decl)
-                    public_members.append(
-                        cgen.Statement('void execute_impl(amdgpu::Wavefront &wf)')
-                    )
+                    if not inst.model_only:
+                        public_members.append(
+                            cgen.Statement('void execute_impl(amdgpu::Wavefront &wf)')
+                        )
                     # A sub-dword (< 32-bit) destination writes only part of its
                     # 32-bit register lane, so the old value survives and the
                     # register is also a read. Surface these partial defs as
@@ -10040,8 +10114,12 @@ class CodeGenerator:
                             '== amdgpu::SRC_SDWA ? '
                             f'"{sdwa_mnemonic}" : {mnemonic_expr}'
                         )
-                    exec_fn_expr = f'make_exec_fn<{inst.fmt_name}>()'
-                    if profile.split_execution_sources:
+                    exec_fn_expr = (
+                        'nullptr'
+                        if inst.model_only
+                        else f'make_exec_fn<{inst.fmt_name}>()'
+                    )
+                    if profile.split_execution_sources and not inst.model_only:
                         exec_fn_expr = self._split_execute_expr(inst.fmt_name)
                     (
                         _tracks_instruction_literal_support,
@@ -10133,6 +10211,10 @@ class CodeGenerator:
                     ):
                         ctor_body_parts.append(
                             'omit_repeated_destination_sources_ = true;'
+                        )
+                    if inst.required_feature_mask:
+                        ctor_body_parts.append(
+                            f'required_isa_features_ |= uint32_t{{{inst.required_feature_mask}}};'
                         )
                     fieldless_caps_guards: dict[str, str] = {}
                     factory_validation_parts: list[str] = []
@@ -10607,35 +10689,43 @@ class CodeGenerator:
                                 # fields from the ISA-specific extension dword,
                                 # storing them on the Instruction base for
                                 # apply_dpp() to use later.
-                                if (
-                                    _dpp_struct
-                                    and _supports_dpp_encoding
-                                    and _dpp_opcode_rule
-                                    is DppOpcodeRule.ROW_SELECT_ONLY
-                                ):
-                                    _factory_src0 = f'reinterpret_cast<const {factory_op_encoding}*>(inst)->src0'
-                                    factory_validation_parts.append(
-                                        f'if (amdgpu::dpp::is_src_dpp8({_factory_src0})) '
-                                        f'[[unlikely]] return emit_error.emit() << "{inst.mnemonic}: only DPP row-select controls 0x150-0x15f are supported";'
-                                        f'if ({_factory_src0} == amdgpu::SRC_DPP) {{'
-                                        f' auto *dp = reinterpret_cast<const {_dpp_struct}*>(inst);'
-                                        f' if (dp->dpp_ctrl < amdgpu::dpp::ROW_SELECT_BASE ||'
-                                        f'     dp->dpp_ctrl > amdgpu::dpp::ROW_SELECT_MAX)'
-                                        f'   [[unlikely]] return emit_error.emit() << "{inst.mnemonic}: only DPP row-select controls 0x150-0x15f are supported";'
-                                        f'}}'
+                                if _dpp_struct and _supports_dpp_encoding:
+                                    _dpp_feature_mask = self._modifier_feature_mask(
+                                        inst, _modifier_enc_name, 'dpp'
                                     )
-                                    ctor_body_parts.append(
-                                        f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) {{'
-                                        f' auto *dp = reinterpret_cast<const {_dpp_struct}*>(inst);'
-                                        f' src0 = Operand({opnd.size}, OperandType::OPR_VGPR, '
-                                        f'{_dpp_vsrc0}{_packed_dpp_arg});'
-                                        f' dpp_ctrl_ = dp->dpp_ctrl;'
-                                        f' dpp_row_mask_ = dp->row_mask;'
-                                        f' dpp_bank_mask_ = dp->bank_mask;'
-                                        f' dpp_bound_ctrl_ = dp->bound_ctrl;'
-                                        f'{_dpp_fi_ctor_stmt}'
-                                        f'}}'
+                                    _dpp_feature_stmt = (
+                                        f' required_isa_features_ |= '
+                                        f'uint32_t{{{_dpp_feature_mask}}};'
+                                        if _dpp_feature_mask
+                                        else ''
                                     )
+                                    if (
+                                        _dpp_opcode_rule
+                                        is DppOpcodeRule.ROW_SELECT_ONLY
+                                    ):
+                                        _factory_src0 = f'reinterpret_cast<const {factory_op_encoding}*>(inst)->src0'
+                                        factory_validation_parts.append(
+                                            f'if (amdgpu::dpp::is_src_dpp8({_factory_src0})) '
+                                            f'[[unlikely]] return emit_error.emit() << "{inst.mnemonic}: only DPP row-select controls 0x150-0x15f are supported";'
+                                            f'if ({_factory_src0} == amdgpu::SRC_DPP) {{'
+                                            f' auto *dp = reinterpret_cast<const {_dpp_struct}*>(inst);'
+                                            f' if (dp->dpp_ctrl < amdgpu::dpp::ROW_SELECT_BASE ||'
+                                            f'     dp->dpp_ctrl > amdgpu::dpp::ROW_SELECT_MAX)'
+                                            f'   [[unlikely]] return emit_error.emit() << "{inst.mnemonic}: only DPP row-select controls 0x150-0x15f are supported";'
+                                            f'}}'
+                                        )
+                                        ctor_body_parts.append(
+                                            f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) {{'
+                                            f' auto *dp = reinterpret_cast<const {_dpp_struct}*>(inst);'
+                                            f' src0 = Operand({opnd.size}, OperandType::OPR_VGPR, dp->vsrc0);'
+                                            f' dpp_ctrl_ = dp->dpp_ctrl;'
+                                            f' dpp_row_mask_ = dp->row_mask;'
+                                            f' dpp_bank_mask_ = dp->bank_mask;'
+                                            f' dpp_bound_ctrl_ = dp->bound_ctrl;'
+                                            f'{_dpp_fi_ctor_stmt}'
+                                            f'{_dpp_feature_stmt}'
+                                            f'}}'
+                                        )
                                 unsupported_dpp_markers = []
                                 if _dpp_struct and not _supports_dpp_encoding:
                                     unsupported_dpp_markers.append(
@@ -10709,6 +10799,7 @@ class CodeGenerator:
                                         f' dpp_bank_mask_ = dp->bank_mask;'
                                         f' dpp_bound_ctrl_ = dp->bound_ctrl;'
                                         f'{_dpp_fi_ctor_stmt}'
+                                        f'{_dpp_feature_stmt}'
                                         f'}}'
                                     )
                                 # SDWA (src0 == amdgpu::SRC_SDWA): CDNA and RDNA1/2 only.
@@ -11976,8 +12067,8 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
-                    execution_impls = [exec_impl]
-                    if modifier_exec_impl is not None:
+                    execution_impls = [] if inst.model_only else [exec_impl]
+                    if modifier_exec_impl is not None and not inst.model_only:
                         execution_impls.append(modifier_exec_impl)
                     if not profile.split_execution_sources:
                         inst_impls.extend(execution_impls)

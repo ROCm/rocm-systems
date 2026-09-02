@@ -461,6 +461,7 @@ add_executable(
     code/amdgpu_code_object_test.cpp
     code/relocation_function_table_test.cpp
     code/kernel_descriptor_scan_test.cpp
+    code/kernel_scope_test.cpp
     dbt/semantic_scratch_test.cpp
     dbt/waitcnt_translator_test.cpp
     dbt/virtual_lds_dispatch_rewrite_test.cpp
@@ -486,6 +487,7 @@ add_executable(
     scoped_temp_test.cpp
     wave_debug_test.cpp
     decode_execute_benchmark.cpp
+    util_observable_shared_mutex_test.cpp
     util_result_test.cpp
     util_unique_handle_test.cpp
     util_simd_test.cpp
@@ -933,18 +935,25 @@ target_link_libraries(
     PRIVATE rocjitsu_translate_cli GTest::gtest
 )
 rj_configure_target(rj_dbt_translate_smoke_test TEST)
-add_dependencies(rj_dbt_translate_smoke_test rj_dbt_translate)
+add_dependencies(
+    rj_dbt_translate_smoke_test
+    rj_dbt_translate
+    rj_decode_benchmark
+)
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(rj_dbt_translate_smoke_test)
     rj_install_test_target(rj_dbt_translate)
+    rj_install_test_target(rj_decode_benchmark)
 endif()
 rj_add_test(
     NAME "RjDbtTranslate.Smoke"
     COMMAND rj_dbt_translate_smoke_test $<TARGET_FILE:rj_dbt_translate>
+            $<TARGET_FILE:rj_decode_benchmark>
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     INSTALL_COMMAND
         "bin/rj_dbt_translate_smoke_test"
         "bin/rj_dbt_translate"
+        "bin/rj_decode_benchmark"
 )
 
 # --- Scaling test (standalone executable) ---
@@ -2688,6 +2697,24 @@ if(RJ_ENABLE_HIP_TESTS)
             "HipMemcpyTest.RoundTripInt"
             CONFIG ${RJ_HIP_TEST_CONFIG}
         )
+        # The only case that reaches ROCr's pinned SDMA blit, and both sanitizers
+        # report that library rather than rocjitsu. TSan sees the blit's memcpy
+        # into the ring but not the release store on the doorbell that follows
+        # it, because libhsa-runtime64 is not instrumented; the pair it forms
+        # with the acquire load in poll_doorbells() is therefore invisible and
+        # the fetch looks unordered. LSan reports ~5.7 KB allocated entirely
+        # within that library, in frames with no rocjitsu caller. Neither is
+        # actionable from here, and suppressing them by file would hide the same
+        # classes of defect on the paths rocjitsu does own. The case still runs
+        # in regular builds, in both local and daemon mode, which is where it
+        # regression-tests the transfer.
+        if(NOT RJ_ENABLE_ASAN AND NOT RJ_ENABLE_TSAN)
+            rj_add_hip_test_case(
+                hip_memcpy_test
+                "HipMemcpyTest.RoundTripPageableAbovePinThreshold"
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+            )
+        endif()
         rj_add_hip_test_case(
             hip_memcpy_test
             "HipMemcpyTest.DeviceToDevice"
@@ -2794,6 +2821,16 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.InterposerDup2OverPrimaryInvalidatesRemote
             DaemonTest.InterposerProcMapsNamesRemoteKfdMarker
         )
+        # Excluded under sanitizers for the reason given at its local-mode
+        # registration above: the pinned SDMA path this case exists to cover
+        # runs inside an uninstrumented libhsa-runtime64, and both the race TSan
+        # infers and the allocations LSan finds are that library's.
+        if(NOT RJ_ENABLE_ASAN AND NOT RJ_ENABLE_TSAN)
+            list(
+                APPEND RJ_DAEMON_TESTS
+                DaemonTest.HipMemcpyRoundTripPageableAbovePinThreshold
+            )
+        endif()
         foreach(TC IN LISTS RJ_DAEMON_TESTS)
             rj_add_test(
                 NAME ${TC}

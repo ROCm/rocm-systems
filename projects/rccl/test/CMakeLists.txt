@@ -289,6 +289,12 @@ if(BUILD_TESTS)
   target_link_options(rccl-UnitTests PRIVATE
     "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12")
 
+  # AICOMRCCL-2183: RcclMockFuncs.hpp's empty ncclDebugLog, needed to link the Release-only
+  # sources above, overrides librccl.so's own in Debug and silences all library logging. Hidden
+  # keeps it linkable here but out of .dynsym, as rccl-UnitTestsFixturesDebug does below.
+  target_compile_options(rccl-UnitTests PRIVATE
+    -fvisibility=hidden -fvisibility-inlines-hidden)
+
   # A real shared library, unlike the net plugin above: ProfilerPluginCloseTests checks
   # that RCCL unloads an external profiler plugin, so it needs a separately loadable
   # object. It lands beside rccl-UnitTests in the build tree and is installed beside it
@@ -484,6 +490,57 @@ if(BUILD_TESTS)
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
   add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
   set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
+
+  # GIN Anvil-SDMA hybrid AllGather (-D 3) policy host unit test (no GPU).
+  # Compiles gin_sdma_allgather_policy.h from the sibling rccl-tests project with
+  # GIN_SDMA_HOST_ONLY (no librccl / device codegen needed), validating the exact
+  # chunk sizing, LSA<->SDMA tier crossover, context-threshold fallback and
+  # bandwidth math the GinHybridAllGatherKernel relies on. Skip the target if the
+  # rccl-tests checkout is absent so a standalone rccl build still configures.
+  # Runs under `ctest -L unit`.
+  set(_gin_sdma_ag_hdr_dir "${PROJECT_SOURCE_DIR}/../rccl-tests/src")
+  if (EXISTS "${_gin_sdma_ag_hdr_dir}/gin_sdma_allgather_policy.h")
+    add_executable(rccl-UnitTestsGinSdmaAllGatherPolicy gin/gin_sdma_allgather_policy_test.cpp)
+    set_source_files_properties(gin/gin_sdma_allgather_policy_test.cpp PROPERTIES LANGUAGE CXX)
+    target_include_directories(rccl-UnitTestsGinSdmaAllGatherPolicy PRIVATE
+      "${_gin_sdma_ag_hdr_dir}")
+    target_compile_definitions(rccl-UnitTestsGinSdmaAllGatherPolicy PRIVATE GIN_SDMA_HOST_ONLY)
+    target_link_libraries(rccl-UnitTestsGinSdmaAllGatherPolicy PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+    set_target_properties(rccl-UnitTestsGinSdmaAllGatherPolicy PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+    add_test(NAME rccl-UnitTestsGinSdmaAllGatherPolicy COMMAND rccl-UnitTestsGinSdmaAllGatherPolicy)
+    set_tests_properties(rccl-UnitTestsGinSdmaAllGatherPolicy PROPERTIES LABELS "unit")
+
+    # GIN-SDMA AllGather ON-GPU correctness test. AllGather has no reduction, so
+    # this validates the LSA<->SDMA tier predicate device-vs-host and the
+    # direct-LSA gather addressing (the pointer-arithmetic core of
+    # AllGatherLsaDirect) on real hardware, self-contained (no librccl / GIN
+    # comm). Requires a visible GPU at run time (skips cleanly otherwise), so it
+    # carries a "gpu" label alongside "unit".
+    add_executable(rccl-UnitTestsGinSdmaAllGatherGpu gin/gin_sdma_allgather_gpu_test.cpp)
+    set_source_files_properties(gin/gin_sdma_allgather_gpu_test.cpp PROPERTIES LANGUAGE CXX)
+    target_include_directories(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE
+      "${_gin_sdma_ag_hdr_dir}")
+    # Offload for the configured GPU arch(s); hipcc (the CXX compiler) handles the
+    # HIP language, so no separate enable_language(HIP) is needed.
+    set(_gin_sdma_ag_gpu_offload "")
+    foreach(_g IN LISTS GPU_TARGETS)
+      if(_g)
+        list(APPEND _gin_sdma_ag_gpu_offload "--offload-arch=${_g}")
+      endif()
+    endforeach()
+    if(_gin_sdma_ag_gpu_offload)
+      target_compile_options(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE ${_gin_sdma_ag_gpu_offload})
+      target_link_options(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE ${_gin_sdma_ag_gpu_offload})
+    endif()
+    target_link_libraries(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE
+      ${GTEST_BOTH_LIBRARIES} hip::host hip::device Threads::Threads)
+    set_target_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+      CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+    add_test(NAME rccl-UnitTestsGinSdmaAllGatherGpu COMMAND rccl-UnitTestsGinSdmaAllGatherGpu)
+    set_tests_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES LABELS "unit;gpu")
+  endif()
 
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
   # librccl.so which are only visible in Debug builds (hidden visibility in Release).

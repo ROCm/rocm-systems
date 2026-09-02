@@ -144,6 +144,21 @@ ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass
   }
   return ncclSuccess;
 }
+// fillInfo's compute-partition probe. "SPX" is the unpartitioned default, so the class-probe
+// fallback stays on the path it had before partition detection existed.
+static const char* const kDefaultComputePartition = "SPX";
+std::string g_pciComputePartition = kDefaultComputePartition;
+int g_pciComputePartitionCalls = 0;
+std::string g_lastPciComputePartitionBusId;
+ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* busId, char* partition, size_t maxLen) {
+  ++g_pciComputePartitionCalls;
+  g_lastPciComputePartitionBusId = busId ? busId : "";
+  if (partition && maxLen > 0) {
+    std::strncpy(partition, g_pciComputePartition.c_str(), maxLen - 1);
+    partition[maxLen - 1] = '\0';
+  }
+  return ncclSuccess;
+}
 ncclResult_t rocmLibraryInit(void) { return ncclSuccess; }
 uint64_t ncclOsGetPid() { return 4321; }
 // dmaBufSupported gate: NULL -> unsupported.
@@ -299,6 +314,9 @@ void ResetInitFakes() {
   g_pciDeviceClass = kDefaultPciDeviceClass;
   g_pciDeviceClassCalls = 0;
   g_lastPciDeviceClassBusId.clear();
+  g_pciComputePartition = kDefaultComputePartition;
+  g_pciComputePartitionCalls = 0;
+  g_lastPciComputePartitionBusId.clear();
   pfn_hsa_amd_portable_export_dmabuf = nullptr;
   g_ncclNetInitResult = ncclSuccess;
   g_ncclGinInitResult = ncclSuccess;
