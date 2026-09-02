@@ -10187,3 +10187,79 @@ surface, or harvest more than this six-line investment; another movement-only
 barrier checkpoint would violate the anti-circling rule.  Full target/mode
 locality, broad transaction and operating-point reduction, extension-proof
 revalidation, and the independent Section 14 audit remain open.
+
+### 16.147 Convergence checkpoint 146: mode-owned InlineShadow barrier bodies
+
+The next trace completed the physical cut through InlineShadow barrier-body
+emission.  The 180-line ordinary scalar/VGPR epoch emitter still lived in the
+shared barrier fragment, and its visible-evidence path independently rebuilt
+the same first-active-lane election sequence used by ordinary InlineShadow
+access emission.  It also chose the gfx9 CDNA address/result register order by
+testing an architecture-family predicate inside the mode body.
+
+Both ordinary and private epoch bodies now live in mode-named implementation
+owners.  The shared barrier transaction owns placement and discriminated body
+dispatch, but its only body dependencies are narrow declarations over the
+already-retained emission plans.  A reader of the shared transaction no longer
+has to traverse either InlineShadow instruction body.
+
+The move exposed and removed a second authority.  Access and barrier emission
+now use one `append_publish_first_active_lane_visible_evidence_if_zero`
+mechanism.  Its typed result preserves the two pre-existing access diagnostics
+rather than buying consolidation by weakening errors.  The old externally
+visible lower-level publisher and two stale mode imports were removed.  The
+three InlineShadow barrier representations also share one mode-owned restore,
+VGPR-bank, and return epilogue instead of spelling it independently.
+
+The gfx9-specific three-VGPR ordering is now the
+`moi_visible_evidence_address_precedes_result` target-profile fact, published
+by the gfx9 CDNA family owner.  Barrier planning resolves that fact into exact
+`result_vgpr` and `address_vgpr` fields.  The mode body consumes those retained
+registers and contains neither a raw gfx-family predicate nor the duplicated
+lane-election instruction construction.  A new five-target component test
+fixes the current CDNA3/CDNA4 versus RDNA3/RDNA4/CDNA5 layout matrix.
+
+Structural enforcement requires both body implementations and their shared
+epilogue to remain in the mode-named owners, requires both access and barrier
+emission to consume the single first-active-lane publisher, requires gfx9 to
+publish the normalized target fact, and forbids family inspection or lane-
+election reconstruction in the ordinary mode body.
+
+| Signal | Checkpoint 146 | Cumulative change | Slice change from checkpoint 145 |
+| --- | ---: | ---: | ---: |
+| Production files | 307 | +78 | +1 mode owner |
+| Physical production lines | 102,735 | **-2,241** | +9 |
+| Nonblank production lines | 96,312 | **-2,772** | +7 |
+| Production implementation lines | 88,518 | **-2,932** | +6 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **250 / 50** | **-40 / -1** | 0 / 0 |
+| Ordinary InlineShadow barrier-body lines in the shared fragment | **0** | n/a | **-180 physical** |
+| InlineShadow first-active-lane evidence implementations | **1** | n/a | **-1 duplicate** |
+| Raw gfx-family decisions in InlineShadow barrier bodies | **0** | n/a | **-1** |
+| Test inventory | **5,425** | **+80** | **+1** |
+
+The implementation is committed as `975b68ed9af`.  Validation includes a
+successful full `-j16` build; all **16/16** target-capability and manifest
+tests; the architecture-boundary gate and four focused layout, access-
+publication, and barrier-emission host tests; all **10/10** correct/incorrect
+barrier-publication cases across the five simulated targets; and the complete
+**536/536** InlineShadow simulator-device matrix across gfx942, gfx950,
+gfx1100, gfx1201, and gfx1250 during the publisher cutover.  The final typed
+diagnostic and shared-epilogue refinements were followed by another successful
+build, focused host gate, and five-target barrier matrix.  Checkpoint 141
+remains the immediately preceding complete all-mode **4,789/4,789**
+nonphysical gate.  No test was removed, renamed, disabled, or replaced, and no
+physical GPU test was run.
+
+This checkpoint satisfies checkpoint 145's required larger physical cut and
+consolidates two real duplicated mechanisms, but its explicit mode-owner and
+typed shared-mechanism wiring still costs six implementation lines.  The two
+physical-locality checkpoints together are therefore 12 implementation lines
+larger than checkpoint 144.  The next convergence checkpoint must harvest at
+least that locality investment from the adjacent shared barrier transaction
+or a higher-leverage broad surface; another growth-only checkpoint is not
+admissible.  Full target/mode locality, broad transaction and operating-point
+reduction, extension-proof revalidation, and the independent Section 14 audit
+remain open.
