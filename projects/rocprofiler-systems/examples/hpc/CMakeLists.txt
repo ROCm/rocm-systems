@@ -15,12 +15,22 @@ endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/hpc-helper.cmake)
 
-# HPCTrainingExamples/Pragma_examples/OpenMP/Fortran/8_jacobi/3_jacobi_targetdata_markers
-add_subdirectory(jacobi-fortran-targetdata-markers)
+# The Fortran OpenMP-offload examples compile with --offload-arch=<target> for
+# each entry in ROCPROFSYS_GFX_TARGETS. flang cannot lower Fortran target-offload
+# to the portable SPIR-V target (amdgcnspirv): it fails with
+# "Target.cpp: not yet implemented: target not implemented". Skip them when the
+# only requested GPU target is amdgcnspirv; native targets are unaffected. The
+# C/C++/HIP examples below lower to SPIR-V fine and always build.
+set(_rocprofsys_non_spirv_gfx_targets ${ROCPROFSYS_GFX_TARGETS})
+list(REMOVE_ITEM _rocprofsys_non_spirv_gfx_targets amdgcnspirv)
+if(_rocprofsys_non_spirv_gfx_targets OR NOT ROCPROFSYS_GFX_TARGETS)
+    # HPCTrainingExamples/Pragma_examples/OpenMP/Fortran/8_jacobi/3_jacobi_targetdata_markers
+    add_subdirectory(jacobi-fortran-targetdata-markers)
 
-# HPCTrainingExamples/Pragma_examples/OpenMP/Fortran/8_jacobi/1_jacobi_usm
-# Only runs on GPUs that support xnack (instinct cards)
-add_subdirectory(jacobi-fortran-usm)
+    # HPCTrainingExamples/Pragma_examples/OpenMP/Fortran/8_jacobi/1_jacobi_usm
+    # Only runs on GPUs that support xnack (instinct cards)
+    add_subdirectory(jacobi-fortran-usm)
+endif()
 
 # HPCTrainingExamples/HIP/jacobi
 add_subdirectory(jacobi-hip)
