@@ -929,23 +929,35 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
 
 amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
                                        amdsmi_nic_fw_info_t* info) {
+  (void)processor_handle;
+  (void)info;
   return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
 }
 
 amdsmi_status_t amdsmi_get_nic_device_bdf(amdsmi_processor_handle processor_handle,
                                           amdsmi_bdf_t* bdf) {
+  (void)processor_handle;
+  (void)bdf;
   return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
 }
 
 amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor_handle,
                                                uint32_t port_index, uint32_t* num_stats,
                                                amdsmi_nic_stat_t* stats) {
+  (void)processor_handle;
+  (void)port_index;
+  (void)num_stats;
+  (void)stats;
   return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
 }
 
 amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
                                                  uint32_t port_index, uint32_t* num_stats,
                                                  amdsmi_nic_stat_t* stats) {
+  (void)processor_handle;
+  (void)port_index;
+  (void)num_stats;
+  (void)stats;
   return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
 }
 
@@ -1365,6 +1377,7 @@ amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_han
 
   return AMDSMI_STATUS_SUCCESS;
 #else
+  (void)processor_handle;
   return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 }
@@ -1492,8 +1505,9 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
 
   status = smi_amdgpu_get_board_info(gpu_device, board_info);
   if (board_info->product_serial[0] == '\0') {
-    status = rsmi_wrapper(rsmi_dev_serial_number_get, processor_handle, 0,
-                          board_info->product_serial, AMDSMI_MAX_STRING_LENGTH);
+    status =
+        rsmi_wrapper(rsmi_dev_serial_number_get, processor_handle, 0U, board_info->product_serial,
+                     static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
     if (status != AMDSMI_STATUS_SUCCESS) {
       memset(board_info->product_serial, 0,
              AMDSMI_MAX_STRING_LENGTH * sizeof(board_info->product_serial[0]));
@@ -1501,7 +1515,7 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
   }
   if (board_info->product_name[0] == '\0') {
     status = rsmi_wrapper(rsmi_dev_name_get, processor_handle, 0, board_info->product_name,
-                          AMDSMI_MAX_STRING_LENGTH);
+                          static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
     // Check if the value is in hex format
     if (status == AMDSMI_STATUS_SUCCESS) {
       if (board_info->product_name[0] == '0' && board_info->product_name[1] == 'x') {
@@ -1526,8 +1540,9 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
   LOG_INFO(ss);
 
   if (board_info->product_serial[0] == '\0') {
-    status = rsmi_wrapper(rsmi_dev_serial_number_get, processor_handle, 0,
-                          board_info->product_serial, AMDSMI_MAX_STRING_LENGTH);
+    status =
+        rsmi_wrapper(rsmi_dev_serial_number_get, processor_handle, 0U, board_info->product_serial,
+                     static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
     if (status != AMDSMI_STATUS_SUCCESS) {
       memset(board_info->product_serial, 0,
              AMDSMI_MAX_STRING_LENGTH * sizeof(board_info->product_serial[0]));
@@ -1538,8 +1553,8 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
   }
 
   if (board_info->product_name[0] == '\0') {
-    status = rsmi_wrapper(rsmi_dev_name_get, processor_handle, 0, board_info->product_name,
-                          AMDSMI_MAX_STRING_LENGTH);
+    status = rsmi_wrapper(rsmi_dev_name_get, processor_handle, 0U, board_info->product_name,
+                          static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
     // Check if the value is in hex format
     if (status == AMDSMI_STATUS_SUCCESS) {
       if (board_info->product_name[0] == '0' && board_info->product_name[1] == 'x') {
@@ -1557,8 +1572,9 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
   }
 
   if (board_info->manufacturer_name[0] == '\0') {
-    status = rsmi_wrapper(rsmi_dev_vendor_name_get, processor_handle, 0,
-                          board_info->manufacturer_name, AMDSMI_MAX_STRING_LENGTH);
+    status =
+        rsmi_wrapper(rsmi_dev_vendor_name_get, processor_handle, 0U, board_info->manufacturer_name,
+                     static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
     if (status != AMDSMI_STATUS_SUCCESS) {
       memset(board_info->manufacturer_name, 0,
              AMDSMI_MAX_STRING_LENGTH * sizeof(board_info->manufacturer_name[0]));
@@ -1822,7 +1838,7 @@ static void system_wait(int milli_seconds) {
   ss << __PRETTY_FUNCTION__ << " | "
      << "** Waiting for " << std::dec << waitTime << " us (" << waitTime / 1000 << " seconds) **";
   LOG_DEBUG(ss);
-  usleep(waitTime);
+  usleep(static_cast<unsigned int>(waitTime));
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   ss << __PRETTY_FUNCTION__ << " | "
@@ -1895,7 +1911,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
   const auto p1 = std::chrono::system_clock::now();
   auto current_time =
       std::chrono::duration_cast<std::chrono::microseconds>(p1.time_since_epoch()).count();
-  violation_status->reference_timestamp = current_time;
+  violation_status->reference_timestamp = static_cast<uint64_t>(current_time);
 
   amd::smi::AMDSmiProcessor* device = nullptr;
   amdsmi_status_t ret =
@@ -2431,20 +2447,6 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   uint16_t device_id = 0;
   uint16_t subsystem_id = 0;
   char temp_market_name[AMDSMI_MAX_STRING_LENGTH] = {0};
-  smi_clear_char_and_reinitialize(info->market_name, AMDSMI_MAX_STRING_LENGTH, temp_market_name);
-  info->market_name[0] = '\0';
-  info->vendor_id = std::numeric_limits<uint32_t>::max();
-  info->vendor_name[0] = '\0';
-  info->subvendor_id = std::numeric_limits<uint32_t>::max();
-  info->device_id = std::numeric_limits<uint64_t>::max();
-  info->rev_id = std::numeric_limits<uint16_t>::max();
-  info->asic_serial[0] = '\0';
-  info->oam_id = std::numeric_limits<uint32_t>::max();
-  info->num_of_compute_units = std::numeric_limits<uint32_t>::max();
-  info->target_graphics_version = std::numeric_limits<uint64_t>::max();
-  info->subsystem_id = std::numeric_limits<uint32_t>::max();
-  info->flags = 0;
-  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
 
   std::ostringstream ss;
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
@@ -2475,13 +2477,12 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
     }
   }
 
+  init_asic_info_defaults(info);
+
   /**
    * For other sysfs related information, get from rocm-smi
    */
 
-  // Ensure asic_serial defaults to an unsupported value
-  std::string max_uint64_str = "ffffffffffffffff";
-  smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, max_uint64_str);
   uint64_t asic_serial_id = 0;
   amdsmi_status_t status =
       rsmi_wrapper(rsmi_dev_asic_serial_get, processor_handle, 0, &asic_serial_id);
@@ -2506,8 +2507,8 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   if (status == AMDSMI_STATUS_SUCCESS) info->subsystem_id = subsystem_id;
 
   char temp_vendor_name[AMDSMI_MAX_STRING_LENGTH] = {0};
-  status = rsmi_wrapper(rsmi_dev_pcie_vendor_name_get, processor_handle, 0, temp_vendor_name,
-                        AMDSMI_MAX_STRING_LENGTH);
+  status = rsmi_wrapper(rsmi_dev_pcie_vendor_name_get, processor_handle, 0U, temp_vendor_name,
+                        static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
   if (status == AMDSMI_STATUS_SUCCESS) {
     smi_clear_char_and_reinitialize(info->vendor_name, AMDSMI_MAX_STRING_LENGTH, temp_vendor_name);
   }
@@ -2544,7 +2545,6 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   if (status == AMDSMI_STATUS_SUCCESS) {
     info->device_id = static_cast<uint64_t>(device_id);
   }
-  info->rev_id = dev_info.pci_rev;
   status = rsmi_wrapper(rsmi_dev_vendor_id_get, processor_handle, 0, &vendor_id);
   if (status == AMDSMI_STATUS_SUCCESS) {
     info->vendor_id = vendor_id;
@@ -2558,8 +2558,8 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
 
   status = smi_amdgpu_get_market_name_from_dev_id(gpu_device, info->market_name);
   if (status != AMDSMI_STATUS_SUCCESS) {
-    status = rsmi_wrapper(rsmi_dev_brand_get, processor_handle, 0, temp_market_name,
-                          AMDSMI_MAX_STRING_LENGTH);
+    status = rsmi_wrapper(rsmi_dev_brand_get, processor_handle, 0U, temp_market_name,
+                          static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
     if (status == AMDSMI_STATUS_SUCCESS) {
       ss << __PRETTY_FUNCTION__
          << " | rsmi_dev_brand_get() returned: " << smi_amdgpu_get_status_string(status, false)
@@ -2636,6 +2636,8 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   // TODO(cpoag): check if this is correct, might be able to go through KGD/KFD
   info->rev_id = static_cast<uint32_t>(dev_info.pci_rev);
   info->flags = static_cast<uint64_t>(dev_info.ids_flags);
+  info->chip_rev_id = static_cast<uint32_t>(dev_info.chip_rev);
+  info->external_rev_id = static_cast<uint32_t>(dev_info.external_rev);
   libdrm.unload();
 
   ss << __PRETTY_FUNCTION__ << " | info->market_name: " << info->market_name << "\n"
@@ -2652,6 +2654,12 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
      << " | info->rev_id (dec): " << std::dec << info->rev_id << "\n"
      << " | info->rev_id (hex): 0x" << std::hex << std::setw(4) << std::setfill('0') << info->rev_id
      << "\n"
+     << " | info->chip_rev_id (dec): " << std::dec << info->chip_rev_id << "\n"
+     << " | info->chip_rev_id (hex): 0x" << std::hex << std::setw(4) << std::setfill('0')
+     << info->chip_rev_id << "\n"
+     << " | info->external_rev_id (dec): " << std::dec << info->external_rev_id << "\n"
+     << " | info->external_rev_id (hex): 0x" << std::hex << std::setw(4) << std::setfill('0')
+     << info->external_rev_id << "\n"
      << " | info->asic_serial: 0x" << info->asic_serial << "\n"
      << " | info->oam_id (dec): " << std::dec << info->oam_id << "\n"
      << " | info->oam_id (hex): 0x" << std::hex << std::setw(4) << std::setfill('0') << info->oam_id
@@ -2835,7 +2843,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handl
   // (e.g. amdsmi_get_gpu_vram_info) still get the vendor when DRM is unavailable.
   char brand[256] = {'\0'};
   amdsmi_status_t vendor_status =
-      rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0, brand, 255);
+      rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0U, brand, 255U);
   if (vendor_status == AMDSMI_STATUS_SUCCESS) {
     for (auto& x : brand) x = static_cast<char>(toupper(x));
     snprintf(info->vram_vendor, AMDSMI_MAX_STRING_LENGTH, "%s", brand);
@@ -2940,7 +2948,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handl
      << "; info->vram_size (MB): " << std::dec << info->vram_size << "\n"
      << "; info->vram_vendor: " << std::dec << info->vram_vendor << "\n"
      << "; info->vram_bit_width: " << std::dec
-     << (info->vram_bit_width == std::numeric_limits<uint64_t>::max()
+     << (info->vram_bit_width == std::numeric_limits<uint32_t>::max()
              ? "N/A"
              : std::to_string(info->vram_bit_width))
      << "\n"
@@ -4300,7 +4308,7 @@ amdsmi_status_t amdsmi_get_power_cap_info(amdsmi_processor_handle processor_hand
       rsmi_wrapper(rsmi_dev_power_cap_get, processor_handle, 0, sensor_ind, &(info->power_cap));
 
   status = smi_amdgpu_get_ranges(gpudevice, AMDSMI_CLK_TYPE_GFX, NULL, NULL, &dpm, NULL);
-  info->dpm_cap = dpm;
+  info->dpm_cap = static_cast<uint64_t>(dpm);
 
   // Get other information from rocm-smi
   status = rsmi_wrapper(rsmi_dev_power_cap_default_get, processor_handle, 0, sensor_ind,
@@ -5024,8 +5032,8 @@ amdsmi_status_t amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_hand
   } else {
     // get sysfs vbios_version string which is known as the part number
     char vbios_version[AMDSMI_MAX_STRING_LENGTH];
-    status = rsmi_wrapper(rsmi_dev_vbios_version_get, processor_handle, 0, vbios_version,
-                          AMDSMI_MAX_STRING_LENGTH);
+    status = rsmi_wrapper(rsmi_dev_vbios_version_get, processor_handle, 0U, vbios_version,
+                          static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
 
     // fail if cannot get vbios version from sysfs
     if (status == AMDSMI_STATUS_SUCCESS) {
@@ -5037,8 +5045,8 @@ amdsmi_status_t amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_hand
   // get vbios build string from rocm_smi which translates to ifwi version
   char vbios_build_number[AMDSMI_MAX_STRING_LENGTH];
   amdsmi_status_t build_status;
-  build_status = rsmi_wrapper(rsmi_dev_vbios_build_number_get, processor_handle, 0,
-                              vbios_build_number, AMDSMI_MAX_STRING_LENGTH);
+  build_status = rsmi_wrapper(rsmi_dev_vbios_build_number_get, processor_handle, 0U,
+                              vbios_build_number, static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
 
   // Continue if sysfs doesn't exist
   if (build_status == AMDSMI_STATUS_SUCCESS) {
@@ -5143,8 +5151,8 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  info->max_clk = max_freq;
-  info->min_clk = min_freq;
+  info->max_clk = static_cast<uint32_t>(max_freq);
+  info->min_clk = static_cast<uint32_t>(min_freq);
   info->clk_deep_sleep = static_cast<uint8_t>(sleep_state_freq);
 
   switch (clk_type) {
@@ -5408,7 +5416,7 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
   uint32_t i = 0;
   for (int afid : cper_decode(cper)) {
     if (i < *num_afids) {
-      afids[i] = afid;
+      afids[i] = static_cast<uint64_t>(afid);
     }
     ++i;
   }
@@ -6400,8 +6408,8 @@ amdsmi_status_t amdsmi_read_supported_ptl_formats(amdsmi_processor_handle proces
   std::string line;
   {
     char buf[AMDSMI_MAX_STRING_LENGTH] = {0};
-    amdsmi_status_t st = rsmi_wrapper(rsmi_read_supported_ptl_formats, processor_handle, 0, buf,
-                                      AMDSMI_MAX_STRING_LENGTH);
+    amdsmi_status_t st = rsmi_wrapper(rsmi_read_supported_ptl_formats, processor_handle, 0U, buf,
+                                      static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
 
     if (st != AMDSMI_STATUS_SUCCESS) {
       return st;
@@ -6448,7 +6456,8 @@ amdsmi_status_t amdsmi_get_gpu_ptl_formats(amdsmi_processor_handle processor_han
   std::string line;
   {
     char buf[AMDSMI_MAX_STRING_LENGTH] = {0};
-    st = rsmi_wrapper(rsmi_get_gpu_ptl_formats, processor_handle, 0, buf, AMDSMI_MAX_STRING_LENGTH);
+    st = rsmi_wrapper(rsmi_get_gpu_ptl_formats, processor_handle, 0U, buf,
+                      static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
     if (st != AMDSMI_STATUS_SUCCESS) {
       return st;
     }
@@ -7601,7 +7610,7 @@ amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_hand
 
 amdsmi_status_t amdsmi_get_cpu_cores_per_socket(uint32_t sock_count,
                                                 amdsmi_sock_info_t* sock_info) {
-  (void)(sock_count);  // unused
+  (void)(sock_count);
   amdsmi_status_t status;
   uint32_t core_num;
   status = amd::smi::AMDSmiSystem::getInstance().get_sys_cpu_cores_per_socket(&core_num);

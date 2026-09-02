@@ -444,6 +444,8 @@ add_executable(
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
     transcendental_test.cpp
+    amdgpu_elf_test_support.cpp
+    analysis/free_registers_test.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
     patch/log_buffer_test.cpp
@@ -468,7 +470,6 @@ add_executable(
     dbt/virtual_lds_metadata_test.cpp
     dbt/encoding_translator_test.cpp
     dbt/legalization_table_test.cpp
-    dbt/support/translate_test_support.cpp
     dbt/translate_gfx1250_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
@@ -487,6 +488,7 @@ add_executable(
     scoped_temp_test.cpp
     wave_debug_test.cpp
     decode_execute_benchmark.cpp
+    util_observable_shared_mutex_test.cpp
     util_result_test.cpp
     util_unique_handle_test.cpp
     util_simd_test.cpp
@@ -934,18 +936,25 @@ target_link_libraries(
     PRIVATE rocjitsu_translate_cli GTest::gtest
 )
 rj_configure_target(rj_dbt_translate_smoke_test TEST)
-add_dependencies(rj_dbt_translate_smoke_test rj_dbt_translate)
+add_dependencies(
+    rj_dbt_translate_smoke_test
+    rj_dbt_translate
+    rj_decode_benchmark
+)
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(rj_dbt_translate_smoke_test)
     rj_install_test_target(rj_dbt_translate)
+    rj_install_test_target(rj_decode_benchmark)
 endif()
 rj_add_test(
     NAME "RjDbtTranslate.Smoke"
     COMMAND rj_dbt_translate_smoke_test $<TARGET_FILE:rj_dbt_translate>
+            $<TARGET_FILE:rj_decode_benchmark>
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     INSTALL_COMMAND
         "bin/rj_dbt_translate_smoke_test"
         "bin/rj_dbt_translate"
+        "bin/rj_decode_benchmark"
 )
 
 # --- Scaling test (standalone executable) ---
