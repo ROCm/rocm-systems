@@ -63,6 +63,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     std::optional<uint16_t> current_byte_provenance_vgpr = std::nullopt,
     std::optional<uint16_t> relative_cell_index_vgpr = std::nullopt,
     uint32_t relative_cell_index = 0u) {
+  InstructionSequence sequence(words);
   if (!plan.scalar_state.exec_save_sgpr || layout.diagnostic_capacity == 0)
     return true;
   if (shadow_granule_bytes != 1u && shadow_granule_bytes != consan_moi_shadow_cell::granule_bytes)
@@ -118,16 +119,12 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     return true;
   };
 
-  const uint32_t mov_zero = build_v_mov_b32_e32(tmp_vgpr, scalar_positive_inline_u32(0), arch);
-  const auto prior_nonempty =
-      instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(old_value_vgpr), tmp_vgpr, arch);
-  const auto narrow_nonempty = instrumentation::build_s_and_saveexec_b64(
-      *plan.scalar_state.exec_save_sgpr, kAmdGpuVccLo, arch);
-  if (!prior_nonempty || !narrow_nonempty)
+  if (!sequence.emit_all(build_v_mov_b32_e32(tmp_vgpr, scalar_positive_inline_u32(0), arch),
+                         instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(old_value_vgpr),
+                                                                 tmp_vgpr, arch),
+                         instrumentation::build_s_and_saveexec_b64(
+                             *plan.scalar_state.exec_save_sgpr, kAmdGpuVccLo, arch)))
     return false;
-  words.push_back(mov_zero);
-  words.push_back(*prior_nonempty);
-  words.push_back(*narrow_nonempty);
   if (!skip_diagnostic_if_empty())
     return false;
 
@@ -145,39 +142,31 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
                                                 address_lo_vgpr, arch)) {
       return false;
     }
-    const auto same_workgroup = instrumentation::build_v_cmp_eq_u32_vcc(
-        vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
-    const auto narrow_same_workgroup =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo, arch);
-    if (!same_workgroup || !narrow_same_workgroup)
+    if (!sequence.emit_all(instrumentation::build_v_cmp_eq_u32_vcc(
+                               vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch),
+                           instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr,
+                                                                     kAmdGpuVccLo, arch)))
       return false;
-    words.push_back(*same_workgroup);
-    words.push_back(*narrow_same_workgroup);
     if (!skip_diagnostic_if_empty())
       return false;
   }
 
   if (prior_byte_provenance_vgpr) {
-    const auto prior_byte_mask = instrumentation::build_v_and_b32_literal(
-        tmp_vgpr, consan_moi_exact_byte_cell::byte_mask_mask, *prior_byte_provenance_vgpr, arch);
-    const auto current_byte_mask = instrumentation::build_v_and_b32_literal(
-        current_field_vgpr, consan_moi_exact_byte_cell::byte_mask_mask,
-        *current_byte_provenance_vgpr, arch);
-    const auto overlapping_bytes = instrumentation::build_v_and_b32(
-        current_field_vgpr, vector_source_vgpr(tmp_vgpr), current_field_vgpr, arch);
-    const auto overlap_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
-        scalar_positive_inline_u32(0u), current_field_vgpr, arch);
-    const auto narrow_overlap =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo, arch);
-    if (!prior_byte_mask || !current_byte_mask || !overlapping_bytes || !overlap_nonzero ||
-        !narrow_overlap) {
+    if (!sequence.emit_all(
+            instrumentation::build_v_and_b32_literal(tmp_vgpr,
+                                                     consan_moi_exact_byte_cell::byte_mask_mask,
+                                                     *prior_byte_provenance_vgpr, arch),
+            instrumentation::build_v_and_b32_literal(current_field_vgpr,
+                                                     consan_moi_exact_byte_cell::byte_mask_mask,
+                                                     *current_byte_provenance_vgpr, arch),
+            instrumentation::build_v_and_b32(current_field_vgpr, vector_source_vgpr(tmp_vgpr),
+                                             current_field_vgpr, arch),
+            instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u),
+                                                    current_field_vgpr, arch),
+            instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo,
+                                                      arch))) {
       return false;
     }
-    words.insert(words.end(), prior_byte_mask->begin(), prior_byte_mask->end());
-    words.insert(words.end(), current_byte_mask->begin(), current_byte_mask->end());
-    words.push_back(*overlapping_bytes);
-    words.push_back(*overlap_nonzero);
-    words.push_back(*narrow_overlap);
     if (!skip_diagnostic_if_empty())
       return false;
   }
@@ -188,18 +177,15 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // different physical lane still represents a distinct participant.
   const auto current_kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
   if (current_kind != ConSanMoiShadowAccessKind::Write) {
-    const auto prior_kind = instrumentation::build_v_and_b32_literal(
-        tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask), old_value_vgpr,
-        arch);
-    const auto kind_ne = instrumentation::build_v_cmp_ne_u32_vcc(
-        scalar_positive_inline_u32(static_cast<uint32_t>(current_kind)), tmp_vgpr, arch);
-    const auto narrow_kind_conflict =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo, arch);
-    if (!prior_kind || !kind_ne || !narrow_kind_conflict)
+    if (!sequence.emit_all(
+            instrumentation::build_v_and_b32_literal(
+                tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask),
+                old_value_vgpr, arch),
+            instrumentation::build_v_cmp_ne_u32_vcc(
+                scalar_positive_inline_u32(static_cast<uint32_t>(current_kind)), tmp_vgpr, arch),
+            instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo,
+                                                      arch)))
       return false;
-    words.insert(words.end(), prior_kind->begin(), prior_kind->end());
-    words.push_back(*kind_ne);
-    words.push_back(*narrow_kind_conflict);
     if (!skip_diagnostic_if_empty())
       return false;
   }
@@ -212,79 +198,51 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
                                          consan_moi_exact_shadow::max_owner, arch)) {
     return false;
   }
-  const auto owner_ne = instrumentation::build_v_cmp_ne_u32_vcc(
-      vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
-  if (!owner_ne)
-    return false;
   if (prior_byte_provenance_vgpr) {
     const uint16_t candidate_exec = static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u);
     const uint16_t different_owner_exec =
         static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u);
     const uint16_t predicate_exec = static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 6u);
-    const auto save_candidates =
-        instrumentation::build_s_mov_b64(candidate_exec, kAmdGpuExecLo, arch);
-    const auto narrow_different_owner =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch);
-    const auto save_different_owner =
-        instrumentation::build_s_mov_b64(different_owner_exec, kAmdGpuExecLo, arch);
-    const auto restore_candidates =
-        instrumentation::build_s_mov_b64(kAmdGpuExecLo, candidate_exec, arch);
-    const auto owner_eq = instrumentation::build_v_cmp_eq_u32_vcc(
-        vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
-    const auto narrow_same_owner =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch);
-    const auto prior_instruction = instrumentation::build_v_lshrrev_b32(
-        tmp_vgpr,
-        scalar_positive_inline_u32(consan_moi_exact_shadow::instruction_offset_shift - 32u),
-        old_value_hi_vgpr, arch);
-    const auto current_instruction = instrumentation::build_v_mov_b32_literal(
-        current_field_vgpr, static_cast<uint32_t>(candidate.anchor()), arch);
-    const auto same_instruction = instrumentation::build_v_cmp_eq_u32_vcc(
-        vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
-    const auto narrow_same_instruction =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch);
-    const auto prior_lane = instrumentation::build_v_lshrrev_b32(
-        tmp_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
-        *prior_byte_provenance_vgpr, arch);
-    const auto current_lane = instrumentation::build_v_lshrrev_b32(
-        current_field_vgpr,
-        scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
-        *current_byte_provenance_vgpr, arch);
-    const auto different_lane = instrumentation::build_v_cmp_ne_u32_vcc(
-        vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
-    const auto narrow_different_lane =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch);
-    const auto union_conflicts =
-        instrumentation::build_s_xor_b64(kAmdGpuExecLo, different_owner_exec, kAmdGpuExecLo, arch);
-    if (!save_candidates || !narrow_different_owner || !save_different_owner ||
-        !restore_candidates || !owner_eq || !narrow_same_owner || !prior_instruction ||
-        !current_instruction || !same_instruction || !narrow_same_instruction || !prior_lane ||
-        !current_lane || !different_lane || !narrow_different_lane || !union_conflicts) {
+    if (!sequence.emit_all(
+            instrumentation::build_s_mov_b64(candidate_exec, kAmdGpuExecLo, arch),
+            instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(current_field_vgpr),
+                                                    tmp_vgpr, arch),
+            instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch),
+            instrumentation::build_s_mov_b64(different_owner_exec, kAmdGpuExecLo, arch),
+            instrumentation::build_s_mov_b64(kAmdGpuExecLo, candidate_exec, arch),
+            instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(current_field_vgpr),
+                                                    tmp_vgpr, arch),
+            instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch),
+            instrumentation::build_v_lshrrev_b32(
+                tmp_vgpr,
+                scalar_positive_inline_u32(consan_moi_exact_shadow::instruction_offset_shift - 32u),
+                old_value_hi_vgpr, arch),
+            instrumentation::build_v_mov_b32_literal(
+                current_field_vgpr, static_cast<uint32_t>(candidate.anchor()), arch),
+            instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(current_field_vgpr),
+                                                    tmp_vgpr, arch),
+            instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch),
+            instrumentation::build_v_lshrrev_b32(
+                tmp_vgpr,
+                scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
+                *prior_byte_provenance_vgpr, arch),
+            instrumentation::build_v_lshrrev_b32(
+                current_field_vgpr,
+                scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
+                *current_byte_provenance_vgpr, arch),
+            instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(current_field_vgpr),
+                                                    tmp_vgpr, arch),
+            instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch),
+            instrumentation::build_s_xor_b64(kAmdGpuExecLo, different_owner_exec, kAmdGpuExecLo,
+                                             arch))) {
       return false;
     }
-    words.push_back(*save_candidates);
-    words.push_back(*owner_ne);
-    words.push_back(*narrow_different_owner);
-    words.push_back(*save_different_owner);
-    words.push_back(*restore_candidates);
-    words.push_back(*owner_eq);
-    words.push_back(*narrow_same_owner);
-    words.push_back(*prior_instruction);
-    words.insert(words.end(), current_instruction->begin(), current_instruction->end());
-    words.push_back(*same_instruction);
-    words.push_back(*narrow_same_instruction);
-    words.push_back(*prior_lane);
-    words.push_back(*current_lane);
-    words.push_back(*different_lane);
-    words.push_back(*narrow_different_lane);
-    words.push_back(*union_conflicts);
   } else {
-    const auto narrow_conflict =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo, arch);
-    if (!narrow_conflict)
+    if (!sequence.emit_all(instrumentation::build_v_cmp_ne_u32_vcc(
+                               vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch),
+                           instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr,
+                                                                     kAmdGpuVccLo, arch)))
       return false;
-    words.push_back(*owner_ne);
-    words.push_back(*narrow_conflict);
   }
   if (!skip_diagnostic_if_empty())
     return false;
@@ -300,14 +258,11 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
                                            consan_moi_exact_shadow::max_epoch, arch)) {
       return false;
     }
-    const auto epoch_eq = instrumentation::build_v_cmp_eq_u32_vcc(
-        vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
-    const auto narrow_same_epoch =
-        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kAmdGpuVccLo, arch);
-    if (!epoch_eq || !narrow_same_epoch)
+    if (!sequence.emit_all(instrumentation::build_v_cmp_eq_u32_vcc(
+                               vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch),
+                           instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr,
+                                                                     kAmdGpuVccLo, arch)))
       return false;
-    words.push_back(*epoch_eq);
-    words.push_back(*narrow_same_epoch);
     if (!skip_diagnostic_if_empty())
       return false;
   }
@@ -368,22 +323,15 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
         return false;
 
       const auto narrow = [&]() {
-        const auto instruction =
-            instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch);
-        if (!instruction)
-          return false;
-        words.push_back(*instruction);
-        return true;
+        return sequence.emit(
+            instrumentation::build_s_and_saveexec_b64(predicate_exec, kAmdGpuVccLo, arch));
       };
       const auto require_equal = [&](size_t offset, uint16_t expected) {
         if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch))
           return false;
-        const auto equal =
-            instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), tmp_vgpr, arch);
-        if (!equal)
-          return false;
-        words.push_back(*equal);
-        return narrow();
+        return sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected),
+                                                                     tmp_vgpr, arch)) &&
+               narrow();
       };
       const auto require_dispatch_equal = [&](size_t offset, bool high_word) {
         if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch) ||
@@ -396,12 +344,9 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
       const auto require_zero = [&](size_t offset) {
         if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch))
           return false;
-        const auto zero =
-            instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
-        if (!zero)
-          return false;
-        words.push_back(*zero);
-        return narrow();
+        return sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
+                                                                     tmp_vgpr, arch)) &&
+               narrow();
       };
 
       // The acquiring atomic can populate this direct-mapped slot immediately
@@ -411,22 +356,14 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
       // slot and miss the completed token publication.
       if (!append_atomic_load_u32(words, address_lo_vgpr, token_version, arch))
         return false;
-      const auto token_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
-          scalar_positive_inline_u32(0), token_version, arch);
-      const auto token_parity =
-          instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, token_version, arch);
-      if (!token_nonzero || !token_parity)
-        return false;
-      words.push_back(*token_nonzero);
-      if (!narrow())
-        return false;
-      words.insert(words.end(), token_parity->begin(), token_parity->end());
-      const auto token_even =
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
-      if (!token_even)
-        return false;
-      words.push_back(*token_even);
-      if (!narrow() ||
+      if (!sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
+                                                                 token_version, arch)) ||
+          !narrow() ||
+          !sequence.emit(
+              instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, token_version, arch)) ||
+          !sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
+                                                                 tmp_vgpr, arch)) ||
+          !narrow() ||
           !require_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key),
                          workgroup_key) ||
           !require_equal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
@@ -466,108 +403,63 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
           !require_zero(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version)) ||
           !append_atomic_load_u32(words, address_lo_vgpr, static_cast<uint16_t>(base + 14u), arch))
         return false;
-      const auto source_address_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
-          scalar_positive_inline_u32(0), source_address, arch);
-      const auto source_version_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
-          scalar_positive_inline_u32(0), source_version, arch);
-      const auto source_version_parity =
-          instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, source_version, arch);
-      if (!source_address_nonzero || !source_version_nonzero || !source_version_parity)
-        return false;
-      words.push_back(*source_address_nonzero);
-      if (!narrow())
-        return false;
-      words.push_back(*source_version_nonzero);
-      if (!narrow())
-        return false;
-      words.insert(words.end(), source_version_parity->begin(), source_version_parity->end());
-      const auto source_version_even =
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
-      if (!source_version_even)
-        return false;
-      words.push_back(*source_version_even);
-      if (!narrow())
-        return false;
-      const auto token_unchanged = instrumentation::build_v_cmp_eq_u32_vcc(
-          vector_source_vgpr(token_version), static_cast<uint16_t>(base + 14u), arch);
-      if (!token_unchanged)
-        return false;
-      words.push_back(*token_unchanged);
-      if (!narrow() ||
+      if (!sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
+                                                                 source_address, arch)) ||
+          !narrow() ||
+          !sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
+                                                                 source_version, arch)) ||
+          !narrow() ||
+          !sequence.emit(
+              instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u, source_version, arch)) ||
+          !sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
+                                                                 tmp_vgpr, arch)) ||
+          !narrow() ||
+          !sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(
+              vector_source_vgpr(token_version), static_cast<uint16_t>(base + 14u), arch)) ||
+          !narrow() ||
           !append_extract_exact_shadow_field(words, source_version, consumer_packed_value,
                                              consan_moi_exact_shadow::epoch_shift,
                                              consan_moi_exact_shadow::max_epoch, arch))
         return false;
-      const auto max_epoch = instrumentation::build_v_mov_b32_literal(
-          tmp_vgpr, consan_moi_exact_shadow::max_epoch, arch);
-      const auto consumer_below_max = instrumentation::build_v_cmp_ne_u32_vcc(
-          vector_source_vgpr(source_version), tmp_vgpr, arch);
-      if (!max_epoch || !consumer_below_max)
+      if (!sequence.emit_all(instrumentation::build_v_mov_b32_literal(
+                                 tmp_vgpr, consan_moi_exact_shadow::max_epoch, arch),
+                             instrumentation::build_v_cmp_ne_u32_vcc(
+                                 vector_source_vgpr(source_version), tmp_vgpr, arch)) ||
+          !narrow() ||
+          !sequence.emit_all(
+              instrumentation::build_v_add_u32(source_version, scalar_positive_inline_u32(1),
+                                               source_version, arch),
+              instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(token_hash),
+                                                      source_version, arch),
+              instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch)))
         return false;
-      words.insert(words.end(), max_epoch->begin(), max_epoch->end());
-      words.push_back(*consumer_below_max);
-      if (!narrow())
-        return false;
-      const auto add_consumer_one = instrumentation::build_v_add_u32(
-          source_version, scalar_positive_inline_u32(1), source_version, arch);
-      if (!add_consumer_one)
-        return false;
-      words.insert(words.end(), add_consumer_one->begin(), add_consumer_one->end());
-      const auto token_too_new = instrumentation::build_v_cmp_gt_u32_vcc(
-          vector_source_vgpr(token_hash), source_version, arch);
-      if (!token_too_new)
-        return false;
-      words.push_back(*token_too_new);
-      const auto remove_token_too_new =
-          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch);
-      if (!remove_token_too_new)
-        return false;
-      words.push_back(*remove_token_too_new);
       if (!append_extract_exact_shadow_field(words, token_hash, producer_packed_value,
                                              consan_moi_exact_shadow::epoch_shift,
                                              consan_moi_exact_shadow::max_epoch, arch))
         return false;
-      const auto producer_max_epoch = instrumentation::build_v_mov_b32_literal(
-          tmp_vgpr, consan_moi_exact_shadow::max_epoch, arch);
-      const auto producer_below_max =
-          instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(token_hash), tmp_vgpr, arch);
-      if (!producer_max_epoch || !producer_below_max)
+      if (!sequence.emit_all(instrumentation::build_v_mov_b32_literal(
+                                 tmp_vgpr, consan_moi_exact_shadow::max_epoch, arch),
+                             instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(token_hash),
+                                                                     tmp_vgpr, arch)) ||
+          !narrow() ||
+          !sequence.emit_all(
+              instrumentation::build_v_add_u32(token_hash, scalar_positive_inline_u32(1),
+                                               token_hash, arch),
+              instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(token_hash), token_epoch,
+                                                      arch),
+              instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch)))
         return false;
-      words.insert(words.end(), producer_max_epoch->begin(), producer_max_epoch->end());
-      words.push_back(*producer_below_max);
-      if (!narrow())
-        return false;
-      const auto add_producer_one = instrumentation::build_v_add_u32(
-          token_hash, scalar_positive_inline_u32(1), token_hash, arch);
-      if (!add_producer_one)
-        return false;
-      words.insert(words.end(), add_producer_one->begin(), add_producer_one->end());
-      const auto token_insufficient = instrumentation::build_v_cmp_gt_u32_vcc(
-          vector_source_vgpr(token_hash), token_epoch, arch);
-      if (!token_insufficient)
-        return false;
-      words.push_back(*token_insufficient);
-      const auto remove_insufficient =
-          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch);
-      if (!remove_insufficient)
-        return false;
-      words.push_back(*remove_insufficient);
 
       // Direct and inherited tokens are committed only after a stable source
       // release has been acquired and the guest RMW has completed. The token
       // is therefore the durable causal fact. Release-sequence tokens carry
       // ancestry between releases and never authorize an ordinary access.
-      const auto access_authorized = instrumentation::build_v_cmp_gt_u32_vcc(
-          scalar_positive_inline_u32(
-              static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence)),
-          token_kind, arch);
-      const auto remove_ordered =
-          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, conflict_exec, kAmdGpuVccLo, arch);
-      if (!access_authorized || !remove_ordered)
-        return false;
-      words.push_back(*access_authorized);
-      words.push_back(*remove_ordered);
-      return true;
+      return sequence.emit_all(
+          instrumentation::build_v_cmp_gt_u32_vcc(
+              scalar_positive_inline_u32(
+                  static_cast<uint32_t>(ConSanMoiInlineTokenEvidenceKind::ReleaseSequence)),
+              token_kind, arch),
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, conflict_exec, kAmdGpuVccLo, arch));
     };
 
     // A conflicting pair is ordered when either access happens-before the
@@ -601,28 +493,20 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint16_t cdna_slot_vgpr = static_cast<uint16_t>(diagnostic_tuple_candidate & ~1u);
   const uint16_t slot_vgpr =
       consan_uses_gfx9_cdna_encoding(arch) ? cdna_slot_vgpr : diagnostic_tuple_candidate;
-  const auto save_conflict_exec = instrumentation::build_s_mov_b64(
-      static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u), kAmdGpuExecLo, arch);
-  const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
-      tmp_vgpr, static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u),
-      scalar_positive_inline_u32(0), arch);
-  const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
-      tmp_vgpr, static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 3u),
-      vector_source_vgpr(tmp_vgpr), arch);
-  const auto first_active_lane =
-      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
-  const auto narrow_representative = instrumentation::build_s_and_saveexec_b64(
-      static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch);
-  const auto saved_exec_wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
-  if (!save_conflict_exec || !saved_exec_wait || !mbcnt_lo || !mbcnt_hi || !first_active_lane ||
-      !narrow_representative)
+  if (!sequence.emit_all(
+          instrumentation::build_s_mov_b64(
+              static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u), kAmdGpuExecLo, arch),
+          instrumentation::build_salu_to_valu_dependency_wait(arch),
+          instrumentation::build_v_mbcnt_lo_u32_b32(
+              tmp_vgpr, static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u),
+              scalar_positive_inline_u32(0), arch),
+          instrumentation::build_v_mbcnt_hi_u32_b32(
+              tmp_vgpr, static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 3u),
+              vector_source_vgpr(tmp_vgpr), arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch),
+          instrumentation::build_s_and_saveexec_b64(
+              static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch)))
     return false;
-  words.push_back(*save_conflict_exec);
-  words.push_back(*saved_exec_wait);
-  words.insert(words.end(), mbcnt_lo->begin(), mbcnt_lo->end());
-  words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
-  words.push_back(*first_active_lane);
-  words.push_back(*narrow_representative);
 
   if (capture_first_diagnostic_only) {
     // A concurrency fault can make the same static conflict execute in every
@@ -631,49 +515,38 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     // returned old count is also the slot index: only the 0 -> 1 winner keeps
     // EXEC and writes slot zero.
     const uint64_t count_address = report_base + offsetof(ConSanMoiReportHeader, diagnostic_count);
-    const auto mov_address_lo = instrumentation::build_v_mov_b32_literal(
-        plan.scratch_vgpr, static_cast<uint32_t>(count_address), arch);
-    const auto mov_address_hi =
-        instrumentation::build_v_mov_b32_literal(static_cast<uint16_t>(plan.scratch_vgpr + 1u),
-                                                 static_cast<uint32_t>(count_address >> 32u), arch);
     const uint32_t mov_claimed =
         build_v_mov_b32_e32(slot_vgpr, scalar_positive_inline_u32(1), arch);
     const uint32_t mov_unclaimed = build_v_mov_b32_e32(static_cast<uint16_t>(slot_vgpr + 1u),
                                                        scalar_positive_inline_u32(0), arch);
-    const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
-        plan.scratch_vgpr, slot_vgpr, slot_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice,
-        arch);
-    const auto claim_won =
-        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), slot_vgpr, arch);
-    const auto narrow_winner = instrumentation::build_s_and_saveexec_b64(
-        static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch);
-    if (!mov_address_lo || !mov_address_hi || !claim || !claim_won || !narrow_winner)
+    if (!sequence.emit_all(instrumentation::build_v_mov_b32_literal(
+                               plan.scratch_vgpr, static_cast<uint32_t>(count_address), arch),
+                           instrumentation::build_v_mov_b32_literal(
+                               static_cast<uint16_t>(plan.scratch_vgpr + 1u),
+                               static_cast<uint32_t>(count_address >> 32u), arch),
+                           mov_claimed, mov_unclaimed,
+                           instrumentation::build_flat_atomic_cmpswap_b32(
+                               plan.scratch_vgpr, slot_vgpr, slot_vgpr, /*return_old_value=*/true,
+                               kAmdGpuScopeDevice, arch)))
       return false;
-    words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
-    words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
-    words.push_back(mov_claimed);
-    words.push_back(mov_unclaimed);
-    words.insert(words.end(), claim->begin(), claim->end());
     if (!append_moi_global_atomic_wait(words, arch))
       return false;
-    words.push_back(*claim_won);
-    words.push_back(*narrow_winner);
+    if (!sequence.emit_all(
+            instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), slot_vgpr, arch),
+            instrumentation::build_s_and_saveexec_b64(
+                static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch)))
+      return false;
   } else {
     if (!append_atomic_fetch_add_one_u32(
             words, report_base + offsetof(ConSanMoiReportHeader, diagnostic_count), slot_vgpr,
             plan.scratch_vgpr, arch))
       return false;
-    const auto mov_capacity =
-        instrumentation::build_v_mov_b32_literal(tmp_vgpr, layout.diagnostic_capacity, arch);
-    const auto slot_in_capacity =
-        instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(tmp_vgpr), slot_vgpr, arch);
-    const auto narrow_capacity = instrumentation::build_s_and_saveexec_b64(
-        static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch);
-    if (!mov_capacity || !slot_in_capacity || !narrow_capacity)
+    if (!sequence.emit_all(
+            instrumentation::build_v_mov_b32_literal(tmp_vgpr, layout.diagnostic_capacity, arch),
+            instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(tmp_vgpr), slot_vgpr, arch),
+            instrumentation::build_s_and_saveexec_b64(
+                static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch)))
       return false;
-    words.insert(words.end(), mov_capacity->begin(), mov_capacity->end());
-    words.push_back(*slot_in_capacity);
-    words.push_back(*narrow_capacity);
   }
 
   // SLOT is dead once capacity admission has selected this record. Form its
@@ -689,37 +562,25 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   }
 
   const auto store_literal = [&](size_t offset, uint32_t value) {
-    const auto store = instrumentation::build_flat_store_b32(diagnostic_address_vgpr, tmp_vgpr,
-                                                             arch, static_cast<uint32_t>(offset));
-    if (!store)
-      return false;
     if (value <= 64u) {
-      words.push_back(build_v_mov_b32_e32(tmp_vgpr, scalar_positive_inline_u32(value), arch));
-    } else {
-      const auto mov_value = instrumentation::build_v_mov_b32_literal(tmp_vgpr, value, arch);
-      if (!mov_value)
+      if (!sequence.emit(build_v_mov_b32_e32(tmp_vgpr, scalar_positive_inline_u32(value), arch)))
         return false;
-      words.insert(words.end(), mov_value->begin(), mov_value->end());
+    } else {
+      if (!sequence.emit(instrumentation::build_v_mov_b32_literal(tmp_vgpr, value, arch)))
+        return false;
     }
-    words.insert(words.end(), store->begin(), store->end());
-    return true;
+    return sequence.emit(instrumentation::build_flat_store_b32(
+        diagnostic_address_vgpr, tmp_vgpr, arch, static_cast<uint32_t>(offset)));
   };
   const auto store_vgpr = [&](size_t offset, uint16_t value_vgpr) {
-    const auto store = instrumentation::build_flat_store_b32(diagnostic_address_vgpr, value_vgpr,
-                                                             arch, static_cast<uint32_t>(offset));
-    if (!store)
-      return false;
-    words.insert(words.end(), store->begin(), store->end());
-    return true;
+    return sequence.emit(instrumentation::build_flat_store_b32(
+        diagnostic_address_vgpr, value_vgpr, arch, static_cast<uint32_t>(offset)));
   };
   const auto store_scalar = [&](size_t offset, uint16_t scalar_src) {
-    words.push_back(build_v_mov_b32_e32(tmp_vgpr, scalar_src, arch));
-    const auto store = instrumentation::build_flat_store_b32(diagnostic_address_vgpr, tmp_vgpr,
-                                                             arch, static_cast<uint32_t>(offset));
-    if (!store)
-      return false;
-    words.insert(words.end(), store->begin(), store->end());
-    return true;
+    return sequence.emit_all(build_v_mov_b32_e32(tmp_vgpr, scalar_src, arch),
+                             instrumentation::build_flat_store_b32(diagnostic_address_vgpr,
+                                                                   tmp_vgpr, arch,
+                                                                   static_cast<uint32_t>(offset)));
   };
   bool stored_generation = false;
   if (plan.track_atomics && plan.dispatch_id.sgpr) {
@@ -775,19 +636,18 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     return false;
   }
 
-  const auto prior_inst_shift = instrumentation::build_v_lshrrev_b32(
-      tmp_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::instruction_offset_shift - 32u),
-      old_value_hi_vgpr, arch);
-  const auto prior_kind = instrumentation::build_v_and_b32_literal(
-      tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask), old_value_vgpr,
-      arch);
-  if (!prior_inst_shift || !prior_kind)
+  if (!sequence.emit(instrumentation::build_v_lshrrev_b32(
+          tmp_vgpr,
+          scalar_positive_inline_u32(consan_moi_exact_shadow::instruction_offset_shift - 32u),
+          old_value_hi_vgpr, arch)))
     return false;
-  words.push_back(*prior_inst_shift);
   if (!store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_instruction_offset), tmp_vgpr)) {
     return false;
   }
-  words.insert(words.end(), prior_kind->begin(), prior_kind->end());
+  if (!sequence.emit(instrumentation::build_v_and_b32_literal(
+          tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask),
+          old_value_vgpr, arch)))
+    return false;
   if (!store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_access_kind), tmp_vgpr)) {
     return false;
   }
@@ -814,33 +674,28 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
       words.push_back(
           build_v_mov_b32_e32(current_value_vgpr, vector_source_vgpr(lds_byte_offset_vgpr), arch));
     }
-    const auto align_cell = instrumentation::build_v_and_b32_literal(
-        current_value_vgpr, ~(shadow_granule_bytes - 1u), current_value_vgpr, arch);
-    if (!align_cell)
+    if (!sequence.emit(instrumentation::build_v_and_b32_literal(
+            current_value_vgpr, ~(shadow_granule_bytes - 1u), current_value_vgpr, arch)))
       return false;
-    words.insert(words.end(), align_cell->begin(), align_cell->end());
     if (relative_cell_index_vgpr) {
       // CDNA materializes the scale literal in the supplied helper VGPR. The
       // The record address was formed once above, so SLOT is dead and can
       // materialize CDNA's scale literal without clobbering that address pair.
       const uint16_t scale_literal_vgpr = slot_vgpr;
-      const auto scale_cell = instrumentation::build_v_mul_lo_u32_literal(
-          tmp_vgpr, scale_literal_vgpr, shadow_granule_bytes, *relative_cell_index_vgpr, arch);
-      const auto add_cell = instrumentation::build_v_add_u32(
-          current_value_vgpr, vector_source_vgpr(tmp_vgpr), current_value_vgpr, arch);
-      if (!scale_cell || !add_cell)
+      if (!sequence.emit_all(
+              instrumentation::build_v_mul_lo_u32_literal(tmp_vgpr, scale_literal_vgpr,
+                                                          shadow_granule_bytes,
+                                                          *relative_cell_index_vgpr, arch),
+              instrumentation::build_v_add_u32(current_value_vgpr, vector_source_vgpr(tmp_vgpr),
+                                               current_value_vgpr, arch)))
         return false;
-      words.insert(words.end(), scale_cell->begin(), scale_cell->end());
-      words.insert(words.end(), add_cell->begin(), add_cell->end());
     } else if (relative_cell_index != 0u) {
       if (relative_cell_index > std::numeric_limits<uint32_t>::max() / shadow_granule_bytes)
         return false;
-      const auto add_cell = instrumentation::build_v_add_u32_literal(
-          current_value_vgpr, tmp_vgpr, relative_cell_index * shadow_granule_bytes,
-          current_value_vgpr, arch);
-      if (!add_cell)
+      if (!sequence.emit(instrumentation::build_v_add_u32_literal(
+              current_value_vgpr, tmp_vgpr, relative_cell_index * shadow_granule_bytes,
+              current_value_vgpr, arch)))
         return false;
-      words.insert(words.end(), add_cell->begin(), add_cell->end());
     }
 
     const auto store_exact_range = [&](uint16_t provenance_vgpr, size_t offset_field,
@@ -851,11 +706,10 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
               consan_moi_low_bit_mask(consan_moi_exact_byte_cell::byte_offset_bits), arch)) {
         return false;
       }
-      const auto add_start = instrumentation::build_v_add_u32(
-          current_field_vgpr, vector_source_vgpr(current_value_vgpr), current_field_vgpr, arch);
-      if (!add_start)
+      if (!sequence.emit(instrumentation::build_v_add_u32(current_field_vgpr,
+                                                          vector_source_vgpr(current_value_vgpr),
+                                                          current_field_vgpr, arch)))
         return false;
-      words.insert(words.end(), add_start->begin(), add_start->end());
       if (!store_vgpr(offset_field, current_field_vgpr) ||
           !append_extract_exact_shadow_field(
               words, tmp_vgpr, provenance_vgpr,
@@ -863,29 +717,24 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
               consan_moi_low_bit_mask(consan_moi_exact_byte_cell::byte_end_minus_one_bits), arch)) {
         return false;
       }
-      const auto end = instrumentation::build_v_add_u32(tmp_vgpr, scalar_positive_inline_u32(1u),
-                                                        tmp_vgpr, arch);
-      if (!end ||
+      if (!sequence.emit(instrumentation::build_v_add_u32(tmp_vgpr, scalar_positive_inline_u32(1u),
+                                                          tmp_vgpr, arch)) ||
           !append_extract_exact_shadow_field(
               words, current_field_vgpr, provenance_vgpr,
               consan_moi_exact_byte_cell::byte_offset_shift,
               consan_moi_low_bit_mask(consan_moi_exact_byte_cell::byte_offset_bits), arch)) {
         return false;
       }
-      words.insert(words.end(), end->begin(), end->end());
       // CDNA4 materializes this literal in the supplied helper VGPR. The
       // already-consumed slot index is dead while the precomputed diagnostic
       // address pair must remain intact for all following field stores.
       const uint16_t negative_start_literal_vgpr = slot_vgpr;
-      const auto negative_start = instrumentation::build_v_mul_lo_u32_literal(
-          current_field_vgpr, negative_start_literal_vgpr, std::numeric_limits<uint32_t>::max(),
-          current_field_vgpr, arch);
-      const auto count = instrumentation::build_v_add_u32(
-          tmp_vgpr, vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
-      if (!negative_start || !count)
+      if (!sequence.emit_all(instrumentation::build_v_mul_lo_u32_literal(
+                                 current_field_vgpr, negative_start_literal_vgpr,
+                                 std::numeric_limits<uint32_t>::max(), current_field_vgpr, arch),
+                             instrumentation::build_v_add_u32(
+                                 tmp_vgpr, vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch)))
         return false;
-      words.insert(words.end(), negative_start->begin(), negative_start->end());
-      words.insert(words.end(), count->begin(), count->end());
       return store_vgpr(count_field, tmp_vgpr);
     };
     if (shadow_granule_bytes == 1u) {
@@ -897,14 +746,13 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
                 arch)) {
           return false;
         }
-        const auto negative_relative_index = instrumentation::build_v_mul_lo_u32_literal(
-            tmp_vgpr, slot_vgpr, std::numeric_limits<uint32_t>::max(), current_field_vgpr, arch);
-        const auto original_start = instrumentation::build_v_add_u32(
-            current_value_vgpr, vector_source_vgpr(tmp_vgpr), current_value_vgpr, arch);
-        if (!negative_relative_index || !original_start)
+        if (!sequence.emit_all(
+                instrumentation::build_v_mul_lo_u32_literal(tmp_vgpr, slot_vgpr,
+                                                            std::numeric_limits<uint32_t>::max(),
+                                                            current_field_vgpr, arch),
+                instrumentation::build_v_add_u32(current_value_vgpr, vector_source_vgpr(tmp_vgpr),
+                                                 current_value_vgpr, arch)))
           return false;
-        words.insert(words.end(), negative_relative_index->begin(), negative_relative_index->end());
-        words.insert(words.end(), original_start->begin(), original_start->end());
         if (!store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_offset),
                         current_value_vgpr) ||
             !append_extract_exact_shadow_field(
@@ -915,11 +763,9 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
                 arch)) {
           return false;
         }
-        const auto access_byte_count = instrumentation::build_v_add_u32(
-            tmp_vgpr, scalar_positive_inline_u32(1u), tmp_vgpr, arch);
-        if (!access_byte_count)
+        if (!sequence.emit(instrumentation::build_v_add_u32(
+                tmp_vgpr, scalar_positive_inline_u32(1u), tmp_vgpr, arch)))
           return false;
-        words.insert(words.end(), access_byte_count->begin(), access_byte_count->end());
         return store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_count), tmp_vgpr);
       };
       if (!store_prior_original_range())
@@ -977,12 +823,9 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     words[branch_offset] = *branch;
   }
 
-  const auto restore_exec =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, *plan.scalar_state.exec_save_sgpr, arch);
-  if (!restore_exec)
-    return false;
-  words.push_back(*restore_exec);
-  return append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch);
+  return sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo,
+                                                        *plan.scalar_state.exec_save_sgpr, arch)) &&
+         append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch);
 }
 
 // Publish one exact slot through an odd-version reservation. EXEC on entry is
@@ -999,6 +842,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     uint16_t address_lo_vgpr, uint16_t current_low_vgpr, uint16_t old_value_vgpr,
     uint16_t publisher_exec_sgpr, uint16_t committed_exec_sgpr, bool retry_contention,
     std::vector<std::string> &errors) {
+  InstructionSequence sequence(words);
   struct FailureStage {
     std::vector<std::string> &errors;
     std::string_view stage = "preflight";
@@ -1036,28 +880,18 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint16_t tmp_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 4u);
 
   const auto narrow_vcc = [&]() -> bool {
-    const auto narrow =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
-    if (!narrow)
-      return false;
-    words.push_back(*narrow);
-    return true;
+    return sequence.emit(
+        instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch));
   };
   const auto require_equal_literal = [&](uint16_t value_vgpr, uint32_t literal) -> bool {
-    const auto compare = instrumentation::build_v_cmp_eq_u32_vcc(
-        scalar_positive_inline_u32(literal), value_vgpr, arch);
-    if (!compare)
-      return false;
-    words.push_back(*compare);
-    return narrow_vcc();
+    return sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(
+               scalar_positive_inline_u32(literal), value_vgpr, arch)) &&
+           narrow_vcc();
   };
   const auto require_not_equal_literal = [&](uint16_t value_vgpr, uint32_t literal) -> bool {
-    const auto compare = instrumentation::build_v_cmp_ne_u32_vcc(
-        scalar_positive_inline_u32(literal), value_vgpr, arch);
-    if (!compare)
-      return false;
-    words.push_back(*compare);
-    return narrow_vcc();
+    return sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(
+               scalar_positive_inline_u32(literal), value_vgpr, arch)) &&
+           narrow_vcc();
   };
   const auto restore_slot_address = [&]() {
     words.push_back(
@@ -1111,31 +945,19 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // narrowing instead of branching so a mixed wave can still publish valid
   // independent slots.
   failure.stage = "payload validation";
-  const auto same_version = instrumentation::build_v_cmp_eq_u32_vcc(
-      vector_source_vgpr(ready_version_vgpr), cas_expected_vgpr, arch);
-  const auto parity =
-      instrumentation::build_v_and_b32_literal(cas_new_vgpr, 1u, ready_version_vgpr, arch);
-  const auto max_ready = instrumentation::build_v_mov_b32_literal(
-      cas_new_vgpr, kConSanMoiInlineExactMaxReadyVersion, arch);
-  const auto below_terminal = instrumentation::build_v_cmp_ne_u32_vcc(
-      vector_source_vgpr(cas_new_vgpr), ready_version_vgpr, arch);
-  if (!same_version || !parity || !max_ready || !below_terminal)
+  if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(ready_version_vgpr),
+                                                             cas_expected_vgpr, arch)) ||
+      !narrow_vcc() ||
+      !sequence.emit(
+          instrumentation::build_v_and_b32_literal(cas_new_vgpr, 1u, ready_version_vgpr, arch)) ||
+      !require_equal_literal(cas_new_vgpr, 0) ||
+      !sequence.emit_all(instrumentation::build_v_mov_b32_literal(
+                             cas_new_vgpr, kConSanMoiInlineExactMaxReadyVersion, arch),
+                         instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(cas_new_vgpr),
+                                                                 ready_version_vgpr, arch)) ||
+      !narrow_vcc() ||
+      !sequence.emit(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch)))
     return false;
-  words.push_back(*same_version);
-  if (!narrow_vcc())
-    return false;
-  words.insert(words.end(), parity->begin(), parity->end());
-  if (!require_equal_literal(cas_new_vgpr, 0))
-    return false;
-  words.insert(words.end(), max_ready->begin(), max_ready->end());
-  words.push_back(*below_terminal);
-  if (!narrow_vcc())
-    return false;
-  const auto save_stable_exec =
-      instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch);
-  if (!save_stable_exec)
-    return false;
-  words.push_back(*save_stable_exec);
 
   // Version zero is empty only when every payload word is zero.
   if (!require_equal_literal(ready_version_vgpr, 0) || !require_equal_literal(old_value_vgpr, 0) ||
@@ -1144,14 +966,10 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
       !require_equal_literal(prior_dispatch_high_vgpr, 0) || !require_equal_literal(tmp_vgpr, 0)) {
     return false;
   }
-  const auto save_empty_exec =
-      instrumentation::build_s_mov_b64(empty_exec_sgpr, kAmdGpuExecLo, arch);
-  const auto restore_stable_exec =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch);
-  if (!save_empty_exec || !restore_stable_exec)
+  if (!sequence.emit_all(
+          instrumentation::build_s_mov_b64(empty_exec_sgpr, kAmdGpuExecLo, arch),
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch)))
     return false;
-  words.push_back(*save_empty_exec);
-  words.push_back(*restore_stable_exec);
 
   // A nonempty ready predecessor must itself be structurally valid. Owner and
   // epoch zero are legal packed values; access kind, workgroup key, dispatch,
@@ -1160,16 +978,12 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
       !require_not_equal_literal(tmp_vgpr, 0)) {
     return false;
   }
-  const auto provenance_reserved = instrumentation::build_v_and_b32_literal(
-      cas_new_vgpr, ~consan_moi_exact_byte_cell::packed_mask, tmp_vgpr, arch);
-  const auto provenance_mask = instrumentation::build_v_and_b32_literal(
-      cas_new_vgpr, consan_moi_exact_byte_cell::byte_mask_mask, tmp_vgpr, arch);
-  if (!provenance_reserved || !provenance_mask)
+  if (!sequence.emit(instrumentation::build_v_and_b32_literal(
+          cas_new_vgpr, ~consan_moi_exact_byte_cell::packed_mask, tmp_vgpr, arch)) ||
+      !require_equal_literal(cas_new_vgpr, 0) ||
+      !sequence.emit(instrumentation::build_v_and_b32_literal(
+          cas_new_vgpr, consan_moi_exact_byte_cell::byte_mask_mask, tmp_vgpr, arch)))
     return false;
-  words.insert(words.end(), provenance_reserved->begin(), provenance_reserved->end());
-  if (!require_equal_literal(cas_new_vgpr, 0))
-    return false;
-  words.insert(words.end(), provenance_mask->begin(), provenance_mask->end());
   for (uint32_t byte_mask = 0; byte_mask <= consan_moi_exact_byte_cell::byte_mask_mask;
        ++byte_mask) {
     if (!consan_moi_exact_byte_cell_mask_is_contiguous(byte_mask) &&
@@ -1178,35 +992,22 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     }
   }
   const auto require_canonical_provenance_field = [&](uint32_t field_shift, uint32_t field_lookup) {
-    const auto mask = instrumentation::build_v_and_b32_literal(
-        cas_new_vgpr, consan_moi_exact_byte_cell::byte_mask_mask, tmp_vgpr, arch);
-    const auto scale_mask = instrumentation::build_v_lshlrev_b32(
-        cas_new_vgpr, scalar_positive_inline_u32(1u), cas_new_vgpr, arch);
-    const auto lookup =
-        instrumentation::build_v_mov_b32_literal(cas_expected_vgpr, field_lookup, arch);
-    const auto select_expected = instrumentation::build_v_lshrrev_b32(
-        cas_expected_vgpr, vector_source_vgpr(cas_new_vgpr), cas_expected_vgpr, arch);
-    const auto bound_expected =
-        instrumentation::build_v_and_b32_literal(cas_expected_vgpr, 0x3u, cas_expected_vgpr, arch);
-    const auto unpack_actual = instrumentation::build_v_lshrrev_b32(
-        cas_new_vgpr, scalar_positive_inline_u32(field_shift), tmp_vgpr, arch);
-    const auto bound_actual =
-        instrumentation::build_v_and_b32_literal(cas_new_vgpr, 0x3u, cas_new_vgpr, arch);
-    const auto matches = instrumentation::build_v_cmp_eq_u32_vcc(
-        vector_source_vgpr(cas_expected_vgpr), cas_new_vgpr, arch);
-    if (!mask || !scale_mask || !lookup || !select_expected || !bound_expected || !unpack_actual ||
-        !bound_actual || !matches) {
-      return false;
-    }
-    words.insert(words.end(), mask->begin(), mask->end());
-    words.push_back(*scale_mask);
-    words.insert(words.end(), lookup->begin(), lookup->end());
-    words.push_back(*select_expected);
-    words.insert(words.end(), bound_expected->begin(), bound_expected->end());
-    words.push_back(*unpack_actual);
-    words.insert(words.end(), bound_actual->begin(), bound_actual->end());
-    words.push_back(*matches);
-    return narrow_vcc();
+    return sequence.emit_all(
+               instrumentation::build_v_and_b32_literal(
+                   cas_new_vgpr, consan_moi_exact_byte_cell::byte_mask_mask, tmp_vgpr, arch),
+               instrumentation::build_v_lshlrev_b32(cas_new_vgpr, scalar_positive_inline_u32(1u),
+                                                    cas_new_vgpr, arch),
+               instrumentation::build_v_mov_b32_literal(cas_expected_vgpr, field_lookup, arch),
+               instrumentation::build_v_lshrrev_b32(
+                   cas_expected_vgpr, vector_source_vgpr(cas_new_vgpr), cas_expected_vgpr, arch),
+               instrumentation::build_v_and_b32_literal(cas_expected_vgpr, 0x3u, cas_expected_vgpr,
+                                                        arch),
+               instrumentation::build_v_lshrrev_b32(
+                   cas_new_vgpr, scalar_positive_inline_u32(field_shift), tmp_vgpr, arch),
+               instrumentation::build_v_and_b32_literal(cas_new_vgpr, 0x3u, cas_new_vgpr, arch),
+               instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected_vgpr),
+                                                       cas_new_vgpr, arch)) &&
+           narrow_vcc();
   };
   if (!require_canonical_provenance_field(consan_moi_exact_byte_cell::byte_offset_shift,
                                           consan_moi_exact_byte_cell::byte_offset_by_mask_lookup) ||
@@ -1215,129 +1016,85 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
           consan_moi_exact_byte_cell::byte_end_minus_one_by_mask_lookup)) {
     return false;
   }
-  const auto provenance_lane = instrumentation::build_v_and_b32_literal(
-      cas_new_vgpr, consan_moi_exact_byte_cell::lane_plus_one_mask, tmp_vgpr, arch);
-  const auto unpack_provenance_lane = instrumentation::build_v_lshrrev_b32(
-      cas_new_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
-      cas_new_vgpr, arch);
-  if (!provenance_lane || !unpack_provenance_lane)
-    return false;
-  words.insert(words.end(), provenance_lane->begin(), provenance_lane->end());
-  if (!require_not_equal_literal(cas_new_vgpr, 0))
-    return false;
-  words.push_back(*unpack_provenance_lane);
-  const auto zero_based_lane = instrumentation::build_v_add_u32_literal(
-      cas_new_vgpr, tmp_vgpr, std::numeric_limits<uint32_t>::max(), cas_new_vgpr, arch);
-  if (!zero_based_lane)
-    return false;
-  words.insert(words.end(), zero_based_lane->begin(), zero_based_lane->end());
-  const auto provenance_lane_in_range = instrumentation::build_v_cmp_gt_u32_vcc(
-      scalar_positive_inline_u32(consan_moi_exact_byte_cell::maximum_lane + 1u), cas_new_vgpr,
-      arch);
-  if (!provenance_lane_in_range)
-    return false;
-  words.push_back(*provenance_lane_in_range);
-  if (!narrow_vcc())
-    return false;
-  const auto kind = instrumentation::build_v_and_b32_literal(
-      tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask), old_value_vgpr,
-      arch);
-  if (!kind)
-    return false;
-  words.insert(words.end(), kind->begin(), kind->end());
-  if (!require_not_equal_literal(tmp_vgpr, 0))
-    return false;
-  const auto kind_in_range = instrumentation::build_v_cmp_gt_u32_vcc(
-      scalar_positive_inline_u32(static_cast<uint32_t>(ConSanMoiShadowAccessKind::Atomic) + 1u),
-      tmp_vgpr, arch);
-  if (!kind_in_range)
-    return false;
-  words.push_back(*kind_in_range);
-  if (!narrow_vcc() ||
+  if (!sequence.emit(instrumentation::build_v_and_b32_literal(
+          cas_new_vgpr, consan_moi_exact_byte_cell::lane_plus_one_mask, tmp_vgpr, arch)) ||
+      !require_not_equal_literal(cas_new_vgpr, 0) ||
+      !sequence.emit(instrumentation::build_v_lshrrev_b32(
+          cas_new_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
+          cas_new_vgpr, arch)) ||
+      !sequence.emit(instrumentation::build_v_add_u32_literal(
+          cas_new_vgpr, tmp_vgpr, std::numeric_limits<uint32_t>::max(), cas_new_vgpr, arch)) ||
+      !sequence.emit(instrumentation::build_v_cmp_gt_u32_vcc(
+          scalar_positive_inline_u32(consan_moi_exact_byte_cell::maximum_lane + 1u), cas_new_vgpr,
+          arch)) ||
+      !narrow_vcc() ||
+      !sequence.emit(instrumentation::build_v_and_b32_literal(
+          tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask),
+          old_value_vgpr, arch)) ||
+      !require_not_equal_literal(tmp_vgpr, 0) ||
+      !sequence.emit(instrumentation::build_v_cmp_gt_u32_vcc(
+          scalar_positive_inline_u32(static_cast<uint32_t>(ConSanMoiShadowAccessKind::Atomic) + 1u),
+          tmp_vgpr, arch)) ||
+      !narrow_vcc() ||
       !append_extract_exact_shadow_generation(words, tmp_vgpr, old_value_vgpr,
                                               static_cast<uint16_t>(old_value_vgpr + 1u),
                                               cas_new_vgpr, arch) ||
       !require_not_equal_literal(tmp_vgpr, 0)) {
     return false;
   }
-  const auto save_ready_fields_exec =
-      instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch);
-  if (!save_ready_fields_exec)
+  if (!sequence.emit(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch)))
     return false;
-  words.push_back(*save_ready_fields_exec);
 
   // Form the nonzero 64-bit dispatch predicate without truncating it: the low
   // nonzero and low-zero/high-nonzero masks are disjoint, so XOR is their union.
   if (!require_not_equal_literal(prior_dispatch_low_vgpr, 0))
     return false;
-  const auto save_low_dispatch_exec =
-      instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kAmdGpuExecLo, arch);
-  const auto restore_ready_fields_exec =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch);
-  if (!save_low_dispatch_exec || !restore_ready_fields_exec)
+  if (!sequence.emit_all(
+          instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kAmdGpuExecLo, arch),
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch)))
     return false;
-  words.push_back(*save_low_dispatch_exec);
-  words.push_back(*restore_ready_fields_exec);
   if (!require_equal_literal(prior_dispatch_low_vgpr, 0) ||
       !require_not_equal_literal(prior_dispatch_high_vgpr, 0)) {
     return false;
   }
-  const auto save_high_dispatch_exec =
-      instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch);
-  const auto union_ready_dispatch = instrumentation::build_s_xor_b64(
-      ready_exec_sgpr, low_dispatch_exec_sgpr, committed_exec_sgpr, arch);
-  const auto union_valid =
-      instrumentation::build_s_xor_b64(kAmdGpuExecLo, empty_exec_sgpr, ready_exec_sgpr, arch);
-  if (!save_high_dispatch_exec || !union_ready_dispatch || !union_valid)
+  if (!sequence.emit_all(
+          instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch),
+          instrumentation::build_s_xor_b64(ready_exec_sgpr, low_dispatch_exec_sgpr,
+                                           committed_exec_sgpr, arch),
+          instrumentation::build_s_xor_b64(kAmdGpuExecLo, empty_exec_sgpr, ready_exec_sgpr, arch)))
     return false;
-  words.push_back(*save_high_dispatch_exec);
-  words.push_back(*union_ready_dispatch);
-  words.push_back(*union_valid);
 
   failure.stage = "reservation";
-  const auto claim_new = instrumentation::build_v_add_u32(
-      cas_new_vgpr, scalar_positive_inline_u32(1), ready_version_vgpr, arch);
   const uint32_t claim_expected =
       build_v_mov_b32_e32(cas_expected_vgpr, vector_source_vgpr(ready_version_vgpr), arch);
-  if (!claim_new || !append_add_literal_field(words, address_lo_vgpr,
-                                              offsetof(ConSanMoiInlineExactShadowSlot, version),
-                                              tmp_vgpr, arch)) {
+  if (!append_add_literal_field(words, address_lo_vgpr,
+                                offsetof(ConSanMoiInlineExactShadowSlot, version), tmp_vgpr,
+                                arch) ||
+      !sequence.emit_all(instrumentation::build_v_add_u32(
+                             cas_new_vgpr, scalar_positive_inline_u32(1), ready_version_vgpr, arch),
+                         claim_expected)) {
     return false;
   }
-  words.insert(words.end(), claim_new->begin(), claim_new->end());
-  words.push_back(claim_expected);
-  const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
-      address_lo_vgpr, cas_new_vgpr, cas_new_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice,
-      arch);
-  if (!claim)
+  if (!sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(
+          address_lo_vgpr, cas_new_vgpr, cas_new_vgpr, /*return_old_value=*/true,
+          kAmdGpuScopeDevice, arch)))
     return false;
-  words.insert(words.end(), claim->begin(), claim->end());
   if (!append_moi_global_atomic_wait(words, arch))
     return false;
-  const auto claim_won = instrumentation::build_v_cmp_eq_u32_vcc(
-      vector_source_vgpr(cas_expected_vgpr), cas_new_vgpr, arch);
-  if (!claim_won)
-    return false;
-  words.push_back(*claim_won);
-  if (!narrow_vcc())
+  if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected_vgpr),
+                                                             cas_new_vgpr, arch)) ||
+      !narrow_vcc())
     return false;
   if (retry_contention) {
     failure.stage = "contention retry";
-    const auto save_claimed =
-        instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch);
-    const auto select_failed = instrumentation::build_s_andn2_b64(
-        kAmdGpuExecLo, publisher_exec_sgpr, committed_exec_sgpr, arch);
-    const auto decrement = instrumentation::build_s_sub_u32(retry_count_sgpr, retry_count_sgpr,
-                                                            scalar_positive_inline_u32(1), arch);
-    const auto retries_remain =
-        instrumentation::build_s_cmp_lg_u32(retry_count_sgpr, scalar_positive_inline_u32(0), arch);
     const auto restore_claimed =
         instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch);
-    if (!save_claimed || !select_failed || !decrement || !retries_remain || !restore_claimed) {
+    if (!sequence.emit_all(
+            instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch),
+            instrumentation::build_s_andn2_b64(kAmdGpuExecLo, publisher_exec_sgpr,
+                                               committed_exec_sgpr, arch))) {
       return false;
     }
-    words.push_back(*save_claimed);
-    words.push_back(*select_failed);
     // Refresh the version only on contending lanes. The ordinary two-read
     // snapshot is substantially cheaper on the successful path. Feed this
     // coherent device-scope value directly into the next retry rather than
@@ -1354,13 +1111,14 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     }
     restore_slot_address();
     words.push_back(build_s_sleep(/*delay=*/1, arch));
-    words.push_back(*decrement);
-    words.push_back(*retries_remain);
-    restore_slot_address();
-    const auto retries_exhausted = instrumentation::build_s_cbranch_scc0(/*simm16=*/1, arch);
-    if (!retries_exhausted)
+    if (!sequence.emit_all(instrumentation::build_s_sub_u32(retry_count_sgpr, retry_count_sgpr,
+                                                            scalar_positive_inline_u32(1), arch),
+                           instrumentation::build_s_cmp_lg_u32(
+                               retry_count_sgpr, scalar_positive_inline_u32(0), arch)))
       return false;
-    words.push_back(*retries_exhausted);
+    restore_slot_address();
+    if (!sequence.emit(instrumentation::build_s_cbranch_scc0(/*simm16=*/1, arch)))
+      return false;
     const size_t retry_branch = words.size();
     const int64_t retry_delta =
         static_cast<int64_t>(retry_begin) - static_cast<int64_t>(retry_branch + 1u);
@@ -1368,12 +1126,10 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
         retry_delta > std::numeric_limits<int16_t>::max()) {
       return false;
     }
-    const auto retry =
-        instrumentation::build_s_cbranch_execnz(static_cast<int16_t>(retry_delta), arch);
-    if (!retry)
+    if (!sequence.emit_all(
+            instrumentation::build_s_cbranch_execnz(static_cast<int16_t>(retry_delta), arch),
+            restore_claimed))
       return false;
-    words.push_back(*retry);
-    words.push_back(*restore_claimed);
   }
 
   // Qualify the predecessor's complete dispatch identity while its payload
@@ -1381,11 +1137,8 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // the vector dispatch pair can then retain exact-byte provenance for the
   // diagnostic path without growing the scratch window.
   failure.stage = "dispatch qualification";
-  const auto save_claimed_publishers =
-      instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch);
-  if (!save_claimed_publishers)
+  if (!sequence.emit(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch)))
     return false;
-  words.push_back(*save_claimed_publishers);
   if (!append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, prior_dispatch_low_vgpr,
                                                   tmp_vgpr,
                                                   /*high_word=*/false, arch)) {
@@ -1393,20 +1146,16 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   }
   if (!narrow_vcc())
     return false;
-  const auto save_same_dispatch =
-      instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kAmdGpuExecLo, arch);
-  const auto restore_claimed_publishers =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch);
   if (!append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, prior_dispatch_high_vgpr,
                                                   tmp_vgpr,
-                                                  /*high_word=*/true, arch) ||
-      !save_same_dispatch || !restore_claimed_publishers) {
+                                                  /*high_word=*/true, arch)) {
     return false;
   }
-  if (!narrow_vcc())
+  if (!narrow_vcc() ||
+      !sequence.emit_all(
+          instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kAmdGpuExecLo, arch),
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch)))
     return false;
-  words.push_back(*save_same_dispatch);
-  words.push_back(*restore_claimed_publishers);
 
   restore_slot_address();
   if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
@@ -1444,44 +1193,31 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
                                        static_cast<uint16_t>(current_low_vgpr + 1u), arch)) {
     return false;
   }
-  const auto store_drain = instrumentation::build_s_wait_global_store0(arch);
-  if (!store_drain)
+  if (!sequence.emit(instrumentation::build_s_wait_global_store0(arch)))
     return false;
-  words.push_back(*store_drain);
 
   failure.stage = "commit";
-  const auto commit_new = instrumentation::build_v_add_u32(
-      cas_new_vgpr, scalar_positive_inline_u32(2), ready_version_vgpr, arch);
-  const auto commit_expected = instrumentation::build_v_add_u32(
-      cas_expected_vgpr, scalar_positive_inline_u32(1), ready_version_vgpr, arch);
-  if (!commit_new || !commit_expected ||
-      !append_add_literal_field(words, address_lo_vgpr,
+  if (!append_add_literal_field(words, address_lo_vgpr,
                                 offsetof(ConSanMoiInlineExactShadowSlot, version), tmp_vgpr,
-                                arch)) {
+                                arch) ||
+      !sequence.emit_all(
+          instrumentation::build_v_add_u32(cas_new_vgpr, scalar_positive_inline_u32(2),
+                                           ready_version_vgpr, arch),
+          instrumentation::build_v_add_u32(cas_expected_vgpr, scalar_positive_inline_u32(1),
+                                           ready_version_vgpr, arch))) {
     return false;
   }
-  words.insert(words.end(), commit_new->begin(), commit_new->end());
-  words.insert(words.end(), commit_expected->begin(), commit_expected->end());
-  const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(
-      address_lo_vgpr, cas_new_vgpr, cas_new_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice,
-      arch);
-  if (!commit)
+  if (!sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(
+          address_lo_vgpr, cas_new_vgpr, cas_new_vgpr, /*return_old_value=*/true,
+          kAmdGpuScopeDevice, arch)))
     return false;
-  words.insert(words.end(), commit->begin(), commit->end());
   if (!append_moi_global_atomic_wait(words, arch))
     return false;
-  const auto commit_won = instrumentation::build_v_cmp_eq_u32_vcc(
-      vector_source_vgpr(cas_expected_vgpr), cas_new_vgpr, arch);
-  if (!commit_won)
+  if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected_vgpr),
+                                                             cas_new_vgpr, arch)) ||
+      !narrow_vcc() ||
+      !sequence.emit(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch)))
     return false;
-  words.push_back(*commit_won);
-  if (!narrow_vcc())
-    return false;
-  const auto save_committed =
-      instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch);
-  if (!save_committed)
-    return false;
-  words.push_back(*save_committed);
 
   // Count successful publications before excluding cross-dispatch priors from
   // diagnosis. The event counter therefore remains a successful-commit count.
@@ -1493,33 +1229,26 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   }
   restore_slot_address();
 
-  const auto restore_publishers =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, publisher_exec_sgpr, arch);
-  const auto select_failed = instrumentation::build_s_andn2_b64(kAmdGpuExecLo, publisher_exec_sgpr,
-                                                                committed_exec_sgpr, arch);
-  const auto restore_committed =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch);
-  if (!restore_publishers || !select_failed || !restore_committed)
+  if (!sequence.emit_all(instrumentation::build_s_mov_b64(kAmdGpuExecLo, publisher_exec_sgpr, arch),
+                         instrumentation::build_s_andn2_b64(kAmdGpuExecLo, publisher_exec_sgpr,
+                                                            committed_exec_sgpr, arch)))
     return false;
-  words.push_back(*restore_publishers);
-  words.push_back(*select_failed);
   if (!append_atomic_fetch_add_one_u32(
           words,
           plan.report_buffer_address + offsetof(ConSanMoiReportHeader, inline_undercoverage_count),
           tmp_vgpr, address_lo_vgpr, arch)) {
     return false;
   }
-  words.push_back(*restore_committed);
+  if (!sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch)))
+    return false;
   restore_slot_address();
   words.push_back(
       build_v_mov_b32_e32(current_low_vgpr, vector_source_vgpr(saved_current_low_vgpr), arch));
   words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(current_low_vgpr + 1u),
                                       vector_source_vgpr(saved_current_high_vgpr), arch));
-  const auto select_same_dispatch = instrumentation::build_s_and_b64(
-      kAmdGpuExecLo, committed_exec_sgpr, low_dispatch_exec_sgpr, arch);
-  if (!select_same_dispatch)
+  if (!sequence.emit(instrumentation::build_s_and_b64(kAmdGpuExecLo, committed_exec_sgpr,
+                                                      low_dispatch_exec_sgpr, arch)))
     return false;
-  words.push_back(*select_same_dispatch);
   failure.succeeded = true;
   return true;
 }
