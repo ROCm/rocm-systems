@@ -8323,3 +8323,70 @@ already-established boundary rather than add another schema layer. Broader
 placement/coordinator transactions, architecture locality across the complete
 matrix, material whole-refactoring shrinkage, and the independent completion
 audit remain open, so the goal remains active.
+
+### 16.118 Convergence checkpoint 117: one retained InlineShadow atomic emission plan
+
+The InlineShadow atomic-ordering trace found the same planning/emission
+peephole after checkpoint 116, but with an additional dense-routing wrinkle.
+Candidate admission established the report layout, inline-access relationship,
+owner and epoch representations, persistent scalar state, special-state ABI,
+workgroup and dispatch sources, private-state materialization, indirect jump,
+scratch geometry, and patch ABI effects. Final direct and appended emission
+then reconstructed an operating point and reapplied owner-local register
+assignments to rediscover those decisions. A separate replay pass reconstructed
+every candidate again solely to infer descriptor demand.
+
+`MoiInlineAtomicEmissionPlan` now retains the complete exact atomic-body
+decision while the candidate operating point is authoritative. Its nested
+`MoiInlineAtomicPrivateStatePlan` represents the selected private workitem or
+resident-wave owner materialization rather than exposing owner policy to the
+native body. Direct and appended routes consume that product without seeing
+the request, bound resources, operating point, or object-wide mode semantics.
+Dense routing legitimately resolves one exact plan after its route-group-local
+assignment; all emission inside that group then consumes the retained plan.
+Descriptor demand is published once during candidate admission, so the
+descriptor-only reconstruction pass and its assignment applications are
+deleted.
+
+The InlineShadow planning owner now also validates the original persistent
+register projection before scratch-backed materialization changes the final
+register representation. Existing persistent-acquire tests caught an initial
+attempt to validate the materialized representation instead; the ownership was
+corrected without weakening the overlap invariant. Exact workitem-owner
+materialization reuses the shared derivation emitter, deleting the atomic
+body's duplicate private-load, wait, and shift sequence. Structural checks now
+reject broad request/resource/point/semantics inputs in the atomic body,
+forbid their rediscovery helpers there, and limit transient and persistent
+assignment applications to candidate and dense-group planning.
+
+| Signal | Checkpoint 117 | Cumulative change | Slice change from checkpoint 116 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,848 | **-2,128** | **-32** |
+| Nonblank production lines | 96,493 | **-2,591** | **-37** |
+| Production implementation lines | 88,738 | **-2,712** | **-45** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **268 / 51** | **-22 / 0** | **-19 / -2** |
+| Broad request/resource/point/semantics types in atomic body emission | **0** | n/a | **-4** |
+| Owner-assignment applications after exact candidate/group planning | **0** | n/a | **-4** |
+| Test inventory | **5,412** | **+67** | 0 |
+
+The two implementation commits are deliberately bisectable: descriptor-demand
+publication first, followed by exact-plan retention and consumer convergence.
+Validation includes a warning-clean `-j16` rebuild, all focused InlineShadow
+atomic and architecture-boundary tests **37/37**, all **1,296/1,296**
+`ConSan.*` and `ConSanMoi.*` host/component tests, and all **4,777/4,777**
+nonphysical ConSan tests. The full gate includes all **2,918** simulator tests
+across gfx942, gfx950, gfx1100, gfx1201, and gfx1250. No test source or
+registration was removed, and no physical gfx1201 test was run.
+
+Unlike checkpoint 116, this retained-plan migration pays back its contract and
+enforcement immediately: the complete slice deletes 45 net implementation
+lines while narrowing both the native body and its nested synchronization
+helpers. It therefore strengthens Sections 14.3, 14.5, 14.6, 14.7, 14.8, and
+14.9. Broader placement/coordinator transactions, architecture locality across
+the complete matrix, both extension exercises, material whole-refactoring
+shrinkage, and the independent completion audit remain open, so the goal
+remains active.
