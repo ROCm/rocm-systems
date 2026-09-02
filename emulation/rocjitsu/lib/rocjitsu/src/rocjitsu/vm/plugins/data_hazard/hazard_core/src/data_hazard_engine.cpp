@@ -86,6 +86,15 @@ std::string register_read_suggestion(const SimulatorInstructionFormatter *format
   return wait_suggestion(formatter, kind, HazardAccessKind::Read, HazardResourceLabel::Register);
 }
 
+std::string flat_load_read_suggestion(const SimulatorInstructionFormatter *formatter) {
+  if (formatter) {
+    std::string suggestion = formatter->format_flat_load_wait_suggestion();
+    if (!suggestion.empty())
+      return suggestion;
+  }
+  return make_flat_load_wait_suggestion();
+}
+
 std::string format_pending_message(const char *hazard, const std::string &resource,
                                    const char *action, const char *op,
                                    const PendingAsyncOp &pending) {
@@ -253,14 +262,17 @@ const EngineGlobalAccessInfo *find_conflicting_access(const EngineGlobalAccessSl
   return nullptr;
 }
 
-/// Whether the accessing workgroup itself already covered one of @p byte_mask.
-bool covered_by_same_workgroup(const EngineGlobalAccessSlots &slots,
-                               const EngineInstructionContext &ctx, uint8_t byte_mask) {
+/// Which of @p byte_mask the accessing workgroup itself already covered. Bytes
+/// outside the returned mask remain the caller's to retain, since a workgroup
+/// that covered part of an access says nothing about the rest of it.
+uint8_t coverage_by_same_workgroup(const EngineGlobalAccessSlots &slots,
+                                   const EngineInstructionContext &ctx, uint8_t byte_mask) {
+  uint8_t covered = 0;
   for (const auto &slot : slots) {
-    if (slot.valid && (slot.byte_mask & byte_mask) != 0 && same_workgroup(slot, ctx))
-      return true;
+    if (slot.valid && same_workgroup(slot, ctx))
+      covered = static_cast<uint8_t>(covered | slot.byte_mask);
   }
-  return false;
+  return static_cast<uint8_t>(covered & byte_mask);
 }
 
 /// Retains @p current while keeping the slots on distinct workgroups: a repeat
@@ -917,12 +929,10 @@ void DataHazardEngine::check_vector_raw_hazards(EngineWaveState &wave,
         const std::string message = format_pending_message(
             "RAW", reg_label(pending_writes, read_reg, vmem_pending->instruction_id), "read",
             "load", *vmem_pending);
-        record_warning(
-            ctx, event, HazardKind::RAW, regs.resource_kind, HazardAccessKind::Read, read_reg, 0,
-            event.size_bytes, vmem_pending->wait_type, *vmem_pending,
-            get_pending_raw_isa(wave, vmem_pending->instruction_id), vmem_pending->pc, message,
-            "Add s_wait_loadcnt_dscnt 0 before reading this register (flat load uses both "
-            "LOADcnt and DScnt)");
+        record_warning(ctx, event, HazardKind::RAW, regs.resource_kind, HazardAccessKind::Read,
+                       read_reg, 0, event.size_bytes, vmem_pending->wait_type, *vmem_pending,
+                       get_pending_raw_isa(wave, vmem_pending->instruction_id), vmem_pending->pc,
+                       message, flat_load_read_suggestion(instruction_formatter()));
       }
       continue;
     }
@@ -1189,8 +1199,12 @@ void DataHazardEngine::handle_lds_access(EngineWaveState &wave, const EngineInst
                    WaitCntType::TENSOR);
 
     if (!event.is_write) {
+      // A read outstanding on a counter of its own, as the LDS a tensor store
+      // streams out is, retires with that counter rather than with DScnt.
+      const WaitCntType read_wait =
+          event.hazards.read_wait != WaitCntType::NONE ? event.hazards.read_wait : WaitCntType::LDS;
       track_pending_raw_isa(wave, ctx);
-      hazard_core::track_lds_read(&wave.core, current_id, ctx.pc, address, size);
+      hazard_core::track_lds_read(&wave.core, current_id, ctx.pc, address, size, read_wait);
     }
   }
 
@@ -1302,8 +1316,17 @@ void DataHazardEngine::check_global_access_for_races(const EngineInstructionCont
       } else {
         if (event.is_write)
           record_access(entry.writers, ctx, current);
-        if (event.is_read && !covered_by_same_workgroup(entry.writers, ctx, byte_mask))
-          record_access(entry.readers, ctx, current);
+        if (event.is_read) {
+          // Bytes this workgroup wrote itself are already spoken for by the
+          // retained writer, which a later foreign access conflicts with just as
+          // it would with the read. The bytes it did not write still need a
+          // reader of their own, or a foreign write to them finds nothing.
+          EngineGlobalAccessInfo read_access = current;
+          read_access.byte_mask = static_cast<uint8_t>(
+              byte_mask & ~coverage_by_same_workgroup(entry.writers, ctx, byte_mask));
+          if (read_access.byte_mask != 0)
+            record_access(entry.readers, ctx, read_access);
+        }
       }
 
       if (addr > max_address - kGlobalShadowAlignment)

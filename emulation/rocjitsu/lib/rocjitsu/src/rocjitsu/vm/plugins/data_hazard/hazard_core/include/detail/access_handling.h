@@ -371,12 +371,14 @@ inline void track_lds_write(WaveState *wave, EntityId instruction_id, uint64_t p
   wave->lds_fifo.push_back({address, make_pending_op(instruction_id, pc, wait_type, size)});
 }
 
+/// Retains an LDS read a later write must not overtake. @p wait_type is the
+/// counter the read is outstanding on: DScnt for an ordinary DS read, TENSORcnt
+/// for the LDS a tensor store streams out.
 inline void track_lds_read(WaveState *wave, EntityId instruction_id, uint64_t pc, uint32_t address,
-                           uint32_t size) {
-  if (!wave || size == 0)
+                           uint32_t size, WaitCntType wait_type = WaitCntType::LDS) {
+  if (!wave || size == 0 || wait_type == WaitCntType::NONE)
     return;
-  wave->lds_read_fifo.push_back(
-      {address, make_pending_op(instruction_id, pc, WaitCntType::LDS, size)});
+  wave->lds_read_fifo.push_back({address, make_pending_op(instruction_id, pc, wait_type, size)});
 }
 
 inline void track_tensor_lds(WaveState *wave, EntityId instruction_id, uint64_t pc,

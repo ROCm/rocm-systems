@@ -35,6 +35,9 @@ inline const char *wait_counter_mnemonic(WaitCntType type) {
   case WaitCntType::NONE:
   case WaitCntType::XCNT:
   case WaitCntType::ASYNC:
+  // A drain-only counter: what is outstanding on it is tagged SMEM or LDS, and
+  // the suggestion names the wait for that.
+  case WaitCntType::LGKM:
     break;
   }
   return nullptr;
@@ -66,6 +69,13 @@ inline std::string make_wait_suggestion(WaitCntType type, HazardAccessKind acces
       access == HazardAccessKind::Write ? " 0 before writing this " : " 0 before reading this ";
   suggestion += resource == HazardResourceLabel::LdsAddress ? "LDS address" : "register";
   return suggestion;
+}
+
+/// Build the wait suggestion for a flat load, which holds LOADcnt and DScnt at
+/// once and so names no single counter.
+inline std::string make_flat_load_wait_suggestion() {
+  return "Add s_wait_loadcnt_dscnt 0 before reading this register (flat load uses both "
+         "LOADcnt and DScnt)";
 }
 
 /// Get a human-readable suggestion for the wait instruction needed to

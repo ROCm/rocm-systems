@@ -25,6 +25,11 @@ public:
   /// hazard_core::make_wait_suggestion; override only for simulator-specific text.
   virtual std::string format_wait_suggestion(WaitCntType kind, HazardAccessKind access,
                                              HazardResourceLabel resource) const;
+
+  /// Wording for the wait a flat load needs. It occupies LOADcnt and DScnt at
+  /// once, so there is no counter to hand to format_wait_suggestion; the
+  /// default builds it from hazard_core::make_flat_load_wait_suggestion.
+  virtual std::string format_flat_load_wait_suggestion() const;
 };
 
 class DataHazardSimulatorApi {

@@ -101,6 +101,11 @@ struct MemoryRouteView {
   bool is_tensor = false;
   bool writes_local_memory = false;
   hazard_core::WaitCntType local_write_wait = hazard_core::WaitCntType::NONE;
+  /// Whether the route reads LDS asynchronously, as a tensor store streaming
+  /// out of it does. The read stays live until local_read_wait drains, and
+  /// overwriting the LDS before then is a WAR hazard.
+  bool reads_local_memory = false;
+  hazard_core::WaitCntType local_read_wait = hazard_core::WaitCntType::NONE;
   /// Counter a store of this route is outstanding on: VMEM where one counter
   /// covers loads and stores, as on gfx9 and CDNA, and STORE where gfx10 and
   /// later count them apart. Read from the decoded instruction rather than

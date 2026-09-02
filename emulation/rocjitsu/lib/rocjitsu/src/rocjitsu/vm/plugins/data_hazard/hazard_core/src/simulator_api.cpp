@@ -20,4 +20,8 @@ SimulatorInstructionFormatter::format_wait_suggestion(WaitCntType kind, HazardAc
   return make_wait_suggestion(kind, access, resource);
 }
 
+std::string SimulatorInstructionFormatter::format_flat_load_wait_suggestion() const {
+  return make_flat_load_wait_suggestion();
+}
+
 } // namespace hazard_core

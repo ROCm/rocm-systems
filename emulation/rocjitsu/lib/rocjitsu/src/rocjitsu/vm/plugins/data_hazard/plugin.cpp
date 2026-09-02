@@ -208,8 +208,25 @@ read_tensor_descriptor(const Instruction &inst, const amdgpu::Wavefront &wf) {
 
 // -- InstructionFormatter ----------------------------------------------------
 
+std::shared_ptr<DisasmCache> InstructionFormatter::cache_for(hazard_core::EntityId dispatch_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto &cache = disassembly_[dispatch_id];
+  if (!cache)
+    cache = std::make_shared<DisasmCache>();
+  return cache;
+}
+
+std::shared_ptr<const DisasmCache>
+InstructionFormatter::find_cache(hazard_core::EntityId dispatch_id) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = disassembly_.find(dispatch_id);
+  return it != disassembly_.end() ? it->second : nullptr;
+}
+
 void InstructionFormatter::remember(const InstructionView &view, const Instruction &inst) {
-  disassembly_.record(view.pc, inst);
+  // Held by value so a dispatch ending on another thread cannot drop the cache
+  // out from under this record.
+  cache_for(view.execution.dispatch_id)->record(view.pc, inst);
 
   std::lock_guard<std::mutex> lock(mutex_);
   const auto [it, inserted] = instructions_.try_emplace(view.instruction_id);
@@ -232,13 +249,97 @@ std::string InstructionFormatter::format_instruction(
       return format_fallback(instruction);
     view = it->second;
   }
-  return format(view, disassembly_.lookup(view.pc));
+  const std::shared_ptr<const DisasmCache> cache = find_cache(view.execution.dispatch_id);
+  return format(view, cache ? cache->lookup(view.pc) : std::string{});
+}
+
+void InstructionFormatter::set_architecture(rj_code_arch_t arch) {
+  arch_.store(arch, std::memory_order_relaxed);
+}
+
+namespace {
+
+/// Whether @p arch drains its wait counters with the legacy `s_waitcnt` forms
+/// rather than the per-counter waits gfx12 introduced. CDNA4 is gfx11-era
+/// hardware that kept the gfx9 encoding, so the split is by family rather than
+/// by age.
+bool uses_legacy_waitcnt(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return true;
+  default:
+    return false;
+  }
+}
+
+/// The legacy wait that drains @p kind, or empty where the counter has no
+/// legacy form. Vector stores are counted on vmcnt by the CDNA families and on
+/// a vscnt of their own from gfx10, which has a wait instruction of its own.
+std::string legacy_wait_text(rj_code_arch_t arch, hazard_core::WaitCntType kind) {
+  switch (kind) {
+  case hazard_core::WaitCntType::VMEM:
+    return "s_waitcnt vmcnt(0)";
+  case hazard_core::WaitCntType::SMEM:
+  case hazard_core::WaitCntType::LDS:
+  case hazard_core::WaitCntType::LGKM:
+    return "s_waitcnt lgkmcnt(0)";
+  case hazard_core::WaitCntType::STORE:
+    return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+                   arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5
+               ? "s_waitcnt_vscnt null, 0"
+               : "s_waitcnt vmcnt(0)";
+  default:
+    // TENSOR, XCNT and ASYNC name counters these targets do not have.
+    return {};
+  }
+}
+
+} // namespace
+
+std::string
+InstructionFormatter::format_wait_suggestion(hazard_core::WaitCntType kind,
+                                             hazard_core::HazardAccessKind access,
+                                             hazard_core::HazardResourceLabel resource) const {
+  const rj_code_arch_t arch = arch_.load(std::memory_order_relaxed);
+  if (!uses_legacy_waitcnt(arch))
+    return {};
+
+  const std::string wait = legacy_wait_text(arch, kind);
+  if (wait.empty())
+    return {};
+
+  std::string suggestion = "Add ";
+  suggestion += wait;
+  suggestion += access == hazard_core::HazardAccessKind::Write ? " before writing this "
+                                                               : " before reading this ";
+  suggestion +=
+      resource == hazard_core::HazardResourceLabel::LdsAddress ? "LDS address" : "register";
+  return suggestion;
+}
+
+std::string InstructionFormatter::format_flat_load_wait_suggestion() const {
+  if (!uses_legacy_waitcnt(arch_.load(std::memory_order_relaxed)))
+    return {};
+
+  return "Add s_waitcnt vmcnt(0) lgkmcnt(0) before reading this register (flat load uses both "
+         "vmcnt and lgkmcnt)";
+}
+
+void InstructionFormatter::forget_dispatch(hazard_core::EntityId dispatch_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  disassembly_.erase(dispatch_id);
 }
 
 void InstructionFormatter::clear() {
-  disassembly_.clear();
-
   std::lock_guard<std::mutex> lock(mutex_);
+  disassembly_.clear();
   instructions_.clear();
   insertion_order_.clear();
 }
@@ -425,7 +526,10 @@ void DataHazardPlugin::onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
 void DataHazardPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
   if (shutting_down())
     return;
+  // The end of a dispatch closes its outstanding epochs, and those findings are
+  // formatted before this returns, so the disassembly is only dropped after.
   adapter_.on_dispatch_end(dispatch_id);
+  formatter_.forget_dispatch(dispatch_id);
 }
 
 void DataHazardPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
@@ -436,8 +540,11 @@ void DataHazardPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_
     return;
   adapter_.on_workgroup_begin(hazard_core::ExecutionKey{dispatch_id, 0, wg_id, 0});
   for (amdgpu::Wavefront *wf : wavefronts) {
-    if (wf != nullptr)
+    if (wf != nullptr) {
+      // The waits a report recommends have to be ones this target assembles.
+      formatter_.set_architecture(wf->cu().arch());
       seed_wave_state(*wf);
+    }
   }
 }
 
@@ -485,9 +592,11 @@ void DataHazardPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instr
     state->is_memory_op = is_memory_op;
   }
 
-  emit_source_reads(view, inst, is_memory_op);
+  emit_source_reads(view, inst);
   if (inst.mnemonic() == "tensor_load_to_lds")
-    emit_tensor_lds_write(view, inst, wf);
+    emit_tensor_lds_access(view, inst, wf, /*reads_lds=*/false);
+  else if (inst.mnemonic() == "tensor_store_from_lds")
+    emit_tensor_lds_access(view, inst, wf, /*reads_lds=*/true);
   // Destination writes of memory instructions are emitted when the access is
   // routed, where the wait counter that guards them is known.
   if (!is_memory_op)
@@ -631,7 +740,7 @@ void DataHazardPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wa
 }
 
 std::vector<LocalMemoryRange>
-tensor_lds_write_ranges(const amdgpu::tensor_dma_detail::TensorDmaDescriptor &desc) {
+tensor_lds_ranges(const amdgpu::tensor_dma_detail::TensorDmaDescriptor &desc) {
   namespace tdm = amdgpu::tensor_dma_detail;
 
   // A descriptor whose count is zero transfers nothing at all.
@@ -665,19 +774,23 @@ tensor_lds_write_ranges(const amdgpu::tensor_dma_detail::TensorDmaDescriptor &de
   return coalesce_local_ranges(std::move(ranges));
 }
 
-void DataHazardPlugin::emit_tensor_lds_write(const InstructionView &view, const Instruction &inst,
-                                             const amdgpu::Wavefront &wf) {
+void DataHazardPlugin::emit_tensor_lds_access(const InstructionView &view, const Instruction &inst,
+                                              const amdgpu::Wavefront &wf, bool reads_lds) {
   const auto desc = read_tensor_descriptor(inst, wf);
   if (!desc)
     return;
 
-  // One route per stretch of LDS the transfer writes. A wait drains them
+  // One route per stretch of LDS the transfer touches. A wait drains them
   // together, because the TENSORcnt slot belongs to the instruction rather than
-  // to the entries it leaves behind.
-  for (const LocalMemoryRange &range : tensor_lds_write_ranges(*desc)) {
+  // to the entries it leaves behind. A store streams its LDS out for as long as
+  // a load streams into it, so the side that reads is tracked the same way: an
+  // overwrite before s_wait_tensorcnt is a WAR hazard on the data in flight.
+  for (const LocalMemoryRange &range : tensor_lds_ranges(*desc)) {
     MemoryRouteView route;
     route.instruction = view;
-    route.writes_local_memory = true;
+    route.reads_local_memory = reads_lds;
+    route.local_read_wait = hazard_core::WaitCntType::TENSOR;
+    route.writes_local_memory = !reads_lds;
     route.local_write_wait = hazard_core::WaitCntType::TENSOR;
     route.local_address = range.address;
     route.local_size_bytes = range.size;
@@ -686,8 +799,7 @@ void DataHazardPlugin::emit_tensor_lds_write(const InstructionView &view, const 
   }
 }
 
-void DataHazardPlugin::emit_source_reads(const InstructionView &view, const Instruction &inst,
-                                         bool is_memory_op) {
+void DataHazardPlugin::emit_source_reads(const InstructionView &view, const Instruction &inst) {
   auto register_key = [](const auto &ref) {
     return (static_cast<uint64_t>(ref.index) << 8) | static_cast<uint64_t>(ref.width) |
            (static_cast<uint64_t>(ref.cls) << 32);
@@ -724,10 +836,6 @@ void DataHazardPlugin::emit_source_reads(const InstructionView &view, const Inst
       continue;
     const auto reg_class = make_register_class(ref->cls);
     if (reg_class == RegisterClass::None)
-      continue;
-    // The address operand pair of a buffer store is not a data dependency.
-    if (is_memory_op && inst.mnemonic() == "buffer_store_dword" &&
-        reg_class == RegisterClass::Scalar && ref->width > 1)
       continue;
     // Where a vector load names its own destination as a source, treating it as
     // a read would manufacture a false WAR against the load itself. The address

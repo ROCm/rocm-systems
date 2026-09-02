@@ -37,10 +37,15 @@ enum class WaitCntType {
   SMEM,  // Scalar memory loads (s_wait_kmcnt)
   LDS,   // Local Data Share operations (s_wait_dscnt)
   STORE, // Vector memory stores (s_wait_storecnt)
-  XCNT,  // Address translation counter (s_wait_xcnt) — tracks XACK/XNACK, not data completion
+  // The one counter gfx9-style targets keep scalar memory and LDS on
+  // (s_waitcnt lgkmcnt). Only a drain names it: an operation is outstanding on
+  // SMEM or LDS, and this counter retires the two as the single sequence the
+  // hardware counts them as.
+  LGKM,
+  XCNT, // Address translation counter (s_wait_xcnt) — tracks XACK/XNACK, not data completion
   // TODO: Implement tracking for these wait counter types when needed
-  ASYNC,  // Async copy operations (s_wait_asynccnt) - not yet tracked
-  TENSOR  // Tensor DMA operations (s_wait_tensorcnt) — tensor_load_to_lds, tensor_store_from_lds
+  ASYNC, // Async copy operations (s_wait_asynccnt) - not yet tracked
+  TENSOR // Tensor DMA operations (s_wait_tensorcnt) — tensor_load_to_lds, tensor_store_from_lds
 };
 
 // =============================================================================

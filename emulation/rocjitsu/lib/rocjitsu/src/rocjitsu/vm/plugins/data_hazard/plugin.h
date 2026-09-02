@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/vm/plugins/data_hazard/adapter.h"
 #include "rocjitsu/vm/plugins/data_hazard/report.h"
 #include "rocjitsu/vm/plugins/disasm_cache.h"
@@ -49,32 +50,53 @@ struct LocalMemoryRange {
   uint32_t size = 0;
 };
 
-/// The LDS a `tensor_load_to_lds` writes, derived from the descriptor it
-/// transfers under: a variable base, an element size, tile dimensions, an
-/// iteration stride, and padding that skews the rows apart. A descriptor that
-/// transfers nothing, or one the executor rejects, writes no LDS and yields no
-/// ranges.
+/// The LDS a tensor DMA transfer touches — written by `tensor_load_to_lds`,
+/// read by `tensor_store_from_lds` — derived from the descriptor it transfers
+/// under: a variable base, an element size, tile dimensions, an iteration
+/// stride, and padding that skews the rows apart. A descriptor that transfers
+/// nothing, or one the executor rejects, touches no LDS and yields no ranges.
 ///
 /// A padded run is reported as the whole span it skews across, gaps included.
 /// The gaps hold no transferred data, but they sit between rows of the same
 /// tile, and reporting them apart would leave a pending write per row for every
 /// later LDS access to walk.
 std::vector<LocalMemoryRange>
-tensor_lds_write_ranges(const amdgpu::tensor_dma_detail::TensorDmaDescriptor &desc);
+tensor_lds_ranges(const amdgpu::tensor_dma_detail::TensorDmaDescriptor &desc);
 
 /// @brief Renders instruction identity for hazard messages.
 ///
 /// The engine only carries an ::hazard_core::InstructionDescriptor, so what an
 /// instruction was is remembered here as instructions are observed and looked
-/// up again when a hazard is reported. The text comes from the shared
-/// DisasmCache, keyed by PC so each static instruction is disassembled once;
-/// the per-execution metadata is appended at format time.
+/// up again when a hazard is reported. The text comes from a DisasmCache keyed
+/// by PC, so each static instruction is disassembled once; the per-execution
+/// metadata is appended at format time.
 class InstructionFormatter final : public hazard_core::SimulatorInstructionFormatter {
 public:
   void remember(const InstructionView &view, const Instruction &inst);
 
+  /// Names the architecture the suggestions must be assemblable on. Until this
+  /// is called the wording defaults to the split-counter waits.
+  void set_architecture(rj_code_arch_t arch);
+
   std::string
   format_instruction(const hazard_core::InstructionDescriptor &instruction) const override;
+
+  /// The split waits (`s_wait_loadcnt` and the rest) exist only on gfx12-era
+  /// targets. Everywhere else the same counters are drained by the legacy
+  /// `s_waitcnt` forms, so a report on those targets has to name those instead
+  /// of instructions the assembler would reject.
+  std::string format_wait_suggestion(hazard_core::WaitCntType kind,
+                                     hazard_core::HazardAccessKind access,
+                                     hazard_core::HazardResourceLabel resource) const override;
+
+  /// A flat load holds two counters at once, which gfx12-era targets drain with
+  /// the combined `s_wait_loadcnt_dscnt`. The legacy targets have no such
+  /// instruction: a flat load counts on vmcnt and lgkmcnt, and both are named.
+  std::string format_flat_load_wait_suggestion() const override;
+
+  /// Drops the disassembly recorded for @p dispatch_id, once nothing more can
+  /// be reported against it.
+  void forget_dispatch(hazard_core::EntityId dispatch_id);
 
   void clear();
 
@@ -85,8 +107,16 @@ private:
   static std::string format(const InstructionView &view, const std::string &disassembly);
   static std::string format_fallback(const hazard_core::InstructionDescriptor &instruction);
 
-  DisasmCache disassembly_;
+  std::shared_ptr<DisasmCache> cache_for(hazard_core::EntityId dispatch_id);
+  std::shared_ptr<const DisasmCache> find_cache(hazard_core::EntityId dispatch_id) const;
+
+  std::atomic<rj_code_arch_t> arch_{ROCJITSU_CODE_ARCH_INVALID};
   mutable std::mutex mutex_;
+  /// One cache per dispatch rather than one for the plugin: a code object can
+  /// be unloaded and a later dispatch can run different code at the same
+  /// address, and a PC-keyed entry outliving its code object would quote that
+  /// later dispatch the instruction it replaced.
+  std::unordered_map<hazard_core::EntityId, std::shared_ptr<DisasmCache>> disassembly_;
   std::unordered_map<uint64_t, InstructionView> instructions_;
   std::deque<uint64_t> insertion_order_;
 };
@@ -176,12 +206,13 @@ private:
   /// report written at process exit is not racing fresh detections.
   bool shutting_down() const { return shutting_down_.load(std::memory_order_acquire); }
 
-  void emit_source_reads(const InstructionView &view, const Instruction &inst, bool is_memory_op);
+  void emit_source_reads(const InstructionView &view, const Instruction &inst);
   void emit_destination_writes(const InstructionView &view, const Instruction &inst);
-  /// Routes the LDS a `tensor_load_to_lds` writes, derived from the descriptor
-  /// the transfer will execute from.
-  void emit_tensor_lds_write(const InstructionView &view, const Instruction &inst,
-                             const amdgpu::Wavefront &wf);
+  /// Routes the LDS a tensor DMA transfer touches, derived from the descriptor
+  /// the transfer will execute from. @p reads_lds distinguishes a store
+  /// streaming LDS out from a load streaming it in.
+  void emit_tensor_lds_access(const InstructionView &view, const Instruction &inst,
+                              const amdgpu::Wavefront &wf, bool reads_lds);
   void route_scalar_memory(const Instruction &inst, amdgpu::Wavefront &wf,
                            const InstructionView &current);
   void route_vector_memory(const Instruction &inst, amdgpu::Wavefront &wf,

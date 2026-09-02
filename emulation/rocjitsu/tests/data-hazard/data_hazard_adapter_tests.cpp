@@ -5,6 +5,7 @@
 
 #include "data_hazard_engine.h"
 #include "rocjitsu/vm/plugins/data_hazard/adapter.h"
+#include "rocjitsu/vm/plugins/data_hazard/plugin.h"
 
 #include <cstddef>
 #include <string>
@@ -2100,11 +2101,9 @@ TEST(DataHazardAdapterTest, WaitCountsWiderThanTheCdnaFieldSurviveTheAdapter) {
 
   const WaitAction action = dh::make_wait_action(parsed);
   ASSERT_NE(find_counter(action, WaitCntType::VMEM), nullptr);
-  ASSERT_NE(find_counter(action, WaitCntType::LDS), nullptr);
-  ASSERT_NE(find_counter(action, WaitCntType::SMEM), nullptr);
+  ASSERT_NE(find_counter(action, WaitCntType::LGKM), nullptr);
   EXPECT_EQ(find_counter(action, WaitCntType::VMEM)->keep_count, 40u);
-  EXPECT_EQ(find_counter(action, WaitCntType::LDS)->keep_count, 20u);
-  EXPECT_EQ(find_counter(action, WaitCntType::SMEM)->keep_count, 20u);
+  EXPECT_EQ(find_counter(action, WaitCntType::LGKM)->keep_count, 20u);
 }
 
 TEST(DataHazardAdapterTest, MapsWaitInfoToGenericWaitActions) {
@@ -2113,20 +2112,20 @@ TEST(DataHazardAdapterTest, MapsWaitInfoToGenericWaitActions) {
   wait.count = 0x17u;    // vmcnt(23)
   wait.paired_count = 5; // lgkmcnt(5)
 
-  // s_waitcnt drains the vector memory counter, LDS and scalar memory. It
-  // names no store counter of its own: a gfx9 store is outstanding on the
-  // vector memory counter this already drains, and a gfx10 or gfx11 store
-  // waits for the separate s_waitcnt_vscnt.
+  // s_waitcnt drains the vector memory counter and the lgkm counter that holds
+  // scalar memory and LDS together. It names no store counter of its own: a
+  // gfx9 store is outstanding on the vector memory counter this already drains,
+  // and a gfx10 or gfx11 store waits for the separate s_waitcnt_vscnt.
   WaitAction action = dh::make_wait_action(wait);
   ASSERT_TRUE(action.is_wait_instruction);
-  ASSERT_EQ(action.counters.size(), 3u);
+  ASSERT_EQ(action.counters.size(), 2u);
   ASSERT_NE(find_counter(action, WaitCntType::VMEM), nullptr);
   ASSERT_EQ(find_counter(action, WaitCntType::STORE), nullptr);
-  ASSERT_NE(find_counter(action, WaitCntType::LDS), nullptr);
-  ASSERT_NE(find_counter(action, WaitCntType::SMEM), nullptr);
+  ASSERT_EQ(find_counter(action, WaitCntType::LDS), nullptr);
+  ASSERT_EQ(find_counter(action, WaitCntType::SMEM), nullptr);
+  ASSERT_NE(find_counter(action, WaitCntType::LGKM), nullptr);
   EXPECT_EQ(find_counter(action, WaitCntType::VMEM)->keep_count, 0x17u);
-  EXPECT_EQ(find_counter(action, WaitCntType::LDS)->keep_count, 5u);
-  EXPECT_EQ(find_counter(action, WaitCntType::SMEM)->keep_count, 5u);
+  EXPECT_EQ(find_counter(action, WaitCntType::LGKM)->keep_count, 5u);
 
   wait.kind = dh::WaitKind::WaitLoadcntDscnt;
   wait.count = 9;        // loadcnt(9)
@@ -2165,4 +2164,67 @@ TEST(DataHazardAdapterTest, MapsWaitInfoToGenericWaitActions) {
   wait.kind = dh::WaitKind::AddressTranslation;
   action = dh::make_wait_action(wait);
   EXPECT_TRUE(action.is_address_translation);
+}
+
+// A report is only actionable if the wait it names assembles for the target
+// that ran the shader: the split waits are gfx12-era instructions, and the
+// families before it drain the same counters with s_waitcnt.
+TEST(DataHazardFormatterTest, SuggestsWaitsTheRunningTargetCanAssemble) {
+  using hazard_core::HazardAccessKind;
+  using hazard_core::HazardResourceLabel;
+
+  dh::InstructionFormatter formatter;
+  const auto suggest = [&formatter](WaitCntType kind, HazardAccessKind access,
+                                    HazardResourceLabel resource) {
+    return formatter.format_wait_suggestion(kind, access, resource);
+  };
+
+  // Until a wave has run there is nothing to tailor to, and the shared wording
+  // stands.
+  EXPECT_TRUE(
+      suggest(WaitCntType::VMEM, HazardAccessKind::Read, HazardResourceLabel::Register).empty());
+
+  formatter.set_architecture(ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(suggest(WaitCntType::VMEM, HazardAccessKind::Read, HazardResourceLabel::Register),
+            "Add s_waitcnt vmcnt(0) before reading this register");
+  EXPECT_EQ(suggest(WaitCntType::SMEM, HazardAccessKind::Read, HazardResourceLabel::Register),
+            "Add s_waitcnt lgkmcnt(0) before reading this register");
+  EXPECT_EQ(suggest(WaitCntType::LDS, HazardAccessKind::Write, HazardResourceLabel::LdsAddress),
+            "Add s_waitcnt lgkmcnt(0) before writing this LDS address");
+  // CDNA counts stores on the same vmcnt as loads.
+  EXPECT_EQ(suggest(WaitCntType::STORE, HazardAccessKind::Write, HazardResourceLabel::Register),
+            "Add s_waitcnt vmcnt(0) before writing this register");
+  // No legacy target has a tensor counter, so nothing is worded for it.
+  EXPECT_TRUE(suggest(WaitCntType::TENSOR, HazardAccessKind::Read, HazardResourceLabel::LdsAddress)
+                  .empty());
+
+  // gfx10 and gfx11 count stores apart, on a counter with its own wait.
+  formatter.set_architecture(ROCJITSU_CODE_ARCH_RDNA2);
+  EXPECT_EQ(suggest(WaitCntType::STORE, HazardAccessKind::Write, HazardResourceLabel::Register),
+            "Add s_waitcnt_vscnt null, 0 before writing this register");
+
+  // The split waits are what gfx12-era targets assemble, so the shared wording
+  // is left to speak for them.
+  formatter.set_architecture(ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_TRUE(
+      suggest(WaitCntType::VMEM, HazardAccessKind::Read, HazardResourceLabel::Register).empty());
+  EXPECT_TRUE(
+      suggest(WaitCntType::LDS, HazardAccessKind::Read, HazardResourceLabel::LdsAddress).empty());
+}
+
+// A flat load occupies two counters at once, so it is worded on its own rather
+// than from the counter a hazard names.
+TEST(DataHazardFormatterTest, WordsTheFlatLoadWaitForTheRunningTarget) {
+  dh::InstructionFormatter formatter;
+
+  EXPECT_TRUE(formatter.format_flat_load_wait_suggestion().empty());
+
+  formatter.set_architecture(ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(formatter.format_flat_load_wait_suggestion(),
+            "Add s_waitcnt vmcnt(0) lgkmcnt(0) before reading this register (flat load uses both "
+            "vmcnt and lgkmcnt)");
+
+  // gfx12-era targets have the combined wait the shared wording names.
+  formatter.set_architecture(ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_TRUE(formatter.format_flat_load_wait_suggestion().empty());
 }

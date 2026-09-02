@@ -162,8 +162,10 @@ WaitAction make_wait_action(const WaitInfo &wait) {
     // count stores on vscnt, drained by the separate s_waitcnt_vscnt, and
     // their stores are tracked against that counter instead.
     add_counter(action, WaitCntType::VMEM, wait.count);
-    add_counter(action, WaitCntType::LDS, wait.paired_count);
-    add_counter(action, WaitCntType::SMEM, wait.paired_count);
+    // lgkmcnt is one counter over scalar memory and LDS together, so it drains
+    // them as one sequence. Draining each to the same count would keep an old
+    // scalar load that a later LDS operation has already counted past.
+    add_counter(action, WaitCntType::LGKM, wait.paired_count);
     break;
   case WaitKind::WaitLoadcnt:
     add_counter(action, WaitCntType::VMEM, wait.count);
@@ -410,6 +412,21 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
                               local.hazards.write_wait = route.local_write_wait != WaitCntType::NONE
                                                              ? route.local_write_wait
                                                              : WaitCntType::VMEM;
+                              api_.on_resource_access(local);
+                            });
+  }
+
+  if (route.reads_local_memory && route.resource_kind != ResourceKind::LocalMemory) {
+    emit_per_lane_or_scalar(route.per_lane_local_addresses, route.local_address, route.exec_mask,
+                            [&](uint64_t address) {
+                              ResourceAccessEvent local = make_base_resource_event(
+                                  instruction, local_size_bytes, route.is_atomic, exec_mask);
+                              local.resource_kind = ResourceKind::LocalMemory;
+                              local.address = address;
+                              local.is_read = true;
+                              local.hazards.read_wait = route.local_read_wait != WaitCntType::NONE
+                                                            ? route.local_read_wait
+                                                            : WaitCntType::LDS;
                               api_.on_resource_access(local);
                             });
   }
