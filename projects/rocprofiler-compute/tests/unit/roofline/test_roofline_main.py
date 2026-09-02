@@ -16,13 +16,7 @@ import plotly.graph_objects as go
 import pytest
 
 import roofline.roofline_html as roofline_html
-from roofline.roofline_frame import (
-    FRAME_MIN_DECADES,
-    FRAME_NOMINAL_ASPECT,
-    FRAME_SLOPE_SKEW,
-    FrameAnchors,
-    frame_bounds,
-)
+from roofline.roofline_frame import FRAME_X_MIN, canonical_frame
 from roofline.roofline_hover import wrap_hover_name
 from roofline.roofline_html import RooflineViewModel
 from roofline.roofline_main import Roofline
@@ -189,123 +183,63 @@ def test_kernel_hover_carries_the_whole_name() -> None:
 
 BANDWIDTH = 500.0
 PEAK_PERF = 5000.0
-KNEE_AI = PEAK_PERF / BANDWIDTH
-KERNELS = [(20.0, 1000.0), (40.0, 2000.0)]
-
-FLOAT_SLACK = 1e-9
-
-any_viewport = pytest.mark.parametrize("aspect", [0.4, 1.0, FRAME_NOMINAL_ASPECT, 4.0])
 
 
-def one_roof_anchors() -> FrameAnchors:
-    return FrameAnchors(
-        points=[(KNEE_AI, PEAK_PERF)] + list(KERNELS),
-        throughputs=[PEAK_PERF],
-        bandwidths=[BANDWIDTH],
-    )
+def test_canonical_frame_snaps_every_bound_to_a_decade() -> None:
+    bounds = canonical_frame([5301.0, 10003.0], [81007.0, 163009.0])
+
+    assert bounds is not None
+    for bound in bounds:
+        assert math.log10(bound).is_integer()
 
 
-def assert_roofs_enter_through_the_bottom(
-    bounds: tuple[float, float, float, float],
-    bandwidths: list[float],
-) -> None:
-    """Every diagonal crosses the bottom edge inside the frame, so the slope
-    itself is on screen instead of being clipped away by the left edge."""
-    x_lo, x_hi, y_lo, _ = bounds
-    for bandwidth in bandwidths:
-        entry_ai = y_lo / bandwidth
-        assert x_lo <= entry_ai * (1 + FLOAT_SLACK), (
-            f"the {bandwidth} roof was cut off by the left edge"
-        )
-        assert entry_ai < x_hi, f"the {bandwidth} roof is off the right of the frame"
+def test_canonical_frame_matches_the_diagnosis_gpu() -> None:
+    bandwidths = [5300.0, 10000.0, 30000.0, 50000.0]
+    peaks = [81000.0, 163000.0]
+
+    assert canonical_frame(bandwidths, peaks) == (1e-2, 1e2, 1e1, 1e6)
 
 
-@any_viewport
-def test_frame_holds_every_anchor(aspect: float) -> None:
-    """The dots, and the corner every roofline is read against, stay in view:
-    shaping and the minimum width may open the frame up but never close it back
-    over an anchor."""
-    x_lo, x_hi, y_lo, y_hi = frame_bounds(one_roof_anchors(), aspect=aspect)
+def test_two_kernel_sets_open_on_the_same_frame(benchmarked_roofline) -> None:
+    slow_data = {
+        "ai_hbm": [[0.5], [2000.0]],
+        "kernelNames": ["slow"],
+    }
+    fast_data = {
+        "ai_hbm": [[40.0], [20000.0]],
+        "kernelNames": ["fast"],
+    }
 
-    for ai, perf in [(KNEE_AI, PEAK_PERF)] + KERNELS:
-        assert x_lo < ai < x_hi, f"intensity {ai} fell outside the frame"
-        assert y_lo < perf < y_hi, f"throughput {perf} fell outside the frame"
+    slow_figure = benchmarked_roofline(["FP64"]).construct_plotly_figures(
+        slow_data, datatypes=["FP64"]
+    )[1]
+    fast_figure = benchmarked_roofline(["FP64"]).construct_plotly_figures(
+        fast_data, datatypes=["FP64"]
+    )[1]
 
-
-@any_viewport
-def test_frame_shows_the_whole_of_every_slope(aspect: float) -> None:
-    """A roof is read by its slope, not just its corner, so the frame reaches
-    left far enough for the diagonal to enter through the bottom edge -- and
-    neither the minimum width nor the shaping may lift it back off."""
-    assert_roofs_enter_through_the_bottom(
-        frame_bounds(one_roof_anchors(), aspect=aspect), [BANDWIDTH]
-    )
-
-
-def test_frame_follows_the_slopes_when_stacking_lifts_the_knees() -> None:
-    """Stacking datatypes caps every diagonal at the tallest ceiling, lifting the
-    knees decades above the kernels. The frame has to follow the slopes down to
-    the kernels instead of opening on the knees alone."""
-    tall_peak = 40 * PEAK_PERF
-    stacked = FrameAnchors(
-        points=[(tall_peak / BANDWIDTH, tall_peak)] + list(KERNELS),
-        throughputs=[PEAK_PERF, tall_peak],
-        bandwidths=[BANDWIDTH],
-    )
-
-    bounds = frame_bounds(stacked)
-
-    assert_roofs_enter_through_the_bottom(bounds, [BANDWIDTH])
-    _, _, y_lo, _ = bounds
-    assert math.log10(tall_peak / y_lo) >= math.log10(
-        tall_peak / min(perf for _, perf in KERNELS)
-    )
+    assert slow_figure.layout.xaxis.range == fast_figure.layout.xaxis.range
+    assert slow_figure.layout.yaxis.range == fast_figure.layout.yaxis.range
 
 
-@any_viewport
-def test_frame_keeps_roofs_near_45_degrees(aspect: float) -> None:
-    """A roof reads at the same angle whatever the window: whichever axis is
-    cramped is widened until the diagonal is within the skew allowance."""
-    x_lo, x_hi, y_lo, y_hi = frame_bounds(one_roof_anchors(), aspect=aspect)
+def test_a_taller_ceiling_never_narrows_the_intensity_axis() -> None:
+    _, x_hi, _, y_hi = canonical_frame([BANDWIDTH], [PEAK_PERF])
+    _, taller_x_hi, _, taller_y_hi = canonical_frame([BANDWIDTH], [10 * PEAK_PERF])
 
-    screen_slope = math.log10(x_hi / x_lo) / (aspect * math.log10(y_hi / y_lo))
-    assert 1 / FRAME_SLOPE_SKEW <= screen_slope <= FRAME_SLOPE_SKEW, (
-        f"a roof reads at slope {screen_slope:.2f} in a {aspect} viewport"
-    )
+    assert taller_x_hi >= x_hi
+    assert taller_y_hi > y_hi
 
 
-def test_frame_opens_on_a_minimum_width() -> None:
-    """One kernel sitting on the knee gives the axes nothing to span, so the
-    intensity axis opens on the minimum rather than on a sliver."""
-    x_lo, x_hi, _, _ = frame_bounds(
-        FrameAnchors(
-            points=[(KNEE_AI, PEAK_PERF)],
-            throughputs=[PEAK_PERF],
-            bandwidths=[BANDWIDTH],
-        )
-    )
-
-    assert math.log10(x_hi / x_lo) >= FRAME_MIN_DECADES
+def test_canonical_frame_guards_degenerate_spans() -> None:
+    assert canonical_frame([1.0], [1e-3]) == (FRAME_X_MIN, 1e-1, 1e-2, 1e-1)
 
 
-def test_a_taller_ceiling_does_not_widen_the_intensity_axis() -> None:
-    """Compute ceilings run off the right edge, so a taller ceiling raises the
-    frame without dragging the intensity axis out with it."""
-    _, x_hi, _, y_hi = frame_bounds(one_roof_anchors())
-
-    taller = one_roof_anchors()
-    taller.throughputs.append(10 * PEAK_PERF)
-    _, taller_x_hi, _, taller_y_hi = frame_bounds(taller)
-
-    assert taller_y_hi > y_hi, "the taller ceiling has to be in view"
-    assert taller_x_hi == x_hi, "a flat ceiling must not widen the intensity axis"
-
-
-def test_frame_bounds_without_anchors() -> None:
+def test_canonical_frame_requires_bandwidths_and_peaks() -> None:
     """Nothing to frame is reported rather than guessed at."""
-    assert frame_bounds(FrameAnchors()) is None
-    assert frame_bounds(FrameAnchors(bandwidths=[BANDWIDTH])) is None
-    assert frame_bounds(FrameAnchors(points=[(0.0, PEAK_PERF)])) is None
+    assert canonical_frame([], []) is None
+    assert canonical_frame([BANDWIDTH], []) is None
+    assert canonical_frame([], [PEAK_PERF]) is None
+    assert canonical_frame([0.0, math.inf], [PEAK_PERF]) is None
+    assert canonical_frame([BANDWIDTH], [0.0, math.nan]) is None
 
 
 FRAME_MAX_DECADES = 6.0
@@ -330,15 +264,10 @@ def stacked_figure(benchmarked_roofline, datatypes: list[str]):
 
 
 @pytest.mark.parametrize("datatypes", [["FP64"], ["FP64", "BF16"]])
-def test_the_figure_opens_on_the_geometry_it_draws(
+def test_the_figure_opens_on_the_machine_frame(
     benchmarked_roofline, datatypes: list[str]
 ) -> None:
-    """The frame is built from where the diagonals turn over, not the
-    extrapolated endpoints they are drawn out to. Stacking datatypes caps every
-    diagonal at the tallest ceiling drawn, which lifts the knees decades above
-    the kernels: the frame then has to open where the steepest roof crosses the
-    bottom edge, or the slopes are clipped away against the left edge and only
-    their corners survive."""
+    """The figure uses the file-wide frame and keeps every drawn roof knee visible."""
     _, fig = stacked_figure(benchmarked_roofline, datatypes)
 
     x_lo, x_hi = (10**bound for bound in fig.layout.xaxis.range)
@@ -348,10 +277,6 @@ def test_the_figure_opens_on_the_geometry_it_draws(
     for level, (knee_ai, knee_perf) in knees.items():
         assert x_lo < knee_ai < x_hi, f"{level}'s knee fell outside the frame"
         assert y_lo < knee_perf < y_hi, f"{level}'s knee fell outside the frame"
-    assert_roofs_enter_through_the_bottom(
-        (x_lo, x_hi, y_lo, y_hi),
-        [knee_perf / knee_ai for knee_ai, knee_perf in knees.values()],
-    )
     assert math.log10(x_hi / x_lo) < FRAME_MAX_DECADES
     assert math.log10(y_hi / y_lo) < FRAME_MAX_DECADES
 

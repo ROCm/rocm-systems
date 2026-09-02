@@ -3,6 +3,7 @@
 
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -11,9 +12,11 @@ import pytest
 from utils import schema
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import (
+    XMAX_DEFAULT,
     GraphPoints,
     calc_ai_analyze,
     calc_ceilings,
+    machine_ceilings,
     sanitize_ai_value,
     sanitize_mem_level,
 )
@@ -392,6 +395,63 @@ def full_benchmark_data() -> dict[str, list[str]]:
     for col, value in PEAK_VALUES.items():
         data[col] = [str(value)]
     return data
+
+
+def write_roofline_csv(path: Path, header: str, rows: list[str]) -> None:
+    path.write_text("\n".join([header] + rows) + "\n", encoding="utf-8")
+
+
+def test_machine_ceilings_reads_every_base_ceiling_for_the_device(
+    tmp_path: Path,
+) -> None:
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,HBMBwLow,L2Bw,FP32Flops,FP32FlopsHigh,I8Ops,MFMAF16Flops",
+        [
+            "0,5300,5290,10000,81000,81100,40000,163000",
+            "1,6300,6290,20000,91000,91100,50000,173000",
+        ],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    bandwidths, peaks = machine_ceilings(parameters, MockMspec())
+
+    assert bandwidths == [5300.0, 10000.0]
+    assert peaks == [81000.0, 40000.0, 163000.0]
+
+
+def test_machine_ceilings_drops_unusable_cells(tmp_path: Path) -> None:
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,L2Bw,FP32Flops,I8Ops",
+        ["0,N/A,nan,inf,-1"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+
+
+def test_machine_ceilings_returns_empty_when_csv_is_unreadable(
+    tmp_path: Path,
+) -> None:
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+
+
+def test_calc_ceilings_uses_fixed_compute_roof_endpoint() -> None:
+    result = calc_ceilings(
+        roofline_parameters(),
+        "FP64",
+        full_benchmark_data(),
+        MockMspec(),
+    )
+
+    assert result["valu"][0][-1] == XMAX_DEFAULT
+    assert result["matrix_ops"][0][-1] == XMAX_DEFAULT
 
 
 @pytest.mark.parametrize(
