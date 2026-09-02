@@ -375,8 +375,8 @@ void try_apply_direct_sampled_watchpoint_patch(
           !private_layout || private_layout->owner_offset.has_value());
     const bool has_private_workgroup_sources =
         private_layout && private_layout->exact_workgroup_offsets.complete();
-    const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
-        bytes, *workgroup_descriptor, options.moi_engine, candidate_point, arch, candidate_errors,
+    const auto workgroup_sources = sampled_workgroup_sources(
+        bytes, *workgroup_descriptor, candidate_point, arch, candidate_errors,
         candidate.container.uses_cluster_workgroup_id,
         private_layout ? &private_layout->exact_workgroup_offsets : nullptr);
     if (!workgroup_sources) {

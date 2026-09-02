@@ -49,9 +49,8 @@ struct SampledBarrierCandidate {
   } else {
     owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(point.moi_owner_epoch_vgprs);
   }
-  const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
-      bytes, descriptor_file_offset, request.moi_engine, point, arch, errors,
-      uses_cluster_workgroup_id,
+  const auto workgroup_sources = sampled_workgroup_sources(
+      bytes, descriptor_file_offset, point, arch, errors, uses_cluster_workgroup_id,
       private_layout ? &private_layout->exact_workgroup_offsets : nullptr);
   if (!workgroup_sources)
     return std::nullopt;

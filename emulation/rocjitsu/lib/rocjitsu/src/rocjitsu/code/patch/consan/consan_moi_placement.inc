@@ -417,19 +417,6 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
-moi_persistent_or_descriptor_workgroup_sources(
-    std::span<const uint8_t> image, uint64_t descriptor_file_offset, ConSanMoiEngine engine,
-    const ConSanMoiOperatingPoint &point, rj_code_arch_t arch, std::vector<std::string> &errors,
-    bool uses_cluster_workgroup_id,
-    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
-  if (const auto persistent =
-          moi_exact_entry_workgroup_sources(engine, point, private_offsets))
-    return persistent;
-  return moi_descriptor_workgroup_sources(image, descriptor_file_offset, arch, errors,
-                                          uses_cluster_workgroup_id);
-}
-
 struct MoiKernelResourceContext {
   const ConSanKernelInfo *kernel = nullptr;
   KernelCfgScope scope;

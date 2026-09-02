@@ -1304,6 +1304,27 @@ if(_workgroup_source_placement MATCHES "kTtmp|ConSanWorkgroupIdentitySource")
         "ConSan common workgroup placement must consume the target-owned exact ABI"
     )
 endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_placement.inc"
+    "moi_persistent_or_descriptor_workgroup_sources|sampled_workgroup_sources"
+    "Sampled workgroup-source fallback must remain in the Sampled owner"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_probe_contracts.h"
+    "persistent_or_descriptor_workgroup_sources|sampled_workgroup_sources"
+    "Sampled workgroup-source fallback must not return to a shared public contract"
+)
+file(READ "${_consan_dir}/consan_moi_sampled.cpp" _sampled_workgroup_source_owner)
+if(NOT _sampled_workgroup_source_owner MATCHES
+       "sampled_workgroup_sources" OR
+   NOT _sampled_workgroup_source_owner MATCHES
+       "moi_exact_entry_workgroup_sources" OR
+   NOT _sampled_workgroup_source_owner MATCHES
+       "moi_descriptor_workgroup_sources")
+    message(FATAL_ERROR
+        "ConSan Sampled owner lost its exact-entry/descriptor workgroup-source policy"
+    )
+endif()
 file(READ "${_consan_dir}/consan_moi_shared_lowering.h" _moi_private_layout_contract)
 if(NOT _moi_private_layout_contract MATCHES "struct MoiPrivateStateDemand" OR
    NOT _moi_private_layout_contract MATCHES "class MoiPrivateStateLayoutCache")
@@ -2433,7 +2454,7 @@ foreach(
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_sampled_sync_emitter}"
-        "ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|moi_persistent_or_descriptor_workgroup_sources|moi_bound_dispatch_id_sources|moi_special_state_sgprs|moi_indirect_jump_sgprs"
+        "ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|sampled_workgroup_sources|moi_bound_dispatch_id_sources|moi_special_state_sgprs|moi_indirect_jump_sgprs"
         "Sampled synchronization emission must consume its exact retained plan"
     )
 endforeach()
@@ -3017,7 +3038,7 @@ endif()
 file(READ "${_consan_dir}/consan_moi_sampled_access.inc" _moi_sampled_access_owner)
 foreach(_selected_sampled_helper IN ITEMS
     "plan_moi_runtime_workgroup_gate[(]"
-    "moi_persistent_or_descriptor_workgroup_sources[(]"
+    "sampled_workgroup_sources[(]"
 )
     string(
         REGEX MATCHALL
@@ -3040,7 +3061,7 @@ _consan_assert_no_match(
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_sampled_access_emission.cpp"
-    "moi_persistent_or_descriptor_workgroup_sources"
+    "sampled_workgroup_sources"
     "Sampled access emission must consume its retained workgroup-source product"
 )
 file(READ "${_consan_dir}/consan_moi_sampled_access_emission.h"
