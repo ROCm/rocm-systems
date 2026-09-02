@@ -3669,16 +3669,12 @@ TEST(HsaHooksUnitTest, AutoReportDecoderProducesTypedEventsFailuresAndLoss) {
       rocjitsu::consan_hook::decode_auto_moi_report(input, snapshot, initial_summary);
   ASSERT_TRUE(decoded.complete());
   EXPECT_EQ(decoded.engine, rocjitsu::ConSanMoiEngine::RecordReplay);
-  EXPECT_EQ(decoded.visible_record_slot_count, report.layout.access_record_capacity);
+  EXPECT_EQ(decoded.visible_access_slots.size(), report.layout.access_record_capacity);
   ASSERT_EQ(decoded.replay_access_records.size(), 1u);
   EXPECT_EQ(decoded.replay_access_records.front().instruction_offset, 0x40u);
   EXPECT_EQ(decoded.summary.visible_access_record_count, 1u);
   EXPECT_EQ(decoded.summary.dropped_access_record_count, 2u);
   EXPECT_EQ(decoded.summary.inline_malformed_count, 1u);
-  EXPECT_TRUE(std::ranges::any_of(decoded.losses, [](const auto &loss) {
-    return loss.reason == rocjitsu::consan_hook::AutoMoiReportLossReason::DroppedAccess &&
-           loss.count == 2u;
-  }));
 
   snapshot.bytes[0] = 0;
   const auto malformed = rocjitsu::consan_hook::decode_auto_moi_report(input, snapshot, {});

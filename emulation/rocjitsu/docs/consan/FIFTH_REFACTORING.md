@@ -7571,3 +7571,65 @@ implementation is not an acceptable payoff. Broad lowering mutation surfaces,
 the remaining runtime mode mixture, material whole-refactoring shrinkage, and
 the independent completion audit remain open. The goal therefore remains
 active.
+
+### 16.105 Convergence checkpoint 104: one observable runtime evidence product
+
+The decoder/renderer trace paid back checkpoint 103's temporary mode-contract
+growth by following every field of `AutoMoiDecodedReport` to its production
+consumers. Two apparent typed products were parallel or dormant authorities.
+`AutoMoiReportEvidenceLoss` reconstructed twelve loss categories from counters
+already stored in the authoritative `AutoMoiReportSummary`; no production code
+read the resulting vector. `AutoMoiReportEvidenceIssue` exposed twenty enum
+alternatives, but the renderer handled only six and silently discarded the
+other fourteen through a `default` arm. The discarded alternatives incurred
+allocation and copying without affecting diagnostics, trust, summary, or any
+later decision.
+
+The duplicate loss enum, record, vector, and end-of-decode projection are now
+deleted. All loss behavior remains represented once in the summary consumed by
+trust and rendering. The issue product now contains exactly the six detailed
+diagnostics that are observable: malformed exact snapshots, publishing release
+snapshots, malformed or empty Sampled windows/watchpoints, and unresolved
+compact diagnostic tokens. Counters for every incomplete, changed, malformed,
+dropped, saturated, and unsupported state remain unchanged in the summary.
+The renderer's issue switch is exhaustive and has no `default`, so adding a new
+typed detail without defining its rendering fails compilation and the boundary
+gate rather than becoming another dormant allocation.
+
+The same consumer trace removed nine scalar fields cached in the decoded report
+solely for rendering. Raw counts come from the retained ABI header, capacities
+come from the typed layout, visible counts come from the decoded vectors, and
+the effective diagnostic count is derived from the header and retained
+qualified-token count. The decoder test continues to assert the authoritative
+summary loss directly; its duplicate-vector assertion was removed without
+removing, renaming, or weakening the behavioral test.
+
+| Signal | Checkpoint 104 | Cumulative change | Slice change from checkpoint 103 |
+| --- | ---: | ---: | ---: |
+| Production files | 282 | +53 | 0 |
+| Physical production lines | 102,674 | **-2,302** | **-123** |
+| Nonblank production lines | 96,412 | **-2,672** | **-120** |
+| Production implementation lines | 88,700 | **-2,750** | **-120** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Runtime loss side-channel types/vectors | **0** | n/a | **-3** |
+| Typed issue alternatives without a renderer | **0** | n/a | **-14** |
+| Cached renderer-derivable decoded scalars | **0** | n/a | **-9** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and all **41/41** report,
+analyzer, decoder, pipeline, renderer, live-hook, and architecture-boundary
+tests. Checkpoint 103 passed all 1,295 host/component tests immediately before
+this deletion-only payoff. No test was added, removed, renamed, disabled, or
+replaced, and no physical gfx1201 test was run.
+
+This slice strengthens Sections 14.1, 14.5, 14.7, and 14.8. It more than pays
+checkpoint 103's 58-line migration cost and brings production 62 implementation
+lines below checkpoint 102. The large decoder and renderer still physically mix
+mode-specific logic, however, so this is legacy harvesting enabled by the new
+analysis boundary rather than completion of runtime mode locality. Broad
+lowering mutation surfaces, physical decoder/renderer ownership, material
+whole-refactoring shrinkage, and the independent completion audit remain open.
+The goal therefore remains active.

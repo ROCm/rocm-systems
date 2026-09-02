@@ -2314,6 +2314,23 @@ foreach(
         )
     endif()
 endforeach()
+foreach(_decoder_contract IN ITEMS rj_hsa_dbi_moi_report_decoder.cpp rj_hsa_dbi_moi_report_decoder.h)
+    _consan_assert_no_match(
+        "${_hook_dir}/${_decoder_contract}"
+        "AutoMoiReportLossReason|AutoMoiReportEvidenceLoss"
+        "runtime evidence loss has one authoritative summary projection"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_moi_report_decoder.h"
+    "uint32_t (access_record_count|barrier_record_count|atomic_record_count|visible_record_slot_count|effective_diagnostic_count|sampled_watchpoint_capacity|sampled_sync_metadata_capacity|sampled_pending_acquire_capacity|sampled_pending_acquire_owner_bank_count)"
+    "decoded reports must not cache values derivable from their header, layout, or vectors"
+)
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_moi_report_renderer.cpp"
+    "default:"
+    "every typed runtime evidence issue must have an explicit renderer case"
+)
 
 # Every active implementation fragment has one reviewed textual owner. No
 # implementation fragment may include another except the three coherent

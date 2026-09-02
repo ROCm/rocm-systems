@@ -21,25 +21,11 @@ enum class AutoMoiReportDecodeFailure : uint8_t {
 };
 
 enum class AutoMoiReportEvidenceReason : uint8_t {
-  ExactPublishing,
-  ExactChangedDuringRead,
   ExactMalformed,
   ReleasePublishing,
-  ReleaseChangedDuringRead,
-  ReleaseCapacityOverflow,
-  ReleaseSourceIncomplete,
-  ReleaseMalformed,
-  TokenPublishing,
-  TokenChangedDuringRead,
-  TokenMalformed,
-  SampledChangedDuringRead,
-  SampledPublishing,
   SampledMalformedWindow,
   SampledEmptyWatchpoint,
-  SampledStaleGeneration,
-  SampledIncompletePublication,
   SampledMalformedWatchpoint,
-  SampledMalformedSynchronization,
   CompactDiagnosticTokenUnresolved,
 };
 
@@ -49,26 +35,6 @@ struct AutoMoiReportEvidenceIssue {
   AutoMoiReportEvidenceReason reason = AutoMoiReportEvidenceReason::ExactMalformed;
   uint32_t index = 0;
   std::array<uint64_t, 12> words{};
-};
-
-enum class AutoMoiReportLossReason : uint8_t {
-  DroppedAccess,
-  DroppedBarrier,
-  DroppedAtomic,
-  DroppedFence,
-  DroppedDiagnostic,
-  SampledDroppedWindow,
-  SampledSaturatedWindow,
-  SampledUnsupportedSynchronization,
-  InlineUndercoverage,
-  InlineOverflow,
-  InlineUnsupported,
-  InlineMalformed,
-};
-
-struct AutoMoiReportEvidenceLoss {
-  AutoMoiReportLossReason reason = AutoMoiReportLossReason::DroppedAccess;
-  uint64_t count = 0;
 };
 
 struct AutoMoiExactShadowEvidence {
@@ -121,16 +87,7 @@ struct AutoMoiDecodedReport {
   ConSanMoiReportHeader header;
   AutoMoiReportSummary summary;
 
-  uint32_t access_record_count = 0;
-  uint32_t barrier_record_count = 0;
-  uint32_t atomic_record_count = 0;
-  uint32_t visible_record_slot_count = 0;
-  uint32_t effective_diagnostic_count = 0;
   uint32_t deferred_token_qualified_diagnostic_count = 0;
-  uint32_t sampled_watchpoint_capacity = 0;
-  uint32_t sampled_sync_metadata_capacity = 0;
-  uint32_t sampled_pending_acquire_capacity = 0;
-  uint32_t sampled_pending_acquire_owner_bank_count = 0;
   uint64_t sampled_watchpoint_slots_examined = 0;
   uint64_t sampled_pending_release_slots_examined = 0;
   bool sampled_synchronization_evidence_complete = false;
@@ -146,7 +103,6 @@ struct AutoMoiDecodedReport {
   std::vector<AutoMoiInlineAcquiredTokenEvidence> inline_acquired_tokens;
   std::vector<AutoMoiSampledEvidence> sampled;
   std::vector<AutoMoiReportEvidenceIssue> issues;
-  std::vector<AutoMoiReportEvidenceLoss> losses;
 
   [[nodiscard]] bool complete() const { return failure == AutoMoiReportDecodeFailure::None; }
 };

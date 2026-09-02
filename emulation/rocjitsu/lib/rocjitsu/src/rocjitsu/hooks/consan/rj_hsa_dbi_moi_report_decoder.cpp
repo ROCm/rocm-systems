@@ -153,12 +153,9 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
       break;
     case rocjitsu::ConSanMoiInlineExactSnapshotState::Publishing:
       ++summary.exact_incomplete_snapshot_count;
-      result.issues.push_back({.reason = AutoMoiReportEvidenceReason::ExactPublishing, .index = i});
       break;
     case rocjitsu::ConSanMoiInlineExactSnapshotState::ChangedDuringRead:
       ++summary.exact_changed_snapshot_count;
-      result.issues.push_back(
-          {.reason = AutoMoiReportEvidenceReason::ExactChangedDuringRead, .index = i});
       break;
     case rocjitsu::ConSanMoiInlineExactSnapshotState::Malformed:
       result.issues.push_back(
@@ -212,23 +209,15 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
       break;
     case rocjitsu::ConSanMoiInlineReleaseSnapshotState::ChangedDuringRead:
       ++summary.release_changed_snapshot_count;
-      result.issues.push_back(
-          {.reason = AutoMoiReportEvidenceReason::ReleaseChangedDuringRead, .index = i});
       break;
     case rocjitsu::ConSanMoiInlineReleaseSnapshotState::CapacityOverflow:
       ++summary.release_overflow_snapshot_count;
-      result.issues.push_back(
-          {.reason = AutoMoiReportEvidenceReason::ReleaseCapacityOverflow, .index = i});
       break;
     case rocjitsu::ConSanMoiInlineReleaseSnapshotState::SourceIncomplete:
       ++summary.release_source_incomplete_snapshot_count;
-      result.issues.push_back(
-          {.reason = AutoMoiReportEvidenceReason::ReleaseSourceIncomplete, .index = i});
       break;
     case rocjitsu::ConSanMoiInlineReleaseSnapshotState::Malformed:
       ++summary.release_malformed_snapshot_count;
-      result.issues.push_back(
-          {.reason = AutoMoiReportEvidenceReason::ReleaseMalformed, .index = i});
       break;
     }
   }
@@ -261,16 +250,12 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
       break;
     case rocjitsu::ConSanMoiInlineAcquiredTokenState::Publishing:
       ++summary.token_incomplete_snapshot_count;
-      result.issues.push_back({.reason = AutoMoiReportEvidenceReason::TokenPublishing, .index = i});
       break;
     case rocjitsu::ConSanMoiInlineAcquiredTokenState::Changed:
       ++summary.token_changed_snapshot_count;
-      result.issues.push_back(
-          {.reason = AutoMoiReportEvidenceReason::TokenChangedDuringRead, .index = i});
       break;
     case rocjitsu::ConSanMoiInlineAcquiredTokenState::Malformed:
       ++summary.token_malformed_snapshot_count;
-      result.issues.push_back({.reason = AutoMoiReportEvidenceReason::TokenMalformed, .index = i});
       break;
     }
   }
@@ -288,7 +273,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   const auto &visible_diagnostic_indices = deferred_filter.visible_indices;
   const uint32_t deferred_token_qualified_diagnostics = deferred_filter.qualified_count;
   const uint32_t visible_diagnostics = static_cast<uint32_t>(visible_diagnostic_indices.size());
-  const uint32_t effective_diagnostic_count = deferred_filter.effective_diagnostic_count;
   const auto *sampled_metadata =
       input.static_metadata ? std::get_if<AutoMoiSampledStaticMetadata>(input.static_metadata)
                             : nullptr;
@@ -362,8 +346,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
                                                        active_sampled_generation);
     if (state_before != state_after) {
       ++summary.sampled_changed_snapshot_count;
-      result.issues.push_back(
-          {.reason = AutoMoiReportEvidenceReason::SampledChangedDuringRead, .index = i});
       continue;
     }
     const auto publication_state =
@@ -376,8 +358,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
     }
     if (publication_state == rocjitsu::ConSanMoiSampledCausalPublicationState::Publishing) {
       ++summary.sampled_incomplete_snapshot_count;
-      result.issues.push_back(
-          {.reason = AutoMoiReportEvidenceReason::SampledPublishing, .index = i});
       continue;
     }
     if (publication_state == rocjitsu::ConSanMoiSampledCausalPublicationState::Ready)
@@ -417,10 +397,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
     if (has_sync && sync_snapshot_usable) {
       if (sync.classification != rocjitsu::ConSanMoiSampledSyncClassification::Valid) {
         ++summary.sampled_malformed_sync_count;
-        result.issues.push_back(
-            {.reason = AutoMoiReportEvidenceReason::SampledMalformedSynchronization,
-             .index = i,
-             .words = {static_cast<uint32_t>(sync.classification)}});
         sync_snapshot_usable = false;
       }
     }
@@ -443,18 +419,12 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
       break;
     case rocjitsu::ConSanMoiSampledSnapshotState::StaleGeneration:
       ++summary.sampled_stale_snapshot_count;
-      result.issues.push_back(
-          {.reason = AutoMoiReportEvidenceReason::SampledStaleGeneration, .index = i});
       break;
     case rocjitsu::ConSanMoiSampledSnapshotState::IncompletePublication:
       ++summary.sampled_incomplete_snapshot_count;
-      result.issues.push_back(
-          {.reason = AutoMoiReportEvidenceReason::SampledIncompletePublication, .index = i});
       break;
     case rocjitsu::ConSanMoiSampledSnapshotState::ChangedDuringRead:
       ++summary.sampled_changed_snapshot_count;
-      result.issues.push_back(
-          {.reason = AutoMoiReportEvidenceReason::SampledChangedDuringRead, .index = i});
       break;
     case rocjitsu::ConSanMoiSampledSnapshotState::Malformed:
       result.issues.push_back({.reason = AutoMoiReportEvidenceReason::SampledMalformedWatchpoint,
@@ -525,9 +495,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
           continue;
         if (release_sync_attached[visible_index]) {
           ++summary.sampled_malformed_sync_count;
-          result.issues.push_back(
-              {.reason = AutoMoiReportEvidenceReason::SampledMalformedSynchronization,
-               .index = release.index});
           release.sync = {};
           release.sync_snapshot_usable = false;
           release_sync_rejected[visible_index] = true;
@@ -549,10 +516,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
           (entry.entry.owner_id & (sampled_pending_acquire_owner_bank_count - 1u));
       if (pending_index >= sampled_pending_acquire_capacity) {
         ++summary.sampled_malformed_sync_count;
-        result.issues.push_back(
-            {.reason = AutoMoiReportEvidenceReason::SampledMalformedSynchronization,
-             .index = entry.index,
-             .words = {pending_index, sampled_pending_acquire_capacity}});
         entry.sync_snapshot_usable = false;
         continue;
       }
@@ -572,39 +535,23 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
           entry.sync = pending_join.sync;
         else {
           ++summary.sampled_malformed_sync_count;
-          result.issues.push_back(
-              {.reason = AutoMoiReportEvidenceReason::SampledMalformedSynchronization,
-               .index = entry.index,
-               .words = {static_cast<uint32_t>(pending_join.state)}});
           entry.sync_snapshot_usable = false;
         }
         break;
       case rocjitsu::ConSanMoiSampledPendingAcquireState::Publishing:
         ++summary.sampled_incomplete_snapshot_count;
         ++summary.sampled_malformed_sync_count;
-        result.issues.push_back(
-            {.reason = AutoMoiReportEvidenceReason::SampledMalformedSynchronization,
-             .index = entry.index,
-             .words = {static_cast<uint32_t>(pending_join.state)}});
         entry.sync_snapshot_usable = false;
         break;
       case rocjitsu::ConSanMoiSampledPendingAcquireState::ChangedDuringRead:
         ++summary.sampled_changed_snapshot_count;
         ++summary.sampled_malformed_sync_count;
-        result.issues.push_back(
-            {.reason = AutoMoiReportEvidenceReason::SampledMalformedSynchronization,
-             .index = entry.index,
-             .words = {static_cast<uint32_t>(pending_join.state)}});
         entry.sync_snapshot_usable = false;
         break;
       case rocjitsu::ConSanMoiSampledPendingAcquireState::Malformed:
       case rocjitsu::ConSanMoiSampledPendingAcquireState::IdentityMismatch:
       case rocjitsu::ConSanMoiSampledPendingAcquireState::FutureEpoch:
         ++summary.sampled_malformed_sync_count;
-        result.issues.push_back(
-            {.reason = AutoMoiReportEvidenceReason::SampledMalformedSynchronization,
-             .index = entry.index,
-             .words = {static_cast<uint32_t>(pending_join.state)}});
         entry.sync_snapshot_usable = false;
         break;
       }
@@ -751,16 +698,7 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   result.failure = AutoMoiReportDecodeFailure::None;
   result.engine = expected_engine;
   result.header = *header;
-  result.access_record_count = access_record_count;
-  result.barrier_record_count = barrier_record_count;
-  result.atomic_record_count = atomic_record_count;
-  result.visible_record_slot_count = visible_records;
-  result.effective_diagnostic_count = effective_diagnostic_count;
   result.deferred_token_qualified_diagnostic_count = deferred_token_qualified_diagnostics;
-  result.sampled_watchpoint_capacity = sampled_watchpoint_capacity;
-  result.sampled_sync_metadata_capacity = sampled_sync_metadata_capacity;
-  result.sampled_pending_acquire_capacity = sampled_pending_acquire_capacity;
-  result.sampled_pending_acquire_owner_bank_count = sampled_pending_acquire_owner_bank_count;
   result.sampled_watchpoint_slots_examined = sampled_watchpoint_slots_examined;
   result.sampled_pending_release_slots_examined = sampled_pending_release_slots_examined;
   result.sampled_synchronization_evidence_complete = sampled_sync_evidence_complete;
@@ -768,24 +706,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   result.inline_atomic_releases = std::move(visible_inline_atomic_releases);
   result.inline_acquired_tokens = std::move(visible_inline_acquired_tokens);
   result.sampled = std::move(visible_sampled);
-
-  const auto add_loss = [&](AutoMoiReportLossReason reason, uint64_t count) {
-    if (count != 0)
-      result.losses.push_back({reason, count});
-  };
-  add_loss(AutoMoiReportLossReason::DroppedAccess, summary.dropped_access_record_count);
-  add_loss(AutoMoiReportLossReason::DroppedBarrier, summary.dropped_barrier_record_count);
-  add_loss(AutoMoiReportLossReason::DroppedAtomic, summary.dropped_atomic_record_count);
-  add_loss(AutoMoiReportLossReason::DroppedFence, summary.dropped_fence_record_count);
-  add_loss(AutoMoiReportLossReason::DroppedDiagnostic, summary.dropped_diagnostic_record_count);
-  add_loss(AutoMoiReportLossReason::SampledDroppedWindow, summary.sampled_dropped_window_count);
-  add_loss(AutoMoiReportLossReason::SampledSaturatedWindow, summary.sampled_saturated_window_count);
-  add_loss(AutoMoiReportLossReason::SampledUnsupportedSynchronization,
-           summary.sampled_unsupported_sync_count);
-  add_loss(AutoMoiReportLossReason::InlineUndercoverage, summary.inline_undercoverage_count);
-  add_loss(AutoMoiReportLossReason::InlineOverflow, summary.inline_overflow_count);
-  add_loss(AutoMoiReportLossReason::InlineUnsupported, summary.inline_unsupported_count);
-  add_loss(AutoMoiReportLossReason::InlineMalformed, summary.inline_malformed_count);
   return result;
 }
 

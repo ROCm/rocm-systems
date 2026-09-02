@@ -59,23 +59,26 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
 
   const ConSanMoiEngine expected_engine = decoded.engine;
   const ConSanMoiReportHeader *header = &decoded.header;
-  const uint32_t access_record_count = decoded.access_record_count;
-  const uint32_t barrier_record_count = decoded.barrier_record_count;
-  const uint32_t atomic_record_count = decoded.atomic_record_count;
-  const uint32_t visible_records = decoded.visible_record_slot_count;
+  const uint32_t access_record_count = header->access_record_count;
+  const uint32_t barrier_record_count = header->barrier_record_count;
+  const uint32_t atomic_record_count = header->atomic_record_count;
+  const uint32_t visible_records = static_cast<uint32_t>(decoded.visible_access_slots.size());
   const uint32_t visible_barriers = static_cast<uint32_t>(decoded.barrier_records.size());
   const uint32_t visible_atomics = static_cast<uint32_t>(decoded.atomic_records.size());
   const uint32_t visible_fences = static_cast<uint32_t>(decoded.fence_records.size());
   const uint32_t visible_diagnostics = static_cast<uint32_t>(decoded.diagnostics.size());
-  const uint32_t effective_diagnostic_count = decoded.effective_diagnostic_count;
+  const uint32_t effective_diagnostic_count =
+      header->diagnostic_count >= decoded.deferred_token_qualified_diagnostic_count
+          ? header->diagnostic_count - decoded.deferred_token_qualified_diagnostic_count
+          : 0u;
   const uint32_t dropped_records = static_cast<uint32_t>(summary.dropped_access_record_count);
   const uint32_t dropped_barriers = static_cast<uint32_t>(summary.dropped_barrier_record_count);
   const uint32_t dropped_atomics = static_cast<uint32_t>(summary.dropped_atomic_record_count);
   const uint32_t dropped_fences = static_cast<uint32_t>(summary.dropped_fence_record_count);
   const uint32_t dropped_diagnostics =
       static_cast<uint32_t>(summary.dropped_diagnostic_record_count);
-  const uint32_t sampled_watchpoint_capacity = decoded.sampled_watchpoint_capacity;
-  const uint32_t sampled_sync_metadata_capacity = decoded.sampled_sync_metadata_capacity;
+  const uint32_t sampled_watchpoint_capacity = input.layout.sampled_watchpoint_capacity;
+  const uint32_t sampled_sync_metadata_capacity = input.layout.sampled_sync_metadata_capacity;
   const uint64_t sampled_watchpoint_slots_examined = decoded.sampled_watchpoint_slots_examined;
   const uint64_t sampled_pending_release_slots_examined =
       decoded.sampled_pending_release_slots_examined;
@@ -178,8 +181,6 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
                   static_cast<unsigned long long>(input.reader), issue.index,
                   static_cast<uint32_t>(issue.words[0]), issue.words[1] != 0 ? "true" : "false",
                   issue.words[2] != 0 ? "true" : "false", issue.words[3] != 0 ? "true" : "false");
-      break;
-    default:
       break;
     }
   }
