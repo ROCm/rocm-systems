@@ -970,9 +970,9 @@ def _make_sdk_run_profiling_profiler(
     mock_finder_cls = Mock()
     finder_instance = mock_finder_cls.return_value
     if native_finder_raises:
-        finder_instance.get_collector_library_path.side_effect = RuntimeError("boom")
+        finder_instance.get_artifact_path.side_effect = RuntimeError("boom")
     else:
-        finder_instance.get_collector_library_path.return_value = "/n/native.so"
+        finder_instance.get_artifact_path.return_value = "/n/native.so"
 
     mock_profile = Mock(return_value=0.0)
 

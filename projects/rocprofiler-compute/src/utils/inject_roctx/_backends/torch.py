@@ -1,21 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""ROCTX instrumentation backend for PyTorch.
+"""ROCTX instrumentation for PyTorch.
 
-ATen ops use the C++ RecordFunction tier (roctx_recordfn.so) when
-TorchBackend.install() initializes it, with a Python TorchDispatchMode
-fallback. Structural wraps (nn.Module, Optimizer, distributed,
-CUDA graph, torch.compile) run on both tiers. Triton kernel launches
-are wrapped by the separate triton backend.
-
-Module import is side-effect free with respect to PyTorch state. Torch is
-imported lazily by TorchBackend.install.
+ATen operators use torch_trace_collector when it is installed, otherwise
+TorchDispatchMode. No collector for the workload PyTorch version, or a
+failure to load the collector, terminates the process.
 """
 
-import importlib
 import importlib.util
-import inspect
 import os
 import sys
 import threading
@@ -24,36 +17,38 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from utils.inject_roctx import core
+from utils.inject_roctx._backends.torch_cpp_loader import (
+    CollectorUnavailableError,
+)
+from utils.inject_roctx._backends.torch_cpp_loader import (
+    load as load_torch_trace_collector,
+)
 from utils.inject_roctx.registry import register
-from utils.logger import console_log, console_warning
+from utils.logger import console_error, console_log, console_warning
 
 _BACKEND_NAME = "torch"
 
 
 class _RecordFnHook:
     def active(self) -> bool:
-        return _STATE.using_c_tier and _STATE.roctx_recordfn is not None
+        return _STATE.using_c_tier and _STATE.torch_trace_collector is not None
 
     def push(self, marker: str, context: str, backend: str) -> bool:
         try:
-            _STATE.roctx_recordfn.push_user_scope(marker, context, backend)
+            _STATE.torch_trace_collector.push_user_scope(marker, context, backend)
             return True
         except Exception:
             return False
 
     def pop(self) -> None:
         try:
-            _STATE.roctx_recordfn.pop_user_scope()
+            _STATE.torch_trace_collector.pop_user_scope()
         except Exception:
             pass
 
 
 class _TorchState:
-    """Mutable backend state populated by TorchBackend.install().
-
-    Holds the resolved torch module handles, the roctx_recordfn loader and
-    native C++ RecordFunction tier, and the active Python-tier dispatch mode.
-    """
+    """Resolved torch modules, collector, and active tracing tier."""
 
     def __init__(self) -> None:
         self.torch: Any = None
@@ -67,10 +62,8 @@ class _TorchState:
         self.nn: Any = None
         self.torch_root: str = ""
 
-        self.loader_module: Any = None
-        self.load_roctx_recordfn: Optional[Callable[..., Any]] = None
-        self.load_diagnostics: list[tuple[str, str]] = []
-        self.roctx_recordfn: Any = None
+        self.load_torch_trace_collector: Optional[Callable[..., Any]] = None
+        self.torch_trace_collector: Any = None
         self.using_c_tier: bool = False
         self.c_tier_initialized: bool = False
         self.native_hook: Optional[_RecordFnHook] = None
@@ -258,35 +251,34 @@ def _walk_subclasses(cls: type, fn: Callable[[type], None]) -> None:
 
 
 def _initialize_c_tier() -> bool:
-    """Load and install roctx_recordfn.so once per process."""
+    """Load and install torch_trace_collector.so once per process."""
     if _STATE.c_tier_initialized:
         return _STATE.using_c_tier
 
     _STATE.c_tier_initialized = True
 
-    if _STATE.load_roctx_recordfn is None:
-        _STATE.roctx_recordfn = None
+    if _STATE.load_torch_trace_collector is None:
+        _STATE.torch_trace_collector = None
         _STATE.using_c_tier = False
         return False
 
     try:
-        result = _STATE.load_roctx_recordfn()
+        module = _STATE.load_torch_trace_collector()
+    except CollectorUnavailableError as exc:
+        console_error("ml api trace", str(exc))
     except Exception as exc:
         console_warning(
             "ml api trace",
-            f"loader raised; falling back to Python tier: {exc}",
+            "C++ RecordFunction tier unavailable "
+            f"({type(exc).__name__}: {exc}); falling back to Python tier",
         )
-        result = None
+        module = None
 
-    if result is not None:
-        _STATE.roctx_recordfn = result.module
-        _STATE.load_diagnostics = result.diagnostics
-    else:
-        _STATE.roctx_recordfn = None
+    _STATE.torch_trace_collector = module
 
-    if _STATE.roctx_recordfn is not None:
+    if _STATE.torch_trace_collector is not None:
         try:
-            _STATE.roctx_recordfn.install()
+            _STATE.torch_trace_collector.install()
             console_log(
                 "ml api trace",
                 (
@@ -300,9 +292,10 @@ def _initialize_c_tier() -> bool:
         except Exception as exc:
             console_warning(
                 "ml api trace",
-                f".so install() raised; falling back to Python tier: {exc}",
+                "C++ RecordFunction tier install failed "
+                f"({type(exc).__name__}: {exc}); falling back to Python tier",
             )
-            _STATE.roctx_recordfn = None
+            _STATE.torch_trace_collector = None
 
     _STATE.using_c_tier = False
     return False
@@ -312,20 +305,11 @@ def _emit_python_tier_fallback_warning() -> None:
     """Emit one warning when the C++ tier is unavailable."""
     if _STATE.using_c_tier:
         return
-    loader_trail = ""
-    if _STATE.loader_module is not None:
-        try:
-            loader_trail = _STATE.loader_module.format_load_diagnostic_trail(
-                _STATE.load_diagnostics,
-            )
-        except Exception:
-            loader_trail = ""
-    trail_block = f"\nLoader trail:\n{loader_trail}" if loader_trail else ""
     console_warning(
         "ml api trace",
         "Coverage tier: Python-only injector (the C++ RecordFunction tier is "
         "unavailable). Operator coverage on autograd backward threads is "
-        "reduced; backward markers may lack their full context chain." + trail_block,
+        "reduced; backward markers may lack their full context chain.",
     )
 
 
@@ -371,7 +355,7 @@ def patch_distributed_collectives() -> None:
             fn = getattr(fc, fn_name, None)
             if not callable(fn):
                 continue
-            if inspect.isclass(fn):
+            if isinstance(fn, type):
                 continue
             # Skip symbols re-exported from other modules (e.g. ReduceOp).
             if getattr(fn, "__module__", "") != fc.__name__:
@@ -1145,12 +1129,12 @@ def using_c_tier() -> bool:
     return _STATE.using_c_tier
 
 
-def dump_recordfn_stats() -> Optional[dict[str, object]]:
-    """Return the .so counters, or None on the Python tier."""
-    if _STATE.roctx_recordfn is None:
+def dump_torch_trace_stats() -> Optional[dict[str, object]]:
+    """Return the collector counters, or None when the C++ module is not loaded."""
+    if _STATE.torch_trace_collector is None:
         return None
     try:
-        return _STATE.roctx_recordfn.dump_stats()
+        return _STATE.torch_trace_collector.dump_stats()
     except Exception:
         return None
 
@@ -1230,17 +1214,7 @@ def _resolve_torch() -> bool:
         _STATE.nn = _nn_mod
     except Exception:
         _STATE.nn = None
-    try:
-        from . import torch_cpp_loader as _loader_mod
-        from .torch_cpp_loader import load as _loader_fn
-
-        _STATE.loader_module = _loader_mod
-        _STATE.load_roctx_recordfn = _loader_fn
-    except Exception as exc:
-        console_warning(
-            "ml api trace",
-            f"torch_cpp_loader unavailable; falling back to Python tier: {exc}",
-        )
+    _STATE.load_torch_trace_collector = load_torch_trace_collector
 
     return True
 
