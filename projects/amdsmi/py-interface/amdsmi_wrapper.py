@@ -4044,6 +4044,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_fabric_cper_entries = _libraries['libamd_smi.so'].amdsmi_get_fabric_cper_entries
+    amdsmi_get_fabric_cper_entries.restype = amdsmi_status_t
+    amdsmi_get_fabric_cper_entries.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.POINTER(struct_amdsmi_cper_hdr_t)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_gpu_ecc_status = _libraries['libamd_smi.so'].amdsmi_get_gpu_ecc_status
     amdsmi_get_gpu_ecc_status.restype = amdsmi_status_t
     amdsmi_get_gpu_ecc_status.argtypes = [amdsmi_processor_handle, amdsmi_gpu_block_t, ctypes.POINTER(amdsmi_ras_err_state_t)]
@@ -5402,6 +5408,7 @@ __all__ = \
     'amdsmi_get_cpu_svi3_vr_controller_temp', 'amdsmi_get_cpu_tdelta',
     'amdsmi_get_cpu_xgmi_pstate_range', 'amdsmi_get_cpucore_handles',
     'amdsmi_get_energy_count', 'amdsmi_get_esmi_err_msg',
+    'amdsmi_get_fabric_cper_entries',
     'amdsmi_get_fabric_telemetry_data', 'amdsmi_get_fw_info',
     'amdsmi_get_gpu_accelerator_partition_mem_alloc_mode',
     'amdsmi_get_gpu_accelerator_partition_profile',

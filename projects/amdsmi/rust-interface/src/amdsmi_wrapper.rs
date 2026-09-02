@@ -4797,6 +4797,17 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_fabric_cper_entries(
+        processor_handle: AmdsmiProcessorHandle,
+        severity_mask: u32,
+        cper_data: *mut ::std::os::raw::c_char,
+        buf_size: *mut u64,
+        cper_hdrs: *mut *mut AmdsmiCperHdrT,
+        entry_count: *mut u64,
+        cursor: *mut u64,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_gpu_ecc_status(
         processor_handle: AmdsmiProcessorHandle,
         block: AmdsmiGpuBlockT,

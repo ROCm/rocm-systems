@@ -27,6 +27,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Populated by `amdsmi_get_gpu_enumeration_info()`, UALoE-backed like the existing `physical_acc_id` field in `amdsmi_asic_info_t`.
   - CLI: `amd-smi list --enumeration` now includes `PHYSICAL_ACC_ID` next to `OAM_ID`.
 
+- **Added IFoE fabric RAS CPER API**.
+  - `amdsmi_get_fabric_cper_entries()` — retrieve IFoE RAS CPER records from UALoE library
+  - CLI: `amd-smi ras --cper` now reports fabric link events alongside GPU errors (fabric-linkdown, fabric-linkup, fabric-fatal)
+
 ### Changed
 
 - **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  

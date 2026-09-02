@@ -1844,6 +1844,17 @@ typedef enum {
 } amdsmi_cper_notify_type_t;
 
 /**
+ * @brief IFoE CPER notify type GUID
+ *
+ * Placeholder GUID for IFoE fabric error records. Will be replaced with
+ * official GUID once provided by UALoE team.
+ *
+ * @cond @tag{host} @endcond
+ */
+#define AMDSMI_CPER_NOTIFY_TYPE_IFOE_GUID \
+  {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+
+/**
  * @brief Ras policy v4.0
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -6199,6 +6210,55 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_ha
                                             uint32_t severity_mask, char* cper_data,
                                             uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
                                             uint64_t* entry_count, uint64_t* cursor);
+
+/**
+ *  @brief Retrieve CPER entries for IFoE fabric RAS events
+ *
+ *  @ingroup tagRasInfo
+ *
+ *  @platform{host}
+ *
+ *  @details Returns CPER-formatted error records for IFoE network port link events
+ *  (link down, link up, fatal errors). Uses the same CPER format and calling
+ *  conventions as amdsmi_get_gpu_cper_entries() so callers can handle both GPU and
+ *  fabric CPERs with identical code paths.
+ *
+ *  Records are fetched from the UALoE library and transformed into full UEFI CPER
+ *  format. The notify_type field is set to AMDSMI_CPER_NOTIFY_TYPE_IFOE_GUID to
+ *  distinguish fabric events from GPU events.
+ *
+ *  @param[in] processor_handle GPU processor handle with UALoE fabric support.
+ *  @param[in] severity_mask Bitmask of severity levels to retrieve.
+ *                           Use (1U << AMDSMI_CPER_SEV_*) to construct the mask.
+ *                           Use (1U << AMDSMI_CPER_SEV_NUM) to retrieve all severities.
+ *
+ *  @param[in,out] cper_data Caller-allocated buffer for raw CPER data.
+ *                 Records are packed back-to-back.
+ *
+ *  @param[in,out] buf_size [in] size of cper_data buffer in bytes.
+ *                 [out] actual bytes written.
+ *
+ *  @param[in,out] cper_hdrs Array of pointers into cper_data, one per
+ *                 returned entry. Caller allocates the array.
+ *
+ *  @param[in,out] entry_count [in] maximum number of entries the cper_hdrs array can hold,
+ *                 must be in [1, 4096].
+ *                 [out] number of CPER entries returned.
+ *
+ *  @param[in,out] cursor [in] cursor from previous call (0 = start).
+ *                 [out] cursor for next call (0 = no more data).
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success with no more data,
+ *          ::AMDSMI_STATUS_MORE_DATA if entries returned but more remain,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if UALoE not available,
+ *          ::AMDSMI_STATUS_INVAL if null pointer or out-of-range entry_count arguments,
+ *          ::AMDSMI_STATUS_OUT_OF_RESOURCES if buffer too small for one entry,
+ *          non-zero on other failures
+ */
+amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor_handle,
+                                               uint32_t severity_mask, char* cper_data,
+                                               uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
+                                               uint64_t* entry_count, uint64_t* cursor);
 
 /** @} End tagRasInfo */
 
