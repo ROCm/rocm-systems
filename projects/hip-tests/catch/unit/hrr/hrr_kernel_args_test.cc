@@ -148,7 +148,7 @@ inline bool hrr_live_arg(const std::string& out, uint64_t recorded,
 // sentinel arrived as null, or the lost pointer arrived as the recorded
 // address.
 // ---------------------------------------------------------------------------
-TEST_CASE("Unit_HRR_KernelArgs_SentinelKeptLostPointerNulled", "[hrr]") {
+TEST_CASE("Unit_HRR_KernelArgs_SentinelKeptLostPointerNulled", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_kernel_args.hrr");
   const uint64_t lost = hrr_capture_direct_kargs(cap.path);
   REQUIRE(lost != 0);
