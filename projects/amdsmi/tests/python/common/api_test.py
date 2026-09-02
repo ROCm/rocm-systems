@@ -378,7 +378,7 @@ class ApiTest:
         except amdsmi.AmdSmiLibraryException as e:
             return self._judge_status(label, e, expected)
         except amdsmi.AmdSmiException as e:
-            return self._judge_status(label, e, expected or self.common.FAIL)
+            return self._judge_status(label, e, self.common.FAIL if expected is None else expected)
         except _BINDING_REJECTIONS as e:
             # ctypes refused the value, so the C entry point was never reached.
             self.common.print(
@@ -396,7 +396,12 @@ class ApiTest:
             self.common.check_ret(label, exc, self.common.ANY_FAIL)
             return None
         wanted = [expected] if isinstance(expected, str) else list(expected)
-        code, name = self.common.get_error_code(exc)
+        if hasattr(exc, "get_error_code"):
+            code, name = self.common.get_error_code(exc)
+        else:
+            # AmdSmiParameterException and friends carry no status: the interface
+            # refused the argument before the library saw it, which is an INVAL.
+            code, name = "-1", INVAL
         if name in wanted:
             self.common.print(f"{label}\n\tTEST SUCCESS, AMDSMI API Returned {code:>2s}, {name}")
             return None
