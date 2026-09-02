@@ -77,9 +77,10 @@
  * - 1.23 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS
  * - 1.24 - hsa_amd_external_semaphore_handle_open/hsa_amd_external_semaphore_handle_close
  * - 1.25 - hsa_amd_vmem_export_fabric_handle, hsa_amd_vmem_import_fabric_handle
+ * - 1.26 - AMD AQL indirect buffer, conditional branch, and loop-back packet definitions
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 25
+#define HSA_AMD_INTERFACE_VERSION_MINOR 26
 
 #ifdef __cplusplus
 extern "C" {
@@ -129,6 +130,26 @@ typedef enum {
    */
   HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH = 3,
 
+  /**
+   * Dispatches an indirect buffer through a vendor-specific AQL packet.
+   */
+  HSA_AMD_PACKET_TYPE_AQL_INDIRECT_BUFFER = 5,
+
+  /**
+   * Conditionally dispatches true/false sub-ranges of an indirect buffer.
+   */
+  HSA_AMD_PACKET_TYPE_AQL_COND_BRANCH = 6,
+
+  /**
+   * Loop-back packet used inside an indirect buffer.
+   */
+  HSA_AMD_PACKET_TYPE_AQL_LOOP_BACK = 7,
+
+  /**
+   * Compatibility alias for the conditional indirect-buffer branch packet.
+   */
+  HSA_AMD_PACKET_TYPE_DISPATCH_IB_COND_JUMP = HSA_AMD_PACKET_TYPE_AQL_COND_BRANCH,
+
   /* Reserved for a packet that is not yet released */
   HSA_AMD_PACKET_TYPE_RESERVED200 = 200,
 } hsa_amd_packet_type_t;
@@ -137,6 +158,27 @@ typedef enum {
  * @brief A fixed-size type used to represent ::hsa_amd_packet_type_t constants.
  */
 typedef uint8_t hsa_amd_packet_type8_t;
+
+/**
+ * @brief Condition operation for @ref hsa_amd_aql_cond_branch_packet_t.
+ */
+typedef enum {
+  HSA_AMD_AQL_COND_BRANCH_COND_BOOL_TRUE = 10,
+} hsa_amd_aql_cond_branch_cond_op_t;
+
+/**
+ * @brief Execution mode for @ref hsa_amd_aql_cond_branch_packet_t.
+ */
+typedef enum {
+  HSA_AMD_AQL_COND_BRANCH_EXEC_BRANCH_ONCE = 0,
+} hsa_amd_aql_cond_branch_execution_mode_t;
+
+/**
+ * @brief Post action for @ref hsa_amd_aql_cond_branch_packet_t.
+ */
+typedef enum {
+  HSA_AMD_AQL_COND_BRANCH_POST_ACTION_NONE = 0,
+} hsa_amd_aql_cond_branch_post_action_t;
 
 /**
  * @brief AMD vendor specific AQL packet header
@@ -220,6 +262,52 @@ typedef struct hsa_amd_barrier_value_packet_s {
    */
   hsa_signal_t completion_signal;
 } hsa_amd_barrier_value_packet_t;
+
+/**
+ * @brief AMD conditional indirect-buffer branch packet.
+ *
+ * When the condition is true, the packet processor executes
+ * true_target_size_packets packets starting at ib_base_addr plus
+ * true_target_offset_packets AQL slots.  When the condition is false, it
+ * executes false_target_size_packets packets starting at ib_base_addr plus
+ * false_target_offset_packets AQL slots.  A zero-sized target is permitted.
+ */
+typedef struct hsa_amd_aql_cond_branch_packet_s {
+  hsa_amd_vendor_packet_header_t header;
+  uint8_t cond_op;
+  uint8_t execution_mode;
+  uint8_t post_action;
+  uint8_t flags;
+  hsa_signal_t condition_signal;
+  hsa_signal_value_t test_value;
+  uint32_t true_target_offset_packets;
+  uint32_t true_target_size_packets;
+  uint32_t false_target_offset_packets;
+  uint32_t false_target_size_packets;
+  uint64_t ib_base_addr;
+  uint32_t branch_options;
+  uint32_t ib_size_packets;
+  hsa_signal_t completion_signal;
+} hsa_amd_aql_cond_branch_packet_t;
+
+typedef hsa_amd_aql_cond_branch_packet_t
+    hsa_amd_dispatch_indirect_buffer_conditional_jump_t;
+
+/**
+ * @brief AMD loop-back packet used inside an indirect buffer.
+ */
+typedef struct hsa_amd_aql_loop_back_s {
+  hsa_amd_vendor_packet_header_t header;
+  uint32_t reserved0;
+  hsa_signal_t condition_signal;
+  hsa_signal_value_t test_value;
+  hsa_signal_condition32_t cond_op;
+  uint32_t ib_size_packets;
+  uint64_t reserved1;
+  uint64_t reserved2;
+  uint64_t reserved3;
+  hsa_signal_t completion_signal;
+} hsa_amd_aql_loop_back_t;
 
 /**
  * @brief Enumeration constants corresponding to the sub-fields of

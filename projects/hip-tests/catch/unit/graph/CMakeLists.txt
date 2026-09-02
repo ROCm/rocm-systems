@@ -200,6 +200,7 @@ add_dependencies(build_tests add_Kernel.code)
 if(HIP_PLATFORM MATCHES "amd")
   set(CONDITIONAL_TEST_SRC
     hipGraphConditionalNode.cc
+    hipGraphConditionalNodeSmoke.cc
   )
   set(_clr_install "${CMAKE_SOURCE_DIR}/../clr/build/install")
   if(EXISTS "${_clr_install}/include/hip/hip_runtime_api.h")

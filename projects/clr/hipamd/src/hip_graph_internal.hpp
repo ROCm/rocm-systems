@@ -2888,7 +2888,7 @@ class GraphEmptyNode : public GraphNode {
 // or 2 (IF/ELSE) empty body graphs that the caller populates after node
 // creation.  The runtime reads the bodies at GraphExec::Init time to build
 // the per-conditional indirect buffer (see m2_clr_ib_build), and at
-// GraphExec::Run time emits a single vendor cond_jump AQL packet on the
+// GraphExec::Run time emits a single vendor COND_BRANCH AQL packet on the
 // launch stream's HW queue (see m2_clr_packet_emit + m2_clr_launch_reset).
 //
 // The CreateCommand override currently emits an amd::Marker as a stand-in so
@@ -2922,7 +2922,7 @@ class GraphConditionalNode : public GraphNode {
 
  public:
   // Custom amd::Command emitted at graph launch.  submit() resets the cond
-  // signal to its default and rings out one vendor cond_jump AQL packet on
+  // signal to its default and rings out one vendor COND_BRANCH AQL packet on
   // the launch stream's HW queue.  Defined out-of-line in
   // hip_graph_internal.cpp because submit() needs HSA + rocvirtual headers.
   class CondJumpCommand : public amd::Command {
@@ -2980,9 +2980,16 @@ class GraphConditionalNode : public GraphNode {
 
   // Used by CondJumpCommand::submit().
   void* GetIbAddr() const { return ib_addr_; }
-  uint32_t GetFallPkts() const { return fall_pkts_; }
-  uint32_t GetJumpOffPkts() const { return jump_off_pkts_; }
-  uint32_t GetJumpPkts() const { return jump_pkts_; }
+  void RefreshIb() {
+    if (ib_addr_ != nullptr && !ib_template_.empty()) {
+      std::memcpy(ib_addr_, ib_template_.data(), ib_template_.size());
+    }
+  }
+  uint32_t GetTrueOffsetPkts() const { return true_off_pkts_; }
+  uint32_t GetTruePkts() const { return true_pkts_; }
+  uint32_t GetFalseOffsetPkts() const { return false_off_pkts_; }
+  uint32_t GetFalsePkts() const { return false_pkts_; }
+  uint32_t GetIbSizePkts() const { return static_cast<uint32_t>(ib_size_pkts_); }
   bool IsIbBuilt() const { return ib_built_; }
 
  private:
@@ -2994,9 +3001,11 @@ class GraphConditionalNode : public GraphNode {
   void* ib_addr_ = nullptr;        //!< Base of the IB in device-accessible memory.
   size_t ib_size_bytes_ = 0;       //!< Allocation size for ib_addr_, used by hostFree.
   size_t ib_size_pkts_ = 0;        //!< Total IB packets including loop_back (WHILE).
-  uint32_t fall_pkts_ = 0;         //!< cond_jump.fallthrough_ib_size_packets
-  uint32_t jump_off_pkts_ = 0;     //!< cond_jump.jump_offset_packets
-  uint32_t jump_pkts_ = 0;         //!< cond_jump.jump_ib_size_packets
+  uint32_t true_off_pkts_ = 0;     //!< cond_branch.true_target_offset_packets
+  uint32_t true_pkts_ = 0;         //!< cond_branch.true_target_size_packets
+  uint32_t false_off_pkts_ = 0;    //!< cond_branch.false_target_offset_packets
+  uint32_t false_pkts_ = 0;        //!< cond_branch.false_target_size_packets
+  std::vector<uint8_t> ib_template_;  //!< Pristine IB bytes copied before each launch.
   amd::Device* ib_device_ = nullptr;  //!< Device that allocated ib_addr_.
   bool ib_built_ = false;
 };

@@ -10,11 +10,9 @@ new vendor AQL packet types to let the GPU Command Processor (CP) evaluate a
 signal-backed condition and walk a pre-built instruction buffer (IB) of kernel
 dispatch packets, without scheduler kernel involvement or driver round-trips.
 
-**Current status:** The CLR + ROCr stack compiles and instantiates conditional
-graphs end-to-end. At `hipGraphLaunch` time the CP rejects the cond_jump packet
-with `HSA_STATUS_ERROR_INVALID_PACKET_FORMAT (0x1009)` because vendor packet
-types 5 and 6 are not yet recognised by CP microcode. Runtime execution becomes
-valid once the matching CP firmware ships.
+**Current status:** The CLR + ROCr stack targets the current firmware ABI:
+COND_BRANCH is packet type 6, LOOP_BACK is packet type 7, and WHILE remains
+lowered as `[body packets | LOOP_BACK]` rather than COND_BRANCH repeat mode.
 
 ---
 
@@ -96,35 +94,39 @@ with the AMD format field encoding the subtype.
 
 | Enum value | Name | Purpose |
 |---|---|---|
-| 4 | `HSA_AMD_PACKET_TYPE_AQL_INDIRECT_BUFFER` | Generic IB dispatch (reserved; not emitted by this POC) |
-| 5 | `HSA_AMD_PACKET_TYPE_DISPATCH_IB_COND_JUMP` | Entry packet for IF/WHILE nodes |
-| 6 | `HSA_AMD_PACKET_TYPE_AQL_LOOP_BACK` | Loop-back tail packet inside a WHILE body IB |
+| 5 | `HSA_AMD_PACKET_TYPE_AQL_INDIRECT_BUFFER` | Generic IB dispatch (reserved; not emitted by this POC) |
+| 6 | `HSA_AMD_PACKET_TYPE_AQL_COND_BRANCH` | Entry packet for IF/WHILE nodes |
+| 7 | `HSA_AMD_PACKET_TYPE_AQL_LOOP_BACK` | Loop-back tail packet inside a WHILE body IB |
 
-### `hsa_amd_dispatch_indirect_buffer_conditional_jump_t` (type 5)
+### `hsa_amd_aql_cond_branch_packet_t` (type 6)
 
 | Offset | Field | Description |
 |--------|-------|-------------|
 | +0  | `header` | Vendor packet header; BARRIER=1, scacquire=screlease=SYSTEM |
-| +4  | `reserved0` | Must be 0 |
+| +4  | `cond_op` | `BOOL_TRUE` (10) for HIP IF/WHILE entry |
+| +5  | `execution_mode` | `BRANCH_ONCE` (0) |
+| +6  | `post_action` | `NONE` (0) |
+| +7  | `flags` | Must be 0 |
 | +8  | `condition_signal` | `hsa_signal_t` — the cond cell read by the CP |
-| +16 | `test_value` | Value to compare against the signal |
-| +24 | `cond_op` | `hsa_signal_condition_t` (EQ/NE/LT/GTE) |
-| +28 | `fallthrough_ib_size_packets` | Packets to run when condition is FALSE |
-| +32 | `ib_base_addr` | Base address of the instruction buffer |
-| +40 | `jump_offset_packets` | Offset (in packets) to the TRUE-arm start |
-| +44 | `jump_ib_size_packets` | Packets to run when condition is TRUE |
-| +48 | `reserved1` | Must be 0 |
+| +16 | `test_value` | 0 for `BOOL_TRUE` |
+| +24 | `true_target_offset_packets` | TRUE-arm start offset in packets |
+| +28 | `true_target_size_packets` | Packets to run when condition is TRUE |
+| +32 | `false_target_offset_packets` | FALSE-arm start offset in packets |
+| +36 | `false_target_size_packets` | Packets to run when condition is FALSE |
+| +40 | `ib_base_addr` | Base address of the instruction buffer |
+| +48 | `branch_options` | Must be 0 |
+| +52 | `ib_size_packets` | Total IB size in packets |
 | +56 | `completion_signal` | Optional completion signal (0 for in-graph use) |
 
-### `hsa_amd_aql_loop_back_t` (type 6)
+### `hsa_amd_aql_loop_back_t` (type 7)
 
 | Offset | Field | Description |
 |--------|-------|-------------|
 | +0  | `header` | Vendor packet header; BARRIER=1, scacquire=screlease=SYSTEM |
 | +4  | `reserved0` | Must be 0 |
-| +8  | `condition_signal` | Same signal as the enclosing cond_jump |
-| +16 | `test_value` | Same test value as the enclosing cond_jump |
-| +24 | `cond_op` | Same condition as the enclosing cond_jump |
+| +8  | `condition_signal` | Same signal as the enclosing COND_BRANCH |
+| +16 | `test_value` | 1; firmware increments the signal and exits when the result equals this |
+| +24 | `cond_op` | Legacy field; HIP leaves this as `NE` |
 | +28 | `ib_size_packets` | Total IB size including this packet; CP uses it to rewind the read pointer |
 | +32 | `reserved1`–`reserved3` | Must be 0 |
 | +56 | `completion_signal` | Optional (0 for in-graph use) |
@@ -138,14 +140,14 @@ with the AMD format field encoding the subtype.
 ```
 parent queue:
   [ ... ]
-  [ COND_JUMP ]
+  [ COND_BRANCH ]
       condition_signal  = handle.signal
-      test_value        = default_value  (typically 1)
-      cond_op           = NE
+      cond_op           = BOOL_TRUE
+      test_value        = 0
       ib_base_addr      = body_ib
-      fallthrough_pkts  = 0             (0-iteration: skip immediately)
-      jump_offset_pkts  = 0
-      jump_ib_size_pkts = N + 1         (N body kernels + 1 LOOP_BACK)
+      true_offset_pkts  = 0
+      true_size_pkts    = N + 1         (N body kernels + 1 LOOP_BACK)
+      false_size_pkts   = 0             (0-iteration: skip immediately)
   [ ... ]
 
 body_ib:
@@ -165,10 +167,10 @@ condition is met; only then does the CP exit the IB and resume the parent queue.
 
 ```
 parent queue:
-  [ COND_JUMP ]
-      fallthrough_pkts  = 0
-      jump_offset_pkts  = 0
-      jump_ib_size_pkts = N
+  [ COND_BRANCH ]
+      true_offset_pkts  = 0
+      true_size_pkts    = N
+      false_size_pkts   = 0
 
 body_ib:
   [ KERNEL_DISPATCH body[0] ]
@@ -181,17 +183,18 @@ body_ib:
 
 ```
 body_ib:
-  [ KERNEL_DISPATCH else[0]  ]  <- false arm (M packets)
-  ...
-  [ KERNEL_DISPATCH else[M-1] ]
   [ KERNEL_DISPATCH if[0]    ]  <- true arm (K packets)
   ...
   [ KERNEL_DISPATCH if[K-1]  ]
+  [ KERNEL_DISPATCH else[0]  ]  <- false arm (M packets)
+  ...
+  [ KERNEL_DISPATCH else[M-1] ]
 
-COND_JUMP fields:
-  fallthrough_pkts  = M     (run else arm on FALSE)
-  jump_offset_pkts  = M     (skip to true arm on TRUE)
-  jump_ib_size_pkts = K     (run true arm on TRUE)
+COND_BRANCH fields:
+  true_offset_pkts  = 0     (run true arm on TRUE)
+  true_size_pkts    = K
+  false_offset_pkts = K     (run else arm on FALSE)
+  false_size_pkts   = M
 ```
 
 ---
@@ -211,9 +214,10 @@ Inherits from `GraphNode` with `hipGraphNodeTypeConditional`.
 | `bodies_` | `vector<Graph*>` | Owned body graph(s) |
 | `ib_addr_` | `void*` | Base of the IB in device-accessible memory |
 | `ib_size_pkts_` | `size_t` | Total IB packets including LOOP_BACK |
-| `fall_pkts_` | `uint32_t` | `cond_jump.fallthrough_ib_size_packets` |
-| `jump_off_pkts_` | `uint32_t` | `cond_jump.jump_offset_packets` |
-| `jump_pkts_` | `uint32_t` | `cond_jump.jump_ib_size_packets` |
+| `true_off_pkts_` | `uint32_t` | `cond_branch.true_target_offset_packets` |
+| `true_pkts_` | `uint32_t` | `cond_branch.true_target_size_packets` |
+| `false_off_pkts_` | `uint32_t` | `cond_branch.false_target_offset_packets` |
+| `false_pkts_` | `uint32_t` | `cond_branch.false_target_size_packets` |
 
 **`BuildIB(kernArgMgr, devId)`** — called from `GraphExec::CaptureAQLPackets()`:
 
@@ -222,39 +226,39 @@ Inherits from `GraphNode` with `hipGraphNodeTypeConditional`.
 2. Walks each body graph in insertion order, calling
    `GraphNode::CaptureAndFormPacket(kernArgMgr)` on every kernel node.
 3. Zeroes `completion_signal` in each captured packet.
-4. Allocates the IB: `Device::deviceLocalAlloc` on largeBar systems,
-   `Device::hostAlloc(kKernArg segment)` fallback otherwise.
+4. Allocates the IB with `Device::hostAlloc(kKernArg segment)` so ROCclr uses
+   the executable CPU HSA memory pool and grants agent access.
 5. `memcpy`s all captured packets into the IB, appending an
    `hsa_amd_aql_loop_back_t` for WHILE.
-6. Sets `fall_pkts_`, `jump_off_pkts_`, `jump_pkts_` for the parent
+6. Sets true/false target packet ranges for the parent
    `CondJumpCommand`.
 
 **`CondJumpCommand::submit(device)`** — called at each `hipGraphLaunch`:
 
 1. `hsa_signal_store_relaxed(cond_sig, default_value)` — resets the cell so a
    previous launch's terminal value doesn't carry over.
-2. `roc::VirtualGPU::dispatchCondJumpPacket(...)` — emits the vendor packet.
+2. `roc::VirtualGPU::dispatchCondBranchPacket(...)` — emits the vendor packet.
 
 **Copy constructor / `clone()`:** deep-clones each body `Graph` so the
 `GraphExec` owns independent body graph instances. IB metadata is
 default-initialised; `BuildIB` is re-run on the clone's first instantiation.
 
-### `VirtualGPU::dispatchCondJumpPacket` (`rocvirtual.hpp/.cpp`)
+### `VirtualGPU::dispatchCondBranchPacket` (`rocvirtual.hpp/.cpp`)
 
 ```cpp
-void dispatchCondJumpPacket(
+void dispatchCondBranchPacket(
     hsa_signal_t cond_signal,
-    hsa_signal_value_t test_value,
     uint64_t ib_base_addr,
-    uint32_t fall_pkts,
-    uint32_t jump_offset_pkts,
-    uint32_t jump_pkts);
+    uint32_t true_offset_pkts,
+    uint32_t true_pkts,
+    uint32_t false_offset_pkts,
+    uint32_t false_pkts,
+    uint32_t ib_size_pkts);
 ```
 
-Assembles `hsa_amd_dispatch_indirect_buffer_conditional_jump_t` with:
+Assembles `hsa_amd_aql_cond_branch_packet_t` with:
 - `BARRIER=1`, `scacquire=screlease=HSA_FENCE_SCOPE_SYSTEM`
-- `cond_op = HSA_SIGNAL_CONDITION_NE`, `test_value` from the handle's
-  `default_value`
+- `cond_op = HSA_AMD_AQL_COND_BRANCH_COND_BOOL_TRUE`, `test_value = 0`
 
 Reserves a slot on the HW queue via `hsa_queue_add_write_index_screlease`,
 writes the packet at the ring-buffer location, and rings the doorbell.
@@ -276,7 +280,7 @@ allocated before body-kernel kernarg allocation runs inside `BuildIB`.
 | IB visibility to CP | Flagged uncached on host side; CP fetches through GFX cache |
 | Cond cell update (device) | Volatile store in `hipGraphSetConditional`; ordered by body kernel's screlease |
 | Cond cell reset (host) | `hsa_signal_store_relaxed` in `CondJumpCommand::submit` before each launch |
-| Packet ordering | BARRIER=1 + SYSTEM fences on both COND_JUMP and LOOP_BACK packets |
+| Packet ordering | BARRIER=1 + SYSTEM fences on both COND_BRANCH and LOOP_BACK packets |
 
 ---
 
@@ -322,8 +326,8 @@ API reads.
 
 Exercises `hipGraphInstantiate` + `hipGraphLaunch` for WHILE and IF nodes. All
 tests fail at `hipStreamSynchronize` with `hipErrorLaunchFailure (719)` in the
-expected pattern: the CP aborts the queue on the vendor cond_jump packet with
-`HSA_STATUS_ERROR_INVALID_PACKET_FORMAT (0x1009)` (amd_format=5). This matches
+expected pattern: the CP aborts the queue on the vendor COND_BRANCH packet with
+`HSA_STATUS_ERROR_INVALID_PACKET_FORMAT (0x1009)` (amd_format=6). This matches
 the documented firmware boundary exactly.
 
 ---
@@ -337,7 +341,7 @@ the documented firmware boundary exactly.
 | Handle creation + node creation | `projects/clr/hipamd/src/hip_graph.cpp` |
 | `GraphConditionalNode` class definition | `projects/clr/hipamd/src/hip_graph_internal.hpp` |
 | `BuildIB`, `CondJumpCommand::submit` | `projects/clr/hipamd/src/hip_graph_internal.cpp` |
-| `dispatchCondJumpPacket` | `projects/clr/rocclr/device/rocm/rocvirtual.hpp/.cpp` |
+| `dispatchCondBranchPacket` | `projects/clr/rocclr/device/rocm/rocvirtual.hpp/.cpp` |
 | Vendor AQL packet types (ROCr) | `projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_ext_amd.h` |
 | AQL packet name printer (ROCr) | `projects/rocr-runtime/runtime/hsa-runtime/core/inc/queue.h` |
 
@@ -345,11 +349,10 @@ the documented firmware boundary exactly.
 
 ## Open Items
 
-1. **CP firmware** — vendor packet types 5 and 6 must be recognised by CP
-   microcode. All CLR/ROCr changes are in place; no runtime changes are needed
-   once the firmware ships.
-2. **ROCr packet definitions** — currently removed from this branch. They
-   should land through a dedicated ROCr PR before or alongside the CP firmware.
+1. **WHILE repeat mode** — WHILE still uses `[body packets | LOOP_BACK]`; it is
+   not lowered to COND_BRANCH repeat mode yet.
+2. **ROCr packet definitions** — the ABI definitions are present in this branch
+   and should be kept in sync with the firmware-owned packet layout.
 3. **Handle lifetime** — the backing `hsa_signal_t` is not yet destroyed when
    the owning graph is destroyed (M1 limitation).
 4. **Non-kernel body nodes** — `BuildIB` returns `hipErrorNotSupported` for any

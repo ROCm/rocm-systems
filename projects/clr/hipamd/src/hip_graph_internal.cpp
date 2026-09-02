@@ -2788,7 +2788,7 @@ void GraphKernelArgManager::ReadBackOrFlush() {
 }
 
 // ================================================================================================
-// GraphConditionalNode: lazy IB build + cond_jump command (M2 IB path).
+// GraphConditionalNode: lazy IB build + COND_BRANCH command (M2 IB path).
 //
 // BuildIB() is called from GraphExec::CaptureAQLPackets() at instantiate time
 // after the parent's GraphKernelArgManager pool has been allocated.  It walks
@@ -2796,15 +2796,14 @@ void GraphKernelArgManager::ReadBackOrFlush() {
 // AQL kernel-dispatch packets via the same machinery that the segmented
 // scheduler uses for regular nodes (GraphNode::CaptureAndFormPacket).  For
 // WHILE we append a vendor LOOP_BACK packet so the CP re-evaluates the cond
-// signal after every iteration.  The IB lives in coarse-grain VRAM on
-// largeBar systems (so the CP fetches without PCIe round-trips) and in
-// pinned host memory otherwise.
+// signal after every iteration.  The IB lives in executable host kernarg
+// memory so it is CP-fetchable with the current firmware design.
 //
 // CondJumpCommand::submit() runs at launch on the launch stream's
 // roc::VirtualGPU.  It resets the cond cell back to the handle's default
 // value (otherwise iteration N would observe value=0 left by iteration N-1)
-// and emits a single vendor cond_jump packet via the new
-// dispatchCondJumpPacket helper.  The CP follows the cond_jump into the IB,
+// and emits a single vendor COND_BRANCH packet via the new
+// dispatchCondBranchPacket helper.  The CP follows the COND_BRANCH into the IB,
 // runs the body, and (for WHILE) loops via LOOP_BACK until the kernel zeroes
 // the cond cell.
 
@@ -2914,7 +2913,7 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
       for (auto* pkt : nodePackets) {
         // Zero the captured packet's completion_signal (offset 56) so the
         // body kernel inside the IB does not try to signal a per-packet
-        // completion.  Aggregation (if any) is handled at the cond_jump
+        // completion.  Aggregation (if any) is handled at the COND_BRANCH
         // entry packet level.
         std::memset(pkt + 56, 0, 8);
         body_bytes[bi].insert(body_bytes[bi].end(), pkt, pkt + 64);
@@ -2923,34 +2922,37 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
     }
   }
 
-  // Compute IB layout + cond_jump arguments per cond_type.
+  // Compute IB layout + COND_BRANCH arguments per cond_type.
   size_t total_pkts = 0;
-  size_t fall_pkts = 0;
-  size_t jump_off_pkts = 0;
-  size_t jump_pkts = 0;
+  size_t true_off_pkts = 0;
+  size_t true_pkts = 0;
+  size_t false_off_pkts = 0;
+  size_t false_pkts = 0;
 
   if (cond_type_ == hipGraphCondTypeWhile) {
-    // Layout: [body | loop_back].  cond_jump runs body+loop_back if cond != 0;
-    // skips entirely if cond == 0 (handles 0-iteration WHILE).
+    // Layout: [body | loop_back].  COND_BRANCH runs body+loop_back if cond is
+    // nonzero; skips entirely if cond == 0 (handles 0-iteration WHILE).
     total_pkts = body_pkt_count[0] + 1;  // +1 for trailing loop_back
-    fall_pkts = 0;
-    jump_off_pkts = 0;
-    jump_pkts = total_pkts;
+    true_off_pkts = 0;
+    true_pkts = total_pkts;
+    false_off_pkts = 0;
+    false_pkts = 0;
   } else {
     if (bodies_.size() == 1) {
       // IF (1 body).  Layout: [body].  Run body if cond != 0, skip otherwise.
       total_pkts = body_pkt_count[0];
-      fall_pkts = 0;
-      jump_off_pkts = 0;
-      jump_pkts = body_pkt_count[0];
+      true_off_pkts = 0;
+      true_pkts = body_pkt_count[0];
+      false_off_pkts = 0;
+      false_pkts = 0;
     } else {
       // IF / ELSE (2 bodies).  CUDA convention: body[0] = "if" (TRUE),
-      // body[1] = "else" (FALSE).  IB layout is [false_arm | true_arm], so
-      // jump_offset/fall point to body[1] = false_arm at the start.
+      // body[1] = "else" (FALSE).  IB layout is [true_arm | false_arm].
       total_pkts = body_pkt_count[0] + body_pkt_count[1];
-      fall_pkts = body_pkt_count[1];
-      jump_off_pkts = body_pkt_count[1];
-      jump_pkts = body_pkt_count[0];
+      true_off_pkts = 0;
+      true_pkts = body_pkt_count[0];
+      false_off_pkts = body_pkt_count[0];
+      false_pkts = body_pkt_count[1];
     }
   }
 
@@ -2960,26 +2962,19 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
     ib_addr_ = nullptr;
     ib_size_bytes_ = 0;
     ib_size_pkts_ = 0;
-    fall_pkts_ = 0;
-    jump_off_pkts_ = 0;
-    jump_pkts_ = 0;
+    true_off_pkts_ = 0;
+    true_pkts_ = 0;
+    false_off_pkts_ = 0;
+    false_pkts_ = 0;
     ib_built_ = true;
     return hipSuccess;
   }
 
-  // Allocate IB in device-accessible memory.  Mirror GraphKernelArgManager's
-  // allocation strategy: largeBar -> coarse-grain VRAM (executable kernarg
-  // pool flavor, GPU-local + host-writable on largeBar), else pinned host.
+  // Allocate IB in executable host kernarg memory.  Device::hostAlloc(...,
+  // kKernArg) routes through the ROCclr path that requests
+  // HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG and allows agent access.
   const size_t ib_bytes = total_pkts * 64;
-  void* ib = nullptr;
-  if (device->info().largeBar_) {
-    amd::Device::AllocationFlags flags = {};
-    flags.executable_ = true;
-    ib = device->deviceLocalAlloc(ib_bytes, flags);
-  } else {
-    ib = device->hostAlloc(ib_bytes, 64,
-                           amd::Device::MemorySegment::kKernArg);
-  }
+  void* ib = device->hostAlloc(ib_bytes, 64, amd::Device::MemorySegment::kKernArg);
   if (ib == nullptr) {
     ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
             "[hipGraph][cond] IB allocation of %zu bytes failed", ib_bytes);
@@ -3005,7 +3000,7 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
     lb.header.header = static_cast<uint16_t>(kVendorH | kBarrierH | kSysScopeH);
     lb.header.AmdFormat = HSA_AMD_PACKET_TYPE_AQL_LOOP_BACK;
     lb.condition_signal.handle = handle_.signal_handle;
-    lb.test_value = static_cast<hsa_signal_value_t>(handle_.default_value);
+    lb.test_value = 1;
     lb.cond_op = HSA_SIGNAL_CONDITION_NE;
     lb.ib_size_packets = static_cast<uint32_t>(total_pkts);
     lb.completion_signal.handle = 0;
@@ -3017,31 +3012,34 @@ hipError_t GraphConditionalNode::BuildIB(GraphKernelArgManager* kernArgMgr,
       dst += body_bytes[0].size();
     }
   } else {
-    // IF / ELSE: memcpy false_arm (body[1]) first, then true_arm (body[0]).
-    if (!body_bytes[1].empty()) {
-      std::memcpy(dst, body_bytes[1].data(), body_bytes[1].size());
-      dst += body_bytes[1].size();
-    }
+    // IF / ELSE: memcpy true_arm (body[0]) first, then false_arm (body[1]).
     if (!body_bytes[0].empty()) {
       std::memcpy(dst, body_bytes[0].data(), body_bytes[0].size());
       dst += body_bytes[0].size();
+    }
+    if (!body_bytes[1].empty()) {
+      std::memcpy(dst, body_bytes[1].data(), body_bytes[1].size());
+      dst += body_bytes[1].size();
     }
   }
 
   ib_addr_ = ib;
   ib_size_bytes_ = ib_bytes;
   ib_size_pkts_ = total_pkts;
-  fall_pkts_ = static_cast<uint32_t>(fall_pkts);
-  jump_off_pkts_ = static_cast<uint32_t>(jump_off_pkts);
-  jump_pkts_ = static_cast<uint32_t>(jump_pkts);
+  true_off_pkts_ = static_cast<uint32_t>(true_off_pkts);
+  true_pkts_ = static_cast<uint32_t>(true_pkts);
+  false_off_pkts_ = static_cast<uint32_t>(false_off_pkts);
+  false_pkts_ = static_cast<uint32_t>(false_pkts);
+  ib_template_.assign(static_cast<uint8_t*>(ib), static_cast<uint8_t*>(ib) + ib_bytes);
   ib_device_ = device;
   ib_built_ = true;
 
   ClPrint(amd::LOG_INFO, amd::LOG_CODE,
           "[hipGraph][cond] BuildIB type=%d ib=%p bytes=%zu pkts=%zu "
-          "fall=%u jump_off=%u jump=%u",
+          "true_off=%u true=%u false_off=%u false=%u",
           static_cast<int>(cond_type_), ib_addr_, ib_size_bytes_,
-          ib_size_pkts_, fall_pkts_, jump_off_pkts_, jump_pkts_);
+          ib_size_pkts_, true_off_pkts_, true_pkts_, false_off_pkts_,
+          false_pkts_);
   return hipSuccess;
 }
 
@@ -3071,20 +3069,19 @@ void GraphConditionalNode::CondJumpCommand::submit(device::VirtualDevice& device
       node_.GetHandle().default_value);
 
   // Reset the cond cell to its default value before re-entering the
-  // conditional.  Required so iteration N+1 doesn't observe the value left
-  // by iteration N inside the kernel.  Relaxed is fine because the cond_jump
+  // conditional.  Required so launch N+1 doesn't observe the value left
+  // by launch N inside the kernel.  Relaxed is fine because the COND_BRANCH
   // packet itself carries SYSTEM acquire/release fences.
   hsa_signal_store_relaxed(cond_sig, default_value);
 
+  node_.RefreshIb();
+
   auto& vgpu = static_cast<amd::roc::VirtualGPU&>(device);
-  vgpu.dispatchCondJumpPacket(
-      cond_sig,
-      default_value,
-      HSA_SIGNAL_CONDITION_NE,
-      reinterpret_cast<uint64_t>(node_.GetIbAddr()),
-      node_.GetFallPkts(),
-      node_.GetJumpOffPkts(),
-      node_.GetJumpPkts());
+  vgpu.dispatchCondBranchPacket(cond_sig,
+                                reinterpret_cast<uint64_t>(node_.GetIbAddr()),
+                                node_.GetTrueOffsetPkts(), node_.GetTruePkts(),
+                                node_.GetFalseOffsetPkts(), node_.GetFalsePkts(),
+                                node_.GetIbSizePkts());
 
   setStatus(CL_COMPLETE);
 }
