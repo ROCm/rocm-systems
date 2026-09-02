@@ -78,5 +78,7 @@ namespace consan_moi_impl {
 
 #include "rocjitsu/code/patch/consan/consan_moi_barrier.inc"
 
+#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_private_barrier.inc"
+
 } // namespace consan_moi_impl
 } // namespace rocjitsu

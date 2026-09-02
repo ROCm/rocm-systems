@@ -838,6 +838,17 @@ if(NOT _moi_barrier_planning MATCHES
         "planned shared barriers must retain exactly one typed mode body"
     )
 endif()
+file(READ "${_consan_dir}/consan_moi_inline_shadow_private_barrier.inc"
+     _inline_private_barrier_owner)
+file(READ "${_consan_dir}/consan_moi_barrier.cpp" _moi_barrier_source)
+if(NOT _moi_barrier_source MATCHES
+       "#include \"rocjitsu/code/patch/consan/consan_moi_inline_shadow_private_barrier.inc\"" OR
+   NOT _inline_private_barrier_owner MATCHES
+       "build_inline_shadow_private_epoch_barrier_cave_words")
+    message(FATAL_ERROR
+        "InlineShadow private barrier emission must remain in its mode-named owner"
+    )
+endif()
 file(READ "${_consan_dir}/consan_moi_placement_contracts.h" _moi_placement_contract)
 if(NOT _moi_placement_contract MATCHES
        "moi_resource_owner_anchors_admit_scalar_router_ranges" OR
@@ -3449,6 +3460,7 @@ set(
     consan_moi_barrier.inc
     consan_moi_common_emission.inc
     consan_moi_inline_atomic.inc
+    consan_moi_inline_shadow_private_barrier.inc
     consan_moi_inline_shadow.inc
     consan_moi_pipeline.inc
     consan_moi_placement.inc
