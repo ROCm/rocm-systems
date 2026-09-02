@@ -100,14 +100,17 @@ inline int ddaFabricMaxNBlocksForScratch(int cuCount, const char* overrideValue)
     maxBlocks = DDA_FABRIC_MAXBLOCKS;
   }
 
-  if (overrideValue != nullptr) {
-    int requested = atoi(overrideValue);
-    if (requested < 1) {
-      requested = 1;
+  if (overrideValue != nullptr && overrideValue[0] != '\0') {
+    char* endptr = nullptr;
+    long val = strtol(overrideValue, &endptr, 10);
+    // Only apply if the entire string was a valid integer
+    if (endptr != overrideValue && *endptr == '\0') {
+      int requested = (val < 1) ? 1 : static_cast<int>(val);
+      if (requested < maxBlocks) {
+        maxBlocks = requested;
+      }
     }
-    if (requested < maxBlocks) {
-      maxBlocks = requested;
-    }
+    // Invalid input (non-numeric) is silently ignored, using cuCount-derived cap
   }
 
   return maxBlocks;

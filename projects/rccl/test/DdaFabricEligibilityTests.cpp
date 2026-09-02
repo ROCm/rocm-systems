@@ -74,6 +74,39 @@ TEST(DdaFabricMaxBlocksTest, ZeroOverrideUsesOneBlock)
     EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "0"), 1);
 }
 
+TEST(DdaFabricMaxBlocksTest, MinimumValidCuCount)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(1, nullptr), 1);
+}
+
+TEST(DdaFabricMaxBlocksTest, ExactHardLimitCuCount)
+{
+    // cuCount exactly at DDA_FABRIC_MAXBLOCKS (256) should not be clamped
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(256, nullptr), 256);
+    // cuCount at 257 should clamp to 256
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(257, nullptr), 256);
+}
+
+TEST(DdaFabricMaxBlocksTest, OverrideAboveHardLimitIgnored)
+{
+    // Override "512" with cuCount=256 should still cap at 256 (cuCount)
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(256, "512"), 256);
+}
+
+TEST(DdaFabricMaxBlocksTest, InvalidOverrideIgnored)
+{
+    // Non-numeric override should be ignored, using cuCount-derived cap
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "garbage"), 96);
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, ""), 96);
+    // "12abc" has trailing non-numeric chars, so it's rejected as invalid
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "12abc"), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, NegativeOverrideUsesOneBlock)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "-5"), 1);
+}
+
 // ---------------------------------------------------------------------------
 // Scratch sizing
 // ---------------------------------------------------------------------------

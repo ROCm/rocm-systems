@@ -84,6 +84,18 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
 
   const char* fabricMaxBlocksOverride = getenv("RCCL_DDA_FABRIC_MAXBLOCKS");
   const int localBlocksMax = ddaFabricMaxNBlocksForScratch(comm->cuCount, fabricMaxBlocksOverride);
+
+  // Warn if user override was ignored because it exceeds the CU-derived cap
+  if (fabricMaxBlocksOverride != nullptr && fabricMaxBlocksOverride[0] != '\0') {
+    char* endptr = nullptr;
+    long requestedVal = strtol(fabricMaxBlocksOverride, &endptr, 10);
+    if (endptr != fabricMaxBlocksOverride && *endptr == '\0' && requestedVal > localBlocksMax) {
+      WARN("RCCL_DDA_FABRIC_MAXBLOCKS=%ld exceeds CU-derived cap (%d); using %d. "
+           "The override can only lower the block count, not raise it.",
+           requestedVal, localBlocksMax, localBlocksMax);
+    }
+  }
+
   std::vector<int> blockCaps(nRanks, 0);
   blockCaps[comm->rank] = localBlocksMax;
   NCCLCHECK(bootstrapAllGather(comm->bootstrap, blockCaps.data(), sizeof(int)));
