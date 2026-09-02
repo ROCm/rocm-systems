@@ -37,8 +37,11 @@ cd projects/rocprofiler-compute
 # Initialize submodule dependencies (vendored Python deps and src/lib/external C++ libs)
 git submodule update --init --recursive -- src/
 
+# Analyze mode dependencies only. Install these in a separate virtual environment.
 python3 -m pip install -r requirements.txt
 ```
+
+**Note**: The packages in `requirements.txt` are needed for analyze mode only; profile mode uses the standard library. Install them in a virtual environment separate from your profiled application so their pinned versions don't conflict with the workload's own packages. See the [quickstart](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/install/quickstart.html) for supported Python versions.
 
 **Note**: When working from source, submodules live under `src/` (vendored Python dependencies like PyYAML in `src/vendored/`, and C++ libraries like googletest, fmt, and json in `src/lib/external/`). If you see import errors about missing vendored modules or missing C++ externals during a build, run `git submodule update --init --recursive -- src/`.
 
