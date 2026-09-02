@@ -26,6 +26,9 @@
   // the canonical frame is padded out to bring it back. Presentation only: it
   // can widen an axis, never narrow one below the frame the server sent.
   var PLOT_SLOPE_SKEW = 2.0;
+  var OFF_PLOT_LABEL = "off plot";
+  var ZOOM_PAD_DECADES = 0.5;
+  var ZOOM_MIN_DECADES = 1.0;
   var FALLBACK_COLOR = "#888888";
   var PLOT_DIM_OPACITY = 0.15;
   var RUNTIME_EPSILON = 1e-6;
@@ -59,6 +62,7 @@
   var kernelList = document.getElementById("roofline-kernel-list");
   var showAllBtn = document.getElementById("roofline-show-all");
   var kernelCountEl = document.getElementById("roofline-kernel-count");
+  var offPlotCountEl = document.getElementById("roofline-kernel-offplot-count");
   var runtimeSlider = document.getElementById("roofline-runtime-threshold");
   var runtimeValueEl = document.getElementById("roofline-runtime-value");
   var runtimeFilterEl = document.getElementById("roofline-runtime-filter");
@@ -223,6 +227,30 @@
 
   function kernelIsDrawn(kernel) {
     return kernelIsVisible(kernel) && pointsForCurrentPeak(kernel).length > 0;
+  }
+
+  // Measured against the canonical frame, never the padded frame actually
+  // rendered, so the count matches the server's warning and does not change
+  // with the window size.
+  function pointIsOffPlot(point) {
+    var frame = model.frame;
+    if (!frame || !frame.x || !frame.y) {
+      return false;
+    }
+    return !(
+      point.ai >= frame.x[0] &&
+      point.ai <= frame.x[1] &&
+      point.perf >= frame.y[0] &&
+      point.perf <= frame.y[1]
+    );
+  }
+
+  function offPlotPoints(kernel) {
+    return pointsForCurrentPeak(kernel).filter(pointIsOffPlot);
+  }
+
+  function kernelIsOffPlot(kernel) {
+    return kernelIsDrawn(kernel) && offPlotPoints(kernel).length > 0;
   }
 
   function isSoleSelected(kernel) {
@@ -520,12 +548,14 @@
     return shapeToPlotArea(frame);
   }
 
-  function applyFrame(frame) {
+  // framed marks a view the canonical frame owns, so a resize may re-pad it.
+  // A one-shot zoom is not framed: it survives a resize like a hand pan does.
+  function applyRange(range, framed) {
     applyingFrame = true;
-    autoFramed = true;
+    autoFramed = framed;
     var settled = Plotly.relayout(gd, {
-      "xaxis.range": frame.x,
-      "yaxis.range": frame.y,
+      "xaxis.range": range.x,
+      "yaxis.range": range.y,
     });
     var release = function () {
       applyingFrame = false;
@@ -545,7 +575,48 @@
     if (!frame) {
       return;
     }
-    applyFrame(frame);
+    applyRange(frame, true);
+  }
+
+  function loggedExtent(values) {
+    var logs = values
+      .map(function (value) {
+        return Math.log10(value);
+      })
+      .filter(isFinite);
+    if (!logs.length) {
+      return null;
+    }
+    return widenTo(
+      [
+        Math.min.apply(null, logs) - ZOOM_PAD_DECADES,
+        Math.max.apply(null, logs) + ZOOM_PAD_DECADES,
+      ],
+      ZOOM_MIN_DECADES
+    );
+  }
+
+  // A one-shot look at a kernel the canonical frame does not reach. Reset zoom
+  // and double-click still return to the frame.
+  function zoomToKernel(kernel) {
+    if (!plotlyReady()) {
+      return;
+    }
+    var points = pointsForCurrentPeak(kernel);
+    var x = loggedExtent(
+      points.map(function (point) {
+        return point.ai;
+      })
+    );
+    var y = loggedExtent(
+      points.map(function (point) {
+        return point.perf;
+      })
+    );
+    if (!x || !y) {
+      return;
+    }
+    applyRange({ x: x, y: y }, false);
   }
 
   function exportTextWidth(text) {
@@ -1180,13 +1251,39 @@
     precisionSelect.value = state.precision;
   }
 
+  // The badge, not the row, is the zoom target: a row click filters kernels,
+  // and filtering must never move the axes.
+  function buildOffPlotBadge(kernel) {
+    var badge = document.createElement("span");
+    badge.className = "roofline-kernel-offplot";
+    badge.textContent = OFF_PLOT_LABEL;
+    badge.title =
+      "This kernel is drawn outside the axes, which are fixed to this GPU's "
+      + "ceilings. Click to zoom to it; Reset zoom returns to the full plot.";
+    badge.hidden = true;
+    badge.tabIndex = 0;
+    badge.setAttribute("role", "button");
+    var zoom = function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      zoomToKernel(kernel);
+    };
+    badge.addEventListener("click", zoom);
+    badge.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        zoom(event);
+      }
+    });
+    return badge;
+  }
+
   function buildKernelPanel() {
     if (!kernelList) {
       return;
     }
     kernelIndicesByRuntime().forEach(function (index) {
       var kernel = kernels[index];
-      var extras = [];
+      var extras = [buildOffPlotBadge(kernel)];
       if (kernelHasRuntime(kernel)) {
         var pct = document.createElement("span");
         pct.className = "roofline-kernel-pct";
@@ -1268,10 +1365,19 @@
 
   function updatePanel() {
     var filtering = state.selected.size > 0;
+    var offPlotCount = 0;
     eachKernelRow(function (item, kernel) {
       var selected = state.selected.has(kernel.index);
       setRowState(item, selected, filtering && !selected);
       item.classList.toggle("filtered", !withinThreshold(kernel));
+      // The AI axis selector changes which points are plotted, so which
+      // kernels miss the frame is re-read every render.
+      var offPlot = kernelIsOffPlot(kernel);
+      offPlotCount += offPlot ? 1 : 0;
+      var badge = item.querySelector(".roofline-kernel-offplot");
+      if (badge) {
+        badge.hidden = !offPlot;
+      }
       var swatch = item.querySelector(".roofline-swatch");
       if (swatch) {
         var colors = kernelPointColors(kernel, kernel.points);
@@ -1288,6 +1394,14 @@
         kernels.filter(kernelIsDrawn).length,
         kernels.length
       );
+    }
+    if (offPlotCountEl) {
+      offPlotCountEl.textContent = offPlotCount
+        ? offPlotCount + " " + OFF_PLOT_LABEL
+        : "";
+      offPlotCountEl.title = offPlotCount
+        ? "Drawn outside the axes, which are fixed to this GPU's ceilings"
+        : "";
     }
     if (showAllBtn) {
       showAllBtn.disabled = !filtering;

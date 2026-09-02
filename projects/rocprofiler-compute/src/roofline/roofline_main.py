@@ -12,7 +12,7 @@ import plotly.colors as pcolors
 import plotly.graph_objects as go
 from dash import dcc, html
 
-from roofline.roofline_frame import canonical_frame
+from roofline.roofline_frame import canonical_frame, points_outside_frame
 from roofline.roofline_hover import (
     build_compute_peak_hover,
     build_kernel_hover_template,
@@ -84,6 +84,27 @@ def get_color(category: str, backend: str = "html") -> str:
         raise RuntimeError(f"Invalid backend passed to get_color(): {backend}")
 
     return TRACE_COLORS[key][backend]
+
+
+def _off_plot_phrase(
+    point: dict[str, Any], x_overflow: float, y_overflow: float
+) -> str:
+    """How far past the frame one plotted point sits, in words."""
+    parts = []
+    for overflow, value, axis in (
+        (x_overflow, point["ai"], "arithmetic intensity axis"),
+        (y_overflow, point["perf"], "performance axis"),
+    ):
+        if not overflow:
+            continue
+        if math.isfinite(overflow):
+            edge = "below" if overflow < 0 else "above"
+            parts.append(
+                f"{value:g} sits {abs(overflow):.2f} decades {edge} the {axis}"
+            )
+        else:
+            parts.append(f"{value:g} cannot be placed on the {axis}")
+    return f"at {point['peak']}, " + " and ".join(parts)
 
 
 def _roof_sample_count(low_ai: float, high_ai: float) -> int:
@@ -677,14 +698,6 @@ class Roofline:
             )
         compute_peaks = self._figure_compute_peaks(ops_flops)
 
-        if plot_kernels:
-            self._add_kernel_traces(
-                fig,
-                sanitized_cache_hierarchy,
-                ops_flops,
-                compute_peaks,
-            )
-
         if self.__frame_bounds is None:
             self.__frame_bounds = (
                 canonical_frame(*machine_ceilings(self.__run_parameters, self.__mspec))
@@ -693,6 +706,17 @@ class Roofline:
         x_lo, x_hi, y_lo, y_hi = self.__frame_bounds
         # The client opens on the same frame the figure was laid out on.
         self.__view_models[ops_flops].frame = {"x": [x_lo, x_hi], "y": [y_lo, y_hi]}
+
+        if plot_kernels:
+            self._add_kernel_traces(
+                fig,
+                sanitized_cache_hierarchy,
+                ops_flops,
+                compute_peaks,
+            )
+            self._warn_off_plot_kernels(
+                self.__view_models[ops_flops].kernels, self.__frame_bounds
+            )
         # Roofs are densely sampled across so they stay hoverable
         # throughout the visible range.
         roof_dense_lo = x_lo / ROOF_DENSE_PAD_FACTOR
@@ -757,6 +781,34 @@ class Roofline:
         view_model.kernel_trace_indices = list(
             range(first_index, first_index + len(kernel_traces))
         )
+
+    def _warn_off_plot_kernels(
+        self,
+        kernels_model: list[dict[str, Any]],
+        frame: tuple[float, float, float, float],
+    ) -> None:
+        """Name every kernel the machine frame does not reach.
+
+        The frame is a property of the GPU, so a kernel outside it is left where
+        it truly belongs and reported here rather than pulled onto an edge, which
+        would make it read as a kernel that is doing better than it is.
+        """
+        for kernel in kernels_model:
+            points = kernel["points"]
+            outside = points_outside_frame(
+                frame, [(point["ai"], point["perf"]) for point in points]
+            )
+            if not outside:
+                continue
+            detail = "; ".join(
+                _off_plot_phrase(points[index], x_overflow, y_overflow)
+                for index, x_overflow, y_overflow in outside
+            )
+            console_warning(
+                f"Kernel {kernel['name']} falls outside the roofline plot: "
+                f"{detail}. It is drawn at its true position; the axes are fixed "
+                "to this GPU's ceilings."
+            )
 
     def _present_peaks(
         self,
