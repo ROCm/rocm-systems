@@ -5,17 +5,31 @@ hardware. Each entry names the symptom, the affected test, and the file holding
 the skip. Root causes are under investigation unless stated otherwise.
 
 Paths in the **Location** column are relative to `tests/amd_smi_test/`. The skip
-is the `AMDSMI_SKIP_KNOWN_FAILURE()` call in the named test, at the top of the
-body unless the entry says otherwise.
+is the `AMDSMI_SKIP_KNOWN_FAILURE()` call at the top of the named test's body.
+To retire an entry, delete that call and this row.
 
 ## Running the skipped tests
 
-Set `AMDSMI_RUN_KNOWN_FAILURES` to run every test in this file instead of
+Set `AMDSMI_RUN_KNOWN_FAILURES=1` to run every test in this file instead of
 skipping it, so its current behavior can be checked without editing source:
 
 ```shell
 AMDSMI_RUN_KNOWN_FAILURES=1 ./amdsmitst
 ```
+
+Entries here are skipped on **every** ASIC. Where a bug is known to affect only
+some, prefer a per-ASIC `FILTER[...]` row in `amdsmitst.exclude` over an entry
+here, so the coverage is kept everywhere else. The three
+`AMDSMI_STATUS_UNEXPECTED_DATA` clock and thermal entries below are still global
+pending a full per-ASIC sweep; re-scoping them needs a
+`AMDSMI_RUN_KNOWN_FAILURES=1` run on each supported ASIC to find which ones pass.
+
+Measured so far, on gfx950 (16 GPUs), all three still fail, but not with the
+status recorded below: `GetClkFreq_AllGpusAllTypes` and
+`GetClockInfo_AllGpusAllTypes` return `AMDSMI_STATUS_INVAL` and
+`GetTempMetric_AllGpusAllTypesMetrics` returns
+`AMDSMI_STATUS_INTERNAL_EXCEPTION`. The `UNEXPECTED_DATA` symptom below is from a
+different ASIC, so the underlying cause may not be shared.
 
 A test that now passes is a candidate to retire from this file; one that still
 fails prints its real assertion. Results differ by ASIC, so re-verify on your
@@ -33,13 +47,12 @@ data-format issue.
 | API | Skipped test(s) | Location |
 |-----|-----------------|----------|
 | `amdsmi_get_clk_freq` | `GpuIntegration.GetClkFreq_AllGpusAllTypes` | `integration/gpu/clock/clock_freq_test.cc` |
-| `amdsmi_get_clk_freq` | `GpuFunctionalReadOnly.TestFrequenciesRead` | `functional/gpu/clock/frequencies_read_test.cc` |
-| `amdsmi_set_clk_freq` | `GpuFunctionalReadWrite.TestFrequenciesReadWrite` | `functional/gpu/clock/frequencies_read_write_test.cc` |
+| `amdsmi_get_clk_freq` | `GpuFunctionalReadOnly.TestFrequenciesRead` | `main.cc` |
+| `amdsmi_set_clk_freq` | `GpuFunctionalReadWrite.TestFrequenciesReadWrite` | `main.cc` |
 | `amdsmi_get_clk_info` | `GpuIntegration.GetClockInfo_AllGpusAllTypes` | `integration/gpu/clock/clock_freq_test.cc` |
 | `amdsmi_get_violation_status` | `GpuIntegration.GetViolationStatus_AllGpus` | `integration/gpu/events/event_ptl_test.cc` |
 | `amdsmi_get_gpu_xcd_counter` | `GpuIntegration.GetXcdCounter_AllGpus` | `integration/gpu/identity/id_info_test.cc` |
 | `amdsmi_get_gpu_metrics_info` | `GpuIntegration.GetMetricsInfo_AllGpus` | `integration/gpu/metrics/metrics_test.cc` |
-| `amdsmi_gpu_create_event`/`amdsmi_gpu_control_counter` | `GpuIntegration.CounterLifecycle_AllGpus` | `integration/gpu/perf/counter_test.cc` |
 | `amdsmi_get_utilization_count` | `GpuIntegration.GetUtilizationCount_AllGpus` | `integration/gpu/perf/perf_overdrive_test.cc` |
 | `amdsmi_get_gpu_activity` | `GpuIntegration.GetActivity_AllGpus` | `integration/gpu/perf/perf_overdrive_test.cc` |
 | `amdsmi_get_energy_count` | `GpuIntegration.GetEnergyCount_AllGpus` | `integration/gpu/power/power_test.cc` |
@@ -49,8 +62,8 @@ data-format issue.
 | `amdsmi_get_link_metrics` | `SystemIntegration.GetLinkMetrics_AllGpus` | `integration/system/topology_test.cc` |
 | `amdsmi_get_afids_from_cper` | `GpuIntegration.GetAfidsFromCper_DummyBuffer` | `integration/gpu/ras/ras_ecc_test.cc` |
 | `amdsmi_get_temp_metric` | `GpuIntegration.GetTempMetric_AllGpusAllTypesMetrics` | `integration/gpu/thermal/thermal_fan_test.cc` |
-| `amdsmi_get_temp_metric` | `GpuFunctionalReadOnly.TempRead` | `functional/gpu/thermal/temp_read_test.cc` |
-| `amdsmi_xgmi_*` (error injection) | `GpuFunctionalReadWrite.TestXGMIReadWrite` | `functional/gpu/xgmi/xgmi_read_write_test.cc` |
+| `amdsmi_get_temp_metric` | `GpuFunctionalReadOnly.TempRead` | `main.cc` |
+| `amdsmi_xgmi_*` (error injection) | `GpuFunctionalReadWrite.TestXGMIReadWrite` | `main.cc` |
 
 ## AMDSMI_STATUS_UNEXPECTED_SIZE (error 42)
 
@@ -71,13 +84,8 @@ an undocumented status instead of the expected `AMDSMI_STATUS_INVAL`.
 
 | API | Bug | Skipped test(s) | Location |
 |-----|-----|-----------------|----------|
-| `amdsmi_status_code_to_string` | Crashes on `nullptr` output pointer; should return `AMDSMI_STATUS_INVAL` | `SystemIntegration.StatusCodeToString_NullOutput` | `integration/system/init_test.cc` |
-| `amdsmi_get_gpu_xcd_counter` | Crashes on `nullptr` output pointer; should return `AMDSMI_STATUS_INVAL` | `GpuIntegration.GetXcdCounter_NullOutput` | `integration/gpu/identity/id_info_test.cc` |
-| `amdsmi_gpu_control_counter` | Crashes on invalid processor handle; should return `AMDSMI_STATUS_INVAL` | `GpuIntegration.ControlCounter_InvalidHandle` | `integration/gpu/perf/counter_test.cc` |
 | `amdsmi_get_gpu_cper_entries` | Returns `AMDSMI_STATUS_OUT_OF_RESOURCES` for `nullptr` output instead of `AMDSMI_STATUS_INVAL` | `GpuIntegration.GetCperEntries_NullOutput` | `integration/gpu/ras/ras_ecc_test.cc` |
-| `amdsmi_get_gpu_metrics_header_info` | Crashes on `nullptr` output pointer; should return `AMDSMI_STATUS_INVAL` | `GpuIntegration.GetMetricsHeaderInfo_NullOutput` | `integration/gpu/metrics/metrics_test.cc` |
 | `amdsmi_get_gpu_pci_throughput` | Returns `AMDSMI_STATUS_SUCCESS` for `nullptr` output pointers; should return `AMDSMI_STATUS_INVAL` | `GpuIntegration.GetPciThroughput_NullOutput` | `integration/gpu/pci/pci_test.cc` |
-| `amdsmi_topo_get_numa_node_number` | Crashes on `nullptr` output pointer; should return `AMDSMI_STATUS_INVAL` | `SystemIntegration.TopoGetNumaNodeNumber_NullOutput` | `integration/system/topology_test.cc` |
 | `amdsmi_get_link_topology_nearest` | Returns `AMDSMI_STATUS_SUCCESS` for an invalid handle; should return `AMDSMI_STATUS_INVAL` | `SystemIntegration.GetLinkTopologyNearest_InvalidHandle` | `integration/system/topology_test.cc` |
 | `amdsmi_get_processor_handle_from_bdf` | Returns `AMDSMI_STATUS_API_FAILED` for zero BDF; should return `NOT_FOUND` or `INVAL` | `SystemIntegration.GetProcessorHandleFromBdf_ZeroBdf` | `integration/system/enumeration_test.cc` |
 | `amdsmi_gpu_xgmi_error_status` | Returns `AMDSMI_STATUS_INVAL` for valid arguments on every GPU; `amdsmi.h` reserves `INVAL` for a `nullptr` status pointer. Re-enable once an absent XGMI sysfs node maps to `NOT_SUPPORTED` | `GpuIntegration.XgmiErrorStatus_AllGpus` | `integration/gpu/xgmi/xgmi_test.cc` |
@@ -93,3 +101,16 @@ Once the underlying issue is fixed:
    location given above.
 3. Uncomment the reproduction stub (if present).
 4. Remove the entry from this file.
+
+## Setters with no getter to restore from
+
+These are not failures. AMD SMI exposes no getter for these values, so the tests
+below cannot record a prior value and put it back. A root run leaves them at the
+documented default rather than at whatever was configured before.
+
+| API | Test | Location |
+|-----|------|----------|
+| `amdsmi_set_cpu_xgmi_width` | `CpuFunctionalReadWrite.LinkSetters_Set` | `functional/cpu/link/link_read_write_test.cc` |
+| `amdsmi_set_cpu_gmi3_link_width_range` | `CpuFunctionalReadWrite.LinkSetters_Set` | `functional/cpu/link/link_read_write_test.cc` |
+| `amdsmi_set_cpu_core_msr_floor_freq_limit` | `CpuFunctionalReadWrite.MsrFloorFreqLimit_Set` | `functional/cpu/power/boostlimit_read_write_test.cc` |
+| `amdsmi_reset_gpu_fan` | `GpuFunctionalReadWrite.FanSpeed_SetVerifyRestore` | `functional/gpu/thermal/fan_speed_read_write_test.cc` |

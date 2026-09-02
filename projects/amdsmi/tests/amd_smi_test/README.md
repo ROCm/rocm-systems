@@ -142,17 +142,26 @@ write needs:
 sudo ./amdsmitst --gtest_filter="*FunctionalReadWrite*"
 ```
 
-| Condition | Effect when unmet |
-|-----------|-------------------|
-| `AMDSMI_NON_PRIVILEGED` is **not** set | skipped |
-| process is root | skipped |
+A write test runs only when **both** hold:
 
-Each write test stores the original value, sets a different one, verifies the
-readback against what it set, then restores the original and confirms the
-restore took, so a run leaves the device as it found it.
+- the process is root, and
+- `AMDSMI_NON_PRIVILEGED` is not set to a true value.
 
-The one setter the API cannot read back, `amdsmi_set_cpu_msr_floor_freq_limit`,
-writes 0 to clear the floor, which is the default state, so it needs no restore.
+Otherwise it skips. A plain `sudo ./amdsmitst` therefore **does** write to the
+device; set `AMDSMI_NON_PRIVILEGED=1` to suppress every write.
+
+Most write tests store the original value, set a different one, verify the
+readback against what they set, then restore the original and confirm the
+restore took.
+
+Four setters cannot do that, because AMD SMI exposes no getter to read the prior
+value from. `known_failures.md` lists them under "Setters with no getter to
+restore from". `amdsmi_set_cpu_core_msr_floor_freq_limit` writes 0 to clear the
+floor, which is the documented default; `amdsmi_set_cpu_xgmi_width` and
+`amdsmi_set_cpu_gmi3_link_width_range` widen back to the documented full range;
+and `amdsmi_reset_gpu_fan` returns fan control to the driver. On a host where an
+operator had configured any of these, a root run replaces that setting with the
+default rather than restoring it.
 
 The partition setters carry two caveats. The driver returns
 `AMDSMI_STATUS_BUSY` unless the device is idle with no open clients, so those

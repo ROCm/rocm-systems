@@ -130,12 +130,10 @@ TEST_F(SystemIntegration, GetLinkMetrics_AllGpus) {
 // ---- amdsmi_topo_get_numa_node_number : invalid params first ----
 
 TEST_F(SystemIntegration, TopoGetNumaNodeNumber_NullOutput) {
-  AMDSMI_SKIP_KNOWN_FAILURE()
-      << "amdsmi_topo_get_numa_node_number crashes on a null output pointer; proper return "
-         "should be AMDSMI_STATUS_INVAL";
-  // Proper contract once fixed:
-  //   amdsmi_status_t err = amdsmi_topo_get_numa_node_number(gpus()[0], nullptr);
-  //   AMDSMI_EXPECT_NULL_ARG(err);
+  DISPLAY_AMDSMI_API("amdsmi_topo_get_numa_node_number", "gpu=0 out=nullptr", kVerbose);
+  amdsmi_status_t err = amdsmi_topo_get_numa_node_number(any_gpu(), nullptr);
+  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  AMDSMI_EXPECT_NULL_ARG(err);
 }
 TEST_F(SystemIntegration, TopoGetNumaNodeNumber_InvalidHandle) {
   uint32_t numa_node = 0;
@@ -239,11 +237,13 @@ TEST_F(SystemIntegration, GetLinkTopologyNearest_NullOutput) {
 TEST_F(SystemIntegration, GetLinkTopologyNearest_InvalidHandle) {
   AMDSMI_SKIP_KNOWN_FAILURE() << "amdsmi_get_link_topology_nearest returns SUCCESS for an "
                                  "invalid handle; proper return should be AMDSMI_STATUS_INVAL";
-  // Proper contract once fixed:
-  //   amdsmi_topology_nearest_t info; memset(&info, 0, sizeof(info));
-  //   amdsmi_status_t err = amdsmi_get_link_topology_nearest(
-  //       kInvalidHandle, AMDSMI_LINK_TYPE_XGMI, &info);
-  //   AMDSMI_EXPECT_NULL_ARG(err);
+  amdsmi_topology_nearest_t info;
+  memset(&info, 0, sizeof(info));
+  DISPLAY_AMDSMI_API("amdsmi_get_link_topology_nearest", "handle=invalid", kVerbose);
+  amdsmi_status_t err =
+      amdsmi_get_link_topology_nearest(kInvalidHandle, AMDSMI_LINK_TYPE_XGMI, &info);
+  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(SystemIntegration, GetLinkTopologyNearest_AllGpusAllLinkTypes) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_link_topology_nearest");

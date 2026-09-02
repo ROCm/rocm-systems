@@ -42,7 +42,7 @@ The test suite redesign has four goals:
 | :--- | :--- | :--- | :--- |
 | **Unit** | `unit/` | No — pure logic, static data, no device calls | C++: `TEST_F()` on a plain fixture · Python: `unittest` |
 | **Integration** | `integration/` | Yes — needs a live library and device | C++: `TEST_F()` on `ApiTest` · Python: `unittest` |
-| **Functional** | `functional/` | Yes — runs against a live device | C++: `TestBase` lifecycle · Python: `unittest` |
+| **Functional** | `functional/` | Yes — runs against a live device | C++: `TEST_F()` on `SelfManagedApiTest`, or the legacy `TestBase` lifecycle · Python: `unittest` |
 
 The **integration** tier owns the public `amdsmi.h` API surface: every API's
 invalid-input cases (null pointer, invalid handle), and every **getter** driven
@@ -217,8 +217,8 @@ names lets a feature line up across both suites. Adapt them as the APIs warrant.
 declare no class of their own.
 
 **Every test registers with `TEST_F(Suite, Name)`** — never the fixture-less `TEST()`. The suite
-fixtures in `unit/unit_test_framework.h` own the `amdsmi_init`, device enumeration and shutdown that
-each test depends on. Mixing `TEST()` into a suite that uses `TEST_F()` still compiles, but GTest
+fixtures in `api_test_framework.h` own the `amdsmi_init`, device enumeration and shutdown that
+each test depends on; the device-free `*Unit` fixtures live in `unit_fixtures.h`. Mixing `TEST()` into a suite that uses `TEST_F()` still compiles, but GTest
 then fails every `TEST()` case in that suite at runtime. `check_test_conventions.py` enforces this.
 
 **GTest suites registered in `main.cc` follow the `<Component><Type>[<Operation>]` scheme**:
@@ -273,7 +273,8 @@ so a new test file added to any subdirectory is picked up on the next build with
 re-run:
 
 ```cmake
-file(GLOB_RECURSE unitSources  CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
+file(GLOB_RECURSE unitSources   CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
+file(GLOB_RECURSE integSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/integration/*.cc)
 file(GLOB_RECURSE functSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
 
 add_executable(amdsmitst

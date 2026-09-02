@@ -41,10 +41,18 @@ inline bool IsFeatureAbsent(amdsmi_status_t status) {
          status == AMDSMI_STATUS_DRIVER_NOT_LOADED || status == AMDSMI_STATUS_NON_AMD_CPU;
 }
 
+// A switch is on only for an explicitly true value, so FOO=0 reads as off.
+inline bool EnvFlagEnabled(const char* name) {
+  const char* v = std::getenv(name);
+  if (v == nullptr) return false;
+  return std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 || std::strcmp(v, "TRUE") == 0 ||
+         std::strcmp(v, "yes") == 0;
+}
+
 // Tests whose API is tracked in known_failures.md are skipped by default.
-// Set AMDSMI_RUN_KNOWN_FAILURES to run them and see the current behavior.
+// Set AMDSMI_RUN_KNOWN_FAILURES=1 to run them and see the current behavior.
 inline bool RunKnownFailures() {
-  static const bool run = std::getenv("AMDSMI_RUN_KNOWN_FAILURES") != nullptr;
+  static const bool run = EnvFlagEnabled("AMDSMI_RUN_KNOWN_FAILURES");
   return run;
 }
 
@@ -74,6 +82,22 @@ inline bool AmdsmiStatusMatches(amdsmi_status_t err, Args... expected) {
 template <typename... Args>
 inline bool AmdsmiStatusIsExpected(amdsmi_status_t err, Args... expected) {
   return AmdsmiStatusMatches(err, expected...) || IsFeatureAbsent(err);
+}
+
+// Getters are handed a struct pre-filled with this byte so a SUCCESS that left
+// the output untouched is detectable. A plain all-zero check cannot do that: an
+// idle GPU's activity counters and a healthy board's ECC counts are legitimately
+// zero.
+inline constexpr unsigned char kOutputPoison = 0xA5;
+
+inline void PoisonOutput(void* out, size_t size) { memset(out, kOutputPoison, size); }
+
+inline bool OutputWasWritten(const void* out, size_t size) {
+  const auto* bytes = static_cast<const unsigned char*>(out);
+  for (size_t i = 0; i < size; ++i) {
+    if (bytes[i] != kOutputPoison) return true;
+  }
+  return false;
 }
 
 // True when buf holds a non-empty, NUL-terminated string within size.
@@ -317,6 +341,16 @@ class ApiTest : public ::testing::Test {
   static void TearDownTestSuite() { ReleaseSharedInventory(); }
 
  protected:
+  // On a host where amdsmi_init() failed -- no amdgpu driver, for instance --
+  // every call would otherwise return AMDSMI_STATUS_NOT_INIT and each test
+  // would report that same failure. Skip instead, and let the init test report
+  // the real cause once. Only suites that acquired the shared inventory are
+  // gated, so a self-managed test still owns its own init sequence.
+  void SetUp() override {
+    if (SharedInventoryRefs() > 0 && !SharedInventory().initialized())
+      GTEST_SKIP() << "AMD SMI could not initialize on this host";
+  }
+
   void TearDown() override {
     if (!test_scoped_ref_) return;
     ReleaseSharedInventory();
@@ -374,14 +408,11 @@ class SelfManagedApiTest : public ApiTest {
 // A TEST_F() suite name is its fixture class name. The three tiers are:
 //
 //   <Component>Unit          no device and no amdsmi_init -- pure logic and
-//                            static data
+//                            static data; declared in unit_fixtures.h
 //   <Component>Integration   every API's invalid-input cases, plus getters
 //                            driven with valid input and checked for valid output
 //   <Component>Functional*   setters, and APIs that need setup from another API
 //
-class GpuUnit : public ::testing::Test {};
-class SystemUnit : public ::testing::Test {};
-
 class GpuIntegration : public amdsmi::test::ApiTest {};
 class CpuIntegration : public amdsmi::test::ApiTest {};
 class NicIntegration : public amdsmi::test::ApiTest {};
@@ -396,10 +427,9 @@ class IfoeFunctionalReadOnly : public amdsmi::test::SelfManagedApiTest {};
 class IfoeFunctionalReadWrite : public amdsmi::test::SelfManagedApiTest {};
 
 // Assert an API returned the status it SHOULD for a null pointer argument.
-// amdsmi.h documents both outcomes for a null out-param: AMDSMI_STATUS_INVAL when
-// the function is supported with the given arguments, AMDSMI_STATUS_NOT_SUPPORTED
-// when it is not -- so a feature-absent status is a pass, not a miss.
-// SUCCESS is never acceptable.
+// A feature-absent status is tolerated because an unimplemented or unsupported
+// API never reaches its argument check. SUCCESS never is -- that is the real
+// contract violation these cases exist to catch.
 #define AMDSMI_EXPECT_NULL_ARG(actual)                                              \
   EXPECT_TRUE(::amdsmi::test::AmdsmiStatusIsExpected((actual), AMDSMI_STATUS_INVAL, \
                                                      AMDSMI_STATUS_ARG_PTR_NULL))   \
@@ -407,15 +437,14 @@ class IfoeFunctionalReadWrite : public amdsmi::test::SelfManagedApiTest {};
       << ", expected AMDSMI_STATUS_INVAL or AMDSMI_STATUS_ARG_PTR_NULL "            \
       << "(or a status meaning the feature is absent here)"
 
-// Assert an API rejected an invalid processor handle. amdsmi.h names
-// AMDSMI_STATUS_INVAL for this; a feature-absent status is tolerated because the
-// call can bail before it reaches the handle check. Any other code -- a timeout,
-// an I/O error, SUCCESS -- is a real contract violation.
-#define AMDSMI_EXPECT_INVALID_HANDLE(actual)                                        \
-  EXPECT_TRUE(::amdsmi::test::AmdsmiStatusIsExpected((actual), AMDSMI_STATUS_INVAL, \
-                                                     AMDSMI_STATUS_ARG_PTR_NULL))   \
-      << "returned " << ::amdsmi::test::AmdsmiStatusLabel(actual)                   \
-      << ", expected AMDSMI_STATUS_INVAL for an invalid handle "                    \
+// Assert an API rejected an invalid processor handle. The out-param handed in
+// with it is valid, so AMDSMI_STATUS_ARG_PTR_NULL would be a wrong answer about a
+// non-null pointer and is not accepted here. A feature-absent status is, because
+// the call can bail before reaching the handle check. SUCCESS is never acceptable.
+#define AMDSMI_EXPECT_INVALID_HANDLE(actual)                                         \
+  EXPECT_TRUE(::amdsmi::test::AmdsmiStatusIsExpected((actual), AMDSMI_STATUS_INVAL)) \
+      << "returned " << ::amdsmi::test::AmdsmiStatusLabel(actual)                    \
+      << ", expected AMDSMI_STATUS_INVAL for an invalid handle "                     \
       << "(or a status meaning the feature is absent here)"
 
 // Non-fatal check for a single negative call: fails if err is neither one of the
@@ -424,17 +453,6 @@ class IfoeFunctionalReadWrite : public amdsmi::test::SelfManagedApiTest {};
   EXPECT_TRUE(::amdsmi::test::AmdsmiStatusIsExpected((err), __VA_ARGS__)) \
       << "returned " << ::amdsmi::test::AmdsmiStatusLabel(err)            \
       << ", which is not an expected status"
-
-// Single positive call: SUCCESS passes, a feature-absent status skips the test,
-// anything else fails. Never lets "not supported" masquerade as coverage.
-#define AMDSMI_EXPECT_POSITIVE(err, api)                                                          \
-  do {                                                                                            \
-    if (::amdsmi::test::IsFeatureAbsent(err))                                                     \
-      GTEST_SKIP() << (api) << ": not supported here (" << ::amdsmi::test::AmdsmiStatusLabel(err) \
-                   << ")";                                                                        \
-    EXPECT_EQ((err), AMDSMI_STATUS_SUCCESS)                                                       \
-        << (api) << " returned " << ::amdsmi::test::AmdsmiStatusLabel(err);                       \
-  } while (0)
 
 // Close out a multi-input positive loop: report every bad input, then skip when
 // the feature was absent on every one so the pass is not mistaken for coverage.
@@ -445,65 +463,85 @@ class IfoeFunctionalReadWrite : public amdsmi::test::SelfManagedApiTest {};
       GTEST_SKIP() << (col).api() << ": not supported on any device here"; \
   } while (0)
 
-// A device write needs the privilege to perform it, but is safe to run by
-// default: every *FunctionalReadWrite test records the original value and
-// restores it, so a plain root run leaves a shared GPU/CPU as it found it.
+// A device write needs the privilege to perform it. Most *FunctionalReadWrite
+// tests record the original value and restore it; the setters the API cannot
+// read back are named in known_failures.md and the suite README.
 #define AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED()                                                      \
   do {                                                                                             \
-    if (std::getenv("AMDSMI_NON_PRIVILEGED") != nullptr)                                           \
+    if (::amdsmi::test::EnvFlagEnabled("AMDSMI_NON_PRIVILEGED"))                                   \
       GTEST_SKIP() << "device write skipped; AMDSMI_NON_PRIVILEGED is set";                        \
     if (!amd::smi::is_sudo_user()) GTEST_SKIP() << "device write skipped; must run as super user"; \
   } while (0)
 
-// Skip a test blocked by an entry in known_failures.md. Stream the symptom
-// onto it; AMDSMI_RUN_KNOWN_FAILURES runs the test instead of skipping.
+// Skip a test blocked by an entry in known_failures.md. Stream the symptom onto
+// it; AMDSMI_RUN_KNOWN_FAILURES=1 runs the test instead of skipping.
+// Expands to a bare if -- callers stream onto it, so do/while(0) is unavailable.
+// Never place it inside an unbraced if/else, where a later else would bind here.
 #define AMDSMI_SKIP_KNOWN_FAILURE() \
   if (!::amdsmi::test::RunKnownFailures()) GTEST_SKIP()
 
-// The null-output / invalid-handle / all-GPUs trio below is the shape almost
-// every read-only getter is tested with. Generating it keeps one copy of the
-// expectations -- including the SUCCESS-path output check -- instead of one per
-// API. Use the explicit long form only where an API needs different inputs.
-#define AMDSMI_INTEGRATION_GPU_STRUCT_GETTER(TESTBASE, APINAME, STRUCT)                            \
-  TEST_F(GpuIntegration, TESTBASE##_NullOutput) {                                                  \
-    DISPLAY_AMDSMI_API(#APINAME, "gpu=0 out=nullptr", ::amdsmi::test::kVerbose);                   \
-    amdsmi_status_t err = APINAME(any_gpu(), nullptr);                                             \
+// Handle for a negative case on a host with no such processor: argument checks
+// do not depend on the device, so fall back to the invalid-handle sentinel.
+#define AMDSMI_ANY_HANDLE(HANDLES) \
+  (HANDLES().empty() ? ::amdsmi::test::kInvalidHandle : HANDLES()[0])
+
+// The null-output / invalid-handle / all-processors trio below is the shape
+// almost every read-only getter is tested with. Generating it keeps one copy of
+// the expectations -- including the SUCCESS-path output check -- instead of one
+// per API. FIXTURE/HANDLES/LABEL select the component, so CPU and NIC getters
+// use the same generator as GPU ones. Use the long form only where an API needs
+// different inputs.
+#define AMDSMI_INTEGRATION_STRUCT_GETTER(FIXTURE, HANDLES, LABEL, TESTBASE, APINAME, STRUCT)       \
+  TEST_F(FIXTURE, TESTBASE##_NullOutput) {                                                         \
+    DISPLAY_AMDSMI_API(#APINAME, "out=nullptr", ::amdsmi::test::kVerbose);                         \
+    amdsmi_status_t err = APINAME(AMDSMI_ANY_HANDLE(HANDLES), nullptr);                            \
     DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL); \
     AMDSMI_EXPECT_NULL_ARG(err);                                                                   \
   }                                                                                                \
-  TEST_F(GpuIntegration, TESTBASE##_InvalidHandle) {                                               \
+  TEST_F(FIXTURE, TESTBASE##_InvalidHandle) {                                                      \
     STRUCT info;                                                                                   \
-    memset(&info, 0, sizeof(info));                                                                \
+    ::amdsmi::test::PoisonOutput(&info, sizeof(info));                                             \
     DISPLAY_AMDSMI_API(#APINAME, "handle=invalid", ::amdsmi::test::kVerbose);                      \
     amdsmi_status_t err = APINAME(::amdsmi::test::kInvalidHandle, &info);                          \
     DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL); \
     AMDSMI_EXPECT_INVALID_HANDLE(err);                                                             \
   }                                                                                                \
-  TEST_F(GpuIntegration, TESTBASE##_AllGpus) {                                                     \
+  TEST_F(FIXTURE, TESTBASE##_All##LABEL) {                                                         \
     ::amdsmi::test::StatusCollector col(#APINAME);                                                 \
-    if (gpus().empty()) GTEST_SKIP() << "No GPU processors";                                       \
-    for (size_t i = 0; i < gpus().size(); ++i) {                                                   \
+    if (HANDLES().empty()) GTEST_SKIP() << "No " #LABEL " processors";                             \
+    for (size_t i = 0; i < HANDLES().size(); ++i) {                                                \
       STRUCT info;                                                                                 \
-      memset(&info, 0, sizeof(info));                                                              \
-      const std::string in = "gpu=" + std::to_string(i);                                           \
+      ::amdsmi::test::PoisonOutput(&info, sizeof(info));                                           \
+      const std::string in = #LABEL "=" + std::to_string(i);                                       \
       DISPLAY_AMDSMI_API(#APINAME, in, ::amdsmi::test::kVerbose);                                  \
-      amdsmi_status_t err = APINAME(gpus()[i], &info);                                             \
+      amdsmi_status_t err = APINAME(HANDLES()[i], &info);                                          \
       DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err,                     \
                             AMDSMI_STATUS_SUCCESS);                                                \
-      col.RecordPositive(in, err);                                                                 \
+      col.RecordPositive(in, err, ::amdsmi::test::OutputWasWritten(&info, sizeof(info)));          \
     }                                                                                              \
     AMDSMI_FINISH_POSITIVE(col);                                                                   \
   }
 
-// Same trio for getters that fill a caller-supplied character buffer.
-#define AMDSMI_INTEGRATION_GPU_BUFFER_GETTER(TESTBASE, APINAME, BUFSIZE)                           \
-  TEST_F(GpuIntegration, TESTBASE##_NullOutput) {                                                  \
-    DISPLAY_AMDSMI_API(#APINAME, "gpu=0 out=nullptr", ::amdsmi::test::kVerbose);                   \
-    amdsmi_status_t err = APINAME(any_gpu(), nullptr, BUFSIZE);                                    \
+#define AMDSMI_INTEGRATION_GPU_STRUCT_GETTER(TESTBASE, APINAME, STRUCT) \
+  AMDSMI_INTEGRATION_STRUCT_GETTER(GpuIntegration, gpus, Gpus, TESTBASE, APINAME, STRUCT)
+
+#define AMDSMI_INTEGRATION_CPU_STRUCT_GETTER(TESTBASE, APINAME, STRUCT) \
+  AMDSMI_INTEGRATION_STRUCT_GETTER(CpuIntegration, cpus, Cpus, TESTBASE, APINAME, STRUCT)
+
+#define AMDSMI_INTEGRATION_NIC_STRUCT_GETTER(TESTBASE, APINAME, STRUCT) \
+  AMDSMI_INTEGRATION_STRUCT_GETTER(NicIntegration, nics, Nics, TESTBASE, APINAME, STRUCT)
+
+// Same trio for getters that fill a caller-supplied character buffer. The
+// SUCCESS path checks the buffer holds a real string, not just that the call
+// reported success.
+#define AMDSMI_INTEGRATION_BUFFER_GETTER(FIXTURE, HANDLES, LABEL, TESTBASE, APINAME, BUFSIZE)      \
+  TEST_F(FIXTURE, TESTBASE##_NullOutput) {                                                         \
+    DISPLAY_AMDSMI_API(#APINAME, "out=nullptr", ::amdsmi::test::kVerbose);                         \
+    amdsmi_status_t err = APINAME(AMDSMI_ANY_HANDLE(HANDLES), nullptr, BUFSIZE);                   \
     DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL); \
     AMDSMI_EXPECT_NULL_ARG(err);                                                                   \
   }                                                                                                \
-  TEST_F(GpuIntegration, TESTBASE##_InvalidHandle) {                                               \
+  TEST_F(FIXTURE, TESTBASE##_InvalidHandle) {                                                      \
     char buf[BUFSIZE];                                                                             \
     memset(buf, 0, sizeof(buf));                                                                   \
     DISPLAY_AMDSMI_API(#APINAME, "handle=invalid", ::amdsmi::test::kVerbose);                      \
@@ -511,20 +549,23 @@ class IfoeFunctionalReadWrite : public amdsmi::test::SelfManagedApiTest {};
     DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL); \
     AMDSMI_EXPECT_INVALID_HANDLE(err);                                                             \
   }                                                                                                \
-  TEST_F(GpuIntegration, TESTBASE##_AllGpus) {                                                     \
+  TEST_F(FIXTURE, TESTBASE##_All##LABEL) {                                                         \
     ::amdsmi::test::StatusCollector col(#APINAME);                                                 \
-    if (gpus().empty()) GTEST_SKIP() << "No GPU processors";                                       \
-    for (size_t i = 0; i < gpus().size(); ++i) {                                                   \
+    if (HANDLES().empty()) GTEST_SKIP() << "No " #LABEL " processors";                             \
+    for (size_t i = 0; i < HANDLES().size(); ++i) {                                                \
       char buf[BUFSIZE];                                                                           \
       memset(buf, 0, sizeof(buf));                                                                 \
-      const std::string in = "gpu=" + std::to_string(i);                                           \
+      const std::string in = #LABEL "=" + std::to_string(i);                                       \
       DISPLAY_AMDSMI_API(#APINAME, in, ::amdsmi::test::kVerbose);                                  \
-      amdsmi_status_t err = APINAME(gpus()[i], buf, sizeof(buf));                                  \
+      amdsmi_status_t err = APINAME(HANDLES()[i], buf, sizeof(buf));                               \
       DISPLAY_AMDSMI_STATUS(::amdsmi::test::kVerbose, __FILE__, __LINE__, err,                     \
                             AMDSMI_STATUS_SUCCESS);                                                \
       col.RecordPositive(in, err, ::amdsmi::test::IsValidString(buf, sizeof(buf)));                \
     }                                                                                              \
     AMDSMI_FINISH_POSITIVE(col);                                                                   \
   }
+
+#define AMDSMI_INTEGRATION_GPU_BUFFER_GETTER(TESTBASE, APINAME, BUFSIZE) \
+  AMDSMI_INTEGRATION_BUFFER_GETTER(GpuIntegration, gpus, Gpus, TESTBASE, APINAME, BUFSIZE)
 
 #endif  // TESTS_AMD_SMI_TEST_API_TEST_FRAMEWORK_H_

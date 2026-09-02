@@ -274,9 +274,13 @@ TEST_F(CpuFunctionalReadWrite, SocketLclkDpmLevel_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-// Every setter below is write-only -- AMD SMI exposes no getter for xgmi width,
-// gmi3 link width, pcie link rate, df pstate range or APB state, so there is
-// nothing to read back and compare against the value written.
+// Every setter below is write-only: AMD SMI exposes no getter for xgmi width,
+// gmi3 link width, df pstate range or APB state, so the prior value cannot be
+// read and put back. Only pcie link rate is restorable, because its setter
+// returns the mode it replaced. The xgmi and gmi3 calls widen back to the full
+// documented range afterwards -- a best-effort mitigation, not a restore, so
+// this test leaves those two ranges at the documented default rather than at
+// whatever the operator had configured. known_failures.md records that.
 TEST_F(CpuFunctionalReadWrite, LinkSetters_Set) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
@@ -293,11 +297,10 @@ TEST_F(CpuFunctionalReadWrite, LinkSetters_Set) {
                AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
                                       AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_NO_HSMP_MSG_SUP,
                                       AMDSMI_STATUS_INVAL));
-    // No prior width to put back, so widen to the full documented range instead
-    // of leaving the links capped.
+    // Best effort only: (0,2) is the documented full range, not a value read
+    // back from this socket, so this is not asserted as a restore.
     if (err == AMDSMI_STATUS_SUCCESS) {
-      EXPECT_EQ(amdsmi_set_cpu_xgmi_width(cpus()[i], 0, 2), AMDSMI_STATUS_SUCCESS)
-          << tag << " failed to reopen xgmi width";
+      col.Record("xgmi_width reopen " + tag, amdsmi_set_cpu_xgmi_width(cpus()[i], 0, 2), true);
     }
 
     DISPLAY_AMDSMI_API("amdsmi_set_cpu_gmi3_link_width_range", tag, kVerbose);
@@ -309,9 +312,10 @@ TEST_F(CpuFunctionalReadWrite, LinkSetters_Set) {
                AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
                                       AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_NO_HSMP_MSG_SUP,
                                       AMDSMI_STATUS_INVAL));
+    // Best effort only, for the same reason as the xgmi widen above.
     if (err == AMDSMI_STATUS_SUCCESS) {
-      EXPECT_EQ(amdsmi_set_cpu_gmi3_link_width_range(cpus()[i], 0, 2), AMDSMI_STATUS_SUCCESS)
-          << tag << " failed to reopen gmi3 link width";
+      col.Record("gmi3_link_width reopen " + tag,
+                 amdsmi_set_cpu_gmi3_link_width_range(cpus()[i], 0, 2), true);
     }
 
     uint8_t prev_mode = 0;

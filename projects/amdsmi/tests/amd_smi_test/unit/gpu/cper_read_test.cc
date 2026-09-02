@@ -3,8 +3,8 @@
 
 // Regression tests for the CPER read path via
 // amdsmi_get_gpu_cper_entries_by_path(); no GPU required.
-// ROCM-25398: a zero-byte CPER node must not abort the process.
-// ROCM-25954: an empty ring returns SUCCESS with zero entries, not an error.
+// A zero-byte CPER node must not abort the process, and an empty ring returns
+// SUCCESS with zero entries rather than an error.
 //
 // Also covers the structural bounds of the parser: a crafted record whose
 // sec_cnt, sec_offset, or reg_arr_size points past the buffer, or whose fixed-width
@@ -25,13 +25,12 @@
 
 #include "amd_smi/impl/amd_smi_cper.h"
 #include "amd_smi/impl/amd_smi_cper_testing.h"
-#include "api_test_framework.h"
 #include "ras-decode/ras_decode_constants.h"
+#include "unit_fixtures.h"
 
 namespace {
 
-// 4 MiB ring + 12 B header, matching the st_size reported in the ROCM-25954
-// field report.
+// 4 MiB ring + 12 B header, matching the st_size reported from the field.
 constexpr off_t kRingCapacity = 4194316;
 
 // Runs the CPER read path against a file. Out-params report the final
@@ -222,7 +221,7 @@ TEST_F(GpuUnit, CperParsesSingleRecord) {
   EXPECT_GT(buf_size, 0u);
 }
 
-// Faithful ROCM-25954 repro: st_size advertises the 4 MiB ring capacity while
+// st_size advertises the 4 MiB ring capacity while
 // read() returns 0 on an empty ring. Must be SUCCESS with zero entries.
 TEST_F(GpuUnit, CperEmptyRingAdvertisedCapacityShortRead) {
   CperReadFnGuard guard;

@@ -129,8 +129,10 @@ TEST_F(CpuFunctionalReadWrite, FloorFreqLimit_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-// Write-only: the API exposes no MSR floor getter. Writing 0 clears the floor,
-// which is the default state, so there is nothing to restore.
+// Write-only: the API exposes no MSR floor getter, so a floor an operator had
+// set cannot be read first and put back. Writing 0 clears it to the documented
+// default; on a tuned host that discards their setting. known_failures.md lists
+// this under "Setters with no getter to restore from".
 TEST_F(CpuFunctionalReadWrite, MsrFloorFreqLimit_Set) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpu_cores().empty() && cpus().empty()) GTEST_SKIP() << "No CPU processors or cores";

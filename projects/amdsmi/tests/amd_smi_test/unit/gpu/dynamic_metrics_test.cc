@@ -3,15 +3,18 @@
 
 #include <amd_smi_test/test_base.h>
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <string>
 #include <vector>
 
-#include "api_test_framework.h"
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
 #include "test_common.h"
+#include "unit_fixtures.h"
 
 namespace amd::smi {
 
@@ -83,18 +86,26 @@ auto BuildFakeMetricsBlob(amd::smi::AMDGpuMetricsHeader_v1_t new_header) -> std:
   return std::vector<uint8_t>(begin, begin + sizeof(header));
 }
 
-auto WriteBlobToTempFile(const std::vector<uint8_t>& blob,
-                         const std::string& filename = "amdsmi_fake_metrics.bin")
+// mkstemp so a local user cannot pre-create the path as a symlink and have this
+// suite, which is documented to run under sudo, truncate an arbitrary file.
+auto WriteBlobToTempFile(const std::vector<uint8_t>& blob, const std::string& tag = "metrics")
     -> std::filesystem::path {
-  auto temp_dir = std::filesystem::temp_directory_path();
-  auto file_path = temp_dir / filename;
+  std::string tmpl =
+      (std::filesystem::temp_directory_path() / ("amdsmi_fake_" + tag + "_XXXXXX")).string();
+  int fd = mkstemp(tmpl.data());
+  if (fd < 0) return {};
 
-  std::ofstream stream(file_path, std::ios::binary | std::ios::trunc);
-  stream.write(reinterpret_cast<const char*>(blob.data()),
-               static_cast<std::streamsize>(blob.size()));
-  stream.close();
+  const char* bytes = reinterpret_cast<const char*>(blob.data());
+  size_t remaining = blob.size();
+  while (remaining > 0) {
+    ssize_t written = write(fd, bytes, remaining);
+    if (written <= 0) break;
+    bytes += written;
+    remaining -= static_cast<size_t>(written);
+  }
+  close(fd);
 
-  return file_path;
+  return std::filesystem::path(tmpl);
 }
 
 }  // namespace
@@ -116,8 +127,7 @@ TEST_F(GpuUnit, GPUMetricDynamicVersionSupported) {
         .m_format_revision = 1,
         .m_content_revision = static_cast<uint8_t>(ver),  // Known minor versions
     });
-    const auto fake_path =
-        WriteBlobToTempFile(blob, "amdsmi_fake_gpu_metrics_v1" + std::to_string(ver) + ".bin");
+    const auto fake_path = WriteBlobToTempFile(blob, "gpu_metrics_v1" + std::to_string(ver));
 
     ASSERT_FALSE(blob.empty());
     ASSERT_TRUE(std::filesystem::exists(fake_path));
@@ -162,8 +172,7 @@ TEST_F(GpuUnit, XCPMetricDynamicVersionSupported) {
         .m_format_revision = 1,
         .m_content_revision = static_cast<uint8_t>(ver),  // Known minor versions
     });
-    const auto fake_path =
-        WriteBlobToTempFile(blob, "amdsmi_fake_xcp_metrics_v1" + std::to_string(ver) + ".bin");
+    const auto fake_path = WriteBlobToTempFile(blob, "xcp_metrics_v1" + std::to_string(ver));
 
     ASSERT_FALSE(blob.empty());
     ASSERT_TRUE(std::filesystem::exists(fake_path));

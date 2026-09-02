@@ -126,6 +126,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amdsmi_get_gpu_device_cuid` has been added as an API for this upcoming change but will remain disabled until full support from the amdgpu driver is available.
   - The CLI `list` output and GPU selection now report the CUID in place of the UUID when a CUID is available, and fall back to the UUID otherwise.
 
+- **Restructured AMD SMI C++ tests into unit, integration and functional suites**.  
+  - The `amdsmitst` source tree now splits into three tiers under `tests/amd_smi_test/`: `unit/` (no device, no `amdsmi_init`), `integration/` (every API's invalid-input cases plus getters on valid input), and `functional/` (setters and multi-API workflows).
+  - GTest suite names now follow a `<Component><Type>[<Operation>]` scheme: functional tests are `<Component>FunctionalReadOnly`/`<Component>FunctionalReadWrite` (e.g. `GpuFunctionalReadOnly`) and unit tests are `<Component>Unit` (e.g. `GpuUnit`). This replaces the old `amdsmitstReadOnly`/`amdsmitstReadWrite` and `AmdSmiDynamicMetricTest` names.
+  - Integration tests use `<Component>Integration` (e.g. `GpuIntegration`). Most suites previously named `<Component>Unit` are now `<Component>Integration`; `*Unit` is reserved for tests that need no device.
+  - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
+  - Device writes in `*FunctionalReadWrite` suites require root. Each test restores the value it changed, except for the few setters AMD SMI cannot read back, which `known_failures.md` names.
+  - Tests blocked by a known driver or library bug are skipped and tracked in `tests/amd_smi_test/known_failures.md`. Set `AMDSMI_RUN_KNOWN_FAILURES=1` to run them anyway and see their current behavior. 31 of the registered tests are quarantined this way and do not execute by default.
+  - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
+
 ## amd_smi_lib for ROCm 10.0.0
 
 ### Added
@@ -256,15 +265,6 @@ GPU: 0
 - **Removed the `plpds` key from `amdsmi_get_xgmi_plpd()` Python output** (breaking). Use the `policies` key instead.
 
 - **Removed `amdsmi_set_gpu_clk_range()`** (breaking). Use `amdsmi_set_gpu_clk_limit()` instead.
-
-- **Restructured AMD SMI C++ tests into unit, integration and functional suites**.  
-  - The `amdsmitst` source tree now splits into three tiers under `tests/amd_smi_test/`: `unit/` (no device, no `amdsmi_init`), `integration/` (every API's invalid-input cases plus getters on valid input), and `functional/` (setters and multi-API workflows).
-  - GTest suite names now follow a `<Component><Type>[<Operation>]` scheme: functional tests are `<Component>FunctionalReadOnly`/`<Component>FunctionalReadWrite` (e.g. `GpuFunctionalReadOnly`) and unit tests are `<Component>Unit` (e.g. `GpuUnit`). This replaces the old `amdsmitstReadOnly`/`amdsmitstReadWrite` and `AmdSmiDynamicMetricTest` names.
-  - Integration tests use `<Component>Integration` (e.g. `GpuIntegration`). Most suites previously named `<Component>Unit` are now `<Component>Integration`; `*Unit` is reserved for tests that need no device.
-  - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
-  - Device writes in `*FunctionalReadWrite` suites require root, and each test restores the value it changed.
-  - Tests blocked by a known driver or library bug are skipped and tracked in `tests/amd_smi_test/known_failures.md`. Set `AMDSMI_RUN_KNOWN_FAILURES` to run them anyway and see their current behavior.
-  - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
 
 ### Optimized
 

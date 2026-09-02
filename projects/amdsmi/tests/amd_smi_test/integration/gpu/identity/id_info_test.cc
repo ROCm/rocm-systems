@@ -202,66 +202,10 @@ TEST_F(GpuIntegration, GetRevision_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_vendor_name ----------------
-TEST_F(GpuIntegration, GetVendorName_NullOutput) {
-  DISPLAY_AMDSMI_API("amdsmi_get_gpu_vendor_name", "gpu=0 out=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_gpu_vendor_name(any_gpu(), nullptr, 256);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-  AMDSMI_EXPECT_NULL_ARG(err);
-}
-TEST_F(GpuIntegration, GetVendorName_InvalidHandle) {
-  char name[256];
-  memset(name, 0, sizeof(name));
-  DISPLAY_AMDSMI_API("amdsmi_get_gpu_vendor_name", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_get_gpu_vendor_name(kInvalidHandle, name, sizeof(name));
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  AMDSMI_EXPECT_INVALID_HANDLE(err);
-}
-TEST_F(GpuIntegration, GetVendorName_AllGpus) {
-  amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_vendor_name");
-  if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
-  for (size_t i = 0; i < gpus().size(); ++i) {
-    char name[256];
-    memset(name, 0, sizeof(name));
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_vendor_name", "gpu=" + std::to_string(i), kVerbose);
-    amdsmi_status_t err = amdsmi_get_gpu_vendor_name(gpus()[i], name, sizeof(name));
-    DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
-                          AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.RecordPositive("gpu=" + std::to_string(i), err);
-  }
-  AMDSMI_FINISH_POSITIVE(amdsmi_col);
-}
+AMDSMI_INTEGRATION_GPU_BUFFER_GETTER(GetVendorName, amdsmi_get_gpu_vendor_name, 256);
 
 // ---------------- amdsmi_get_gpu_vram_vendor ----------------
-TEST_F(GpuIntegration, GetVramVendor_NullOutput) {
-  DISPLAY_AMDSMI_API("amdsmi_get_gpu_vram_vendor", "gpu=0 out=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_gpu_vram_vendor(any_gpu(), nullptr, 256);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-  AMDSMI_EXPECT_NULL_ARG(err);
-}
-TEST_F(GpuIntegration, GetVramVendor_InvalidHandle) {
-  char brand[256];
-  memset(brand, 0, sizeof(brand));
-  DISPLAY_AMDSMI_API("amdsmi_get_gpu_vram_vendor", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_get_gpu_vram_vendor(kInvalidHandle, brand, sizeof(brand));
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  AMDSMI_EXPECT_INVALID_HANDLE(err);
-}
-TEST_F(GpuIntegration, GetVramVendor_AllGpus) {
-  amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_vram_vendor");
-  if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
-  for (size_t i = 0; i < gpus().size(); ++i) {
-    char brand[256];
-    memset(brand, 0, sizeof(brand));
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_vram_vendor", "gpu=" + std::to_string(i), kVerbose);
-    amdsmi_status_t err = amdsmi_get_gpu_vram_vendor(gpus()[i], brand, sizeof(brand));
-    DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
-                          AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.RecordPositive("gpu=" + std::to_string(i), err);
-  }
-  AMDSMI_FINISH_POSITIVE(amdsmi_col);
-}
+AMDSMI_INTEGRATION_GPU_BUFFER_GETTER(GetVramVendor, amdsmi_get_gpu_vram_vendor, 256);
 
 // ---------------- amdsmi_get_gpu_subsystem_id ----------------
 TEST_F(GpuIntegration, GetSubsystemId_NullOutput) {
@@ -293,44 +237,14 @@ TEST_F(GpuIntegration, GetSubsystemId_AllGpus) {
 }
 
 // ---------------- amdsmi_get_gpu_subsystem_name ----------------
-TEST_F(GpuIntegration, GetSubsystemName_NullOutput) {
-  DISPLAY_AMDSMI_API("amdsmi_get_gpu_subsystem_name", "gpu=0 out=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_gpu_subsystem_name(any_gpu(), nullptr, 256);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-  AMDSMI_EXPECT_NULL_ARG(err);
-}
-TEST_F(GpuIntegration, GetSubsystemName_InvalidHandle) {
-  char name[256];
-  memset(name, 0, sizeof(name));
-  DISPLAY_AMDSMI_API("amdsmi_get_gpu_subsystem_name", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_get_gpu_subsystem_name(kInvalidHandle, name, sizeof(name));
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  AMDSMI_EXPECT_INVALID_HANDLE(err);
-}
-TEST_F(GpuIntegration, GetSubsystemName_AllGpus) {
-  amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_gpu_subsystem_name");
-  if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
-  for (size_t i = 0; i < gpus().size(); ++i) {
-    char name[256];
-    memset(name, 0, sizeof(name));
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_subsystem_name", "gpu=" + std::to_string(i), kVerbose);
-    amdsmi_status_t err = amdsmi_get_gpu_subsystem_name(gpus()[i], name, sizeof(name));
-    DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
-                          AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.RecordPositive("gpu=" + std::to_string(i), err);
-  }
-  AMDSMI_FINISH_POSITIVE(amdsmi_col);
-}
+AMDSMI_INTEGRATION_GPU_BUFFER_GETTER(GetSubsystemName, amdsmi_get_gpu_subsystem_name, 256);
 
 // ---------------- amdsmi_get_gpu_xcd_counter ----------------
 TEST_F(GpuIntegration, GetXcdCounter_NullOutput) {
-  AMDSMI_SKIP_KNOWN_FAILURE()
-      << "amdsmi_get_gpu_xcd_counter crashes on a null output pointer; proper return "
-         "should be AMDSMI_STATUS_INVAL";
-  // Proper contract once fixed:
-  //   amdsmi_status_t err = amdsmi_get_gpu_xcd_counter(gpus()[0], nullptr);
-  //   AMDSMI_EXPECT_NULL_ARG(err);
+  DISPLAY_AMDSMI_API("amdsmi_get_gpu_xcd_counter", "gpu=0 out=nullptr", kVerbose);
+  amdsmi_status_t err = amdsmi_get_gpu_xcd_counter(any_gpu(), nullptr);
+  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  AMDSMI_EXPECT_NULL_ARG(err);
 }
 TEST_F(GpuIntegration, GetXcdCounter_InvalidHandle) {
   uint16_t xcd = 0;

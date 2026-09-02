@@ -67,9 +67,6 @@ static void print_frequencies(amdsmi_frequencies_t* f, uint32_t* l = nullptr) {
 }
 
 void TestFrequenciesRead::Run(void) {
-  AMDSMI_SKIP_KNOWN_FAILURE() << "amdsmi_get_clk_freq returns AMDSMI_STATUS_UNEXPECTED_DATA in "
-                                 "TestFrequenciesRead; root cause unknown, under investigation";
-
   amdsmi_status_t err;
   amdsmi_frequencies_t f;
   amdsmi_pcie_bandwidth_t b;
