@@ -21,11 +21,23 @@ class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
 
         self.unsupported_data_types = []
 
+        self.matrix_kernel_selector = {
+            "F4": "mfma_f8f6f4<FP4_E2M1>",
+            "F6": "mfma_f8f6f4<FP6_E2M3>",
+            "F6F4": "mfma_f8f6f4<FP6_FP4_MIXED>",
+            "F8": "mfma_f8f6f4<FP8_E4M3>",
+            "F16": "mfma_f16",
+            "BF16": "mfma_bf16",
+            "F32": "mfma_f32",
+            "F64": "mfma_f64",
+            "I8": "mfma_i8",
+        }
+
         self.matrix_ops = {
             "F4": 131072,
             "F6": 131072,
             "F6F4": 131072,  # Mixed precision F6 x F4
-            "F8": 32768,
+            "F8": 131072,   # Scaled builtin has higher ops than standard MFMA
             "F16": 32768,
             "F32": 4096,
             "BF16": 32768,
