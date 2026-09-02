@@ -409,6 +409,48 @@ public:
   /// @param message Optional message payload (ownership transferred).
   void schedule_event(Event *event, Tick timestamp, std::unique_ptr<Message> message = nullptr);
 
+  /// @brief Schedule a collapsing wake for @p event at @p timestamp.
+  ///
+  /// @details Unlike schedule_event(), an event has at most one outstanding
+  /// wake. Asking again for an earlier tick supersedes the pending one; asking
+  /// for a later or equal tick is ignored. That cap is what bounds the queue
+  /// for a component whose event count should follow the work in flight rather
+  /// than the elapsed time -- at the one-picosecond tick resolution a 2.1 GHz
+  /// domain is a 476-tick period, and a model with hundreds of mostly idle
+  /// components cannot afford an entry each per cycle.
+  ///
+  /// A superseded entry is left in the queue and dropped when it surfaces,
+  /// because finding and removing it costs more than ignoring it. It is
+  /// dropped before the partition tick moves: a superseded entry always sits
+  /// later than the wake that replaced it, so advancing the clock first would
+  /// carry simulated time forward for work that never ran.
+  ///
+  /// A wake into the past is clamped forward to the partition's current tick
+  /// rather than refused. That happens legitimately -- a request can reach a
+  /// component the engine has already advanced past -- and refusing it would
+  /// strand the request forever.
+  ///
+  /// Owner-thread-only, like schedule_event().
+  /// @param event Event to wake; must have a target component.
+  /// @param timestamp Requested wake tick. TICK_MAX is refused: it is the
+  ///        queue's empty sentinel, so an entry at it would be invisible to
+  ///        the termination check.
+  /// @retval true The wake was armed, superseding any pending one.
+  /// @retval false An earlier or equal wake was already pending, or the tick
+  ///         was not schedulable.
+  bool schedule_wake(Event *event, Tick timestamp);
+
+  /// @brief Whether @p event has a wake outstanding in this create() generation.
+  ///
+  /// @details The authority on whether a component is going to be visited
+  /// again. A component tracking that itself would have to keep its own copy
+  /// in step with an event that outlives the engine generation.
+  /// @param event Event to query.
+  /// @retval true A wake armed in this generation is still queued.
+  /// @retval false Nothing is queued, or what is queued is from a dead
+  ///         generation.
+  bool wake_pending(const Event &event) const { return event.wake_pending(epoch_); }
+
 private:
   /// @brief Worker loop executed by each partition thread.
   void worker_loop(PartitionID partition_id);
@@ -516,6 +558,12 @@ private:
   /// @brief Set up partition contexts, async queues, and engine pointers.
   void setup_partitions();
 
+  /// @brief The partition context that owns @p event's target component.
+  /// @param event Event being scheduled; must have a target component.
+  /// @param caller Name of the calling entry point, for assertion messages.
+  /// @returns The owning partition's context.
+  PartitionContext &partition_for(Event *event, const char *caller);
+
   /// @brief Start components and arm the max-ticks sentinel, once per create().
   ///
   /// @details Shared by run(), step(), and run_bounded(), so that whichever
@@ -575,6 +623,12 @@ private:
   bool created_ = false; ///< Whether create() has completed (components initialized).
   bool running_ = false; ///< True while an execution loop is in progress.
   bool started_ = false; ///< True once this create() generation has started components.
+  /// @brief Which create() generation this is.
+  ///
+  /// @details Stamped into every armed wake. Events are owned by components
+  /// and outlive the queues shutdown() destroys, so this is what stops a wake
+  /// from a dead generation refusing the same wake in a live one.
+  uint64_t epoch_ = 0;
   /// @brief Set while any entry point is driving this engine's queue.
   ///
   /// @details A runtime guard rather than an assert, unlike this class's other

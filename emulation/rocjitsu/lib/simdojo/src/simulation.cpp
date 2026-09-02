@@ -84,6 +84,11 @@ void SimulationEngine::create() {
   exit_status_ = {};
   exit_set_ = false;
   started_ = false;
+  // A new generation. An Event outlives its queue -- shutdown() destroys the
+  // contexts and leaves the components holding their events -- so a wake armed
+  // in the previous generation must not refuse the identical wake this one
+  // asks for.
+  ++epoch_;
   executing_.store(false, std::memory_order_release);
   current_time_.store(0, std::memory_order_release);
   global_lbts_.store(0, std::memory_order_release);
@@ -346,13 +351,16 @@ bool SimulationEngine::step() {
     auto entry = ctx.event_queue.pop();
     process_event(ctx, entry);
     if (done_.load(std::memory_order_acquire)) {
-      current_time_.store(step_tick, std::memory_order_release);
+      current_time_.store(ctx.current_tick(), std::memory_order_release);
       running_ = false;
       return false;
     }
   }
 
-  current_time_.store(step_tick, std::memory_order_release);
+  // The partition's tick rather than step_tick: every entry at this tick may
+  // have been a stale wake, which process_event drops without advancing the
+  // clock precisely so that time is not charged to work that never ran.
+  current_time_.store(ctx.current_tick(), std::memory_order_release);
   return true;
 }
 
@@ -561,6 +569,16 @@ void SimulationEngine::barrier_completion() {
 }
 
 void SimulationEngine::process_event(PartitionContext &ctx, EventQueueEntry &entry) {
+  if (entry.wake_generation != 0) {
+    // A wake this event's owner superseded with an earlier one. Dropped before
+    // the partition tick moves, because the superseded entry always sits later
+    // than its replacement and advancing to it would charge simulated time to
+    // work that never runs.
+    if (!entry.event->is_current_wake(entry.wake_generation))
+      return;
+    entry.event->consume_wake();
+  }
+
   ctx.event_queue.set_current_tick(entry.timestamp);
 
   if (entry.event->has_handler()) {
@@ -569,13 +587,19 @@ void SimulationEngine::process_event(PartitionContext &ctx, EventQueueEntry &ent
   }
 }
 
+PartitionContext &SimulationEngine::partition_for(Event *event, const char *caller) {
+  Component *target = event->target();
+  assert(target != nullptr && "scheduled event has no target component");
+  PartitionID pid = target->partition_id();
+  assert(pid < contexts_.size() && "scheduled event's target partition ID is out of range");
+  static_cast<void>(caller);
+  return *contexts_[pid];
+}
+
 void SimulationEngine::schedule_event(Event *event, Tick timestamp,
                                       std::unique_ptr<Message> message) {
-  Component *target = event->target();
-  assert(target != nullptr && "schedule_event: event has no target component");
-  PartitionID pid = target->partition_id();
-  assert(pid < contexts_.size() && "schedule_event: target partition ID out of range");
-  contexts_[pid]->event_queue.push(EventQueueEntry{timestamp, 0, event, std::move(message)});
+  partition_for(event, "schedule_event")
+      .event_queue.push(EventQueueEntry{timestamp, 0, event, std::move(message)});
 }
 
 void SimulationEngine::send_cross_partition(PartitionID src_partition, PartitionID dst_partition,
@@ -701,6 +725,24 @@ void SimulationEngine::request_exit(std::string reason, int code) {
   wake_partition(0);
   // In multi-threaded mode, done_ is checked after each barrier epoch.
   // No explicit wake needed since threads will see it at the next barrier.
+}
+
+bool SimulationEngine::schedule_wake(Event *event, Tick timestamp) {
+  // TICK_MAX is the "no such tick" value and the queue's empty sentinel, and
+  // it is also how an Event spells "no wake armed". Arming one would push an
+  // entry the termination check cannot see and lose the one-outstanding-wake
+  // cap in the same move.
+  if (timestamp == TICK_MAX)
+    return false;
+
+  PartitionContext &ctx = partition_for(event, "schedule_wake");
+  timestamp = std::max(timestamp, ctx.event_queue.current_tick());
+  if (event->wake_pending(epoch_) && timestamp >= event->wake_tick())
+    return false;
+
+  const uint64_t generation = event->arm_wake(timestamp, epoch_);
+  ctx.event_queue.push(EventQueueEntry{timestamp, 0, event, nullptr, generation});
+  return true;
 }
 
 void SimulationEngine::schedule_event_async(Event *event, Tick timestamp,

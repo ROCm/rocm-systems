@@ -18,6 +18,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -1667,8 +1668,9 @@ TEST(ClockedEdgeTest, ResumeClockLandsOnAnEdge) {
   // a distance that has not elapsed yet.
   EXPECT_EQ(domain.next_edge(0), 1250u);
 
-  // And a resume while already running is refused, so the one reusable clock
-  // event cannot be queued twice: the second ask does not move the edge.
+  // And a second, later ask does not move the edge: wakes collapse onto the
+  // earliest outstanding one, so the reusable clock event cannot be queued
+  // twice however many times it is asked.
   rig.recorder->resume_from(20'000);
   EXPECT_TRUE(rig.recorder->running());
   rig.recorder->resume_from(30'000);
@@ -2025,4 +2027,448 @@ TEST(BoundedRunTest, StepAndBoundedRunShareOneLazyStartup) {
   engine.run_until_idle();
   EXPECT_EQ(recorder->edges, (std::vector<Tick>{1000, 2000, 3000, 4000}));
   EXPECT_EQ(engine.events_processed(), 4u);
+}
+
+// ============================================================================
+// Collapsing wakes and on-demand clocking
+// ============================================================================
+
+namespace {
+
+/// @brief A component whose one event is armed only through schedule_wake().
+class WakeRecorder : public Component {
+public:
+  WakeRecorder() : Component("wake_recorder") {}
+
+  /// @brief Ask to be woken at @p tick.
+  /// @returns Whether the ask superseded whatever was pending.
+  bool ask(Tick tick) { return this->schedule_wake(&wake_, tick); }
+
+  /// @brief Schedule the same event the ordinary way.
+  void ask_plainly(Tick tick) { this->schedule_event(&wake_, tick); }
+
+  Event wake_{this, EventType::TIMER_CALLBACK,
+              [this](Tick now, Message *) { fired.push_back(now); }};
+  std::vector<Tick> fired;
+};
+
+/// @brief An engine holding one WakeRecorder.
+class WakeRig {
+public:
+  WakeRig() {
+    auto root = std::make_unique<CompositeComponent>("root");
+    recorder = static_cast<WakeRecorder *>(root->add_child(std::make_unique<WakeRecorder>()));
+    engine.topology().set_root(std::move(root));
+    engine.create();
+  }
+
+  SimulationEngine engine{{}};
+  WakeRecorder *recorder = nullptr;
+};
+
+} // namespace
+
+TEST(CollapsingWakeTest, AnEarlierAskSupersedesALaterOne) {
+  WakeRig rig;
+  EXPECT_TRUE(rig.recorder->ask(5000));
+  EXPECT_TRUE(rig.recorder->ask(2000));  // earlier: supersedes
+  EXPECT_FALSE(rig.recorder->ask(9000)); // later: ignored
+  EXPECT_FALSE(rig.recorder->ask(2000)); // equal: ignored
+
+  rig.engine.run_until_idle();
+
+  // The superseded entry is left in the queue and dropped when it surfaces, so
+  // exactly one firing happens, at the earliest tick asked for.
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{2000}));
+}
+
+TEST(CollapsingWakeTest, ASupersededEntryDoesNotMoveTheClock) {
+  // The property the whole mechanism turns on. A superseded entry always sits
+  // later than the wake that replaced it, so a drop taken after the tick moved
+  // would drag the engine's clock forward for work that never ran -- and a
+  // model reading that clock would charge it as elapsed time.
+  WakeRig rig;
+  rig.recorder->ask(1'000'000);
+  rig.recorder->ask(3000);
+
+  EXPECT_EQ(rig.engine.run_until_idle(), 3000u);
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{3000}));
+  EXPECT_EQ(rig.engine.context(0).current_tick(), 3000u);
+  // One event ran, not two.
+  EXPECT_EQ(rig.engine.events_processed(), 1u);
+}
+
+TEST(CollapsingWakeTest, ARearmAtTheSupersededTickStillFires) {
+  // Identity, not tick equality, is what tells a live entry from a stale one:
+  // a wake re-armed at a tick it had already been armed for must not be
+  // mistaken for the entry the supersession left behind.
+  WakeRig rig;
+  rig.recorder->ask(9000);
+  rig.recorder->ask(2000);
+  rig.engine.run_until_idle();
+  ASSERT_EQ(rig.recorder->fired, (std::vector<Tick>{2000}));
+
+  rig.recorder->ask(9000);
+  rig.engine.run_until_idle();
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{2000, 9000}));
+}
+
+TEST(CollapsingWakeTest, AWakeIntoThePastIsClampedForward) {
+  // A request can legitimately reach a component the engine has already
+  // advanced past. Refusing it would strand the request forever.
+  WakeRig rig;
+  rig.recorder->ask(4000);
+  rig.engine.run_until_idle();
+
+  EXPECT_TRUE(rig.recorder->ask(1000));
+  rig.engine.run_until_idle();
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{4000, 4000}));
+}
+
+TEST(CollapsingWakeTest, AnOrdinaryEventOnTheSameDescriptorIsUnaffected) {
+  // schedule_event() and schedule_wake() share one Event. Ordinary entries
+  // carry no wake identity and must all fire, including ones queued while a
+  // wake is pending and ones queued after a wake has been superseded.
+  WakeRig rig;
+  rig.recorder->ask(8000);
+  rig.recorder->ask(3000);
+  rig.recorder->ask_plainly(1000);
+  rig.recorder->ask_plainly(5000);
+
+  rig.engine.run_until_idle();
+
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{1000, 3000, 5000}));
+  EXPECT_EQ(rig.engine.events_processed(), 3u);
+}
+
+TEST(CollapsingWakeTest, AWakeArmedFromInsideItsOwnHandlerIsHonoured) {
+  WakeRig rig;
+  std::vector<Tick> chain{4000, 9000};
+  rig.recorder->wake_.set_handler([&](Tick now, Message *) {
+    rig.recorder->fired.push_back(now);
+    if (!chain.empty()) {
+      const Tick next = chain.front();
+      chain.erase(chain.begin());
+      rig.recorder->ask(next);
+    }
+  });
+
+  rig.recorder->ask(1000);
+  rig.engine.run_until_idle();
+
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{1000, 4000, 9000}));
+}
+
+namespace {
+
+/// @brief A clocked component that advances only when asked.
+class OnDemand : public Clocked<Component> {
+public:
+  explicit OnDemand(const ClockDomain &domain) : Clocked<Component>("on_demand", domain) {}
+
+  bool clock_at_startup() const override { return false; }
+
+  bool advance(Tick now) override {
+    advanced.push_back(now);
+    if (!follow_ups.empty()) {
+      const Tick next = follow_ups.front();
+      follow_ups.erase(follow_ups.begin());
+      wake_at(next);
+    }
+    return keep_clocking;
+  }
+
+  std::vector<Tick> advanced;
+  std::vector<Tick> follow_ups;
+  bool keep_clocking = false;
+};
+
+/// @brief An engine holding one OnDemand component in a 1 GHz domain.
+class OnDemandRig {
+public:
+  OnDemandRig() {
+    auto root = std::make_unique<CompositeComponent>("root");
+    block = static_cast<OnDemand *>(root->add_child(std::make_unique<OnDemand>(domain)));
+    engine.topology().set_root(std::move(root));
+    engine.create();
+  }
+
+  ClockDomain domain{"ghz", 1'000'000'000ULL};
+  SimulationEngine engine{{}};
+  OnDemand *block = nullptr;
+};
+
+} // namespace
+
+TEST(ClockedOnDemandTest, SchedulesNothingUntilAsked) {
+  OnDemandRig rig;
+
+  rig.engine.run_until_idle();
+
+  EXPECT_TRUE(rig.block->advanced.empty());
+  EXPECT_FALSE(rig.block->running());
+  // The point of the whole mechanism: an idle component costs no events at
+  // all, rather than one per cycle of elapsed simulated time.
+  EXPECT_EQ(rig.engine.events_processed(), 0u);
+}
+
+TEST(ClockedOnDemandTest, WakeAtAlignsToAnEdgeAndCollapses) {
+  OnDemandRig rig;
+
+  rig.block->wake_at(5500); // rounds up to 6000
+  rig.block->wake_at(2500); // supersedes; rounds up to 3000
+  rig.engine.run_until_idle();
+
+  EXPECT_EQ(rig.block->advanced, (std::vector<Tick>{3000}));
+  EXPECT_EQ(rig.engine.events_processed(), 1u);
+}
+
+TEST(ClockedOnDemandTest, AdvanceCanScheduleItsOwnNextVisit) {
+  // The idiom Clocked could not express before: resume_clock() early-returns
+  // while running_ is set, and running_ was only cleared after advance()
+  // returned, so a component had no way to ask for a later visit from inside
+  // its own advance().
+  OnDemandRig rig;
+
+  rig.block->follow_ups = {4000, 9000};
+  rig.block->wake_at(1000);
+  rig.engine.run_until_idle();
+
+  EXPECT_EQ(rig.block->advanced, (std::vector<Tick>{1000, 4000, 9000}));
+}
+
+TEST(ClockedOnDemandTest, AContinuousClockStillRunsEveryEdge) {
+  // clock_at_startup() is the only thing being opted out of. A component that
+  // returns true from advance() clocks every edge as before, now through the
+  // same collapsing path.
+  OnDemandRig rig;
+  rig.block->keep_clocking = true;
+
+  rig.block->wake_at(1000);
+  for (int i = 0; i < 4; ++i)
+    rig.engine.step();
+
+  EXPECT_EQ(rig.block->advanced, (std::vector<Tick>{1000, 2000, 3000, 4000}));
+  EXPECT_TRUE(rig.block->running());
+}
+
+TEST(ClockedOnDemandTest, AnEarlierAskFromInsideAdvanceBeatsTheNextEdge) {
+  // advance() returning true arms the next edge, but a wake advance() armed
+  // for an earlier tick must win -- and both must not produce two entries.
+  OnDemandRig rig;
+  rig.block->keep_clocking = true;
+  rig.block->follow_ups = {1500}; // rounds to 2000, the next edge anyway
+  rig.block->wake_at(1000);
+
+  rig.engine.step();
+  rig.engine.step();
+
+  EXPECT_EQ(rig.block->advanced, (std::vector<Tick>{1000, 2000}));
+}
+
+TEST(ClockedOnDemandTest, ReserveSerialisesOverlappingWork) {
+  OnDemandRig rig;
+
+  // Three cycles of work ready at tick 0 starts at the domain's first edge.
+  EXPECT_EQ(rig.block->reserve(0, 3), 4000u);
+  // Work that could have started at 2000 queues behind it instead.
+  EXPECT_EQ(rig.block->reserve(2000, 2), 6000u);
+  // Work arriving after the server is free starts when it arrives.
+  EXPECT_EQ(rig.block->reserve(20'000, 1), 21'000u);
+  EXPECT_EQ(rig.block->busy_until(), 21'000u);
+  // Reserving schedules nothing; it only says when the server is next free.
+  EXPECT_FALSE(rig.block->running());
+  EXPECT_EQ(rig.engine.events_processed(), 0u);
+}
+
+TEST(ClockedOnDemandTest, ReserveSaturatesRatherThanWrapping) {
+  OnDemandRig rig;
+
+  EXPECT_EQ(rig.block->reserve(0, TICK_MAX), TICK_MAX);
+  // And stays saturated: a busy_until() that wrapped would make the server
+  // look free again.
+  EXPECT_EQ(rig.block->reserve(0, 1), TICK_MAX);
+}
+
+TEST(ServiceCyclesTest, RoundsUpAndNeverToNothing) {
+  EXPECT_EQ(ClockDomain::service_cycles(8, 2.0), 4u);
+  EXPECT_EQ(ClockDomain::service_cycles(9, 2.0), 5u);
+  EXPECT_EQ(ClockDomain::service_cycles(1, 2.0), 1u);
+  // A server handed work has looked at it, so no amount of rate rounds the
+  // work away and makes the component infinitely fast.
+  EXPECT_EQ(ClockDomain::service_cycles(0, 2.0), 1u);
+  EXPECT_EQ(ClockDomain::service_cycles(1, 1e9), 1u);
+  // A rate that is not a rate falls back to one unit per cycle.
+  EXPECT_EQ(ClockDomain::service_cycles(7, 0.0), 7u);
+  EXPECT_EQ(ClockDomain::service_cycles(7, -1.0), 7u);
+  EXPECT_EQ(ClockDomain::service_cycles(0, 0.0), 1u);
+  // A rate below one unit per cycle can ask for more cycles than there are
+  // ticks; saturating keeps it a number rather than an overflow.
+  EXPECT_EQ(ClockDomain::service_cycles(std::numeric_limits<uint64_t>::max(), 0.5),
+            std::numeric_limits<uint64_t>::max());
+}
+
+TEST(ClockedOnDemandTest, AWakeIntoThePastStaysOnTheClockGrid) {
+  // The case the collapsing-wake contract calls normal: a request reaches a
+  // component the engine has already advanced past. The engine clamps a wake
+  // into the past forward to the current tick, which is not an edge of this
+  // component's domain -- so the alignment has to happen after the clamp, not
+  // before it, or every edge from here on inherits the offset.
+  const ClockDomain domain("ghz", 1'000'000'000ULL);
+  SimulationEngine engine({});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *block = static_cast<OnDemand *>(root->add_child(std::make_unique<OnDemand>(domain)));
+  auto *pacer = static_cast<TickRecorder *>(root->add_child(std::make_unique<TickRecorder>()));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  // Drive the partition's clock to a tick that is not on the 1 GHz grid.
+  pacer->ask(5500);
+  engine.run_until_idle();
+  ASSERT_EQ(engine.context(0).current_tick(), 5500u);
+
+  // Asked for a tick long past, then twice more for ticks that are not edges.
+  block->follow_ups = {6100, 7200};
+  block->wake_at(1000);
+  engine.run_until_idle();
+
+  ASSERT_EQ(block->advanced.size(), 3u);
+  for (Tick edge : block->advanced)
+    EXPECT_EQ(edge % 1000, 0u) << "advanced at " << edge << ", which is not an edge";
+  EXPECT_EQ(block->advanced, (std::vector<Tick>{6000, 7000, 8000}));
+}
+
+TEST(ClockedOnDemandTest, AComponentStillClocksAfterTheEngineIsRebuilt) {
+  // An Event is owned by its component and outlives the queue that held its
+  // entry: shutdown() destroys the contexts, not the components. A wake armed
+  // in the old generation must not refuse the identical wake the new
+  // generation's startup asks for.
+  OnDemandRig rig;
+  rig.block->wake_at(1000);
+  ASSERT_TRUE(rig.block->running());
+
+  // Torn down before that edge ever fired.
+  rig.engine.shutdown();
+  ASSERT_TRUE(rig.block->advanced.empty());
+
+  rig.engine.create();
+  rig.block->wake_at(1000);
+  rig.engine.run_until_idle();
+
+  EXPECT_EQ(rig.block->advanced, (std::vector<Tick>{1000}));
+  EXPECT_FALSE(rig.block->running());
+}
+
+TEST(ClockedOnDemandTest, StartupClearsAReservationFromABuriedGeneration) {
+  // busy_until_ is an absolute tick. Carried across a rebuild it would leave
+  // the component looking occupied until a tick the new generation reaches
+  // only after re-simulating everything the old one did.
+  OnDemandRig rig;
+  EXPECT_EQ(rig.block->reserve(0, 3), 4000u);
+  rig.engine.shutdown();
+  rig.engine.create();
+
+  rig.block->wake_at(1000);
+  rig.engine.run_until_idle();
+  EXPECT_EQ(rig.block->busy_until(), 0u);
+}
+
+TEST(ClockedOnDemandTest, AnAdvanceThatThrowsLeavesTheComponentRecoverable) {
+  // The wake is consumed before the handler runs, so a throw leaves nothing
+  // armed. If the component still reported a running clock, every later
+  // attempt to restart it would be silently dropped.
+  OnDemandRig rig;
+  bool throw_now = true;
+  class Thrower : public Clocked<Component> {
+  public:
+    Thrower(const ClockDomain &domain, bool &fail) : Clocked("thrower", domain), fail_(fail) {}
+    bool clock_at_startup() const override { return false; }
+    bool advance(Tick now) override {
+      if (fail_)
+        throw std::runtime_error("boom");
+      advanced.push_back(now);
+      return false;
+    }
+    std::vector<Tick> advanced;
+
+  private:
+    bool &fail_;
+  };
+
+  SimulationEngine engine({});
+  ClockDomain domain("ghz", 1'000'000'000ULL);
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *thrower =
+      static_cast<Thrower *>(root->add_child(std::make_unique<Thrower>(domain, throw_now)));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  thrower->wake_at(1000);
+  EXPECT_THROW(engine.run_until_idle(), std::runtime_error);
+  EXPECT_FALSE(thrower->running()) << "a throw left the clock reporting itself as live";
+
+  throw_now = false;
+  thrower->resume_clock(2000);
+  engine.run_until_idle();
+  EXPECT_EQ(thrower->advanced, (std::vector<Tick>{2000}));
+}
+
+TEST(CollapsingWakeTest, TheSentinelTickIsRefused) {
+  // TICK_MAX is what an empty queue reports as its next event time, so an
+  // entry at it would be invisible to the termination check -- and, because it
+  // is also how an Event spells "no wake armed", every later ask would push
+  // another entry rather than collapsing onto it.
+  WakeRig rig;
+  EXPECT_FALSE(rig.recorder->ask(TICK_MAX));
+  EXPECT_FALSE(rig.recorder->ask(TICK_MAX));
+  EXPECT_TRUE(rig.recorder->ask(4000));
+
+  rig.engine.run_until_idle();
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{4000}));
+  EXPECT_EQ(rig.engine.events_processed(), 1u);
+}
+
+TEST(CollapsingWakeTest, SteppingOverASupersededEntryDoesNotMoveTheClock) {
+  // The same property as ASupersededEntryDoesNotMoveTheClock, on the other
+  // driver. step() advances to the tick it selected, which is the tick of the
+  // entry it is about to drop -- so it has to publish the partition's tick
+  // instead, or a model reading the global clock is charged the difference.
+  WakeRig rig;
+  rig.recorder->ask(3000);
+  rig.engine.step();
+  ASSERT_EQ(rig.recorder->fired, (std::vector<Tick>{3000}));
+
+  rig.recorder->ask(1'000'000);
+  rig.recorder->ask(9000);
+  rig.engine.step(); // fires the 9000 wake
+  rig.engine.step(); // surfaces the superseded 1'000'000 entry
+
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{3000, 9000}));
+  EXPECT_EQ(rig.engine.context(0).current_tick(), 9000u);
+  EXPECT_EQ(rig.engine.global_time(), 9000u);
+}
+
+TEST(ClockedOnDemandTest, AWakeArmedBeforeStartupIsReportedAsRunning) {
+  // startup() runs on the engine's first step, so a component armed between
+  // create() and that step already has an entry queued. running() is the
+  // framework's answer to "will this be visited again", and startup() must
+  // read it rather than assert it: answering no with an entry queued is the
+  // opposite of the truth.
+  const ClockDomain domain("ghz", 1'000'000'000ULL);
+  SimulationEngine engine({});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *block = static_cast<OnDemand *>(root->add_child(std::make_unique<OnDemand>(domain)));
+  auto *pacer = static_cast<TickRecorder *>(root->add_child(std::make_unique<TickRecorder>()));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  block->wake_at(5000);
+  pacer->ask(1000);
+  engine.step(); // startup, then the pacer's event at 1000
+
+  EXPECT_TRUE(block->running());
+  EXPECT_TRUE(block->advanced.empty());
+
+  engine.run_until_idle();
+  EXPECT_EQ(block->advanced, (std::vector<Tick>{5000}));
 }
