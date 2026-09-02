@@ -257,9 +257,10 @@ TEST(ConSanMoi, DirectSampledProbeWritesPackedWatchpointEntry) {
   EXPECT_EQ(runtime_mapping.access.intent_ids,
             result.coverage_ledger.lowering_commits().front().intent_ids);
   EXPECT_EQ(runtime_mapping.access.original_site.original_text_offset, access_patch->anchor_offset);
-  EXPECT_EQ(runtime_mapping.first_slot, access_patch->sampled_first_slot);
-  EXPECT_EQ(runtime_mapping.range_count, access_patch->sampled_access_range_count);
-  EXPECT_EQ(runtime_mapping.bank_count, access_patch->sampled_window_bank_count);
+  EXPECT_EQ(runtime_mapping.access_kind, ConSanLdsAccessKind::Write);
+  EXPECT_EQ(runtime_mapping.first_slot, 0u);
+  EXPECT_EQ(runtime_mapping.range_count, 1u);
+  EXPECT_EQ(runtime_mapping.bank_count, 1u);
   EXPECT_EQ(runtime_mapping.emitted_probe_text_offset, access_patch->trampoline_offset);
   EXPECT_EQ(runtime_mapping.relocated_guest_text_offset,
             access_patch->relocated_guest_instruction_offset);
@@ -1273,7 +1274,9 @@ TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesSampledAccessAndOrderingMetadata)
   ASSERT_NE(atomic, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(access->relocated_guest_instruction_offset);
   ASSERT_TRUE(atomic->relocated_guest_instruction_offset);
-  ASSERT_GT(atomic->sampled_window_bank_count, 1u);
+  const auto sampled_mappings = consan_sampled_static_access_mappings(result);
+  ASSERT_EQ(sampled_mappings.size(), 1u);
+  ASSERT_GT(sampled_mappings.front().bank_count, 1u);
   ASSERT_TRUE(atomic->scratch_vgpr);
   ASSERT_TRUE(test_moi_owner_vgpr(result));
   EXPECT_EQ(access->anchor_offset, atomic->anchor_offset);
@@ -4394,9 +4397,11 @@ TEST(ConSanMoi, CdnaSampledBarrierMaterializesNonzeroAbsoluteSlot) {
       }
     }
     ASSERT_EQ(accesses.size(), 2u);
-    std::ranges::sort(accesses, {}, &ConSanPatchInfo::sampled_first_slot);
-    EXPECT_EQ(accesses.front()->sampled_first_slot, 0u);
-    ASSERT_GT(accesses.back()->sampled_first_slot, 0u);
+    auto sampled_mappings = consan_sampled_static_access_mappings(result);
+    ASSERT_EQ(sampled_mappings.size(), 2u);
+    std::ranges::sort(sampled_mappings, {}, &ConSanSampledStaticAccessMapping::first_slot);
+    EXPECT_EQ(sampled_mappings.front().first_slot, 0u);
+    ASSERT_GT(sampled_mappings.back().first_slot, 0u);
     const auto barrier_patch = std::ranges::find(
         result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
     ASSERT_NE(barrier_patch, result.patches.end());
@@ -4413,7 +4418,7 @@ TEST(ConSanMoi, CdnaSampledBarrierMaterializesNonzeroAbsoluteSlot) {
     // VALUE is dead after bank selection and is the explicit CDNA4 literal
     // temporary. Every target leaves the absolute slot directly in BANK.
     const auto absolute_slot = instrumentation::build_v_add_u32_literal(
-        bank_vgpr, value_vgpr, accesses.back()->sampled_first_slot, bank_vgpr, target.arch);
+        bank_vgpr, value_vgpr, sampled_mappings.back().first_slot, bank_vgpr, target.arch);
     ASSERT_TRUE(absolute_slot);
     std::vector<uint32_t> expected = *absolute_slot;
     EXPECT_TRUE(contains_subsequence(cave, expected));
@@ -4973,10 +4978,13 @@ TEST(ConSanMoi, DirectSampledProbeRuntimeAddressSelectionKeepsAllSitesPatchable)
   ASSERT_EQ(result.patches.size(), 3u);
   EXPECT_EQ(result.patches[0].anchor_offset, 0u);
   EXPECT_EQ(result.patches[1].anchor_offset, kSecondSiteWord * sizeof(uint32_t));
-  EXPECT_EQ(result.patches[0].sampled_first_slot, 0u);
-  EXPECT_EQ(result.patches[0].sampled_window_bank_count, 8u);
-  EXPECT_EQ(result.patches[1].sampled_first_slot, 8u);
-  EXPECT_EQ(result.patches[1].sampled_window_bank_count, 8u);
+  auto sampled_mappings = consan_sampled_static_access_mappings(result);
+  ASSERT_EQ(sampled_mappings.size(), 2u);
+  std::ranges::sort(sampled_mappings, {}, &ConSanSampledStaticAccessMapping::first_slot);
+  EXPECT_EQ(sampled_mappings[0].first_slot, 0u);
+  EXPECT_EQ(sampled_mappings[0].bank_count, 8u);
+  EXPECT_EQ(sampled_mappings[1].first_slot, 8u);
+  EXPECT_EQ(sampled_mappings[1].bank_count, 8u);
   ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   EXPECT_TRUE(test_moi_dispatch_id_sgpr(result).has_value());
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
@@ -5372,10 +5380,13 @@ TEST(ConSanMoi, DirectSampledProbeCanCheckCorrespondingPriorBank) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified());
   ASSERT_EQ(result.patches.size(), 3u);
-  EXPECT_EQ(result.patches[0].sampled_first_slot, 0u);
-  EXPECT_EQ(result.patches[0].sampled_window_bank_count, 8u);
-  EXPECT_EQ(result.patches[1].sampled_first_slot, 8u);
-  EXPECT_EQ(result.patches[1].sampled_window_bank_count, 8u);
+  auto sampled_mappings = consan_sampled_static_access_mappings(result);
+  ASSERT_EQ(sampled_mappings.size(), 2u);
+  std::ranges::sort(sampled_mappings, {}, &ConSanSampledStaticAccessMapping::first_slot);
+  EXPECT_EQ(sampled_mappings[0].first_slot, 0u);
+  EXPECT_EQ(sampled_mappings[0].bank_count, 8u);
+  EXPECT_EQ(sampled_mappings[1].first_slot, 8u);
+  EXPECT_EQ(sampled_mappings[1].bank_count, 8u);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -5442,10 +5453,13 @@ TEST(ConSanMoi, DirectSampledProbeChecksEveryPriorMultiAddressRange) {
       accesses.push_back(&patch);
   }
   ASSERT_EQ(accesses.size(), 2u) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(accesses[0]->sampled_access_range_count, 2u);
-  EXPECT_EQ(accesses[1]->sampled_access_range_count, 2u);
-  EXPECT_EQ(accesses[0]->sampled_first_slot, 0u);
-  EXPECT_EQ(accesses[1]->sampled_first_slot, 16u);
+  auto sampled_mappings = consan_sampled_static_access_mappings(result);
+  ASSERT_EQ(sampled_mappings.size(), 2u);
+  std::ranges::sort(sampled_mappings, {}, &ConSanSampledStaticAccessMapping::first_slot);
+  EXPECT_EQ(sampled_mappings[0].range_count, 2u);
+  EXPECT_EQ(sampled_mappings[1].range_count, 2u);
+  EXPECT_EQ(sampled_mappings[0].first_slot, 0u);
+  EXPECT_EQ(sampled_mappings[1].first_slot, 16u);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -5550,19 +5564,15 @@ TEST(ConSanMoi, SampledMultiRangeReportSlotsDoNotConsumePatchBudgetAcrossTargets
 
     ASSERT_TRUE(consan_patch_succeeded(result))
         << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-    std::vector<const ConSanPatchInfo *> accesses;
-    for (const ConSanPatchInfo &patch : result.patches) {
-      if (patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
-          patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
-        accesses.push_back(&patch);
-    }
-    ASSERT_EQ(accesses.size(), 2u) << testing::PrintToString(result.warnings);
-    EXPECT_EQ(accesses[0]->sampled_access_range_count, 2u);
-    EXPECT_EQ(accesses[1]->sampled_access_range_count, 2u);
-    EXPECT_EQ(accesses[0]->sampled_window_bank_count, 8u);
-    EXPECT_EQ(accesses[1]->sampled_window_bank_count, 8u);
-    EXPECT_EQ(accesses[0]->sampled_first_slot, 0u);
-    EXPECT_EQ(accesses[1]->sampled_first_slot, 16u);
+    auto sampled_mappings = consan_sampled_static_access_mappings(result);
+    ASSERT_EQ(sampled_mappings.size(), 2u) << testing::PrintToString(result.warnings);
+    std::ranges::sort(sampled_mappings, {}, &ConSanSampledStaticAccessMapping::first_slot);
+    EXPECT_EQ(sampled_mappings[0].range_count, 2u);
+    EXPECT_EQ(sampled_mappings[1].range_count, 2u);
+    EXPECT_EQ(sampled_mappings[0].bank_count, 8u);
+    EXPECT_EQ(sampled_mappings[1].bank_count, 8u);
+    EXPECT_EQ(sampled_mappings[0].first_slot, 0u);
+    EXPECT_EQ(sampled_mappings[1].first_slot, 16u);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
@@ -5642,7 +5652,9 @@ TEST(ConSanMoi, SampledRuntimeGateUsesExpandedBranchIslands) {
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access_patch, result.patches.end());
   ASSERT_TRUE(access_patch->scratch_vgpr);
-  EXPECT_EQ(access_patch->sampled_window_bank_count, 2u);
+  const auto sampled_mappings = consan_sampled_static_access_mappings(result);
+  ASSERT_FALSE(sampled_mappings.empty());
+  EXPECT_EQ(sampled_mappings.front().bank_count, 2u);
   const auto return_restore_scc =
       instrumentation::build_s_cmp_lg_u32(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u),
                                           scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
@@ -6937,8 +6949,7 @@ TEST(ConSanMoi, Cdna4SampledDenseAtomicKeepsFarOrderedEdgeComplete) {
             kAccessCount);
   const auto atomic_sync = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
-           patch.anchor_offset == atomic_offset &&
-           patch.sampled_access_kind == ConSanLdsAccessKind::Atomic;
+           patch.anchor_offset == atomic_offset;
   });
   ASSERT_NE(atomic_sync, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {

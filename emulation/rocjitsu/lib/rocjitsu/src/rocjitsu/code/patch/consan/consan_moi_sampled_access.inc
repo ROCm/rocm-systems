@@ -677,6 +677,14 @@ void try_apply_direct_sampled_watchpoint_patch(
     note_moi_access_private_requirements(private_requirements, planned_patch);
   }
 
+  const auto make_runtime_mapping = [&](ConSanStaticAccessAttribution access,
+                                        const PlannedSampledPatch &planned_patch,
+                                        const auto &patch) {
+    return make_sampled_access_runtime_mapping(
+        std::move(access), planned_patch.candidate->kind, planned_patch.emission.first_record_index,
+        planned_patch.access_range_count, window_bank_count, patch);
+  };
+
   const bool uses_appended_cave =
       std::ranges::any_of(planned_patches, [](const PlannedSampledPatch &patch) {
         return patch.placement.kind == DbiPatchPlacementKind::AppendedCave;
@@ -769,10 +777,6 @@ void try_apply_direct_sampled_watchpoint_patch(
                       ? ConSanPatchKind::TrampolineMoiSampledWatchpointStore
                       : ConSanPatchKind::InlineMoiSampledWatchpointStore;
       info.anchor_offset = candidate.anchor();
-      info.sampled_first_slot = planned_patch.emission.first_record_index;
-      info.sampled_window_bank_count = window_bank_count;
-      info.sampled_access_kind = candidate.kind;
-      info.sampled_access_range_count = planned_patch.access_range_count;
       note_moi_replay_access_patch_info(info, planned_patch);
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
@@ -971,8 +975,11 @@ void try_apply_direct_sampled_watchpoint_patch(
         info.relocated_guest_instruction_offset =
             candidate.anchor() + planned_patch.probe_guest_instruction_offset;
       }
-      auto commit = make_moi_access_lowering_commit(result.observation_plan(), candidate, info,
-                                                    kSampledAccessCommitPolicy);
+      auto commit = make_moi_access_lowering_commit(
+          result.observation_plan(), candidate, info, ConSanProbeIntentKind::SampledAccess,
+          [&](ConSanStaticAccessAttribution access) {
+            return make_runtime_mapping(std::move(access), planned_patch, info);
+          });
       if (!commit) {
         result.errors.emplace_back(
             "ConSan MOI sampled probe produced an invalid intent-bound lowering");
@@ -1044,15 +1051,11 @@ void try_apply_direct_sampled_watchpoint_patch(
             info.anchor_offset = candidate.anchor();
             info.trampoline_offset = candidate.anchor() + candidate.size();
             info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
-            info.sampled_first_slot = planned_patch.emission.first_record_index;
-            info.sampled_window_bank_count = window_bank_count;
-            info.sampled_access_kind = candidate.kind;
-            info.sampled_access_range_count = planned_patch.access_range_count;
             note_moi_replay_access_patch_info(info, planned_patch);
             info.relocated_guest_instruction_offset =
                 candidate.anchor() + planned_patch.probe_guest_instruction_offset;
             return info;
           },
-          kSampledAccessCommitPolicy, result))
+          ConSanProbeIntentKind::SampledAccess, make_runtime_mapping, result))
     return;
 }

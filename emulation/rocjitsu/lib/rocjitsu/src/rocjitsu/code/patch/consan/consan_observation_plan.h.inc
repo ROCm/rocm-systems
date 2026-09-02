@@ -1090,6 +1090,7 @@ struct ConSanRecordReplayStaticAccessMapping {
 /// probe, relocated guest, and scratch-register values.
 struct ConSanSampledStaticAccessMapping {
   ConSanStaticAccessAttribution access;
+  ConSanLdsAccessKind access_kind = ConSanLdsAccessKind::Other;
   uint32_t first_slot = 0;
   uint32_t range_count = 0;
   uint32_t bank_count = 0;

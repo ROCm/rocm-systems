@@ -678,12 +678,20 @@ foreach(_common_fence_consumer IN ITEMS
         "common fence composition must consume the engine probe vocabulary"
     )
 endforeach()
-foreach(_file IN LISTS _consan_production_files)
-    _consan_assert_no_match(
-        "${_file}"
+foreach(_parallel_patch_fact IN ITEMS
         "covered_sync_event_count"
-        "patch telemetry must not duplicate intent-bound synchronization coverage"
+        "sampled_first_slot"
+        "sampled_window_bank_count"
+        "sampled_access_range_count"
+        "ConSanPatchSampledAccessEffect"
     )
+    foreach(_file IN LISTS _consan_production_files)
+        _consan_assert_no_match(
+            "${_file}"
+            "${_parallel_patch_fact}"
+            "patch telemetry must not duplicate intent-bound semantic mappings"
+        )
+    endforeach()
 endforeach()
 
 # Dispatch placement composes one mode-owned demand with one target-owned
@@ -1747,13 +1755,17 @@ foreach(_access_mapping_owner IN ITEMS
     consan_moi_inline_shadow.cpp
 )
     file(READ "${_consan_dir}/${_access_mapping_owner}" _access_mapping_text)
-    if(NOT _access_mapping_text MATCHES "access_runtime_mapping" OR
-       NOT _access_mapping_text MATCHES "AccessCommitPolicy")
+    if(NOT _access_mapping_text MATCHES "access_runtime_mapping")
         message(FATAL_ERROR
             "ConSan mode owner ${_access_mapping_owner} lost its access runtime mapping"
         )
     endif()
 endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_access_apply.h"
+    "MoiAccess(RuntimeMappingFactory|CommitPolicy)"
+    "common access application must not type-erase mode-owned mapping inputs"
+)
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
     "ROCJITSU_CODE_ARCH_"

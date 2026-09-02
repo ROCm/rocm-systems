@@ -700,14 +700,15 @@ void try_apply_sampled_barrier_sync_patch(
     return;
   }
   const ConSanMoiReportBufferLayout &layout = mode_semantics.report_layout;
+  const ConSanRuntimeStaticMapping runtime_mapping =
+      result.coverage_ledger.runtime_static_mapping();
+  const ConSanRuntimeStaticMapping::Sampled *sampled_accesses = runtime_mapping.sampled();
   struct SelectedWindow {
-    const ConSanPatchLoweringProduct *patch = nullptr;
+    const ConSanSampledStaticAccessMapping *mapping = nullptr;
     const ConSanMoiCandidate *access = nullptr;
-    uint32_t first_slot = 0;
-    uint32_t bank_count = 1;
   };
   std::vector<SelectedWindow> selected_windows;
-  selected_windows.reserve(result.patches.size());
+  selected_windows.reserve(sampled_accesses == nullptr ? 0u : sampled_accesses->size());
   std::unordered_map<uint64_t, const ConSanMoiCandidate *> access_by_offset;
   access_by_offset.reserve(admitted.size());
   for (const ConSanMoiCandidate &candidate : admitted) {
@@ -715,19 +716,14 @@ void try_apply_sampled_barrier_sync_patch(
       access_by_offset.try_emplace(candidate.anchor(), &candidate);
   }
   bool has_multi_range_window = false;
-  for (const ConSanPatchLoweringProduct &patch : result.patches) {
-    if (patch.kind != ConSanPatchKind::InlineMoiSampledWatchpointStore &&
-        patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
-      continue;
-    const auto access = access_by_offset.find(patch.anchor_offset);
-    if (access == access_by_offset.end())
-      continue;
-    const auto &ranges = access->second->ranges;
-    if (ranges.empty())
-      continue;
-    selected_windows.push_back({&patch, access->second, patch.sampled_first_slot,
-                                std::max(patch.sampled_window_bank_count, 1u)});
-    has_multi_range_window |= ranges.size() > 1u;
+  if (sampled_accesses != nullptr) {
+    for (const ConSanSampledStaticAccessMapping &mapping : *sampled_accesses) {
+      const auto access = access_by_offset.find(mapping.access.original_site.original_text_offset);
+      if (access == access_by_offset.end() || mapping.range_count == 0u || mapping.bank_count == 0u)
+        continue;
+      selected_windows.push_back({&mapping, access->second});
+      has_multi_range_window |= mapping.range_count > 1u;
+    }
   }
   if (selected_windows.empty() || layout.sampled_sync_metadata_capacity == 0) {
     result.warnings.emplace_back(
@@ -745,8 +741,8 @@ void try_apply_sampled_barrier_sync_patch(
   }
   std::unordered_map<uint64_t, std::vector<const SelectedWindow *>> windows_by_descriptor;
   for (const SelectedWindow &window : selected_windows) {
-    if (!window.patch->owner_descriptor_file_offsets.empty()) {
-      for (uint64_t descriptor : window.patch->owner_descriptor_file_offsets)
+    if (!window.mapping->access.execution_owner_descriptor_file_offsets.empty()) {
+      for (uint64_t descriptor : window.mapping->access.execution_owner_descriptor_file_offsets)
         windows_by_descriptor[descriptor].push_back(&window);
     } else if (window.access->kernel_descriptor_file_offset) {
       windows_by_descriptor[*window.access->kernel_descriptor_file_offset].push_back(&window);
@@ -824,14 +820,15 @@ void try_apply_sampled_barrier_sync_patch(
       std::optional<SampledBarrierWindow> selected_window;
       std::optional<SampledCfgDistance> closest;
       for (const SelectedWindow *window : owner_windows->second) {
-        const ConSanPatchLoweringProduct &patch = *window->patch;
-        if (!window->access || !kernel_owns_patch(*owner_kernel, patch))
+        if (!window->access || window->mapping == nullptr)
           continue;
-        const auto distance = moi_cfg_forward_distance(*distance_index, patch.anchor_offset);
+        const auto distance = moi_cfg_forward_distance(
+            *distance_index, window->mapping->access.original_site.original_text_offset);
         if (!distance || (closest && *closest <= *distance))
           continue;
         closest = *distance;
-        selected_window = SampledBarrierWindow{window->first_slot, window->bank_count};
+        selected_window =
+            SampledBarrierWindow{window->mapping->first_slot, window->mapping->bank_count};
       }
       if (!selected_window) {
         every_owner_has_window = false;
@@ -1485,11 +1482,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     return;
   }
   const ConSanMoiReportBufferLayout &layout = mode_semantics.report_layout;
-  const uint32_t selected_window_count = static_cast<uint32_t>(std::count_if(
-      result.patches.begin(), result.patches.end(), [](const ConSanPatchLoweringProduct &patch) {
-        return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
-               patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
-      }));
+  ConSanRuntimeStaticMapping runtime_mapping = result.coverage_ledger.runtime_static_mapping();
+  ConSanRuntimeStaticMapping::Sampled *sampled_accesses = runtime_mapping.sampled();
+  const uint32_t selected_window_count =
+      sampled_accesses == nullptr ? 0u : static_cast<uint32_t>(sampled_accesses->size());
   if (selected_window_count == 0 || options.max_patches == 0 ||
       layout.sampled_sync_metadata_capacity == 0) {
     result.warnings.emplace_back(
@@ -1609,6 +1605,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     canonicalize_owners(plan.owner_descriptor_file_offsets);
   for (ConSanPatchLoweringProduct &patch : result.patches)
     canonicalize_owners(patch.owner_descriptor_file_offsets);
+  if (sampled_accesses != nullptr) {
+    for (ConSanSampledStaticAccessMapping &mapping : *sampled_accesses)
+      canonicalize_owners(mapping.access.execution_owner_descriptor_file_offsets);
+  }
 
   if (!moi_resource_is_valid(resource_state)) {
     result.warnings.emplace_back("ConSan MOI sampled atomic sync lacks a complete kernel CFG");
@@ -1618,32 +1618,41 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   struct Window {
     uint32_t slot = 0;
     uint32_t bank_count = 1;
-    const ConSanPatchLoweringProduct *patch = nullptr;
+    const ConSanSampledStaticAccessMapping *mapping = nullptr;
     ConSanLdsAccessKind access_kind = ConSanLdsAccessKind::Other;
     uint64_t owner_descriptor_file_offset = 0;
   };
   std::vector<Window> windows;
   windows.reserve(selected_window_count);
   bool has_multi_range_window = false;
-  for (const ConSanPatchLoweringProduct &patch : result.patches) {
-    if (patch.kind != ConSanPatchKind::InlineMoiSampledWatchpointStore &&
-        patch.kind != ConSanPatchKind::TrampolineMoiSampledWatchpointStore)
-      continue;
-    if (patch.sampled_access_kind != ConSanLdsAccessKind::Read &&
-        patch.sampled_access_kind != ConSanLdsAccessKind::Write &&
-        patch.sampled_access_kind != ConSanLdsAccessKind::Atomic)
-      continue;
-    has_multi_range_window |= patch.sampled_access_range_count > 1u;
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-      if (!moi_resource_has_owner_context(resource_state, kernel.descriptor_file_offset) ||
-          !kernel_owns_patch(kernel, patch))
+  if (sampled_accesses != nullptr) {
+    for (const ConSanSampledStaticAccessMapping &mapping : *sampled_accesses) {
+      if (mapping.access_kind != ConSanLdsAccessKind::Read &&
+          mapping.access_kind != ConSanLdsAccessKind::Write &&
+          mapping.access_kind != ConSanLdsAccessKind::Atomic)
         continue;
-      // One physical access in a shared helper is one sampled slot, but it has
-      // an independent causal view in every kernel that can execute it. Those
-      // owners are mutually exclusive dispatches, so each may safely attach
-      // one synchronization edge to the same metadata slot.
-      windows.push_back({patch.sampled_first_slot, std::max(patch.sampled_window_bank_count, 1u),
-                         &patch, patch.sampled_access_kind, kernel.descriptor_file_offset});
+      has_multi_range_window |= mapping.range_count > 1u;
+      for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+        if (!moi_resource_has_owner_context(resource_state, kernel.descriptor_file_offset))
+          continue;
+        const auto &owners = mapping.access.execution_owner_descriptor_file_offsets;
+        const bool owns_mapping =
+            owners.empty()
+                ? kernel.has_text_range &&
+                      mapping.access.original_site.original_text_offset >=
+                          kernel.entry_text_offset &&
+                      mapping.access.original_site.original_text_offset - kernel.entry_text_offset <
+                          kernel.code_size
+                : std::ranges::find(owners, kernel.descriptor_file_offset) != owners.end();
+        if (!owns_mapping)
+          continue;
+        // One physical access in a shared helper is one sampled slot, but it has
+        // an independent causal view in every kernel that can execute it. Those
+        // owners are mutually exclusive dispatches, so each may safely attach
+        // one synchronization edge to the same metadata slot.
+        windows.push_back({mapping.first_slot, mapping.bank_count, &mapping, mapping.access_kind,
+                           kernel.descriptor_file_offset});
+      }
     }
   }
   if (has_multi_range_window) {
@@ -1694,14 +1703,15 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       std::optional<SampledCfgDistance> distance;
       Association::Side side = Association::Side::Release;
       if (release_side) {
-        distance = sampled_cfg_forward_distance(resource_state, window.owner_descriptor_file_offset,
-                                                window.patch->anchor_offset,
-                                                candidate.atomic.site.text_offset);
+        distance =
+            sampled_cfg_forward_distance(resource_state, window.owner_descriptor_file_offset,
+                                         window.mapping->access.original_site.original_text_offset,
+                                         candidate.atomic.site.text_offset);
       } else if (acquire_side) {
         side = Association::Side::Acquire;
-        distance = sampled_cfg_forward_distance(resource_state, window.owner_descriptor_file_offset,
-                                                candidate.atomic.site.text_offset,
-                                                window.patch->anchor_offset);
+        distance = sampled_cfg_forward_distance(
+            resource_state, window.owner_descriptor_file_offset, candidate.atomic.site.text_offset,
+            window.mapping->access.original_site.original_text_offset);
       }
       if (!distance)
         continue;
@@ -1753,9 +1763,12 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         if (!window_has_side)
           continue;
         const uint64_t text_distance =
-            window.patch->anchor_offset < candidate.atomic.site.text_offset
-                ? candidate.atomic.site.text_offset - window.patch->anchor_offset
-                : window.patch->anchor_offset - candidate.atomic.site.text_offset;
+            window.mapping->access.original_site.original_text_offset <
+                    candidate.atomic.site.text_offset
+                ? candidate.atomic.site.text_offset -
+                      window.mapping->access.original_site.original_text_offset
+                : window.mapping->access.original_site.original_text_offset -
+                      candidate.atomic.site.text_offset;
         Association current{candidate_index,
                             window_index,
                             {std::numeric_limits<uint32_t>::max(), text_distance},
@@ -1801,7 +1814,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         continue;
       const Window &lhs = windows[proposed[i].window_index];
       const Window &rhs = windows[proposed[j].window_index];
-      if (lhs.patch == rhs.patch && lhs.slot == rhs.slot) {
+      if (lhs.mapping == rhs.mapping && lhs.slot == rhs.slot) {
         // The same physical access and atomic in a shared helper appear once
         // per owning kernel CFG. They need one physical patch, not competing
         // duplicate attachments.
@@ -2077,9 +2090,6 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     info.trampoline_size = static_cast<uint32_t>(cave_words.size() * sizeof(uint32_t));
     info.relocated_guest_instruction_offset =
         guest_preserved_at_anchor ? site.text_offset : cave_offset + guest_instruction_offset;
-    info.sampled_access_kind = ConSanLdsAccessKind::Atomic;
-    info.sampled_first_slot = planned.candidate.selected_slot;
-    info.sampled_window_bank_count = planned.candidate.bank_count;
     note_moi_probe_patch_info(info, planned);
     if (!append_moi_sync_lowering_commit(result.observation_plan(), result.errors,
                                          planned.candidate.atomic, info, "sampled atomic sync",

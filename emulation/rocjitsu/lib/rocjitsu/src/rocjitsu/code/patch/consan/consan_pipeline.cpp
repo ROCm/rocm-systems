@@ -502,9 +502,6 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
         .workgroup_shadow_base = patch.workgroup_shadow_base,
         .workgroup_shadow_size = patch.workgroup_shadow_size,
         .required_group_segment_size = patch.required_group_segment_size,
-        .sampled_first_slot = patch.sampled_first_slot,
-        .sampled_window_bank_count = patch.sampled_window_bank_count,
-        .sampled_access_kind = patch.sampled_access_kind,
     });
   }
   return report;

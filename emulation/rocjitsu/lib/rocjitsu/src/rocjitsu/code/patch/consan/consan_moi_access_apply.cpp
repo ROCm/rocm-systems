@@ -18,10 +18,10 @@ namespace rocjitsu::consan_moi_impl {
 
 using consan_moi_detail::append_word_bytes;
 
-[[nodiscard]] std::optional<ConSanCommittedLowering> make_moi_access_lowering_commit(
+[[nodiscard]] std::optional<ConSanStaticAccessAttribution> make_moi_access_attribution(
     const ConSanObservationPlan &observation, const ConSanMoiCandidate &candidate,
-    const ConSanPatchLoweringProduct &patch, const MoiAccessCommitPolicy &policy) {
-  if (patch.original_size == 0u || policy.make_runtime_mapping == nullptr)
+    const ConSanPatchLoweringProduct &patch, ConSanProbeIntentKind expected_intent) {
+  if (patch.original_size == 0u)
     return std::nullopt;
   ConSanStaticAccessAttribution access{
       .intent_ids = candidate.intent_ids,
@@ -36,7 +36,7 @@ using consan_moi_detail::append_word_bytes;
       access.execution_owner_descriptor_file_offsets.end());
   for (ConSanProbeIntentId id : candidate.intent_ids) {
     const ConSanProbeIntent *intent = observation.intent(id);
-    if (intent == nullptr || intent->kind != policy.expected_intent)
+    if (intent == nullptr || intent->kind != expected_intent)
       return std::nullopt;
     for (const SemanticSiteId &site : intent->covered_semantic_sites) {
       if (std::ranges::find(access.original_semantic_sites, site) ==
@@ -47,12 +47,7 @@ using consan_moi_detail::append_word_bytes;
   }
   if (candidate.intent_ids.empty())
     return std::nullopt;
-
-  auto runtime_mapping = policy.make_runtime_mapping(std::move(access), patch);
-  if (!runtime_mapping)
-    return std::nullopt;
-  return make_consan_instrumented_patch_lowering(observation, candidate.intent_ids, patch,
-                                                 std::move(*runtime_mapping));
+  return access;
 }
 
 /// Apply the descriptor growth shared by every appended MOI access engine.

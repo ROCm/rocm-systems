@@ -116,26 +116,22 @@ using consan_moi_detail::resolve_moi_report_layout;
 
 namespace consan_moi_impl {
 
-static std::optional<ConSanRuntimeStaticMapping>
-make_sampled_access_runtime_mapping(ConSanStaticAccessAttribution access,
-                                    const ConSanPatchLoweringProduct &patch) {
-  if (patch.sampled_access_range_count == 0u || patch.sampled_window_bank_count == 0u)
+static std::optional<ConSanRuntimeStaticMapping> make_sampled_access_runtime_mapping(
+    ConSanStaticAccessAttribution access, ConSanLdsAccessKind access_kind, uint32_t first_slot,
+    uint32_t range_count, uint32_t bank_count, const ConSanPatchLoweringProduct &patch) {
+  if (range_count == 0u || bank_count == 0u)
     return std::nullopt;
   return ConSanRuntimeStaticMapping::sampled({
       .access = std::move(access),
-      .first_slot = patch.sampled_first_slot,
-      .range_count = patch.sampled_access_range_count,
-      .bank_count = patch.sampled_window_bank_count,
+      .access_kind = access_kind,
+      .first_slot = first_slot,
+      .range_count = range_count,
+      .bank_count = bank_count,
       .emitted_probe_text_offset = patch.trampoline_offset,
       .relocated_guest_text_offset = patch.relocated_guest_instruction_offset,
       .scratch_vgpr = patch.scratch_vgpr,
   });
 }
-
-static constexpr MoiAccessCommitPolicy kSampledAccessCommitPolicy{
-    ConSanProbeIntentKind::SampledAccess,
-    make_sampled_access_runtime_mapping,
-};
 
 /// Returns the SCC snapshot that remains valid after a sampled access body.
 ///

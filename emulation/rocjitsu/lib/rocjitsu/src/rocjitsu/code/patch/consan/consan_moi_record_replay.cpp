@@ -55,15 +55,9 @@ using consan_moi_detail::resolve_moi_report_layout;
 namespace consan_moi_impl {
 
 static std::optional<ConSanRuntimeStaticMapping>
-make_record_replay_access_runtime_mapping(ConSanStaticAccessAttribution access,
-                                          const ConSanPatchLoweringProduct &) {
+make_record_replay_access_runtime_mapping(ConSanStaticAccessAttribution access) {
   return ConSanRuntimeStaticMapping::record_replay({.access = std::move(access)});
 }
-
-static constexpr MoiAccessCommitPolicy kRecordReplayAccessCommitPolicy{
-    ConSanProbeIntentKind::AccessRecord,
-    make_record_replay_access_runtime_mapping,
-};
 
 MoiObjectModePlan
 plan_record_replay_object_mode(const ConSanRequest &request, const BoundRuntimeResources &resources,

@@ -75,9 +75,6 @@ struct ConSanPatchDiagnostic {
   uint32_t workgroup_shadow_base = 0;
   uint32_t workgroup_shadow_size = 0;
   uint32_t required_group_segment_size = 0;
-  uint32_t sampled_first_slot = 0;
-  uint32_t sampled_window_bank_count = 0;
-  ConSanLdsAccessKind sampled_access_kind = ConSanLdsAccessKind::Other;
 };
 
 /// Owned diagnostic projection of a completed transform.

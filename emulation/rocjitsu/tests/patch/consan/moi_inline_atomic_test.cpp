@@ -3405,8 +3405,10 @@ TEST(ConSanMoi, SampledAccessAndAtomicShareSelectedCausalSlot) {
                patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
       });
   ASSERT_NE(sampled_access, result.patches.end());
-  EXPECT_EQ(sampled_access->sampled_access_kind, ConSanLdsAccessKind::Write);
-  EXPECT_EQ(sampled_access->sampled_access_range_count, 1u);
+  const auto sampled_mappings = consan_sampled_static_access_mappings(result);
+  ASSERT_EQ(sampled_mappings.size(), 1u);
+  EXPECT_EQ(sampled_mappings.front().access_kind, ConSanLdsAccessKind::Write);
+  EXPECT_EQ(sampled_mappings.front().range_count, 1u);
   EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                               &ConSanPatchInfo::kind),
             result.patches.end());

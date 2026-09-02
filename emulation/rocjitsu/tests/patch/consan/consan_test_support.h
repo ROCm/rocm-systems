@@ -577,6 +577,13 @@ consan_committed_lowering_for_intent_kind(const ConSanTransformArtifacts &result
   return commit == commits.end() ? 0u : commit->original_semantic_sites.size();
 }
 
+[[nodiscard]] ConSanRuntimeStaticMapping::Sampled
+consan_sampled_static_access_mappings(const ConSanTransformArtifacts &result) {
+  ConSanRuntimeStaticMapping mapping = result.coverage_ledger.runtime_static_mapping();
+  ConSanRuntimeStaticMapping::Sampled *sampled = mapping.sampled();
+  return sampled == nullptr ? ConSanRuntimeStaticMapping::Sampled{} : std::move(*sampled);
+}
+
 [[nodiscard]] const ConSanBarrierSiteDecision *
 consan_barrier_decision_at(const ConSanTransformArtifacts &result, uint64_t text_offset) {
   const auto decision = std::ranges::find_if(

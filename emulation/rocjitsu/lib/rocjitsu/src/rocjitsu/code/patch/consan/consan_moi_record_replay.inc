@@ -1448,7 +1448,8 @@ void try_apply_first_light_access_record_patch(
           info.branch_relay_offsets.push_back(offset);
       }
       auto commit = make_moi_access_lowering_commit(result.observation_plan(), candidate, info,
-                                                    kRecordReplayAccessCommitPolicy);
+                                                    ConSanProbeIntentKind::AccessRecord,
+                                                    make_record_replay_access_runtime_mapping);
       if (!commit) {
         result.errors.emplace_back(
             "ConSan MOI first-light probe produced an invalid intent-bound lowering");
@@ -1540,6 +1541,10 @@ void try_apply_first_light_access_record_patch(
                 candidate.anchor() + planned_patch.probe_guest_instruction_offset;
             return info;
           },
-          kRecordReplayAccessCommitPolicy, result))
+          ConSanProbeIntentKind::AccessRecord,
+          [](ConSanStaticAccessAttribution access, const PlannedAccessRecordPatch &, const auto &) {
+            return make_record_replay_access_runtime_mapping(std::move(access));
+          },
+          result))
     return;
 }

@@ -554,19 +554,6 @@ struct ConSanPatchRoutingProof {
   std::optional<uint64_t> dispatch_id_secondary_prologue_offset;
 };
 
-/// Sampled-access placement facts emitted by a patch. These facts support
-/// Sampled synchronization composition and independent validation, not
-/// runtime attribution.
-struct ConSanPatchSampledAccessEffect {
-  /// Sampled access patches reserve a contiguous immutable bank beginning at
-  /// this slot. Synchronization patches use the same dispatch/workgroup hash
-  /// to select the matching dynamic window.
-  uint32_t sampled_first_slot = 0;
-  uint32_t sampled_window_bank_count = 0;
-  ConSanLdsAccessKind sampled_access_kind = ConSanLdsAccessKind::Other;
-  uint32_t sampled_access_range_count = 0;
-};
-
 /// Validation-only description of a deliberately mutated guest operation.
 struct ConSanPatchMutationProof {
   /// Whole-pair markerless barrier moves record whether the exact barrier
@@ -730,9 +717,7 @@ struct ConSanPatchPlacementEffects : ConSanPatchRoutingProof, ConSanPatchAbiEffe
 
 /// Complete product visible to ordinary lowering composition. Validation-only
 /// mutation and fault identities are deliberately absent from this contract.
-struct ConSanPatchLoweringProduct : ConSanCommittedPatchGeometry,
-                                    ConSanPatchPlacementEffects,
-                                    ConSanPatchSampledAccessEffect {};
+struct ConSanPatchLoweringProduct : ConSanCommittedPatchGeometry, ConSanPatchPlacementEffects {};
 
 /// Pristine identities and decoded operands used only to validate fault
 /// mutations against the original code object.

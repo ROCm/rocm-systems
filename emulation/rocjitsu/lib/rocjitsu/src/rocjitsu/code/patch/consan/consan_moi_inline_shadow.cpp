@@ -89,7 +89,7 @@ namespace consan_moi_impl {
 
 static std::optional<ConSanRuntimeStaticMapping>
 make_inline_shadow_access_runtime_mapping(ConSanStaticAccessAttribution access,
-                                          const ConSanPatchLoweringProduct &patch) {
+                                          const ConSanPatchAbiEffects &patch) {
   if (!patch.workgroup_shadow_compact)
     return ConSanRuntimeStaticMapping{};
   return ConSanRuntimeStaticMapping::inline_compact({
@@ -97,11 +97,6 @@ make_inline_shadow_access_runtime_mapping(ConSanStaticAccessAttribution access,
       .token = patch.workgroup_shadow_compact_token,
   });
 }
-
-static constexpr MoiAccessCommitPolicy kInlineShadowAccessCommitPolicy{
-    ConSanProbeIntentKind::ExactShadowAccess,
-    make_inline_shadow_access_runtime_mapping,
-};
 
 MoiInlineShadowScalarState
 project_inline_shadow_scalar_state(const ConSanMoiOperatingPoint &point) {

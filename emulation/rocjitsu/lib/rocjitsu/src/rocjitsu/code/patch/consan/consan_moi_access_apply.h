@@ -16,6 +16,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
+#include "rocjitsu/code/patch/consan/consan_placement.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -34,24 +35,34 @@ using consan_moi_detail::append_moi_scc_preserving_indirect_jump;
 using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::append_words_bytes;
 
-using MoiAccessRuntimeMappingFactory = std::optional<ConSanRuntimeStaticMapping> (*)(
-    ConSanStaticAccessAttribution, const ConSanPatchLoweringProduct &);
-
-struct MoiAccessCommitPolicy {
-  ConSanProbeIntentKind expected_intent;
-  MoiAccessRuntimeMappingFactory make_runtime_mapping;
-};
-
 /// Bind common original-program attribution to one mode-owned runtime map.
 ///
 /// Shared access application owns the intent/semantic-site join and committed
-/// patch geometry. Each mode supplies the expected access intent and the small
-/// factory for its own runtime evidence representation.
+/// patch geometry. Each mode supplies the expected access intent and a
+/// callable that creates its typed runtime evidence representation from the
+/// common attribution. The callable closes over mode-local placement facts;
+/// common code never needs to add them to the generic patch product.
+[[nodiscard]] std::optional<ConSanStaticAccessAttribution> make_moi_access_attribution(
+    const ConSanObservationPlan &observation, const ConSanMoiCandidate &candidate,
+    const ConSanPatchLoweringProduct &patch, ConSanProbeIntentKind expected_intent);
+
+template <typename MakeRuntimeMapping>
 [[nodiscard]] std::optional<ConSanCommittedLowering> make_moi_access_lowering_commit(
     const ConSanObservationPlan &observation, const ConSanMoiCandidate &candidate,
-    const ConSanPatchLoweringProduct &patch, const MoiAccessCommitPolicy &policy);
+    const ConSanPatchLoweringProduct &patch, ConSanProbeIntentKind expected_intent,
+    MakeRuntimeMapping make_runtime_mapping) {
+  auto access = make_moi_access_attribution(observation, candidate, patch, expected_intent);
+  if (!access)
+    return std::nullopt;
+  auto runtime_mapping = make_runtime_mapping(std::move(*access));
+  if (!runtime_mapping)
+    return std::nullopt;
+  return make_consan_instrumented_patch_lowering(observation, candidate.intent_ids, patch,
+                                                 std::move(*runtime_mapping));
+}
 
-template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo>
+template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
+          typename MakeRuntimeMapping>
 [[nodiscard]] bool apply_inline_moi_access_patches(
     std::span<const uint8_t> bytes, const std::vector<PlannedPatch> &planned_patches,
     const MoiDescriptorVgprRequirements &descriptor_requirements,
@@ -59,8 +70,8 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo>
     const MoiDescriptorPrivateRequirements &private_requirements,
     const MoiDescriptorLdsRequirements *lds_requirements, const RuntimeCapabilities *capabilities,
     std::string_view probe_name, rj_code_arch_t arch, BuildWords build_words,
-    MakePatchInfo make_patch_info, const MoiAccessCommitPolicy &commit_policy,
-    ConSanTransformArtifacts &result) {
+    MakePatchInfo make_patch_info, ConSanProbeIntentKind expected_intent,
+    MakeRuntimeMapping make_runtime_mapping, ConSanTransformArtifacts &result) {
   std::vector<uint8_t> replacement(bytes.begin(), bytes.end());
   for (const PlannedPatch &planned_patch : planned_patches) {
     const ConSanMoiCandidate &candidate = *planned_patch.candidate;
@@ -96,8 +107,11 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo>
   lowering_commits.reserve(planned_patches.size());
   for (const PlannedPatch &planned_patch : planned_patches) {
     ConSanPatchInfo patch = make_patch_info(planned_patch);
-    auto commit = make_moi_access_lowering_commit(result.observation_plan(),
-                                                  *planned_patch.candidate, patch, commit_policy);
+    auto commit = make_moi_access_lowering_commit(
+        result.observation_plan(), *planned_patch.candidate, patch, expected_intent,
+        [&](ConSanStaticAccessAttribution access) {
+          return make_runtime_mapping(std::move(access), planned_patch, patch);
+        });
     if (!commit) {
       result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                                  " produced an invalid intent-bound lowering");

@@ -53,9 +53,6 @@ concept HasPatchRoutingProof = requires(const T &patch) {
 };
 
 template <typename T>
-concept HasPatchSampledAccessEffect = requires(const T &patch) { patch.sampled_window_bank_count; };
-
-template <typename T>
 concept HasPatchMutationProof = requires(const T &patch) {
   patch.perturbation_edge;
   patch.barrier_move_cfg_contract;
@@ -75,7 +72,6 @@ concept HasPatchFaultProof = requires(const T &patch) {
 
 static_assert(std::derived_from<ConSanPatchInfo, ConSanCommittedPatchGeometry>);
 static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchRoutingProof>);
-static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchSampledAccessEffect>);
 static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchMutationProof>);
 static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchAbiEffects>);
 static_assert(std::derived_from<ConSanPatchInfo, ConSanPatchFaultProof>);
@@ -85,7 +81,6 @@ static_assert(std::derived_from<ConSanPatchMutationProduct, ConSanPatchLoweringP
 static_assert(std::derived_from<ConSanPatchMutationProduct, ConSanPatchMutationProof>);
 static_assert(std::derived_from<ConSanPatchLoweringProduct, ConSanCommittedPatchGeometry>);
 static_assert(std::derived_from<ConSanPatchLoweringProduct, ConSanPatchPlacementEffects>);
-static_assert(std::derived_from<ConSanPatchLoweringProduct, ConSanPatchSampledAccessEffect>);
 static_assert(std::derived_from<ConSanPatchPlacementEffects, ConSanPatchRoutingProof>);
 static_assert(std::derived_from<ConSanPatchPlacementEffects, ConSanPatchAbiEffects>);
 
@@ -95,8 +90,6 @@ static_assert(!HasPatchAbiEffects<ConSanCommittedPatchGeometry>);
 static_assert(!HasPatchFaultProof<ConSanCommittedPatchGeometry>);
 static_assert(HasPatchRoutingProof<ConSanPatchRoutingProof>);
 static_assert(!HasCommittedPatchGeometry<ConSanPatchRoutingProof>);
-static_assert(HasPatchSampledAccessEffect<ConSanPatchSampledAccessEffect>);
-static_assert(!HasCommittedPatchGeometry<ConSanPatchSampledAccessEffect>);
 static_assert(HasPatchMutationProof<ConSanPatchMutationProof>);
 static_assert(!HasPatchAbiEffects<ConSanPatchMutationProof>);
 static_assert(HasPatchAbiEffects<ConSanPatchAbiEffects>);
@@ -107,7 +100,6 @@ static_assert(!HasPatchMutationProof<ConSanPatchLoweringProduct>);
 static_assert(!HasPatchFaultProof<ConSanPatchLoweringProduct>);
 static_assert(!HasPatchFaultProof<ConSanPatchMutationProduct>);
 static_assert(!HasCommittedPatchGeometry<ConSanPatchPlacementEffects>);
-static_assert(!HasPatchSampledAccessEffect<ConSanPatchPlacementEffects>);
 static_assert(!HasPatchMutationProof<ConSanPatchPlacementEffects>);
 static_assert(!HasPatchFaultProof<ConSanPatchPlacementEffects>);
 

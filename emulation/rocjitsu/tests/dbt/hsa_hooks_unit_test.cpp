@@ -7276,9 +7276,6 @@ TEST(HsaHooksUnitTest, AutoSampledReportDoesNotInferAttributionFromRawPatchTelem
   raw_patch_telemetry.kind = rocjitsu::ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
   raw_patch_telemetry.anchor_offset = 0x120u;
   raw_patch_telemetry.trampoline_offset = 0x440u;
-  raw_patch_telemetry.sampled_first_slot = 0u;
-  raw_patch_telemetry.sampled_window_bank_count = 1u;
-  raw_patch_telemetry.sampled_access_range_count = 1u;
   raw_patch_telemetry.relocated_guest_instruction_offset = 0x448u;
   raw_patch_telemetry.scratch_vgpr = 12u;
   raw_patch_telemetry.owner_descriptor_file_offsets = {0x100u};
