@@ -58,7 +58,9 @@ struct GinAnvilMockComm {
   void reset() {
     std::memset(&comm, 0, sizeof(comm));
     comm.bootstrap = &bootstrapPlaceholder;
-    comm.commHash = 0xC0FFEEULL;
+    comm.commHash = 0xA11CEUL;
+    comm.rank = 0;
+    comm.nRanks = 2;
     comm.devrState.lsaSelf = 0;
     comm.devrState.lsaSize = 2;
     comm.devrState.bigSize = 0x100000;
@@ -99,7 +101,8 @@ class GinAnvilPluginTest : public ::testing::Test {
     void* listen = nullptr;
     char handle[NCCL_NET_HANDLE_MAXSIZE] = {};
     ASSERT_EQ(plugin_.listen(ictx, 0, handle, &listen), ncclSuccess);
-    void* handles[1] = {handle};
+    void* handles[8] = {};
+    for (int i = 0; i < nranks; ++i) handles[i] = handle;
     ASSERT_EQ(plugin_.connect(ictx, handles, nranks, 0, listen, coll), ncclSuccess);
     ASSERT_EQ(plugin_.closeListen(listen), ncclSuccess);
   }
