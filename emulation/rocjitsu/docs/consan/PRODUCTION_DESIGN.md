@@ -2961,6 +2961,13 @@ validator's second partial projection are gone. The shared patch contract sees
 only a narrow effect header; the preload construction algorithm remains in
 the private lowering header.
 
+Entry-local scalar ABI preservation now follows the same typed-proof rule.
+The carrier VGPR, scalar-window base, and scalar-window count remain one
+`ConSanMoiEntryScalarBackup` from prologue planning through emission, committed
+patch proof, descriptor accounting, and independent instruction validation.
+The three flattened patch fields and the validator's partial-tuple checks are
+gone; absence is represented only by the optional complete tuple.
+
 ### Slice 4X: delete mirrored owner and dispatch allocation flags
 
 - **Authoritative allocation facts:** The selected owner and dispatch-ID

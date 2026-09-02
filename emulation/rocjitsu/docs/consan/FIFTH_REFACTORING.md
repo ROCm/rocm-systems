@@ -9130,3 +9130,61 @@ It strengthens Sections 14.1, 14.5, 14.6, 14.7, 14.8, and 14.9. Full target
 and mode locality, the remaining broad coordinator and operating-point
 surfaces, final extension-proof revalidation, and the independent Section 14
 audit remain open, so the goal remains active.
+
+### 16.131 Convergence checkpoint 130: one typed entry scalar-backup effect
+
+The next patch-ABI trace followed entry-local scalar preservation. Prologue
+planning already used one `MoiEntryScalarBackup` tuple containing the carrier
+VGPR and contiguous guest-SGPR window. Emission consumed that tuple for both
+save and restore, but committed patch proof split it into two optionals and a
+count. Final validation first checked whether those three fields happened to
+form a complete tuple, then repeated the tuple's range invariants and consumed
+the three fields separately for instruction proof and descriptor sizing.
+
+Planning, emission, patch proof, descriptor accounting, tests, and independent
+validation now retain one optional `ConSanMoiEntryScalarBackup`. Its narrow
+contract owns the complete carrier/window value and its target-limit-parameterized
+well-formedness rule. Prologue publication is one assignment. Final validation
+can no longer encounter an incomplete tuple and reuses the same structural
+invariant before independently reconstructing and checking the emitted save
+and restore instructions. Absence is represented only by an empty optional,
+not three coordinated sentinel values.
+
+The value moved from the broad MOI internal header to
+`consan_moi_entry_scalar_backup.h`, which is visible through the shared patch
+contract without exposing prologue planning internals. Structural checks
+require the narrow type and typed patch field, prohibit the three flattened
+fields and their production consumers, prevent the old private type from
+returning, and keep the value independent of mode and report policy. Existing
+contract, corruption, fixed/dynamic-stack, and mode/target tests now inspect
+the complete value.
+
+| Signal | Checkpoint 130 | Cumulative change | Slice change from checkpoint 129 |
+| --- | ---: | ---: | ---: |
+| Production files | 298 | +69 | +1 narrow contract |
+| Physical production lines | 102,708 | **-2,268** | **-7** |
+| Nonblank production lines | 96,328 | **-2,756** | **-12** |
+| Production implementation lines | 88,559 | **-2,891** | **-14** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **273 / 51** | **-17 / 0** | 0 / 0 |
+| Flattened entry scalar-backup patch fields | **0** | n/a | **-3** |
+| Test inventory | **5,414** | **+69** | 0 |
+
+The implementation is committed as `da3fdb89f3e`. Validation includes a
+successful compiler-clean `-j16` rebuild (with only the pre-existing CMake
+CMP0174 development warnings), all nine focused scalar-backup and architecture-
+boundary tests, all **1,297/1,297** nonphysical `ConSan.*` and `ConSanMoi.*`
+host/component tests, and all **1,706/1,706** Record/Replay, Sampled, and
+InlineShadow simulator-device tests across gfx942, gfx950, gfx1100, gfx1201,
+and gfx1250. No test was removed, renamed, disabled, or replaced, and no
+physical test was run.
+
+This slice removes another independently mutable patch schema and its
+reconstruction rather than wrapping it. The narrow contract costs no parallel
+path and the complete migration deletes 14 production implementation lines.
+It strengthens Sections 14.1, 14.5, 14.6, 14.7, 14.8, and 14.9. Full target
+and mode locality, remaining broad transaction and operating-point surfaces,
+final extension-proof revalidation, and the independent Section 14 audit
+remain open, so the goal remains active.
