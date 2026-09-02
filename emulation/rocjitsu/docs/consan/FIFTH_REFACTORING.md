@@ -8254,3 +8254,72 @@ harvesting the superseded state. Broader placement/coordinator transactions,
 remaining architecture and mode locality, further legacy harvesting, material
 whole-refactoring shrinkage, and the independent completion audit remain open,
 so the goal remains active.
+
+### 16.117 Convergence checkpoint 116: one retained InlineShadow access emission plan
+
+The corresponding InlineShadow trace found the same planning/emission
+peephole at a larger scale. Candidate planning selected owner-local transient
+and persistent assignments, dispatch and workgroup identity, private-state
+offsets, scalar preservation, scratch geometry, local-shadow layout, and
+report identity. It then retained several parallel fragments while provisional
+sizing, appended emission, and inline emission each reconstructed a complete
+candidate operating point. The body emitter accepted the complete request,
+bound resources, operating point, object semantics, and a long list of
+already-resolved values. Its exact-shadow transaction, local-shadow exchange,
+and diagnostic helpers independently rediscovered scalar, dispatch, and
+resource facts from those broad inputs.
+
+`MoiInlineShadowEmissionPlan` now retains the complete exact access-body
+decision after owner-local assignment. It contains the scalar state and ABI,
+dispatch source, owner and epoch representations, workgroup sources and
+registers, local-shadow selection, private offsets, report identity, scratch
+geometry, and normalized access-resource facts. Provisional sizing and every
+final body-emission path consume that same immutable product. Entry islands,
+dense returns, and branch-only routes consume its retained scalar products as
+well, so the two final-emission operating-point reconstructions and their four
+assignment applications are deleted.
+
+The public InlineShadow body-emission header and implementation no longer
+mention `ConSanRequest`, `BoundRuntimeResources`, or
+`ConSanMoiOperatingPoint`. They cannot call the resource-fact, EXEC-save,
+dispatch-source, special-state, or hardware-dispatch planners. Owner and epoch
+field emission consumes exact representation plans rather than either broad
+request or operating-point state. Mode-local scalar sizing and validation also
+moved physically from the body emitter into the InlineShadow planning owner,
+and redundant workgroup/private fields in the derived planned-patch wrapper
+were removed where the retained emission product is authoritative. Structural
+checks enforce each of these boundaries.
+
+| Signal | Checkpoint 116 | Cumulative change | Slice change from checkpoint 115 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,880 | **-2,096** | +42 |
+| Nonblank production lines | 96,530 | **-2,554** | +36 |
+| Production implementation lines | 88,783 | **-2,667** | +25 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **287 / 53** | **-3 / +2** | **-15 / -2** |
+| Broad request/resource/point types in InlineShadow body emission | **0** | n/a | **-3** |
+| Final-emission owner-assignment applications | **0** | n/a | **-4** |
+| Test inventory | **5,412** | **+67** | authoritative registration recount: -1 |
+
+Validation includes a complete warning-clean `-j16` rebuild, all InlineShadow
+host and architecture-boundary tests **182/182**, all **1,296/1,296**
+`ConSan.*` and `ConSanMoi.*` host/component tests, and all **4,777/4,777**
+nonphysical ConSan tests in 198.80 seconds. The latter includes all **2,918**
+simulator tests across gfx942, gfx950, gfx1100, gfx1201, and gfx1250. A fresh
+CMake registration reports 4,777 nonphysical plus 635 physical tests, or 5,412
+total; this corrects checkpoint 115's ledger total of 5,413. No test source or
+registration was removed by this slice, and no physical gfx1201 test was run.
+
+This closes the InlineShadow access-body planning/emission loop and materially
+reduces the remaining operating-point surface, strengthening Sections 14.1,
+14.3, 14.5, 14.6, 14.7, and 14.9. The exact contract and enforcement cost 25
+net implementation lines across the two implementation commits, however, so
+this checkpoint does not strengthen Section 14.8. The next convergence
+checkpoint must harvest deletion leverage from this retained plan or another
+already-established boundary rather than add another schema layer. Broader
+placement/coordinator transactions, architecture locality across the complete
+matrix, material whole-refactoring shrinkage, and the independent completion
+audit remain open, so the goal remains active.
