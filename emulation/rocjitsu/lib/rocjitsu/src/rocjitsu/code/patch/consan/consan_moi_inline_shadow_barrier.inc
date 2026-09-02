@@ -184,9 +184,10 @@ append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_of
 
 [[nodiscard]] std::optional<PlannedBarrierLowering>
 plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
-  auto &[bytes, options, point, candidate, resource_plan, owners, access_patch,
-         private_state_layout, semantics, spill_managers, private_requirements, arch, result] =
-      context;
+  auto &[bytes, options, point, candidate, resource_plan, access_patch, semantics, spill_managers,
+         arch, result] = context;
+  const std::vector<uint64_t> &owners = resource_plan.owner_descriptor_file_offsets;
+  const ConSanMoiPrivateStateLayout &private_state_layout = *access_patch.private_state_layout;
   const uint32_t ephemeral_base = private_state_layout.ephemeral_base;
   const auto private_limit = consan_address_free_private_limit(arch);
   if (!private_limit) {
@@ -209,7 +210,6 @@ plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
   }
   const uint32_t required_private_bytes =
       std::max(access_patch.required_private_segment_size, spill->total_private_bytes);
-  note_maximum_descriptor_extents(private_requirements, owners, required_private_bytes);
   ConSanPatchAbiEffects patch_abi = plan_barrier_patch_abi(
       owners, access_patch.scratch_vgpr, private_state_layout, &*spill, required_private_bytes);
   const MoiScalarAbiPlan scalar_abi =

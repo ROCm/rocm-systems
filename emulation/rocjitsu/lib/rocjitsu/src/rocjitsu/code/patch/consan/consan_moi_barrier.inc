@@ -222,12 +222,9 @@ struct MoiPrivateBarrierPlanningContext {
   ConSanMoiOperatingPoint point;
   const MoiBarrierEvidenceSitePlan &candidate;
   const ConSanCandidateResourcePlan &resource_plan;
-  std::span<const uint64_t> owners;
   const ConSanPatchLoweringProduct &access_patch;
-  const ConSanMoiPrivateStateLayout &private_state_layout;
   const MoiObjectModeSemantics &semantics;
   MoiSpillManagers &spill_managers;
-  MoiDescriptorPrivateRequirements &private_requirements;
   rj_code_arch_t arch;
   ConSanTransformArtifacts &result;
 };
@@ -443,24 +440,24 @@ void try_apply_shared_barrier_patch(
             candidate.container_name);
         continue;
       }
-      const ConSanMoiPrivateStateLayout &private_state_layout = *access_patch->private_state_layout;
       auto planned = plan_private_body(MoiPrivateBarrierPlanningContext{
           .bytes = bytes,
           .options = options,
           .point = std::move(owner_point),
           .candidate = candidate,
           .resource_plan = *plan,
-          .owners = owners,
           .access_patch = *access_patch,
-          .private_state_layout = private_state_layout,
           .semantics = semantics,
           .spill_managers = visible_evidence_spill_managers,
-          .private_requirements = private_requirements,
           .arch = arch,
           .result = result,
       });
-      if (planned)
+      if (planned) {
+        note_maximum_descriptor_extents(private_requirements,
+                                        planned->patch_abi.owner_descriptor_file_offsets,
+                                        planned->patch_abi.required_private_segment_size);
         planned_candidates.push_back(std::move(*planned));
+      }
     }
   }
   if (operating_point.moi_persistent_sgprs.complete()) {

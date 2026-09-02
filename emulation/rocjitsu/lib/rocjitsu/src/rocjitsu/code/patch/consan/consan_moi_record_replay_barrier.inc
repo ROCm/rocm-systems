@@ -632,9 +632,10 @@ void try_apply_record_replay_barrier_record_patch(
 
 [[nodiscard]] std::optional<PlannedBarrierLowering>
 plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
-  auto &[bytes, options, point, candidate, resource_plan, owners, access_patch,
-         private_state_layout, semantics, spill_managers, private_requirements, arch, result] =
-      context;
+  auto &[bytes, options, point, candidate, resource_plan, access_patch, semantics, spill_managers,
+         arch, result] = context;
+  const std::vector<uint64_t> &owners = resource_plan.owner_descriptor_file_offsets;
+  const ConSanMoiPrivateStateLayout &private_state_layout = *access_patch.private_state_layout;
   const auto resources = resolve_moi_scratch_plan(resource_plan, point, result.moi_operating_point,
                                                   /*expected_count=*/6u);
   if (!resources || !private_state_layout.record_replay_workgroup_offsets.complete()) {
@@ -692,7 +693,6 @@ plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
     required_private_bytes = std::max(required_private_bytes, spill->total_private_bytes);
   if (scalar_spill)
     required_private_bytes = std::max(required_private_bytes, scalar_spill->total_private_bytes);
-  note_maximum_descriptor_extents(private_requirements, owners, required_private_bytes);
   ConSanPatchAbiEffects patch_abi = plan_barrier_patch_abi(
       owners, resources->base, private_state_layout, spill ? &*spill : nullptr,
       required_private_bytes);

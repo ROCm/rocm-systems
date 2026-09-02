@@ -952,6 +952,20 @@ if(NOT _moi_barrier_planning MATCHES
         "private-epoch barrier bodies must be planned by the selected mode owner"
     )
 endif()
+if(_moi_barrier_planning MATCHES
+       "struct MoiPrivateBarrierPlanningContext[^}]*MoiDescriptorPrivateRequirements" OR
+   _moi_barrier_planning MATCHES
+       "struct MoiPrivateBarrierPlanningContext[^}]*std::span<const uint64_t>[ \t\r\n]+owners" OR
+   _moi_barrier_planning MATCHES
+       "struct MoiPrivateBarrierPlanningContext[^}]*ConSanMoiPrivateStateLayout" OR
+   NOT _moi_barrier_planning MATCHES
+       "planned->patch_abi[.]owner_descriptor_file_offsets" OR
+   NOT _moi_barrier_planning MATCHES
+       "planned->patch_abi[.]required_private_segment_size")
+    message(FATAL_ERROR
+        "private barrier planning must derive owner/layout facts and return descriptor effects once"
+    )
+endif()
 if(NOT _record_replay_barrier_owner MATCHES
        "try_apply_record_replay_barrier_patch[^}]*moi_track_barriers" OR
    NOT _inline_barrier_owner MATCHES
