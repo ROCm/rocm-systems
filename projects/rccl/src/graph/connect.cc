@@ -41,7 +41,6 @@ ncclResult_t ncclTopoReconcileGrowChannels(struct ncclComm* comm, int* value) {
 #endif
 }
 
-RCCL_PARAM(RdDiv,"RG_DIV",0);
 /******************************************************************/
 /********************* Internode connection ***********************/
 /******************************************************************/
@@ -137,11 +136,11 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
   topoRanks->crossNicRing = graphs[NCCL_ALGO_RING]->crossNic;
   topoRanks->nvlsHeadNum = 0;
   
-  const bool isGfx120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
+  const bool isGfx_110x_120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
   const bool p2pDisabled = ncclParamP2pDisable();
-  const bool intraGraphGen = rcclParamIntraGraphGen() || (p2pDisabled && isGfx120x);
+  const bool intraGraphGen = rcclParamIntraGraphGen() || (p2pDisabled && isGfx_110x_120x);
   const bool interGraphGen = rcclParamInterGraphGen();
-  const bool disableRingDiversity = isGfx120x && !p2pDisabled;
+  const bool disableRingDiversity = isGfx_110x_120x && !p2pDisabled;
 
   // ---- POISONING / INITIALIZATION ---
   // set all the uninitialized topoRanks rank values to -1 , 0 from calloc is ambiguous with rank 0
@@ -227,7 +226,6 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
       }
     }
   }
- 
   // Duplicate channels trees
   {
     struct ncclChannel* channel0 = comm->channels;
@@ -434,8 +432,7 @@ static ncclResult_t connectRingsLoadBalanced(struct ncclComm* comm, int* ringRec
          nChannels);
   }
 
-  // // 2. Populate the Diverse/Greedy Node Order
-  // generateGreedyNodeOrder(nNodes, nChannels, nodeOrder);
+  // 2. Populate the Diverse/Greedy Node Order
   NCCLCHECK(generateRings(nNodes, nChannels, nodeOrder));
 
   for (int c = 0; c < nChannels; c++) {

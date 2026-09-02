@@ -1708,10 +1708,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   {
     const bool isGfx1151 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151");
-    const bool isGfx120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
+    const bool isGfx_110x_120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
     const bool p2pDisabled = ncclParamP2pDisable();
     //Identical with ncclTopoPreset() in connect.cc
-    const bool intraGraphGen = rcclParamIntraGraphGen() || (p2pDisabled && isGfx120x);
+    const bool intraGraphGen = rcclParamIntraGraphGen() || (p2pDisabled && isGfx_110x_120x);
     
     if (isGfx1151 || intraGraphGen) {
       /**
@@ -1726,7 +1726,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       * by repairMissingChannels() during Postset.
       * */
      int initChannels = (int)rcclParamInitChannels();
-     int defaultNumChannels = isGfx1151 ? 6 /* 2 X (comm->nNodes - 1)  */ : ((isGfx120x && p2pDisabled) ? 16: ringGraph->nChannels);
+     int defaultNumChannels = isGfx1151 ? 6 /* 2 X (comm->nNodes - 1)  */ : ((isGfx_110x_120x && p2pDisabled) ? 16: ringGraph->nChannels);
      int numChannels =  initChannels > 0 ? initChannels : defaultNumChannels ;
      INFO(NCCL_ENV,
       "intraGraphGen : %d rcclParamInitChannels:%d numChannels : %d ringGraph->minChannels: %d ringGraph->maxChannels: %d", 
