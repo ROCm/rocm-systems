@@ -552,7 +552,7 @@ moi_descriptor_dispatch_id_preload_plan(const KD &descriptor, rj_code_arch_t arc
     std::optional<uint16_t> cdna_full_payload_user_sgpr_count = std::nullopt);
 
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSources> moi_exact_entry_workgroup_sources(
-    ConSanMoiEngine engine, const ConSanMoiOperatingPoint &point,
+    const ConSanMoiOperatingPoint &point,
     const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets = nullptr);
 
 [[nodiscard]] constexpr uint16_t moi_ordinary_sgpr_limit(rj_code_arch_t arch) {

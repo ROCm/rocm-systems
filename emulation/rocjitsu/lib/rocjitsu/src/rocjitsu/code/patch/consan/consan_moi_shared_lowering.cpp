@@ -669,8 +669,8 @@ bool apply_moi_descriptor_requirements(
     derived_owner_words = owner->words;
     derived_owner_words.insert(derived_owner_words.end(), owner_mask->begin(), owner_mask->end());
   }
-  const auto persistent_workgroup_sources = moi_exact_entry_workgroup_sources(
-      request.moi_engine, point, private_workgroup_offsets);
+  const auto persistent_workgroup_sources =
+      moi_exact_entry_workgroup_sources(point, private_workgroup_offsets);
   if (!persistent_workgroup_sources) {
     errors.emplace_back(
         "ConSan MOI Record/Replay access requires one exact entry-captured workgroup tuple");

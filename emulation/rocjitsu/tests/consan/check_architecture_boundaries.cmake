@@ -1304,6 +1304,24 @@ if(_workgroup_source_placement MATCHES "kTtmp|ConSanWorkgroupIdentitySource")
         "ConSan common workgroup placement must consume the target-owned exact ABI"
     )
 endif()
+string(FIND "${_moi_placement}" "moi_exact_entry_workgroup_sources"
+       _exact_entry_source_begin)
+string(FIND "${_moi_placement}" "struct MoiKernelResourceContext"
+       _exact_entry_source_end)
+if(_exact_entry_source_begin LESS 0 OR
+   _exact_entry_source_end LESS_EQUAL _exact_entry_source_begin)
+    message(FATAL_ERROR "ConSan exact-entry source boundary could not be located")
+endif()
+math(EXPR _exact_entry_source_length
+     "${_exact_entry_source_end} - ${_exact_entry_source_begin}")
+string(SUBSTRING "${_moi_placement}" ${_exact_entry_source_begin}
+       ${_exact_entry_source_length} _exact_entry_source_contract)
+if(_exact_entry_source_contract MATCHES
+   "ConSanMoiEngine|moi_mode_operations|requires_entry_workgroup_capture")
+    message(FATAL_ERROR
+        "ConSan exact-entry storage resolution must not reopen mode policy"
+    )
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
     "moi_persistent_or_descriptor_workgroup_sources|sampled_workgroup_sources"

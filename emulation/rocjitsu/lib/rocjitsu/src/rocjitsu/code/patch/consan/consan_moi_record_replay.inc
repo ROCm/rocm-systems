@@ -593,8 +593,7 @@ void try_apply_first_light_access_record_patch(
     }
     const std::optional<ConSanMoiWorkgroupSources> runtime_workgroup_sources =
         moi_exact_entry_workgroup_sources(
-            options.moi_engine, candidate_point,
-            private_layout ? &private_layout->exact_workgroup_offsets : nullptr);
+            candidate_point, private_layout ? &private_layout->exact_workgroup_offsets : nullptr);
     const std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate =
         runtime_workgroup_sources && !candidate_point.has_compact_moi_scalar_spill() &&
                 candidate_point.moi_exec_save_sgpr

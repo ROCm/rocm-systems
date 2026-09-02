@@ -360,10 +360,9 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
 /// complete tuple at entry instead of depending on descriptor SGPRs or RDNA
 /// launch TTMPs retaining their entry values.
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSources> moi_exact_entry_workgroup_sources(
-    ConSanMoiEngine engine, const ConSanMoiOperatingPoint &point,
+    const ConSanMoiOperatingPoint &point,
     const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
-  if (!moi_mode_operations(engine).policy.requires_entry_workgroup_capture ||
-      !moi_has_exact_entry_workgroup_capture(point, private_offsets) ||
+  if (!moi_has_exact_entry_workgroup_capture(point, private_offsets) ||
       !moi_exact_entry_workgroup_capture_is_unambiguous(point, private_offsets)) {
     return std::nullopt;
   }

@@ -67,8 +67,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
     rj_code_arch_t arch, const ConSanMoiPrivateStateLayout *private_layout) {
   const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets =
       private_layout ? &private_layout->exact_workgroup_offsets : nullptr;
-  const auto workgroup_sources =
-      moi_exact_entry_workgroup_sources(request.moi_engine, point, private_offsets);
+  const auto workgroup_sources = moi_exact_entry_workgroup_sources(point, private_offsets);
   if (!point.moi_exec_save_sgpr || !bound_resources.moi_report_buffer_address ||
       !workgroup_sources || !scalar_abi.special_state) {
     return std::nullopt;
