@@ -167,6 +167,13 @@ function(rocprofiler_sdk_get_spm_preflight_script OUT_VAR)
     list(APPEND _candidates
          "${CMAKE_CURRENT_LIST_DIR}/../../tests/spm_runner_preflight.py")
 
+    # Installed rocprofiler-sdk package: Modules -> lib/cmake/rocprofiler-sdk/Modules.
+    list(
+        APPEND
+        _candidates
+        "${CMAKE_CURRENT_LIST_DIR}/../../../../share/rocprofiler-sdk/tests/spm_runner_preflight.py"
+        )
+
     # Installed rocprofiler-sdk package (find_package consumers and test installs).
     if(DEFINED PACKAGE_PREFIX_DIR)
         list(
