@@ -193,10 +193,12 @@ def _get_name_value(num, data) -> List[Dict[str, int]]:
     """
     Extracts a list of name-value pairs from a ctypes array buffer.
 
-    This function works around a ctypes array issue where direct field access
-    to the `amdsmi_name_value_t` structure is unreliable. Instead, it uses
-    memory operations to extract the 'name' (a 64-byte char array) and 'value'
-    (a uint64) from each structure in the array.
+    The record stride and the offsets of the ``name`` and ``value`` members are
+    read from the generated ``amdsmi_wrapper.amdsmi_name_value_t`` so the layout
+    always matches the C ABI of the loaded library (a 256-byte name char array
+    followed by a uint64 value). Bounding the name read by the field size keeps
+    a name that fills the whole array (no trailing NUL) from spilling into the
+    next record.
 
     Parameters:
         num (ctypes.c_uint32): Number of elements in the array.
@@ -206,46 +208,32 @@ def _get_name_value(num, data) -> List[Dict[str, int]]:
     Returns:
         List[Dict[str, int]]: A list of dictionaries, each with keys 'name' (str)
             and 'value' (int) extracted from the buffer.
-
-    Workaround:
-        Direct access to the fields of the ctypes array is broken, so the function
-        uses memory alignment and pointer arithmetic to extract the fields manually.
     """
 
-    # Work around ctypes array issue by using memory access
-    # Use 4 byte alignment for amdsmi_name_value_t.name char array,  64=256/4
-    # Use 8 bytes for amdsmi_name_value_t.value uint64
-    aligned_name_size = int(AMDSMI_MAX_STRING_LENGTH / 4)
-    value_size_bytes = 8
-    struct_alignment = aligned_name_size + value_size_bytes
+    name_value_t = amdsmi_wrapper.amdsmi_name_value_t
+    # Derive the stride and member offsets from the generated structure so they
+    # track the C ABI instead of relying on hand-computed arithmetic.
+    struct_stride = ctypes.sizeof(name_value_t)
+    name_offset = name_value_t.name.offset
+    name_size = name_value_t.name.size
+    value_offset = name_value_t.value.offset
 
-    # Access name,value field using memory operations since direct access is broken
-    struct_ptr = ctypes.cast(data, ctypes.POINTER(ctypes.c_char * struct_alignment))
+    base_address = ctypes.cast(data, ctypes.c_void_p).value
+    results: List[Dict[str, int]] = []
+    if base_address is None:
+        return results
 
-    results = []
     for i in range(num.value):
-        # Offset into structure array
-        current_struct = struct_ptr[i]
+        record_address = base_address + i * struct_stride
 
-        # Cast address for name member with max chars to read
-        name_ptr = ctypes.cast(
-            ctypes.addressof(current_struct),
-            ctypes.POINTER(ctypes.c_char * AMDSMI_MAX_STRING_LENGTH),
-        )
-        # Data buffer in bytes
-        name_bytes = ctypes.string_at(name_ptr.contents)
-        # Get string
-        name_str = name_bytes.rstrip(b"\x00").decode("utf-8", errors="replace")
+        # Read the name bounded by its field size, then trim at the first NUL so
+        # the parse stays inside the record even without a terminator.
+        name_bytes = ctypes.string_at(record_address + name_offset, name_size)
+        name_str = name_bytes.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
 
-        # Address for value member
-        addr_value = ctypes.addressof(current_struct) + struct_alignment
-        # Cast data buffer to a uint64
-        int64_ptr = ctypes.cast(addr_value, ctypes.POINTER(ctypes.c_uint64))
-        # Get value
-        value = int64_ptr.contents.value
+        value = ctypes.c_uint64.from_address(record_address + value_offset).value
 
-        item = {"name": name_str, "value": value}
-        results.append(item)
+        results.append({"name": name_str, "value": value})
 
     return results
 
