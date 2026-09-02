@@ -7937,3 +7937,51 @@ prologue transaction still derives each kernel's plan while holding the broad
 point and transformation transaction, and the barrier/placement surfaces
 remain larger opportunities. The independent completion audit remains open,
 so the goal remains active.
+
+### 16.111 Convergence checkpoint 110: retained Record/Replay runtime gate plans
+
+The Record/Replay access trace found a selected runtime workgroup gate being
+discarded before emission. Access planning resolved the persistent workgroup
+tuple and all gate eligibility, but retained two booleans plus the tuple. Both
+the entry-island and dense-body emission paths then called the shared gate
+planner again with the complete request, bound resources, operating point, and
+architecture. This repeated target lookup and policy selection after geometry
+had already been committed, and allowed the emitted gate to drift from the
+gate whose size and placement had been reserved.
+
+Each planned access now retains the one optional
+`MoiRuntimeWorkgroupGatePlan` selected before placement. The existing
+`dense_call_anchor` identifies whether that product belongs in the dense body;
+there is no second dense-gate flag. Entry-island and dense-body emission both
+consume the retained product directly, and diagnostics use its exact
+exec-save register rather than rereading the operating point. The two
+emission-time planner calls and both parallel gate booleans are deleted. A
+boundary check requires exactly one Record/Replay access gate-planning call
+and rejects restoration of a dense planned-state flag.
+
+| Signal | Checkpoint 110 | Cumulative change | Slice change from checkpoint 109 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,881 | **-2,095** | **-14** |
+| Nonblank production lines | 96,538 | **-2,546** | **-14** |
+| Production implementation lines | 88,812 | **-2,638** | **-14** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 322 / 61 | +32 / +10 | 0 / 0 |
+| Record/Replay access gate planner calls | **1** | n/a | **-2** |
+| Parallel planned access gate booleans | **0** | n/a | **-2** |
+| Test inventory | **5,412** | **+67** | 0 |
+
+Validation includes a complete `-j16` rebuild, the focused five-target tuple,
+dense-call, complete Record/Replay host, and architecture-boundary gate
+**177/177**, and all **1,295/1,295** `ConSan.*` and `ConSanMoi.*`
+host/component tests. No test was removed, renamed, disabled, or replaced, and
+no physical gfx1201 test was run.
+
+This slice makes Record/Replay access gate emission forward-only and harvests
+its parallel state, strengthening Sections 14.2, 14.3, 14.5, 14.6, and 14.7.
+The same shared mechanism's Sampled access consumer still rediscovers both its
+workgroup tuple and gate plan during emission; that is the next coherent
+consumer migration. Material whole-refactoring shrinkage and the independent
+completion audit remain open, so the goal remains active.
