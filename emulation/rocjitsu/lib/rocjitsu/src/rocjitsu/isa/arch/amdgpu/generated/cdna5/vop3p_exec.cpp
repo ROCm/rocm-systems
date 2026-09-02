@@ -2992,6 +2992,58 @@ void VWmmaF3232x16x128F4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
                         amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
 }
 
+void VPkMulF64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    const auto lhs = read_pk_u64_pair(src0, wf, lane);
+    const auto rhs = read_pk_u64_pair(src1, wf, lane);
+    constexpr uint64_t kSignBit = 0x8000000000000000ULL;
+    const auto apply = [&](uint64_t lhs_bits, uint64_t rhs_bits, bool negate_lhs, bool negate_rhs) {
+      if (negate_lhs)
+        lhs_bits ^= kSignBit;
+      if (negate_rhs)
+        rhs_bits ^= kSignBit;
+      uint64_t result =
+          amdgpu::fp_mode::binary_f64(lhs_bits, rhs_bits, amdgpu::fp_mode::BinaryF64Op::Multiply,
+                                      wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
+      return amdgpu::fp_mode::finish_f64(result, wf.fp_round_mode_f16_f64(), 0, inst_.clamp,
+                                         amdgpu::floating_clamp_nan_to_zero(wf));
+    };
+    const uint64_t result_lo = apply(lhs.lo, rhs.lo, (inst_.neg & 1u) != 0, (inst_.neg & 2u) != 0);
+    const uint64_t result_hi =
+        apply(lhs.hi, rhs.hi, (inst_.neg_hi & 1u) != 0, (inst_.neg_hi & 2u) != 0);
+    write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});
+  }
+}
+
+void VPkAddF64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    const auto lhs = read_pk_u64_pair(src0, wf, lane);
+    const auto rhs = read_pk_u64_pair(src1, wf, lane);
+    constexpr uint64_t kSignBit = 0x8000000000000000ULL;
+    const auto apply = [&](uint64_t lhs_bits, uint64_t rhs_bits, bool negate_lhs, bool negate_rhs) {
+      if (negate_lhs)
+        lhs_bits ^= kSignBit;
+      if (negate_rhs)
+        rhs_bits ^= kSignBit;
+      uint64_t result =
+          amdgpu::fp_mode::binary_f64(lhs_bits, rhs_bits, amdgpu::fp_mode::BinaryF64Op::Add,
+                                      wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
+      return amdgpu::fp_mode::finish_f64(result, wf.fp_round_mode_f16_f64(), 0, inst_.clamp,
+                                         amdgpu::floating_clamp_nan_to_zero(wf));
+    };
+    const uint64_t result_lo = apply(lhs.lo, rhs.lo, (inst_.neg & 1u) != 0, (inst_.neg & 2u) != 0);
+    const uint64_t result_hi =
+        apply(lhs.hi, rhs.hi, (inst_.neg_hi & 1u) != 0, (inst_.neg_hi & 2u) != 0);
+    write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});
+  }
+}
+
 void VPkAddNcU64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -3050,6 +3102,58 @@ void VPkSubNcU64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
           return std::numeric_limits<uint64_t>::max();
       }
       return static_cast<uint64_t>(result);
+    };
+    const uint64_t result_lo = apply(lhs.lo, rhs.lo, (inst_.neg & 1u) != 0, (inst_.neg & 2u) != 0);
+    const uint64_t result_hi =
+        apply(lhs.hi, rhs.hi, (inst_.neg_hi & 1u) != 0, (inst_.neg_hi & 2u) != 0);
+    write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});
+  }
+}
+
+void VPkMaxNumF64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    const auto lhs = read_pk_u64_pair(src0, wf, lane);
+    const auto rhs = read_pk_u64_pair(src1, wf, lane);
+    constexpr uint64_t kSignBit = 0x8000000000000000ULL;
+    const auto apply = [&](uint64_t lhs_bits, uint64_t rhs_bits, bool negate_lhs, bool negate_rhs) {
+      if (negate_lhs)
+        lhs_bits ^= kSignBit;
+      if (negate_rhs)
+        rhs_bits ^= kSignBit;
+      uint64_t result = amdgpu::fp_mode::binary_f64(
+          lhs_bits, rhs_bits, amdgpu::fp_mode::BinaryF64Op::MaximumNumber,
+          wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
+      return amdgpu::fp_mode::finish_f64(result, wf.fp_round_mode_f16_f64(), 0, inst_.clamp,
+                                         amdgpu::floating_clamp_nan_to_zero(wf));
+    };
+    const uint64_t result_lo = apply(lhs.lo, rhs.lo, (inst_.neg & 1u) != 0, (inst_.neg & 2u) != 0);
+    const uint64_t result_hi =
+        apply(lhs.hi, rhs.hi, (inst_.neg_hi & 1u) != 0, (inst_.neg_hi & 2u) != 0);
+    write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});
+  }
+}
+
+void VPkMinNumF64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    const auto lhs = read_pk_u64_pair(src0, wf, lane);
+    const auto rhs = read_pk_u64_pair(src1, wf, lane);
+    constexpr uint64_t kSignBit = 0x8000000000000000ULL;
+    const auto apply = [&](uint64_t lhs_bits, uint64_t rhs_bits, bool negate_lhs, bool negate_rhs) {
+      if (negate_lhs)
+        lhs_bits ^= kSignBit;
+      if (negate_rhs)
+        rhs_bits ^= kSignBit;
+      uint64_t result = amdgpu::fp_mode::binary_f64(
+          lhs_bits, rhs_bits, amdgpu::fp_mode::BinaryF64Op::MinimumNumber,
+          wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
+      return amdgpu::fp_mode::finish_f64(result, wf.fp_round_mode_f16_f64(), 0, inst_.clamp,
+                                         amdgpu::floating_clamp_nan_to_zero(wf));
     };
     const uint64_t result_lo = apply(lhs.lo, rhs.lo, (inst_.neg & 1u) != 0, (inst_.neg & 2u) != 0);
     const uint64_t result_hi =

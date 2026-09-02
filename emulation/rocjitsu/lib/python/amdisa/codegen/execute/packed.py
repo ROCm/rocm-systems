@@ -687,6 +687,50 @@ def gen_pk_binop_u64(dst: list[str], src: list[str], op: str) -> str:
     return '\n'.join(L)
 
 
+def gen_pk_binop_f64(dst: list[str], src: list[str], op: str) -> str:
+    """Generate two-element packed F64 add/mul/minNum/maxNum execution."""
+    operations = {
+        'add': 'Add',
+        'mul': 'Multiply',
+        'max_num': 'MaximumNumber',
+        'min_num': 'MinimumNumber',
+    }
+    try:
+        operation = operations[op]
+    except KeyError as exc:
+        raise ValueError(f'unsupported packed F64 binary operation: {op}') from exc
+
+    d, s0, s1 = dst[0], src[0], src[1]
+    return '\n'.join(
+        [
+            '  uint64_t exec = wf.exec();',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+            '    if (!(exec & (1ULL << lane))) continue;',
+            f'    const auto lhs = read_pk_u64_pair({s0}, wf, lane);',
+            f'    const auto rhs = read_pk_u64_pair({s1}, wf, lane);',
+            '    constexpr uint64_t kSignBit = 0x8000000000000000ULL;',
+            '    const auto apply = [&](uint64_t lhs_bits, uint64_t rhs_bits,',
+            '                           bool negate_lhs, bool negate_rhs) {',
+            '      if (negate_lhs) lhs_bits ^= kSignBit;',
+            '      if (negate_rhs) rhs_bits ^= kSignBit;',
+            '      uint64_t result = amdgpu::fp_mode::binary_f64(',
+            f'          lhs_bits, rhs_bits, amdgpu::fp_mode::BinaryF64Op::{operation},',
+            '          wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());',
+            '      return amdgpu::fp_mode::finish_f64(',
+            '          result, wf.fp_round_mode_f16_f64(), 0, inst_.clamp,',
+            '          amdgpu::floating_clamp_nan_to_zero(wf));',
+            '    };',
+            '    const uint64_t result_lo =',
+            '        apply(lhs.lo, rhs.lo, (inst_.neg & 1u) != 0, (inst_.neg & 2u) != 0);',
+            '    const uint64_t result_hi = apply(lhs.hi, rhs.hi,',
+            '                                     (inst_.neg_hi & 1u) != 0,',
+            '                                     (inst_.neg_hi & 2u) != 0);',
+            f'    write_pk_u64_pair({d}, wf, lane, {{result_lo, result_hi}});',
+            '  }',
+        ]
+    )
+
+
 def gen_pk_lshl_add_u64(dst: list[str], src: list[str]) -> str:
     """Generate packed U64 shift-left-add over two independent elements.
 

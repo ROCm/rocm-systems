@@ -2513,6 +2513,20 @@ class TestDerivePacked:
             assert sem.operation == operation
             assert sem.data_type == 'u64'
 
+    def test_pk_f64_basic_arithmetic_has_distinct_binary_semantics(self):
+        for name, operation in (
+            ('V_PK_ADD_F64', 'add'),
+            ('V_PK_MUL_F64', 'mul'),
+            ('V_PK_MAX_NUM_F64', 'max_num'),
+            ('V_PK_MIN_NUM_F64', 'min_num'),
+        ):
+            sem = derive_semantics(name, 'ENC_VOP3P')
+
+            assert sem is not None
+            assert sem.semantic_class == 'pk_binop_f64'
+            assert sem.operation == operation
+            assert sem.data_type == 'f64'
+
     def test_pk_mov_b32(self):
         sem = _FakeSem('V_PK_MOV_B32', 'pk_mov_b32')
         block = derive_sema_block(sem)
