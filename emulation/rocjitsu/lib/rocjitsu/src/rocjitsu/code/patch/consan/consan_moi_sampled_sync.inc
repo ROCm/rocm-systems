@@ -12,46 +12,62 @@ struct SampledBarrierCandidate {
   bool uses_cluster_workgroup_id = false;
 };
 
-/// Owner-local state consumed by one emitted Sampled synchronization probe.
-///
-/// Resource planning accepts one code-object-wide operating point, while
-/// emission may need an owner-local scalar assignment, persistent tuple, or
-/// prologue-backed private tuple. Resolve that choice once so direct barriers,
-/// dense barriers, and atomics cannot assemble different effective states.
-struct SampledSyncProbeState {
-  ConSanMoiOperatingPoint operating_point;
-  ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs;
-};
-
-[[nodiscard]] std::optional<SampledSyncProbeState> resolve_sampled_sync_probe_state(
-    const ConSanRequest &request, const ConSanMoiOperatingPoint &base_point,
-    const ConSanMoiOperatingPoint &accepted_point, std::span<const uint64_t> owner_descriptors,
-    const MoiPrivateEpochLayout *private_layout, uint16_t scratch_owner_vgpr,
-    uint16_t scratch_epoch_vgpr, bool transient_assignment_already_resolved,
+/// Resolve one exact, immutable emission product at the Sampled sync planning
+/// boundary. Direct and dense barriers and every atomic route consume only
+/// this product; broad request, resource, and operating-point state cannot be
+/// rediscovered while sizing or encoding a cave.
+[[nodiscard]] std::optional<MoiSampledSyncEmissionPlan> plan_sampled_sync_emission(
+    std::span<const uint8_t> bytes, uint64_t descriptor_file_offset, bool uses_cluster_workgroup_id,
+    const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
+    const ConSanMoiOperatingPoint &base_point, const ConSanMoiOperatingPoint &accepted_point,
+    std::span<const uint64_t> owner_descriptors, const MoiPrivateEpochLayout *private_layout,
+    uint16_t scratch_vgpr, uint16_t scratch_owner_vgpr, uint16_t scratch_epoch_vgpr,
+    rj_code_arch_t arch, bool transient_assignment_already_resolved,
     std::string_view diagnostic_subject, std::vector<std::string> &errors) {
-  SampledSyncProbeState state{.operating_point = base_point, .owner_epoch_vgprs = {}};
+  if (!bound_resources.moi_report_buffer_address) {
+    errors.emplace_back("ConSan MOI " + std::string(diagnostic_subject) +
+                        " lacks a bound report buffer");
+    return std::nullopt;
+  }
+  ConSanMoiOperatingPoint point = base_point;
   if (!transient_assignment_already_resolved &&
-      !apply_moi_transient_sgpr_assignment(request, state.operating_point, accepted_point,
-                                           owner_descriptors)) {
+      !apply_moi_transient_sgpr_assignment(request, point, accepted_point, owner_descriptors)) {
     errors.emplace_back("ConSan MOI " + std::string(diagnostic_subject) +
                         " lost its transient scalar assignment");
     return std::nullopt;
   }
-  if (private_layout || state.operating_point.moi_persistent_sgprs.complete()) {
-    state.owner_epoch_vgprs = {
+  ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs;
+  if (private_layout || point.moi_persistent_sgprs.complete()) {
+    owner_epoch_vgprs = {
         .owner = scratch_owner_vgpr,
         .epoch = scratch_epoch_vgpr,
     };
-  } else if (!apply_moi_persistent_vgpr_assignment(state.operating_point, accepted_point,
-                                                   owner_descriptors)) {
+  } else if (!apply_moi_persistent_vgpr_assignment(point, accepted_point, owner_descriptors)) {
     errors.emplace_back("ConSan MOI " + std::string(diagnostic_subject) +
                         " lost its persistent VGPR assignment");
     return std::nullopt;
   } else {
-    state.owner_epoch_vgprs =
-        moi_owner_epoch_vgpr_sources(state.operating_point.moi_owner_epoch_vgprs);
+    owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(point.moi_owner_epoch_vgprs);
   }
-  return state;
+  const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
+      bytes, descriptor_file_offset, request.moi_engine, point, arch, errors,
+      uses_cluster_workgroup_id,
+      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr);
+  if (!workgroup_sources)
+    return std::nullopt;
+  return MoiSampledSyncEmissionPlan{
+      .report_buffer_address = *bound_resources.moi_report_buffer_address,
+      .report_generation = bound_resources.moi_report_generation,
+      .exec_save_sgpr = point.moi_exec_save_sgpr,
+      .automatic_private_epoch = point.automatic_moi_private_epoch,
+      .workitem_owner = request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
+      .persistent_sgprs = point.moi_persistent_sgprs,
+      .scalar_abi = plan_moi_scalar_abi(request, point),
+      .dispatch_id = consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
+      .workgroup_sources = *workgroup_sources,
+      .owner_epoch_vgprs = owner_epoch_vgprs,
+      .scratch_vgpr = scratch_vgpr,
+  };
 }
 
 struct SampledDenseSyncRoute {
@@ -156,30 +172,21 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_barrier_sync_cave_words(
     std::span<const uint8_t> bytes, const SampledBarrierCandidate &candidate,
-    const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-    const ConSanMoiOperatingPoint &point, const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs,
-    uint16_t scratch_vgpr, const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
-    rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
+    const MoiSampledSyncEmissionPlan &plan, const VgprSpillSequence *spill,
+    const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
+    const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
     uint64_t return_text_offset, const MoiPrivateEpochLayout *private_layout,
     std::optional<uint16_t> selectable_vgpr_bank_mode, std::vector<std::string> &errors) {
-  const bool scalar_persistent = point.moi_persistent_sgprs.complete();
-  if (!bound_resources.moi_report_buffer_address || !owner_epoch_vgprs.epoch ||
-      !point.moi_exec_save_sgpr || !owner_epoch_vgprs.owner ||
-      request.moi_owner_source != ConSanMoiOwnerSource::WorkitemId ||
-      !candidate.barrier.kernel_descriptor_file_offset ||
-      static_cast<uint32_t>(scratch_vgpr) + (scalar_persistent ? 9u : 7u) > kMaxVgprs ||
+  const bool scalar_persistent = plan.persistent_sgprs.complete();
+  if (!plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr || !plan.owner_epoch_vgprs.owner ||
+      !plan.workitem_owner || !candidate.barrier.kernel_descriptor_file_offset ||
+      static_cast<uint32_t>(plan.scratch_vgpr) + (scalar_persistent ? 9u : 7u) > kMaxVgprs ||
       candidate.windows.empty() ||
       std::ranges::any_of(candidate.windows, [&](const SampledBarrierWindow &window) {
         return window.first_slot >= layout.sampled_sync_metadata_capacity ||
                window.bank_count == 0 ||
                window.bank_count > layout.sampled_sync_metadata_capacity - window.first_slot;
       }))
-    return std::nullopt;
-  const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
-      bytes, *candidate.barrier.kernel_descriptor_file_offset, request.moi_engine, point, arch,
-      errors, candidate.uses_cluster_workgroup_id,
-      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr);
-  if (!workgroup_sources)
     return std::nullopt;
   if (candidate.barrier.site.file_offset > bytes.size() ||
       candidate.barrier.site.size > bytes.size() - candidate.barrier.site.file_offset) {
@@ -199,15 +206,15 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   if (encoded.classification != ConSanMoiSampledSyncClassification::Valid)
     return std::nullopt;
 
-  const uint16_t base = scratch_vgpr;
+  const uint16_t base = plan.scratch_vgpr;
   const uint16_t value = static_cast<uint16_t>(base + 2u);
   const uint16_t expected = static_cast<uint16_t>(base + 3u);
   const uint16_t next_epoch = static_cast<uint16_t>(base + 4u);
   const uint16_t lane_rank = static_cast<uint16_t>(base + 5u);
   const uint16_t bank_vgpr = static_cast<uint16_t>(base + 6u);
-  const uint16_t temporary_exec = *point.moi_exec_save_sgpr;
-  const uint16_t original_exec = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 6u);
-  const uint64_t report_base = *bound_resources.moi_report_buffer_address;
+  const uint16_t temporary_exec = *plan.exec_save_sgpr;
+  const uint16_t original_exec = static_cast<uint16_t>(*plan.exec_save_sgpr + 6u);
+  const uint64_t report_base = plan.report_buffer_address;
   const uint64_t first_window_address = report_base + layout.sampled_causal_windows_offset;
   const uint64_t first_metadata_address = report_base + layout.sampled_sync_metadata_offset;
 
@@ -253,17 +260,18 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   // window and advance its epoch. A separate workgroup-residue gate can skip a
   // workgroup which touched a selected address, leaving its recorded accesses
   // in one epoch with no synchronization metadata.
-  if (private_layout && !append_sampled_private_owner_epoch_load(
-                            words, bytes, *candidate.barrier.kernel_descriptor_file_offset, point,
-                            owner_epoch_vgprs, *private_layout, arch, errors))
+  if (private_layout &&
+      !append_sampled_private_owner_epoch_load(
+          words, bytes, *candidate.barrier.kernel_descriptor_file_offset,
+          plan.automatic_private_epoch, plan.owner_epoch_vgprs, *private_layout, arch, errors))
     return std::nullopt;
   if (scalar_persistent) {
     words.push_back(
-        build_v_mov_b32_e32(*owner_epoch_vgprs.owner, *point.moi_persistent_sgprs.owner(), arch));
+        build_v_mov_b32_e32(*plan.owner_epoch_vgprs.owner, *plan.persistent_sgprs.owner(), arch));
     words.push_back(
-        build_v_mov_b32_e32(*owner_epoch_vgprs.epoch, *point.moi_persistent_sgprs.epoch(), arch));
+        build_v_mov_b32_e32(*plan.owner_epoch_vgprs.epoch, *plan.persistent_sgprs.epoch(), arch));
   }
-  if (!append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
+  if (!append_save_moi_special_state(words, plan.scalar_abi.special_state, arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
     return std::nullopt;
   }
@@ -282,10 +290,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
       return std::nullopt;
     }
     words.push_back(*restore_scan_exec);
-    if (!append_sampled_window_bank_index(
-            words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
-            *workgroup_sources, window.bank_count, bank_vgpr, value, *owner_epoch_vgprs.owner,
-            arch)) {
+    if (!append_sampled_window_bank_index(words, plan.dispatch_id, plan.workgroup_sources,
+                                          window.bank_count, bank_vgpr, value,
+                                          *plan.owner_epoch_vgprs.owner, arch)) {
       errors.emplace_back("ConSan MOI sampled barrier failed at causal-window bank selection");
       return std::nullopt;
     }
@@ -313,14 +320,13 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
 
     if (!consan_moi_impl::append_sampled_causal_window_validation(
             words, sequence,
-            {.generation = bound_resources.moi_report_generation,
-             .dispatch_id =
-                 consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
-             .workgroup_sources = *workgroup_sources,
+            {.generation = plan.report_generation,
+             .dispatch_id = plan.dispatch_id,
+             .workgroup_sources = plan.workgroup_sources,
              .address_vgpr = base,
              .value_vgpr = value,
              .expected_vgpr = expected,
-             .epoch_vgpr = *owner_epoch_vgprs.epoch,
+             .epoch_vgpr = *plan.owner_epoch_vgprs.epoch,
              .first_entry_vgpr = bank_vgpr,
              .temporary_exec_sgpr = temporary_exec,
              .mismatch_label = next_window_label,
@@ -348,8 +354,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   // before the wave-local lane election below so exactly one wave can publish
   // the workgroup-wide transition. Without this narrowing, every wave races
   // the same metadata slot and the losing waves look like unsupported sync.
-  const auto owner_zero = instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
-                                                                  *owner_epoch_vgprs.owner, arch);
+  const auto owner_zero = instrumentation::build_v_cmp_eq_u32_vcc(
+      scalar_positive_inline_u32(0), *plan.owner_epoch_vgprs.owner, arch);
   if (!owner_zero) {
     errors.emplace_back("ConSan MOI sampled barrier failed at owner election");
     return std::nullopt;
@@ -362,7 +368,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   const auto max_epoch = instrumentation::build_v_mov_b32_literal(
       expected, consan_moi_sampled_watchpoint::max_epoch, arch);
   const auto epoch_has_successor = instrumentation::build_v_cmp_ne_u32_vcc(
-      vector_source_vgpr(expected), *owner_epoch_vgprs.epoch, arch);
+      vector_source_vgpr(expected), *plan.owner_epoch_vgprs.epoch, arch);
   if (!max_epoch || !epoch_has_successor) {
     errors.emplace_back("ConSan MOI sampled barrier failed at epoch successor check");
     return std::nullopt;
@@ -431,7 +437,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   }
 
   const auto increment = instrumentation::build_v_add_u32(next_epoch, scalar_positive_inline_u32(1),
-                                                          *owner_epoch_vgprs.epoch, arch);
+                                                          *plan.owner_epoch_vgprs.epoch, arch);
   if (!increment) {
     errors.emplace_back("ConSan MOI sampled barrier failed at next-epoch materialization");
     return std::nullopt;
@@ -450,7 +456,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   if (!record.store_literal(0u, 0u) || !record.store_literal(4u, 0u) ||
       !record.store_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), 0u) ||
       !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
-                         *owner_epoch_vgprs.epoch) ||
+                         *plan.owner_epoch_vgprs.epoch) ||
       !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after), next_epoch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at metadata body stores");
     return std::nullopt;
@@ -556,7 +562,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
       !require_existing_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, address) + 4u, 0u) ||
       !require_existing_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), 0u) ||
       !require_existing_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
-                             *owner_epoch_vgprs.epoch) ||
+                             *plan.owner_epoch_vgprs.epoch) ||
       !require_existing_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after),
                              next_epoch) ||
       !sequence.emit_branch(restore_label, InstructionSequence::BranchKind::Unconditional)) {
@@ -614,8 +620,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     return std::nullopt;
   }
   words.push_back(*narrow_advance);
-  const auto advance_epoch = instrumentation::build_v_add_u32(
-      *owner_epoch_vgprs.epoch, scalar_positive_inline_u32(1), *owner_epoch_vgprs.epoch, arch);
+  const auto advance_epoch =
+      instrumentation::build_v_add_u32(*plan.owner_epoch_vgprs.epoch, scalar_positive_inline_u32(1),
+                                       *plan.owner_epoch_vgprs.epoch, arch);
   if (!advance_epoch) {
     errors.emplace_back("ConSan MOI sampled barrier failed at epoch advance");
     return std::nullopt;
@@ -624,7 +631,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   words.push_back(*restore_after_advance);
   if (scalar_persistent) {
     const auto persist_epoch = instrumentation::build_v_readfirstlane_b32(
-        *point.moi_persistent_sgprs.epoch(), *owner_epoch_vgprs.epoch, arch);
+        *plan.persistent_sgprs.epoch(), *plan.owner_epoch_vgprs.epoch, arch);
     const auto delay = instrumentation::build_salu_dependency_delay(arch);
     if (!persist_epoch || !delay) {
       errors.emplace_back("ConSan MOI sampled barrier failed at scalar epoch persistence");
@@ -634,7 +641,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     words.push_back(*delay);
   }
   if (private_layout) {
-    const auto store = instrumentation::build_private_store_b32(*owner_epoch_vgprs.epoch,
+    const auto store = instrumentation::build_private_store_b32(*plan.owner_epoch_vgprs.epoch,
                                                                 private_layout->epoch_offset, arch);
     const auto wait = instrumentation::build_s_wait_private_store0(arch);
     if (!store || !wait) {
@@ -644,7 +651,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     words.insert(words.end(), store->begin(), store->end());
     words.push_back(*wait);
   }
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
+  if (!append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state restore");
     return std::nullopt;
   }
@@ -663,7 +670,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   if (ret) {
     words.push_back(build_s_branch(*ret, arch));
   } else {
-    const auto jump_sgprs = moi_indirect_jump_sgprs(request, point);
+    const auto jump_sgprs = plan.scalar_abi.indirect_jump;
     if (!jump_sgprs || !append_moi_scc_preserving_indirect_jump(
                            words, cave_text_offset, return_text_offset, jump_sgprs->pc_sgpr,
                            jump_sgprs->scc_save_sgpr, /*capture_scc=*/true, arch)) {
@@ -1010,19 +1017,18 @@ void try_apply_sampled_barrier_sync_patch(
     const uint64_t island_offset =
         original_text_size + barrier_index * kIndirectIslandWords * sizeof(uint32_t);
     const uint64_t cave_offset = new_text.size();
-    const auto probe_state = resolve_sampled_sync_probe_state(
-        options, operating_point, result.moi_operating_point,
-        planned.resources.owner_descriptor_file_offsets,
-        planned.private_layout ? &*planned.private_layout : nullptr,
+    const auto emission_plan = plan_sampled_sync_emission(
+        bytes, *planned.candidate.barrier.kernel_descriptor_file_offset,
+        planned.candidate.uses_cluster_workgroup_id, options, options, operating_point,
+        result.moi_operating_point, planned.resources.owner_descriptor_file_offsets,
+        planned.private_layout ? &*planned.private_layout : nullptr, planned.resources.base,
         static_cast<uint16_t>(planned.resources.base + 7u),
-        static_cast<uint16_t>(planned.resources.base + 8u),
+        static_cast<uint16_t>(planned.resources.base + 8u), arch,
         /*transient_assignment_already_resolved=*/false, "sampled barrier sync", result.errors);
-    if (!probe_state)
+    if (!emission_plan)
       return false;
     auto cave_words = build_sampled_barrier_sync_cave_words(
-        bytes, planned.candidate, options, options, probe_state->operating_point,
-        probe_state->owner_epoch_vgprs, planned.resources.base,
-        planned.spill ? &*planned.spill : nullptr,
+        bytes, planned.candidate, *emission_plan, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, layout, cave_offset,
         site.text_offset + site.size, planned.private_layout ? &*planned.private_layout : nullptr,
         std::nullopt, result.errors);
@@ -1031,20 +1037,19 @@ void try_apply_sampled_barrier_sync_patch(
           "ConSan MOI sampled barrier sync could not encode its probe with scratch v" +
           std::to_string(planned.resources.base) + ":v" +
           std::to_string(planned.resources.base + planned.resources.count - 1u) + " epoch v" +
-          (probe_state->owner_epoch_vgprs.epoch
-               ? std::to_string(*probe_state->owner_epoch_vgprs.epoch)
+          (emission_plan->owner_epoch_vgprs.epoch
+               ? std::to_string(*emission_plan->owner_epoch_vgprs.epoch)
                : std::string("<unassigned>")) +
           " EXEC-save s" +
-          (probe_state->operating_point.moi_exec_save_sgpr
-               ? std::to_string(*probe_state->operating_point.moi_exec_save_sgpr)
-               : std::string("<unassigned>")) +
+          (emission_plan->exec_save_sgpr ? std::to_string(*emission_plan->exec_save_sgpr)
+                                         : std::string("<unassigned>")) +
           " across " + std::to_string(planned.candidate.windows.size()) + " owner window(s)");
       return false;
     }
     auto fwd = compute_sopp_branch_simm16(site.text_offset, cave_offset);
     if (!fwd) {
       const auto reserved_fwd = compute_sopp_branch_simm16(site.text_offset, island_offset);
-      const auto indirect_state = moi_indirect_jump_sgprs(options, probe_state->operating_point);
+      const auto indirect_state = emission_plan->scalar_abi.indirect_jump;
       std::vector<uint32_t> island_words;
       const bool reserved_island_valid =
           reserved_fwd && indirect_state &&
@@ -1305,24 +1310,23 @@ void try_apply_sampled_barrier_sync_patch(
       for (size_t index : indices) {
         const Planned &planned = selected[index];
         const ConSanBarrierSite &site = planned.candidate.barrier.site;
-        const auto probe_state = resolve_sampled_sync_probe_state(
-            options, operating_point, result.moi_operating_point,
-            planned.resources.owner_descriptor_file_offsets,
-            planned.private_layout ? &*planned.private_layout : nullptr,
+        const auto emission_plan = plan_sampled_sync_emission(
+            bytes, *planned.candidate.barrier.kernel_descriptor_file_offset,
+            planned.candidate.uses_cluster_workgroup_id, options, options, operating_point,
+            result.moi_operating_point, planned.resources.owner_descriptor_file_offsets,
+            planned.private_layout ? &*planned.private_layout : nullptr, planned.resources.base,
             static_cast<uint16_t>(planned.resources.base + 7u),
-            static_cast<uint16_t>(planned.resources.base + 8u),
+            static_cast<uint16_t>(planned.resources.base + 8u), arch,
             /*transient_assignment_already_resolved=*/false, "sampled dense barrier",
             result.errors);
-        if (!probe_state)
+        if (!emission_plan)
           return;
         const uint64_t body_offset = new_text.size();
         const auto vgpr_msb_mode = consan_selectable_vgpr_bank_mode_at(
             arch, active_bytes, planned.candidate.barrier.text_file_offset,
             planned.candidate.barrier.container_entry_text_offset, site.file_offset);
         auto body_words = build_sampled_barrier_sync_cave_words(
-            bytes, planned.candidate, options, options, probe_state->operating_point,
-            probe_state->owner_epoch_vgprs, planned.resources.base,
-            planned.spill ? &*planned.spill : nullptr,
+            bytes, planned.candidate, *emission_plan, planned.spill ? &*planned.spill : nullptr,
             planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, layout, body_offset,
             site.text_offset + site.size,
             planned.private_layout ? &*planned.private_layout : nullptr, vgpr_msb_mode,
@@ -2031,24 +2035,25 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           const ConSanMoiOperatingPoint *resolved_point = nullptr,
           bool preserve_guest_at_anchor = false, std::span<const uint32_t> leading_guest_words = {})
       -> std::optional<std::vector<uint32_t>> {
-    const auto probe_state = resolve_sampled_sync_probe_state(
-        options, resolved_point ? *resolved_point : operating_point, result.moi_operating_point,
+    const auto emission_plan = plan_sampled_sync_emission(
+        bytes, *planned.candidate.atomic.kernel_descriptor_file_offset,
+        planned.candidate.atomic.uses_cluster_workgroup_id, options, options,
+        resolved_point ? *resolved_point : operating_point, result.moi_operating_point,
         planned.resources.owner_descriptor_file_offsets,
-        planned.private_layout ? &*planned.private_layout : nullptr,
+        planned.private_layout ? &*planned.private_layout : nullptr, planned.resources.base,
         static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kOwner),
-        static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kEpoch),
+        static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kEpoch), arch,
         /*transient_assignment_already_resolved=*/resolved_point != nullptr, "sampled atomic sync",
         result.errors);
-    if (!probe_state)
+    if (!emission_plan)
       return std::nullopt;
     const uint64_t return_text_offset =
         preserve_guest_at_anchor ? planned.physical_anchor_offset
                                  : planned.physical_anchor_offset + planned.relocated_guest_size;
     return planned.candidate.deferred_acquire
                ? build_sampled_pending_acquire_cave_words(
-                     bytes, planned.candidate.atomic, planned.address_plan, options, options,
-                     probe_state->operating_point, probe_state->owner_epoch_vgprs,
-                     planned.resources.base, planned.spill ? &*planned.spill : nullptr,
+                     bytes, planned.candidate.atomic, planned.address_plan, *emission_plan,
+                     planned.spill ? &*planned.spill : nullptr,
                      planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                      planned.private_layout ? &*planned.private_layout : nullptr, arch,
                      planned.candidate.selected_slot, planned.candidate.bank_count,
@@ -2056,9 +2061,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                      return_text_offset, result.errors, &guest_instruction_offset,
                      planned.trailing_guest_words)
                : build_sampled_atomic_sync_cave_words(
-                     bytes, planned.candidate.atomic, planned.address_plan, options, options,
-                     probe_state->operating_point, probe_state->owner_epoch_vgprs,
-                     planned.resources.base, planned.spill ? &*planned.spill : nullptr,
+                     bytes, planned.candidate.atomic, planned.address_plan, *emission_plan,
+                     planned.spill ? &*planned.spill : nullptr,
                      planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                      planned.private_layout ? &*planned.private_layout : nullptr, arch,
                      planned.candidate.selected_slot, planned.candidate.bank_count, layout,

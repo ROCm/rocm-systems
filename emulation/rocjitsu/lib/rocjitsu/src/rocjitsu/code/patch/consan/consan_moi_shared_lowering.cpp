@@ -323,9 +323,9 @@ std::optional<MoiPrivateEpochLayout> MoiPrivateEpochLayoutCache::resolve(
 
 [[nodiscard]] bool append_sampled_private_owner_epoch_load(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes, uint64_t descriptor_file_offset,
-    const ConSanMoiOperatingPoint &point, const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs,
+    bool automatic_private_epoch, const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs,
     const MoiPrivateEpochLayout &layout, rj_code_arch_t arch, std::vector<std::string> &errors) {
-  if (!point.automatic_moi_private_epoch || !owner_epoch_vgprs.owner || !owner_epoch_vgprs.epoch ||
+  if (!automatic_private_epoch || !owner_epoch_vgprs.owner || !owner_epoch_vgprs.epoch ||
       !layout.owner_offset) {
     errors.emplace_back("ConSan MOI sampled sync has an invalid private owner/epoch plan");
     return false;

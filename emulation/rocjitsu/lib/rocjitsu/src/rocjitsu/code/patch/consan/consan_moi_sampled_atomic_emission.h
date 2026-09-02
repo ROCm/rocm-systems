@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access_emission.h"
 
@@ -12,6 +13,24 @@
 #include <vector>
 
 namespace rocjitsu::consan_moi_impl {
+
+/// Exact owner-local state shared by Sampled barrier and atomic emission.
+/// Planning resolves every broad request, resource, and operating-point fact
+/// before any cave is sized; every direct, dense, or ordinary route consumes
+/// this immutable product.
+struct MoiSampledSyncEmissionPlan {
+  uint64_t report_buffer_address = 0;
+  uint64_t report_generation = 0;
+  std::optional<uint16_t> exec_save_sgpr;
+  bool automatic_private_epoch = false;
+  bool workitem_owner = false;
+  ConSanMoiPersistentSgprState persistent_sgprs;
+  MoiScalarAbiPlan scalar_abi;
+  consan_moi_detail::ConSanMoiReportDispatchIdSource dispatch_id;
+  ConSanMoiWorkgroupSources workgroup_sources;
+  ConSanMoiOwnerEpochVgprSources owner_epoch_vgprs;
+  uint16_t scratch_vgpr = 0;
+};
 
 /// Sampled atomic scratch ABI owned jointly by its planner and emitter.
 struct SampledAtomicScratchLayout {
@@ -42,9 +61,7 @@ sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_pending_acquire_cave_words(
     std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const ConSanRequest &request,
-    const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &point,
-    const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs, uint16_t scratch_vgpr,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiSampledSyncEmissionPlan &plan,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch, uint32_t selected_slot,
     uint32_t bank_count, std::optional<uint32_t> release_selected_slot,
@@ -55,9 +72,7 @@ sampled_atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_atomic_sync_cave_words(
     std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const ConSanRequest &request,
-    const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &point,
-    const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs, uint16_t scratch_vgpr,
+    const ConSanMoiAtomicAddressPlan &address_plan, const MoiSampledSyncEmissionPlan &plan,
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch, uint32_t selected_slot,
     uint32_t bank_count, const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,

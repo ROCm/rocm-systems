@@ -1312,6 +1312,26 @@ if(NOT _moi_sampled_indexed_address_call_count EQUAL 2)
     )
 endif()
 file(READ "${_consan_dir}/consan_moi_sampled_atomic_emission.cpp" _moi_sampled_atomic_owner)
+foreach(
+    _sampled_sync_emitter
+    IN ITEMS
+        consan_moi_sampled_atomic_emission.cpp
+        consan_moi_sampled_atomic_emission.h
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_sampled_sync_emitter}"
+        "ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|moi_persistent_or_descriptor_workgroup_sources|moi_bound_dispatch_id_sources|moi_special_state_sgprs|moi_indirect_jump_sgprs"
+        "Sampled synchronization emission must consume its exact retained plan"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sampled_sync.inc"
+    "SampledSyncProbeState|resolve_sampled_sync_probe_state"
+    "Sampled synchronization must not retain its superseded broad probe state"
+)
+if(NOT _moi_sampled_atomic_owner MATCHES "const MoiSampledSyncEmissionPlan [&]plan")
+    message(FATAL_ERROR "ConSan Sampled atomic emission lost its exact retained plan")
+endif()
 string(
     REGEX MATCHALL
     "consan_detail::append_moi_indexed_address"
@@ -1325,6 +1345,15 @@ if(NOT _moi_sampled_atomic_indexed_address_count EQUAL 6)
     )
 endif()
 file(READ "${_consan_dir}/consan_moi_sampled_sync.inc" _moi_sampled_sync_owner)
+if(NOT _moi_sampled_sync_owner MATCHES
+   "build_sampled_barrier_sync_cave_words[(][^)]*const MoiSampledSyncEmissionPlan [&]plan")
+    message(FATAL_ERROR "ConSan Sampled barrier emission lost its exact retained plan")
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_probe_contracts.h"
+    "descriptor_file_offset, const ConSanMoiOperatingPoint"
+    "Sampled private-state emission must consume the exact epoch policy"
+)
 foreach(_sampled_owner IN ITEMS consan_moi_sampled.h consan_moi_sampled_access.inc consan_moi_sampled_sync.inc)
     _consan_assert_no_match(
         "${_consan_dir}/${_sampled_owner}"
