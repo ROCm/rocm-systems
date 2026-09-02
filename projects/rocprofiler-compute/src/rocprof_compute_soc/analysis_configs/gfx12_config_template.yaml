@@ -362,8 +362,8 @@ panels:
 - file: pc_sampling.yaml
   panel_id: 21
   panel_title: PC Sampling
-panel_alias: pc_sampling
-data_sources:
-- type: pc_sampling_table
-  id: 1
-  title: PC Sampling
+  panel_alias: pc_sampling
+  data_sources:
+  - type: pc_sampling_table
+    id: 1
+    title: PC Sampling
