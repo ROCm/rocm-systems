@@ -239,9 +239,6 @@ def _find_library(explicit: str | os.PathLike[str] | None = None) -> str:
 
 
 def _library_names() -> list[str]:
-    # Mirror the loader in rocprofiler-sdk (thread_trace/dl.cpp): probe
-    # most-compatible first and narrow, keeping the unversioned name last since
-    # it is a devel-only symlink to an unknown version.
     parts = _PACKAGE_VERSION.split(".")
     names = [
         f"{_LIBRARY_BASENAME}." + ".".join(parts[:count])
