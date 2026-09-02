@@ -10,7 +10,10 @@ env:
   AIS_INPUT_CXX_STANDARD: ${{ inputs.cxx_standard }}
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
-  AIS_MOUNT_PATH: /mnt/ais/ext4
+  AIS_MOUNT_PATH: ${{ inputs.ais_mount_path }}
+  # Pass the backing NVMe partition through to the container only for the LVM
+  # setup (/mnt/logicalvolume1); the ext4 mount does not need a raw device.
+  AIS_EXTRA_DOCKER_DEVICE: ${{ case(inputs.ais_mount_path == '/mnt/logicalvolume1', '--device=/dev/nvme0n1p3', '') }}
   AIS_PKG_INSTALL_CMD: >-
     ${{
       case(
@@ -36,6 +39,11 @@ on:
       ais_hipfile_pkg_filename:
         required: true
         type: string
+      ais_mount_path:
+        description: "Host path of the filesystem-under-test to bind-mount into the container"
+        required: false
+        default: /mnt/ais/ext4
+        type: string
       ci_image:
         required: true
         type: string
@@ -47,6 +55,11 @@ on:
         description: "C++ standard the build artifacts were built with"
         required: true
         type: number
+      mount_label:
+        description: "Short label identifying the mount/setup, used in the container name"
+        required: false
+        default: system_ext4
+        type: string
       platform:
         required: true
         type: string
@@ -70,7 +83,7 @@ jobs:
           echo "AIS_SAFE_COMPILER_NAME=$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
         run: |
-          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER}_${GITHUB_JOB}_${{ inputs.mount_label }}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
       - name: Fetching hipFile repository...
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -107,6 +120,7 @@ jobs:
             --rm \
             --device=/dev/kfd \
             --device=/dev/dri \
+            ${AIS_EXTRA_DOCKER_DEVICE} \
             --security-opt seccomp=unconfined \
             --pull always \
             -v ${GITHUB_WORKSPACE}:/mnt/ais:ro \
