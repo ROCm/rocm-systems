@@ -194,9 +194,9 @@ inline __device__ void copyToShmem16(int tid, void* dst, void const* src, int by
 
 // Must run with at least 64 threads
 __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncclDevKernelArgs const* args,
-                                                      int batchIx, int workCursorBase = 0) {
+                                                     int batchIx) {
   int lane = tid % WARP_SIZE;
-  int workCursor = workCursorBase; // num works written in previous loop/channel iterations.
+  int workCursor = 0; // num works written in previous loop iterations.
   while (true) {
     struct ncclDevWorkBatch batch = ((struct ncclDevWorkBatch*)(args + 1))[batchIx];
 
@@ -396,13 +396,11 @@ struct RunWorkBatch {
       int subtn = work->nWarps * WARP_SIZE;
 #ifdef ENABLE_WARP_SPEED
       if (tid < subtn) {
+        int ch = ncclShmem.warpChannelId[tid / WARP_SIZE];
         if (ncclShmem.warpComm == 0 || Algo != NCCL_ALGO_RING)
           RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid, subtn, work);
-        else if (ncclShmem.warpChannelId[tid / WARP_SIZE] >= 0) {
-          int ch = ncclShmem.warpChannelId[tid / WARP_SIZE];
-          if (ch >= work->channelLo && ch <= work->channelHi)
-            RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid % WARP_SIZE, WARP_SIZE, work);
-        }
+        else if (ch >= 0 && ch >= work->channelLo && ch <= work->channelHi)
+          RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid % WARP_SIZE, WARP_SIZE, work);
       }
 #else
       // Coverity reports a possible thread divergence due to not all threads participating in the collective.
