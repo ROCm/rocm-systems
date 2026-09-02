@@ -102,8 +102,7 @@ def test_format_table_output_keeps_pc_sampling_table_21_1() -> None:
     )
     assert content != ""
     assert "v_mov" in content
-    assert "Stall reason definitions:" in content
-    assert "cdna3-cdna4-pc-sampling.html#stall-reasons" in content
+    assert content.index("Stall reason definitions:") < content.index("v_mov")
 
 
 def test_has_time_data_detection() -> None:
