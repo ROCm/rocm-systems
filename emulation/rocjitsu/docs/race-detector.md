@@ -8,6 +8,14 @@ Currently detects intra-workgroup races — cases where the value read from a
 register or LDS is not deterministic due to missing `s_waitcnt` or `s_barrier`
 instructions.
 
+## Target scope
+
+The race detector focuses on pre-GFX12 architectures. Its current end-to-end
+coverage exercises gfx950 (GFX9/CDNA4) and gfx1151 (GFX11.5/RDNA3.5). GFX12
+and later architectures are not supported; their counter, scheduling, and
+writeback rules will be modeled when that support is added rather than being
+partially anticipated here.
+
 ## Quick start
 
 This section is a standalone guide to getting up and running with race
@@ -199,10 +207,9 @@ counter instructions. Counter-capacity backpressure is currently modeled for
 CDNA's legacy VMCNT and LGKMCNT domains.
 
 The same completion-order distinction is used for nonzero partial waits; a
-zero wait still completes every event on the selected counter. Counter
-retirement order is tracked separately from destination writeback order because
-newer architectures may decrement a load counter in order while writing load
-data to VGPRs out of order.
+zero wait still completes every event on the selected counter. On the supported
+pre-GFX12 targets, the detector also uses these classes to determine whether
+two asynchronous writes to the same VGPR are ordered.
 
 The plugin keeps track, for all registers and LDS memory bytes, of which memory
 operations are in flight. When an instruction in the emulator accesses an LDS
@@ -323,9 +330,9 @@ ctest --test-dir $BUILD_DIR -R "RaceTest"
   (missing `s_waitcnt` and `s_barrier`). It does not detect inter-workgroup
   races, races between dispatches, or host-device synchronization issues.
 
-- **Limited WAW detection**: VGPR WAW is limited to synchronous instruction
-  writes that overlap a pending asynchronous load. WAW between two asynchronous
-  VGPR writers and LDS WAW are not currently reported.
+- **Limited WAW detection**: VGPR WAW covers instruction writes and
+  asynchronous memory writes that overlap a pending load. LDS WAW is not
+  currently reported.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently

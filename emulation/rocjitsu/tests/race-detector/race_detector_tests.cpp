@@ -57,21 +57,21 @@ TEST(RaceDetectorPlugin, KeepsCompletionOrderSeparateFromWaitCounterDomain) {
   MemoryInstructionForRaceTest gdsRead("ds_read_b32", /*gds=*/true);
   MemoryInstructionForRaceTest scalarLoad("s_load_dword");
 
-  EXPECT_EQ(memoryOrderingForRaceDetector(bufferLoad, ROCJITSU_CODE_ARCH_CDNA4),
-            (MemoryOrdering{MemoryOrderClass::VMEM, MemoryOrderClass::VMEM}));
-  EXPECT_EQ(memoryOrderingForRaceDetector(bufferStore, ROCJITSU_CODE_ARCH_CDNA4),
-            (MemoryOrdering{MemoryOrderClass::VMEM, MemoryOrderClass::VMEM}));
-  EXPECT_EQ(memoryOrderingForRaceDetector(bufferStore, ROCJITSU_CODE_ARCH_RDNA3), MemoryOrdering{});
-  EXPECT_EQ(memoryOrderingForRaceDetector(flatLoad, ROCJITSU_CODE_ARCH_CDNA4), MemoryOrdering{});
-  EXPECT_EQ(memoryOrderingForRaceDetector(ldsRead, ROCJITSU_CODE_ARCH_CDNA4),
-            (MemoryOrdering{MemoryOrderClass::LDS, MemoryOrderClass::LDS}));
-  EXPECT_EQ(memoryOrderingForRaceDetector(gdsRead, ROCJITSU_CODE_ARCH_CDNA4), MemoryOrdering{});
-  EXPECT_EQ(memoryOrderingForRaceDetector(scalarLoad, ROCJITSU_CODE_ARCH_CDNA4), MemoryOrdering{});
-
-  const MemoryOrdering gfx12Load =
-      memoryOrderingForRaceDetector(bufferLoad, ROCJITSU_CODE_ARCH_RDNA4);
-  EXPECT_EQ(gfx12Load.counter, MemoryOrderClass::VMEM);
-  EXPECT_EQ(gfx12Load.writeback, MemoryOrderClass::UNORDERED);
+  EXPECT_EQ(memoryOrderForRaceDetector(bufferLoad, ROCJITSU_CODE_ARCH_CDNA4),
+            MemoryOrderClass::VMEM);
+  EXPECT_EQ(memoryOrderForRaceDetector(bufferStore, ROCJITSU_CODE_ARCH_CDNA4),
+            MemoryOrderClass::VMEM);
+  EXPECT_EQ(memoryOrderForRaceDetector(bufferStore, ROCJITSU_CODE_ARCH_RDNA3),
+            MemoryOrderClass::UNORDERED);
+  EXPECT_EQ(memoryOrderForRaceDetector(flatLoad, ROCJITSU_CODE_ARCH_CDNA4),
+            MemoryOrderClass::UNORDERED);
+  EXPECT_EQ(memoryOrderForRaceDetector(ldsRead, ROCJITSU_CODE_ARCH_CDNA4), MemoryOrderClass::LDS);
+  EXPECT_EQ(memoryOrderForRaceDetector(gdsRead, ROCJITSU_CODE_ARCH_CDNA4),
+            MemoryOrderClass::UNORDERED);
+  EXPECT_EQ(memoryOrderForRaceDetector(scalarLoad, ROCJITSU_CODE_ARCH_CDNA4),
+            MemoryOrderClass::UNORDERED);
+  EXPECT_EQ(memoryOrderForRaceDetector(bufferLoad, ROCJITSU_CODE_ARCH_RDNA4),
+            MemoryOrderClass::UNORDERED);
 }
 
 // ---- VGPR races (vmcnt) ----
@@ -479,13 +479,12 @@ TEST(RaceDetector, VgprWaw_SameCompletionClassIsOrdered) {
   EXPECT_FALSE(b.hasRace());
 }
 
-TEST(RaceDetector, VgprWaw_OrderedCounterCanHaveUnorderedWriteback) {
+TEST(RaceDetector, VgprWaw_UnorderedLoadsRace) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  constexpr MemoryOrdering ordering{MemoryOrderClass::VMEM, MemoryOrderClass::UNORDERED};
   b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1, /*exec=*/0,
-               /*byteMask=*/0xF, ordering);
+               /*byteMask=*/0xF, MemoryOrderClass::UNORDERED);
   b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1, /*exec=*/0,
-               /*byteMask=*/0xF, ordering);
+               /*byteMask=*/0xF, MemoryOrderClass::UNORDERED);
 
   EXPECT_TRUE(b.hasVgprRace(2));
 }
@@ -494,7 +493,7 @@ TEST(RaceDetector, VgprWaw_DifferentCompletionClassesAreUnordered) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
   b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1, /*exec=*/0,
-               /*byteMask=*/0xF, MemoryOrdering{});
+               /*byteMask=*/0xF, MemoryOrderClass::UNORDERED);
 
   EXPECT_TRUE(b.hasVgprRace(2));
 }

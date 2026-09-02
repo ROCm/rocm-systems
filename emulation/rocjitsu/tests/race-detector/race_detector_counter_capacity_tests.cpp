@@ -63,7 +63,7 @@ void issueOrderedVmemLoads(RaceTestBuilder &builder, int count, int firstVgpr = 
 void issueUnorderedVmcntLoads(RaceTestBuilder &builder, int count, int firstVgpr = 0) {
   for (int offset = 0; offset < count; ++offset) {
     builder.globalLoad(kWave, /*vgprBase=*/firstVgpr + offset, /*numRegs=*/1, /*exec=*/0,
-                       /*byteMask=*/0xF, MemoryOrdering{});
+                       /*byteMask=*/0xF, MemoryOrderClass::UNORDERED);
   }
 }
 
@@ -197,12 +197,12 @@ TEST(RaceDetector, CounterCapacity_ScalarIssueAdvancesFullOrderedLgkmcntClass) {
   expectVgprReady(builder, /*vgpr=*/0);
 }
 
-TEST(RaceDetector, CounterCapacity_TwoTokenScalarIssueAdvancesNearlyFullLgkmcntClass) {
+TEST(RaceDetector, CounterCapacity_WideScalarIssueContributesOneLgkmcntToken) {
   auto builder = makeLgkmcntTest();
   issueOrderedLdsReads(builder, kLgkmcntCapacity - 1);
 
   builder.scalarLoad(kWave, /*sgprBase=*/0, /*numRegs=*/2);
-  expectVgprReady(builder, /*vgpr=*/0);
+  expectVgprPending(builder, /*vgpr=*/0);
 }
 
 TEST(RaceDetector, CounterCapacity_MixedLgkmcntDoesNotGuessWhichEventCompleted) {

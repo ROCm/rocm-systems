@@ -43,7 +43,7 @@ public:
   /// Register an event with the exact hardware counter that orders it.
   void registerEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
                      uint64_t execMask, uint8_t byteMask, amdgpu::WaitCounterType waitCounterType,
-                     MemoryOrdering ordering = {});
+                     MemoryOrderClass memoryOrder = MemoryOrderClass::UNORDERED);
 
   /// Register an in-flight scalar load using its architectural destination.
   void
@@ -61,7 +61,7 @@ public:
                         uint64_t execMask, int waveSize,
                         std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask, amdgpu::WaitCounterType waitCounterType,
-                        MemoryOrdering ordering = {});
+                        MemoryOrderClass memoryOrder = MemoryOrderClass::UNORDERED);
 
   /// Register an LDS event with dual-offset intervals. Each active lane
   /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8
@@ -75,7 +75,7 @@ public:
                                   std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
                                   std::span<const uint32_t> laneBaseAddresses, int32_t offset0,
                                   int32_t offset1, amdgpu::WaitCounterType waitCounterType,
-                                  MemoryOrdering ordering = {});
+                                  MemoryOrderClass memoryOrder = MemoryOrderClass::UNORDERED);
 
   /// Dispatch the counter thresholds changed by one wait instruction.
   void dispatch(const PendingWaitCount &);
@@ -96,10 +96,10 @@ public:
   /// Mask-based counterpart of checkVgprWrite().
   void checkVgprWriteLanes(int reg, uint64_t laneMask, uint8_t byteMask) const;
 
-  /// Check an asynchronous memory destination write. Operations in the same
-  /// non-UNORDERED writeback class cannot overtake one another.
+  /// Check an asynchronous memory destination write. On supported targets,
+  /// operations in the same non-UNORDERED class cannot overtake one another.
   void checkVgprWrite(int reg, uint64_t execMask, uint8_t byteMask,
-                      MemoryOrderClass currentWritebackOrder) const;
+                      MemoryOrderClass currentMemoryOrder) const;
 
   /// Check all lanes of a VGPR for races (used by bulk register reads).
   void checkVgprReadAllLanes(int reg) const;
@@ -132,7 +132,8 @@ public:
 private:
   void registerEventWithIntervals(uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
                                   uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
-                                  amdgpu::WaitCounterType waitCounterType, MemoryOrdering ordering);
+                                  amdgpu::WaitCounterType waitCounterType,
+                                  MemoryOrderClass memoryOrder);
   void retireEventRegisters(EventId);
 
   template <typename Pred> void resolveWaitCnt(int limit, Pred isTargetType);

@@ -47,9 +47,8 @@ template <typename T, size_t N> struct RingBuffer {
 /// Return the memory instruction recorded as the exact conflict.
 MarkedPc findConflict(const RaceViolation &, RaceDetector &);
 
-/// Classify an instruction's counter-retirement and destination-writeback
-/// ordering guarantees for the race detector.
-MemoryOrdering memoryOrderingForRaceDetector(const Instruction &, rj_code_arch_t);
+/// Classify an instruction's memory ordering guarantee for the race detector.
+MemoryOrderClass memoryOrderForRaceDetector(const Instruction &, rj_code_arch_t);
 
 /// Format a trace with ==> markers and wave/lane annotations.
 std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
