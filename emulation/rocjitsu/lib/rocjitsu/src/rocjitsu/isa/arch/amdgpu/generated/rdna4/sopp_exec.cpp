@@ -67,7 +67,7 @@ void SDenormModeSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBarrierWaitSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_barrier_wait_sopp(*this, wf);
+  wf.set_state(amdgpu::WfState::BARRIER);
 }
 
 void SCodeEndSopp::execute_impl(amdgpu::Wavefront &wf) {

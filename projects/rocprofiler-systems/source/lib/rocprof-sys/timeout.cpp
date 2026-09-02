@@ -79,8 +79,8 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
     while(_ci_timeout_seconds <= _factor)
         _factor /= 1.25;
 
-    std::uint64_t _ci_timeout_nitr    = 0;
-    std::int64_t  _ci_timeout_nanosec = (_ci_timeout_seconds - _factor) * units::sec;
+    std::uint64_t      _ci_timeout_nitr    = 0;
+    const std::int64_t _ci_timeout_nanosec = (_ci_timeout_seconds - _factor) * units::sec;
     auto _ci_timeout_total_count = get_env<std::uint64_t>(env_vars::CI_TIMEOUT_COUNT, 1);
     const auto root_pid = get_env<pid_t>(env_vars::ROOT_PROCESS, process::get_id());
 
@@ -98,8 +98,8 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
             return;
         }
 
-        auto         _tids = pthread_gotcha::get_native_handles();
-        std::int64_t _ci_timeout_pause =
+        auto               _tids = pthread_gotcha::get_native_handles();
+        const std::int64_t _ci_timeout_pause =
             (_factor * units::sec) / (3 * (_tids.size() + 1));
         auto _kill_thread = [_ci_timeout_pause](auto _handle) {
             // execute the pthread_kill and wait until ci_timeout_backtrace increments

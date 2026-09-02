@@ -45,9 +45,9 @@ process_cpu_info_data()
     };
 
     auto trim_whitespace = [](const std::string& str) -> std::string {
-        size_t start = str.find_first_not_of(" \t");
+        const size_t start = str.find_first_not_of(" \t");
         if(start == std::string::npos) return "";
-        size_t end = str.find_last_not_of(" \t");
+        const size_t end = str.find_last_not_of(" \t");
         return str.substr(start, end - start + 1);
     };
 
@@ -97,14 +97,14 @@ process_cpu_info_data()
             continue;
         }
 
-        size_t colon_pos = line.find(':');
+        const size_t colon_pos = line.find(':');
         if(colon_pos == std::string::npos)
         {
             continue;
         }
 
-        std::string key   = trim_whitespace(line.substr(0, colon_pos));
-        std::string value = trim_whitespace(line.substr(colon_pos + 1));
+        std::string       key   = trim_whitespace(line.substr(0, colon_pos));
+        const std::string value = trim_whitespace(line.substr(colon_pos + 1));
 
         std::transform(key.begin(), key.end(), key.begin(), ::tolower);
 

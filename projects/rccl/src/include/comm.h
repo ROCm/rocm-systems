@@ -29,7 +29,7 @@
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
-#include "dda_init_detail.h"
+#include "algorithms/dda/dda_init_detail.h"
 #include "mem_manager.h"
 
 #ifdef ENABLE_ROCSHMEM
@@ -554,6 +554,7 @@ struct ncclPeerInfo {
   uint64_t pidHash;
   dev_t shmDev;
   int64_t busId;
+  cudaUUID_t gpuUuid;
   struct ncclComm* comm;
   int cudaCompCap;
   size_t totalGlobalMem;
@@ -573,6 +574,7 @@ struct ncclPeerInfo {
   bool crossNicSupport;
   bool rmaPluginAvailable;
   bool cuMemGdrSupport;
+  int mloPart; // MLOPart partition index, or -1 if not an MLOPart GPU
 };
 
 typedef enum ncclGroupTaskType {
@@ -611,14 +613,16 @@ struct ncclComm {
   struct ncclProxyConnector* gproxyConn;
   struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next> legacyRegCleanupQueue;
   bool peerInfoValid;
-  float minNetBw;
+  int minNetCount; // Minimum number of network devices local to a rank
+  float minNetBw; // Minimum bw of any network device local to a rank
 
   ncclNet_t* ncclNet;
   void* netContext;
   void* ginContext;
-  void* rmaGinContext;
+  void* rmaContext;
   int netPluginIndex;
   int ginPluginIndex;
+  int rmaPluginIndex;
   int ncclNetVer;
   ncclNetDeviceType netDeviceType;
   ncclCollNet_t* ncclCollNet;
@@ -666,6 +670,8 @@ struct ncclComm {
   int compCap; // compute capability of the GPU
   int minCompCap, maxCompCap; // min/max compute capability in the communicator
   int64_t busId; // my PCI bus ID in int format
+  bool sideStreamAcquired; // whether this comm holds a side-stream scope ref
+  int sideStreamPriority;  // priority key of the side stream this comm acquired
   ncclAffinity cpuAffinity; // CPU affinity of the GPU
   int WarpSize;
   int cudaArch; // matches __CUDA_ARCH__ of device
@@ -700,9 +706,11 @@ struct ncclComm {
   // Force PAT algorithm for this communicator
   bool forcePatEnable;
 
+  // PAT ReduceScatter and AllGather share one connection set; must match on every rank
+  bool patSharedQps;
+
   // MNNVL: Multi-Node NVLink
   int MNNVL; // true when MNNVL is available
-  bool isMultiRankGpu; // true when multiple ranks use the same GPU device on the same host
   struct cliqueInfo clique; // Our MNNVL clique information
   int cliqueRank; // Our rank within the MNNVL clique
 
@@ -807,6 +815,7 @@ struct ncclComm {
   uint8_t collNetSupportMatrix[4 /*sum,prod,max,min*/][ncclNumTypes];
   int* collNetHeads;
   int collNetHeadsNum;
+  int collNetChainSupport;
   int* collNetDenseToUserRank;
   int* collNetUserToDenseRank;
   /* sharable collNet proxy progress resource. */
@@ -861,11 +870,15 @@ struct ncclComm {
   struct ncclIntruQueueMpsc<struct ncclCommCallback, &ncclCommCallback::next> callbackQueue;
 
   hipEvent_t doneEvent;
-  hipStream_t lastStream;
-  // False until the first kernel launch on this comm. Distinguishes "no prior launch"
-  // from "prior launch on the default stream (lastStream==nullptr)" so ncclLaunchPrepare
-  // can correctly detect a stream change in either case.
-  bool lastStreamValid;
+  // Opaque tag identifying the last launch stream, for stream-change detection only; 0 means
+  // no launch yet, which keeps "launched on the default stream" distinguishable. Not a
+  // hipStream_t: the app may destroy that stream while the comm lives on and HIP gives no
+  // notification, so this is compared, never passed to a HIP API.
+  //
+  // If the handle is recycled onto a new stream, tag equality deliberately skips the wait:
+  // hipStreamDestroy defers reuse until the stream's work completes, so a matching tag
+  // implies the prior kernel already finished.
+  uintptr_t lastStreamTag;
   latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_WARP_SPEED
@@ -919,6 +932,9 @@ struct ncclComm {
   int symmetricSupport;
   bool useNetPXN;
   bool useGdr;
+  bool hasMloPart; // if mlopart is used
+  bool hasMultiRankNvml; // if multiple ranks are using the NVML device
+  bool isMultiRankGpu; // if multiple ranks are sharing the same GPU (bus id) on a node
   ncclGinConnectionType_t globalGinSupport;
   bool globalRmaProxySupport;
   bool hostRmaSupport;

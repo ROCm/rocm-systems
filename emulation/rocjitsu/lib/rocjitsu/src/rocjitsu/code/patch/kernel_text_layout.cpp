@@ -44,7 +44,8 @@ relocation_error(uint64_t source_offset, std::string message,
           .reason = reason,
           .source_offset = source_offset,
           .required_windows = {},
-          .message = std::move(message)};
+          .message = std::move(message),
+          .compact_builder_fallbacks = {}};
 }
 
 [[nodiscard]] KernelTextAppendResult
@@ -341,6 +342,18 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
     }
   }
 
+  if (fixup.keep_dynamic_when_long) {
+    // The builder immediately ahead was rewritten in place to the relocated target, so the
+    // original transfer already lands correctly and needs no window at all. Emitting one would
+    // cost five words and leave an unmarked getpc/add/consumer triple for the next pass to wrap.
+    // One word in, one word out, so the reserved window is exact and .text cannot change size.
+    if (fixup.is_call)
+      words.push_back(build_s_swappc_b64(fixup.return_sreg, fixup.target_sreg, arch));
+    else
+      words.push_back(build_s_setpc_b64(fixup.target_sreg, arch));
+    return true;
+  }
+
   // Every long recovered transfer carries the same non-padding marker. A later
   // pass can then preserve the exact window even if CFG compaction has brought
   // its target back within direct SOPP range.
@@ -409,6 +422,30 @@ void rebase_text_offset(uint64_t &offset, std::span<const TextLayoutInsertion> i
       break;
     offset += insertion.size;
   }
+}
+
+TextOffsetRebaser::TextOffsetRebaser(std::span<const TextLayoutInsertion> insertions) {
+  assert(std::ranges::is_sorted(
+      insertions, {}, [](const TextLayoutInsertion &insertion) { return insertion.offset; }));
+  offsets_.reserve(insertions.size());
+  shifts_.reserve(insertions.size());
+  uint64_t running = 0;
+  for (const TextLayoutInsertion &insertion : insertions) {
+    running += insertion.size;
+    offsets_.push_back(insertion.offset);
+    shifts_.push_back(running);
+  }
+}
+
+void TextOffsetRebaser::rebase(uint64_t &offset) const {
+  // Same result as rebase_text_offset(): add every insertion at or before this offset. Done as a
+  // prefix sum plus one binary search rather than a scan, because the scan is called once per
+  // block bound and per fixup, which made it quadratic in a large scope -- 11% of translation time
+  // on a 745 MB device image.
+  const auto it = std::ranges::upper_bound(offsets_, offset);
+  if (it == offsets_.begin())
+    return;
+  offset += shifts_[static_cast<size_t>(std::distance(offsets_.begin(), it)) - 1];
 }
 
 std::optional<std::vector<TextLayoutInsertion>>
@@ -517,22 +554,23 @@ grow_control_flow_windows(std::vector<uint8_t> &text, KernelTextLayout &layout,
     }
   }
 
+  const TextOffsetRebaser rebaser(insertions);
   for (BlockPlacement &block : layout.blocks) {
-    rebase_text_offset(block.target_start, insertions);
-    rebase_text_offset(block.target_end, insertions);
+    rebaser.rebase(block.target_start);
+    rebaser.rebase(block.target_end);
   }
   for (BranchFixup &fixup : layout.branch_fixups)
-    rebase_text_offset(fixup.target_inst_offset, insertions);
+    rebaser.rebase(fixup.target_inst_offset);
   for (RecoveredIndirectFixup &fixup : layout.recovered_indirect_fixups)
-    rebase_text_offset(fixup.target_window_offset, insertions);
+    rebaser.rebase(fixup.target_window_offset);
   for (IndirectCallFixup &fixup : layout.recovered_builder_fixups) {
-    rebase_text_offset(fixup.target_getpc_offset, insertions);
-    rebase_text_offset(fixup.target_recovery_begin_offset, insertions);
-    rebase_text_offset(fixup.target_recovery_end_offset, insertions);
+    rebaser.rebase(fixup.target_getpc_offset);
+    rebaser.rebase(fixup.target_recovery_begin_offset);
+    rebaser.rebase(fixup.target_recovery_end_offset);
   }
   for (uint64_t &slot : layout.branch_island_slots)
-    rebase_text_offset(slot, insertions);
-  rebase_text_offset(layout.body_end, insertions);
+    rebaser.rebase(slot);
+  rebaser.rebase(layout.body_end);
 
   text = std::move(grown_text);
   return insertions;
@@ -951,7 +989,8 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
 TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
                                                     const KernelTextLayout &layout,
                                                     rj_code_arch_t arch) {
-  std::unordered_map<uint64_t, std::tuple<uint64_t, uint64_t, bool>> rewritten_regions;
+  std::unordered_map<uint64_t, std::tuple<uint64_t, uint64_t, bool, uint16_t>> rewritten_regions;
+  std::vector<uint64_t> compact_builder_fallbacks;
   for (const IndirectCallFixup &fixup : layout.recovered_builder_fixups) {
     auto target_target = target_for_source_offset(layout, fixup.source_target_offset);
     if (!target_target) {
@@ -973,11 +1012,15 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
 
     // One source-side builder may feed multiple consumers. Only the first one
     // rewrites the range, so reuse is valid only when every consumer asks for
-    // the same replacement -- same target, same byte range, and the same drain
-    // requirement, which changes the words emitted.
+    // the same replacement. Every input the emitted words depend on has to be in
+    // this key: the target and byte range, the drain requirement, and the SGPR
+    // pair the add is written against. Omitting the pair let a second consumer
+    // that names a different builder register silently inherit the first
+    // consumer's replacement, which a lane-banked dispatcher can produce because
+    // its producer and consumer pairs differ.
     const auto rewrite_key =
         std::tuple{fixup.target_recovery_end_offset, static_cast<uint64_t>(*target_target),
-                   fixup.source_requires_xcnt_drain};
+                   fixup.source_requires_xcnt_drain, fixup.source_builder_sreg};
     auto [rewrite_it, inserted] =
         rewritten_regions.emplace(fixup.target_recovery_begin_offset, rewrite_key);
     if (!inserted) {
@@ -1013,11 +1056,45 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
       }
       replacement_words.push_back(*drain);
     }
-    if (!append_pc_delta_builder(replacement_words, arch, fixup.source_call_sreg, delta)) {
+    // Emit the literal64 add form. This builder survives into the output, so a later translation
+    // pass has to be able to account for it, and the relocation lattice models only that encoding
+    // -- it cannot be widened to the compact one, because the patcher writes an eight-byte delta
+    // into the literal slot.
+    //
+    // Every rewritten builder gets the wide form, not just the ones whose consumer became a
+    // window. Which builders still have a consumer on the NEXT pass is not knowable here -- a
+    // whole-scope fixup has none to begin with, and a recovered consumer can disappear into a
+    // direct transfer -- so predicting who needs to stay visible gets it wrong. Widening
+    // unconditionally and falling back when it does not fit is both simpler and measurably
+    // better: on RCCL it takes the unaccounted-builder count on re-translation from 32 to 0.
+    //
+    // The pair named is the one the builder's own getpc wrote, not the one its consumer reads.
+    // The replacement covers only the delta half and leaves that getpc in place, so any other
+    // pair would be added to whatever it happened to hold. The two coincide for a direct
+    // getpc/add/swappc chain and diverge for a lane-banked dispatcher, which restores the address
+    // into a different pair between the two.
+    const size_t replacement_begin = replacement_words.size();
+    if (!append_pc_delta_builder(replacement_words, arch, fixup.source_builder_sreg, delta,
+                                 /*prefer_literal64=*/true)) {
       return relocation_error(
           fixup.source_call_offset,
           "target ISA cannot encode canonical recovered indirect branch builder",
           TextLayoutFailureCategory::ResourceLimit);
+    }
+    // The wide form does not always fit a range sized for the compact one. Falling back keeps the
+    // builder correct and keeps objects that translate today translating; what it gives up is
+    // visibility to the lattice, which only matters if an unrecovered indirect transfer also
+    // survives into this object -- and in that case the next pass refuses rather than accepting
+    // something wrong. Widening the range is not available here: the patcher writes in place.
+    if ((replacement_words.size() * sizeof(uint32_t)) > recovery_size) {
+      replacement_words.resize(replacement_begin);
+      if (!append_pc_delta_builder(replacement_words, arch, fixup.source_builder_sreg, delta)) {
+        return relocation_error(
+            fixup.source_call_offset,
+            "target ISA cannot encode canonical recovered indirect branch builder",
+            TextLayoutFailureCategory::ResourceLimit);
+      }
+      compact_builder_fallbacks.push_back(fixup.source_call_offset);
     }
 
     const uint64_t replacement_size = replacement_words.size() * sizeof(uint32_t);
@@ -1036,7 +1113,9 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
     }
   }
 
-  return relocation_ok();
+  TextRelocationResult result = relocation_ok();
+  result.compact_builder_fallbacks = std::move(compact_builder_fallbacks);
+  return result;
 }
 
 } // namespace rocjitsu

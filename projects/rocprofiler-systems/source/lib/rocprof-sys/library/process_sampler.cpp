@@ -75,7 +75,7 @@ sampler::poll(std::atomic<state::process::State>* _state, nsec_t _interval,
 
     auto _duration = config::get_process_sampling_duration();
     if(_duration < 0.0) _duration = config::get_sampling_duration();
-    bool _has_duration = (_duration > 0.0);
+    const bool _has_duration = (_duration > 0.0);
 
     auto _now = std::chrono::steady_clock::now();
     auto _end =
@@ -167,9 +167,9 @@ sampler::shutdown()
     auto& _thread = get_thread();
     if(_thread)
     {
-        size_t           _nitr     = 0;
-        constexpr size_t _nitr_max = 100;
-        std::uint64_t    _freq     = (1.0 / get_process_sampling_freq()) * 1.0e3;
+        size_t              _nitr     = 0;
+        constexpr size_t    _nitr_max = 100;
+        const std::uint64_t _freq     = (1.0 / get_process_sampling_freq()) * 1.0e3;
 
         // wait until the sampler is no longer sampling
         std::this_thread::sleep_for(msec_t{ _freq });

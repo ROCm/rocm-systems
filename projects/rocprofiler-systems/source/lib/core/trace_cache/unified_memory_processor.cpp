@@ -11,11 +11,11 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <fmt/format.h>
 #include <fstream>
 #include <iomanip>
 #include <limits>
 #include <nlohmann/json.hpp>
-#include <spdlog/fmt/fmt.h>
 #include <sstream>
 #include <system_error>
 #include <type_traits>
@@ -212,9 +212,9 @@ unified_memory_processor_t::handle_page_migrate(const kfd_sample& sample)
         size_bytes = static_cast<std::uint64_t>(sample.value);
 
     // Guard against non-monotonic KFD timestamps to avoid unsigned wrap.
-    std::uint64_t duration_ns = (sample.end_timestamp >= sample.start_timestamp)
-                                    ? sample.end_timestamp - sample.start_timestamp
-                                    : 0;
+    const std::uint64_t duration_ns = (sample.end_timestamp >= sample.start_timestamp)
+                                          ? sample.end_timestamp - sample.start_timestamp
+                                          : 0;
 
     auto gpu_bucket_id = resolve_gpu_bucket_id(src_label, dst_label, direction);
     if(gpu_bucket_id.has_value())
@@ -327,8 +327,8 @@ unified_memory_processor_t::classify_direction(const std::string& src_label,
         return migration_direction::UNKNOWN;
     }
 
-    bool src_is_cpu = (src_it->second == agent_type::CPU);
-    bool dst_is_cpu = (dst_it->second == agent_type::CPU);
+    const bool src_is_cpu = (src_it->second == agent_type::CPU);
+    const bool dst_is_cpu = (dst_it->second == agent_type::CPU);
 
     if(src_is_cpu && !dst_is_cpu)
         return migration_direction::HOST_TO_DEVICE;

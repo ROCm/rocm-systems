@@ -10,6 +10,7 @@
 #include "checks.h"
 #include "plugin.h"
 #include "nccl_gin.h"
+#include "gin/gin_host_proxy.h"
 #ifdef ENABLE_ROCSHMEM_GIN
 #include "gin/gin_host_rocshmem_gda.h"
 #include "gin/gin_host_anvil_sdma.h"
@@ -18,29 +19,26 @@
 #include <string.h>
 #include <errno.h>
 #include <mutex>
-// Temporary stubs
 
 typedef ncclGin_t* getNcclGin_t(void* ginPluginLib);
 
 extern getNcclGin_t getNcclGin_v13;
-extern getNcclGin_t getNcclGin_v11;
-extern getNcclGin_t getNcclGin_v12;
-extern getNcclGin_t getNcclGin_v13;
-extern getNcclGin_t getNcclRma_v13;
+extern getNcclGin_t getNcclGin_v14;
+
 extern int64_t ncclParamGinEnable();
-extern bool rcclUseAinic();
 NCCL_PARAM(GinPluginRefCount, "GIN_PLUGIN_REF_COUNT", 0);
-#define NCCL_GIN_VERSION_COUNT 3
-int ncclGinVersion[NCCL_GIN_VERSION_COUNT] = {13, 12, 11};
-getNcclGin_t* getNcclGin[NCCL_GIN_VERSION_COUNT] = {getNcclGin_v13, getNcclGin_v12, getNcclGin_v11};
-getNcclGin_t* getNcclRma[NCCL_GIN_VERSION_COUNT] = {getNcclRma_v13, getNcclGin_v12, getNcclGin_v11};
+#define NCCL_GIN_VERSION_COUNT 2
+int ncclGinVersion[NCCL_GIN_VERSION_COUNT] = {14, 13};
+getNcclGin_t* getNcclGin[NCCL_GIN_VERSION_COUNT] = {getNcclGin_v14, getNcclGin_v13};
 
-extern ncclGin_t* getNcclGin_v12_internal(ncclGin_v12_t* ncclGin_v12);
-
+#if defined(__HIP_PLATFORM_AMD__)
 #ifdef ENABLE_ROCSHMEM_GIN
 #define NCCL_GIN_NUM_INTERNAL_PLUGINS 3
 #else
 #define NCCL_GIN_NUM_INTERNAL_PLUGINS 1
+#endif
+#else
+#define NCCL_GIN_NUM_INTERNAL_PLUGINS 2
 #endif
 
 typedef enum ncclGinPluginState {
@@ -55,39 +53,36 @@ typedef enum ncclGinPluginState {
 typedef struct ginPluginLib {
   char name[MAX_STR_LEN];                       // Name of the plugin library
   void* dlHandle;                               // Handle to the plugin library
-  ncclGin_t* ncclGin;                           // Pointer to the ncclGin_t structure
-  int ncclGinVersion;                           // Version of the nccl gin plugin
-  ncclGinPluginState_t ncclGinPluginState;      // State of the nccl gin plugin
-  ncclGin_t* ncclRma;                           // Pointer to the ncclGin_t structure for RMA
-  ncclGinPluginState_t ncclRmaPluginState;      // State of the nccl gin rma plugin
-  int ncclGinPluginRefCount;                    // Reference count for the nccl gin plugin
-  int ginPhysDevs;                              // ncclGin - number of physical devices
+  ncclGin_t* ncclGin;                           // Pointer to the plugin structure
+  int version;                                  // Version of the plugin
+  ncclGinPluginState_t state;                   // State of the plugin
+  int refCount;                                 // Reference count
+  int physDevs;                                 // Number of physical devices
 } ginPluginLib_t;
 
 static int pluginCount = 0;
-static ginPluginLib_t ginPluginLibs[NCCL_GIN_MAX_PLUGINS] = {0};
-static std::mutex ginPluginMutex;
+static ginPluginLib_t pluginLibs[NCCL_GIN_MAX_PLUGINS] = {0};
+static std::mutex pluginMutex;
 static std::once_flag initPluginLibsOnceFlag;
 
 static ncclResult_t ncclGinPluginUnload(ginPluginLib_t* pluginLib) {
-  if (pluginLib->dlHandle && pluginLib->ncclGinPluginRefCount == 0) {
-    INFO(NCCL_DESTROY | NCCL_NET, "Unloading plugin %s", pluginLib->name);
+  if (pluginLib->dlHandle && pluginLib->refCount == 0) {
+    INFO(NCCL_DESTROY | NCCL_NET, "GIN/Plugin: Unloading plugin %s", pluginLib->name);
     NCCLCHECK(ncclClosePluginLib(pluginLib->dlHandle, ncclPluginTypeGin));
 
     // Reset fields but preserve name, to be reused when reloading
     pluginLib->dlHandle = NULL;
     pluginLib->ncclGin = NULL;
-    pluginLib->ncclGinPluginState = ncclGinPluginStateLoadReady;
-    pluginLib->ncclRma = NULL;
-    pluginLib->ncclRmaPluginState = ncclGinPluginStateLoadReady;
-    pluginLib->ncclGinPluginRefCount = 0;
-    pluginLib->ginPhysDevs = 0;
+    pluginLib->state = ncclGinPluginStateLoadReady;
+    pluginLib->refCount = 0;
+    pluginLib->physDevs = 0;
   }
   return ncclSuccess;
 }
 
 static ncclResult_t ncclGinPluginLoad(ginPluginLib_t* pluginLib) {
-  // Open library. NET plugin dlHandle should be already set.
+  // Entries borrowed from RMA/NET may already have a handle;
+  // after unload, reopen the same library by its saved name/path.
   if (pluginLib->dlHandle == NULL) {
     pluginLib->dlHandle = ncclOpenGinPluginLib(pluginLib->name);
     if (pluginLib->dlHandle == nullptr) goto fail;
@@ -95,70 +90,63 @@ static ncclResult_t ncclGinPluginLoad(ginPluginLib_t* pluginLib) {
 
   // load gin
   for (int i = 0; i < NCCL_GIN_VERSION_COUNT; i++) {
-    pluginLib->ncclGinVersion = ncclGinVersion[i];
+    pluginLib->version = ncclGinVersion[i];
     pluginLib->ncclGin = getNcclGin[i](pluginLib->dlHandle);
-    pluginLib->ncclRma = getNcclRma[i](pluginLib->dlHandle);
     if (pluginLib->ncclGin) break;
   }
 
-  if (pluginLib->ncclGin == nullptr) pluginLib->ncclGinPluginState = ncclGinPluginStateLoadFailed;
-  else pluginLib->ncclGinPluginState = ncclGinPluginStateInitReady;
+  if (pluginLib->ncclGin == nullptr) goto fail;
 
-  INFO(NCCL_INIT | NCCL_NET, "Successfully loaded external gin plugin %s",
+  pluginLib->state = ncclGinPluginStateInitReady;
+  INFO(NCCL_INIT | NCCL_NET, "GIN/Plugin: Successfully loaded external plugin %s",
        (ncclPluginLibPaths[ncclPluginTypeGin] ? ncclPluginLibPaths[ncclPluginTypeGin] : pluginLib->name));
 exit:
   return ncclSuccess;
 fail:
+  INFO(NCCL_INIT | NCCL_NET, "GIN/Plugin: Failed to load external plugin %s, dlHandle: %p, ncclGin: %p",
+       (ncclPluginLibPaths[ncclPluginTypeGin] ? ncclPluginLibPaths[ncclPluginTypeGin] : pluginLib->name),
+       pluginLib->dlHandle, pluginLib->ncclGin);
   if (pluginLib->dlHandle) {
     NCCLCHECK(ncclClosePluginLib(pluginLib->dlHandle, ncclPluginTypeGin));
   }
   pluginLib->dlHandle = nullptr;
-  pluginLib->ncclGinPluginState = ncclGinPluginStateLoadFailed;
+  pluginLib->ncclGin = nullptr;
+  pluginLib->version = 0;
+  pluginLib->state = ncclGinPluginStateLoadFailed;
   goto exit;
 }
 
 static ncclResult_t ncclGinPluginInit(struct ncclComm* comm, ginPluginLib_t* pluginLib) {
   int ndev;
+  bool ginInitCompleted = false;
   // Init must be called for each new comm to set the right context
-  if (pluginLib->ncclGinPluginState >= ncclGinPluginStateInitReady && pluginLib->ncclGin) {
-    if (pluginLib->ncclGin->init(&comm->ginContext, comm->commHash, ncclDebugLog) != ncclSuccess) {
-      pluginLib->ncclGinPluginState = ncclGinPluginStateDisabled;
-    }
+  if (pluginLib->state >= ncclGinPluginStateInitReady && pluginLib->ncclGin) {
+    if (!pluginLib->ncclGin->init ||
+        pluginLib->ncclGin->init(&comm->ginContext, comm->commHash, ncclDebugLog) != ncclSuccess) {
+      pluginLib->state = ncclGinPluginStateDisabled;
+    } else {
+      ginInitCompleted = true;
 #ifdef ENABLE_ROCSHMEM_GIN
-    else if (comm->ginContext && pluginLib->ncclGin == &ncclGinRocshmemGdaPlugin) {
-      ncclGinRocshmemSetInitContext(comm->ginContext, comm);
-    } else if (comm->ginContext && pluginLib->ncclGin == &ncclGinAnvilSdmaPlugin) {
-      ncclGinAnvilSetInitContext(comm->ginContext, comm);
-    }
+      // For internal rocSHMEM-based plugins, hand the freshly created device
+      // context back the owning comm so device-side setup can resolve it.
+      if (comm->ginContext && pluginLib->ncclGin == &ncclGinRocshmemGdaPlugin) {
+        ncclGinRocshmemSetInitContext(comm->ginContext, comm);
+      } else if (comm->ginContext && pluginLib->ncclGin == &ncclGinAnvilSdmaPlugin) {
+        ncclGinAnvilSetInitContext(comm->ginContext, comm);
+      }
 #endif
+    }
   }
-  if (pluginLib->ncclGinPluginState == ncclGinPluginStateInitReady && pluginLib->ncclGin) {
+  if (pluginLib->state == ncclGinPluginStateInitReady && pluginLib->ncclGin) {
     if (pluginLib->ncclGin->devices(&ndev) != ncclSuccess || ndev <= 0) {
-      // init() succeeded but plugin is unusable; release the context to avoid leaking it.
-      if (comm->ginContext && pluginLib->ncclGin->finalize(comm->ginContext) != ncclSuccess)
-        WARN("GIN plugin %s finalize failed while disabling after devices() check", pluginLib->name);
-      comm->ginContext = nullptr;
-      pluginLib->ncclGinPluginState = ncclGinPluginStateDisabled;
+      if (ginInitCompleted) {
+        pluginLib->ncclGin->finalize(comm->ginContext);
+        comm->ginContext = nullptr;
+      }
+      pluginLib->state = ncclGinPluginStateDisabled;
     } else {
-      pluginLib->ginPhysDevs = ndev;
-      pluginLib->ncclGinPluginState = ncclGinPluginStateEnabled;
-    }
-  }
-
-  // Initialize RMA plugin
-  if (pluginLib->ncclRmaPluginState >= ncclGinPluginStateInitReady && pluginLib->ncclRma) {
-    if (pluginLib->ncclRma->init(&comm->rmaGinContext, comm->commHash, ncclDebugLog) != ncclSuccess) {
-      pluginLib->ncclRmaPluginState = ncclGinPluginStateDisabled;
-    }
-  }
-  if (pluginLib->ncclRmaPluginState == ncclGinPluginStateInitReady && pluginLib->ncclRma) {
-    if (pluginLib->ncclRma->devices(&ndev) != ncclSuccess || ndev <= 0) {
-      if (comm->rmaGinContext && pluginLib->ncclRma->finalize(comm->rmaGinContext) != ncclSuccess)
-        WARN("RMA plugin %s finalize failed while disabling after devices() check", pluginLib->name);
-      comm->rmaGinContext = nullptr;
-      pluginLib->ncclRmaPluginState = ncclGinPluginStateDisabled;
-    } else {
-      pluginLib->ncclRmaPluginState = ncclGinPluginStateEnabled;
+      pluginLib->physDevs = ndev;
+      pluginLib->state = ncclGinPluginStateEnabled;
     }
   }
   return ncclSuccess;
@@ -167,18 +155,45 @@ static ncclResult_t ncclGinPluginInit(struct ncclComm* comm, ginPluginLib_t* plu
 static ncclResult_t ncclGinPluginAssignToComm(struct ncclComm* comm, int pluginIndex, bool* isAssigned) {
   *isAssigned = false;
 
-  if (ginPluginLibs[pluginIndex].ncclGinPluginState >= ncclGinPluginStateEnabled) {
-    INFO(NCCL_INIT | NCCL_NET, "Assigned GIN plugin %s to comm", ginPluginLibs[pluginIndex].ncclGin->name);
-    comm->sharedRes->ginState.ncclGin = ginPluginLibs[pluginIndex].ncclGin;
-    comm->sharedRes->ginState.ginVersion = ginPluginLibs[pluginIndex].ncclGinVersion;
+  if (pluginLibs[pluginIndex].state >= ncclGinPluginStateEnabled) {
+    ncclGin_t* gin = pluginLibs[pluginIndex].ncclGin;
+    ncclNetProperties_t props;
+    NCCLCHECK(gin->getProperties(0, &props));
+
+    int64_t ginType = ncclParamGinType();
+    bool isExternal = pluginIndex < (pluginCount - NCCL_GIN_NUM_INTERNAL_PLUGINS);
+
+    if (ginType != -1 && props.netDeviceType != ginType) {
+      INFO(NCCL_INIT | NCCL_NET, "GIN/Plugin: Skipping plugin %s index %d type %d: NCCL_GIN_TYPE=%ld requested",
+           gin->name, pluginIndex, props.netDeviceType, ginType);
+      return ncclSuccess;
+    }
+
+    if (isExternal && props.netDeviceType == NCCL_NET_DEVICE_GIN_PROXY) {
+      INFO(NCCL_INIT | NCCL_NET,
+           "GIN/Plugin: Skipping external proxy plugin %s index %d; using NCCL GIN proxy over RMA backend %s",
+           gin->name, pluginIndex,
+           (comm->rmaState.rmaProxyState.ncclRma ? comm->rmaState.rmaProxyState.ncclRma->name : "none"));
+      return ncclSuccess;
+    }
+
+    INFO(NCCL_INIT | NCCL_NET, "GIN/Plugin: Assigned plugin %s type %d to comm", gin->name, props.netDeviceType);
+    comm->sharedRes->ginState.ncclGin = gin;
+    comm->sharedRes->ginState.ginVersion = pluginLibs[pluginIndex].version;
+    // NOTE: The following cast is valid because ncclGinType_t variant values
+    // should match NCCL_NET_DEVICE_GIN_* values from `enum ncclNetDeviceType`.
+    // Honor NCCL_GIN_ENABLE: when disabled, keep ginType NONE so globalGinSupport
+    // resolves to NONE and GIN bring-up is cleanly rejected downstream.
+    comm->sharedRes->ginState.ginType =
+      ncclParamGinEnable() ? static_cast<ncclGinType_t>(props.netDeviceType) : NCCL_GIN_TYPE_NONE;
     comm->ginPluginIndex = pluginIndex;
-    NCCLCHECK(setLocalGinType(comm));
+
+    ncclGinProperties_t ginProperties;
+    NCCLCHECK(gin->getGinProperties(&ginProperties));
+    comm->sharedRes->ginState.supportsStrongSignals = ginProperties.supportsStrongSignals;
+    comm->sharedRes->ginState.supportsVASignals = ginProperties.supportsVASignals;
   }
-  if (ginPluginLibs[pluginIndex].ncclRmaPluginState >= ncclGinPluginStateEnabled) {
-    INFO(NCCL_INIT | NCCL_NET, "Assigned RMA plugin %s to comm", ginPluginLibs[pluginIndex].ncclRma->name);
-    comm->rmaState.rmaProxyState.ncclGin = ginPluginLibs[pluginIndex].ncclRma;
-  }
-  ginPluginLibs[pluginIndex].ncclGinPluginRefCount++;
+  pluginLibs[pluginIndex].refCount++;
   *isAssigned = true;
   return ncclSuccess;
 }
@@ -188,15 +203,15 @@ static ncclResult_t ncclGinPluginDisableOtherExternal(int pluginIndex) {
   if (pluginIndex >= (pluginCount - NCCL_GIN_NUM_INTERNAL_PLUGINS)) return ncclSuccess;
   char names[MAX_STR_LEN * (NCCL_GIN_MAX_PLUGINS - NCCL_GIN_NUM_INTERNAL_PLUGINS)] = {0};
   for (int i = 0; i < (pluginCount - NCCL_GIN_NUM_INTERNAL_PLUGINS); i++) {
-    if (i != pluginIndex) {
+    if (i != pluginIndex && pluginLibs[i].state >= ncclGinPluginStateEnabled) {
       // Append all disabled plugin names to a string
       snprintf(names + strlen(names), sizeof(names) - strlen(names), (strlen(names) == 0) ? "%s" : ", %s",
-               ginPluginLibs[i].name);
-      ginPluginLibs[i].ncclGinPluginState = ncclGinPluginStateDisabled;
+               pluginLibs[i].name);
+      pluginLibs[i].state = ncclGinPluginStateDisabled;
     }
   }
   if (strlen(names) > 0) {
-    INFO(NCCL_INIT | NCCL_NET, "Disabling external plugins: %s", names);
+    INFO(NCCL_INIT | NCCL_NET, "GIN/Plugin: Disabling external plugins: %s", names);
   }
   return ncclSuccess;
 }
@@ -208,30 +223,28 @@ static void initPluginLibsOnceFunc() {
   char* envGinPluginList = nullptr;
   char* savePtr = nullptr;
   int pluginCounter = 0;
-  // "none" and an empty value only opt out of external plugins; they must not disable the internal AINIC path
-  bool extGinPluginRequested = false;
 
-  memset(ginPluginLibs, 0, NCCL_GIN_MAX_PLUGINS * sizeof(ginPluginLib_t));
+  memset(pluginLibs, 0, NCCL_GIN_MAX_PLUGINS * sizeof(ginPluginLib_t));
   envGinPlugin = ncclGetEnv("NCCL_GIN_PLUGIN");
   if (envGinPlugin) {
     INFO(NCCL_ENV | NCCL_NET, "NCCL_GIN_PLUGIN set by environment to %s", envGinPlugin);
     if (strcasecmp(envGinPlugin, "none") == 0) envGinPlugin = "";
-    extGinPluginRequested = (envGinPlugin[0] != '\0');
     envGinPluginList = strdup(envGinPlugin);
     // Iterate over list until the list is empty
     ginPluginName = strtok_r(envGinPluginList, ",", &savePtr);
     while (ginPluginName) {
       // So, we can have at most( NCCL_GIN_MAX_PLUGINS - (NCCL_GIN_NUM_INTERNAL_PLUGINS)) in the NCCL_GIN_PLUGIN list
-      if (pluginCounter >= (NCCL_GIN_MAX_PLUGINS - (NCCL_GIN_NUM_INTERNAL_PLUGINS))) {
+
+      if (pluginCounter >= (NCCL_GIN_MAX_PLUGINS - NCCL_GIN_NUM_INTERNAL_PLUGINS)) {
         INFO(NCCL_NET | NCCL_ENV, "NCCL_GIN_PLUGIN list contains more than %d plugins, ignoring the rest",
-             (NCCL_GIN_MAX_PLUGINS - (NCCL_GIN_NUM_INTERNAL_PLUGINS + 1)));
+             (NCCL_GIN_MAX_PLUGINS - NCCL_GIN_NUM_INTERNAL_PLUGINS));
         break;
       }
       // need to leave space for the name + "\n"
       if ((strlen(ginPluginName) + 1) <= MAX_STR_LEN) {
-        ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateLoadReady;
-        ginPluginLibs[pluginCounter].ncclGinPluginRefCount = ncclParamGinPluginRefCount();
-        strcpy(ginPluginLibs[pluginCounter].name, ginPluginName);
+        pluginLibs[pluginCounter].state = ncclGinPluginStateLoadReady;
+        pluginLibs[pluginCounter].refCount = ncclParamGinPluginRefCount();
+        strcpy(pluginLibs[pluginCounter].name, ginPluginName);
         pluginCounter++;
       } else {
         INFO(NCCL_NET | NCCL_ENV,
@@ -243,95 +256,106 @@ static void initPluginLibsOnceFunc() {
     if (envGinPluginList) free(envGinPluginList);
   } else {
     // Add default gin plugin
-    ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateLoadReady;
-    ginPluginLibs[pluginCounter].ncclGinPluginRefCount = ncclParamGinPluginRefCount();
-    strcpy(ginPluginLibs[pluginCounter++].name, defaultGinPlugin);
+    pluginLibs[pluginCounter].state = ncclGinPluginStateLoadReady;
+    pluginLibs[pluginCounter].refCount = ncclParamGinPluginRefCount();
+    strcpy(pluginLibs[pluginCounter++].name, defaultGinPlugin);
   }
 
   // Also check if the NET plugin has GIN support
-  if ((ginPluginLibs[pluginCounter].dlHandle = ncclGetNetPluginLib(ncclPluginTypeGin)) != NULL) {
-    ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateLoadReady;
-    pluginCounter++;
+  if ((pluginLibs[pluginCounter].dlHandle = ncclGetNetPluginLib(ncclPluginTypeGin)) != NULL) {
+    pluginLibs[pluginCounter].state = ncclGinPluginStateLoadReady;
+    strcpy(pluginLibs[pluginCounter++].name, ncclGetPluginLibName(ncclPluginTypeGin));
   }
 
-  const char* envNet = ncclGetEnv("NCCL_NET");
-  if (envNet && (strcasecmp(envNet, "ROCM-IB") == 0)) {
-    envNet = "IB-CAST";
+  // Add internal ib plugin
+#if !defined(__HIP_PLATFORM_AMD__)
+  // [RCCL] GDAKI (native driver-mode GIN over MLX5) is NVIDIA-only; not built on ROCm.
+  pluginLibs[pluginCounter].ncclGin = &ncclGinIbGdaki;
+  pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
+  pluginLibs[pluginCounter].version = ncclGinVersion[0];
+  pluginCounter++;
+#else
+  // [RCCL] IB-CAST: register the device-initiated GDAKI GIN backend when it is built
+  // (RCCL_NET_IB_CAST_ENABLE_GDAKI). Under the v14 GIN/RMA split, proxy GIN over
+  // IB-CAST is provided by the generic ncclGinProxy (registered below) layered on top
+  // of the IB-CAST RMA backend (IbCastRmaIbProxy, registered in plugin/rma.cc)
+#ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
+  {
+    const char* envNet = ncclGetEnv("NCCL_NET");
+    if (envNet && strcasecmp(envNet, "IB-CAST") == 0) {
+      pluginLibs[pluginCounter].ncclGin = &IbCastGinIbGdaki;
+      pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
+      pluginLibs[pluginCounter].version = ncclGinVersion[0];
+      pluginCounter++;
+    }
   }
-  if ((envNet && strcasecmp(envNet, "IB-CAST") == 0 && !extGinPluginRequested) ||
-      (!envNet && rcclUseAinic() && !extGinPluginRequested)) {
-    ginPluginLibs[pluginCounter].ncclGin = &IbCastGinIb;
-    ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
-    ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
-    ginPluginLibs[pluginCounter].ncclRma = &IbCastGinIbProxy;
-    ginPluginLibs[pluginCounter].ncclRmaPluginState = ncclGinPluginStateInitReady;
-    ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
-    pluginCounter++;
-  } else {
-    ginPluginLibs[pluginCounter].ncclGin = &ncclGinIbProxy;
-    ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
-    ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
-    ginPluginLibs[pluginCounter].ncclRma = ginPluginLibs[pluginCounter].ncclGin;
-    ginPluginLibs[pluginCounter].ncclRmaPluginState = ncclGinPluginStateInitReady;
-    ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
-    pluginCounter++;
-  }
+#endif
+#endif
+  // Add gin proxy as fallback
+  pluginLibs[pluginCounter].ncclGin = &ncclGinProxy;
+  pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
+  pluginLibs[pluginCounter].version = ncclGinProxyVersion;
+  pluginCounter++;
 
 #ifdef ENABLE_ROCSHMEM_GIN
-  // Add internal rocshmem GDA plugin (device-initiated, GIN_TYPE=4)
-  {
-    extern ncclGin_t ncclGinRocshmemGdaPlugin;
-    ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemGdaPlugin;
-    ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
-    pluginCounter++;
-  }
-  // Add internal SDMA Anvil plugin (GIN_TYPE=5)
-  {
-    extern ncclGin_t ncclGinAnvilSdmaPlugin;
-    ginPluginLibs[pluginCounter].ncclGin = &ncclGinAnvilSdmaPlugin;
-    ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
-    pluginCounter++;
-  }
+  // Add internal rocshmem GDA plugin (device-initiated, GIN_TYPE=5)
+  pluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemGdaPlugin;
+  pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
+  pluginLibs[pluginCounter].version = ncclGinVersion[0];
+  pluginCounter++;
+  // Add internal SDMA Anvil plugin (GIN_TYPE=6)
+  pluginLibs[pluginCounter].ncclGin = &ncclGinAnvilSdmaPlugin;
+  pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
+  pluginLibs[pluginCounter].version = ncclGinVersion[0];
+  pluginCounter++;
 #endif
 
   pluginCount = pluginCounter;
 }
 
 static ncclResult_t ncclGinPluginFinalize(struct ncclComm* comm, int pluginIndex) {
-  if (ginPluginLibs[pluginIndex].ncclRma && ginPluginLibs[pluginIndex].ncclRmaPluginState == ncclGinPluginStateEnabled)
-    NCCLCHECK(ginPluginLibs[pluginIndex].ncclRma->finalize(comm->rmaGinContext));
-  if (ginPluginLibs[pluginIndex].ncclGin && ginPluginLibs[pluginIndex].ncclGinPluginState == ncclGinPluginStateEnabled)
-    NCCLCHECK(ginPluginLibs[pluginIndex].ncclGin->finalize(comm->ginContext));
-  ginPluginLibs[pluginIndex].ncclGinPluginRefCount--;
+  if (pluginLibs[pluginIndex].ncclGin && pluginLibs[pluginIndex].state == ncclGinPluginStateEnabled) {
+    NCCLCHECK(pluginLibs[pluginIndex].ncclGin->finalize(comm->ginContext));
+  }
+  pluginLibs[pluginIndex].refCount--;
   if (pluginIndex < (pluginCount - NCCL_GIN_NUM_INTERNAL_PLUGINS)) {
-    NCCLCHECK(ncclGinPluginUnload(&ginPluginLibs[pluginIndex]));
+    NCCLCHECK(ncclGinPluginUnload(&pluginLibs[pluginIndex]));
   }
   return ncclSuccess;
 }
 
 ncclResult_t ncclGinInit(struct ncclComm* comm) {
-  bool ncclGinPluginInitialized = false;
   if (ncclParamGinEnable() == 0) {
-    INFO(NCCL_INIT|NCCL_NET, "GIN disabled by NCCL_GIN_ENABLE=0; skipping GIN plugin init");
+    INFO(NCCL_INIT | NCCL_NET, "GIN disabled by NCCL_GIN_ENABLE=0; skipping GIN plugin init");
     return ncclSuccess;
   }
+#if !defined(__HIP_PLATFORM_AMD__)
+  if (comm->compCap < 70) {
+    /* GIN only supported for Volta and later */
+    INFO(NCCL_INIT, "Compute Capability (%d) is not sufficient to enable GIN.  Require Volta (70) or newer.",
+         comm->compCap);
+    return ncclSuccess;
+  }
+#endif
+
+  bool initialized = false;
   std::call_once(initPluginLibsOnceFlag, initPluginLibsOnceFunc);
-  std::lock_guard<std::mutex> lock(ginPluginMutex);
+  std::lock_guard<std::mutex> lock(pluginMutex);
   for (int pluginIndex = 0; pluginIndex < pluginCount; pluginIndex++) {
     if (pluginIndex < (pluginCount - NCCL_GIN_NUM_INTERNAL_PLUGINS) &&
-        ginPluginLibs[pluginIndex].ncclGinPluginState == ncclGinPluginStateLoadReady) {
-      NCCLCHECK(ncclGinPluginLoad(&ginPluginLibs[pluginIndex]));
+        pluginLibs[pluginIndex].state == ncclGinPluginStateLoadReady) {
+      NCCLCHECK(ncclGinPluginLoad(&pluginLibs[pluginIndex]));
     }
-    if (ginPluginLibs[pluginIndex].ncclGinPluginState >= ncclGinPluginStateInitReady) {
+    if (pluginLibs[pluginIndex].state >= ncclGinPluginStateInitReady) {
       // plugin init must be done by all comms to setup the context, therefore we use ">="
-      NCCLCHECK(ncclGinPluginInit(comm, &ginPluginLibs[pluginIndex]));
-      if (ginPluginLibs[pluginIndex].ncclGinPluginState == ncclGinPluginStateEnabled) {
+      NCCLCHECK(ncclGinPluginInit(comm, &pluginLibs[pluginIndex]));
+      if (pluginLibs[pluginIndex].state == ncclGinPluginStateEnabled) {
         bool isAssigned = false;
         NCCLCHECK(ncclGinPluginAssignToComm(comm, pluginIndex, &isAssigned));
         if (isAssigned) {
           // If one external plugin is assigned to a comm, then disable all other external plugins
           ncclGinPluginDisableOtherExternal(pluginIndex);
-          ncclGinPluginInitialized = true;
+          initialized = true;
           break;
         } else {
           ncclGinPluginFinalize(comm, pluginIndex);
@@ -339,32 +363,29 @@ ncclResult_t ncclGinInit(struct ncclComm* comm) {
       }
     }
   }
-  if (!ncclGinPluginInitialized) INFO(NCCL_INIT | NCCL_NET, "Failed to initialize any GIN plugin");
+  if (!initialized) INFO(NCCL_INIT | NCCL_NET, "GIN/Plugin: Failed to initialize any GIN plugin");
   return ncclSuccess;
 }
 
 ncclResult_t ncclGinInitFromParent(struct ncclComm* comm, struct ncclComm* parent) {
   comm->ginContext = parent->ginContext;
-  comm->rmaGinContext = parent->rmaGinContext;
   comm->ginPluginIndex = parent->ginPluginIndex;
   return ncclSuccess;
 }
 
 ncclResult_t ncclGinFinalize(struct ncclComm* comm) {
   int pluginIndex = comm->ginPluginIndex;
-  std::lock_guard<std::mutex> lock(ginPluginMutex);
+  std::lock_guard<std::mutex> lock(pluginMutex);
   NCCLCHECK(ncclGinPluginFinalize(comm, pluginIndex));
   return ncclSuccess;
 }
 
-ncclResult_t ncclGinGetDevCount(int ginPluginIndex, int* nPhysDevs, int* nVirtDevs) {
-  if (ginPluginLibs[ginPluginIndex].ncclGinPluginState != ncclGinPluginStateEnabled ||
-      ginPluginLibs[ginPluginIndex].ginPhysDevs == 0)
-    goto fail;
+ncclResult_t ncclGinGetDevCount(int pluginIndex, int* nPhysDevs, int* nVirtDevs) {
+  if (pluginLibs[pluginIndex].state != ncclGinPluginStateEnabled || pluginLibs[pluginIndex].physDevs == 0) goto fail;
   // lock not needed as it's called within a lock already in ncclTopoGetSystem
-  *nPhysDevs = ginPluginLibs[ginPluginIndex].ginPhysDevs;
+  *nPhysDevs = pluginLibs[pluginIndex].physDevs;
   return ncclSuccess;
 fail:
-  WARN("%s: trying to access the number of devices of an uninitialized ginPlugin[%d]", __func__, ginPluginIndex);
+  WARN("trying to access the number of devices of an uninitialized ginPlugin[%d]", pluginIndex);
   return ncclInternalError;
 }

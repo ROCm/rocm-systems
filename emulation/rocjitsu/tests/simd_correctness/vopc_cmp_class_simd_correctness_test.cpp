@@ -18,6 +18,7 @@
 /// outcomes for every input incl. NaN payload), so the compare is bit-exact with
 /// no carve-out.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -221,7 +222,7 @@ void check_all(uint64_t exec) {
       uint32_t vsrc1 = (c.kind == Kind::F64) ? 2u : 1u; // f64 src0 spans v0:v1
       uint32_t enc = vopc_encode(c.opcode, /*src0=*/256, vsrc1);
       uint32_t words[4] = {enc, 0u, 0u, 0u};
-      Instruction *inst = fx.decoder->decode(words);
+      Instruction *inst = decode_valid(*fx.decoder, words);
       EXPECT_NE(inst, nullptr) << c.name << " decode failed";
       uint64_t vcc = fx.run(inst, c.kind, rot, exec, vcc_in);
       delete inst;
@@ -273,7 +274,7 @@ void check_all_vop3(uint64_t exec) {
           EXPECT_NE(fx.wf, nullptr);
           uint32_t words[4] = {0u, 0u, 0u, 0u};
           vop3_encode(c.opcode, /*vdst=*/kVccSdst, /*src0=*/256, src1, abs, neg, words);
-          Instruction *inst = fx.decoder->decode(words);
+          Instruction *inst = decode_valid(*fx.decoder, words);
           EXPECT_NE(inst, nullptr) << c.name << " decode failed";
           uint64_t vcc = fx.run(inst, c.kind, rot, exec, vcc_in);
           delete inst;

@@ -144,8 +144,8 @@ TEST_F(backend_test, query_record_counter_id_extracts_instance_id_from_record)
 {
     // For SDK v1+ (compile_time_version >= 10000), backend.hpp directly writes
     // record.id into counter_id->handle without making an SDK call.
-    counter_record rec{ counter_instance_id{ 42 }, 0.0 };
-    counter_id     out_id{};
+    const counter_record rec{ counter_instance_id{ 42 }, 0.0 };
+    counter_id           out_id{};
 
     EXPECT_EQ(sut::query_record_counter_id(rec, &out_id), sut::status_success);
     EXPECT_EQ(out_id.handle, std::uint64_t{ 42 });
@@ -153,7 +153,7 @@ TEST_F(backend_test, query_record_counter_id_extracts_instance_id_from_record)
 
 TEST_F(backend_test, query_record_counter_id_returns_error_for_null_output)
 {
-    counter_record rec{ counter_instance_id{ 42 }, 0.0 };
+    const counter_record rec{ counter_instance_id{ 42 }, 0.0 };
 
     EXPECT_EQ(sut::query_record_counter_id(rec, nullptr),
               mock_sdk::STATUS_ERROR_INVALID_ARGUMENT);
@@ -653,6 +653,126 @@ TEST_F(backend_test, iterate_counter_dimensions_throws_on_sdk_error)
 
     EXPECT_THROW(sut::iterate_counter_dimensions(cid, nullptr, nullptr),
                  std::runtime_error);
+}
+
+// ─── Cached SDK-query methods (get_version / tracing names) ──────────────────
+//
+// Each cached method needs its own Sdk type per test — sharing mock_sdk (and
+// therefore `sut`) would let one test's cached result leak into another.
+
+template <int Tag>
+struct tagged_mock_sdk : mock_sdk
+{};
+
+constexpr int version_cache_tag_id        = 1;
+constexpr int callback_names_cache_tag_id = 2;
+constexpr int buffer_names_cache_tag_id   = 3;
+constexpr int version_match_tag_id        = 4;
+constexpr int version_mismatch_tag_id     = 5;
+
+using version_cache_tag        = tagged_mock_sdk<version_cache_tag_id>;
+using callback_names_cache_tag = tagged_mock_sdk<callback_names_cache_tag_id>;
+using buffer_names_cache_tag   = tagged_mock_sdk<buffer_names_cache_tag_id>;
+using version_match_tag        = tagged_mock_sdk<version_match_tag_id>;
+using version_mismatch_tag     = tagged_mock_sdk<version_mismatch_tag_id>;
+
+TEST_F(backend_test, get_version_caches_after_first_call)
+{
+    EXPECT_CALL(*g_mock_sdk, get_version(gm::_, gm::_, gm::_))
+        .Times(1)
+        .WillOnce(gm::DoAll(gm::SetArgPointee<0>(1), gm::SetArgPointee<1>(2),
+                            gm::SetArgPointee<2>(3),
+                            gm::Return(mock_sdk::STATUS_SUCCESS)));
+
+    using sut_v = backend<version_cache_tag>;
+
+    std::uint32_t major = 0;
+    std::uint32_t minor = 0;
+    std::uint32_t patch = 0;
+    EXPECT_EQ(sut_v::get_version(&major, &minor, &patch), mock_sdk::STATUS_SUCCESS);
+    EXPECT_EQ(major, 1u);
+    EXPECT_EQ(minor, 2u);
+    EXPECT_EQ(patch, 3u);
+
+    // Second call must not hit the SDK again — the EXPECT_CALL above is Times(1).
+    major = 0;
+    minor = 0;
+    patch = 0;
+    EXPECT_EQ(sut_v::get_version(&major, &minor, &patch), mock_sdk::STATUS_SUCCESS);
+    EXPECT_EQ(major, 1u);
+    EXPECT_EQ(minor, 2u);
+    EXPECT_EQ(patch, 3u);
+}
+
+TEST_F(backend_test, get_callback_tracing_names_caches_after_first_call)
+{
+    auto table = name_info<>{};
+    table.emplace(1, "HIP_RUNTIME_API");
+    EXPECT_CALL(*g_mock_sdk, get_callback_tracing_names())
+        .Times(1)
+        .WillOnce(gm::Return(table));
+
+    using sut_cb = backend<callback_names_cache_tag>;
+
+    const auto& first  = sut_cb::get_callback_tracing_names();
+    const auto& second = sut_cb::get_callback_tracing_names();
+
+    EXPECT_EQ(&first, &second);
+    EXPECT_EQ(first[1].name, "HIP_RUNTIME_API");
+}
+
+TEST_F(backend_test, get_buffer_tracing_names_caches_after_first_call)
+{
+    auto table = name_info<>{};
+    table.emplace(2, "MEMORY_COPY");
+    EXPECT_CALL(*g_mock_sdk, get_buffer_tracing_names())
+        .Times(1)
+        .WillOnce(gm::Return(table));
+
+    using sut_buf = backend<buffer_names_cache_tag>;
+
+    const auto& first  = sut_buf::get_buffer_tracing_names();
+    const auto& second = sut_buf::get_buffer_tracing_names();
+
+    EXPECT_EQ(&first, &second);
+    EXPECT_EQ(first[2].name, "MEMORY_COPY");
+}
+
+TEST_F(backend_test, name_info_emplace_operation_overload_fills_gap_with_default_value)
+{
+    auto table = name_info<>{};
+    table.emplace(1, 0, "OP_A");
+    table.emplace(1, 2, "OP_C");
+
+    const auto& operations = table[1].operations;
+    ASSERT_EQ(operations.size(), 3u);
+    EXPECT_EQ(operations.at(0), "OP_A");
+    EXPECT_EQ(operations.at(1), std::string_view{});
+    EXPECT_EQ(operations.at(2), "OP_C");
+}
+
+TEST_F(backend_test, check_version_compatibility_accepts_matching_runtime_version)
+{
+    // mock_sdk::compile_time_version == 10100u -> 1.1.0
+    EXPECT_CALL(*g_mock_sdk, get_version(gm::_, gm::_, gm::_))
+        .WillOnce(gm::DoAll(gm::SetArgPointee<0>(1), gm::SetArgPointee<1>(1),
+                            gm::SetArgPointee<2>(0),
+                            gm::Return(mock_sdk::STATUS_SUCCESS)));
+
+    using sut_v = backend<version_match_tag>;
+    EXPECT_NO_THROW(sut_v::check_version_compatibility());
+}
+
+TEST_F(backend_test, check_version_compatibility_throws_on_runtime_version_mismatch)
+{
+    // mock_sdk::compile_time_version == 10100u -> 1.1.0, runtime reports 1.2.0
+    EXPECT_CALL(*g_mock_sdk, get_version(gm::_, gm::_, gm::_))
+        .WillOnce(gm::DoAll(gm::SetArgPointee<0>(1), gm::SetArgPointee<1>(2),
+                            gm::SetArgPointee<2>(0),
+                            gm::Return(mock_sdk::STATUS_SUCCESS)));
+
+    using sut_v = backend<version_mismatch_tag>;
+    EXPECT_THROW(sut_v::check_version_compatibility(), std::runtime_error);
 }
 
 }  // namespace rocprofsys::backends::rocprofiler_sdk::testing

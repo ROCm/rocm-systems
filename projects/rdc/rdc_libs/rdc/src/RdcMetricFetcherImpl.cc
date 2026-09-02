@@ -300,7 +300,8 @@ void RdcMetricFetcherImpl::get_ecc_total(uint32_t gpu_index, rdc_field_t field_i
   if (!value) {
     return;
   }
-  for (uint32_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
+  // amdsmi_gpu_block_t is a 64-bit flag enum; a 32-bit counter wraps to 0 and never exits.
+  for (uint64_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
     err =
         amdsmi_get_gpu_ecc_status(processor_handle, static_cast<amdsmi_gpu_block_t>(b), &err_state);
     if (err != AMDSMI_STATUS_SUCCESS) {
@@ -412,7 +413,8 @@ void RdcMetricFetcherImpl::get_ecc_deferred_total(uint32_t gpu_index, rdc_field_
   amdsmi_status_t err = get_processor_handle_from_id(gpu_index, &processor_handle);
 
   uint64_t deferred_count = 0;
-  for (uint32_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
+  // amdsmi_gpu_block_t is a 64-bit flag enum; a 32-bit counter wraps to 0 and never exits.
+  for (uint64_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
     amdsmi_ras_err_state_t err_state = AMDSMI_RAS_ERR_STATE_INVALID;
     err =
         amdsmi_get_gpu_ecc_status(processor_handle, static_cast<amdsmi_gpu_block_t>(b), &err_state);
@@ -1599,6 +1601,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
   }
 }
 
+#ifdef ENABLE_ESMI_LIB
 rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_field_t field_id,
                                                     rdc_field_value* value) {
   amdsmi_processor_handle processor_handle = {};
@@ -1800,6 +1803,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_fiel
 
   return Smi2RdcError(static_cast<amdsmi_status_t>(value->status));
 }
+#endif  // ENABLE_ESMI_LIB
 
 rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field_t field_id,
                                                    rdc_field_value* value) {
@@ -1860,8 +1864,12 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
   value->field_id = field_id;
   value->status = AMDSMI_STATUS_NOT_SUPPORTED;
   if (info.device_type == RDC_DEVICE_TYPE_CPU) {
-    // don't care about partition for CPUs
+// don't care about partition for CPUs
+#ifdef ENABLE_ESMI_LIB
     status = fetch_cpu_field_(gpu_index, field_id, value);
+#else
+    status = RDC_ST_NOT_SUPPORTED;
+#endif
   } else if (info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {
     status = fetch_gpu_partition_field_(gpu_index, field_id, value);
   } else if (info.device_type == RDC_DEVICE_TYPE_GPU) {

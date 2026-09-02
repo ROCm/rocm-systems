@@ -82,7 +82,6 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/inc/amd_topology.h"
 #include "core/inc/exceptions.h"
 #include "core/inc/host_queue.h"
-#include "core/inc/hotswap.hpp"
 #include "core/inc/hsa_api_trace_int.h"
 #include "core/inc/hsa_ext_amd_impl.h"
 #include "core/inc/hsa_ext_interface.h"
@@ -90,6 +89,7 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/inc/signal.h"
 #include "core/util/memory.h"
 #include "core/util/os.h"
+#include "core/util/poll_backoff.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
 
 #ifndef HSA_VERSION_MAJOR
@@ -979,7 +979,7 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal, hsa_signal_cond
 
   asyncInfo->new_events.PushBack(signal, cond, value, handler, arg);
 
-  hsa_signal_handle(asyncInfo->control.wake)->StoreRelease(1);
+  hsa_signal_handle(asyncInfo->control.wake)->StoreReleaseAndNotify(1);
 
   return HSA_STATUS_SUCCESS;
 }
@@ -1773,11 +1773,11 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       mem_flags.Value = 0;
       mem_flags.ui32.CoarseGrain = 1;
       mem_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags, numNodes,
-                                    nodes)) != HSAKMT_STATUS_SUCCESS) {
+      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags,
+                                                numNodes, nodes)) != HSAKMT_STATUS_SUCCESS) {
         mem_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags, numNodes,
-                                      nodes)) != HSAKMT_STATUS_SUCCESS) {
+        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags,
+                                                  numNodes, nodes)) != HSAKMT_STATUS_SUCCESS) {
           HSAKMT_CALL(hsaKmtDeregisterMemory(importAddress));
           return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         }
@@ -2018,6 +2018,23 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // Process all signals on the CPU first
       bool finish = false;
       bool polling = false;
+      // Nap duration for the no-interrupt polling mode below (see
+      // core/util/poll_backoff.h). poll_nap_us is re-initialized here, i.e.
+      // once per outer-loop iteration (one per new wait batch), so the backoff
+      // only compounds within a single idle wait and every new wait starts
+      // again at the floor -- the escalated value cannot carry across waits.
+      // The ceiling depends on why we would be polling: with interrupts
+      // unavailable globally (WSL/dxg, DTIF, KFD 1.0, HSA_ENABLE_INTERRUPT=0)
+      // every signal is polling-only and a long nap costs only the napping
+      // wait's own observation latency. With interrupts available, polling can
+      // still be forced by a single EopEvent-less signal in the batch (an IPC
+      // signal or an internal DefaultSignal such as gang-copy signals); the
+      // nap then delays unrelated interrupt-backed handlers on this shared
+      // thread, so it is capped at the interrupt path's 200us active-poll
+      // window instead.
+      const int poll_nap_ceiling_us =
+          g_use_interrupt_wait ? kPollNapCeilingMixedUs : kPollNapCeilingUs;
+      int poll_nap_us = kPollNapFloorUs;
 
       while (!finish) {
         // If exception or WaitAny(), then finish with just one iterration
@@ -2107,6 +2124,25 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             break;
           }
+        } else if (polling && !finish) {
+          // No interrupt-backed event is available for at least one pending
+          // signal (PrepareInterrupt forced polling) -- on the WSL/dxg thunk
+          // that is every signal, since it implements no KFD events at all.
+          // Without a sleep this loop monopolizes a CPU core re-scanning the
+          // signal values for the whole lifetime of the async-events thread,
+          // idle or not; the two async-events threads cost ~2 cores in every
+          // process that has merely touched the GPU
+          // (https://github.com/ROCm/librocdxg/issues/60). Nap between scans,
+          // doubling from 20us up to poll_nap_ceiling_us (2ms when the whole
+          // runtime is polling-only, 200us when a mixed batch also carries
+          // interrupt-backed handlers this nap would delay -- see the ceiling
+          // selection above), so a wait that completes quickly keeps low
+          // observation latency while a long-lived idle wait costs almost no
+          // CPU. The nap is re-initialized at the outer-loop boundary (see
+          // poll_nap_us above), so the escalation only compounds within a
+          // single idle wait batch.
+          os::uSleep(poll_nap_us);
+          poll_nap_us = NextPollNapUs(poll_nap_us, poll_nap_ceiling_us);
         }
       }
     }
@@ -2146,6 +2182,31 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
 }
 
 void Runtime::AsyncEventsPool::clear() {
+  // The same lock alloc() and free() take. Without it this walks and releases
+  // block_list_, and empties free_list_, while another thread is still handing
+  // items out of them: ConcurrentAsyncEvents::Clear() runs on the async-event
+  // monitor thread, and application threads can be inside
+  // hsa_amd_signal_async_handler() -> PushBack() -> alloc() at the same moment.
+  // Not recursive, so this cannot self-deadlock: neither caller (the destructor,
+  // and ConcurrentAsyncEvents::Clear()) holds the lock.
+  //
+  // What this lock does not cover is an item alloc() already returned. That
+  // caller releases the lock before it runs item->init() and enqueues, so a
+  // clear() landing in between frees the block out from under that write. No
+  // lock here can close that window: the item outlives the critical section it
+  // came from. What closes it is the API contract. Both callers run only from
+  // teardown, reached from Runtime::Unload() under bootstrap_lock(), and the
+  // HSA specification leaves it undefined to call into the runtime concurrently
+  // with the hsa_shut_down() releasing the last reference, so in a conforming
+  // program no PushBack() is in flight by the time either runs. The runtime
+  // does not enforce that, though: IS_OPEN() reads ref_count_ once and holds
+  // nothing for the rest of the call, so a thread can pass it and then be
+  // descheduled while another tears the runtime down. Holding the lock here is
+  // what keeps that program from corrupting the pool's vectors outright, a far
+  // likelier and less debuggable failure than the item-lifetime window it
+  // leaves; it is not a substitute for callers quiescing before shutdown.
+  std::lock_guard<HybridMutex> lock(lock_);
+
   ifdebug {
     size_t capacity = 0;
     for (auto& block : block_list_) capacity += block.second;
@@ -2597,7 +2658,6 @@ hsa_status_t Runtime::Load() {
   }
 
   flag_.Refresh();
-  hotswap::ConfigureHotswapBackend();
 
   thunkLoader_ = new ThunkLoader();
   thunkLoader_->LoadThunkApiTable();
@@ -3062,18 +3122,20 @@ void Runtime::LoadTools() {
   }
 }
 
-// Load the rocjitsu backend through the existing HSA tool lifecycle. Keeping
-// its handle in tool_libs_ gives it the normal reverse-order OnUnload and
-// CloseTools handling without dedicated runtime state.
+// Load the rocjitsu hotswap hook through the existing HSA tool lifecycle.
+// Keeping its handle in tool_libs_ gives it the normal reverse-order OnUnload
+// and CloseTools handling without dedicated runtime state.
 hsa_status_t Runtime::LoadHotswapTool() {
-  if (!hotswap::IsRocjitsuHotswapEnabled()) return HSA_STATUS_SUCCESS;
+  if (flag().hotswap_disable()) return HSA_STATUS_SUCCESS;
 
   bool has_gfx1250_a0_agent = false;
   for (const Agent* agent : gpu_agents_) {
     char name[64] = {};
     hsa_status_t status = agent->GetInfo(HSA_AGENT_INFO_NAME, name);
     if (status != HSA_STATUS_SUCCESS) return status;
-    if (std::strcmp(name, "gfx1250") != 0) continue;
+    // A0 agents report the strict target name, so match both spellings; the ASIC
+    // revision below is the actual A0 discriminator.
+    if (std::strcmp(name, "gfx1250") != 0 && std::strcmp(name, "gfx1250-strict") != 0) continue;
 
     uint32_t asic_revision = 0;
     status = agent->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),
@@ -3178,7 +3240,7 @@ void Runtime::CloseTools() {
 
 void Runtime::AsyncEventsControl::Shutdown() {
   exit.store(true, std::memory_order_release);
-  hsa_signal_handle(wake)->StoreRelaxed(1);
+  hsa_signal_handle(wake)->StoreReleaseAndNotify(1);
   os::WaitForThread(thread_);
   os::CloseThread(thread_);
   thread_ = NULL;
@@ -4072,6 +4134,21 @@ void Runtime::ReleaseMemoryHandle(Runtime::MemoryHandle* handle) {
   memory_handles.erase(MemoryHandle::Convert(handle));
 }
 
+Agent* Runtime::KfdGttAnchorGpu() {
+  HSAuint32 node_id = 0;
+  HSAuint32 gpu_id = 0;
+  if (HSAKMT_CALL(hsaKmtGetDefaultHostGpu)(&node_id, &gpu_id) != HSAKMT_STATUS_SUCCESS) {
+    return nullptr;
+  }
+
+  auto it = agents_by_node_.find(node_id);
+  if (it == agents_by_node_.end() || it->second.empty()) {
+    return nullptr;
+  }
+
+  return it->second[0];
+}
+
 hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t size,
                                           MemoryRegion::AllocateFlags alloc_flags,
                                           uint64_t flags_unused,
@@ -4090,18 +4167,16 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     uint64_t offset;
     auto agentOwner = region->owner();
 
-    /* For CPU-owned memory, DRM operations require a GPU agent. Select
-    the first available GPU agent before calling CreateShareableHandle.
-    For device memory, use owner agent. */
+    /* CPU-owned host memory: DRM import requires a GPU agent; use libhsakmt
+     * first_gpu_mem (KFD GTT anchor). Device-owned: use owner agent. */
     core::Agent* agent_for_drm = agentOwner;
     core::Agent* drm_owner = nullptr;
     if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-      const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
-      if (gpus.empty()) {
+      agent_for_drm = core::Runtime::runtime_singleton_->KfdGttAnchorGpu();
+      if (agent_for_drm == nullptr) {
         region->Free(driver_handle);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
-      agent_for_drm = gpus.front();
       drm_owner = agent_for_drm;
     }
 
@@ -4308,9 +4383,9 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
     /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
      * The driver_handle created during import should have the correct mmap_offset. */
     if (mappedHandle->mem_handle->imported) {
-      const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
-      if (!gpus.empty()) {
-        agent = gpus.front();
+      core::Agent* drm_agent = core::Runtime::runtime_singleton_->KfdGttAnchorGpu();
+      if (drm_agent != nullptr) {
+        agent = drm_agent;
         agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
       }
     } else if (mappedHandle->mem_handle->region) {

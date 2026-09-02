@@ -17,6 +17,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <cfenv>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -412,12 +413,10 @@ TEST(UtilSimd, Fma_VectorMatchesScalar_BitExact) {
   }
 }
 
-// Toolchain guard for the 64-bit-lane VOP2 FMA SIMD fast path (v_fmac_f64,
-// SIMD_VOP2_FMA_F64). Same contract as the f32 Fma guard above, over
-// native<double>: util::stdx::fma must be the single-rounded fused operation
-// matching the scalar std::fma in the generated body. Sweeps full-range random
-// 64-bit patterns for all three operands, EXCLUDING NaN-input lanes (accepted
-// payload divergence). If a finite/Inf lane diverges, drop SIMD_VOP2_FMA_F64.
+// Toolchain guard for the native<double> stdx::fma primitive. Architectural
+// F64 execution declines this SIMD operation because MODE cannot be represented
+// exactly; this test documents the utility's narrower host-default rounding
+// contract. It excludes NaN-input lanes because payload propagation may differ.
 TEST(UtilSimd, FmaF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   using V = util::native<double>;
@@ -912,12 +911,37 @@ TEST(UtilSimd, CubeMa_F32_BitExact) {
 int16_t scalar_cvt_pknorm_i16(float f) {
   if (std::isnan(f))
     return 0;
-  return static_cast<int16_t>(std::clamp(f * 32767.0f, -32768.0f, 32767.0f));
+  float scaled = std::clamp(f * 32767.0f, -32768.0f, 32767.0f);
+  float lower = std::floor(scaled);
+  float fraction = scaled - lower;
+  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0f;
+  return static_cast<int16_t>(lower);
 }
 uint16_t scalar_cvt_pknorm_u16(float f) {
   if (std::isnan(f))
     return 0;
-  return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));
+  float scaled = std::clamp(f * 65535.0f, 0.0f, 65535.0f);
+  float lower = std::floor(scaled);
+  float fraction = scaled - lower;
+  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0f;
+  return static_cast<uint16_t>(lower);
+}
+
+TEST(UtilSimd, RoundToNearestEvenIgnoresHostRoundingMode) {
+  SKIP_IF_NO_SIMD();
+  const int original_mode = std::fegetround();
+  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    EXPECT_EQ(std::fesetround(mode), 0);
+    EXPECT_EQ(util::round_to_nearest_even(16383.5f), 16384.0f);
+    EXPECT_EQ(util::round_to_nearest_even(-16383.5f), -16384.0f);
+    util::native<float> input(32767.5f);
+    auto result = util::round_to_nearest_even_simd(input);
+    for (std::size_t lane = 0; lane < result.size(); ++lane)
+      EXPECT_EQ(result[lane], 32768.0f);
+  }
+  EXPECT_EQ(std::fesetround(original_mode), 0);
 }
 
 TEST(UtilSimd, CvtPkNormI16_F32_BitExact) {

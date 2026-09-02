@@ -31,16 +31,17 @@ use std::path::PathBuf;
 use mirage_core::agent::AgentDef;
 use mirage_core::common::{MaybeRef, SimpleValue};
 use mirage_core::config::OptionDef;
-use mirage_core::discovery::{self, LibSearch};
+use mirage_core::discovery::{self, LibSearch, RuntimeLocation};
 use mirage_core::emulator::{
-    EmulatorBackend, EmulatorBackendDef, EmulatorDef, EmulatorDescription, SupportStatus,
+    EmulatorBackend, EmulatorBackendDef, EmulatorDef, EmulatorDescription, RuntimeStatus,
+    SupportStatus,
 };
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::hardware::{gfx_name, gpu_gfx_versions};
 use mirage_core::plugin::PluginsDef;
 use mirage_core::profile::{FileMount, ProfileDef};
-use mirage_core::session::{SessionHealth, SessionId};
+use mirage_core::session::{SessionContext, SessionHealth};
 use mirage_core::topology::TopologyDef;
 
 /// The canonical name the DBT backend registers under (the value stored
@@ -76,6 +77,7 @@ pub const DBT_ISAS: &[(u32, &str)] = &[
 
 /// The rocjitsu DBT [`EmulatorBackend`]. Stateless; a single shared
 /// instance is registered in the emulator registry.
+#[derive(Debug)]
 pub struct RocjitsuDbt;
 
 impl EmulatorBackend for RocjitsuDbt {
@@ -91,30 +93,19 @@ impl EmulatorBackend for RocjitsuDbt {
         options_schema()
     }
 
-    fn shutdown(&self, _session: &SessionId) {}
+    fn shutdown(&self, _ctx: &SessionContext) {}
 
     fn validate_profile(&self, def: &ProfileDef) -> std::result::Result<(), String> {
-        // Resolving the guest gfx version exercises the same topology +
-        // agent reference resolution the run path needs, so any error
-        // here is exactly what would otherwise surface at run time.
-        let gfx = guest_gfx_version(&def.emulator)
-            .map_err(|e| format!("rocjitsu-dbt cannot use this profile: {e}"))?;
-        // A source override (option or env) lets a caller name a guest
-        // ISA explicitly; otherwise the agent's gfx must be one the DBT
-        // translator can read.
-        if source_override(&def.emulator).is_none() && dbt_isa_name(gfx).is_none() {
-            return Err(format!(
-                "rocjitsu-dbt: guest {} (gfx_target_version {gfx}) is not a translatable \
-                 source ISA; supported: {}",
-                gfx_name(gfx),
-                supported_isa_list(),
-            ));
-        }
-        Ok(())
+        self.validate_profile_with(def, &ProcessEnv)
     }
 
-    fn installed(&self) -> bool {
-        is_installed()
+    fn runtime(&self) -> RuntimeStatus {
+        // The hook library is the whole of the DBT install, so one
+        // search answers both "installed?" and "where?" — and the
+        // trait's default `installed` takes the first of those from
+        // here, rather than an override running the identical search a
+        // second time.
+        RuntimeStatus::from_location(runtime_location())
     }
 
     fn supported(&self) -> SupportStatus {
@@ -125,7 +116,7 @@ impl EmulatorBackend for RocjitsuDbt {
         Vec::new()
     }
 
-    fn health(&self, _session: &SessionId) -> SessionHealth {
+    fn health(&self, _ctx: &SessionContext) -> SessionHealth {
         let installed = is_installed();
         let support = support_status();
         let healthy = installed && support.supported;
@@ -146,25 +137,94 @@ impl EmulatorBackend for RocjitsuDbt {
         }
     }
 
-    fn injection_def(&self, session: &SessionId) -> Result<InjectionDef> {
-        // The trait hands us only the session id, so recover the profile
-        // (and thus the emulator def) it was started with.
-        let profile = mirage_core::session::resolve_profile(session)?;
-        let def = &profile.emulator;
+    fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef> {
+        self.injection_def_with(ctx, &ProcessEnv)
+    }
+}
+
+impl RocjitsuDbt {
+    /// [`EmulatorBackend::validate_profile`] against an explicit
+    /// environment.
+    ///
+    /// Exists for the same reason [`Self::injection_def_with`] does. The
+    /// check consults `RJ_DBT_SOURCE_ISA`, a documented user-facing
+    /// override, so reading the *process* environment makes the test for
+    /// it fail for any developer who has it exported — and the
+    /// alternative, `remove_var`, is `unsafe` in Rust 2024 and races the
+    /// rest of the test binary. Threading the lookup through was done for
+    /// every other env-reading path in this file; this one was missed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming the problem when the profile's guest ISA
+    /// cannot be resolved or is not translatable.
+    pub fn validate_profile_with(
+        &self,
+        def: &ProfileDef,
+        env_lookup: &impl EnvLookup,
+    ) -> std::result::Result<(), String> {
+        // Resolving the guest gfx version exercises the same topology +
+        // agent reference resolution the run path needs, so any error
+        // here is exactly what would otherwise surface at run time.
+        let gfx = guest_gfx_version(&def.emulator)
+            .map_err(|e| format!("rocjitsu-dbt cannot use this profile: {e}"))?;
+        // A source override (option or env) lets a caller name a guest
+        // ISA explicitly; otherwise the agent's gfx must be one the DBT
+        // translator can read.
+        if source_override(&def.emulator, env_lookup).is_none() && dbt_isa_name(gfx).is_none() {
+            return Err(format!(
+                "rocjitsu-dbt: guest {} (gfx_target_version {gfx}) is not a translatable \
+                 source ISA; supported: {}",
+                gfx_name(gfx),
+                supported_isa_list(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// [`EmulatorBackend::injection_def`] against an explicit
+    /// environment.
+    ///
+    /// Every environment override this backend honours flows through
+    /// `env`, so a test can pin the hook library and both ISAs without
+    /// touching the process environment — which Rust 2024 makes `unsafe`
+    /// and which would race the rest of the test binary besides.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the HSA tools hook library cannot be found,
+    /// or when no target ISA can be determined.
+    pub fn injection_def_with(
+        &self,
+        ctx: &SessionContext,
+        env_lookup: &impl EnvLookup,
+    ) -> Result<InjectionDef> {
+        let def = ctx.emulator();
 
         // Refuse to run unemulated: without the hook there is nothing to
         // translate the guest code objects, so the workload would either
         // fail to load or silently run native code. Fail loudly instead.
-        let hooks = hooks_preload().ok_or_else(|| {
-            MirageError::Other(format!(
-                "rocjitsu-dbt: HSA tools hook library ({HOOKS_LIB_NAME}) not found; \
-                 cannot translate workload"
-            ))
-        })?;
+        let hooks = env_lookup
+            .get("ROCJITSU_HOOKS_LIB")
+            .map(PathBuf::from)
+            .filter(|p| p.is_file())
+            .or_else(hooks_preload)
+            .ok_or_else(|| {
+                // Was: "not found; cannot translate workload", naming no
+                // variable at all — strictly worse than the message the
+                // rocjitsu backend prints beside it.
+                let detail = runtime_location()
+                    .explain_missing()
+                    .unwrap_or_else(|| format!("{HOOKS_LIB_NAME} was not found"));
+                MirageError::Other(format!(
+                    "rocjitsu-dbt: HSA tools hook library ({HOOKS_LIB_NAME}) not \
+                     found; cannot translate workload — {detail}"
+                ))
+            })?;
 
         // The translator must know which physical GPU ISA to emit code
         // for. Without a target there is nothing to run on.
-        let target = resolve_target_isa(def).ok_or_else(|| {
+        let target = resolve_target_isa_with(def, env_lookup).ok_or_else(|| {
             MirageError::Other(format!(
                 "rocjitsu-dbt: no target ISA; set the `{OPT_TARGET_ISA}` option or \
                  RJ_DBT_TARGET_ISA, or run on a supported GPU (one of: {})",
@@ -172,7 +232,7 @@ impl EmulatorBackend for RocjitsuDbt {
             ))
         })?;
 
-        let containerized = profile.containerize.is_some();
+        let containerized = ctx.profile.containerize.is_some();
         // For a containerised session the workload runs inside a node
         // container that does not share the host filesystem, so the hook
         // library is bind-mounted in under the in-container lib dir (the
@@ -187,14 +247,12 @@ impl EmulatorBackend for RocjitsuDbt {
         let mut env = BTreeMap::new();
         env.insert("HSA_TOOLS_LIB".to_string(), hooks_in_workload.clone());
         env.insert("RJ_DBT_TARGET_ISA".to_string(), target);
-        if let Some(source) = resolve_source_isa(def) {
+        if let Some(source) = resolve_source_isa_with(def, env_lookup) {
             env.insert("RJ_DBT_SOURCE_ISA".to_string(), source);
         }
-        // Forward an explicit hook log level from the exec environment so
-        // a user can debug translation without editing the profile.
-        if let Ok(log) = std::env::var("RJ_DBT_LOG")
-            && !log.is_empty()
-        {
+        // Forward an explicit hook log level so a user can debug
+        // translation without editing the profile.
+        if let Some(log) = env_lookup.get("RJ_DBT_LOG") {
             env.insert("RJ_DBT_LOG".to_string(), log);
         }
 
@@ -303,26 +361,60 @@ fn guest_gfx_version(def: &EmulatorDef) -> Result<u32> {
     Ok(agent.vm.gpu.device.gfx_target_version)
 }
 
+/// How the ISA resolvers read environment overrides.
+///
+/// Threading the lookup through instead of calling [`std::env::var`]
+/// directly is what lets these be tested. Rust 2024 makes
+/// `std::env::set_var` `unsafe` — it is a data race against any other
+/// thread reading the environment — and the test binary is multi-threaded
+/// by default, so a test that mutated the process environment would be
+/// both unsound and able to perturb unrelated tests. With the lookup as a
+/// parameter, the tests pass a map and stay hermetic and parallel-safe.
+pub trait EnvLookup {
+    /// Value of `key`, or `None` if unset or empty.
+    fn get(&self, key: &str) -> Option<String>;
+}
+
+/// Reads the real process environment.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProcessEnv;
+
+impl EnvLookup for ProcessEnv {
+    fn get(&self, key: &str) -> Option<String> {
+        std::env::var(key).ok().filter(|v| !v.is_empty())
+    }
+}
+
+impl<F> EnvLookup for F
+where
+    F: Fn(&str) -> Option<String>,
+{
+    fn get(&self, key: &str) -> Option<String> {
+        self(key).filter(|v| !v.is_empty())
+    }
+}
+
 /// An explicit source-ISA override, from the `source_isa` option or the
 /// `RJ_DBT_SOURCE_ISA` environment variable (env wins). `None` when
 /// neither is set, in which case the guest is derived from the agent.
-fn source_override(def: &EmulatorDef) -> Option<String> {
-    if let Ok(value) = std::env::var("RJ_DBT_SOURCE_ISA")
-        && !value.is_empty()
-    {
-        return Some(value);
-    }
-    string_option(def, OPT_SOURCE_ISA)
+fn source_override(def: &EmulatorDef, env: &impl EnvLookup) -> Option<String> {
+    env.get("RJ_DBT_SOURCE_ISA")
+        .or_else(|| string_option(def, OPT_SOURCE_ISA))
 }
 
 /// Resolve the host ISA the workload's code objects are translated *to*.
 /// Priority: explicit `RJ_DBT_TARGET_ISA` env, then the `target_isa`
 /// option, then the first physically-present GPU the translator
 /// supports.
+#[must_use]
 pub fn resolve_target_isa(def: &EmulatorDef) -> Option<String> {
-    if let Ok(value) = std::env::var("RJ_DBT_TARGET_ISA")
-        && !value.is_empty()
-    {
+    resolve_target_isa_with(def, &ProcessEnv)
+}
+
+/// [`resolve_target_isa`] against an explicit environment.
+#[must_use]
+pub fn resolve_target_isa_with(def: &EmulatorDef, env: &impl EnvLookup) -> Option<String> {
+    if let Some(value) = env.get("RJ_DBT_TARGET_ISA") {
         return Some(value);
     }
     if let Some(value) = string_option(def, OPT_TARGET_ISA) {
@@ -339,8 +431,15 @@ pub fn resolve_target_isa(def: &EmulatorDef) -> Option<String> {
 /// explicit override (option or env), then the profile agent's gfx
 /// target. `None` when no override is set and the agent cannot be
 /// resolved or its gfx is not translatable.
+#[must_use]
 pub fn resolve_source_isa(def: &EmulatorDef) -> Option<String> {
-    if let Some(value) = source_override(def) {
+    resolve_source_isa_with(def, &ProcessEnv)
+}
+
+/// [`resolve_source_isa`] against an explicit environment.
+#[must_use]
+pub fn resolve_source_isa_with(def: &EmulatorDef, env: &impl EnvLookup) -> Option<String> {
+    if let Some(value) = source_override(def, env) {
         return Some(value);
     }
     guest_gfx_version(def)
@@ -379,6 +478,15 @@ fn hooks_lib_search() -> LibSearch<'static> {
 /// the shared discovery search.
 pub fn hooks_preload() -> Option<PathBuf> {
     discovery::find_emulator_lib(&hooks_lib_search())
+}
+
+/// Where `librocjitsu_hooks.so` is on this machine, or — when it is not
+/// here — the locations that were searched for it. The reporting form of
+/// [`hooks_preload`], so what `mirage emulators -l` shows and what the
+/// backend actually probes are the same search.
+#[must_use]
+pub fn runtime_location() -> RuntimeLocation {
+    discovery::locate_emulator_lib(&hooks_lib_search())
 }
 
 /// Returns true if the rocjitsu HSA tools hook library is reachable on
@@ -420,9 +528,23 @@ pub fn support_status() -> SupportStatus {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
     use super::*;
     use mirage_core::common::SimpleValue;
     use mirage_core::emulator::ExecMode;
+
+    #[test]
+    fn the_installed_flag_and_the_located_library_are_one_answer() {
+        // The hook library is the whole of the DBT install, so the
+        // search that finds it settles both halves. `installed` is left
+        // to the trait rather than overridden with `is_installed()`,
+        // which ran that identical search again and could therefore
+        // only agree or be a bug.
+        let backend = RocjitsuDbt;
+        assert_eq!(backend.installed(), backend.runtime().installed);
+        assert_eq!(backend.installed(), is_installed());
+    }
 
     fn def_with(topology: MaybeRef<TopologyDef>) -> EmulatorDef {
         EmulatorDef {
@@ -450,13 +572,38 @@ mod tests {
         assert_eq!(backend.description().name, NAME);
     }
 
+    /// An environment containing exactly the given pairs.
+    ///
+    /// These tests used to call `std::env::set_var`, which Rust 2024
+    /// makes `unsafe` because it races every other thread reading the
+    /// environment — and the test harness is multi-threaded. Passing the
+    /// lookup in keeps them sound, hermetic and parallel-safe.
+    fn env_of(pairs: &[(&str, &str)]) -> impl EnvLookup + use<> {
+        let map: std::collections::HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        move |key: &str| map.get(key).cloned()
+    }
+
+    fn empty_env() -> impl EnvLookup {
+        env_of(&[])
+    }
+
     #[test]
     fn target_isa_prefers_env_override() {
-        let def = def_with(MaybeRef::Ref("unused".to_string()));
-        // SAFETY: single-threaded test; restored before returning.
-        unsafe { std::env::set_var("RJ_DBT_TARGET_ISA", "gfx1201") };
-        assert_eq!(resolve_target_isa(&def), Some("gfx1201".to_string()));
-        unsafe { std::env::remove_var("RJ_DBT_TARGET_ISA") };
+        let mut def = def_with(MaybeRef::Ref("unused".to_string()));
+        // The option is set too, so this proves precedence rather than
+        // merely that the env is read at all.
+        def.options.insert(
+            OPT_TARGET_ISA.to_string(),
+            SimpleValue::String("gfx942".to_string()),
+        );
+        let env = env_of(&[("RJ_DBT_TARGET_ISA", "gfx1201")]);
+        assert_eq!(
+            resolve_target_isa_with(&def, &env),
+            Some("gfx1201".to_string())
+        );
     }
 
     #[test]
@@ -466,9 +613,26 @@ mod tests {
             OPT_TARGET_ISA.to_string(),
             SimpleValue::String("gfx942".to_string()),
         );
-        // Ensure no stray env override is present.
-        unsafe { std::env::remove_var("RJ_DBT_TARGET_ISA") };
-        assert_eq!(resolve_target_isa(&def), Some("gfx942".to_string()));
+        assert_eq!(
+            resolve_target_isa_with(&def, &empty_env()),
+            Some("gfx942".to_string())
+        );
+    }
+
+    #[test]
+    fn an_empty_env_override_does_not_win() {
+        // `RJ_DBT_TARGET_ISA=` must read as unset, not as an empty ISA
+        // name that would be forwarded to the translator.
+        let mut def = def_with(MaybeRef::Ref("unused".to_string()));
+        def.options.insert(
+            OPT_TARGET_ISA.to_string(),
+            SimpleValue::String("gfx942".to_string()),
+        );
+        let env = env_of(&[("RJ_DBT_TARGET_ISA", "")]);
+        assert_eq!(
+            resolve_target_isa_with(&def, &env),
+            Some("gfx942".to_string())
+        );
     }
 
     #[test]
@@ -478,8 +642,24 @@ mod tests {
             OPT_SOURCE_ISA.to_string(),
             SimpleValue::String("gfx950".to_string()),
         );
-        unsafe { std::env::remove_var("RJ_DBT_SOURCE_ISA") };
-        assert_eq!(resolve_source_isa(&def), Some("gfx950".to_string()));
+        assert_eq!(
+            resolve_source_isa_with(&def, &empty_env()),
+            Some("gfx950".to_string())
+        );
+    }
+
+    #[test]
+    fn source_isa_env_overrides_the_option() {
+        let mut def = def_with(MaybeRef::Ref("does-not-exist".to_string()));
+        def.options.insert(
+            OPT_SOURCE_ISA.to_string(),
+            SimpleValue::String("gfx950".to_string()),
+        );
+        let env = env_of(&[("RJ_DBT_SOURCE_ISA", "gfx90a")]);
+        assert_eq!(
+            resolve_source_isa_with(&def, &env),
+            Some("gfx90a".to_string())
+        );
     }
 
     #[test]
@@ -487,7 +667,6 @@ mod tests {
         let _g = mirage_core::paths::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(tmp.path());
-        unsafe { std::env::remove_var("RJ_DBT_SOURCE_ISA") };
 
         // An owned gfx1250 (MI450X) agent: a valid mirage agent, but not
         // a DBT-translatable source.
@@ -504,7 +683,12 @@ mod tests {
             emulator: def_with(MaybeRef::Owned(topology)),
             containerize: None,
         };
-        let err = RocjitsuDbt.validate_profile(&profile).unwrap_err();
+        // Against an injected empty environment, not the process's:
+        // `RJ_DBT_SOURCE_ISA` is a documented override, so a developer
+        // who has it exported would otherwise fail this test.
+        let err = RocjitsuDbt
+            .validate_profile_with(&profile, &empty_env())
+            .unwrap_err();
         assert!(err.contains("not a translatable"), "unexpected: {err}");
     }
 
@@ -513,7 +697,6 @@ mod tests {
         let _g = mirage_core::paths::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(tmp.path());
-        unsafe { std::env::remove_var("RJ_DBT_SOURCE_ISA") };
 
         let mut agent = AgentDef::default();
         agent.vm.gpu.device.gfx_target_version = 90500; // gfx950
@@ -528,6 +711,10 @@ mod tests {
             emulator: def_with(MaybeRef::Owned(topology)),
             containerize: None,
         };
-        assert!(RocjitsuDbt.validate_profile(&profile).is_ok());
+        assert!(
+            RocjitsuDbt
+                .validate_profile_with(&profile, &empty_env())
+                .is_ok()
+        );
     }
 }

@@ -17,6 +17,7 @@ import re
 
 if TYPE_CHECKING:
     from amdisa.gpuisa import IsaSpec
+    from amdisa.isa_profile import IsaProfile
 
 
 @dataclass
@@ -352,21 +353,24 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
     }
     if name in _SPLIT_WAIT:
         return InstructionSemantics(name, 'wait_counter', operation=name[2:].lower())
-    # S_BARRIER_WAIT uses the existing whole-workgroup barrier model for the
-    # common split form where S_BARRIER_SIGNAL is immediately followed by
-    # S_BARRIER_WAIT. Arrival accounting and named-barrier ids are not modeled
-    # yet: signal stays a no-op, wait parks the wavefront, and CU release logic
-    # keys only on all non-halted sibling waves in the same workgroup.
-    if name in ('S_BARRIER', 'S_BARRIER_WAIT'):
+    if name == 'S_BARRIER':
         return InstructionSemantics(name, 'barrier')
+    if name == 'S_BARRIER_WAIT':
+        return InstructionSemantics(name, 'scalar_barrier_wait')
+    if name == 'S_BARRIER_LEAVE':
+        return InstructionSemantics(name, 'scalar_barrier_leave', sets_scc='nonzero')
 
     if name == 'S_SET_GPR_IDX_OFF':
         return InstructionSemantics(name, 'gpr_idx', operation='off')
     if name == 'S_SET_GPR_IDX_MODE':
         return InstructionSemantics(name, 'gpr_idx', operation='mode')
-    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_ICACHE_INV,
-    # S_INCPERFLEVEL, S_DECPERFLEVEL — all are either no-ops or system/debug
-    # instructions that don't affect compute simulation correctness.
+    # The instruction cache is not coherent with data writes, so self-modifying
+    # code is only visible to the fetcher once this instruction retires.
+    if name == 'S_ICACHE_INV':
+        return InstructionSemantics(name, 'icache_inv')
+    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_INCPERFLEVEL,
+    # S_DECPERFLEVEL — all are either no-ops or system/debug instructions that
+    # don't affect compute simulation correctness.
     return InstructionSemantics(name, 'true_nop')
 
 
@@ -419,11 +423,11 @@ _SOP1_SPECIAL = {
     'S_MOVRELSD_2': ('scalar_movrel', 'srcdst2'),
     'S_MOVRELSD_2_B32': ('scalar_movrel', 'srcdst2'),
     'S_SENDMSG_RTN': ('scalar_sendmsg_rtn', None),
-    'S_BARRIER_SIGNAL': ('true_nop', None),
-    'S_BARRIER_SIGNAL_ISFIRST': ('true_nop', None),
+    'S_BARRIER_SIGNAL_ISFIRST': ('scalar_barrier_signal', 'signal_isfirst'),
+    'S_BARRIER_SIGNAL': ('scalar_barrier_signal', 'signal'),
     'S_GET_BARRIER_STATE': ('scalar_barrier_state', None, 'b32'),
-    'S_BARRIER_INIT': ('true_nop', None),
-    'S_BARRIER_JOIN': ('true_nop', None),
+    'S_BARRIER_INIT': ('scalar_barrier_init', None),
+    'S_BARRIER_JOIN': ('scalar_barrier_join', None),
     'S_WAKEUP_BARRIER': ('true_nop', None),
     'S_ALLOC_VGPR': ('true_nop', None),
     'S_SLEEP_VAR': ('true_nop', None),
@@ -523,6 +527,8 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
                 scc = 'none'
             else:
                 scc = 'nonzero'
+        elif cls == 'scalar_barrier_signal' and op == 'signal_isfirst':
+            scc = 'nonzero'
         return InstructionSemantics(
             name, cls, operation=op, data_type=dtype, sets_scc=scc
         )
@@ -728,7 +734,7 @@ _VOP1_OP_MAP = {
     'V_READFIRSTLANE': ('vector_readfirstlane', None),
     'V_NOP': ('true_nop', None),
     'V_CLREXCP': ('true_nop', None),
-    'V_SAT_PK_U8_I16': ('nop', None),
+    'V_SAT_PK_U8_I16': ('vector_sat_pack', 'u8_i16'),
     'V_SCREEN_PARTITION_4SE': ('nop', None),
     'V_ACCVGPR_MOV': ('vector_mov', None),
     'V_CVT_F32_FP8': ('vector_unary', 'cvt_f32_fp8'),
@@ -765,7 +771,7 @@ _VOP1_OP_MAP = {
     'V_PRNG': ('true_nop', None),  # PRNG not simulated
     'V_PERMLANE16_SWAP': ('vector_permlane16_swap', None),
     'V_PERMLANE32_SWAP': ('vector_permlane32_swap', None),
-    'V_SWAPREL': ('nop', None),
+    'V_SWAPREL': ('vector_swaprel', None),
     'V_S_EXP': ('pseudo_scalar_unary', 'exp2'),
     'V_S_LOG': ('pseudo_scalar_unary', 'log2'),
     'V_S_RCP': ('pseudo_scalar_unary', 'rcp'),
@@ -793,12 +799,12 @@ _VOP1_OP_MAP = {
     # Relative addressing through M0.
     'V_MOVRELD': ('vector_movrel', 'dst'),
     'V_MOVRELS': ('vector_movrel', 'src'),
-    'V_MOVRELSD': ('nop', None),
-    'V_MOVRELSD2': ('nop', None),
-    'V_MOVRELSD2_B32': ('nop', None),
-    'V_MOVRELSD_2': ('nop', None),
-    'V_MOVRELSD_2_B32': ('nop', None),
-    'V_SWAP_REL': ('nop', None),
+    'V_MOVRELSD': ('vector_movrel', 'srcdst'),
+    'V_MOVRELSD2': ('vector_movrel', 'srcdst2'),
+    'V_MOVRELSD2_B32': ('vector_movrel', 'srcdst2'),
+    'V_MOVRELSD_2': ('vector_movrel', 'srcdst2'),
+    'V_MOVRELSD_2_B32': ('vector_movrel', 'srcdst2'),
+    'V_SWAP_REL': ('vector_swaprel', None),
     'V_PERMLANE64': ('vector_permlane64', None),
 }
 
@@ -819,6 +825,12 @@ def _derive_vop1(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'vector_unary', operation=bf16_transcendentals[name], data_type='bf16'
         )
+    sat_pack = {
+        'V_SAT_PK4_I4_I8': 'i4_i8',
+        'V_SAT_PK4_U4_U8': 'u4_u8',
+    }
+    if name in sat_pack:
+        return InstructionSemantics(name, 'vector_sat_pack', operation=sat_pack[name])
     packed_fp8_bf8_conversions = {
         'V_CVT_PK_F32_FP8': 'f32_fp8',
         'V_CVT_PK_F32_BF8': 'f32_bf8',
@@ -940,10 +952,10 @@ def _derive_vop2(name: str) -> InstructionSemantics | None:
         )
 
     # FMAMK / FMAAK / MADMK / MADAK - FMA/MAD with inline constant
-    if name == 'V_FMAMK_F32':
-        return InstructionSemantics(name, 'vector_fmamk', data_type='f32')
-    if name == 'V_FMAAK_F32':
-        return InstructionSemantics(name, 'vector_fmaak', data_type='f32')
+    if name in ('V_FMAMK_F32', 'V_FMAMK_F64'):
+        return InstructionSemantics(name, 'vector_fmamk', data_type=name[-3:].lower())
+    if name in ('V_FMAAK_F32', 'V_FMAAK_F64'):
+        return InstructionSemantics(name, 'vector_fmaak', data_type=name[-3:].lower())
     if name in ('V_MADMK_F16', 'V_FMAMK_F16'):
         return InstructionSemantics(name, 'vector_fmamk', data_type='f16')
     if name in ('V_MADAK_F16', 'V_FMAAK_F16'):
@@ -967,9 +979,9 @@ def _derive_vop2(name: str) -> InstructionSemantics | None:
             name, 'vector_binop', operation='mul', data_type='u16'
         )
 
-    # Packed FP16 FMA VOP2 form (the VOP3P form is functional).
+    # Packed FP16 fused multiply-accumulate VOP2 form.
     if name == 'V_PK_FMAC_F16':
-        return InstructionSemantics(name, 'nop')
+        return InstructionSemantics(name, 'pk_fmac_vop2', data_type='f16')
 
     # DOT product instructions
     if name == 'V_DOT2ACC_F32_F16':
@@ -1129,9 +1141,29 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
             name, 'vector_ternary', operation=_SAD_MAP[name], data_type='u32'
         )
 
-    # MQSAD (complex, rarely used) → nop
-    if name in ('V_MQSAD_PK_U16_U8', 'V_MQSAD_U32_U8', 'V_QSAD_PK_U16_U8'):
-        return InstructionSemantics(name, 'nop')
+    qsad = {
+        'V_QSAD_PK_U16_U8': 'sad_pk_u16',
+        'V_MQSAD_PK_U16_U8': 'msad_pk_u16',
+        'V_MQSAD_U32_U8': 'msad_u32',
+    }
+    if name in qsad:
+        return InstructionSemantics(name, 'vector_qsad', operation=qsad[name])
+
+    perm_pk16 = {
+        'V_PERM_PK16_B4_U4': 'b4',
+        'V_PERM_PK16_B6_U4': 'b6',
+        'V_PERM_PK16_B8_U4': 'b8',
+    }
+    if name in perm_pk16:
+        return InstructionSemantics(name, 'vector_perm_pk16', operation=perm_pk16[name])
+
+    # Bit count with accumulate: D.u32 = CountOneBits(S0.u32) + S1.u32. The MR
+    # ISA gives no pseudocode, so the generic stem table below would derive this
+    # as a plain unary popcount and silently drop S1 -- the same shape as the
+    # V_MBCNT_* pair right underneath, which is why it is classified the same
+    # way rather than as a 'vector_unary'.
+    if name == 'V_BCNT_U32_B32':
+        return InstructionSemantics(name, 'vector_bcnt', data_type='u32')
 
     # Masked bit count
     if name == 'V_MBCNT_LO_U32_B32':
@@ -1175,9 +1207,8 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     if name == 'V_CVT_PK_I16_I32':
         return InstructionSemantics(name, 'vector_cvt_pk', operation='i16_i32')
 
-    # Trig preop → nop (internal microcode helper)
     if name == 'V_TRIG_PREOP_F64':
-        return InstructionSemantics(name, 'nop')
+        return InstructionSemantics(name, 'vector_trig_preop', data_type='f64')
 
     # ── CDNA4 / RDNA4 new conversions ─────────────────────────────────
     if name == 'V_CVT_F32_BF16':
@@ -1229,7 +1260,9 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
             name, 'vector_ternary', operation='fma', data_type='f32'
         )
     if name == 'V_MULLIT_F32':
-        return InstructionSemantics(name, 'nop')
+        return InstructionSemantics(
+            name, 'vector_mullit', operation='mul_legacy', data_type='f32'
+        )
 
     # MAXMIN/MINMAX/MINIMUMMAXIMUM/MAXIMUMMINIMUM variants (all types)
     _CLAMP_TERNARY = {
@@ -1437,7 +1470,7 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
 
     # V_PK_FMAC_F16 VOP2 form — the VOP3P form is handled via _VOP3P_PK16_MAP.
     if name == 'V_PK_FMAC_F16':
-        return InstructionSemantics(name, 'nop')
+        return InstructionSemantics(name, 'pk_fmac_vop2', data_type='f16')
 
     # Legacy interpolation (CDNA1, RDNA1/2) — niche, not simulated
     if name.startswith('V_INTERP_P1') or name.startswith('V_INTERP_P2'):
@@ -1527,6 +1560,10 @@ _VOP3P_PK16_MAP = {
     'V_PK_MINIMUM_F16': ('pk_binop', 'min', 'f16'),
     'V_PK_MAXIMUM_F16': ('pk_binop', 'max', 'f16'),
     'V_PK_FMAC_F16': ('pk_ternary', 'fmac', 'f16'),
+    'V_PK_ADD_MAX_I16': ('pk_ternary', 'add_max_sat', 'i16'),
+    'V_PK_ADD_MAX_U16': ('pk_ternary', 'add_max_sat', 'u16'),
+    'V_PK_ADD_MIN_I16': ('pk_ternary', 'add_min_sat', 'i16'),
+    'V_PK_ADD_MIN_U16': ('pk_ternary', 'add_min_sat', 'u16'),
     'V_PK_FMA_BF16': ('pk_ternary', 'fma', 'bf16'),
     'V_PK_ADD_BF16': ('pk_binop', 'add', 'bf16'),
     'V_PK_MUL_BF16': ('pk_binop', 'mul', 'bf16'),
@@ -1565,6 +1602,10 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
     if name == 'V_PK_ADD_F32':
         return InstructionSemantics(
             name, 'pk_binop_f32', operation='add', data_type='f32'
+        )
+    if name == 'V_PK_LSHL_ADD_U64':
+        return InstructionSemantics(
+            name, 'pk_lshl_add_u64', operation='lshl_add', data_type='u64'
         )
     if name == 'V_PK_MOV_B32':
         return InstructionSemantics(name, 'pk_mov_b32')
@@ -1788,10 +1829,16 @@ _FLAT_DATA_MAP: dict[str, tuple[int, int, bool]] = {
 _TRANSPOSE_LOAD_MAP: dict[str, tuple[str, int, int, int]] = {
     # suffix -> (semantic suffix, elem_size, num_elems, transpose kind)
     # elem_size/num_elems describe the raw VGPR result size in dwords.
+    # transpose kind is amdgpu::TransposeKind: TR_B4=1, TR_B6=2,
+    # B64_TR_B8=3 (CDNA4 MFMA default), TR16_B128=4, B64_TR_B16=5,
+    # WMMA_TR_B8=6 (RDNA4 16x16 matrix layout), and
+    # CDNA5_DS_TR_B8=7 (gfx1250 DS matrix layout). All textual aliases use the
+    # same default here; instruction-family and ISA-profile overrides below
+    # select the architecture's routing.
     'B64_TR_B4': ('b4', 4, 2, 1),
     'B96_TR_B6': ('b6', 4, 3, 2),
     'B64_TR_B8': ('b8', 4, 2, 3),
-    'B64_TR_B16': ('b16', 4, 2, 4),
+    'B64_TR_B16': ('b16', 4, 2, 5),
     'TR4_B64': ('b4', 4, 2, 1),
     'TR6_B96': ('b6', 4, 3, 2),
     'TR8_B64': ('b8', 4, 2, 3),
@@ -2004,7 +2051,9 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
             if prefix == 'GLOBAL_LOAD_':
                 transpose_info = _derive_transpose_load_info(upper)
                 if transpose_info:
-                    _, esz, ne, transpose_kind = transpose_info
+                    kind, esz, ne, transpose_kind = transpose_info
+                    if kind == 'b8':
+                        transpose_kind = 6
                     return InstructionSemantics(
                         name,
                         'flat_load',
@@ -2549,7 +2598,9 @@ _ENC_DERIVE = {
 }
 
 
-def derive_semantics(name: str, enc_name: str) -> InstructionSemantics | None:
+def derive_semantics(
+    name: str, enc_name: str, profile: IsaProfile | None = None
+) -> InstructionSemantics | None:
     """Derive execution semantics for an instruction from its name and encoding.
 
     The encoding format name selects a format-specific derivation function
@@ -2559,6 +2610,7 @@ def derive_semantics(name: str, enc_name: str) -> InstructionSemantics | None:
     Args:
         name: Instruction mnemonic (e.g. ``S_ADD_I32``).
         enc_name: Encoding format name (e.g. ``ENC_SOP2``, ``VOP3A``).
+        profile: Optional ISA profile for architecture-specific semantic data.
 
     Returns:
         InstructionSemantics if the instruction could be classified, or
@@ -2585,6 +2637,23 @@ def derive_semantics(name: str, enc_name: str) -> InstructionSemantics | None:
             sem = fallback(name)
             if sem is not None:
                 break
+
+    if (
+        sem is not None
+        and profile is not None
+        and sem.semantic_class == 'ds_read_tr_b8'
+    ):
+        sem = replace(sem, transpose_kind=profile.ds_b8_transpose_kind)
+
+    if (
+        sem is not None
+        and profile is not None
+        and sem.semantic_class == 'flat_load'
+        and name.upper().startswith('GLOBAL_LOAD_')
+    ):
+        transpose_info = _derive_transpose_load_info(name.upper())
+        if transpose_info is not None and transpose_info[0] == 'b8':
+            sem = replace(sem, transpose_kind=profile.global_b8_transpose_kind)
 
     return sem
 
@@ -2625,7 +2694,7 @@ def derive_all_semantics(isa_spec: IsaSpec) -> SemanticsSpec:
                     data_type=data_type or None,
                 )
                 continue
-            sem = derive_semantics(inst.name, enc.enc_name)
+            sem = derive_semantics(inst.name, enc.enc_name, isa_spec.profile)
             if sem is not None:
                 semantic_class = class_overrides.get(inst.name)
                 if semantic_class is not None:

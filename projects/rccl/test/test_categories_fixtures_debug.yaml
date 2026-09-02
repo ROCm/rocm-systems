@@ -17,6 +17,7 @@ test_categories:
       - "ParameterApiTests.*"
       - "EnqueueTests.*"
       - "ProxyTests.*"
+      - "PatAGAlgorithmTests.*"
       - "Rcclwrap.*"
       - "TransportTest.*"
       - "ArgCheckTest.*"
@@ -28,12 +29,14 @@ test_categories:
       - "RcclCeAllReduceEligibility.*"
       - "CeAlltoAllvEligibilityTest.*"
       - "NetSocketTests.*"
+      - "NetBootstrapInterfaceTest.*"
       - "SocketPollTimeout.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
       - "NetDevsPolicyP2pNetTests.*"
       - "TopoTest.*"
       - "TopoNicFusionTests.*"
+      - "P2pMaxNchannels.*"
     exclude_windows:
       - "*"
     labels:

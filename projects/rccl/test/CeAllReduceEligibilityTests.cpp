@@ -259,7 +259,7 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
                     mock.comm.config.CTAPolicy = tc.ctaPolicy;
 
                     const bool result =
-                        rcclUseCeAllReduce(mock.get(), tc.count, tc.datatype, tc.op);
+                        rcclUseCeAllReduce(mock.get(), tc.count, tc.datatype, tc.op, /*acc=*/nullptr);
                     EXPECT_EQ(result, tc.expected) << tc.name;
                 })
                 .withEnvironment(env)

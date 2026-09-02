@@ -22,6 +22,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Swap) {
     HIP_SKIP_TEST("Skipping because fewer than 2 devices are available");
   }
 
+  skipMemcpyBatchAsyncIfAnyGfx1250();
+
   const int device_for_a = 0;
   const int device_for_b = 1;
   int can_access_peer_a_to_b = 0;
@@ -177,5 +179,80 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Multicast_Large) {
   const size_t size_in_bytes = 1024 * 1024;
 
   RunMulticastCopyP2pTest(count, size_in_bytes, 0, 1);
+}
+
+static void RunIndirectCopyP2pTest(unsigned int flags, size_t count, size_t size_in_bytes,
+                                   int device_for_src, int device_for_dst) {
+  const bool is_indirect_src = flags & hipMemcpyFlagExtOpIndirectSrc;
+  const bool is_indirect_dst = flags & hipMemcpyFlagExtOpIndirectDst;
+  const hipError_t expected_error =
+      getIndirectExpectedReturn(LinearAllocs::hipMalloc, LinearAllocs::hipMalloc, device_for_src,
+                                device_for_dst, device_for_dst);
+
+  EnablePeerAccess({{device_for_dst, device_for_src}});
+
+  IndirectCopyBuffers buffers =
+      makeIndirectCopyBuffers(count, size_in_bytes, LinearAllocs::hipMalloc,
+                              LinearAllocs::hipMalloc, device_for_src, device_for_dst);
+
+  for (size_t i = 0; i < count; ++i) {
+    if (is_indirect_src) {
+      HIP_CHECK(hipSetDevice(device_for_src));
+      buffers.batch_src_ptrs[i] =
+          addPointerSlot(buffers.slots, buffers.src_ptrs[i], LinearAllocs::hipMalloc);
+    }
+
+    if (is_indirect_dst) {
+      HIP_CHECK(hipSetDevice(device_for_dst));
+      buffers.batch_dst_ptrs[i] =
+          addPointerSlot(buffers.slots, buffers.dst_ptrs[i], LinearAllocs::hipMalloc);
+    }
+  }
+
+  HIP_CHECK(hipSetDevice(device_for_dst));
+  StreamGuard stream_guard(Streams::created);
+  std::vector<size_t> sizes(count, size_in_bytes);
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, flags};
+  size_t attrs_idxs[1] = {0};
+
+  HIP_CHECK_ERROR(hipMemcpyBatchAsync(buffers.batch_dst_ptrs.data(), buffers.batch_src_ptrs.data(),
+                                      sizes.data(), count, &attr, attrs_idxs, 1, nullptr,
+                                      stream_guard.stream()),
+                  expected_error);
+
+  if (expected_error == hipSuccess) {
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+    for (size_t i = 0; i < count; ++i) {
+      requireBufferEquals(buffers.dst_ptrs[i], buffers.initial_values[i], LinearAllocs::hipMalloc);
+    }
+  }
+
+  DisablePeerAccess({{device_for_dst, device_for_src}});
+}
+
+/**
+ * Cross-GPU batched copy that reaches its buffers through pointer slots, on the peer GPU for an
+ * indirect source and on the local GPU for an indirect destination.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_IndirectCopy) {
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+
+  int can_access_peer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 1, 0));
+
+  if (!can_access_peer) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+
+  const unsigned int flags =
+      GENERATE(as<unsigned int>{}, hipMemcpyFlagExtOpIndirectSrc, hipMemcpyFlagExtOpIndirectDst,
+               hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst);
+  const size_t count = GENERATE(1, 3, 8);
+  const size_t size_in_bytes = GENERATE(as<size_t>{}, 1, 63, 4096);
+  CAPTURE(flags, count, size_in_bytes);
+
+  RunIndirectCopyP2pTest(flags, count, size_in_bytes, 0, 1);
 }
 #endif

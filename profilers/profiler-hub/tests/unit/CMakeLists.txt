@@ -17,6 +17,12 @@ set(UNIT_TEST_SOURCES
 
 add_executable(profiler-hub_unit_tests ${UNIT_TEST_SOURCES})
 
+# gtest's TLS symbols need explicit pthread linkage under amd-llvm (clang/lld), which
+# gcc provided implicitly. Threads::Threads adapts: no flag where libc supplies pthread
+# (glibc >= 2.34), -pthread on older sysroots.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 target_link_libraries(
     profiler-hub_unit_tests
     PRIVATE
@@ -27,6 +33,7 @@ target_link_libraries(
         GTest::gmock
         spdlog::spdlog
         nlohmann_json::nlohmann_json
+        Threads::Threads
 )
 
 set(ROCPD_DB_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd.db)
@@ -51,34 +58,24 @@ target_include_directories(
         ${CMAKE_SOURCE_DIR}/source/queries
 )
 
-if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-    target_link_libraries(
-        profiler-hub_unit_tests
-        PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-    )
-
-    target_compile_definitions(
-        profiler-hub_unit_tests
-        PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
-    )
-else()
-    target_include_directories(
-        profiler-hub_unit_tests
-        PRIVATE ${SQL_SCHEMA_BINARY_DIR}
-    )
-
-    target_compile_definitions(
-        profiler-hub_unit_tests
-        PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
-    )
-endif()
+target_include_directories(
+    profiler-hub_unit_tests
+    PRIVATE ${SQL_SCHEMA_BINARY_DIR}
+)
 
 target_compile_features(profiler-hub_unit_tests PRIVATE cxx_std_17)
 
 if(PROFILER_HUB_ENABLE_COVERAGE)
     profiler_hub_add_coverage_flags(profiler-hub_unit_tests)
+endif()
+
+# ASAN: TheRock forces -shared-libsan fleet-wide but amd-llvm ships only the static asan
+# runtime, so link it statically here.
+if(
+    CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+    AND CMAKE_CXX_FLAGS MATCHES "-fsanitize=address"
+)
+    target_link_options(profiler-hub_unit_tests PRIVATE -static-libsan)
 endif()
 
 gtest_discover_tests(

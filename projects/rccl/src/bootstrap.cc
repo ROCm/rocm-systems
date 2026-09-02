@@ -431,9 +431,9 @@ struct extInfo {
 #define BOOTSTRAP_HANDLE(h, i) ((struct ncclBootstrapHandle*)((char*)h + i * NCCL_UNIQUE_ID_BYTES))
 
 // Bootstrap-side accept wrapper. ncclSocketAccept's default behavior
-// (retryOnBadMagic=true) loops internally on bad-magic events, which can
+// (retry=true) loops internally on bad-handshake events, which can
 // monopolize CPU and starve legitimate peer connects when a non-NCCL TCP
-// peer hits the bootstrap listen socket. We pass retryOnBadMagic=false and
+// peer hits the bootstrap listen socket. We pass retry=false and
 // drive the retry from here: close the rejected socket, yield 1ms, retry.
 // abortFlag is honored between iterations.
 static ncclResult_t bootstrapAccept(struct ncclSocket* sock, struct ncclSocket* listenSock,
@@ -443,8 +443,8 @@ static ncclResult_t bootstrapAccept(struct ncclSocket* sock, struct ncclSocket* 
       return ncclInternalError;
     }
     NCCLCHECK(ncclSocketInit(sock));
-    NCCLCHECK(ncclSocketAccept(sock, listenSock, /*retryOnBadMagic=*/false));
-    if (sock->state != ncclSocketStateBadMagic) return ncclSuccess;
+    NCCLCHECK(ncclSocketAccept(sock, listenSock, /*retry=*/false));
+    if (sock->state != ncclSocketStateBadHandshake) return ncclSuccess;
     INFO(NCCL_INIT | NCCL_NET, "bootstrap: rejected bad-magic peer connection on listen sock, retrying accept");
     (void)ncclSocketClose(sock);
     usleep(1000);
@@ -580,7 +580,8 @@ static void* bootstrapRoot(void* rargs) {
   BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_ROOT_SEND]);
   // here we need to send info only to my own local process
   for (int r = 0; r < n2send; ++r) {
-    // use nrecv to periodize: if 1 root, we will send the first one to the last one, if >1 roots we will send the additional one we have received
+    // use nrecv to periodize: if 1 root, we will send the first one to the last one,
+    // if >1 roots we will send the additional one we have received
     int next = BOOTSTRAP_PID(r + 1, nrecv);
     if (memcmp(&zeroAddress, &rankAddressesRoot[r], sizeof(union ncclSocketAddress)) != 0 &&
         memcmp(&zeroInfo, &rankInfo[next], sizeof(struct ringConnectInfo)) != 0) {
@@ -1113,7 +1114,8 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
   // Set magic: for grow existing ranks, receive from coordinator; otherwise use handle magic.
   // This is consistent with the magic created in ncclCommGetUniqueId.
   if (handles != NULL) {
-    comm->magic = state->magic = BOOTSTRAP_HANDLE(handles, 0)->magic; // state and comm magic set to the first magic ID
+    // state and comm magic set to the first magic ID
+    comm->magic = state->magic = BOOTSTRAP_HANDLE(handles, 0)->magic;
   } else if (parent != NULL) {
     comm->magic = state->magic = hashCombine(parent->magic, parent->childCount);
   } else {
@@ -1221,7 +1223,8 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
     NCCLCHECK(ncclSocketClose(&listenSockRoot));
   }
   if (parent && comm->isGrow && rank != parent->nRanks - 1) {
-    // Grow: Ranks 0 to N-2 use the parent bootstrap to recv connection information to the next rank. This is consistent with the bootstrapSend above.
+    // Grow: Ranks 0 to N-2 use the parent bootstrap to recv connection information to the next rank.
+    // This is consistent with the bootstrapSend above.
     NCCLCHECK(bootstrapRecv(parent->bootstrap, rank + 1, 0, &nextPeer, sizeof(nextPeer)));
   }
   BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_RECV]);
@@ -1274,8 +1277,8 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
 
   // Initialize RAS
   if (ncclParamRasEnable() == 1) {
-    // The RAS thread will take care of freeing the memory allocated below.
-    NCCLCHECK(ncclCalloc(&rasRanks, nranks));
+    // The RAS thread will take ownership after ncclRasAddRanks succeeds.
+    NCCLCHECKGOTO(ncclCalloc(&rasRanks, nranks), result, fail);
     memcpy(&rasRanks[rank].addr, &bootstrapNetIfAddr, sizeof(rasRanks[rank].addr));
     rasRanks[rank].pid = ncclOsGetPid();
     rasRanks[rank].cudaDev = comm->cudaDev;
@@ -1333,6 +1336,11 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
   if (ncclParamRasEnable() == 1 && performRasAddRanks) {
     if (ncclRasAddRanks(rasRanks, nranks) != ncclSuccess)
       INFO(NCCL_INIT | NCCL_RAS, "Continuing in spite of a RAS initialization error");
+    else
+      // Ownership of rasRanks has been handed off to the RAS thread, which frees it in
+      // rasLocalHandleAddRanks(). Clear our local pointer so the free() at exit does not
+      // double-free it (an async double-free that corrupts the heap).
+      rasRanks = nullptr;
   }
 
   BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_TOTAL]);
@@ -1342,6 +1350,7 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
        timers[BOOTSTRAP_INIT_TIME_SEND] / 1e9, timers[BOOTSTRAP_INIT_TIME_RECV] / 1e9,
        timers[BOOTSTRAP_INIT_TIME_RING] / 1e9, timers[BOOTSTRAP_INIT_TIME_DELAY] / 1e9);
 exit:
+  free(rasRanks);
   return result;
 fail:
   free(proxySocket);

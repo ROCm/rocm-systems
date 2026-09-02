@@ -23,8 +23,50 @@ THE SOFTWARE.
 #include "rocjpeg_vaapi_decoder.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <stdlib.h>
+
+#ifdef ROCJPEG_USE_DLOPEN_VA
+// ---------------------------------------------------------------------------
+// VA-API call redirection through the process-wide shared dlopen vtable.
+// All va*() calls in this translation unit are macro-redirected through
+// g_va_loader.load()->fn.*, resolving to the isolated librocm_sysdeps_va.so.2
+// loaded with RTLD_LOCAL | RTLD_DEEPBIND.  This prevents system libva.so.2
+// (e.g. loaded by libavcodec) from intercepting rocjpeg's VA calls.
+//
+// g_va_loader is std::atomic to make concurrent decoder construction/destruction
+// safe: all writes use release ordering and the destructor uses compare_exchange
+// to avoid clobbering a pointer already updated by a concurrent constructor.
+// ---------------------------------------------------------------------------
+static std::atomic<RocJpegVaapiLoader *> g_va_loader{nullptr};
+
+// clang-format off
+#define vaGetDisplayDRM(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaGetDisplayDRM(__VA_ARGS__))
+#define vaInitialize(...)             (g_va_loader.load(std::memory_order_acquire)->fn.vaInitialize(__VA_ARGS__))
+#define vaTerminate(...)              (g_va_loader.load(std::memory_order_acquire)->fn.vaTerminate(__VA_ARGS__))
+#define vaSetInfoCallback(...)        (g_va_loader.load(std::memory_order_acquire)->fn.vaSetInfoCallback(__VA_ARGS__))
+#define vaQueryVendorString(...)      (g_va_loader.load(std::memory_order_acquire)->fn.vaQueryVendorString(__VA_ARGS__))
+#define vaErrorStr(...)               (g_va_loader.load(std::memory_order_acquire)->fn.vaErrorStr(__VA_ARGS__))
+#define vaMaxNumEntrypoints(...)      (g_va_loader.load(std::memory_order_acquire)->fn.vaMaxNumEntrypoints(__VA_ARGS__))
+#define vaQueryConfigEntrypoints(...) (g_va_loader.load(std::memory_order_acquire)->fn.vaQueryConfigEntrypoints(__VA_ARGS__))
+#define vaGetConfigAttributes(...)    (g_va_loader.load(std::memory_order_acquire)->fn.vaGetConfigAttributes(__VA_ARGS__))
+#define vaCreateConfig(...)           (g_va_loader.load(std::memory_order_acquire)->fn.vaCreateConfig(__VA_ARGS__))
+#define vaDestroyConfig(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaDestroyConfig(__VA_ARGS__))
+#define vaQuerySurfaceAttributes(...) (g_va_loader.load(std::memory_order_acquire)->fn.vaQuerySurfaceAttributes(__VA_ARGS__))
+#define vaCreateSurfaces(...)         (g_va_loader.load(std::memory_order_acquire)->fn.vaCreateSurfaces(__VA_ARGS__))
+#define vaDestroySurfaces(...)        (g_va_loader.load(std::memory_order_acquire)->fn.vaDestroySurfaces(__VA_ARGS__))
+#define vaCreateContext(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaCreateContext(__VA_ARGS__))
+#define vaDestroyContext(...)         (g_va_loader.load(std::memory_order_acquire)->fn.vaDestroyContext(__VA_ARGS__))
+#define vaCreateBuffer(...)           (g_va_loader.load(std::memory_order_acquire)->fn.vaCreateBuffer(__VA_ARGS__))
+#define vaDestroyBuffer(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaDestroyBuffer(__VA_ARGS__))
+#define vaBeginPicture(...)           (g_va_loader.load(std::memory_order_acquire)->fn.vaBeginPicture(__VA_ARGS__))
+#define vaRenderPicture(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaRenderPicture(__VA_ARGS__))
+#define vaEndPicture(...)             (g_va_loader.load(std::memory_order_acquire)->fn.vaEndPicture(__VA_ARGS__))
+#define vaSyncSurface(...)            (g_va_loader.load(std::memory_order_acquire)->fn.vaSyncSurface(__VA_ARGS__))
+#define vaExportSurfaceHandle(...)    (g_va_loader.load(std::memory_order_acquire)->fn.vaExportSurfaceHandle(__VA_ARGS__))
+// clang-format on
+#endif // ROCJPEG_USE_DLOPEN_VA
 
 /**
  * @brief Default constructor for RocJpegVaapiMemoryPool class.
@@ -53,6 +95,7 @@ RocJpegVaapiMemoryPool::RocJpegVaapiMemoryPool() {
  * Finally, it resets the HIP interop structure for each entry in the memory pool.
  */
 void RocJpegVaapiMemoryPool::ReleaseResources() {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     VAStatus va_status;
     hipError_t hip_status;
     for (auto& pair : mem_pool_) {
@@ -159,6 +202,7 @@ bool RocJpegVaapiMemoryPool::DeleteIdleEntry() {
  * @return The status of the operation. Returns ROCJPEG_STATUS_SUCCESS if the operation is successful.
  */
 RocJpegStatus RocJpegVaapiMemoryPool::AddPoolEntry(uint32_t surface_format, const RocJpegVaapiMemPoolEntry& pool_entry) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     size_t total_mem_pool_size = GetTotalMemPoolSize();
     auto& entries = mem_pool_[surface_format];
     if (total_mem_pool_size < max_pool_size_) {
@@ -184,6 +228,7 @@ RocJpegStatus RocJpegVaapiMemoryPool::AddPoolEntry(uint32_t surface_format, cons
  * @return The matching `RocJpegVaapiMemPoolEntry` if found, or a default-initialized entry if not found.
  */
 RocJpegVaapiMemPoolEntry RocJpegVaapiMemoryPool::GetEntry(uint32_t surface_format, uint32_t image_width, uint32_t image_height, uint32_t num_surfaces) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     for (auto& entry : mem_pool_[surface_format]) {
         if (entry.image_width >= image_width && entry.image_height >= image_height && entry.va_surface_ids.size() == num_surfaces && entry.entry_status == kIdle) {
             entry.entry_status = kBusy;
@@ -194,6 +239,7 @@ RocJpegVaapiMemPoolEntry RocJpegVaapiMemoryPool::GetEntry(uint32_t surface_forma
 }
 
 bool RocJpegVaapiMemoryPool::FindSurfaceId(VASurfaceID surface_id) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     for (auto& pair : mem_pool_) {
         for (auto& entry : pair.second) {
             if (std::find(entry.va_surface_ids.begin(), entry.va_surface_ids.end(), surface_id) != entry.va_surface_ids.end()) {
@@ -221,6 +267,7 @@ bool RocJpegVaapiMemoryPool::FindSurfaceId(VASurfaceID surface_id) {
  *         ROCJPEG_STATUS_INVALID_PARAMETER if the requested surface_id is not found in the memory pool.
  */
 RocJpegStatus RocJpegVaapiMemoryPool::GetHipInteropMem(VASurfaceID surface_id, HipInteropDeviceMem& hip_interop) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     for (auto& pair : mem_pool_) {
         auto& entries = pair.second;
         auto it = std::find_if(entries.begin(), entries.end(),
@@ -319,6 +366,7 @@ RocJpegStatus RocJpegVaapiMemoryPool::GetHipInteropMem(VASurfaceID surface_id, H
 }
 
 bool RocJpegVaapiMemoryPool::SetSurfaceAsIdle(VASurfaceID surface_id) {
+    std::lock_guard<std::mutex> lock(pool_mutex_);
     for (auto& pair : mem_pool_) {
         for (auto& entry : pair.second) {
             if (std::find(entry.va_surface_ids.begin(), entry.va_surface_ids.end(), surface_id) != entry.va_surface_ids.end()) {
@@ -340,7 +388,12 @@ bool RocJpegVaapiMemoryPool::SetSurfaceAsIdle(VASurfaceID surface_id) {
 RocJpegVappiDecoder::RocJpegVappiDecoder(int device_id) : device_id_{device_id}, drm_fd_{-1}, min_picture_width_{64}, min_picture_height_{64},
     max_picture_width_{4096}, max_picture_height_{4096}, default_surface_width_{3840}, default_surface_height_{2160}, supports_modifiers_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_{VAProfileJPEGBaseline},
     vaapi_mem_pool_(std::make_unique<RocJpegVaapiMemoryPool>()), current_vcn_jpeg_spec_{}, va_picture_parameter_buf_id_{0}, va_quantization_matrix_buf_id_{0}, va_huffmantable_buf_id_{0},
-    va_slice_param_buf_id_{0}, va_slice_data_buf_id_{0} {};
+    va_slice_param_buf_id_{0}, va_slice_data_buf_id_{0} {
+#ifdef ROCJPEG_USE_DLOPEN_VA
+    va_loader_ = RocJpegVaapiLoader::GetShared();
+    g_va_loader.store(va_loader_.get(), std::memory_order_release);
+#endif
+};
 
 /**
  * @brief Destructor for the RocJpegVappiDecoder class.
@@ -380,6 +433,21 @@ RocJpegVappiDecoder::~RocJpegVappiDecoder() {
         }
 
     }
+#ifdef ROCJPEG_USE_DLOPEN_VA
+    // Only null the global when this is the last live decoder (use_count == 1).
+    // This prevents nulling g_va_loader while another decoder is still alive
+    // and making VA calls through it.
+    // The CAS adds a guard for the narrow race where a concurrent constructor
+    // has called GetShared() (incrementing use_count to 2 after our check, so
+    // our check was stale) and already stored its pointer to g_va_loader: in
+    // that case the CAS fails because g_va_loader no longer matches our
+    // expected value, and we leave the valid pointer untouched.
+    if (va_loader_.use_count() == 1) {
+        RocJpegVaapiLoader *expected = va_loader_.get();
+        g_va_loader.compare_exchange_strong(expected, nullptr, std::memory_order_release);
+    }
+    va_loader_.reset();
+#endif
 }
 
 /**

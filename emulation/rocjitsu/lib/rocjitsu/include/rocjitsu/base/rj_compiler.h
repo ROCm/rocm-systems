@@ -17,6 +17,15 @@
 /// @brief Marks a libc entry point interposed by the LD_PRELOAD shim for export.
 #define RJ_INTERPOSER_EXPORT RJ_API_EXPORT
 
+/// @brief Prevent a helper from being inlined into a performance-sensitive caller.
+#if defined(_MSC_VER)
+#define RJ_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define RJ_NOINLINE __attribute__((noinline))
+#else
+#define RJ_NOINLINE
+#endif
+
 /// @brief Suppress specific compiler warnings around third-party headers.
 ///
 /// Usage:

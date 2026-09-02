@@ -140,6 +140,23 @@ struct VecTrait<uint8_t> {
 };
 
 // *********************************************************************************
+// ncclCeLocalReduceBlocksT<T> -- launch block count for the reduce kernel.
+// Single source of the geometry: 1-D grid over the vectorized element space,
+// clamped to [1, NCCL_CE_REDUCE_MAX_BLOCKS] for CE DMA headroom. Redop-independent
+// (depends only on the per-type VecTrait W/GpuUnroll). Used by both the generated
+// launcher and the host-side reporting wrapper so live dispatch and reporting
+// never drift.
+// *********************************************************************************
+template <typename T>
+static inline int ncclCeLocalReduceBlocksT(size_t chunkElems) {
+  constexpr int threads = 256;
+  constexpr int UnrollFactor = VecTrait<T>::GpuUnroll;
+  return (int)std::clamp<size_t>((chunkElems / VecTrait<T>::W + (size_t)threads * UnrollFactor - 1) /
+                                   ((size_t)threads * UnrollFactor),
+                                 (size_t)1, (size_t)NCCL_CE_REDUCE_MAX_BLOCKS);
+}
+
+// *********************************************************************************
 // ReduceOp<T, RedOp> -- compile-time reduction functor
 // 0=Sum  1=Prod  2=Min  3=Max
 // *********************************************************************************

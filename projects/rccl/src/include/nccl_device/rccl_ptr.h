@@ -55,3 +55,12 @@ typedef __attribute__((address_space(1))) v4u* v4u_gptr;
 // "" means system scope, "agent" means device.  Adding this here because I don't think it's obvious otherwise that
 // "" means system scope.
 #define RCCL_SYSTEM_SYNCSCOPE ""
+
+// Observed on gfx1250: with a cuMem/VMM comm FIFO the LL/LL128 flag poll does not
+// observe peer writes under a non-temporal load, but does under scope:SCOPE_SYS.
+// Restricted to gfx1250, the only arch measured. Following up with HIP/compilers.
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && defined(__gfx1250__)
+#define RCCL_LL_FIFO_SYS_SCOPE_LOAD 1
+#else
+#define RCCL_LL_FIFO_SYS_SCOPE_LOAD 0
+#endif

@@ -13,7 +13,7 @@
 #include "internal_libs.hpp"
 #include "log.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <timemory/backends/process.hpp>
 #include <timemory/config.hpp>
@@ -34,6 +34,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iomanip>
 #include <iterator>
 #include <map>
@@ -414,7 +415,7 @@ main(int argc, char** argv)
 
     for(int i = 1; i < argc; ++i)
     {
-        string_t _arg = argv[i];
+        const string_t _arg = argv[i];
         if(_arg.length() == 2 && _arg == "--")
         {
             _argc        = i;
@@ -1192,9 +1193,9 @@ main(int argc, char** argv)
 
     if(_cmdv && _cmdv[0] && strlen(_cmdv[0]) > 0)
     {
-        auto _is_executable    = rocprofsys_get_is_executable(_cmdv[0], binary_rewrite);
-        std::string _cmdv_base = path::filename(_cmdv[0]);
-        auto        _has_lib_suffix = _cmdv_base.length() > 3 &&
+        auto _is_executable = rocprofsys_get_is_executable(_cmdv[0], binary_rewrite);
+        const std::string _cmdv_base      = path::filename(_cmdv[0]);
+        auto              _has_lib_suffix = _cmdv_base.length() > 3 &&
                                (_cmdv_base.find(".so.") != std::string::npos ||
                                 _cmdv_base.find(".so") == (_cmdv_base.length() - 3) ||
                                 _cmdv_base.find(".a") == (_cmdv_base.length() - 2));
@@ -1206,7 +1207,7 @@ main(int argc, char** argv)
             std::stringstream _separator{};
             // 20 is approximate length of '[rocprof-sys][exe] '
             // 32 is approximate length of 'Warning! "" is not executable!'
-            size_t _width =
+            const size_t _width =
                 std::min<size_t>(std::get<0>(tim::utility::console::get_columns()) - 20,
                                  strlen(_cmdv[0]) + 32);
             _separator.fill('=');
@@ -1379,7 +1380,7 @@ main(int argc, char** argv)
     }
 
     auto get_dyninst_option = [&](const std::string& _opt) {
-        bool _ret = dyninst_defs.find(_opt) != dyninst_defs.end();
+        const bool _ret = dyninst_defs.find(_opt) != dyninst_defs.end();
         verbprintf(dyninst_verb, "[dyninst-option]> %-20s = %4s\n", _opt.c_str(),
                    (_ret) ? "on" : "off");
         return _ret;
@@ -1740,11 +1741,6 @@ main(int argc, char** argv)
     if(!main_func && main_fname == "main")
         main_func = find_function(filtered_modules, "_main");
 
-    auto* user_start_func = find_function(filtered_modules, "rocprofsys_user_start_trace",
-                                          { "rocprofsys_user_start_thread_trace" });
-    auto* user_stop_func  = find_function(filtered_modules, "rocprofsys_user_stop_trace",
-                                          { "rocprofsys_user_stop_thread_trace" });
-
 #if ROCPROFSYS_USE_MPI > 0 || ROCPROFSYS_USE_MPI_HEADERS > 0
     // if any of the below MPI functions are found, enable MPI support
     for(const auto* itr :
@@ -2027,9 +2023,6 @@ main(int argc, char** argv)
 
     if(!binary_rewrite) env_vars.clear();
 
-    env_vars.emplace_back(
-        fmt::format("{}={}", rocprofsys::env_vars::INIT_ENABLED,
-                    (user_start_func && user_stop_func) ? "OFF" : "ON"));
     env_vars.emplace_back(fmt::format("{}={}", rocprofsys::env_vars::USE_MPIP,
                                       (binary_rewrite && use_mpi) ? "ON" : "OFF"));
     if(use_mpi)
@@ -2332,8 +2325,8 @@ main(int argc, char** argv)
     if(app_thread)
     {
         verbprintf(2, "Finalizing insertion set...\n");
-        bool modified = true;
-        bool success  = addr_space->finalizeInsertionSet(true, &modified);
+        bool       modified = true;
+        const bool success  = addr_space->finalizeInsertionSet(true, &modified);
         if(!success)
         {
             verbprintf(
@@ -2348,8 +2341,8 @@ main(int argc, char** argv)
                 std::advance(itr, _beg);
                 for(size_t i = _beg; i < _end; ++i, ++itr)
                     (*itr)(addr_space, entr_trace, entr_trace_args, exit_trace);
-                bool _modified = true;
-                bool _success  = addr_space->finalizeInsertionSet(true, &_modified);
+                bool       _modified = true;
+                const bool _success  = addr_space->finalizeInsertionSet(true, &_modified);
                 return _success;
             };
 
@@ -2488,15 +2481,21 @@ main(int argc, char** argv)
     int code = -1;
     if(binary_rewrite)
     {
-        const auto& outf = outfile;
-        if(outf.find('/') != string_t::npos)
+        const auto outdir = path::parent_path(outfile);
+        if(!outdir.empty())
         {
-            auto outdir = outf.substr(0, outf.find_last_of('/'));
-            tim::makedir(outdir);
+            try
+            {
+                std::filesystem::create_directories(outdir);
+            } catch(const std::filesystem::filesystem_error& e)
+            {
+                errprintf(0, "Failed to create output directory '%s': %s\n",
+                          outdir.c_str(), e.code().message().c_str());
+            }
         }
 
-        bool success = app_binary->writeFile(outfile.c_str());
-        code         = (success) ? EXIT_SUCCESS : EXIT_FAILURE;
+        const bool success = app_binary->writeFile(outfile.c_str());
+        code               = (success) ? EXIT_SUCCESS : EXIT_FAILURE;
         if(success)
         {
             verbprintf(0, "\n");
@@ -2565,13 +2564,13 @@ main(int argc, char** argv)
 
         if(!app_thread->isTerminated())
         {
-            pid_t cpid   = app_thread->getPid();
-            int   status = 0;
+            const pid_t cpid   = app_thread->getPid();
+            int         status = 0;
             app_thread->detach(true);
             do
             {
-                status  = 0;
-                pid_t w = waitpid(cpid, &status, WUNTRACED);
+                status        = 0;
+                const pid_t w = waitpid(cpid, &status, WUNTRACED);
                 if(w == -1)
                 {
                     perror("waitpid");
@@ -2872,7 +2871,7 @@ void
 find_dyn_api_rt()
 {
 #if defined(ROCPROFSYS_BUILD_DYNINST)
-    std::string _dyn_api_rt_base =
+    const std::string _dyn_api_rt_base =
         (binary_rewrite) ? "librocprof-sys-rt" : "libdyninstAPI_RT";
 #else
     std::string _dyn_api_rt_base = "libdyninstAPI_RT";
