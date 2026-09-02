@@ -23,6 +23,7 @@
 #include "allocator.h"
 #include "dev_runtime.h"
 #include "sym_kernels.h"
+#include "algorithms/gin/gin_alltoall.h"
 #include "ce_coll.h"
 #include "rma/rma.h"
 #include "argcheck.h"
@@ -942,6 +943,7 @@ struct ncclComm {
 
   struct ncclDevrState devrState; // The symmetric runtime state
   struct ncclSymkState symkState; // The symmetric kernels state (built on previous)
+  struct ncclGinA2AState ginA2AState; // GIN-SDMA alltoall state (private devComm)
 
   struct ncclMemManager* memManager; // Memory manager
   struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> suspendTaskQueue;
