@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
-project(profiler-hub VERSION 0.1.0)
+project(profiler-hub VERSION 0.2.0)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -314,23 +314,6 @@ endforeach()
 unset(_profiler_hub_dep_target)
 unset(_profiler_hub_dep_aliased)
 unset(_profiler_hub_dep_is_imported)
-if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-    # rocprofiler-sdk-rocpd is only ever discovered via find_package() (see
-    # cmake/rocprofiler-sdk-rocpd.cmake); unlike fmt/spdlog it has no in-tree
-    # FetchContent fallback, so the target is always IMPORTED here and needs
-    # no IMPORTED-ness check.
-    list(
-        APPEND profiler_hub_static_iface_libs
-        "$<INSTALL_INTERFACE:rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd>"
-    )
-    string(
-        APPEND profiler_hub_static_find_dependencies
-        "find_package(rocprofiler-sdk-rocpd QUIET)\n"
-        "if(NOT TARGET rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd)\n"
-        "    list(APPEND profiler-hub_static_MISSING_DEPENDENCIES \"rocprofiler-sdk-rocpd\")\n"
-        "endif()\n"
-    )
-endif()
 set_target_properties(
     profiler-hub-static
     PROPERTIES INTERFACE_LINK_LIBRARIES "${profiler_hub_static_iface_libs}"
