@@ -160,7 +160,6 @@ class TestOpenMPCG(RocprofsysTest):
 
 class TestOpenMPLU(RocprofsysTest):
     BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
-    BINARY_REWRITE_PASS_REGEX = ["\\|_omp_"]
     BINARY_REWRITE_FAIL_REGEX = ["0 instrumented loops in procedure"]
     DURATION_SAMPLING_PASS_REGEX = [
         r"Sampler for thread 0 will be triggered 1000\.0x per second of CPU-time",
@@ -191,10 +190,13 @@ class TestOpenMPLU(RocprofsysTest):
             env=env,
             binary_rewrite_args=self.BINARY_REWRITE_ARGS,
         )
+        # OMPT region names are not asserted here: they are only emitted when
+        # rocprofiler-sdk is initialized before the OpenMP runtime, an ordering
+        # rocprof-sys cannot guarantee. The fail regex below still proves the
+        # loop instrumentation ran.
         self.assert_regex(
             result,
             mode,
-            binary_rewrite_pass_regex=self.BINARY_REWRITE_PASS_REGEX,
             binary_rewrite_fail_regex=self.BINARY_REWRITE_FAIL_REGEX,
         )
 
@@ -272,13 +274,11 @@ class TestOpenMPFortran(RocprofsysTest):
             binary_rewrite_args=self.BINARY_REWRITE_ARGS,
             runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
         )
-        self.assert_regex(
-            result,
-            mode,
-            binary_rewrite_pass_regex=["omp_parallel"],
-            runtime_instrument_pass_regex=["omp_parallel"],
-            sys_run_pass_regex=["omp_parallel"],
-        )
+        # OMPT region names are not asserted here: they are only emitted when
+        # rocprofiler-sdk is initialized before the OpenMP runtime, an ordering
+        # rocprof-sys cannot guarantee. This still validates that each mode
+        # instruments and runs the OpenMP binary without aborting.
+        self.assert_regex(result, mode)
 
     @pytest.mark.parametrize(
         "mode",
