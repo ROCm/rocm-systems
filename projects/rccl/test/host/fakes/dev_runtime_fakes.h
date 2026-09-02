@@ -3,7 +3,7 @@
  *
  * See LICENSE.txt for license information
  *
- * Controllable seams exposed by DevRuntimeTestsStubs.cc.
+ * Controllable seams exposed by fakes/dev_runtime_fakes.cc.
  *
  * Each hook defaults to the success behaviour the rest of the suite relies on.
  * A test that needs a HIP VMM call to fail installs its own via ScopedHook
@@ -96,7 +96,7 @@ extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIO
 // Hands back an fd the caller must close; the default opens /dev/null.
 extern std::function<ncclResult_t(struct ncclComm*, int, void*, int*)> g_devrProxyClientGetFdBlocking;
 
-// Backs every NCCL_PARAM in the unit under test. DevRuntimeTests.cpp redefines
+// Backs every NCCL_PARAM in the unit under test. dev-runtime-test.cc redefines
 // the macro to call this instead of param.h's caching body, so a param's value
 // can differ between tests; the default returns the param's own default.
 // Takes the bare env name (no "NCCL_" prefix) and that default.

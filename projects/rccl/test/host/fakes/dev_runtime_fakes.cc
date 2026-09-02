@@ -3,7 +3,7 @@
  *
  * No-op host stubs for the dev_runtime micro-test binary.
  *
- * dev_runtime.cc is #included whole into DevRuntimeTests.cpp, which leaves
+ * dev_runtime.cc is #included whole into dev-runtime-test.cc, which leaves
  * undefined references to everything the translation unit calls but does not
  * define. These inert host-side definitions let the binary link without
  * librccl.so or a GPU. Real headers are included so every signature is checked
@@ -670,7 +670,7 @@ HIP_FAKE hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mod
 // not seams: no test asserts on the text of an error message, and a fixed
 // string keeps the WARN output readable.
 HIP_FAKE const char* hipGetErrorString(hipError_t err) {
-  return err == hipSuccess ? "hipSuccess" : "hipError (DevRuntimeTests fake)";
+  return err == hipSuccess ? "hipSuccess" : "hipError (dev-runtime-test fake)";
 }
 
 HIP_FAKE hipError_t hipGetLastError(void) { return hipSuccess; }

@@ -6,7 +6,7 @@
  * This translation unit #includes the (hipified) dev_runtime.cc source
  * directly so it can reach the file-static symMemory* helpers. It links no
  * librccl.so; every dependency the source references is satisfied by no-op
- * stubs in DevRuntimeTestsStubs.cc (including host-memory fakes for the HIP
+ * stubs in fakes/dev_runtime_fakes.cc (including host-memory fakes for the HIP
  * VMM driver API).
  *
  * Suites appear in the same order as the functions they cover in
@@ -4302,7 +4302,7 @@ TEST_F(DeepCopyDevCommRequirementsTest, FreeNull_IsSafe) {
 // getNcclVersionCompat picks the compatibility record covering the version the
 // caller compiled against, refusing a caller newer than the library.
 //
-// The compat table is three globals defined in DevRuntimeTestsStubs.cc, zeroed
+// The compat table is three globals defined in fakes/dev_runtime_fakes.cc, zeroed
 // there, so each test sets the version window it needs.
 
 class NcclVersionCompatTest : public ::testing::Test {
