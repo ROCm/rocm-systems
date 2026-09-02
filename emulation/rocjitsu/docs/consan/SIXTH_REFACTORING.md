@@ -500,3 +500,53 @@ substantial progress toward the campaign floor, but does not satisfy the
 3,000-line review floor or the fresh-audit completion criteria. Candidate
 selection therefore returns to the whole production codebase rather than
 continuing mechanically through low-density emission helpers.
+
+### 10.3 Macro-slice 3 (active): one authority for closed vocabularies
+
+The post-cutover candidate comparison rejected four more apparent large-file
+opportunities after semantic reads. The host report pipeline is already split
+into snapshot, mode decoder, mode analyzer, and mode renderer; most of its
+remaining volume is genuinely mode-specific evidence interpretation. Access
+and synchronization emitters share routing and placement mechanisms but not
+their entry, guest-replay, call-anchor, or evidence protocols; a common callback
+transaction would be union-shaped. The branch-only relay router already has one
+exact constraint solver reused by its batch and pair fallback paths, while its
+greedy path is a separately bounded escape hatch with observable work-budget
+semantics. Finally, `ConSanOptions` is a thin aggregate of six typed input
+contracts: splitting its 53-file read surface would add projections while
+deleting little. None supplies a credible 500-line replacement thesis.
+
+The selected opportunity is the closed-vocabulary representation repeated
+through ConSan's public contracts and host diagnostics. Many enums currently
+have three separately maintained authorities: the enum declaration, a complete
+iterable array, and a spelling switch. Other diagnostic enums omit the iterable
+array but repeat the same switch shape. The observation contract alone has 92
+such switch cases; request, capability, evidence, synchronization, result,
+pipeline, and hook vocabularies add hundreds more. Adding a value currently
+requires coordinated edits that the type system cannot connect, and every
+spelling switch spends two or more implementation lines restating the value
+inventory.
+
+The deletion thesis is:
+
+- replace each qualifying value-array/spelling-switch pair with one explicit
+  typed vocabulary whose entries contain the enum value and stable spelling;
+- make that vocabulary itself iterable as the enum values, so existing
+  exhaustive contract tests and loops retain their direct shape;
+- make name lookup and, where already applicable, parsing consume the same
+  entries rather than reconstructing another switch or string table;
+- keep semantic switches that compute policy, encoding, state transitions, or
+  validation decisions; this replacement applies only to closed vocabulary,
+  not arbitrary enum control flow; and
+- converge all qualifying production consumers in the same macro-slice and
+  delete every displaced spelling switch and parallel value array.
+
+The conservative target is at least 650 gross deleted implementation lines,
+no more than 150 lines of generic vocabulary support and migrated declarations,
+and therefore at least 500 net deleted lines. The attempt is abandoned if the
+typed vocabulary needs preprocessor generation, makes an enum harder to read,
+weakens invalid-value handling, changes a stable spelling, or falls below 500
+net lines after the complete qualifying family has converged. Focused tests
+exercise exhaustive iteration, every stable spelling, invalid sentinels, and
+existing parsers; the cutover gate remains the complete nonphysical RocJitsu
+matrix across all four modes and five emulated targets.
