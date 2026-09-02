@@ -600,6 +600,17 @@ protected:
   }
 };
 
+// dev_runtime.cc only ever asks whether ncclCuMemHandleType is the POSIX-FD
+// one (:329, :347); every other value takes the same shareable-handle
+// export/import branch, and the specific value is never inspected. So the
+// tests below that want that branch use any portable non-POSIX enumerator
+// rather than hipMemHandleTypeFabric, which only exists where the HIP runtime
+// exposes the fabric API -- the host-test CI image is ROCm 7.2, which does
+// not, and 0x8 is outside that runtime's enum range so it is not even
+// constant-expressible there. hipMemHandleTypeNone is in the same enum and
+// present in every ROCm version.
+static constexpr hipMemAllocationHandleType kMemHandleTypeNonPosix = hipMemHandleTypeNone;
+
 // Branch: POSIX-FD handles need no export, so the handle is stored directly.
 TEST_F(SymMemoryExportSegmentHandleTest, PosixFd_StoresHandleWithoutExporting) {
   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
@@ -616,8 +627,8 @@ TEST_F(SymMemoryExportSegmentHandleTest, PosixFd_StoresHandleWithoutExporting) {
 }
 
 // Branch: any other handle type takes the shareable-handle export path.
-TEST_F(SymMemoryExportSegmentHandleTest, FabricHandle_ExportsShareableHandle) {
-  ncclCuMemHandleType = hipMemHandleTypeFabric;
+TEST_F(SymMemoryExportSegmentHandleTest, NonPosixHandle_ExportsShareableHandle) {
+  ncclCuMemHandleType = kMemHandleTypeNonPosix;
   ScopedHook exportHandle(g_devrHipMemExportToShareableHandle,
                           [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
                              unsigned long long) { return hipSuccess; });
@@ -629,7 +640,7 @@ TEST_F(SymMemoryExportSegmentHandleTest, FabricHandle_ExportsShareableHandle) {
 
 // Branch: the export fails, so the second CUCHECKGOTO propagates the error.
 TEST_F(SymMemoryExportSegmentHandleTest, ExportFails_ReturnsError) {
-  ncclCuMemHandleType = hipMemHandleTypeFabric;
+  ncclCuMemHandleType = kMemHandleTypeNonPosix;
   ScopedHook exportHandle(g_devrHipMemExportToShareableHandle,
                           [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
                              unsigned long long) { return hipErrorInvalidValue; });
@@ -720,8 +731,8 @@ TEST_F(SymImportAndMapSegmentTest, PosixFd_ImportsThenReleases) {
 
 // Branch: any other handle type imports the fabric handle directly, with no
 // proxy round trip.
-TEST_F(SymImportAndMapSegmentTest, FabricHandle_ImportsWithoutProxy) {
-  ncclCuMemHandleType = hipMemHandleTypeFabric;
+TEST_F(SymImportAndMapSegmentTest, NonPosixHandle_ImportsWithoutProxy) {
+  ncclCuMemHandleType = kMemHandleTypeNonPosix;
   ScopedHook proxy(g_devrProxyClientGetFdBlocking,
                    [](ncclComm*, int, void*, int*) { return ncclSuccess; });
   ScopedHook import(g_devrHipMemImportFromShareableHandle,
@@ -749,7 +760,7 @@ TEST_F(SymImportAndMapSegmentTest, ProxyFdFails_ReturnsErrorWithoutImporting) {
 
 // Branch: the import itself fails.
 TEST_F(SymImportAndMapSegmentTest, ImportFails_ReturnsErrorWithoutMapping) {
-  ncclCuMemHandleType = hipMemHandleTypeFabric;
+  ncclCuMemHandleType = kMemHandleTypeNonPosix;
   ScopedHook import(g_devrHipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) {
                       return hipErrorInvalidValue;
@@ -827,7 +838,7 @@ TEST_F(SymImportAndMapSegmentTest, SetAccessFails_ReturnsError) {
 
 // Branch: the release of an imported handle fails.
 TEST_F(SymImportAndMapSegmentTest, ReleaseFails_ReturnsError) {
-  ncclCuMemHandleType = hipMemHandleTypeFabric;
+  ncclCuMemHandleType = kMemHandleTypeNonPosix;
   ScopedHook release(g_devrHipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
 
   EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
