@@ -188,8 +188,9 @@ hsa_status_t KfdDriver::QueryKernelModeDriver(core::DriverQuery query) {
 }
 
 // KERNEL_ALREADY_OPENED means another in-process consumer opened the thunk
-// first - on WSL, rocprofiler-sdk reading the KMT topology alongside this
-// runtime. It is success because hsaKmtOpenKFD()'s already-opened branch in
+// first - on WSL, amdsmi's opt-in WSL backend already reads the KMT topology
+// alongside this runtime, and rocprofiler-sdk joins it with #7016. It is
+// success because hsaKmtOpenKFD()'s already-opened branch in
 // libhsakmt/src/dxg/openclose.cpp increments dxg_open_count just as the first
 // open does: this driver holds a real reference and owes a real close. That is
 // why lifecycle_.Open() recording ownership here is correct and not a

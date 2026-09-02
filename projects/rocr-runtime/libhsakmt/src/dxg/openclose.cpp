@@ -737,8 +737,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
     dxg_runtime->dxg_open_count++;
 
     /* Only the 0->1 transition owns the suballocator. A later open comes from
-     * a second in-process consumer (on WSL, rocprofiler-sdk reading the KMT
-     * topology alongside the HSA runtime) and the first one's allocations are
+     * a second in-process consumer (on WSL, amdsmi's opt-in WSL backend reads
+     * the KMT topology alongside the HSA runtime today; the profiler's WSL
+     * topology reader will do the same) and the first one's allocations are
      * still live - resetting the fragment allocator here would throw away the
      * bookkeeping that tracks them. clear_after_fork() above resets it on the
      * one path where the inherited bookkeeping really is meaningless.
