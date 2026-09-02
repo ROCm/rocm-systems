@@ -240,43 +240,6 @@ namespace consan_detail {
 [[nodiscard]] bool has_recent_saveexec(std::span<const uint8_t> bytes,
                                        const ConSanMoiCandidate &candidate);
 
-/// Selects the one persistent representation that receives a dispatch ID at
-/// kernel entry.
-///
-/// The scalar and vector forms are alternatives, never simultaneous. An
-/// empty value means the current prologue does not capture dispatch identity.
-/// Keeping this choice typed prevents entry initialization from silently
-/// writing two independently configured representations of the same ID.
-class ConSanMoiDispatchIdCapture {
-public:
-  ConSanMoiDispatchIdCapture() = default;
-
-  [[nodiscard]] static ConSanMoiDispatchIdCapture in_sgprs(uint16_t base) {
-    return ConSanMoiDispatchIdCapture{Kind::Sgpr, base};
-  }
-  [[nodiscard]] static ConSanMoiDispatchIdCapture in_vgprs(uint16_t base) {
-    return ConSanMoiDispatchIdCapture{Kind::Vgpr, base};
-  }
-
-  [[nodiscard]] std::optional<uint16_t> sgpr() const {
-    return kind_ == Kind::Sgpr ? std::optional{base_} : std::nullopt;
-  }
-  [[nodiscard]] std::optional<uint16_t> vgpr() const {
-    return kind_ == Kind::Vgpr ? std::optional{base_} : std::nullopt;
-  }
-  [[nodiscard]] bool present() const { return kind_ != Kind::None; }
-
-  bool operator==(const ConSanMoiDispatchIdCapture &) const = default;
-
-private:
-  enum class Kind : uint8_t { None, Sgpr, Vgpr };
-
-  ConSanMoiDispatchIdCapture(Kind kind, uint16_t base) : kind_(kind), base_(base) {}
-
-  Kind kind_ = Kind::None;
-  uint16_t base_ = 0;
-};
-
 /// Complete semantic input to one private-state entry-initialization body.
 ///
 /// Placement constructs this plan after it has resolved the private layout,

@@ -1174,8 +1174,9 @@ TEST(ConSanMoi, AutoRecordReplayCapturesDispatchIdentityInPersistentVgprsAtScala
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  EXPECT_FALSE(prologue->dispatch_id_capture_sgpr);
-  EXPECT_EQ(prologue->dispatch_id_capture_vgpr, test_moi_dispatch_id_vgpr(result));
+  ASSERT_TRUE(prologue->dispatch_id_prologue);
+  EXPECT_FALSE(prologue->dispatch_id_prologue->capture.sgpr());
+  EXPECT_EQ(prologue->dispatch_id_prologue->capture.vgpr(), test_moi_dispatch_id_vgpr(result));
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -1232,13 +1233,14 @@ TEST(ConSanMoi, Gfx1100AutoRecordReplayCapturesDispatchIdentityInPersistentVgprs
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  EXPECT_EQ(prologue->dispatch_id_source_sgpr, 2u);
-  EXPECT_EQ(prologue->dispatch_id_original_user_sgpr_count, 15u);
-  EXPECT_EQ(prologue->dispatch_id_expanded_user_sgpr_count, 15u);
-  EXPECT_EQ(prologue->dispatch_id_kernarg_reload_count, 0u);
-  EXPECT_EQ(prologue->dispatch_id_shifted_guest_sgpr_count, 0u);
-  EXPECT_EQ(prologue->dispatch_id_shifted_system_sgpr_count, 0u);
-  EXPECT_EQ(prologue->dispatch_id_system_sgpr_shift, 0u);
+  ASSERT_TRUE(prologue->dispatch_id_prologue);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, 15u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, 15u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_count, 0u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.shifted_guest_sgpr_count, 0u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.shifted_system_sgpr_count, 0u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.system_sgpr_shift, 0u);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -1316,9 +1318,10 @@ TEST(ConSanMoi, Gfx1100FullVgprRecordReplayUsesPersistentScalarState) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  EXPECT_EQ(prologue->dispatch_id_capture_sgpr, test_moi_dispatch_id_sgpr(result));
-  EXPECT_FALSE(prologue->dispatch_id_capture_vgpr);
-  EXPECT_EQ(prologue->dispatch_id_source_sgpr, 2u);
+  ASSERT_TRUE(prologue->dispatch_id_prologue);
+  EXPECT_EQ(prologue->dispatch_id_prologue->capture.sgpr(), test_moi_dispatch_id_sgpr(result));
+  EXPECT_FALSE(prologue->dispatch_id_prologue->capture.vgpr());
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 2u);
 }
 
 TEST(ConSanMoi, Gfx1100RecordReplayRouteKeyDoesNotAliasPersistentEpoch) {

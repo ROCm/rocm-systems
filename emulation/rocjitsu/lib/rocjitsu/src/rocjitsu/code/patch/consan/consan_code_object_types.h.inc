@@ -669,26 +669,9 @@ struct ConSanPatchAbiEffects {
   ConSanMoiPersistentWorkgroupPrivateOffsets persistent_record_replay_workgroup_private_offsets;
   /// First private byte available after all persistent MOI state.
   std::optional<uint32_t> persistent_private_state_end;
-  /// Persistent instrumentation-owned register pair receiving the full
-  /// hardware dispatch ID at kernel entry. Exactly one representation is
-  /// present, and either proves that the prologue checked the preload map.
-  std::optional<uint16_t> dispatch_id_capture_sgpr;
-  std::optional<uint16_t> dispatch_id_capture_vgpr;
-  uint16_t dispatch_id_source_sgpr = 0;
-  uint16_t dispatch_id_original_user_sgpr_count = 0;
-  uint16_t dispatch_id_expanded_user_sgpr_count = 0;
-  uint16_t dispatch_id_system_sgpr_count = 0;
-  uint16_t dispatch_id_kernarg_reload_sgpr = 0;
-  uint16_t dispatch_id_kernarg_reload_base_sgpr = 0;
-  uint16_t dispatch_id_kernarg_reload_offset_dwords = 0;
-  uint16_t dispatch_id_kernarg_reload_count = 0;
-  uint16_t dispatch_id_shifted_guest_sgpr_count = 0;
-  uint16_t dispatch_id_shifted_system_sgpr_count = 0;
-  uint16_t dispatch_id_system_sgpr_shift = 0;
-  uint16_t dispatch_id_original_kernarg_preload_length = 0;
-  uint16_t dispatch_id_replacement_kernarg_preload_length = 0;
-  uint16_t dispatch_id_required_sgpr_count = 0;
-  bool dispatch_id_preload_inserted = false;
+  /// Exact preload transformation and unique persistent register
+  /// representation proved by an emitted dispatch-ID entry prologue.
+  std::optional<ConSanMoiDispatchIdPrologueEffect> dispatch_id_prologue;
   uint16_t spilled_vgpr_count = 0;
   /// Absolute per-workitem private-segment minimum encoded into the owning
   /// kernel descriptor.

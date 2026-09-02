@@ -660,7 +660,6 @@ TEST(ConSanMoi, WorkgroupKeyRegisterPlanRequiresOneUnambiguousExecutionPlan) {
 }
 
 TEST(ConSanMoi, DispatchCaptureSelectsOnePersistentRepresentation) {
-  using consan_detail::ConSanMoiDispatchIdCapture;
   const ConSanMoiDispatchIdCapture absent{};
   const ConSanMoiDispatchIdCapture scalar = ConSanMoiDispatchIdCapture::in_sgprs(40u);
   const ConSanMoiDispatchIdCapture vector = ConSanMoiDispatchIdCapture::in_vgprs(20u);
@@ -671,6 +670,21 @@ TEST(ConSanMoi, DispatchCaptureSelectsOnePersistentRepresentation) {
   EXPECT_TRUE(vector.present());
   EXPECT_EQ(vector.vgpr(), 20u);
   EXPECT_FALSE(vector.sgpr());
+}
+
+TEST(ConSanMoi, DispatchPrologueEffectCombinesPreloadAndCaptureSgprRequirements) {
+  ConSanMoiDispatchIdPrologueEffect effect{
+      .preload = {.support = ConSanMoiDispatchIdPreloadSupport::SupportedInsert,
+                  .required_sgpr_count = 96u},
+      .capture = ConSanMoiDispatchIdCapture::in_sgprs(40u),
+  };
+  EXPECT_EQ(effect.required_sgpr_count(), 96u);
+
+  effect.capture = ConSanMoiDispatchIdCapture::in_sgprs(100u);
+  EXPECT_EQ(effect.required_sgpr_count(), 102u);
+
+  effect.capture = ConSanMoiDispatchIdCapture::in_vgprs(100u);
+  EXPECT_EQ(effect.required_sgpr_count(), 96u);
 }
 
 TEST(ConSanMoi, PrivateEpochProloguePlanTypesScratchAndDispatchRequirements) {
@@ -698,10 +712,10 @@ TEST(ConSanMoi, PrivateEpochProloguePlanTypesScratchAndDispatchRequirements) {
   plan.dispatch_id_offset = 96u;
   EXPECT_FALSE(plan.is_well_formed());
   plan.dispatch_plan = ConSanMoiDispatchIdPreloadPlan{};
-  plan.dispatch_capture = consan_detail::ConSanMoiDispatchIdCapture::in_vgprs(plan.scratch_vgpr);
+  plan.dispatch_capture = ConSanMoiDispatchIdCapture::in_vgprs(plan.scratch_vgpr);
   EXPECT_EQ(plan.required_scratch_vgpr_count(), 2u);
   EXPECT_TRUE(plan.is_well_formed());
-  plan.dispatch_capture = consan_detail::ConSanMoiDispatchIdCapture::in_sgprs(40u);
+  plan.dispatch_capture = ConSanMoiDispatchIdCapture::in_sgprs(40u);
   EXPECT_FALSE(plan.is_well_formed());
 }
 
@@ -2688,12 +2702,13 @@ TEST(ConSanMoi, DispatchPreloadDescriptorPermutationsUseExactAmdhsaPrefix) {
       return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
     });
     ASSERT_NE(prologue, result.patches.end());
-    ASSERT_TRUE(prologue->dispatch_id_capture_sgpr);
-    EXPECT_EQ(prologue->dispatch_id_source_sgpr, prefix);
-    EXPECT_EQ(prologue->dispatch_id_original_user_sgpr_count, prefix + 2u);
-    EXPECT_EQ(prologue->dispatch_id_expanded_user_sgpr_count, prefix + 4u);
-    EXPECT_EQ(prologue->dispatch_id_system_sgpr_count, 2u);
-    EXPECT_TRUE(prologue->dispatch_id_preload_inserted);
+    ASSERT_TRUE(prologue->dispatch_id_prologue);
+    ASSERT_TRUE(prologue->dispatch_id_prologue->capture.sgpr());
+    EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, prefix);
+    EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, prefix + 2u);
+    EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, prefix + 4u);
+    EXPECT_EQ(prologue->dispatch_id_prologue->preload.system_sgpr_count, 2u);
+    EXPECT_TRUE(prologue->dispatch_id_prologue->preload.descriptor_change_required());
 
     AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
@@ -2752,11 +2767,12 @@ TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntri
     return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
   });
   ASSERT_NE(prologue, result.patches.end());
-  ASSERT_TRUE(prologue->dispatch_id_capture_sgpr);
-  EXPECT_EQ(prologue->dispatch_id_source_sgpr, 10u);
-  EXPECT_EQ(prologue->dispatch_id_original_user_sgpr_count, 14u);
-  EXPECT_EQ(prologue->dispatch_id_expanded_user_sgpr_count, 16u);
-  EXPECT_EQ(prologue->dispatch_id_system_sgpr_count, 4u);
+  ASSERT_TRUE(prologue->dispatch_id_prologue);
+  ASSERT_TRUE(prologue->dispatch_id_prologue->capture.sgpr());
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 10u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, 14u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, 16u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.system_sgpr_count, 4u);
   EXPECT_GE(prologue->trampoline_size, 256u + 20u * sizeof(uint32_t));
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -2786,7 +2802,7 @@ TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntri
       EXPECT_EQ(word, build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4));
       cursor += sizeof(word);
     };
-    const uint16_t persistent = *prologue->dispatch_id_capture_sgpr;
+    const uint16_t persistent = *prologue->dispatch_id_prologue->capture.sgpr();
     expect_write(build_s_mov_b32(persistent, 10u, ROCJITSU_CODE_ARCH_RDNA4));
     expect_write(
         build_s_mov_b32(static_cast<uint16_t>(persistent + 1u), 11u, ROCJITSU_CODE_ARCH_RDNA4));
@@ -2826,13 +2842,13 @@ TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified());
   const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.dispatch_id_capture_sgpr.has_value();
+    return patch.dispatch_id_prologue && patch.dispatch_id_prologue->capture.sgpr();
   });
   ASSERT_NE(prologue, result.patches.end());
-  EXPECT_EQ(prologue->dispatch_id_source_sgpr, 2u);
-  EXPECT_EQ(prologue->dispatch_id_original_user_sgpr_count, 4u);
-  EXPECT_EQ(prologue->dispatch_id_expanded_user_sgpr_count, 4u);
-  EXPECT_FALSE(prologue->dispatch_id_preload_inserted);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, 4u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, 4u);
+  EXPECT_FALSE(prologue->dispatch_id_prologue->preload.descriptor_change_required());
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -2886,15 +2902,15 @@ TEST(ConSanMoi, SharedHelperDispatchCaptureUsesPerKernelLayoutsAndOnePersistentP
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   std::vector<const ConSanPatchInfo *> prologues;
   for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.dispatch_id_capture_sgpr)
+    if (patch.dispatch_id_prologue && patch.dispatch_id_prologue->capture.sgpr())
       prologues.push_back(&patch);
   }
   ASSERT_EQ(prologues.size(), 2u);
   ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
-  EXPECT_EQ(prologues[0]->dispatch_id_capture_sgpr, test_moi_dispatch_id_sgpr(result));
-  EXPECT_EQ(prologues[1]->dispatch_id_capture_sgpr, test_moi_dispatch_id_sgpr(result));
-  std::array<uint16_t, 2> sources = {prologues[0]->dispatch_id_source_sgpr,
-                                     prologues[1]->dispatch_id_source_sgpr};
+  EXPECT_EQ(prologues[0]->dispatch_id_prologue->capture.sgpr(), test_moi_dispatch_id_sgpr(result));
+  EXPECT_EQ(prologues[1]->dispatch_id_prologue->capture.sgpr(), test_moi_dispatch_id_sgpr(result));
+  std::array<uint16_t, 2> sources = {prologues[0]->dispatch_id_prologue->preload.dispatch_id_sgpr,
+                                     prologues[1]->dispatch_id_prologue->preload.dispatch_id_sgpr};
   std::ranges::sort(sources);
   EXPECT_EQ(sources, (std::array<uint16_t, 2>{2u, 6u}));
 
@@ -3022,15 +3038,16 @@ TEST(ConSanMoi, FinalValidationPinsDispatchDescriptorAndCaptureSequence) {
   ConSanTransformArtifacts capture_corruption = valid;
   const auto prologue =
       std::ranges::find_if(capture_corruption.patches, [](const ConSanPatchInfo &patch) {
-        return patch.dispatch_id_capture_sgpr.has_value();
+        return patch.dispatch_id_prologue && patch.dispatch_id_prologue->capture.sgpr();
       });
   ASSERT_NE(prologue, capture_corruption.patches.end());
   const size_t capture_file_offset =
       capture_corruption.program_inventory.text_sections().front().file_offset +
       prologue->trampoline_offset;
   const uint32_t wrong_capture = build_s_mov_b32(
-      *prologue->dispatch_id_capture_sgpr,
-      static_cast<uint16_t>(prologue->dispatch_id_source_sgpr + 1u), ROCJITSU_CODE_ARCH_RDNA4);
+      *prologue->dispatch_id_prologue->capture.sgpr(),
+      static_cast<uint16_t>(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr + 1u),
+      ROCJITSU_CODE_ARCH_RDNA4);
   std::memcpy(capture_corruption.replacement.data() + capture_file_offset, &wrong_capture,
               sizeof(wrong_capture));
   EXPECT_FALSE(validate_consan_modified_elf(bytes, capture_corruption).empty());

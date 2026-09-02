@@ -6,52 +6,11 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/consan/consan_moi_dispatch_prologue_effect.h"
+
 #include <cstdint>
-#include <optional>
 
 namespace rocjitsu {
-
-/// AMDHSA initializes at most 16 user SGPRs. Dispatch-ID insertion is allowed
-/// only when all original preloads, the new two-SGPR ID, and the following
-/// system SGPRs can be mapped without truncation or register overflow.
-enum class ConSanMoiDispatchIdPreloadSupport : uint8_t {
-  SupportedAlreadyEnabled,
-  SupportedInsert,
-  InvalidDispatchPosition,
-  UserSgprInitializationLimit,
-  SgprAllocationLimit,
-};
-
-struct ConSanMoiDispatchIdPreloadPlan {
-  ConSanMoiDispatchIdPreloadSupport support =
-      ConSanMoiDispatchIdPreloadSupport::InvalidDispatchPosition;
-  uint16_t dispatch_id_sgpr = 0;
-  uint16_t original_user_sgpr_count = 0;
-  uint16_t expanded_user_sgpr_count = 0;
-  uint16_t system_sgpr_count = 0;
-  uint16_t first_shifted_guest_sgpr = 0;
-  uint16_t shifted_guest_sgpr_count = 0;
-  /// Full user-SGPR windows can make room for dispatch ID by shortening the
-  /// hardware kernarg preload and reloading its final two dwords in software.
-  uint16_t kernarg_reload_sgpr = 0;
-  uint16_t kernarg_reload_base_sgpr = 0;
-  uint16_t kernarg_reload_offset_dwords = 0;
-  uint16_t kernarg_reload_count = 0;
-  uint16_t shifted_system_sgpr_count = 0;
-  uint16_t system_sgpr_shift = 0;
-  uint16_t original_kernarg_preload_length = 0;
-  uint16_t replacement_kernarg_preload_length = 0;
-  uint16_t required_sgpr_count = 0;
-
-  [[nodiscard]] constexpr bool supported() const {
-    return support == ConSanMoiDispatchIdPreloadSupport::SupportedAlreadyEnabled ||
-           support == ConSanMoiDispatchIdPreloadSupport::SupportedInsert;
-  }
-  [[nodiscard]] constexpr bool descriptor_change_required() const {
-    return support == ConSanMoiDispatchIdPreloadSupport::SupportedInsert;
-  }
-  [[nodiscard]] constexpr bool requires_kernarg_reload() const { return kernarg_reload_count != 0; }
-};
 
 [[nodiscard]] constexpr uint16_t
 consan_moi_amdhsa_dispatch_id_prefix_sgpr_count(bool private_segment_buffer, bool dispatch_ptr,

@@ -589,15 +589,16 @@ TEST(ConSanMoi, Cdna4InlineShadowRecoversFullWindowKernargPreloadTail) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  EXPECT_EQ(prologue->dispatch_id_source_sgpr, 2u);
-  EXPECT_EQ(prologue->dispatch_id_original_user_sgpr_count, 15u);
-  EXPECT_EQ(prologue->dispatch_id_expanded_user_sgpr_count, 16u);
-  EXPECT_EQ(prologue->dispatch_id_kernarg_reload_sgpr, 14u);
-  EXPECT_EQ(prologue->dispatch_id_kernarg_reload_base_sgpr, 0u);
-  EXPECT_EQ(prologue->dispatch_id_kernarg_reload_offset_dwords, 15u);
-  EXPECT_EQ(prologue->dispatch_id_kernarg_reload_count, 1u);
-  EXPECT_EQ(prologue->dispatch_id_shifted_system_sgpr_count, 1u);
-  EXPECT_EQ(prologue->dispatch_id_system_sgpr_shift, 1u);
+  ASSERT_TRUE(prologue->dispatch_id_prologue);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, 15u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, 16u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_sgpr, 14u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_base_sgpr, 0u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_offset_dwords, 15u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_count, 1u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.shifted_system_sgpr_count, 1u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.system_sgpr_shift, 1u);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -649,15 +650,16 @@ TEST(ConSanMoi, Cdna3InlineShadowRecoversFullWindowKernargPreloadTail) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  EXPECT_EQ(prologue->dispatch_id_source_sgpr, 2u);
-  EXPECT_EQ(prologue->dispatch_id_original_user_sgpr_count, 15u);
-  EXPECT_EQ(prologue->dispatch_id_expanded_user_sgpr_count, 16u);
-  EXPECT_EQ(prologue->dispatch_id_kernarg_reload_sgpr, 14u);
-  EXPECT_EQ(prologue->dispatch_id_kernarg_reload_base_sgpr, 0u);
-  EXPECT_EQ(prologue->dispatch_id_kernarg_reload_offset_dwords, 15u);
-  EXPECT_EQ(prologue->dispatch_id_kernarg_reload_count, 1u);
-  EXPECT_EQ(prologue->dispatch_id_shifted_system_sgpr_count, 1u);
-  EXPECT_EQ(prologue->dispatch_id_system_sgpr_shift, 1u);
+  ASSERT_TRUE(prologue->dispatch_id_prologue);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, 15u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, 16u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_sgpr, 14u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_base_sgpr, 0u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_offset_dwords, 15u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_count, 1u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.shifted_system_sgpr_count, 1u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.system_sgpr_shift, 1u);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -1249,11 +1251,12 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       << "warnings=" << testing::PrintToString(result.warnings)
       << " errors=" << testing::PrintToString(result.errors)
       << " patches=" << testing::PrintToString(result.patches);
+  ASSERT_TRUE(full_prologue->dispatch_id_prologue);
   ASSERT_EQ(full_prologue->persistent_dispatch_id_private_offset,
             full_access->persistent_dispatch_id_private_offset);
-  ASSERT_TRUE(full_prologue->dispatch_id_capture_vgpr);
-  EXPECT_EQ(full_prologue->dispatch_id_capture_vgpr, full_access->scratch_vgpr);
-  EXPECT_FALSE(full_prologue->dispatch_id_capture_sgpr);
+  ASSERT_TRUE(full_prologue->dispatch_id_prologue->capture.vgpr());
+  EXPECT_EQ(full_prologue->dispatch_id_prologue->capture.vgpr(), full_access->scratch_vgpr);
+  EXPECT_FALSE(full_prologue->dispatch_id_prologue->capture.sgpr());
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -1434,7 +1437,8 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  EXPECT_EQ(prologue->dispatch_id_capture_vgpr, test_moi_dispatch_id_vgpr(result));
+  ASSERT_TRUE(prologue->dispatch_id_prologue);
+  EXPECT_EQ(prologue->dispatch_id_prologue->capture.vgpr(), test_moi_dispatch_id_vgpr(result));
 }
 
 TEST(ConSanMoi, CdnaInlineShadowClobberingLoadFitsBelowAccumulatorBoundary) {
@@ -4284,7 +4288,7 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
   ASSERT_TRUE(hwreg);
   const auto owner_init = build_s_getreg_b32(owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(owner_init);
-  ASSERT_TRUE(prologue->dispatch_id_capture_sgpr);
+  ASSERT_TRUE(prologue->dispatch_id_prologue->capture.sgpr());
   ASSERT_GE(prologue_words.size(), 11u);
   EXPECT_FALSE(prologue->entry_scalar_backup_vgpr);
   EXPECT_FALSE(prologue->entry_scalar_backup_sgpr_base);

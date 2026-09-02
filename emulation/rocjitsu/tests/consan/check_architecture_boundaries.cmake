@@ -436,6 +436,11 @@ _consan_assert_no_match(
     "dispatch-preload planning must remain independent of report models and mode policy"
 )
 _consan_assert_no_match(
+    "${_consan_dir}/consan_moi_dispatch_prologue_effect.h"
+    "ConSanMoi(Sampled|RecordReplay|Inline|Report)|consan_moi_(sampled|record_replay|inline|report|shadow)|ConSanMoiShadow"
+    "dispatch-prologue effects must remain independent of report models and mode policy"
+)
+_consan_assert_no_match(
     "${_consan_dir}/consan_moi.h"
     "consan_moi_dispatch_preload"
     "the lowerer-private dispatch-preload contract must not leak through the public MOI entry point"
@@ -1067,6 +1072,57 @@ _consan_assert_no_match(
     "patch[.]workgroup_shadow_(base|size|validity_base|validity_size|lazy_initialization|compact|compact_token)|patch[.]required_group_segment_size"
     "prologue construction must consume the typed workgroup-shadow layout"
 )
+
+# Dispatch-ID entry lowering publishes its complete preload transformation and
+# unique persistent capture as one typed effect. The shared patch proof sees
+# only that narrow value contract, not the private planning algorithm, and
+# validation must not regain a flattened field-by-field replica.
+file(READ
+    "${_consan_dir}/consan_moi_dispatch_prologue_effect.h"
+    _dispatch_prologue_effect_contract
+)
+if(NOT _shared_aggregate_contract MATCHES
+       "consan_moi_dispatch_prologue_effect[.]h" OR
+   _shared_aggregate_contract MATCHES
+       "consan_moi_dispatch_preload[.]h" OR
+   NOT _dispatch_prologue_effect_contract MATCHES
+       "struct ConSanMoiDispatchIdPreloadPlan" OR
+   NOT _dispatch_prologue_effect_contract MATCHES
+       "class ConSanMoiDispatchIdCapture" OR
+   NOT _dispatch_prologue_effect_contract MATCHES
+       "struct ConSanMoiDispatchIdPrologueEffect")
+    message(FATAL_ERROR
+        "ConSan shared patch proof lost its narrow dispatch-ID prologue effect"
+    )
+endif()
+if(NOT _patch_proof_contract MATCHES
+   "std::optional<ConSanMoiDispatchIdPrologueEffect>[ \t]+dispatch_id_prologue")
+    message(FATAL_ERROR
+        "ConSan patch proof lost its typed dispatch-ID prologue effect"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_code_object_types.h.inc"
+    "(std::optional<uint16_t>|uint16_t|bool)[ \t]+dispatch_id_(capture_(sgpr|vgpr)|source_sgpr|original_user_sgpr_count|expanded_user_sgpr_count|system_sgpr_count|kernarg_reload_(sgpr|base_sgpr|offset_dwords|count)|shifted_(guest|system)_sgpr_count|system_sgpr_shift|original_kernarg_preload_length|replacement_kernarg_preload_length|required_sgpr_count|preload_inserted)[ \t]*(=|;)"
+    "patch proof must not flatten the typed dispatch-ID prologue effect"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_internal.h"
+    "class[ \t]+ConSanMoiDispatchIdCapture"
+    "dispatch-ID capture must remain in its narrow prologue-effect contract"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_dispatch_preload.h"
+    "(struct[ \t]+ConSanMoiDispatchIdPreloadPlan|class[ \t]+ConSanMoiDispatchIdCapture|struct[ \t]+ConSanMoiDispatchIdPrologueEffect)"
+    "dispatch-ID preload planning must consume, not duplicate, its effect contract"
+)
+foreach(_dispatch_effect_consumer IN ITEMS consan_moi_prologue.cpp consan_validation.inc)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_dispatch_effect_consumer}"
+        "patch[.]dispatch_id_(capture_(sgpr|vgpr)|source_sgpr|original_user_sgpr_count|expanded_user_sgpr_count|system_sgpr_count|kernarg_reload_(sgpr|base_sgpr|offset_dwords|count)|shifted_(guest|system)_sgpr_count|system_sgpr_shift|original_kernarg_preload_length|replacement_kernarg_preload_length|required_sgpr_count|preload_inserted)"
+        "dispatch-ID prologue consumers must retain the typed effect"
+    )
+endforeach()
 
 # Scalar allocations carry their selection provenance. The owner scalar must
 # not return to a loose optional plus a separately mutable automatic marker.

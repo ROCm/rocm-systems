@@ -2718,12 +2718,7 @@ struct DescriptorRequirement {
   bool allow_resource_delta = false;
   bool allow_entry_delta = false;
   bool require_full_workgroup_id = false;
-  bool has_dispatch_id_capture = false;
-  bool dispatch_id_preload_inserted = false;
-  uint16_t dispatch_id_original_user_sgpr_count = 0;
-  uint16_t dispatch_id_expanded_user_sgpr_count = 0;
-  uint16_t dispatch_id_original_kernarg_preload_length = 0;
-  uint16_t dispatch_id_replacement_kernarg_preload_length = 0;
+  std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_id_preload;
   uint16_t required_vgpr_count = 0;
   uint16_t required_sgpr_count = 0;
   uint32_t required_private_bytes = 0;
@@ -2852,8 +2847,16 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
   const auto validate_entry = [&](const ConSanPatchInfo &patch, uint64_t entry_offset,
                                   std::string_view kernel_name,
                                   bool has_semantic_system_sgpr_restore) {
-    const bool captures_sgpr = patch.dispatch_id_capture_sgpr.has_value();
-    const bool captures_vgpr = patch.dispatch_id_capture_vgpr.has_value();
+    if (!patch.dispatch_id_prologue) {
+      errors.emplace_back("ConSan final validation found missing dispatch-ID prologue proof");
+      return;
+    }
+    const ConSanMoiDispatchIdPrologueEffect &dispatch = *patch.dispatch_id_prologue;
+    const ConSanMoiDispatchIdPreloadPlan &preload = dispatch.preload;
+    const std::optional<uint16_t> capture_sgpr = dispatch.capture.sgpr();
+    const std::optional<uint16_t> capture_vgpr = dispatch.capture.vgpr();
+    const bool captures_sgpr = capture_sgpr.has_value();
+    const bool captures_vgpr = capture_vgpr.has_value();
     if (captures_sgpr == captures_vgpr) {
       errors.emplace_back(
           "ConSan final validation found an ambiguous dispatch-ID capture for kernel '" +
@@ -2861,28 +2864,26 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
       return;
     }
     const uint32_t guest_input_count =
-        static_cast<uint32_t>(patch.dispatch_id_original_user_sgpr_count) +
-        patch.dispatch_id_system_sgpr_count;
-    if (patch.dispatch_id_preload_inserted && patch.dispatch_id_source_sgpr > guest_input_count) {
+        static_cast<uint32_t>(preload.original_user_sgpr_count) + preload.system_sgpr_count;
+    if (preload.descriptor_change_required() && preload.dispatch_id_sgpr > guest_input_count) {
       errors.emplace_back(
           "ConSan final validation found invalid dispatch-ID restore bounds for kernel '" +
           std::string(kernel_name) + "'");
       return;
     }
     uint32_t restore_count =
-        patch.dispatch_id_preload_inserted ? patch.dispatch_id_shifted_guest_sgpr_count : 0u;
+        preload.descriptor_change_required() ? preload.shifted_guest_sgpr_count : 0u;
     if (has_semantic_system_sgpr_restore) {
       const uint32_t user_restore_capacity =
-          patch.dispatch_id_original_user_sgpr_count > patch.dispatch_id_source_sgpr
-              ? patch.dispatch_id_original_user_sgpr_count - patch.dispatch_id_source_sgpr
+          preload.original_user_sgpr_count > preload.dispatch_id_sgpr
+              ? preload.original_user_sgpr_count - preload.dispatch_id_sgpr
               : 0u;
       restore_count = std::min(restore_count, user_restore_capacity);
     }
     const uint32_t system_restore_count =
-        has_semantic_system_sgpr_restore ? 0u : patch.dispatch_id_shifted_system_sgpr_count;
-    const uint64_t reload_words = patch.dispatch_id_kernarg_reload_count != 0
-                                      ? 2u * patch.dispatch_id_kernarg_reload_count + 1u
-                                      : 0u;
+        has_semantic_system_sgpr_restore ? 0u : preload.shifted_system_sgpr_count;
+    const uint64_t reload_words =
+        preload.kernarg_reload_count != 0 ? 2u * preload.kernarg_reload_count + 1u : 0u;
     std::vector<uint32_t> capture_prefix;
     const auto dependency_delay = instrumentation::build_salu_dependency_delay(arch);
     if (!dependency_delay) {
@@ -2890,25 +2891,24 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
       return;
     }
     if (captures_sgpr) {
-      const uint16_t persistent = *patch.dispatch_id_capture_sgpr;
+      const uint16_t persistent = *capture_sgpr;
       const auto append_salu = [&](uint32_t word) {
         capture_prefix.push_back(word);
         capture_prefix.push_back(*dependency_delay);
       };
-      append_salu(build_s_mov_b32(persistent, patch.dispatch_id_source_sgpr, arch));
+      append_salu(build_s_mov_b32(persistent, preload.dispatch_id_sgpr, arch));
       append_salu(build_s_mov_b32(static_cast<uint16_t>(persistent + 1u),
-                                  static_cast<uint16_t>(patch.dispatch_id_source_sgpr + 1u), arch));
+                                  static_cast<uint16_t>(preload.dispatch_id_sgpr + 1u), arch));
       append_salu(build_s_add_u32(persistent, persistent, scalar_positive_inline_u32(1), arch));
       append_salu(build_s_addc_u32(static_cast<uint16_t>(persistent + 1u),
                                    static_cast<uint16_t>(persistent + 1u),
                                    scalar_positive_inline_u32(0), arch));
     } else {
-      const uint16_t persistent = *patch.dispatch_id_capture_vgpr;
-      capture_prefix.push_back(
-          build_v_mov_b32_e32(persistent, patch.dispatch_id_source_sgpr, arch));
+      const uint16_t persistent = *capture_vgpr;
+      capture_prefix.push_back(build_v_mov_b32_e32(persistent, preload.dispatch_id_sgpr, arch));
       capture_prefix.push_back(
           build_v_mov_b32_e32(static_cast<uint16_t>(persistent + 1u),
-                              static_cast<uint16_t>(patch.dispatch_id_source_sgpr + 1u), arch));
+                              static_cast<uint16_t>(preload.dispatch_id_sgpr + 1u), arch));
       const auto successor = instrumentation::build_v_add_u64_literal(persistent, 1u, arch);
       if (!successor) {
         errors.emplace_back(
@@ -2944,14 +2944,12 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
       restore_words.push_back(*dependency_delay);
     };
     for (uint32_t i = 0; i < restore_count; ++i) {
-      const uint16_t destination = static_cast<uint16_t>(patch.dispatch_id_source_sgpr + i);
+      const uint16_t destination = static_cast<uint16_t>(preload.dispatch_id_sgpr + i);
       append_restore(destination, static_cast<uint16_t>(destination + 2u));
     }
     for (uint16_t i = 0; i < system_restore_count; ++i) {
-      const uint16_t destination =
-          static_cast<uint16_t>(patch.dispatch_id_original_user_sgpr_count + i);
-      append_restore(destination,
-                     static_cast<uint16_t>(destination + patch.dispatch_id_system_sgpr_shift));
+      const uint16_t destination = static_cast<uint16_t>(preload.original_user_sgpr_count + i);
+      append_restore(destination, static_cast<uint16_t>(destination + preload.system_sgpr_shift));
     }
     // Exact CDNA workgroup identity can be captured before dispatch preload
     // repair, so the dispatch transaction is not necessarily the first
@@ -2979,13 +2977,12 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
     }
     const auto read_word = [&](uint64_t word_index) { return entry_words[word_index]; };
     uint64_t cursor = static_cast<uint64_t>(repair - entry_words.begin()) + dispatch_repair.size();
-    if (patch.dispatch_id_kernarg_reload_count != 0) {
-      for (uint16_t i = 0; i < patch.dispatch_id_kernarg_reload_count; ++i) {
+    if (preload.kernarg_reload_count != 0) {
+      for (uint16_t i = 0; i < preload.kernarg_reload_count; ++i) {
         const auto load = instrumentation::build_s_load_dword(
-            static_cast<uint16_t>(patch.dispatch_id_kernarg_reload_sgpr + i),
-            patch.dispatch_id_kernarg_reload_base_sgpr,
-            static_cast<uint32_t>(patch.dispatch_id_kernarg_reload_offset_dwords + i) *
-                sizeof(uint32_t),
+            static_cast<uint16_t>(preload.kernarg_reload_sgpr + i),
+            preload.kernarg_reload_base_sgpr,
+            static_cast<uint32_t>(preload.kernarg_reload_offset_dwords + i) * sizeof(uint32_t),
             arch);
         if (!load || read_word(cursor++) != (*load)[0] || read_word(cursor++) != (*load)[1]) {
           errors.emplace_back("ConSan final validation found an invalid dispatch-ID kernarg "
@@ -3003,7 +3000,7 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
   };
 
   for (const ConSanPatchInfo &patch : result.patches) {
-    if (!patch.dispatch_id_capture_sgpr && !patch.dispatch_id_capture_vgpr)
+    if (!patch.dispatch_id_prologue)
       continue;
     const auto owner =
         std::ranges::find_if(environment.original.kernels(), [&](const AmdGpuKernelInfo &kernel) {
@@ -3058,11 +3055,14 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
                std::ranges::find(item.owner_descriptor_file_offsets, owner) !=
                    item.owner_descriptor_file_offsets.end();
       });
-      if (prologue == result.patches.end() || !prologue->dispatch_id_capture_vgpr ||
-          (common && *common != *prologue->dispatch_id_capture_vgpr)) {
+      const std::optional<uint16_t> capture_vgpr =
+          prologue == result.patches.end() || !prologue->dispatch_id_prologue
+              ? std::nullopt
+              : prologue->dispatch_id_prologue->capture.vgpr();
+      if (!capture_vgpr || (common && *common != *capture_vgpr)) {
         return std::optional<uint16_t>{};
       }
-      common = prologue->dispatch_id_capture_vgpr;
+      common = capture_vgpr;
     }
     return common;
   };
@@ -3903,23 +3903,14 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
             }
           }
         }
-        if (patch.dispatch_id_capture_sgpr || patch.dispatch_id_capture_vgpr) {
-          requirement.has_dispatch_id_capture = true;
-          requirement.dispatch_id_preload_inserted = patch.dispatch_id_preload_inserted;
-          requirement.dispatch_id_original_user_sgpr_count =
-              patch.dispatch_id_original_user_sgpr_count;
-          requirement.dispatch_id_expanded_user_sgpr_count =
-              patch.dispatch_id_expanded_user_sgpr_count;
-          requirement.dispatch_id_original_kernarg_preload_length =
-              patch.dispatch_id_original_kernarg_preload_length;
-          requirement.dispatch_id_replacement_kernarg_preload_length =
-              patch.dispatch_id_replacement_kernarg_preload_length;
+        if (patch.dispatch_id_prologue) {
+          const ConSanMoiDispatchIdPrologueEffect &dispatch = *patch.dispatch_id_prologue;
+          requirement.dispatch_id_preload = dispatch.preload;
           requirement.required_sgpr_count =
-              std::max(requirement.required_sgpr_count, patch.dispatch_id_required_sgpr_count);
-          if (patch.dispatch_id_capture_vgpr) {
-            requirement.required_vgpr_count =
-                std::max<uint16_t>(requirement.required_vgpr_count,
-                                   static_cast<uint16_t>(*patch.dispatch_id_capture_vgpr + 2u));
+              std::max(requirement.required_sgpr_count, dispatch.required_sgpr_count());
+          if (const std::optional<uint16_t> capture_vgpr = dispatch.capture.vgpr()) {
+            requirement.required_vgpr_count = std::max<uint16_t>(
+                requirement.required_vgpr_count, static_cast<uint16_t>(*capture_vgpr + 2u));
           }
         }
       });
@@ -4024,7 +4015,8 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
       }
       normalize_workgroup_id_payload(normalized.compute_pgm_rsrc2);
     }
-    if (requirement.has_dispatch_id_capture) {
+    if (requirement.dispatch_id_preload) {
+      const ConSanMoiDispatchIdPreloadPlan &preload = *requirement.dispatch_id_preload;
       const uint32_t original_user_count = AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,
                                                            kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
       const uint32_t replacement_user_count = AMDHSA_BITS_GET(
@@ -4035,9 +4027,9 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
       const bool replacement_dispatch =
           AMDHSA_BITS_GET(replacement_descriptor.kernel_code_properties,
                           kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID) != 0;
-      const bool expected_original_dispatch = !requirement.dispatch_id_preload_inserted;
-      if (original_user_count != requirement.dispatch_id_original_user_sgpr_count ||
-          replacement_user_count != requirement.dispatch_id_expanded_user_sgpr_count ||
+      const bool expected_original_dispatch = !preload.descriptor_change_required();
+      if (original_user_count != preload.original_user_sgpr_count ||
+          replacement_user_count != preload.expanded_user_sgpr_count ||
           original_dispatch != expected_original_dispatch || !replacement_dispatch) {
         errors.emplace_back(
             "ConSan final validation found an invalid dispatch-ID preload descriptor delta for "
@@ -4048,9 +4040,8 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
           AMDHSA_BITS_GET(original_descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH);
       const uint32_t replacement_preload_length =
           AMDHSA_BITS_GET(replacement_descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH);
-      if (original_preload_length != requirement.dispatch_id_original_kernarg_preload_length ||
-          replacement_preload_length !=
-              requirement.dispatch_id_replacement_kernarg_preload_length) {
+      if (original_preload_length != preload.original_kernarg_preload_length ||
+          replacement_preload_length != preload.replacement_kernarg_preload_length) {
         errors.emplace_back(
             "ConSan final validation found an invalid dispatch-ID kernarg-preload delta for "
             "kernel '" +
@@ -4091,9 +4082,9 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
                       kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID,
                       AMDHSA_BITS_GET(original_descriptor.kernel_code_properties,
                                       kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID));
-      if (requirement.dispatch_id_original_kernarg_preload_length != 0) {
+      if (preload.original_kernarg_preload_length != 0) {
         AMDHSA_BITS_SET(normalized.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH,
-                        requirement.dispatch_id_original_kernarg_preload_length);
+                        preload.original_kernarg_preload_length);
       }
     }
     if (text_relocated || requirement.allow_entry_delta)
