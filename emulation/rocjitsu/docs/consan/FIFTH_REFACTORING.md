@@ -8200,3 +8200,57 @@ It strengthens Sections 14.1, 14.3, 14.5, 14.6, and 14.7. Larger placement
 and barrier transactions, further architecture and mode locality, material
 whole-refactoring shrinkage, and the independent completion audit remain
 open, so the goal remains active.
+
+### 16.116 Convergence checkpoint 115: one exact Sampled synchronization emission plan
+
+The next Sampled trace found that barrier and atomic resource planning selected
+owner-local scalar state, persistent or private owner/epoch state, dispatch and
+workgroup identity, report identity, and scratch geometry, but exposed only a
+`SampledSyncProbeState` containing another complete mutable operating point.
+The barrier emitter and both atomic emitters then independently rediscovered
+workgroup sources, dispatch sources, scalar preservation state, indirect-return
+state, and report facts from the broad request/resource/point tuple. The helper
+that loads private owner/epoch state likewise accepted an entire operating
+point to inspect one boolean policy fact.
+
+`MoiSampledSyncEmissionPlan` is now the one exact owner-local product for this
+path. Its mode-owned planner performs transient or persistent assignment once,
+resolves the private/persistent owner and epoch representation, and projects
+the exact report, dispatch, workgroup, scalar-ABI, EXEC-save, and scratch facts.
+Direct barriers, dense barrier bodies, deferred acquires, direct atomics, and
+dense atomic bodies consume only that immutable product. The old broad probe
+state is deleted, and the public atomic builders no longer mention
+`ConSanRequest`, `BoundRuntimeResources`, or `ConSanMoiOperatingPoint`. The
+private-state helper now consumes the exact automatic-private-epoch policy.
+Boundary checks reject restoration of the broad state, broad atomic contracts,
+or resource and scalar-ABI replanning inside atomic emission, and require the
+barrier emitter to retain its exact plan contract.
+
+| Signal | Checkpoint 115 | Cumulative change | Slice change from checkpoint 114 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,838 | **-2,138** | **-3** |
+| Nonblank production lines | 96,494 | **-2,590** | **-3** |
+| Production implementation lines | 88,758 | **-2,692** | **-5** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 302 / 55 | +12 / +4 | **-8 / -2** |
+| Broad request/resource/point inputs across the three Sampled sync emitters | **0** | n/a | **-9** |
+| Test inventory | **5,413** | **+68** | 0 |
+
+Validation includes a complete warning-clean `-j16` rebuild, all Sampled host
+and architecture-boundary tests **160/160**, and all **1,296/1,296**
+`ConSan.*` and `ConSanMoi.*` host/component tests. This exercises direct and
+dense barriers, ordinary and deferred atomics, private and persistent state,
+dynamic-stack and scalar spills, long returns, full workgroup identity, and
+all five target families. No test was removed, renamed, disabled, or replaced,
+and no physical gfx1201 test was run.
+
+This closes the remaining Sampled synchronization planning/emission peephole
+and leaves Sampled emission consistently downstream of exact mode-owned
+products. It strengthens Sections 14.1, 14.3, 14.5, 14.6, and 14.7 while also
+harvesting the superseded state. Broader placement/coordinator transactions,
+remaining architecture and mode locality, further legacy harvesting, material
+whole-refactoring shrinkage, and the independent completion audit remain open,
+so the goal remains active.
