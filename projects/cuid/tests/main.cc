@@ -228,6 +228,18 @@ TEST(cuidtstPrivileged, ReverseDeviceType) {
   RunGenericTest(&tst);
 }
 
+// Root, because a cold single-device lookup discovers the device itself, and
+// discovery reads PCIe configuration space. An unprivileged process is routed
+// to the daemon instead, which is a different path with a different failure
+// mode.
+TEST(cuidtstPrivileged, ColdHandleLookup) {
+  if (geteuid() != 0) {
+    GTEST_SKIP() << "Requires root; run with sudo to enable.";
+  }
+  TestColdHandleLookup tst;
+  RunGenericTest(&tst);
+}
+
 TEST(cuidtstPrivileged, GimDeviceEnumeration) {
   if (geteuid() != 0) {
     GTEST_SKIP() << "Requires root; run with sudo to enable.";
@@ -245,5 +257,8 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   ProcessCmdline(&sCUIDGlvalues, argc, argv);
   ::testing::AddGlobalTestEnvironment(new RecordStoreEnvironment());
+  // After RecordStoreEnvironment, so the record-store override is in place, and
+  // before anything else: its SetUp() is the last moment the library is cold.
+  ::testing::AddGlobalTestEnvironment(new ColdLookupEnvironment());
   return RUN_ALL_TESTS();
 }

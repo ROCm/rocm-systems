@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 #include "include/amd_cuid.h"
 #include "src/hmac.h"
@@ -86,6 +87,50 @@ class RecordStoreEnvironment : public ::testing::Environment {
 
  private:
   std::string dir_;
+};
+
+// One GPU as the machine presents it in sysfs, and what each by-name lookup
+// answered for it while the library had not enumerated anything yet.
+//
+// Coldness is the whole point. amdcuid_get_handle_by_bdf() and
+// amdcuid_get_handle_by_dev_path() both check the device manager first, so once
+// anything in the process has called amdcuid_get_all_handles() they answer out
+// of that cache and never reach the discovery path underneath. Every test in
+// this suite runs after TestBase::SetUp() has enumerated, so the discovery path
+// had no coverage at all -- and it was broken: it resolved a sysfs path through
+// real_dev_path_from_fd(), which reads st_rdev, which is zero for a directory.
+// amd-smi calls amdcuid_get_handle_by_bdf() on a cold library and nothing else,
+// so amdsmi_get_gpu_cuid_info() returned NOT_SUPPORTED for every GPU.
+struct ColdLookup {
+  std::string bdf;         // 0000:63:00.0
+  std::string card_path;   // /sys/class/drm/card1
+  std::string node_path;   // /dev/dri/renderD128, empty where there is none
+  amdcuid_status_t bdf_status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
+  amdcuid_status_t card_status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
+  amdcuid_status_t node_status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
+  std::string bdf_cuid;
+  std::string card_cuid;
+  std::string node_cuid;
+  // What a property query on the handle the cold by-BDF lookup returned
+  // answered. A handle that resolves and then cannot be used is worse than one
+  // that does not resolve: amdcuid_get_handle_by_bdf() returned the right
+  // derived CUID while every amdcuid_query_device_property() on it said
+  // DEVICE_NOT_FOUND, because the device had gone into the manager's list
+  // without going into the CUID index it is looked up through.
+  amdcuid_status_t bdf_query_status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
+  amdcuid_device_type_t bdf_query_type = AMDCUID_DEVICE_TYPE_NONE;
+};
+
+// Runs its SetUp() before the first test, which is the only moment in the
+// process when the library is still cold. Register it after
+// RecordStoreEnvironment, whose SetUp() resolves paths but enumerates nothing.
+class ColdLookupEnvironment : public ::testing::Environment {
+ public:
+  void SetUp() override;
+
+  // The GPUs found in sysfs, with the cold answers recorded against each.
+  // Empty when the machine has no DRM card node.
+  static const std::vector<ColdLookup>& results();
 };
 
 void ProcessCmdline(CUIDTstGlobals* globals, int argc, char** argv);

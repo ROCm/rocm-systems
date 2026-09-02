@@ -7,7 +7,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cctype>
 #include <cerrno>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -126,3 +128,107 @@ void ProcessCmdline(CUIDTstGlobals* globals, int argc, char** argv) {
     // Unrecognised flags are currently ignored (GoogleTest is initialized before ProcessCmdline()).
   }
 }
+
+// ---------------------------------------------------------------------------
+// ColdLookupEnvironment
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::vector<ColdLookup> g_cold_lookups;
+
+// The GPUs the machine actually has, read out of sysfs rather than assumed.
+// The tests this feeds used to name "0000:03:00.0" and "/dev/dri/renderD128"
+// literally, which is a different device on every machine and no device at all
+// on most, and then accepted DEVICE_NOT_FOUND as a pass -- so they could not
+// fail, and did not, while the lookup they cover was returning DEVICE_NOT_FOUND
+// for every GPU on the node.
+std::vector<ColdLookup> DiscoverGpusFromSysfs() {
+  std::vector<ColdLookup> found;
+
+  DIR* drm = opendir("/sys/class/drm");
+  if (!drm) return found;
+
+  while (const dirent* e = readdir(drm)) {
+    const std::string name(e->d_name);
+    // cardN and nothing else: cardN-DP-1 and the like are connectors.
+    if (name.compare(0, 4, "card") != 0 || name.size() < 5) continue;
+    bool digits = true;
+    for (size_t i = 4; i < name.size(); ++i) {
+      if (!isdigit(static_cast<unsigned char>(name[i]))) digits = false;
+    }
+    if (!digits) continue;
+
+    ColdLookup entry;
+    entry.card_path = "/sys/class/drm/" + name;
+
+    // The BDF is the name of the directory the device symlink lands in.
+    char resolved[PATH_MAX];
+    if (realpath((entry.card_path + "/device").c_str(), resolved) == nullptr) continue;
+    const std::string pci_dir(resolved);
+    const size_t slash = pci_dir.find_last_of('/');
+    if (slash == std::string::npos) continue;
+    entry.bdf = pci_dir.substr(slash + 1);
+    // A BDF is domain:bus:device.function; anything else is not a PCI device.
+    if (entry.bdf.size() != 12 || entry.bdf[4] != ':' || entry.bdf[7] != ':') continue;
+
+    // The render node beside it, where the driver publishes one.
+    if (DIR* drm_dir = opendir((pci_dir + "/drm").c_str())) {
+      while (const dirent* r = readdir(drm_dir)) {
+        if (std::strncmp(r->d_name, "renderD", 7) == 0) {
+          entry.node_path = std::string("/dev/dri/") + r->d_name;
+          break;
+        }
+      }
+      closedir(drm_dir);
+    }
+
+    found.push_back(entry);
+  }
+  closedir(drm);
+  return found;
+}
+
+void RecordColdLookup(amdcuid_status_t status, const amdcuid_id_t& handle,
+                      amdcuid_status_t* status_out, std::string* cuid_out) {
+  *status_out = status;
+  if (status != AMDCUID_STATUS_SUCCESS) return;
+  const char* text = amdcuid_id_to_string(handle);
+  *cuid_out = text ? text : "";
+}
+
+}  // namespace
+
+void ColdLookupEnvironment::SetUp() {
+  g_cold_lookups = DiscoverGpusFromSysfs();
+
+  for (ColdLookup& entry : g_cold_lookups) {
+    amdcuid_id_t handle = {};
+    RecordColdLookup(
+        amdcuid_get_handle_by_bdf(entry.bdf.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle), handle,
+        &entry.bdf_status, &entry.bdf_cuid);
+
+    // Immediately, on the handle just returned and before anything else has
+    // enumerated: the manager's index is rebuilt wholesale by discovery, so a
+    // query made after that would be answered from the rebuilt index and could
+    // not tell whether the cold path had indexed the device at all.
+    if (entry.bdf_status == AMDCUID_STATUS_SUCCESS) {
+      uint32_t length = sizeof(entry.bdf_query_type);
+      entry.bdf_query_status = amdcuid_query_device_property(
+          handle, AMDCUID_QUERY_DEVICE_TYPE, &entry.bdf_query_type, &length);
+    }
+
+    handle = amdcuid_id_t{};
+    RecordColdLookup(
+        amdcuid_get_handle_by_dev_path(entry.card_path.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle),
+        handle, &entry.card_status, &entry.card_cuid);
+
+    if (entry.node_path.empty()) continue;
+    handle = amdcuid_id_t{};
+    RecordColdLookup(
+        amdcuid_get_handle_by_dev_path(entry.node_path.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle),
+        handle, &entry.node_status, &entry.node_cuid);
+  }
+}
+
+const std::vector<ColdLookup>& ColdLookupEnvironment::results() { return g_cold_lookups; }

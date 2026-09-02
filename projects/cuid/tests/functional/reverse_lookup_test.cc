@@ -34,6 +34,61 @@ static void extract_primary_raw_bits(const amdcuid_id_t& uuid, uint8_t raw_bits[
   }
 }
 
+// True when this primary was adopted from firmware verbatim, in which case none
+// of the reverse lookups below apply to it.
+//
+// An adopted primary carries no CUID payload: its sixteen octets are whatever
+// the firmware UUID contains, so decoding a VendorID or a Component Type out of
+// them yields a number that means nothing. cuid_util.h states the rule the
+// callers below were breaking -- "the version nibble is the discriminator and
+// must be checked before any field is read" -- and they were reading first. On
+// any machine whose SMBIOS supplies a system UUID (which is most of them) that
+// made TestReverseSerialNumber, TestReverseVendorId and TestReverseDeviceType
+// fail against a Platform whose identifier was perfectly correct.
+//
+// Skipping is not enough on its own: a silent skip would also swallow a real
+// packing defect that left some GPU's primary without its v8 nibble. So the two
+// properties an adopted primary must still satisfy are asserted here, and only
+// the field comparison is skipped.
+static bool AdoptedPrimary(const amdcuid_id_t& handle, const amdcuid_id_t& primary,
+                           const char* device_node) {
+  if (CuidUtilities::is_constructed(&primary)) {
+    return false;
+  }
+
+  // Only the Platform ever adopts. Every other component's primary is packed by
+  // this library and is therefore always v8, so a non-v8 nibble anywhere else
+  // is a defect in add_UUIDv8_bits(), not a firmware identity.
+  amdcuid_device_type_t device_type = AMDCUID_DEVICE_TYPE_NONE;
+  uint32_t length = sizeof(device_type);
+  EXPECT_EQ(
+      amdcuid_query_device_property(handle, AMDCUID_QUERY_DEVICE_TYPE, &device_type, &length),
+      AMDCUID_STATUS_SUCCESS);
+  EXPECT_EQ(device_type, AMDCUID_DEVICE_TYPE_PLATFORM)
+      << "a non-Platform component reported a primary that is not a UUIDv8, so its payload "
+         "was never packed: "
+      << device_node;
+
+  // An adopted value is still a UUID: RFC 9562 fixes the variant bits whatever
+  // the version is, and an all-zero identifier is absence reported as presence.
+  EXPECT_EQ(primary.bytes[8] & 0xC0, 0x80)
+      << "adopted primary has a non-RFC-9562 variant for device " << device_node;
+  bool all_zero = true;
+  for (size_t b = 0; b < sizeof(primary.bytes); ++b) {
+    if (primary.bytes[b] != 0) {
+      all_zero = false;
+      break;
+    }
+  }
+  EXPECT_FALSE(all_zero) << "adopted primary is all zero for device " << device_node;
+
+  IF_VERB(1) {
+    printf("  Device [%s] primary is adopted (UUID version %u); field decode skipped\n",
+           device_node, static_cast<unsigned>((primary.bytes[6] >> 4) & 0x0F));
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // TestReverseSerialNumber
 // ---------------------------------------------------------------------------
@@ -137,9 +192,7 @@ void TestReverseSerialNumber::Run() {
                                            &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
-    if (!CuidUtilities::is_constructed(&primary_id)) {
-      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
-      // no packed info to reverse-check; it is opaque firmware bytes.
+    if (AdoptedPrimary(device_handles_[i], primary_id, device_node)) {
       continue;
     }
 
@@ -187,9 +240,7 @@ void TestReverseVendorId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
-    if (!CuidUtilities::is_constructed(&primary_id)) {
-      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
-      // no packed info to reverse-check; it is opaque firmware bytes.
+    if (AdoptedPrimary(device_handles_[i], primary_id, device_node)) {
       continue;
     }
 
@@ -241,9 +292,7 @@ void TestReverseDeviceId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
-    if (!CuidUtilities::is_constructed(&primary_id)) {
-      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
-      // no packed info to reverse-check; it is opaque firmware bytes.
+    if (AdoptedPrimary(device_handles_[i], primary_id, device_node)) {
       continue;
     }
 
@@ -298,9 +347,7 @@ void TestReverseRevisionId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
-    if (!CuidUtilities::is_constructed(&primary_id)) {
-      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
-      // no packed info to reverse-check; it is opaque firmware bytes.
+    if (AdoptedPrimary(device_handles_[i], primary_id, device_node)) {
       continue;
     }
 
@@ -355,9 +402,7 @@ void TestReverseUnitId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
-    if (!CuidUtilities::is_constructed(&primary_id)) {
-      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
-      // no packed info to reverse-check; it is opaque firmware bytes.
+    if (AdoptedPrimary(device_handles_[i], primary_id, device_node)) {
       continue;
     }
 
@@ -414,9 +459,7 @@ void TestReverseDeviceType::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
-    if (!CuidUtilities::is_constructed(&primary_id)) {
-      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
-      // no packed info to reverse-check; it is opaque firmware bytes.
+    if (AdoptedPrimary(device_handles_[i], primary_id, device_node)) {
       continue;
     }
 

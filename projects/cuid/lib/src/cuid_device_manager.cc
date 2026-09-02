@@ -286,8 +286,27 @@ amdcuid_status_t CuidDeviceManager::add_device(DevicePtr device) {
   // Derive first, then take the lock: get_derived_cuid() reads sysfs and then
   // the record file, taking the record's advisory lock, which any local user
   // can hold. Nothing in the derivation needs the manager's state.
+  //
+  // With the key, the same way build_cuid_index() indexes the devices
+  // enumeration found. Without it the derivation has no HMAC key to fall back
+  // on and simply fails, so the device goes into devices_ but not into
+  // cuid_index_, and lookup_by_handle() cannot find it.
+  //
+  // That is invisible in the two cases where nothing is derived at all -- the
+  // driver publishes cuid_secondary, or the record store already holds an
+  // entry -- because both overloads then return the same recorded value. It
+  // bites in exactly the third case: no CUID support in the driver and no
+  // store yet, which is what a node looks like when AMD SMI ships CUID before
+  // the kernel does. There, amdcuid_get_handle_by_bdf() handed back a correct
+  // derived CUID and every amdcuid_query_device_property() on that handle
+  // answered DEVICE_NOT_FOUND, so amdsmi_get_gpu_cuid_info() failed with
+  // AMDSMI_STATUS_API_FAILED and amd-smi static --cuid printed N/A for every
+  // field of every GPU on a working machine.
   amdcuid_derived_id derived;
-  const bool have_derived = device->get_derived_cuid(derived) == AMDCUID_STATUS_SUCCESS;
+  const bool have_derived =
+      (geteuid() == 0 && hmac_ != nullptr)
+          ? device->get_derived_cuid(derived, hmac_) == AMDCUID_STATUS_SUCCESS
+          : device->get_derived_cuid(derived) == AMDCUID_STATUS_SUCCESS;
 
   std::lock_guard<std::mutex> lock(manager_mutex_);
   if (have_derived) {
