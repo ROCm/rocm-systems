@@ -24,7 +24,9 @@ else:
 
 SKIP_RETURN_CODE = 125
 
-ROCM_ROOTS = (os.environ.get("ROCM_PATH", ""), "/opt/rocm")
+ROCM_ROOTS = tuple(
+    root for root in (os.environ.get("ROCM_PATH", ""), "/opt/rocm") if root
+)
 
 
 def skip_with_reason(reason: str) -> int:
@@ -41,8 +43,6 @@ def torch_lib_dirs() -> list[str]:
 
 def first_rocm_dir_matching(suffixes: tuple[str, ...], pattern: str) -> list[str]:
     for root in ROCM_ROOTS:
-        if not root:
-            continue
         for suffix in suffixes:
             candidate = Path(root) / suffix
             if next(candidate.glob(pattern), None) is not None:
