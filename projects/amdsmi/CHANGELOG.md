@@ -27,6 +27,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Populated by `amdsmi_get_gpu_enumeration_info()`, UALoE-backed like the existing `physical_acc_id` field in `amdsmi_asic_info_t`.
   - CLI: `amd-smi list --enumeration` now includes `PHYSICAL_ACC_ID` next to `OAM_ID`.
 
+- **Added `chip_rev_id` and `external_rev_id` to `amdsmi_get_gpu_asic_info()`**.  
+  - Reports the amdgpu `chip_rev` and `external_rev` values from the `AMDGPU_INFO_DEV_INFO` DRM query. Both are distinct from `rev_id`, which is the PCI config-space revision.
+  - `chip_rev_id` is the internal chip revision, or stepping, exactly as the driver reports it; AMD SMI does not decode it into a lifecycle label. `external_rev_id` is family-scoped, so the same value can appear on unrelated ASIC families; interpret it alongside `device_id`.
+  - Exposed under the same names in the Python `amdsmi_get_gpu_asic_info()` dictionary and in `amd-smi static --asic`. The C fields report `0xFFFFFFFF` when unsupported; Python and the CLI render that as `N/A`.
+  - ABI-preserving: the two fields consume two `uint32_t` slots from `amdsmi_asic_info_t.reserved`, so the structure size and the offsets of every pre-existing named field except `reserved` are unchanged. `reserved` moves by two slots and shrinks from 17 to 15 entries.
+
 ### Changed
 
 - **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  
@@ -70,6 +76,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The NIC is now enumerated with an empty `rdma_dev`.
   - `amdsmi_get_nic_rdma_dev_info()` returns `AMDSMI_STATUS_SUCCESS` with `num_rdma_dev` set to 0.
   - `amd-smi static` reports `RDMA_DEVICES: N/A` instead of omitting the device. All other NIC information is reported as usual.
+
+- **Fixed `amdsmi_get_gpu_asic_info()` reporting `rev_id` as a real revision when it is not available**.  
+  - The WSL backend returned success with a zeroed structure, so `rev_id` read as `0x0`, and where it did report the not-supported value Python rendered it as the raw `0xffffffff`. Python and the CLI now render it as `N/A`.
+  - `rev_id` was also assigned from the device-info structure before the `AMDGPU_INFO_DEV_INFO` query populated it. Every such path already returned an error, so this was not observable through a checked return, but the value no longer contradicts the status.
+  - `amdsmi_asic_info_t` is now reset through one shared initializer used by every backend, so a field a backend cannot supply keeps its not-supported value rather than a plausible zero.
 
 ### Upcoming Changes
 
