@@ -26,7 +26,7 @@
 #   run             run the suite (timestamped log + JUnit XML). Always emits
 #                   llvm source-based coverage profiles (*.profraw) into
 #                   <BUILD_DIR>/coverage (requires the host tests to be built
-#                   with -DMICRO_COVERAGE=ON, the default)
+#                   with -DHOST_TEST_COVERAGE=ON, the default)
 #   coverage        turn the per-binary *.profraw profiles from `run` into
 #                   reports: a per-binary text/HTML report + lcov tracefile
 #                   (clean, no hash mismatch), plus an overall line/branch union
