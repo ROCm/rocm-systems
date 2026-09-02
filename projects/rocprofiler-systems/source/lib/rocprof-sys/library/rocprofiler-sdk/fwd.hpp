@@ -8,6 +8,9 @@
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
+
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 #include <rocprofiler-sdk/agent.h>
@@ -119,22 +122,21 @@ using backtrace_operation_map_t =
 
 struct client_data
 {
-    static constexpr size_t num_buffers  = 11;
-    static constexpr size_t num_contexts = 5;
+    static constexpr size_t k_num_buffers  = 11;
+    static constexpr size_t k_num_contexts = 4;
 
     using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info_t<std::string_view>;
     using callback_name_info_t = rocprofiler::sdk::callback_name_info_t<std::string_view>;
     using kernel_symbol_vec_t  = std::vector<kernel_symbol_callback_record_t>;
     using code_object_vec_t    = std::vector<code_object_callback_record_t>;
-    using buffer_id_vec_t      = std::array<rocprofiler_buffer_id_t, num_buffers>;
-    using context_id_vec_t     = std::array<rocprofiler_context_id_t, num_contexts>;
+    using buffer_id_vec_t      = std::array<rocprofiler_buffer_id_t, k_num_buffers>;
+    using context_id_vec_t     = std::array<rocprofiler_context_id_t, k_num_contexts>;
     using agent_vec_t          = std::vector<rocprofiler_agent_v0_t>;
 
     rocprofiler_client_id_t*           client_id                 = nullptr;
     rocprofiler_client_finalize_t      client_fini               = nullptr;
     rocprofiler_context_id_t           primary_ctx               = { 0 };
     rocprofiler_context_id_t           counter_ctx               = { 0 };
-    rocprofiler_context_id_t           spm_ctx                   = { 0 };
     rocprofiler_context_id_t           code_object_ctx           = { 0 };
     rocprofiler_context_id_t           control_ctx               = { 0 };
     rocprofiler_buffer_id_t            kernel_dispatch_buffer    = { 0 };
@@ -166,15 +168,17 @@ struct client_data
     callback_name_info_t                                     callback_tracing_info = {};
     backtrace_operation_map_t                                backtrace_operations  = {};
 
-    void                        initialize();
-    void                        initialize_event_info();
-    void                        set_agents();
-    context_id_vec_t            get_all_contexts() const;
-    context_id_vec_t            get_main_contexts() const;
-    rocprofiler_context_id_t    get_control_context() const;
-    rocprofiler_context_id_t    get_code_obj_context() const;
-    buffer_id_vec_t             get_buffers() const;
-    const rocprofsys_agent_t*   get_agent(rocprofiler_agent_id_t _id) const;
+    void initialize();
+    void initialize_event_info();
+    void set_agents();
+    /// Create the shared counter context on first use.
+    [[nodiscard]] rocprofiler_status_t ensure_counter_context();
+    context_id_vec_t                   get_all_contexts() const;
+    context_id_vec_t                   get_main_contexts() const;
+    rocprofiler_context_id_t           get_control_context() const;
+    rocprofiler_context_id_t           get_code_obj_context() const;
+    buffer_id_vec_t                    get_buffers() const;
+    const rocprofsys_agent_t*          get_agent(rocprofiler_agent_id_t agent_id) const;
     const tool_agent*           get_gpu_tool_agent(rocprofiler_agent_id_t id) const;
     const kernel_symbol_data_t* get_kernel_symbol_info(std::uint64_t _kernel_id) const;
     const rocprofiler_tool_counter_info_t* get_tool_counter_info(
@@ -186,8 +190,7 @@ struct client_data
 inline client_data::context_id_vec_t
 client_data::get_all_contexts() const
 {
-    return context_id_vec_t{ primary_ctx, counter_ctx, spm_ctx, code_object_ctx,
-                             control_ctx };
+    return context_id_vec_t{ primary_ctx, counter_ctx, code_object_ctx, control_ctx };
 }
 
 inline client_data::context_id_vec_t
@@ -196,7 +199,6 @@ client_data::get_main_contexts() const
     return context_id_vec_t{
         primary_ctx,
         counter_ctx,
-        spm_ctx,
     };
 }
 
@@ -224,9 +226,9 @@ client_data::get_buffers() const
 }
 
 inline const rocprofsys_agent_t*
-client_data::get_agent(rocprofiler_agent_id_t _id) const
+client_data::get_agent(rocprofiler_agent_id_t agent_id) const
 {
-    const auto& agent = get_agent_manager_instance().get_agent_by_handle(_id.handle);
+    const auto& agent = get_agent_manager_instance().get_agent_by_handle(agent_id.handle);
     return &agent;
 }
 

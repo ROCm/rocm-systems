@@ -7,6 +7,7 @@
 #include "rocprof-sys/library/rocprofiler-sdk/spm_internal.hpp"
 
 #include <gtest/gtest.h>
+#include <rocprofiler-sdk/fwd.h>
 
 #include <cstdint>
 #include <optional>
@@ -208,11 +209,11 @@ TEST(spm_config_validation, accepts_sample_interval_without_events)
         {}, {}));
 }
 
-TEST(spm_config_validation, rejects_rocm_dispatch_counter_conflict)
+TEST(spm_config_validation, defers_rocm_dispatch_counter_conflict_to_sdk)
 {
     const auto requested_config = make_valid_requested_spm_config();
 
-    EXPECT_FALSE(is_config_valid(requested_config, { "SQ_WAVES" }, {}));
+    EXPECT_TRUE(is_config_valid(requested_config, { "SQ_WAVES" }, {}));
 }
 
 TEST(spm_config_validation, rejects_gpu_perf_counter_conflict)
@@ -237,6 +238,22 @@ TEST(spm_config_validation, accepts_valid_requested_spm_configuration)
     EXPECT_TRUE(is_config_valid(requested_config, {}, {}));
 }
 
+#if ROCPROFSYS_USE_SPM
+TEST(spm_runtime_configuration, classifies_only_context_conflict_as_fatal)
+{
+    using result_type = spm_detail::RuntimeConfigurationResult;
+
+    EXPECT_EQ(
+        spm_detail::classify_runtime_configuration_status(ROCPROFILER_STATUS_SUCCESS),
+        result_type::Configured);
+    EXPECT_EQ(spm_detail::classify_runtime_configuration_status(ROCPROFILER_STATUS_ERROR),
+              result_type::Unavailable);
+    EXPECT_EQ(spm_detail::classify_runtime_configuration_status(
+                  ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT),
+              result_type::FatalError);
+}
+#endif
+
 TEST(spm_runtime_configuration, accepts_when_spm_is_not_requested)
 {
     EXPECT_TRUE(configure_runtime(nullptr, configuration{}, {}, {}));
@@ -250,12 +267,12 @@ TEST(spm_runtime_configuration, accepts_sample_interval_without_events)
         {}, {}));
 }
 
-// Invalid user configuration is the only case that fails tool initialization, so it
-// must be rejected before any client data is touched.
-TEST(spm_runtime_configuration, rejects_rocm_dispatch_counter_conflict)
+// The SDK runtime is disabled in this test target, so a valid request without client
+// data exercises the non-fatal fallback after Systems validation.
+TEST(spm_runtime_configuration, defers_rocm_dispatch_counter_conflict_to_sdk)
 {
-    EXPECT_FALSE(configure_runtime(nullptr, make_valid_requested_spm_config(),
-                                   { "SQ_WAVES" }, {}));
+    EXPECT_TRUE(configure_runtime(nullptr, make_valid_requested_spm_config(),
+                                  { "SQ_WAVES" }, {}));
 }
 
 TEST(spm_runtime_configuration, rejects_zero_sample_interval)
@@ -266,7 +283,7 @@ TEST(spm_runtime_configuration, rejects_zero_sample_interval)
     EXPECT_FALSE(configure_runtime(nullptr, requested_config, {}, {}));
 }
 
-TEST(spm_runtime_configuration, rejects_counter_conflict_with_zero_interval)
+TEST(spm_runtime_configuration, rejects_zero_interval_with_dispatch_counters)
 {
     auto requested_config            = make_valid_requested_spm_config();
     requested_config.sample_interval = 0;

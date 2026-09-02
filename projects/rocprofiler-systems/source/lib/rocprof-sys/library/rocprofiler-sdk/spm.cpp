@@ -88,10 +88,26 @@ get_sample_interval()
         .value_or(0);
 }
 
+#if ROCPROFSYS_USE_SPM
+detail::RuntimeConfigurationResult
+detail::classify_runtime_configuration_status(rocprofiler_status_t status) noexcept
+{
+    if(status == ROCPROFILER_STATUS_SUCCESS)
+    {
+        return RuntimeConfigurationResult::Configured;
+    }
+    if(status == ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT)
+    {
+        return RuntimeConfigurationResult::FatalError;
+    }
+    return RuntimeConfigurationResult::Unavailable;
+}
+#endif
+
 bool
-is_config_valid(const configuration&            requested_config,
-                const std::vector<std::string>& dispatch_counter_events,
-                const std::string&              gpu_perf_counter_events)
+is_config_valid(const configuration& requested_config,
+                const std::vector<std::string>& /*dispatch_counter_events*/,
+                const std::string& gpu_perf_counter_events)
 {
     // Backstop for direct library load paths. Tool initialization must reject
     // SPM requests when the required interval or mutual-exclusion constraints
@@ -106,13 +122,6 @@ is_config_valid(const configuration&            requested_config,
                         "to request SPM collection.");
         }
         return true;
-    }
-
-    if(!dispatch_counter_events.empty())
-    {
-        LOG_ERROR("Invalid SPM configuration: SPM counter collection is mutually "
-                  "exclusive with ROCPROFSYS_ROCM_EVENTS");
-        return false;
     }
 
     // ROCPROFSYS_GPU_PERF_COUNTERS is kept as a raw setting string here. Treat
@@ -238,7 +247,7 @@ requested_counter_names(const requested_counter_vec_t& requested)
 #if ROCPROFSYS_USE_SPM && !defined(ROCPROFSYS_DISABLE_SPM_RUNTIME)
 namespace
 {
-constexpr auto k_invalid_context_handle = 0UL;
+constexpr auto k_invalid_counter_config_handle = 0UL;
 static_assert(sizeof(rocprofiler_counter_config_id_t) == sizeof(spm_counter_config_id_t),
               "SPM config handle mirror diverged from rocprofiler-sdk");
 
@@ -318,7 +327,7 @@ void
 destroy_spm_counter_config(rocprofiler_agent_id_t          agent_id,
                            rocprofiler_counter_config_id_t config_id) noexcept
 {
-    if(config_id.handle == k_invalid_context_handle)
+    if(config_id.handle == k_invalid_counter_config_handle)
     {
         return;
     }
@@ -1070,40 +1079,46 @@ spm_record_callback(const rocprofiler_spm_dispatch_counting_service_data_t* disp
 // NOLINTEND(readability-function-size)
 }  // namespace
 
-bool
+detail::RuntimeConfigurationResult
 configure_requested_runtime(client_data* data, const configuration& requested_config)
 {
     if(data == nullptr)
     {
         LOG_WARNING("SPM runtime collection requested but client data is unavailable");
-        return false;
+        return detail::RuntimeConfigurationResult::Unavailable;
     }
 
     if(!configure_agent_spm_configs(*data, requested_config))
     {
-        return false;
+        return detail::RuntimeConfigurationResult::Unavailable;
     }
 
-    if(data->spm_ctx.handle == k_invalid_context_handle)
-    {
-        auto status = rocprofiler_create_context(&data->spm_ctx);
-        if(status != ROCPROFILER_STATUS_SUCCESS)
-        {
-            LOG_WARNING("Failed to create SPM context: {} ({})", static_cast<int>(status),
-                        rocprofiler_get_status_string(status));
-            destroy_spm_counter_configs(*data);
-            return false;
-        }
-    }
-
-    auto status = rocprofiler_spm_configure_callback_dispatch_service(
-        data->spm_ctx, spm_dispatch_callback, data, spm_record_callback, data);
+    auto status = data->ensure_counter_context();
     if(status != ROCPROFILER_STATUS_SUCCESS)
     {
-        log_sdk_status_failure("Failed to configure SPM callback dispatch service",
-                               status);
+        LOG_WARNING("Failed to create shared counter context for SPM: {} ({})",
+                    static_cast<int>(status), rocprofiler_get_status_string(status));
         destroy_spm_counter_configs(*data);
-        return false;
+        return detail::classify_runtime_configuration_status(status);
+    }
+
+    status = rocprofiler_spm_configure_callback_dispatch_service(
+        data->counter_ctx, spm_dispatch_callback, data, spm_record_callback, data);
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        if(status == ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT)
+        {
+            LOG_ERROR("Failed to configure SPM on shared counter context: {} ({}). "
+                      "SPM and ROCPROFSYS_ROCM_EVENTS cannot be enabled together",
+                      static_cast<int>(status), rocprofiler_get_status_string(status));
+        }
+        else
+        {
+            log_sdk_status_failure("Failed to configure SPM callback dispatch service",
+                                   status);
+        }
+        destroy_spm_counter_configs(*data);
+        return detail::classify_runtime_configuration_status(status);
     }
 
     LOG_WARNING(
@@ -1112,9 +1127,9 @@ configure_requested_runtime(client_data* data, const configuration& requested_co
         "an uninstrumented run. SPM can also affect system stability and in rare cases "
         "trigger a GPU or system reset. See the SPM section of the Systems Profiler "
         "documentation for supported hardware and driver requirements.");
-    LOG_DEBUG("Configured SPM callback dispatch service on spm_ctx={}",
-              data->spm_ctx.handle);
-    return true;
+    LOG_DEBUG("Configured SPM callback dispatch service on counter_ctx={}",
+              data->counter_ctx.handle);
+    return detail::RuntimeConfigurationResult::Configured;
 }
 
 namespace
@@ -1165,14 +1180,14 @@ finalize_runtime(client_data* data) noexcept
     log_data_loss(data);
 }
 #else
-bool
+detail::RuntimeConfigurationResult
 configure_requested_runtime(client_data*, const configuration&)
 {
     LOG_WARNING("SPM runtime collection was requested, but this rocprofiler-sdk "
                 "build does not provide the experimental SPM API. Build with a "
                 "rocprofiler-sdk version that provides "
                 "rocprofiler-sdk/experimental/spm.h.");
-    return false;
+    return detail::RuntimeConfigurationResult::Unavailable;
 }
 
 void
@@ -1190,7 +1205,12 @@ configure_validated_runtime(client_data* data, const configuration& requested_co
         return true;
     }
 
-    if(!configure_requested_runtime(data, requested_config))
+    const auto result = configure_requested_runtime(data, requested_config);
+    if(result == detail::RuntimeConfigurationResult::FatalError)
+    {
+        return false;
+    }
+    if(result == detail::RuntimeConfigurationResult::Unavailable)
     {
         LOG_WARNING("Continuing without SPM counter collection");
     }

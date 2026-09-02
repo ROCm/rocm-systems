@@ -32,6 +32,7 @@
 #include "library/rocprofiler-sdk/kfd_events.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
 #include "library/rocprofiler-sdk/spm.hpp"
+#include "library/rocprofiler-sdk/spm_internal.hpp"
 #include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
@@ -46,9 +47,11 @@
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
+#include <rocprofiler-sdk/dispatch_counting_service.h>
 
 #include <rocprofiler-sdk/version.h>
 
@@ -2352,6 +2355,25 @@ is_valid(rocprofiler_context_id_t ctx)
     return (errc == ROCPROFILER_STATUS_SUCCESS && status > 0);
 }
 
+#if ROCPROFSYS_USE_SPM
+bool
+handle_counter_context_conflict(rocprofiler_status_t status, const char* service,
+                                client_data* data)
+{
+    if(spm::detail::classify_runtime_configuration_status(status) !=
+       spm::detail::RuntimeConfigurationResult::FatalError)
+    {
+        return false;
+    }
+
+    LOG_ERROR("Failed to configure {} on shared counter_ctx: {} ({}). SPM and "
+              "ROCPROFSYS_ROCM_EVENTS cannot be enabled together",
+              service, static_cast<int>(status), rocprofiler_get_status_string(status));
+    spm::finalize_runtime(data);
+    return true;
+}
+#endif
+
 void
 start_context(rocprofiler_context_id_t ctx)
 {
@@ -2752,19 +2774,46 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         }
 
         // --- Dispatch-mode kernel counters ---
-        ROCPROFILER_CALL(rocprofiler_create_context(&_data->counter_ctx));
+        const auto context_status = _data->ensure_counter_context();
+#if ROCPROFSYS_USE_SPM
+        if(handle_counter_context_conflict(context_status,
+                                           "ROCPROFSYS_ROCM_EVENTS context", _data))
+        {
+            return -1;
+        }
+#endif
+        ROCPROFILER_CALL(context_status);
+        if(context_status == ROCPROFILER_STATUS_SUCCESS)
+        {
+            auto operations = std::array<rocprofiler_tracing_operation_t, 1>{
+                ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
+            };
 
-        auto _operations = std::array<rocprofiler_tracing_operation_t, 1>{
-            ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
-        };
+            const auto tracing_status = rocprofiler_configure_callback_tracing_service(
+                _data->counter_ctx, ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                operations.data(), operations.size(), tool_tracing_callback, _data);
+#if ROCPROFSYS_USE_SPM
+            if(handle_counter_context_conflict(tracing_status,
+                                               "ROCPROFSYS_ROCM_EVENTS tracing", _data))
+            {
+                return -1;
+            }
+#endif
+            ROCPROFILER_CALL(tracing_status);
 
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-            _data->counter_ctx, ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-            _operations.data(), _operations.size(), tool_tracing_callback, _data));
-
-        ROCPROFILER_CALL(rocprofiler_configure_callback_dispatch_counting_service(
-            _data->counter_ctx, dispatch_counting_service_callback, _data,
-            counter_record_callback, _data));
+            const auto counting_status =
+                rocprofiler_configure_callback_dispatch_counting_service(
+                    _data->counter_ctx, dispatch_counting_service_callback, _data,
+                    counter_record_callback, _data);
+#if ROCPROFSYS_USE_SPM
+            if(handle_counter_context_conflict(
+                   counting_status, "ROCPROFSYS_ROCM_EVENTS dispatch counting", _data))
+            {
+                return -1;
+            }
+#endif
+            ROCPROFILER_CALL(counting_status);
+        }
     }
 
 #if ROCPROFILER_VERSION >= 600

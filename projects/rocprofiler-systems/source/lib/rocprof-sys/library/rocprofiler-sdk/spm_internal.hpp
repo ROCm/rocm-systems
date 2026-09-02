@@ -12,6 +12,10 @@
 #include <unordered_set>
 #include <vector>
 
+#if ROCPROFSYS_USE_SPM
+#    include <rocprofiler-sdk/fwd.h>
+#endif
+
 namespace rocprofsys::rocprofiler_sdk::spm
 {
 /// Normalized SPM counter collection settings derived from user configuration.
@@ -36,7 +40,8 @@ get_sample_interval();
 ///
 /// Returns true when SPM is not requested because there is no SPM configuration to
 /// reject. If SPM is requested, validates the required sample interval settings and
-/// mutual exclusion with ROCPROFSYS_ROCM_EVENTS and ROCPROFSYS_GPU_PERF_COUNTERS.
+/// mutual exclusion with ROCPROFSYS_GPU_PERF_COUNTERS. Compatibility with
+/// ROCPROFSYS_ROCM_EVENTS is determined by rocprofiler-sdk on the shared context.
 [[nodiscard]] bool
 is_config_valid(const configuration&            requested_config,
                 const std::vector<std::string>& dispatch_counter_events,
@@ -44,8 +49,9 @@ is_config_valid(const configuration&            requested_config,
 
 /// Inject configuration inputs for validation-focused unit tests.
 ///
-/// Returns false only for invalid user configuration. SDK/hardware/runtime SPM
-/// setup failures warn and allow tool initialization to continue without SPM.
+/// Returns false for invalid user configuration or an SDK context conflict. Other
+/// SDK/hardware/runtime SPM setup failures warn and allow tool initialization to
+/// continue without SPM.
 [[nodiscard]] bool
 configure_runtime(client_data* data, const configuration& requested_config,
                   const std::vector<std::string>& dispatch_counter_events,
@@ -62,6 +68,19 @@ struct requested_counter
 };
 
 using requested_counter_vec_t = std::vector<requested_counter>;
+
+enum class RuntimeConfigurationResult
+{
+    Configured,
+    Unavailable,
+    FatalError,
+};
+
+#if ROCPROFSYS_USE_SPM
+/// Classify an SDK setup status for the SPM runtime fallback policy.
+[[nodiscard]] RuntimeConfigurationResult
+classify_runtime_configuration_status(rocprofiler_status_t status) noexcept;
+#endif
 
 [[nodiscard]] std::optional<std::uint64_t>
 parse_device_id(std::string_view value);
