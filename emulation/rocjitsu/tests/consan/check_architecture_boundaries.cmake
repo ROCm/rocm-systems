@@ -693,6 +693,13 @@ foreach(_mode_registry_owner IN ITEMS
         "MOI mode operations must not duplicate the semantic engine probe vocabulary"
     )
 endforeach()
+foreach(_file IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_file}"
+        "consan_moi_default_auto_report_buffer_size|kConSanMoi(RecordReplay|Sampled|InlineShadow)DefaultReportBufferBytes"
+        "retired default report-buffer policy must not return beside the live capacity ceiling"
+    )
+endforeach()
 foreach(_common_fence_consumer IN ITEMS
     consan_atomic_fence_policy.cpp
     consan_moi_placement.inc

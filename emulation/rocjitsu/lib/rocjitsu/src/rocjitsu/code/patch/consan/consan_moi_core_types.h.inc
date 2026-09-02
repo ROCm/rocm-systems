@@ -328,9 +328,6 @@ consan_moi_inline_atomic_support_name(ConSanMoiInlineAtomicSupport support) {
   return "unknown";
 }
 
-inline constexpr uint64_t kConSanMoiRecordReplayDefaultReportBufferBytes = 64u * 1024u;
-inline constexpr uint64_t kConSanMoiSampledDefaultReportBufferBytes = 64u * 1024u;
-inline constexpr uint64_t kConSanMoiInlineShadowDefaultReportBufferBytes = 512u * 1024u;
 /// Hard ordinary/expert safety bounds. Record/Replay retains full 80-byte
 /// identities in a power-of-two hash table and therefore needs the larger
 /// per-buffer tier for qualified generated libraries. Sampled and Inline keep
@@ -397,19 +394,6 @@ inline constexpr uint32_t kConSanMoiReportKnownLayoutFlags =
 // set is therefore a layout-version stamp, not a negotiable capability set:
 // changing any Inline slot layout intentionally makes mixed-build buffers fail
 // validation instead of decoding an older payload under newer assumptions.
-
-[[nodiscard]] constexpr uint64_t
-consan_moi_default_auto_report_buffer_size(ConSanMoiEngine engine) {
-  switch (engine) {
-  case ConSanMoiEngine::RecordReplay:
-    return kConSanMoiRecordReplayDefaultReportBufferBytes;
-  case ConSanMoiEngine::InlineShadow:
-    return kConSanMoiInlineShadowDefaultReportBufferBytes;
-  case ConSanMoiEngine::Sampled:
-    return kConSanMoiSampledDefaultReportBufferBytes;
-  }
-  return 0;
-}
 
 [[nodiscard]] constexpr bool
 consan_moi_report_header_is_current(const ConSanMoiReportHeader &header) {

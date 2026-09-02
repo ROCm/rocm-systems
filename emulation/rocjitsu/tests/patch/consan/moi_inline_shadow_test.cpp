@@ -8392,12 +8392,13 @@ TEST(ConSanMoi, InlineAbiV6LayoutIsCheckedBoundedAndNonAliasing) {
             kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity);
   EXPECT_EQ(full.exact_shadow_entry_capacity, 1u);
 
-  constexpr auto defaults = consan_moi_inline_shadow_report_buffer_layout_for_bytes(
-      kConSanMoiInlineShadowDefaultReportBufferBytes);
-  EXPECT_TRUE(defaults.valid);
-  EXPECT_GE(defaults.exact_shadow_entry_capacity,
+  constexpr uint64_t kRepresentativeBufferBytes = 512u * 1024u;
+  constexpr auto representative =
+      consan_moi_inline_shadow_report_buffer_layout_for_bytes(kRepresentativeBufferBytes);
+  EXPECT_TRUE(representative.valid);
+  EXPECT_GE(representative.exact_shadow_entry_capacity,
             kConSanMoiInlineShadowConservativeExactShadowEntries);
-  EXPECT_LE(defaults.required_bytes, kConSanMoiInlineShadowDefaultReportBufferBytes);
+  EXPECT_LE(representative.required_bytes, kRepresentativeBufferBytes);
 
   ConSanMoiReportHeader header = make_consan_moi_report_header(
       /*generation=*/1, /*dispatch_id=*/2, one.access_record_capacity, one.diagnostic_capacity,

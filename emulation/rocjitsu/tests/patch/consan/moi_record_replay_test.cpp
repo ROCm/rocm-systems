@@ -2304,19 +2304,14 @@ TEST(ConSanMoi, ReportAbiHeaderCarriesVersionedLayout) {
   EXPECT_EQ(fence_header.fence_record_capacity, 2u);
   EXPECT_EQ(fence_header.fence_record_count, 0u);
 
-  EXPECT_EQ(consan_moi_default_auto_report_buffer_size(ConSanMoiEngine::RecordReplay), 64u * 1024u);
-  EXPECT_EQ(consan_moi_default_auto_report_buffer_size(ConSanMoiEngine::Sampled), 64u * 1024u);
-  EXPECT_EQ(consan_moi_default_auto_report_buffer_size(ConSanMoiEngine::InlineShadow),
-            512u * 1024u);
-
-  constexpr ConSanMoiReportBufferLayout default_record_layout =
-      consan_moi_report_buffer_layout_for_bytes(
-          consan_moi_default_auto_report_buffer_size(ConSanMoiEngine::RecordReplay), true, true);
-  EXPECT_GT(default_record_layout.access_record_capacity, 0u);
-  EXPECT_EQ(default_record_layout.access_record_capacity,
-            default_record_layout.barrier_record_capacity);
-  EXPECT_EQ(default_record_layout.access_record_capacity,
-            default_record_layout.atomic_record_capacity);
+  constexpr uint64_t kRepresentativeCompactReportBytes = 64u * 1024u;
+  constexpr ConSanMoiReportBufferLayout representative_record_layout =
+      consan_moi_report_buffer_layout_for_bytes(kRepresentativeCompactReportBytes, true, true);
+  EXPECT_GT(representative_record_layout.access_record_capacity, 0u);
+  EXPECT_EQ(representative_record_layout.access_record_capacity,
+            representative_record_layout.barrier_record_capacity);
+  EXPECT_EQ(representative_record_layout.access_record_capacity,
+            representative_record_layout.atomic_record_capacity);
 
   constexpr ConSanMoiReportBufferLayout fence_layout = consan_moi_report_buffer_layout_for_bytes(
       consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 0, 2, 2),
@@ -2329,19 +2324,18 @@ TEST(ConSanMoi, ReportAbiHeaderCarriesVersionedLayout) {
   EXPECT_EQ(fence_layout.diagnostic_records_offset,
             fence_layout.fence_records_offset + 2u * sizeof(ConSanMoiFenceRecord));
 
-  constexpr ConSanMoiReportBufferLayout default_sampled_layout =
-      consan_moi_direct_sampled_report_buffer_layout_for_bytes(
-          consan_moi_default_auto_report_buffer_size(ConSanMoiEngine::Sampled));
-  EXPECT_GT(default_sampled_layout.sampled_watchpoint_capacity, 0u);
-  EXPECT_EQ(default_sampled_layout.barrier_record_capacity, 0u);
-  EXPECT_EQ(default_sampled_layout.atomic_record_capacity, 0u);
+  constexpr ConSanMoiReportBufferLayout representative_sampled_layout =
+      consan_moi_direct_sampled_report_buffer_layout_for_bytes(kRepresentativeCompactReportBytes);
+  EXPECT_GT(representative_sampled_layout.sampled_watchpoint_capacity, 0u);
+  EXPECT_EQ(representative_sampled_layout.barrier_record_capacity, 0u);
+  EXPECT_EQ(representative_sampled_layout.atomic_record_capacity, 0u);
 
-  constexpr ConSanMoiReportBufferLayout default_inline_layout =
-      consan_moi_inline_shadow_report_buffer_layout_for_bytes(
-          consan_moi_default_auto_report_buffer_size(ConSanMoiEngine::InlineShadow));
-  EXPECT_EQ(default_inline_layout.diagnostic_capacity,
+  constexpr uint64_t kRepresentativeInlineReportBytes = 512u * 1024u;
+  constexpr ConSanMoiReportBufferLayout representative_inline_layout =
+      consan_moi_inline_shadow_report_buffer_layout_for_bytes(kRepresentativeInlineReportBytes);
+  EXPECT_EQ(representative_inline_layout.diagnostic_capacity,
             kConSanMoiInlineShadowDefaultDiagnosticCapacity);
-  EXPECT_GE(default_inline_layout.exact_shadow_entry_capacity,
+  EXPECT_GE(representative_inline_layout.exact_shadow_entry_capacity,
             kConSanMoiInlineShadowConservativeExactShadowEntries);
 
   constexpr ConSanMoiReportBufferLayout access_only_layout =
