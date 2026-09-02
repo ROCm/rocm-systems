@@ -11,6 +11,7 @@
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/event_queue.h"
 
+#include <cassert>
 #include <string>
 #include <utility>
 
@@ -50,17 +51,33 @@ public:
     this->schedule_event(&clock_event_, domain_.first_edge());
   }
 
+  /// @brief Stop clocking so a later startup() can re-arm the event.
+  ///
+  /// @details SimulationEngine::create() also rebuilds after shutdown(). Without
+  /// this, running_ survives teardown and startup()'s precondition fails for a
+  /// component that was simply still clocking when the previous run ended.
+  void shutdown() override {
+    running_ = false;
+    Base::shutdown();
+  }
+
   /// @brief Resume clocking from the next clock edge at or after the given tick.
   ///
-  /// @details No-op if already running. @p after is not compared against the
-  /// engine's current tick: a caller that passes a tick already past schedules
-  /// an edge in the past and moves simulation time backwards.
+  /// @details No-op if already running, and no-op if the domain has no edge at
+  /// or after @p after -- the clock stays stopped rather than being armed at
+  /// TICK_MAX. @p after is not compared against the engine's current tick: a
+  /// caller that passes a tick already past schedules an edge in the past and
+  /// moves simulation time backwards.
   /// @param after Earliest tick from which to resume clocking.
   void resume_clock(Tick after) {
     if (running_)
       return;
+    const Tick next = domain_.next_edge(after);
+    // Same rule as the edge handler below: TICK_MAX must never be scheduled.
+    if (next == TICK_MAX)
+      return;
     running_ = true;
-    this->schedule_event(&clock_event_, domain_.next_edge(after));
+    this->schedule_event(&clock_event_, next);
   }
 
   /// @brief Return whether the clock is currently running.
@@ -71,14 +88,6 @@ public:
   /// @brief Return the clock domain this component belongs to.
   /// @returns Const reference to the clock domain.
   const ClockDomain &clock_domain() const { return domain_; }
-
-  /// @brief Return clock period in simulation ticks.
-  /// @returns Period in ticks.
-  Tick period() const { return domain_.period(); }
-
-  /// @brief Return clock frequency in Hz.
-  /// @returns Frequency in Hz.
-  uint64_t frequency() const { return domain_.frequency(); }
 
   /// @brief Execute one quantum of work on the rising clock edge.
   /// @param now The simulation tick of this clock edge.
@@ -96,9 +105,8 @@ private:
                          this->schedule_event(&clock_event_, next);
                        } else {
                          // Either advance() asked to stop, or the domain has no
-                         // edge left: TICK_MAX is its "no such tick" answer and
-                         // the queue's empty-queue sentinel, so scheduling it
-                         // would hide a live event from the termination check.
+                         // edge left. See ClockDomain::next_edge() for why
+                         // TICK_MAX must never be scheduled.
                          running_ = false;
                        }
                      }};

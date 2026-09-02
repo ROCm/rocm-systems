@@ -53,8 +53,10 @@ public:
   /// @param[in] divisor Frequency divisor (parent freq / divisor).
   /// @param[in] phase_offset Additional phase offset in simulation ticks.
   /// @returns A new ClockDomain with the derived parameters.
-  /// @throws std::invalid_argument if the divisor is zero, or if the derived
-  ///         period or phase is not representable.
+  /// @throws std::invalid_argument if the divisor is zero, if the derived
+  ///         frequency rounds to zero, if the derived period or phase is not
+  ///         representable, or if @p phase_offset is not a whole number of
+  ///         parent periods (which would take the child off the parent's grid).
   ClockDomain derive(std::string name, uint32_t divisor, Tick phase_offset = 0) const {
     if (divisor == 0)
       throw std::invalid_argument("Clock divisor must be positive");
@@ -62,6 +64,14 @@ public:
       throw std::invalid_argument("Derived clock period exceeds simulation time");
     if (phase_offset > TICK_MAX - phase_offset_)
       throw std::invalid_argument("Derived clock phase offset exceeds simulation time");
+    // The public ctor rejects a zero frequency; deriving must not be a way in.
+    if (frequency_ / divisor == 0)
+      throw std::invalid_argument("Derived clock frequency rounds to zero");
+    // The period keeps every child edge on the parent's grid by construction;
+    // the phase only does so if it is a whole number of parent periods.
+    if (phase_offset % period_ != 0)
+      throw std::invalid_argument("Derived clock phase offset must be a multiple of the "
+                                  "parent period");
     return ClockDomain(std::move(name), frequency_ / divisor, period_ * divisor,
                        phase_offset_ + phase_offset);
   }
@@ -81,11 +91,11 @@ public:
 
   /// @brief Return the frequency the integral period actually realises.
   ///
-  /// @details `TICKS_PER_SECOND / period`. Equal to frequency() when the
-  /// requested frequency divides the tick resolution, and above it otherwise,
-  /// because the period rounds down: 2.1 GHz becomes a 476-tick period and a
-  /// real 2.100840 GHz, which is 190 microseconds of disagreement per billion
-  /// cycles.
+  /// @details `TICKS_PER_SECOND / period`. Never below frequency(), because the
+  /// period rounds down. The two agree while the period is large enough for one
+  /// tick not to matter -- 7 Hz and 1 MHz both round-trip exactly -- and diverge
+  /// once it is not: 2.1 GHz becomes a 476-tick period and a real 2.100840 GHz,
+  /// which is 190 microseconds of disagreement per billion cycles.
   /// @returns Realised frequency in Hz.
   uint64_t effective_frequency() const { return TICKS_PER_SECOND / period_; }
 
@@ -110,11 +120,15 @@ public:
   /// idempotent and safe to apply to a value aligned once already.
   ///
   /// TICK_MAX is never an edge: it is the framework's "no such tick" value and
-  /// the event queue's empty sentinel, so a queued event at it would be
-  /// invisible to the termination check. It is what both alignment helpers
-  /// answer when the grid has run out, and a caller reaching it must treat it
-  /// as "never" rather than scheduling it -- see Clocked's handler, which stops
-  /// the clock instead.
+  /// the event queue's empty sentinel. Scheduling one there fails differently
+  /// in each execution mode and neither is recoverable: single-threaded, the
+  /// queue is non-empty so the event fires, edge_after() answers TICK_MAX
+  /// again, and the engine spins with time frozen; multi-threaded, the
+  /// partition's next-event time is TICK_MAX, which the barrier reads as
+  /// quiescent, so the live event is dropped and the run reports COMPLETED.
+  /// TICK_MAX is what both alignment helpers answer when the grid has run out,
+  /// and a caller reaching it must treat it as "never" rather than scheduling
+  /// it -- see Clocked's handler, which stops the clock instead.
   /// @param tick Tick to align.
   /// @returns The first edge at or after @p tick, or TICK_MAX if there is none.
   Tick next_edge(Tick tick) const {
@@ -152,7 +166,7 @@ public:
   /// @param cycles Number of clock cycles.
   /// @returns Equivalent duration in ticks, saturating at TICK_MAX.
   Tick cycles_to_ticks(uint64_t cycles) const {
-    return cycles > TICK_MAX / period_ ? TICK_MAX : cycles * period_;
+    return cycles > max_cycles_ ? TICK_MAX : cycles * period_;
   }
 
   /// @brief Return the tick @p cycles of work starting at @p start completes.
@@ -186,11 +200,13 @@ private:
   /// @throws std::invalid_argument if the phase leaves no representable first edge.
   ClockDomain(std::string name, uint64_t frequency_hz, Tick period, Tick phase_offset)
       : name_(std::move(name)), frequency_(frequency_hz), period_(period),
-        phase_offset_(phase_offset) {
+        phase_offset_(phase_offset), max_cycles_(TICK_MAX / period) {
     // first_edge() is the base of every alignment below, and it is a bare
     // addition. Checking it once here is what lets the rest assume the grid
-    // starts somewhere representable.
-    if (phase_offset_ > TICK_MAX - period_)
+    // starts somewhere representable. The comparison is strict because equality
+    // puts first_edge() on TICK_MAX itself, which next_edge() reserves as
+    // "never" and startup() would arm the clock at regardless.
+    if (phase_offset_ >= TICK_MAX - period_)
       throw std::invalid_argument("Clock phase leaves no representable rising edge");
   }
 
@@ -214,6 +230,12 @@ private:
   const uint64_t frequency_;
   const Tick period_;
   const Tick phase_offset_;
+  /// @brief Largest cycle count whose tick duration is representable.
+  ///
+  /// @details Fixed for the life of the domain, so that cycles_to_ticks() --
+  /// and through it deadline(), the costing path -- tests for overflow with a
+  /// compare instead of a 64-bit division.
+  const Tick max_cycles_;
 };
 
 } // namespace simdojo

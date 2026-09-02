@@ -9,7 +9,9 @@
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/event_queue.h"
+#include "simdojo/sim/sim_types.h"
 
+#include <cassert>
 #include <string>
 #include <utility>
 
@@ -39,8 +41,20 @@ public:
   void startup() override {
     assert(this->engine() != nullptr &&
            "Functional component must be added to a topology before startup()");
+    // The one step_event_ is reusable but not re-entrant: arming it twice
+    // queues two entries and advances this component twice per tick.
+    assert(!active_ && "Functional component was already advancing before startup()");
     active_ = true;
     this->schedule_event(&step_event_, 1);
+  }
+
+  /// @brief Stop advancing so a later startup() can re-arm the event.
+  ///
+  /// @details Mirrors Clocked::shutdown(); see there for why the flag must not
+  /// survive teardown.
+  void shutdown() override {
+    active_ = false;
+    Base::shutdown();
   }
 
   /// @brief Execute one quantum of work. Return true to continue, false to halt.
@@ -68,9 +82,15 @@ private:
   /// component (which has a 1000 ps period). This is by design: functional
   /// components run at maximum simulation speed with no artificial gating.
   Event step_event_{this, EventType::TIMER_CALLBACK, [this](Tick now, Message *) {
-                      if (advance(tick_counter_++)) {
-                        this->schedule_event(&step_event_, now + 1);
+                      const Tick next =
+                          advance(tick_counter_++) ? saturating_add(now, 1) : TICK_MAX;
+                      if (next != TICK_MAX) {
+                        this->schedule_event(&step_event_, next);
                       } else {
+                        // Either advance() asked to stop, or time ran out: a
+                        // bare now + 1 at TICK_MAX wraps to 0, and the engine
+                        // sets current_tick from it unchecked, rewinding
+                        // simulation time.
                         active_ = false;
                       }
                     }};
