@@ -949,10 +949,51 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   endif()
 
   if (ROCSHMEM_SOURCE_DIR)
-    set(GIN_GDA_INCLUDE_DIR "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda")
-    target_include_directories(rccl PRIVATE ${GIN_GDA_INCLUDE_DIR})
+    target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
+    target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/include)
+    if (ROCSHMEM_BUILD_DIR)
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_BUILD_DIR})
+    else()
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
+    endif()
+  endif()
+endif()
+
+if (ENABLE_ROCSHMEM_GIN)
+  # Ensure we see our copied headers before rocSHMEM's
+  target_include_directories(rccl BEFORE PRIVATE "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda")
+
+  # Need to add the GIN GDA directory to the public interface:
+  # internal rocSHMEM headers assume that the source directory is in the include search path
+  target_include_directories(rccl BEFORE INTERFACE
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/nccl_device/gin/rocshmem_gda>
+  )
+
+  # Add target for copying the rocSHMEM headers
+  add_custom_target(copy_rocshmem_headers)
+  add_dependencies(rccl copy_rocshmem_headers)
+
+  if (ROCSHMEM_INCLUDE_DIR)
+    # Copy rocSHMEM public include headers (primarily rocshmem_config.h) into RCCL
+    set(ROCSHMEM_INCLUDE_HEADERS rocshmem/rocshmem_config.h)
+    copy_files(
+      ROCSHMEM_INCLUDE_HEADERS
+      "${ROCSHMEM_INCLUDE_DIR}"
+      "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda"
+      GIN_GDA_ROCSHMEM_INCLUDE_HEADERS
+    )
+    add_custom_target(copy_rocshmem_include_headers DEPENDS ${GIN_GDA_ROCSHMEM_INCLUDE_HEADERS})
+    # Ensure rocSHMEM is fully built/installed before copying installed headers
+    if (TARGET rocshmem_ext)
+      add_dependencies(copy_rocshmem_include_headers rocshmem_ext)
+    endif()
+    add_dependencies(copy_rocshmem_headers copy_rocshmem_include_headers)
+  endif()
+
+  if (ROCSHMEM_SOURCE_DIR)
     # Copy rocSHMEM QueuePair device headers into RCCL
-    set(ROCSHMEM_QUEUEPAIR_HEADERS
+    set(ROCSHMEM_SOURCE_HEADERS
       # Queue Pair core
       gda/queue_pair/queue_pair_common.hpp
       gda/queue_pair/queue_pair_option.hpp
@@ -980,37 +1021,25 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
       # rocSHMEM internals / miscellaneous
       gda/endian.hpp
       gda/gda_enums.hpp
-      #rocshmem/rocshmem_config.h
       bit.hpp
       constmem.hpp
       constants.hpp
     )
-    foreach(qp_hdr ${ROCSHMEM_QUEUEPAIR_HEADERS})
-      set(gin_gda_qp_hdr "${GIN_GDA_INCLUDE_DIR}/${qp_hdr}")
-      set(rocshmem_src_qp_hdr "${ROCSHMEM_SOURCE_DIR}/src/${qp_hdr}")
-      get_filename_component(gin_gda_qp_hdr_dir "${gin_gda_qp_hdr}" DIRECTORY)
-      add_custom_command(
-        OUTPUT "${gin_gda_qp_hdr}"
-        COMMAND  ${CMAKE_COMMAND} -E make_directory "${gin_gda_qp_hdr_dir}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${rocshmem_src_qp_hdr}" "${gin_gda_qp_hdr_dir}"
-        DEPENDS "${rocshmem_src_qp_hdr}"
-        COMMENT "Copying ${rocshmem_src_qp_hdr} -> ${gin_gda_qp_hdr}"
-        VERBATIM
-      )
-      list(APPEND GIN_GDA_QUEUEPAIR_HEADERS "${gin_gda_qp_hdr}")
-    endforeach()
-    add_custom_target(copy_rocshmem_queuepair_headers DEPENDS ${GIN_GDA_QUEUEPAIR_HEADERS})
-    add_dependencies(rccl copy_rocshmem_queuepair_headers)
-    # Include rocSHMEM source dirs directly
-    target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
-    target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/include)
-    if (ROCSHMEM_BUILD_DIR)
-      target_include_directories(rccl PRIVATE ${ROCSHMEM_BUILD_DIR})
-    else()
-      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
-    endif()
+    copy_files(
+      ROCSHMEM_SOURCE_HEADERS
+      "${ROCSHMEM_SOURCE_DIR}/src"
+      "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda"
+      GIN_GDA_ROCSHMEM_SOURCE_HEADERS
+    )
+    add_custom_target(copy_rocshmem_source_headers DEPENDS ${GIN_GDA_ROCSHMEM_SOURCE_HEADERS})
+    add_dependencies(copy_rocshmem_headers copy_rocshmem_source_headers)
   endif()
+
+  # Add rule to install ibvcore.h so that it can be found by ibv_core.hpp
+  rocm_install(FILES       ${HIPIFY_DIR}/src/include/ibvcore.h
+               DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device/gin/rocshmem_gda)
 endif()
+
 if (ENABLE_ROCSHMEM)
   target_link_libraries(rccl PRIVATE ${IBVERBS})
 endif()
