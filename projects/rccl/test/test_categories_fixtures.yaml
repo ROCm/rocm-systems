@@ -40,6 +40,9 @@ test_categories:
       - "PackRoundtripTest.Store16Load16Global_Direct"
       - "RcclEpLayoutTest.*"
       - "HierarchicalShuffleTest.*"
+      - "DeviceTestBase.Gfx1250EnablesSysScope"
+      - "DeviceTestBase.FifoLineSysScopeRoundtrip"
+      - "LlFifoSysScope.SiblingBroadcastSlotReuse"
     exclude_windows:
       - "*"
     labels:
@@ -61,6 +64,8 @@ test_categories:
       - "BitOpsTemplateUnsignedTestsFixture.*"
       - "PackRoundtripTest.*"
       - "HierarchicalShuffleTest.*"
+      - "DeviceTestBase.*"
+      - "LlFifoSysScope.*"
       - "DIVUP.*"
       - "ROUNDUP.*"
       - "ALIGN_POWER.*"
