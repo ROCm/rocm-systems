@@ -4605,8 +4605,7 @@ VPkLshlAddU64Vop3p::VPkLshlAddU64Vop3p(const MachineInst *inst)
             selected_exec_fn(InstructionExecutionId::VPkLshlAddU64Vop3p)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(Operand::make_after_selector_validation(
-          64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1)),
+      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
@@ -4711,7 +4710,7 @@ DecodeResult decodeVPkLshlAddU64Vop3p(const MachineInst *opcode,
          reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 208u) ||
         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 230u ||
         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 235u &&
-         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 238u) ||
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 236u) ||
         (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 >= 240u &&
          reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 <= 248u) ||
         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 == 253u ||

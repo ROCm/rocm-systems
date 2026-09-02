@@ -187,13 +187,6 @@ Operand::Operand(int size_bits, OperandType opr_type, unsigned short encoding_va
     : Operand(size_bits, opr_type, static_cast<int>(encoding_value), packed_16bit_source,
               packed_16bit_dst) {}
 
-Operand Operand::make_after_selector_validation(int size_bits, OperandType opr_type,
-                                                int encoding_value) {
-  Operand operand(size_bits, opr_type, encoding_value);
-  operand.accept_instruction_validated_selector();
-  return operand;
-}
-
 Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
                  uint16_t literal16_display_value, bool has_literal16_display)
     : Operand(size_bits, opr_type, encoding_value) {
