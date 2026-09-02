@@ -271,21 +271,11 @@ def calc_ceilings(
     dtype: str,
     benchmark_data: dict[str, list[str]],
     mspec: MachineSpecs,
-    ai_data: Optional[dict] = None,
 ) -> dict[str, list[Union[list[float], float, None]]]:
     """Given benchmarking data, calculate ceilings (or peak performance) for
     empirical roofline"""
 
-    if ai_data:
-        max_ai = 0
-        for cache_level in CACHE_LEVELS:
-            if cache_level in ai_data and ai_data[cache_level][0]:
-                cache_max = max(ai_data[cache_level][0])
-                max_ai = max(max_ai, cache_max)
-
-        dynamic_xmax = max_ai * 1.2 if max_ai > 0 else XMAX_DEFAULT
-    else:
-        dynamic_xmax = XMAX_DEFAULT
+    dynamic_xmax = XMAX_DEFAULT
 
     # TODO: This is where filtering by memory level will need to occur for standalone
     graph_points: dict[str, list[Union[list[float], float, None]]] = {
@@ -607,6 +597,35 @@ def calc_ai_analyze(
     return plot_points.__dict__
 
 
+def machine_ceilings(
+    roofline_parameters: dict[str, Any], mspec: MachineSpecs
+) -> tuple[list[float], list[float]]:
+    """Return every positive bandwidth and compute ceiling for one device."""
+    console_debug(
+        "roofline",
+        f"Reading machine ceilings for {getattr(mspec, 'gpu_model', 'unknown GPU')}",
+    )
+    base_dir = _workload_base_dir(roofline_parameters.get("workload_dir"))
+    if base_dir is None:
+        return [], []
+
+    try:
+        benchmark_data = _read_benchmark_csv(Path(base_dir) / "roofline.csv")
+        device_id = int(roofline_parameters["device_id"])
+        if device_id < 0:
+            raise IndexError(f"invalid device id {device_id}")
+        bandwidths = _device_values(benchmark_data, device_id, ("Bw",))
+        peaks = _device_values(benchmark_data, device_id, ("Flops", "Ops"))
+    except Exception as error:
+        console_warning(
+            "roofline",
+            f"Unable to read machine ceilings from {base_dir}/roofline.csv: {error}",
+        )
+        return [], []
+
+    return bandwidths, peaks
+
+
 def _read_benchmark_csv(benchmark_results: Path) -> dict[str, list[str]]:
     """Read roofline.csv into {column: [values]}, dropping the device-id column."""
     benchmark_data: dict[str, list[str]] = {}
@@ -621,6 +640,22 @@ def _read_benchmark_csv(benchmark_results: Path) -> dict[str, list[str]]:
                 for i, key in enumerate(headers):
                     benchmark_data[key].append(row[i])
     return benchmark_data
+
+
+def _device_values(
+    benchmark_data: dict[str, list[str]],
+    device_id: int,
+    column_suffixes: tuple[str, ...],
+) -> list[float]:
+    """Return positive finite values for matching columns at one device row."""
+    values: list[float] = []
+    for column_name, column_values in benchmark_data.items():
+        if not column_name.endswith(column_suffixes):
+            continue
+        value = sanitize_ai_value(column_values[device_id])
+        if value > 0:
+            values.append(value)
+    return values
 
 
 def _expected_benchmark_columns(
@@ -650,7 +685,6 @@ def construct_roof(
     roofline_parameters: dict[str, Any],
     dtype: str,
     mspec: MachineSpecs,
-    ai_data: Optional[dict] = None,
 ) -> dict[str, list[Union[list[float], float, None]]]:
     """Load benchmark results from disk and compute the empirical roofline."""
     base_dir = _workload_base_dir(roofline_parameters.get("workload_dir"))
@@ -676,4 +710,4 @@ def construct_roof(
             "benchmark data or cleaning the directory and re-running the analysis."
         )
 
-    return calc_ceilings(roofline_parameters, dtype, benchmark_data, mspec, ai_data)
+    return calc_ceilings(roofline_parameters, dtype, benchmark_data, mspec)

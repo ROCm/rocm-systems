@@ -11,6 +11,8 @@
   --roofline-muted: #5b6472;
   --roofline-selected-bg: rgba(0, 114, 178, 0.12);
   --roofline-swatch-border: rgba(0, 0, 0, 0.25);
+  --roofline-warn: #8a5300;
+  --roofline-warn-bg: rgba(138, 83, 0, 0.12);
   --roofline-dim-opacity: 0.4;
   --roofline-panel-basis: clamp(280px, 26vw, 440px);
 
@@ -30,6 +32,8 @@
   --roofline-muted: #9aa4b2;
   --roofline-selected-bg: rgba(88, 166, 255, 0.18);
   --roofline-swatch-border: rgba(255, 255, 255, 0.35);
+  --roofline-warn: #e0a458;
+  --roofline-warn-bg: rgba(224, 164, 88, 0.16);
   --roofline-plot-area: #000000;
   --roofline-plot-grid: rgba(255, 255, 255, 0.14);
   --roofline-marker-outline: rgba(255, 255, 255, 0.7);
@@ -343,6 +347,33 @@ body {
 
 .roofline-kernel-name {
   font-family: var(--roofline-kernel-font, monospace);
+}
+
+.roofline-kernel-offplot {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--roofline-warn);
+  border-radius: 8px;
+  background: var(--roofline-warn-bg);
+  color: var(--roofline-warn);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+  cursor: zoom-in;
+}
+
+.roofline-kernel-offplot[hidden] {
+  display: none;
+}
+
+.roofline-offplot-count {
+  margin-left: 6px;
+  color: var(--roofline-warn);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .roofline-kernel-pct {
