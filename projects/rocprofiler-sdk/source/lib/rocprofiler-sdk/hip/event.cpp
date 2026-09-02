@@ -752,6 +752,27 @@ struct barrier_info_session_t
     common::container::small_vector<barrier_data_t, 4> barrier_data   = {};
 };
 
+// Event barriers get their own session type and completion handler rather than riding on
+// hsa::queue_info_session_t and AsyncSignalHandler. Three things prevent folding them in:
+//
+//  - Registration point. The queue session registers one handler per batch, on the last
+//    dispatch's completion signal, and only when packet_data is non-empty. A
+//    hipEventRecord routinely produces a batch with no dispatch packets at all, so no
+//    handler would ever be registered for it. Even alongside kernels, an event must be
+//    timestamped when its own barrier retires, not when some later kernel does.
+//
+//  - Timing source. kernel_dispatch::get_dispatch_time derives timing from
+//    packet_data.kernel_packet.kernel_dispatch.completion_signal together with
+//    dispatch_info.agent_id and kernel_id. A barrier has no kernel packet and no
+//    dispatch_info to read those from.
+//
+//  - Record shape. packet_data_t::callback_record is typed
+//    rocprofiler_callback_tracing_kernel_dispatch_data_t. Event records carry different
+//    fields (hip_event_handle, source_queue_id), so sharing the struct would mean
+//    populating a kernel dispatch record that describes no kernel.
+//
+// Deferred waits are the opposite case: they have no barrier of their own to hang off of,
+// so they do ride on the queue session's completion signal. See bind_staged_waits.
 bool
 BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 {
