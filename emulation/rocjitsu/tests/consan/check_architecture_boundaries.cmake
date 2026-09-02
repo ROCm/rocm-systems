@@ -1003,6 +1003,22 @@ if(NOT _moi_placement_contract MATCHES
         "owner-local allocation consumers must use the exact owner-assignment projection"
     )
 endif()
+if(NOT _moi_barrier_planning MATCHES
+       "apply_moi_transient_sgpr_assignment[(]options, owner_point" OR
+   _record_replay_barrier_owner MATCHES
+       "apply_moi_transient_sgpr_assignment" OR
+   _inline_barrier_owner MATCHES
+       "apply_moi_transient_sgpr_assignment" OR
+   NOT _record_replay_barrier_owner MATCHES
+       "plan_record_replay_barrier_emission" OR
+   _record_replay_barrier_owner MATCHES
+       "plan_record_replay_private_barrier[^}]*resolve_moi_record_event_emission_plan" OR
+   _record_replay_barrier_owner MATCHES
+       "plan_record_replay_barrier_body[^}]*resolve_moi_record_event_emission_plan")
+    message(FATAL_ERROR
+        "shared private assignment and Record/Replay barrier emission must each have one owner"
+    )
+endif()
 if(NOT _record_replay_barrier_owner MATCHES
        "try_apply_record_replay_barrier_patch[^}]*moi_track_barriers" OR
    NOT _inline_barrier_owner MATCHES
@@ -2972,11 +2988,10 @@ if(_moi_barrier_owner MATCHES
         "ConSan exact-subset barrier dispatch must not reopen broad body state"
     )
 endif()
-foreach(_inline_barrier_assignment_count IN ITEMS 4 2)
-    if(_inline_barrier_assignment_count EQUAL 4)
+foreach(_inline_barrier_assignment_count IN ITEMS 3 2)
+    if(_inline_barrier_assignment_count EQUAL 3)
         set(_inline_barrier_assignment apply_moi_transient_sgpr_assignment)
-        set(_inline_barrier_assignment_owners
-            "${_moi_barrier_owner}\n${_record_replay_barrier_owner}\n${_inline_barrier_owner}")
+        set(_inline_barrier_assignment_owners "${_moi_barrier_owner}")
     else()
         set(_inline_barrier_assignment apply_moi_persistent_vgpr_assignment)
         set(_inline_barrier_assignment_owners "${_moi_barrier_owner}")

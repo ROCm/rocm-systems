@@ -203,11 +203,6 @@ plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
         "ConSan MOI private epoch barrier could not preserve its temporary VGPR");
     return std::nullopt;
   }
-  if (!apply_moi_transient_sgpr_assignment(options, point, assignments, owners)) {
-    warnings.emplace_back(
-        "ConSan MOI private epoch barrier lost its transient scalar assignment");
-    return std::nullopt;
-  }
   const uint32_t required_private_bytes =
       std::max(access_patch.required_private_segment_size, spill->total_private_bytes);
   ConSanPatchAbiEffects patch_abi = plan_barrier_patch_abi(

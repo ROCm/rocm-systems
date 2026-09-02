@@ -630,6 +630,18 @@ void try_apply_record_replay_barrier_record_patch(
                                std::move(lowering_commits), std::move(patches));
 }
 
+[[nodiscard]] std::optional<MoiRecordEventEmissionPlan> plan_record_replay_barrier_emission(
+    const ConSanOptions &options, ConSanMoiOperatingPoint &point,
+    const MoiScalarAbiPlan &scalar_abi, uint16_t scratch_vgpr, MoiOwnerAssignments assignments,
+    std::span<const uint64_t> owners, rj_code_arch_t arch,
+    const ConSanMoiPrivateStateLayout *private_layout = nullptr) {
+  return apply_record_replay_entry_workgroup_assignment(options, point, assignments, owners,
+                                                         private_layout)
+             ? resolve_moi_record_event_emission_plan(options, options, point, scalar_abi,
+                                                      scratch_vgpr, arch, private_layout)
+             : std::nullopt;
+}
+
 [[nodiscard]] std::optional<PlannedBarrierLowering>
 plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
   auto &[bytes, options, point, candidate, resource_plan, access_patch, semantics, spill_managers,
@@ -644,20 +656,13 @@ plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
         candidate.container_name);
     return std::nullopt;
   }
-  if (!apply_moi_transient_sgpr_assignment(options, point, assignments, owners) ||
-      !apply_record_replay_entry_workgroup_assignment(options, point, assignments,
-                                                      owners, &private_state_layout)) {
-    warnings.emplace_back(
-        "ConSan MOI Record/Replay dense barrier lost its private owner-local assignment");
-    return std::nullopt;
-  }
   const MoiScalarAbiPlan scalar_abi =
       plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(point));
-  const auto record_emission = resolve_moi_record_event_emission_plan(
-      options, options, point, scalar_abi, resources->base, arch, &private_state_layout);
+  const auto record_emission = plan_record_replay_barrier_emission(
+      options, point, scalar_abi, resources->base, assignments, owners, arch,
+      &private_state_layout);
   if (!record_emission) {
-    warnings.emplace_back(
-        "ConSan MOI Record/Replay dense barrier has an incomplete emission plan");
+    warnings.emplace_back("ConSan MOI Record/Replay dense barrier has no owner-local emission");
     return std::nullopt;
   }
   std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
@@ -717,16 +722,10 @@ plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
         "ConSan MOI Record/Replay dense barrier fallback has no scratch VGPR state");
     return std::nullopt;
   }
-  if (!apply_record_replay_entry_workgroup_assignment(options, point, assignments, owners)) {
-    warnings.emplace_back(
-        "ConSan MOI Record/Replay dense barrier fallback lost its entry workgroup assignment");
-    return std::nullopt;
-  }
-  auto record = resolve_moi_record_event_emission_plan(options, options, point, scalar_abi,
-                                                       *scratch_vgpr, arch);
+  auto record = plan_record_replay_barrier_emission(options, point, scalar_abi, *scratch_vgpr,
+                                                    assignments, owners, arch);
   if (!record) {
-    warnings.emplace_back(
-        "ConSan MOI Record/Replay dense barrier fallback has an incomplete emission plan");
+    warnings.emplace_back("ConSan MOI Record/Replay dense fallback has no owner-local emission");
     return std::nullopt;
   }
   return MoiBarrierBodyPlan{std::move(*record)};

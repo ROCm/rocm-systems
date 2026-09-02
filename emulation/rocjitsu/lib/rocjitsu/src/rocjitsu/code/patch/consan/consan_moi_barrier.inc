@@ -432,6 +432,11 @@ void try_apply_shared_barrier_patch(
       }
       if (!owner_point.automatic_moi_private_epoch)
         continue;
+      if (!apply_moi_transient_sgpr_assignment(options, owner_point,
+                                               result.moi_operating_point, owners)) {
+        result.warnings.emplace_back("ConSan MOI private epoch barrier lost its transient state");
+        continue;
+      }
       const ConSanPatchLoweringProduct *access_patch =
           patch_owner_index.persistent_access_patch_for(owners);
       if (access_patch == nullptr) {
