@@ -224,9 +224,8 @@ void try_apply_record_replay_barrier_record_patch(
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result.program_inventory, result.patches,
                                                 arch, kMoiLocalIndirectIslandWords);
   if (operating_point.moi_exec_save_sgpr) {
-    const auto reserved_barrier_island_layout = resolve_reserved_barrier_island_layout(
-        old_text, result.patches, arch, access_output.reserved_sync_islands,
-        selected_candidates.size(),
+    const auto reserved_barrier_island_layout = validate_reserved_barrier_island_layout(
+        old_text, arch, access_output.reserved_sync_islands, selected_candidates.size(),
         moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan(),
                                               options, options, semantics));
     if (reserved_barrier_island_layout) {

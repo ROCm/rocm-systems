@@ -25,6 +25,8 @@ void try_apply_inline_shadow_barrier_patch(std::span<const uint8_t> bytes,
                                            const ConSanMoiOperatingPoint &operating_point,
                                            rj_code_arch_t arch,
                                            MoiResourcePlanningState &resource_state,
+                                           const std::optional<MoiBarrierIslandReservation>
+                                               &reserved_sync_islands,
                                            const MoiObjectModeSemantics &semantics,
                                            ConSanTransformArtifacts &result);
 

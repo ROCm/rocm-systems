@@ -237,12 +237,13 @@ void apply_inline_shadow_mode_patches(std::span<const uint8_t> bytes, const ConS
                                       const MoiObjectFacts &,
                                       const MoiObjectModeSemantics &semantics,
                                       ConSanTransformArtifacts &result) {
+  std::optional<MoiBarrierIslandReservation> barrier_reservation;
   try_apply_inline_shadow_patch(bytes, options, operating_point, arch, resource_state, candidates,
-                                semantics, result);
+                                semantics, barrier_reservation, result);
   if (!result.errors.empty())
     return;
   try_apply_inline_shadow_barrier_patch(bytes, options, operating_point, arch, resource_state,
-                                        semantics, result);
+                                        barrier_reservation, semantics, result);
   if (result.errors.empty())
     try_apply_inline_atomic_ordering_patch(bytes, options, operating_point, arch, semantics,
                                            result);

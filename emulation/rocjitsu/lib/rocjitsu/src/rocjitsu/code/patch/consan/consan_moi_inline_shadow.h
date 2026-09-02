@@ -7,7 +7,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
-#include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
+#include "rocjitsu/code/patch/consan/consan_moi_barrier.h"
 
 namespace rocjitsu::consan_moi_impl {
 
@@ -52,6 +52,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                    rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
                                    std::span<const ConSanMoiCandidate> admitted,
                                    const MoiObjectModeSemantics &semantics,
+                                   std::optional<MoiBarrierIslandReservation> &barrier_reservation,
                                    ConSanTransformArtifacts &result);
 
 void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,

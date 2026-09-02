@@ -858,6 +858,8 @@ file(READ "${_consan_dir}/consan_moi_barrier.cpp" _moi_barrier_source)
 file(READ "${_consan_dir}/consan_moi_barrier.h" _moi_barrier_contract)
 file(READ "${_consan_dir}/consan_moi_record_replay.h"
      _record_replay_contract)
+file(READ "${_consan_dir}/consan_moi_inline_shadow.inc"
+     _inline_shadow_access_owner)
 if(NOT _moi_barrier_source MATCHES
        "#include \"rocjitsu/code/patch/consan/consan_moi_inline_shadow_private_barrier.inc\"" OR
    NOT _moi_barrier_source MATCHES
@@ -896,9 +898,17 @@ if(NOT _moi_barrier_contract MATCHES "struct MoiBarrierIslandReservation" OR
    _moi_barrier_contract MATCHES
        "consan_moi_record_replay[.]h|MoiRecordReplayAccessOutput|try_apply_record_replay_barrier_patch" OR
    NOT _record_replay_barrier_owner MATCHES
-       "access_output[.]reserved_sync_islands")
+       "access_output[.]reserved_sync_islands" OR
+   NOT _inline_shadow_access_owner MATCHES
+       "barrier_reservation[ \t]*=[ \t]*MoiBarrierIslandReservation" OR
+   NOT _inline_shadow_mode_owner MATCHES
+       "std::optional<MoiBarrierIslandReservation>[ \t]+barrier_reservation" OR
+   NOT _inline_shadow_mode_owner MATCHES
+       "try_apply_inline_shadow_patch[(][^;]*barrier_reservation" OR
+   NOT _inline_shadow_mode_owner MATCHES
+       "try_apply_inline_shadow_barrier_patch[(][^;]*barrier_reservation")
     message(FATAL_ERROR
-        "shared barrier reservations and Record/Replay entry points must retain their exact owners"
+        "access producers and mode entry points must retain exact barrier reservation ownership"
     )
 endif()
 _consan_assert_no_match(
@@ -908,11 +918,11 @@ _consan_assert_no_match(
 )
 if(NOT _moi_barrier_planning MATCHES "try_apply_shared_barrier_patch" OR
    NOT _moi_barrier_planning MATCHES
-       "resolve_reserved_barrier_island_layout" OR
+       "validate_reserved_barrier_island_layout" OR
    NOT _moi_barrier_planning MATCHES
        "std::optional<MoiBarrierIslandReservation>[^;]*reserved_sync_islands" OR
    _moi_barrier_planning MATCHES
-       "try_apply_inline_shadow_barrier_epoch_patch|find_record_replay_reserved_barrier_island_begin|MoiRecordReplayAccessOutput")
+       "try_apply_inline_shadow_barrier_epoch_patch|find_record_replay_reserved_barrier_island_begin|resolve_reserved_barrier_island_layout|MoiRecordReplayAccessOutput|access_anchors|first_access_body|access_island_(begin|end)|generated_branch_relays")
     message(FATAL_ERROR
         "the shared barrier mechanism must retain its exact mode-neutral reservation contract"
     )

@@ -3,6 +3,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                    rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
                                    std::span<const ConSanMoiCandidate> admitted,
                                    const MoiObjectModeSemantics &semantics,
+                                   std::optional<MoiBarrierIslandReservation> &barrier_reservation,
                                    ConSanTransformArtifacts &result) {
   if (!options.moi_report_buffer_address)
     return;
@@ -1323,6 +1324,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (!result.publish_access_lowering(std::move(patcher).emit(), "ConSan MOI inline-shadow probe",
                                         std::move(lowering_commits), std::move(patches))) {
       return;
+    }
+    if (reserved_barrier_island_count != 0u) {
+      barrier_reservation = MoiBarrierIslandReservation{
+          .begin = original_text_size,
+          .slot_words = static_cast<uint32_t>(kIndirectIslandWords),
+          .reserved_slot_count = reserved_barrier_island_count,
+      };
     }
     return;
   }
