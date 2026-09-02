@@ -769,7 +769,7 @@ void DataHazardPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wa
 }
 
 std::vector<LocalMemoryRange>
-tensor_lds_ranges(const amdgpu::tensor_dma_detail::TensorDmaDescriptor &desc) {
+tensor_lds_ranges(const amdgpu::tensor_dma_detail::TensorDmaDescriptor &desc, bool store_from_lds) {
   namespace tdm = amdgpu::tensor_dma_detail;
 
   // A descriptor whose count is zero transfers nothing at all.
@@ -787,9 +787,9 @@ tensor_lds_ranges(const amdgpu::tensor_dma_detail::TensorDmaDescriptor &desc) {
         return;
       // The run covers its last element too, so it reaches an element size past
       // where that element begins.
-      const uint64_t begin = tdm::lds_element_offset(desc, run.first_element, false);
+      const uint64_t begin = tdm::lds_element_offset(desc, run.first_element, store_from_lds);
       const uint64_t end =
-          tdm::lds_element_offset(desc, run.first_element + run.element_count - 1, false) +
+          tdm::lds_element_offset(desc, run.first_element + run.element_count - 1, store_from_lds) +
           desc.elem_size;
       if (const auto range = make_local_range(begin, end))
         ranges.push_back(*range);
@@ -814,7 +814,9 @@ void DataHazardPlugin::emit_tensor_lds_access(const InstructionView &view, const
   // to the entries it leaves behind. A store streams its LDS out for as long as
   // a load streams into it, so the side that reads is tracked the same way: an
   // overwrite before s_wait_tensorcnt is a WAR hazard on the data in flight.
-  for (const LocalMemoryRange &range : tensor_lds_ranges(*desc)) {
+  // The transfer that reads LDS is the store, and a store reads the dense
+  // element stream whatever padding the descriptor carries.
+  for (const LocalMemoryRange &range : tensor_lds_ranges(*desc, /*store_from_lds=*/reads_lds)) {
     MemoryRouteView route;
     route.instruction = view;
     route.reads_local_memory = reads_lds;

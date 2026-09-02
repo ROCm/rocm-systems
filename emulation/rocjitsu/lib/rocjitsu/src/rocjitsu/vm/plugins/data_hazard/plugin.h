@@ -60,12 +60,17 @@ struct LocalMemoryRange {
 /// stride, and padding that skews the rows apart. A descriptor that transfers
 /// nothing, or one the executor rejects, touches no LDS and yields no ranges.
 ///
+/// The direction is part of where the transfer lands, not only of what it does
+/// to the LDS it names: the ISA applies descriptor padding to memory-to-LDS
+/// transfers alone, so a @p store_from_lds transfer reads the dense element
+/// stream that the same descriptor would have skewed on the way in.
+///
 /// A padded run is reported as the whole span it skews across, gaps included.
 /// The gaps hold no transferred data, but they sit between rows of the same
 /// tile, and reporting them apart would leave a pending write per row for every
 /// later LDS access to walk.
 std::vector<LocalMemoryRange>
-tensor_lds_ranges(const amdgpu::tensor_dma_detail::TensorDmaDescriptor &desc);
+tensor_lds_ranges(const amdgpu::tensor_dma_detail::TensorDmaDescriptor &desc, bool store_from_lds);
 
 /// @brief Renders instruction identity for hazard messages.
 ///

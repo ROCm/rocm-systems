@@ -32,9 +32,18 @@ tdm::TensorDmaDescriptor make_tile(std::vector<uint32_t> tile_dims, uint32_t lds
   return desc;
 }
 
+/// The LDS a load writes, which is the direction descriptor padding applies to.
 std::vector<std::pair<uint64_t, uint32_t>> ranges_of(const tdm::TensorDmaDescriptor &desc) {
   std::vector<std::pair<uint64_t, uint32_t>> flattened;
-  for (const dh::LocalMemoryRange &range : dh::tensor_lds_ranges(desc))
+  for (const dh::LocalMemoryRange &range : dh::tensor_lds_ranges(desc, /*store_from_lds=*/false))
+    flattened.emplace_back(range.address, range.size);
+  return flattened;
+}
+
+/// The LDS a store reads, which the same descriptor maps densely.
+std::vector<std::pair<uint64_t, uint32_t>> store_ranges_of(const tdm::TensorDmaDescriptor &desc) {
+  std::vector<std::pair<uint64_t, uint32_t>> flattened;
+  for (const dh::LocalMemoryRange &range : dh::tensor_lds_ranges(desc, /*store_from_lds=*/true))
     flattened.emplace_back(range.address, range.size);
   return flattened;
 }
@@ -81,6 +90,42 @@ TEST(TensorLdsWriteRangeTest, PaddedTileCoversTheSpanTheSkewedRowsOccupy) {
   desc.pad_amount = 1;   // dwords: 4 bytes of skew per row.
   // Four rows of 32 bytes, three of them followed by 4 bytes of skew.
   EXPECT_EQ(ranges_of(desc), (Ranges{{0, 4 * 32 + 3 * 4}}));
+}
+
+// The ISA pads memory-to-LDS transfers alone. A store under the same descriptor
+// reads the dense stream, so tracking it as the skewed span the load wrote
+// would claim LDS the store never reads.
+TEST(TensorLdsReadRangeTest, PaddedTileReadBackByAStoreCoversTheDenseStream) {
+  auto desc = make_tile({8, 4});
+  desc.pad = true;
+  desc.pad_interval = 8;
+  desc.pad_amount = 1;
+  EXPECT_EQ(store_ranges_of(desc), (Ranges{{0, 4 * 32}}));
+}
+
+// Skew accumulates across iterations, so a padded descriptor puts each tile
+// further from the base than the store that reads it does. Tracked as the load
+// maps them, the store's later tiles would be tracked past where they begin and
+// an overwrite of the bytes below would go unnoticed.
+TEST(TensorLdsReadRangeTest, PaddedIterationLeavesTheStoreTilesContiguous) {
+  auto desc = make_tile({8, 4});
+  desc.pad = true;
+  desc.pad_interval = 8;
+  desc.pad_amount = 1;
+  desc.iterate = true;
+  desc.iteration_count = 2;
+  desc.lds_increment = 8 * 4; // Elements: the next tile starts where this ends.
+
+  // The load skews the second tile clear of the first, leaving a gap between.
+  EXPECT_EQ(ranges_of(desc), (Ranges{{0, 140}, {144, 140}}));
+  // The store reads both tiles as one dense run of 64 elements.
+  EXPECT_EQ(store_ranges_of(desc), (Ranges{{0, 2 * 8 * 4 * 4}}));
+}
+
+// Without padding the descriptor maps the same LDS whichever way it transfers.
+TEST(TensorLdsReadRangeTest, UnpaddedTileMapsTheSameLdsInEitherDirection) {
+  const auto desc = make_tile({8, 4}, /*lds_base=*/0x200);
+  EXPECT_EQ(store_ranges_of(desc), ranges_of(desc));
 }
 
 TEST(TensorLdsWriteRangeTest, IterationStrideStackingTilesReportsOneRange) {
