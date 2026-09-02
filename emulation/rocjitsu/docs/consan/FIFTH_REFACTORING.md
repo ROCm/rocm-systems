@@ -7881,3 +7881,59 @@ placement, barrier, and prologue mutation bodies still carry broad operating
 point state; the next deep read must keep separating private transactional
 state from cross-component contracts and reap larger obsolete representations.
 The independent completion audit remains open, so the goal remains active.
+
+### 16.110 Convergence checkpoint 109: prologue sizing from one emission product
+
+The next prologue trace followed accepted per-kernel register placement through
+entry-backup selection, descriptor sizing, and native emission. The code
+constructed a complete `MoiOwnerEpochPrologueEmissionPlan`, but only after
+three local helpers had reread the full `ConSanMoiOperatingPoint`. Those
+helpers independently reconstructed the persistent VGPR footprint, dispatch
+capture, exact workgroup tuple, visible-evidence scalar exclusion, and
+workgroup-shadow zero-tuple width. The VGPR helpers also repeated a target
+profile lookup to rediscover whether the already-planned shadow initialization
+used two or four zero VGPRs.
+
+The resolved emission plan is now constructed before entry-scalar backup
+selection. Backup-carrier exclusion, required VGPR sizing, required SGPR
+sizing, and persistent-output overlap proof consume that product. The existing
+`has_quad_zero_tuple` fact is the only authority for the two-versus-four VGPR
+shadow width; the duplicate target lookup and automatic-placement inference
+are deleted. Dispatch and persistent-scalar extent calculation use the exact
+capture and scalar state that native emission will consume. The preexisting
+visible-evidence overlap rule remains explicit as a narrow caller-supplied
+register, rather than being accidentally weakened to only layouts that happen
+to contain a workgroup shadow.
+
+The three private helper signatures no longer accept
+`ConSanMoiOperatingPoint`. A structural check reads their complete multiline
+definitions and rejects renewed broad-point parameters, so later edits cannot
+quietly restore parallel sizing authority.
+
+| Signal | Checkpoint 109 | Cumulative change | Slice change from checkpoint 108 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,895 | **-2,081** | **-12** |
+| Nonblank production lines | 96,552 | **-2,532** | **-12** |
+| Production implementation lines | 88,826 | **-2,624** | **-12** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 322 / 61 | +32 / +10 | **-3 / 0** |
+| Prologue sizing/overlap helpers accepting the broad point | **0** | n/a | **-3** |
+| Duplicate target lookups in prologue VGPR sizing | **0** | n/a | **-1** |
+| Test inventory | **5,412** | **+67** | 0 |
+
+Validation includes a complete `-j16` rebuild, the prologue and architecture
+boundary gate **50/50**, and all **1,295/1,295** `ConSan.*` and `ConSanMoi.*`
+host/component tests. No test was removed, renamed, disabled, or replaced, and
+no physical gfx1201 test was run.
+
+This slice makes per-kernel prologue processing forward-only after its emission
+product exists and harvests duplicated representation and target inference,
+strengthening Sections 14.2, 14.5, 14.6, and 14.7. The twelve-line reduction is
+real but remains far short of material Section 14.8 evidence. The outer
+prologue transaction still derives each kernel's plan while holding the broad
+point and transformation transaction, and the barrier/placement surfaces
+remain larger opportunities. The independent completion audit remains open,
+so the goal remains active.
