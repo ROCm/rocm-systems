@@ -222,9 +222,10 @@ TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFtzDaz) {
 #elif defined(__aarch64__)
 TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFpcrFlushModes) {
   HostFpcrGuard environment_guard;
+  constexpr uint64_t kFizMask = uint64_t{1} << 0;
   constexpr uint64_t kFz16Mask = uint64_t{1} << 19;
   constexpr uint64_t kFzMask = uint64_t{1} << 24;
-  constexpr uint64_t kFlushMask = kFzMask | kFz16Mask;
+  constexpr uint64_t kFlushMask = kFizMask | kFz16Mask | kFzMask;
   amdgpu::fp_mode::detail::write_fpcr(amdgpu::fp_mode::detail::read_fpcr() | kFlushMask);
   const uint64_t enabled_flush_modes = amdgpu::fp_mode::detail::read_fpcr() & kFlushMask;
   ASSERT_NE(enabled_flush_modes & kFzMask, 0u);
@@ -1932,14 +1933,14 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
   }
 }
 
-TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundMode) {
+TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundModeAndClamp) {
   struct TestCase {
     uint32_t src0;
     uint32_t src1;
     uint32_t src2;
     std::array<uint16_t, 4> expected;
   };
-  constexpr std::array test_cases{
+  constexpr std::array round_cases{
       TestCase{0x3f800000u, 0x3f800000u, 0, {0x3f80u, 0x3f80u, 0x3f80u, 0x3f80u}},
       TestCase{0x3f807fffu, 0x3f800000u, 0, {0x3f80u, 0x3f81u, 0x3f80u, 0x3f80u}},
       TestCase{0x3f808000u, 0x3f800000u, 0, {0x3f80u, 0x3f81u, 0x3f80u, 0x3f80u}},
@@ -1958,65 +1959,83 @@ TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundMode) {
       // A tiny addend is lost in F64, but still affects directed BF16 rounding.
       TestCase{0x3f800000u, 0x3f800000u, 0x00000001u, {0x3f80u, 0x3f81u, 0x3f80u, 0x3f80u}},
   };
+  constexpr std::array clamp_cases{
+      TestCase{0xbf000000u, 0x3f800000u, 0, {0u, 0u, 0u, 0u}},
+      TestCase{0x40000000u, 0x3f800000u, 0, {0x3f80u, 0x3f80u, 0x3f80u, 0x3f80u}},
+      TestCase{0x7fc01234u, 0x3f800000u, 0, {0u, 0u, 0u, 0u}},
+      TestCase{0x7f800000u, 0x3f800000u, 0, {0x3f80u, 0x3f80u, 0x3f80u, 0x3f80u}},
+      TestCase{0xff800000u, 0x3f800000u, 0, {0u, 0u, 0u, 0u}},
+  };
   constexpr uint32_t kDstSeed = 0xa5a55a5au;
   constexpr uint32_t kIdentityQuadPerm = 0xe4u;
 
   for (uint32_t round_mode = 0; round_mode < 4; ++round_mode) {
     for (const uint16_t opcode : {cdna5::kVFmaMixloBf16Vop3p, cdna5::kVFmaMixhiBf16Vop3p}) {
       for (const bool use_dpp : {false, true}) {
-        SCOPED_TRACE(round_mode);
-        SCOPED_TRACE(opcode == cdna5::kVFmaMixloBf16Vop3p ? "mixlo" : "mixhi");
-        SCOPED_TRACE(use_dpp ? "dpp" : "ordinary");
+        for (const bool clamp : {false, true}) {
+          const std::span<const TestCase> test_cases = clamp
+                                                           ? std::span<const TestCase>(clamp_cases)
+                                                           : std::span<const TestCase>(round_cases);
+          SCOPED_TRACE(round_mode);
+          SCOPED_TRACE(opcode == cdna5::kVFmaMixloBf16Vop3p ? "mixlo" : "mixhi");
+          SCOPED_TRACE(use_dpp ? "dpp" : "ordinary");
+          SCOPED_TRACE(clamp ? "clamp" : "no clamp");
 
-        auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
-        ASSERT_NE(decoder, nullptr);
-        std::unique_ptr<Instruction> instruction;
-        if (use_dpp) {
-          cdna5::Vop3pVopDpp16MachineInst raw{};
-          raw.vdst = 3;
-          raw.op = opcode;
-          raw.encoding = 0xccu;
-          raw.src0 = amdgpu::SRC_DPP;
-          raw.src1 = 257;
-          raw.src2 = 258;
-          raw.opsel_hi = 0;
-          raw.vsrc0 = 0;
-          raw.dpp_ctrl = kIdentityQuadPerm;
-          raw.fi = 1;
-          raw.bound_ctrl = 0;
-          raw.bank_mask = 0xfu;
-          raw.row_mask = 0xfu;
-          static_assert(sizeof(raw) == 3 * sizeof(uint32_t));
-          instruction.reset(decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
-        } else {
-          const auto words = cdna5::build_vop3p(
-              opcode, {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 0});
-          instruction.reset(decode_valid(*decoder, words.data()));
-        }
-        ASSERT_NE(instruction, nullptr);
+          auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+          ASSERT_NE(decoder, nullptr);
+          std::unique_ptr<Instruction> instruction;
+          if (use_dpp) {
+            cdna5::Vop3pVopDpp16MachineInst raw{};
+            raw.vdst = 3;
+            raw.op = opcode;
+            raw.encoding = 0xccu;
+            raw.src0 = amdgpu::SRC_DPP;
+            raw.src1 = 257;
+            raw.src2 = 258;
+            raw.opsel_hi = 0;
+            raw.clamp = clamp;
+            raw.vsrc0 = 0;
+            raw.dpp_ctrl = kIdentityQuadPerm;
+            raw.fi = 1;
+            raw.bound_ctrl = 0;
+            raw.bank_mask = 0xfu;
+            raw.row_mask = 0xfu;
+            static_assert(sizeof(raw) == 3 * sizeof(uint32_t));
+            instruction.reset(decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
+          } else {
+            const auto words = cdna5::build_vop3p(opcode, {.vdst = 3,
+                                                           .clamp = static_cast<uint8_t>(clamp),
+                                                           .src0 = 256,
+                                                           .src1 = 257,
+                                                           .src2 = 258,
+                                                           .opsel_hi = 0});
+            instruction.reset(decode_valid(*decoder, words.data()));
+          }
+          ASSERT_NE(instruction, nullptr);
 
-        Gfx1250Sim sim;
-        auto *cu = sim.cu();
-        auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
-        ASSERT_NE(wf, nullptr);
-        wf->set_exec((uint64_t{1} << test_cases.size()) - 1);
-        wf->set_mode_raw(round_mode << 2);
-        const uint32_t vgpr_base = wf->vgpr_alloc().base;
-        for (uint32_t lane = 0; lane < test_cases.size(); ++lane) {
-          cu->write_vgpr(vgpr_base, lane, test_cases[lane].src0);
-          cu->write_vgpr(vgpr_base + 1, lane, test_cases[lane].src1);
-          cu->write_vgpr(vgpr_base + 2, lane, test_cases[lane].src2);
-          cu->write_vgpr(vgpr_base + 3, lane, kDstSeed);
-        }
+          Gfx1250Sim sim;
+          auto *cu = sim.cu();
+          auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+          ASSERT_NE(wf, nullptr);
+          wf->set_exec((uint64_t{1} << test_cases.size()) - 1);
+          wf->set_mode_raw(round_mode << 2);
+          const uint32_t vgpr_base = wf->vgpr_alloc().base;
+          for (uint32_t lane = 0; lane < test_cases.size(); ++lane) {
+            cu->write_vgpr(vgpr_base, lane, test_cases[lane].src0);
+            cu->write_vgpr(vgpr_base + 1, lane, test_cases[lane].src1);
+            cu->write_vgpr(vgpr_base + 2, lane, test_cases[lane].src2);
+            cu->write_vgpr(vgpr_base + 3, lane, kDstSeed);
+          }
 
-        cu->execute_instruction(instruction.get(), *wf);
-        for (uint32_t lane = 0; lane < test_cases.size(); ++lane) {
-          const uint32_t expected =
-              opcode == cdna5::kVFmaMixloBf16Vop3p
-                  ? (kDstSeed & 0xffff0000u) | test_cases[lane].expected[round_mode]
-                  : (static_cast<uint32_t>(test_cases[lane].expected[round_mode]) << 16) |
-                        (kDstSeed & 0xffffu);
-          EXPECT_EQ(cu->read_vgpr(vgpr_base + 3, lane), expected) << "lane " << lane;
+          cu->execute_instruction(instruction.get(), *wf);
+          for (uint32_t lane = 0; lane < test_cases.size(); ++lane) {
+            const uint32_t expected =
+                opcode == cdna5::kVFmaMixloBf16Vop3p
+                    ? (kDstSeed & 0xffff0000u) | test_cases[lane].expected[round_mode]
+                    : (static_cast<uint32_t>(test_cases[lane].expected[round_mode]) << 16) |
+                          (kDstSeed & 0xffffu);
+            EXPECT_EQ(cu->read_vgpr(vgpr_base + 3, lane), expected) << "lane " << lane;
+          }
         }
       }
     }
