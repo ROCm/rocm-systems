@@ -576,6 +576,7 @@ if(BUILD_TESTS)
       TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
       graph/SearchTests.cpp
+      graph/TuningTests.cpp
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
       graph/TopoTests.cpp

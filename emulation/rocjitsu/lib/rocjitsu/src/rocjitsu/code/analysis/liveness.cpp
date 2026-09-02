@@ -5,18 +5,19 @@
 
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/exec_state.h"
+#include "rocjitsu/code/analysis/free_registers.h"
 #include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
-#include "util/bit.h"
 
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
 #include <deque>
+#include <limits>
 #include <stdexcept>
 #include <string_view>
 #include <unordered_set>
@@ -25,6 +26,15 @@
 namespace rocjitsu {
 
 namespace {
+
+// find_free_run() tests a candidate run as one RegisterRef, whose width is a
+// uint8_t. These queries take the run width as a uint16_t, so a wider request is
+// expressible; it is answered with nullopt rather than truncated, because a
+// truncated width would test only the first lane of the run and hand back a base
+// whose remaining lanes were never checked.
+[[nodiscard]] bool run_width_is_nameable(uint16_t count) {
+  return count <= std::numeric_limits<uint8_t>::max();
+}
 
 void dfs_reverse_post_order(const BasicBlock &start,
                             const std::unordered_set<const BasicBlock *> &allowed,
@@ -49,15 +59,6 @@ void dfs_reverse_post_order(const BasicBlock &start,
     postorder.push_back(block);
     stack.pop_back();
   }
-}
-
-[[nodiscard]] bool any_live_in_range(const RegisterSet &live, RegClass cls, uint16_t base,
-                                     uint16_t count) {
-  for (uint16_t i = 0; i < count; ++i) {
-    if (live.contains({cls, static_cast<uint16_t>(base + i), 1}))
-      return true;
-  }
-  return false;
 }
 
 [[nodiscard]] RegisterSet kill_defs(const InstDefUse &du, ExecState exec_before) {
@@ -409,42 +410,33 @@ LivenessAnalysis::find_globally_unused_vgpr_run(const Instruction *inst, uint16_
                                                 uint16_t search_start, uint16_t base_alignment,
                                                 uint16_t available_count) const {
   require_available();
-  assert(count > 0 && "Must request at least one register");
-  assert(base_alignment > 0 && "Register tuple alignment must be non-zero");
   if (inst == nullptr || !global_vgpr_usage_is_complete_ ||
-      !scoped_blocks_.contains(inst->parent())) {
+      !scoped_blocks_.contains(inst->parent()) || !run_width_is_nameable(count)) {
     return std::nullopt;
   }
-  const size_t first_candidate = std::max<size_t>(search_start, min_free_vgpr_);
-  const size_t limit = std::min<size_t>(available_count, max_free_vgpr_);
-  for (size_t base = util::align_up(first_candidate, static_cast<size_t>(base_alignment));
-       base + count <= limit; base += base_alignment) {
-    if (!any_live_in_range(globally_used_registers_, RegClass::VGPR, static_cast<uint16_t>(base),
-                           count)) {
-      return static_cast<uint16_t>(base);
-    }
-  }
-  return std::nullopt;
+  // min_free_vgpr_ is an allocation floor, not a dataflow fact; max_free_vgpr_
+  // is the destination-encoding ceiling. The caller's available_count narrows
+  // the latter to what the current descriptor allocation actually owns.
+  const auto first_candidate =
+      static_cast<uint16_t>(std::max<size_t>(search_start, min_free_vgpr_));
+  const auto limit = static_cast<uint32_t>(std::min<size_t>(available_count, max_free_vgpr_));
+  return rocjitsu::find_free_run(globally_used_registers_, RegClass::VGPR,
+                                 static_cast<uint8_t>(count), first_candidate, base_alignment,
+                                 limit);
 }
 
 std::optional<uint16_t> LivenessAnalysis::find_free_run(const Instruction *inst, uint16_t count,
                                                         uint16_t search_start,
                                                         uint16_t base_alignment) const {
   ensure_analyzed();
-  assert(count > 0 && "Must request at least one register");
-  assert(base_alignment > 0 && "Register tuple alignment must be non-zero");
   auto live_it = live_before_.find(inst);
-  if (live_it == live_before_.end())
+  if (live_it == live_before_.end() || !run_width_is_nameable(count))
     return std::nullopt;
 
-  const RegisterSet &live = live_it->second;
-  const size_t first_candidate = std::max<size_t>(search_start, min_free_vgpr_);
-  for (size_t base = util::align_up(first_candidate, static_cast<size_t>(base_alignment));
-       base + count <= max_free_vgpr_; base += base_alignment) {
-    if (!any_live_in_range(live, RegClass::VGPR, static_cast<uint16_t>(base), count))
-      return static_cast<uint16_t>(base);
-  }
-  return std::nullopt;
+  const auto first_candidate =
+      static_cast<uint16_t>(std::max<size_t>(search_start, min_free_vgpr_));
+  return rocjitsu::find_free_run(live_it->second, RegClass::VGPR, static_cast<uint8_t>(count),
+                                 first_candidate, base_alignment, max_free_vgpr_);
 }
 
 std::optional<uint16_t> LivenessAnalysis::find_free_sgpr_pair(const Instruction *inst,
@@ -454,15 +446,8 @@ std::optional<uint16_t> LivenessAnalysis::find_free_sgpr_pair(const Instruction 
   if (live_it == live_before_.end())
     return std::nullopt;
 
-  const RegisterSet &live = live_it->second;
-  size_t base = search_start;
-  if (base % 2 != 0)
-    ++base; // even-align for s_mov_b64-style pair moves.
-  for (; base + 1 < REGISTER_SET_ALLOCATABLE_SGPRS; base += 2) {
-    if (!any_live_in_range(live, RegClass::SGPR, static_cast<uint16_t>(base), 2))
-      return static_cast<uint16_t>(base);
-  }
-  return std::nullopt;
+  return rocjitsu::find_free_sgpr_pair(live_it->second, REGISTER_SET_ALLOCATABLE_SGPRS,
+                                       search_start);
 }
 
 std::optional<uint16_t> LivenessAnalysis::find_free_sgpr(const Instruction *inst,
@@ -472,14 +457,10 @@ std::optional<uint16_t> LivenessAnalysis::find_free_sgpr(const Instruction *inst
   if (live_it == live_before_.end())
     return std::nullopt;
 
-  const RegisterSet &live = live_it->second;
-  // Keep this in sync with find_free_sgpr_pair(): only normal SGPRs that are
-  // valid across supported families are candidates for temporary allocation.
-  for (size_t base = search_start; base < REGISTER_SET_ALLOCATABLE_SGPRS; ++base) {
-    if (!live.contains({RegClass::SGPR, static_cast<uint16_t>(base), 1}))
-      return static_cast<uint16_t>(base);
-  }
-  return std::nullopt;
+  // Only normal SGPRs that are valid across supported families are candidates
+  // for temporary allocation, which is what REGISTER_SET_ALLOCATABLE_SGPRS
+  // bounds here and in find_free_sgpr_pair().
+  return rocjitsu::find_free_sgpr(live_it->second, REGISTER_SET_ALLOCATABLE_SGPRS, search_start);
 }
 
 } // namespace rocjitsu
