@@ -412,36 +412,35 @@ TEST(XcdDistributionTest, FanoutReplicatesNonKernelPacketsButSignalsThemOnce) {
       << "a replicated packet must still signal once, not once per XCD";
 }
 
-// The replication itself. Every XCD must end up holding the IB entry alongside
-// its share of the kernel ahead of it, so the ordering each XCD reads from the
-// entries in front of a barrier'd packet is the owner's ordering and not a
-// shortened one.
+// The replication itself. Every XCD must accept its share of the kernel and then
+// the following IB.
 //
-// The depth is read from each CP's own high-water mark AFTER the run, not sampled
-// during it. An earlier version sampled every peer from inside a workgroup callback,
-// which took a second CP's queue mutex while already holding the dispatching CP's --
-// an inversion between any two CPs, and one ThreadSanitizer reports even on a
-// single-threaded run. Recording the peak where the push happens removes the
-// cross-CP reach entirely, which is why this can run one thread per XCD.
-TEST(XcdDistributionTest, EveryXcdHoldsTheNonKernelPacketsOfItsQueue) {
+// The acceptance count and first two packet kinds are read from each CP AFTER the
+// run. Together they prove that the kernel and then the IB reached each queue
+// without requiring them to coexist there: with one thread per XCD, a peer may
+// legitimately retire its kernel shard before the owner fans out the IB behind it.
+TEST(XcdDistributionTest, EveryXcdAcceptsNonKernelPacketsInQueueOrder) {
   XcdDistributionFixture fx(Threading::ThreadPerXcd);
 
   auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
   ASSERT_NE(cp, nullptr);
   auto queue = test::make_fanout_queue(fx.memory, cp);
 
-  // A long kernel, so the IB behind it is still queued while workgroups run and the
-  // queue genuinely reaches depth two.
   queue->dispatch(kKdAddr, kTotalCus * kWavefrontSize, kWavefrontSize);
   queue->pm4_ib();
 
   fx.engine->run();
 
   for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
-    EXPECT_GE(fx.soc->xcd(xi)->command_processor()->peak_queued_entry_count_for_test(
-                  /*queue_id=*/1, /*process_id=*/0),
-              2u)
-        << "xcd" << xi << " never held both the kernel share and the IB behind it";
+    auto *xcd_cp = fx.soc->xcd(xi)->command_processor();
+    EXPECT_EQ(xcd_cp->accepted_entry_count_for_test(/*queue_id=*/1, /*process_id=*/0), 2u)
+        << "xcd" << xi << " did not accept the kernel share and the IB behind it";
+    const auto kinds =
+        xcd_cp->first_accepted_entry_kinds_for_test(/*queue_id=*/1, /*process_id=*/0);
+    EXPECT_EQ(kinds[0], amdgpu::DispatchPacketKind::Kernel)
+        << "xcd" << xi << " did not accept the kernel share first";
+    EXPECT_EQ(kinds[1], amdgpu::DispatchPacketKind::NonKernel)
+        << "xcd" << xi << " did not accept the IB after the kernel share";
   }
 }
 

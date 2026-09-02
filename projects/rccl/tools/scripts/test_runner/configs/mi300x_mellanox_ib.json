@@ -1105,7 +1105,16 @@
         {"name": "CollTraceUtils.EventQueueOperation", "description": "CollTrace utils event queue operation", "test_filter": "CollTraceUtilsTest.EventQueueOperationTest"},
         {"name": "CollTraceUtils.EventQueueMultiThread", "description": "CollTrace utils event queue multithread", "test_filter": "CollTraceUtilsTest.EventQueueMultiThreadTest"},
         {"name": "CollTraceUtils.getSizeMb", "description": "CollTrace utils get size MB", "test_filter": "CollTraceUtilsTest.getSizeMbTest"},
-        {"name": "CpuAffinity.RestoredAfterInitRank", "description": "Verify CPU affinity mask is restored after ncclCommInitRank (NCCL #2033 regression)", "test_filter": "CpuAffinity.RestoredAfterInitRank"}
+        {"name": "CpuAffinity.RestoredAfterInitRank", "description": "Verify CPU affinity mask is restored after ncclCommInitRank (NCCL #2033 regression)", "test_filter": "CpuAffinity.RestoredAfterInitRank"},
+        {"name": "CollImplInfo.AllReduceMatchesDispatchLog", "description": "rcclGetCollImplInfo reports the AllReduce algo/proto/channels the dispatch log recorded, at every size", "test_filter": "CollImplInfo.AllReduceMatchesDispatchLog"},
+        {"name": "CollImplInfo.AllGatherMatchesDispatchLog", "description": "rcclGetCollImplInfo reports the AllGather algo/proto/channels the dispatch log recorded, at every size", "test_filter": "CollImplInfo.AllGatherMatchesDispatchLog"},
+        {"name": "CollImplInfo.AllReduceSymmetricMatchesDispatchLog", "description": "Same for AllReduce with buffers registered as symmetric windows (-R 2 path)", "test_filter": "CollImplInfo.AllReduceSymmetricMatchesDispatchLog"},
+        {"name": "CollImplInfo.AllGatherSymmetricMatchesDispatchLog", "description": "Same for AllGather with buffers registered as symmetric windows (-R 2 path)", "test_filter": "CollImplInfo.AllGatherSymmetricMatchesDispatchLog"},
+        {"name": "CollImplInfo.AllReduceSymkNotReportedWhenCuMemDisabled", "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real AllReduce backend and never claims SYM", "test_filter": "CollImplInfo.AllReduceSymkNotReportedWhenCuMemDisabled"},
+        {"name": "CollImplInfo.AllGatherSymkNotReportedWhenCuMemDisabled", "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real AllGather backend and never claims SYM", "test_filter": "CollImplInfo.AllGatherSymkNotReportedWhenCuMemDisabled"},
+        {"name": "CollImplInfo.ReduceScatterMatchesDispatchLog", "description": "rcclGetCollImplInfo reports the ReduceScatter algo/proto/channels the dispatch log recorded, at every size", "test_filter": "CollImplInfo.ReduceScatterMatchesDispatchLog"},
+        {"name": "CollImplInfo.ReduceScatterSymmetricMatchesDispatchLog", "description": "Same for ReduceScatter with buffers registered as symmetric windows (-R 2 path)", "test_filter": "CollImplInfo.ReduceScatterSymmetricMatchesDispatchLog"},
+        {"name": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled", "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real ReduceScatter backend and never claims SYM", "test_filter": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled"}
       ]
     },
     "asymmetric_visibility": {
@@ -2213,7 +2222,7 @@
         },
         {
           "name": "Revoke_NonBlocking_ThenShrink_NoRace",
-          "description": "Race commRevokeAsync worker thread against an immediate ncclCommShrink on the same parent across 10 iterations; shrink must succeed",
+          "description": "Non-blocking revoke then shrink on the same parent across 10 iterations, draining each async op via ncclCommGetAsyncError before the next per the non-blocking contract; shrink must succeed",
           "test_filter": "RevokeNonBlockingMPITest.Revoke_NonBlocking_ThenShrink_NoRace",
           "timeout": 300
         }
@@ -2256,7 +2265,7 @@
         },
         {
           "name": "Revoke_NonBlocking_ThenShrink_NoRace",
-          "description": "Race commRevokeAsync worker thread against an immediate ncclCommShrink on the same parent across 10 iterations over IB transport; shrink must succeed",
+          "description": "Non-blocking revoke then shrink on the same parent across 10 iterations over IB transport, draining each async op via ncclCommGetAsyncError before the next per the non-blocking contract; shrink must succeed",
           "test_filter": "RevokeNonBlockingMPITest.Revoke_NonBlocking_ThenShrink_NoRace",
           "timeout": 300
         },

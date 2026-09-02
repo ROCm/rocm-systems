@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
@@ -35,7 +35,8 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(multistream_app.cpp PROPERTIES LANGUAGE HIP)
 add_executable(multistream)
 target_sources(multistream PRIVATE multistream_app.cpp)
-target_compile_options(multistream PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror)
+target_compile_options(multistream PRIVATE -Wpedantic)
 
 find_package(Threads REQUIRED)
-target_link_libraries(multistream PRIVATE Threads::Threads)
+target_link_libraries(multistream PRIVATE Threads::Threads
+                                          rocprofiler-sdk::tests-build-flags)

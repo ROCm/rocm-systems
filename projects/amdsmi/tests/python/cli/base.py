@@ -1,23 +1,7 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Shared base class for the CLI unit tests.
 
 ``TestCliBase`` provides the instance-level scaffolding every CLI test
@@ -90,7 +74,10 @@ class TestCliBase(unittest.TestCase):
 
         # TODO: Remove this condition when CLI supports User automated input
         # Commands that need User permission to run
-        cls.cmds_need_permission = {"set": ["--fan", "--memory-partition", "--compute-partition"]}
+        TestCliBase.cmds_need_permission = {
+            "set": ["--fan", "--memory-partition", "--compute-partition"],
+            "reset": ["--gtt"],
+        }
 
     @classmethod
     def _build_baseline(cls):
@@ -713,6 +700,7 @@ class TestCliBase(unittest.TestCase):
                 cmds[index] = (cmd, cond)
 
         # Remove commands requiring input
+        _skipped_cmds = []
         for index, cmd_cond in enumerate(cmds):
             cmd, cond = cmd_cond
             if not cmd:
@@ -720,9 +708,13 @@ class TestCliBase(unittest.TestCase):
             items = cmd.split()
             if len(items) < 3:
                 continue
-            if items[1] == "set":
-                if items[2] in self.cmds_need_permission["set"]:
+            if items[1] in self.cmds_need_permission:
+                if items[2] in self.cmds_need_permission[items[1]]:
                     cmd = ""
+                    key = f"{items[1]}_{items[2]}"
+                    if key not in _skipped_cmds:
+                        print(f"TODO: Skip needs permission: {items[1]} {items[2]}")
+                        _skipped_cmds.append(key)
             # Update cmds when cmd has changed
             if not cmd:
                 cmds[index] = (cmd, cond)

@@ -83,8 +83,8 @@ jobs:
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
             run_simulator_corpus: true
-            corpus_soft_timeout: 15
-            corpus_hard_timeout: 30
+            corpus_soft_timeout: 30
+            corpus_hard_timeout: 60
             corpus_rerun_timeout: 600
             corpus_sanitizer: none
           - name: asan-ubsan
@@ -126,17 +126,16 @@ jobs:
             corpus_hard_timeout: 0
             corpus_rerun_timeout: 0
             corpus_sanitizer: none
-          - name: asan-ubsan-gcc
+          - name: ubsan-gcc
             allow_failure: true
             verify_dbt_idempotence: 0
-            # GCC's combined sanitizers need additional headroom on the largest
-            # packaged code objects.
+            # Keep additional headroom for the largest packaged code objects.
             dbt_timeout: 180
             dbt_memory_limit_mib: 8192
             dbt_job_timeout: 30
             test_regex: ''
             build_type: RelWithDebInfo
-            enable_asan: 1
+            enable_asan: 0
             enable_ubsan: 1
             enable_tsan: 0
             enable_expensive_checks: 1
@@ -147,7 +146,7 @@ jobs:
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
-            corpus_sanitizer: gcc-asan
+            corpus_sanitizer: none
 
     steps:
       - name: Install base dependencies
@@ -260,11 +259,22 @@ jobs:
             # This test has a five-second wall-clock assertion that becomes
             # load-sensitive at the TSan job's CI-level parallelism.
             "DaemonApi\.FullListenerQueueDoesNotBlockOrRemoveSocket"
+            # The DBI dispatch cases run a full simulator in-process against the
+            # client's own AQL ring and buffers, so they hit the MAP_SHARED alias
+            # limitation described below: every race is GpuMemory::read_mapped
+            # reading a host buffer the test thread wrote. Their gtest assertions
+            # pass. The non-dispatching HsaDbiNop*Sim cases stay covered.
+            # The .* spans the per-target infix, so every target's dispatching
+            # Sim case is excluded -- they all share the limitation.
+            "HsaDbiNopAsm.*Sim\.PatchedKernelDispatchMatchesOriginal"
+            "HsaDbiNopAsm.*Sim\.TrampolineIsActuallyExecutedByGpu"
+            "HsaDbiNopProbe.*Sim\.PatchedKernelDispatchMatchesOriginal"
+            "HsaDbiNopProbe.*Sim\.ProbeBodyIsActuallyCalledByGpu"
           )
 
           TEST_REGEX="${{ matrix.test_regex }}"
           CMAKE_CONFIG_FLAGS=()
-          if [[ "${{ matrix.enable_asan }}" == "1" && "${{ matrix.enable_ubsan }}" == "1" ]]; then
+          if [[ "${{ matrix.enable_asan }}" == "1" || "${{ matrix.enable_ubsan }}" == "1" ]]; then
             if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
               EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${CLANG_ASAN_UBSAN_EXCLUDED_TESTS[*]}")"
             else

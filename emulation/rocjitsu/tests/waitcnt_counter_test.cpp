@@ -117,6 +117,39 @@ TEST(WaitCounterTest, SaturationAtMax) {
 }
 
 // ---------------------------------------------------------------------------
+// Wait-counter families
+// ---------------------------------------------------------------------------
+
+TEST(WaitCounterCoverageTest, MonolithicCountersCoverTheirSplitFamilies) {
+  EXPECT_TRUE(wait_counter_covers(WaitCounterType::VMCNT, WaitCounterType::VMCNT));
+  EXPECT_TRUE(wait_counter_covers(WaitCounterType::VMCNT, WaitCounterType::LOADCNT));
+  EXPECT_FALSE(wait_counter_covers(WaitCounterType::VMCNT, WaitCounterType::STORECNT));
+
+  EXPECT_TRUE(wait_counter_covers(WaitCounterType::LGKMCNT, WaitCounterType::LGKMCNT));
+  EXPECT_TRUE(wait_counter_covers(WaitCounterType::LGKMCNT, WaitCounterType::DSCNT));
+  EXPECT_TRUE(wait_counter_covers(WaitCounterType::LGKMCNT, WaitCounterType::KMCNT));
+  EXPECT_FALSE(wait_counter_covers(WaitCounterType::LGKMCNT, WaitCounterType::VMCNT));
+
+  EXPECT_TRUE(wait_counter_covers(WaitCounterType::VSCNT, WaitCounterType::VSCNT));
+  EXPECT_TRUE(wait_counter_covers(WaitCounterType::VSCNT, WaitCounterType::STORECNT));
+  EXPECT_FALSE(wait_counter_covers(WaitCounterType::VSCNT, WaitCounterType::LOADCNT));
+}
+
+TEST(WaitCounterCoverageTest, SplitCountersCoverOnlyThemselves) {
+  EXPECT_TRUE(wait_counter_covers(WaitCounterType::LOADCNT, WaitCounterType::LOADCNT));
+  EXPECT_FALSE(wait_counter_covers(WaitCounterType::LOADCNT, WaitCounterType::VMCNT));
+  EXPECT_TRUE(wait_counter_covers(WaitCounterType::STORECNT, WaitCounterType::STORECNT));
+  EXPECT_FALSE(wait_counter_covers(WaitCounterType::STORECNT, WaitCounterType::VSCNT));
+  EXPECT_TRUE(wait_counter_covers(WaitCounterType::DSCNT, WaitCounterType::DSCNT));
+  EXPECT_FALSE(wait_counter_covers(WaitCounterType::DSCNT, WaitCounterType::LGKMCNT));
+  EXPECT_TRUE(wait_counter_covers(WaitCounterType::KMCNT, WaitCounterType::KMCNT));
+  EXPECT_FALSE(wait_counter_covers(WaitCounterType::KMCNT, WaitCounterType::LGKMCNT));
+  EXPECT_TRUE(wait_counter_covers(WaitCounterType::EXPCNT, WaitCounterType::EXPCNT));
+  EXPECT_TRUE(wait_counter_covers(WaitCounterType::TENSORCNT, WaitCounterType::TENSORCNT));
+  EXPECT_TRUE(wait_counter_covers(WaitCounterType::ASYNCCNT, WaitCounterType::ASYNCCNT));
+}
+
+// ---------------------------------------------------------------------------
 // WaitTarget — satisfaction checks
 // ---------------------------------------------------------------------------
 

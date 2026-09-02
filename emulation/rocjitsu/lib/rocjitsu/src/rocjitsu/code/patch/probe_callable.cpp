@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <cstring>
 #include <memory>
@@ -162,7 +163,17 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   std::vector<uint32_t> words(num_words + 1, 0);
   std::memcpy(words.data(), image.data() + sym.body_file_offset, sym.body_size);
 
-  auto decoder = Decoder::create(arch);
+  const auto &registry = default_isa_target_registry();
+  const rj_code_target_id_t target = probe_obj.target_id();
+  if (target != ROCJITSU_CODE_TARGET_INVALID) {
+    const IsaTargetDescriptor *descriptor = registry.find(target);
+    if (descriptor == nullptr || descriptor->architecture_id != arch) {
+      report(error_out, "probe code-object target does not match the requested architecture");
+      return std::nullopt;
+    }
+  }
+  auto decoder = target == ROCJITSU_CODE_TARGET_INVALID ? Decoder::create(arch)
+                                                        : Decoder::create(registry, target);
   if (decoder == nullptr) {
     report(error_out, "no decoder for probe architecture");
     return std::nullopt;
@@ -218,6 +229,7 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   ProbeCallable callable;
   callable.symbol = sym.name;
   callable.arch = arch;
+  callable.target = target;
   callable.body_words.assign(words.begin(), words.begin() + num_words);
   callable.cc = ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31;
   // output_text_offset stays 0 — assigned by the later layout step.
