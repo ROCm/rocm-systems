@@ -42,12 +42,12 @@ inline bool ginAllReduceGinTwoShotEligible(size_t count, size_t typeSize, int nR
 
 // Size-only GIN AllReduce policy. forceEnable is RCCL_GIN_ALLREDUCE_FORCE_ENABLE==1.
 // Default: true only for messages >= 256 MiB that pass GIN two-shot alignment.
-// Force: LSA one-shot <= 8 MiB (and >= 512 KiB), LSA two-shot in between, GIN two-shot at 256 MiB+.
+// Force: LSA one-shot <= 4 MiB (and >= 512 KiB), LSA two-shot in between, GIN two-shot at 256 MiB+.
 inline bool ginAllReduceSizePolicyEligible(size_t count, size_t typeSize, int nRanks, bool forceEnable) {
   const size_t bytes = count * typeSize;
   if (bytes < kGinAllReduceGinTwoShotMinBytes && !forceEnable) return false;
   if (bytes < static_cast<size_t>(kGinAllReduceMinBytes)) return false;
-  // Inclusive 8 MiB: one-shot has no per-rank alignment requirement. Two-shot
+  // Inclusive 4 MiB: one-shot has no per-rank alignment requirement. Two-shot
   // starts strictly above this, matching ncclAllReduceGinSdmaTyped().
   if (bytes <= kGinAllReduceLsaOneShotMaxBytes) return true;
   if (bytes >= kGinAllReduceGinTwoShotMinBytes) {

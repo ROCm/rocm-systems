@@ -25,7 +25,7 @@ size_t countForBytes(size_t bytes, size_t typeSize = kFloat) { return bytes / ty
 
 TEST(GinAllReducePolicy, ThresholdsMatchDocumentedBands) {
   EXPECT_EQ(kGinAllReduceMinBytes, static_cast<int>(512 * kKiB));
-  EXPECT_EQ(kGinAllReduceLsaOneShotMaxBytes, 8ull * kMiB);
+  EXPECT_EQ(kGinAllReduceLsaOneShotMaxBytes, 4ull * kMiB);
   EXPECT_EQ(kGinAllReduceGinTwoShotMinBytes, 256ull * kMiB);
   EXPECT_EQ(kGinAllReduceMaxRanks, 8);
   EXPECT_EQ(kGinAllReduceMinPutBytes, 128u);
@@ -55,23 +55,24 @@ TEST(GinAllReducePolicy, ForceRejectsBelowMinBytes) {
 
 TEST(GinAllReducePolicy, ForceAcceptsOneShotBand) {
   EXPECT_TRUE(ginAllReduceSizePolicyEligible(countForBytes(512 * kKiB), kFloat, kRanks, true));
+  EXPECT_TRUE(ginAllReduceSizePolicyEligible(countForBytes(2 * kMiB), kFloat, kRanks, true));
+  // Inclusive 4 MiB: one-shot, so no two-shot alignment check.
   EXPECT_TRUE(ginAllReduceSizePolicyEligible(countForBytes(4 * kMiB), kFloat, kRanks, true));
-  // Inclusive 8 MiB: one-shot, so no two-shot alignment check.
-  EXPECT_TRUE(ginAllReduceSizePolicyEligible(countForBytes(8 * kMiB), kFloat, kRanks, true));
 }
 
-TEST(GinAllReducePolicy, ForceJustAbove8MiBRequiresTwoShotAlignment) {
-  // 8 MiB + 16 of float32 is two-shot; per-rank slice is not 16-byte aligned.
-  EXPECT_FALSE(ginAllReduceSizePolicyEligible(countForBytes(8 * kMiB + 16), kFloat, kRanks, true));
+TEST(GinAllReducePolicy, ForceJustAbove4MiBRequiresTwoShotAlignment) {
+  // 4 MiB + 16 of float32 is two-shot; per-rank slice is not 16-byte aligned.
+  EXPECT_FALSE(ginAllReduceSizePolicyEligible(countForBytes(4 * kMiB + 16), kFloat, kRanks, true));
 }
 
 TEST(GinAllReducePolicy, ForceAcceptsAlignedTwoShotBand) {
+  EXPECT_TRUE(ginAllReduceSizePolicyEligible(countForBytes(8 * kMiB), kFloat, kRanks, true));
   EXPECT_TRUE(ginAllReduceSizePolicyEligible(countForBytes(16 * kMiB), kFloat, kRanks, true));
   EXPECT_TRUE(ginAllReduceSizePolicyEligible(countForBytes(128 * kMiB), kFloat, kRanks, true));
 }
 
 TEST(GinAllReducePolicy, ForceRejectsUnalignedTwoShotBand) {
-  // > 8 MiB so LSA two-shot; per-rank slice is not 16-byte aligned.
+  // > 4 MiB so LSA two-shot; per-rank slice is not 16-byte aligned.
   constexpr size_t countPerRank = 262145; // 262145 * 4 % 16 != 0
   const size_t count = static_cast<size_t>(kRanks) * countPerRank;
   ASSERT_GT(count * kFloat, kGinAllReduceLsaOneShotMaxBytes);

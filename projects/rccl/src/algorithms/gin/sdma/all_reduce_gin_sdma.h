@@ -217,9 +217,11 @@ __global__ void ginAllReduceResetSignalsKernel(struct ncclDevComm devComm) {
 
 // Intra-GPU barrier across every CTA on this device. LSA/world bar.sync only
 // pair CTA i with CTA i on other ranks, so they do not wait for sibling CTAs here.
-// Sense-reversing (same pattern as ncclCeGlobalBlockBarrier): last arriver clears
-// the count and flips sense; others spin on the sense word. The two device words
-// are allocated once at comm init; sense carries across graph replays.
+// Sense-reversing (same pattern as ncclCoopWarpSpan::sync / ncclCeGlobalBlockBarrier):
+// last arriver clears the count and flips sense; others spin on the sense word.
+// Arrival is a relaxed counter; an agent-scope acquire fence on every thread after
+// the wait covers the last arriver (CTA 0 can be last and is the one that gin.put()s).
+// The two device words are allocated once at comm init; sense carries across graph replays.
 __device__ __forceinline__ void ginIntraGpuCtaBarrier(uint32_t* bar, unsigned nCtas) {
   uint32_t* arrived = bar;
   uint32_t* sense = bar + 1;
@@ -249,6 +251,9 @@ __device__ __forceinline__ void ginIntraGpuCtaBarrier(uint32_t* bar, unsigned nC
     }
 #endif
   }
+#if NCCL_DEVICE_COMPILE
+  cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_device);
+#endif
   __syncthreads();
 }
 

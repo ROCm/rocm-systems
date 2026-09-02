@@ -1,11 +1,11 @@
 /*************************************************************************
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
- * Host entry points for the GIN-SDMA AllReduce path launched from ncclAllReduce
+ * Host entry points for the GIN-SDMA AllReduce path selected by rcclSelectAllReduce
  * when symmetric windows are used. By default only messages >= 256 MiB
  * (GIN two-shot) take this path; smaller messages use DDA AllReduce.
- * RCCL_GIN_ALLREDUCE_FORCE_ENABLE=1 also enables LSA one-shot (<= 8 MiB) and
- * LSA two-shot ((8 MiB, 256 MiB)).
+ * RCCL_GIN_ALLREDUCE_FORCE_ENABLE=1 also enables LSA one-shot (<= 4 MiB) and
+ * LSA two-shot ((4 MiB, 256 MiB)).
  * See LICENSE.txt for license information.
  ******************************************************************************/
 
@@ -23,7 +23,7 @@ struct ncclComm;
 // Size and CTA constants live in gin_all_reduce_policy.h so host unit tests and
 // ncclAllReduceGinSdmaEligible() share one definition.
 // LSA one-shot for messages <= kGinAllReduceLsaOneShotMaxBytes (force-enable only).
-// LSA two-shot for (8 MiB, 256 MiB) (force-enable only).
+// LSA two-shot for (4 MiB, 256 MiB) (force-enable only).
 // GIN two-shot for messages >= kGinAllReduceGinTwoShotMinBytes (default path).
 
 // Lazily created on the first eligible AllReduce and torn down with the comm.

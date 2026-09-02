@@ -627,18 +627,8 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
 
-#if defined(ENABLE_ROCSHMEM_GIN)
-  if (isGfx950 && ncclGroupDepth == 0 &&
-      ncclAllReduceGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-    INFO(NCCL_COLL, "AllReduce: taking GIN SDMA path: nRanks=%d count=%zu bytes=%zu", comm->nRanks, count,
-         count * ncclTypeSize(datatype));
-    NCCLCHECK(ncclAllReduceGinSdma(sendbuff, recvbuff, count, datatype, op, comm, stream));
-    return ncclSuccess;
-  }
-#endif
-
   // Select the implementation once, in one place (rccl_wrap.cc). The returned
-  // decision drives dispatch here (CE 2-shot / DDA return early) and is carried
+  // decision drives dispatch here (GIN / CE 2-shot / DDA return early) and is carried
   // into taskAppend() via info so the CE-vs-kernel choice and graph-capture state
   // are never recomputed. rcclSelectAllReduce() also performs the CE graph-latch
   // tick, matching the previous inline behavior. The same function backs the
@@ -650,7 +640,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   info.decision = decision;
   info.decisionValid = true;
 
-  // Canonical selection line for addon backends (CE / DDA / symmetric). Native
+  // Canonical selection line for addon backends (GIN / CE / DDA / symmetric). Native
   // kernels report via the enqueue.cc channel{Lo..Hi} tuning line instead; this
   // names the addon RCCL runs so rcclGetCollImplInfo can be checked against it.
   if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
@@ -660,6 +650,13 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   }
 
   switch (decision.algo) {
+#if defined(ENABLE_ROCSHMEM_GIN)
+  case RCCL_GIN_SDMA:
+    INFO(NCCL_COLL, "AllReduce: taking GIN SDMA path: nRanks=%d count=%zu bytes=%zu", comm->nRanks, count,
+         count * ncclTypeSize(datatype));
+    NCCLCHECK(ncclAllReduceGinSdma(sendbuff, recvbuff, count, datatype, op, comm, stream));
+    return ncclSuccess;
+#endif
   case RCCL_CE_2SHOT:
     if (count == 0) return ncclSuccess;
     INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d", count, (int)datatype, (int)op,

@@ -5,8 +5,8 @@
  * Default: only messages >= 256 MiB take this path (GIN two-shot); smaller
  * messages fall through to DDA AllReduce. RCCL_GIN_ALLREDUCE_FORCE_ENABLE=1
  * also enables the LSA bands:
- *   <= 8 MiB   — LSA one-shot
- *   (8, 256) MiB — LSA two-shot
+ *   <= 4 MiB   — LSA one-shot
+ *   (4, 256) MiB — LSA two-shot
  *   >= 256 MiB — GIN two-shot (LSA reduce-scatter + GIN all-gather)
  *
  * Compiled with NCCL_GIN_ANVIL_SDMA_ENABLE=1 and NCCL_GIN_PROXY_ENABLE=0 so
@@ -200,7 +200,7 @@ static ncclResult_t ncclAllReduceGinSdmaTyped(const void* sendbuff, void* recvbu
                                               cudaStream_t stream, struct ncclDevrWindow* sendWin,
                                               struct ncclDevrWindow* recvWin) {
   const size_t bytes = count * sizeof(T);
-  // Inclusive of 8 MiB so dispatch matches ginAllReduceSizePolicyEligible() and the
+  // Inclusive of 4 MiB so dispatch matches ginAllReduceSizePolicyEligible() and the
   // documented LSA one-shot band. Two-shot starts strictly above this threshold.
   if (bytes <= kGinAllReduceLsaOneShotMaxBytes) {
     return ncclAllReduceGinSdmaOneShotTyped<T>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin);
@@ -231,9 +231,11 @@ static bool ginAllReduceBaseEligible(ncclComm* comm, const void* sendbuff, void*
 
   if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL) return false;
   if (comm->nNodes != 1) return false;
-  if (ncclTeamLsa(comm).nRanks != comm->nRanks) return false;
   if (comm->nRanks > kGinAllReduceMaxRanks) return false;
+  if (comm->sharedRes == nullptr) return false;
   if (comm->sharedRes->ginState.ginType != (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
+  // After cheaper ginType: ncclTeamLsa() can initialize the device runtime.
+  if (ncclTeamLsa(comm).nRanks != comm->nRanks) return false;
   return true;
 }
 
