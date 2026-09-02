@@ -1734,20 +1734,17 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   // than reserving a third long-lived mask pair.
   const uint16_t flag_exec = empty_exec;
   const uint16_t high_nonzero_exec = narrow_save;
+  InstructionSequence sequence(words);
 
   // The vector loop counter cannot advance with EXEC empty. Branch around the
   // complete scan in that case; scalar execution resumes at the caller with
   // the same empty EXEC mask.
-  const auto enter_if_nonempty = instrumentation::build_s_cbranch_execnz(/*offset_dwords=*/1, arch);
-  if (!enter_if_nonempty)
+  if (!sequence.emit(instrumentation::build_s_cbranch_execnz(/*offset_dwords=*/1, arch)))
     return false;
-  words.push_back(*enter_if_nonempty);
   const size_t empty_exec_skip = words.size();
   words.push_back(build_s_branch(/*offset_dwords=*/0, arch));
-  const auto save_scan_exec = instrumentation::build_s_mov_b64(scan_exec, kAmdGpuExecLo, arch);
-  if (!save_scan_exec)
+  if (!sequence.emit(instrumentation::build_s_mov_b64(scan_exec, kAmdGpuExecLo, arch)))
     return false;
-  words.push_back(*save_scan_exec);
 
   InlineExecMaskEmission exec_masks(words, narrow_save, arch);
   const auto restore_exec = [&](uint16_t source) { return exec_masks.restore(source); };
@@ -1764,63 +1761,37 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     const uint32_t bit = consan_moi_inline_causal_snapshot_flag(flag);
     if (!save_exec(flag_exec))
       return false;
-    const auto prior = instrumentation::build_v_and_b32_literal(temporary, bit, flags, arch);
-    const auto unset =
-        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), temporary, arch);
-    const auto add =
-        instrumentation::build_v_add_u32(flags, scalar_positive_inline_u32(bit), flags, arch);
-    if (!prior || !unset || !add)
+    if (!sequence.emit(instrumentation::build_v_and_b32_literal(temporary, bit, flags, arch)) ||
+        !exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
+                                                                   temporary, arch)) ||
+        !sequence.emit(
+            instrumentation::build_v_add_u32(flags, scalar_positive_inline_u32(bit), flags, arch)))
       return false;
-    words.insert(words.end(), prior->begin(), prior->end());
-    words.push_back(*unset);
-    if (!narrow_vcc())
-      return false;
-    words.insert(words.end(), add->begin(), add->end());
     return restore_exec(flag_exec);
   };
   const auto require_nonzero_u64 = [&](size_t offset) -> bool {
     if (!save_exec(mask_a) ||
         !append_load_u32_vgpr_at_offset(words, snapshot_address, offset, temporary, arch))
       return false;
-    const auto low_nonzero =
-        instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), temporary, arch);
-    if (!low_nonzero)
+    if (!exec_masks.narrow(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
+                                                                   temporary, arch)) ||
+        !save_exec(mask_b) || !restore_exec(mask_a))
       return false;
-    words.push_back(*low_nonzero);
-    if (!narrow_vcc() || !save_exec(mask_b) || !restore_exec(mask_a))
+    if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
+                                                                   temporary, arch)) ||
+        !append_load_u32_vgpr_at_offset(words, snapshot_address, offset + sizeof(uint32_t),
+                                        temporary, arch))
       return false;
-    const auto low_zero =
-        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), temporary, arch);
-    if (!low_zero)
+    if (!exec_masks.narrow(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0),
+                                                                   temporary, arch)) ||
+        !save_exec(high_nonzero_exec))
       return false;
-    words.push_back(*low_zero);
-    if (!narrow_vcc() || !append_load_u32_vgpr_at_offset(
-                             words, snapshot_address, offset + sizeof(uint32_t), temporary, arch))
-      return false;
-    const auto high_nonzero =
-        instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), temporary, arch);
-    if (!high_nonzero)
-      return false;
-    words.push_back(*high_nonzero);
-    if (!narrow_vcc() || !save_exec(high_nonzero_exec))
-      return false;
-    const auto combine =
-        instrumentation::build_s_xor_b64(kAmdGpuExecLo, mask_b, high_nonzero_exec, arch);
-    if (!combine)
-      return false;
-    words.push_back(*combine);
-    return true;
+    return sequence.emit(
+        instrumentation::build_s_xor_b64(kAmdGpuExecLo, mask_b, high_nonzero_exec, arch));
   };
 
-  const auto zero = instrumentation::build_v_mov_b32_literal(temporary, 0, arch);
-  const auto token_lo = instrumentation::build_v_mov_b32_literal(
-      snapshot_address, static_cast<uint32_t>(token_table_base), arch);
-  const auto token_hi = instrumentation::build_v_mov_b32_literal(
-      static_cast<uint16_t>(snapshot_address + 1u), static_cast<uint32_t>(token_table_base >> 32u),
-      arch);
-  if (!zero || !token_lo || !token_hi)
+  if (!sequence.emit(instrumentation::build_v_mov_b32_literal(temporary, 0, arch)))
     return false;
-  words.insert(words.end(), zero->begin(), zero->end());
   words.push_back(build_v_mov_b32_e32(count, vector_source_vgpr(temporary), arch));
   words.push_back(build_v_mov_b32_e32(flags, vector_source_vgpr(temporary), arch));
   for (uint16_t i = 0; i < 4u; ++i) {
@@ -1830,8 +1801,12 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                         vector_source_vgpr(temporary), arch));
   }
   words.push_back(build_v_mov_b32_e32(loop_index, vector_source_vgpr(temporary), arch));
-  words.insert(words.end(), token_lo->begin(), token_lo->end());
-  words.insert(words.end(), token_hi->begin(), token_hi->end());
+  if (!sequence.emit_all(instrumentation::build_v_mov_b32_literal(
+                             snapshot_address, static_cast<uint32_t>(token_table_base), arch),
+                         instrumentation::build_v_mov_b32_literal(
+                             static_cast<uint16_t>(snapshot_address + 1u),
+                             static_cast<uint32_t>(token_table_base >> 32u), arch)))
+    return false;
 
   const size_t loop_begin = words.size();
   if (!restore_exec(scan_exec) ||
@@ -1851,10 +1826,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
 
   if (!restore_exec(scan_exec) || !require_literal(version_before, 0, /*equal=*/false))
     return false;
-  const auto parity = instrumentation::build_v_and_b32_literal(temporary, 1u, version_before, arch);
-  if (!parity)
+  if (!sequence.emit(instrumentation::build_v_and_b32_literal(temporary, 1u, version_before, arch)))
     return false;
-  words.insert(words.end(), parity->begin(), parity->end());
   if (!require_literal(temporary, 0, /*equal=*/true) ||
       !load_require_literal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id), 0,
                             /*equal=*/false) ||
@@ -1866,28 +1839,17 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
           arch) ||
       !require_literal(producer_epoch, 0, /*equal=*/false))
     return false;
-  const auto max_epoch = instrumentation::build_v_mov_b32_literal(temporary, 1024u, arch);
-  if (!max_epoch)
-    return false;
-  words.insert(words.end(), max_epoch->begin(), max_epoch->end());
-  const auto epoch_in_range =
-      instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(temporary), producer_epoch, arch);
-  if (!epoch_in_range)
-    return false;
-  words.push_back(*epoch_in_range);
-  if (!narrow_vcc() ||
+  if (!sequence.emit(instrumentation::build_v_mov_b32_literal(temporary, 1024u, arch)) ||
+      !exec_masks.narrow(instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(temporary),
+                                                                 producer_epoch, arch)) ||
       !load_require_literal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key), 0,
                             /*equal=*/false) ||
       !append_load_u32_vgpr_at_offset(words, snapshot_address,
                                       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, kind),
                                       temporary, arch))
     return false;
-  const auto kind_in_range =
-      instrumentation::build_v_cmp_gt_u32_vcc(scalar_positive_inline_u32(3), temporary, arch);
-  if (!kind_in_range)
-    return false;
-  words.push_back(*kind_in_range);
-  if (!narrow_vcc() ||
+  if (!exec_masks.narrow(instrumentation::build_v_cmp_gt_u32_vcc(scalar_positive_inline_u32(3),
+                                                                 temporary, arch)) ||
       !require_nonzero_u64(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id)) ||
       !require_nonzero_u64(
           offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address)) ||
@@ -1897,56 +1859,39 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
           arch) ||
       !require_literal(temporary, 0, /*equal=*/false))
     return false;
-  const auto source_parity =
-      instrumentation::build_v_and_b32_literal(producer, 1u, temporary, arch);
-  if (!source_parity)
+  if (!sequence.emit(instrumentation::build_v_and_b32_literal(producer, 1u, temporary, arch)))
     return false;
-  words.insert(words.end(), source_parity->begin(), source_parity->end());
   if (!require_literal(producer, 0, /*equal=*/true) ||
       !load_require_literal(
           offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one), 0,
           /*equal=*/false))
     return false;
-  const auto consumer_epoch_limit = instrumentation::build_v_mov_b32_literal(
-      producer, consan_moi_exact_shadow::max_epoch + 1u, arch);
-  const auto consumer_epoch_in_range =
-      instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(producer), temporary, arch);
-  if (!consumer_epoch_limit || !consumer_epoch_in_range)
-    return false;
-  words.insert(words.end(), consumer_epoch_limit->begin(), consumer_epoch_limit->end());
-  words.push_back(*consumer_epoch_in_range);
-  if (!narrow_vcc() ||
+  if (!sequence.emit(instrumentation::build_v_mov_b32_literal(
+          producer, consan_moi_exact_shadow::max_epoch + 1u, arch)) ||
+      !exec_masks.narrow(
+          instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(producer), temporary, arch)) ||
       !load_require_literal(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version), 0,
                             /*equal=*/true) ||
       !append_load_u32_vgpr_at_offset(words, snapshot_address,
                                       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version),
                                       temporary, arch))
     return false;
-  const auto version_unchanged =
-      instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(version_before), temporary, arch);
-  if (!version_unchanged)
-    return false;
-  words.push_back(*version_unchanged);
-  if (!narrow_vcc() || !save_exec(ready_exec))
+  if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(version_before),
+                                                                 temporary, arch)) ||
+      !save_exec(ready_exec))
     return false;
 
-  const auto valid_union = instrumentation::build_s_xor_b64(mask_a, empty_exec, ready_exec, arch);
-  const auto malformed = instrumentation::build_s_andn2_b64(kAmdGpuExecLo, scan_exec, mask_a, arch);
-  if (!valid_union || !malformed)
+  if (!sequence.emit_all(
+          instrumentation::build_s_xor_b64(mask_a, empty_exec, ready_exec, arch),
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, scan_exec, mask_a, arch)))
     return false;
-  words.push_back(*valid_union);
-  words.push_back(*malformed);
   if (!set_flag(ConSanMoiInlineCausalSnapshotFlag::Malformed) || !restore_exec(ready_exec))
     return false;
 
   const auto require_current_field = [&](size_t offset, uint16_t expected) -> bool {
     if (!append_load_u32_vgpr_at_offset(words, snapshot_address, offset, temporary, arch))
       return false;
-    const auto equal = instrumentation::build_v_cmp_eq_u32_vcc(expected, temporary, arch);
-    if (!equal)
-      return false;
-    words.push_back(*equal);
-    return narrow_vcc();
+    return exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(expected, temporary, arch));
   };
   const auto require_current_dispatch_field = [&](size_t offset, bool high_word) -> bool {
     // The stable-version check is complete. `version_before` is dead here and
@@ -1973,84 +1918,53 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       !save_exec(candidate_exec))
     return false;
 
-  const auto self_cycle = instrumentation::build_v_cmp_eq_u32_vcc(
-      vector_source_vgpr(plan.owner_epoch_vgprs.owner), producer, arch);
-  if (!self_cycle)
+  if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
+          vector_source_vgpr(plan.owner_epoch_vgprs.owner), producer, arch)) ||
+      !save_exec(mask_b) || !set_flag(ConSanMoiInlineCausalSnapshotFlag::Malformed))
     return false;
-  words.push_back(*self_cycle);
-  if (!narrow_vcc() || !save_exec(mask_b) ||
-      !set_flag(ConSanMoiInlineCausalSnapshotFlag::Malformed))
+  if (!sequence.emit(
+          instrumentation::build_s_andn2_b64(candidate_exec, candidate_exec, mask_b, arch)))
     return false;
-  const auto remove_self =
-      instrumentation::build_s_andn2_b64(candidate_exec, candidate_exec, mask_b, arch);
-  if (!remove_self)
-    return false;
-  words.push_back(*remove_self);
 
   for (uint16_t i = 0; i < 4u; ++i) {
     if (!restore_exec(candidate_exec))
       return false;
-    const auto i_literal = instrumentation::build_v_mov_b32_literal(temporary, i, arch);
-    const auto exists =
-        instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(count), temporary, arch);
-    if (!i_literal || !exists)
-      return false;
-    words.insert(words.end(), i_literal->begin(), i_literal->end());
-    words.push_back(*exists);
-    if (!narrow_vcc())
-      return false;
-    const auto duplicate = instrumentation::build_v_cmp_eq_u32_vcc(
-        vector_source_vgpr(static_cast<uint16_t>(owners + i)), producer, arch);
-    if (!duplicate)
-      return false;
-    words.push_back(*duplicate);
-    if (!narrow_vcc() || !save_exec(mask_b))
+    if (!sequence.emit(instrumentation::build_v_mov_b32_literal(temporary, i, arch)) ||
+        !exec_masks.narrow(
+            instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(count), temporary, arch)) ||
+        !exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
+            vector_source_vgpr(static_cast<uint16_t>(owners + i)), producer, arch)) ||
+        !save_exec(mask_b))
       return false;
     // Direct and release-sequence namespaces can both carry the same causal
     // edge. They are redundant witnesses, not malformed ancestry. Canonicalize
     // the frontier as an owner->maximum-epoch map before removing the duplicate
     // candidate from the insertion path.
-    const auto newer_epoch = instrumentation::build_v_cmp_gt_u32_vcc(
-        vector_source_vgpr(producer_epoch), static_cast<uint16_t>(epochs + i), arch);
-    if (!newer_epoch)
-      return false;
-    words.push_back(*newer_epoch);
-    if (!narrow_vcc())
+    if (!exec_masks.narrow(instrumentation::build_v_cmp_gt_u32_vcc(
+            vector_source_vgpr(producer_epoch), static_cast<uint16_t>(epochs + i), arch)))
       return false;
     words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(epochs + i),
                                         vector_source_vgpr(producer_epoch), arch));
-    const auto remove_duplicate =
-        instrumentation::build_s_andn2_b64(candidate_exec, candidate_exec, mask_b, arch);
-    if (!remove_duplicate)
+    if (!sequence.emit(
+            instrumentation::build_s_andn2_b64(candidate_exec, candidate_exec, mask_b, arch)))
       return false;
-    words.push_back(*remove_duplicate);
   }
 
   if (!restore_exec(candidate_exec))
     return false;
-  const auto full =
-      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(4), count, arch);
-  if (!full)
+  if (!exec_masks.narrow(
+          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(4), count, arch)) ||
+      !save_exec(mask_b) || !set_flag(ConSanMoiInlineCausalSnapshotFlag::CapacityOverflow))
     return false;
-  words.push_back(*full);
-  if (!narrow_vcc() || !save_exec(mask_b) ||
-      !set_flag(ConSanMoiInlineCausalSnapshotFlag::CapacityOverflow))
+  if (!sequence.emit(
+          instrumentation::build_s_andn2_b64(candidate_exec, candidate_exec, mask_b, arch)))
     return false;
-  const auto remove_full =
-      instrumentation::build_s_andn2_b64(candidate_exec, candidate_exec, mask_b, arch);
-  if (!remove_full)
-    return false;
-  words.push_back(*remove_full);
 
   for (uint16_t i = 0; i < 4u; ++i) {
     if (!restore_exec(candidate_exec))
       return false;
-    const auto destination =
-        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(i), count, arch);
-    if (!destination)
-      return false;
-    words.push_back(*destination);
-    if (!narrow_vcc())
+    if (!exec_masks.narrow(
+            instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(i), count, arch)))
       return false;
     words.push_back(
         build_v_mov_b32_e32(static_cast<uint16_t>(owners + i), vector_source_vgpr(producer), arch));
@@ -2059,31 +1973,19 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   }
   if (!restore_exec(candidate_exec))
     return false;
-  const auto increment_count =
-      instrumentation::build_v_add_u32(count, scalar_positive_inline_u32(1), count, arch);
-  if (!increment_count)
+  if (!sequence.emit(
+          instrumentation::build_v_add_u32(count, scalar_positive_inline_u32(1), count, arch)))
     return false;
-  words.insert(words.end(), increment_count->begin(), increment_count->end());
 
   for (uint16_t right = 3u; right > 0u; --right) {
     if (!restore_exec(candidate_exec))
       return false;
-    const auto threshold = instrumentation::build_v_mov_b32_literal(temporary, right, arch);
-    const auto exists =
-        instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(count), temporary, arch);
-    if (!threshold || !exists)
-      return false;
-    words.insert(words.end(), threshold->begin(), threshold->end());
-    words.push_back(*exists);
-    if (!narrow_vcc())
-      return false;
-    const auto out_of_order = instrumentation::build_v_cmp_gt_u32_vcc(
-        vector_source_vgpr(static_cast<uint16_t>(owners + right - 1u)),
-        static_cast<uint16_t>(owners + right), arch);
-    if (!out_of_order)
-      return false;
-    words.push_back(*out_of_order);
-    if (!narrow_vcc())
+    if (!sequence.emit(instrumentation::build_v_mov_b32_literal(temporary, right, arch)) ||
+        !exec_masks.narrow(
+            instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(count), temporary, arch)) ||
+        !exec_masks.narrow(instrumentation::build_v_cmp_gt_u32_vcc(
+            vector_source_vgpr(static_cast<uint16_t>(owners + right - 1u)),
+            static_cast<uint16_t>(owners + right), arch)))
       return false;
     words.push_back(build_v_mov_b32_e32(
         producer, vector_source_vgpr(static_cast<uint16_t>(owners + right - 1u)), arch));
@@ -2105,26 +2007,19 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       !append_add_literal_field(words, snapshot_address,
                                 sizeof(ConSanMoiInlineAcquiredEpochTokenSlot), temporary, arch))
     return false;
-  const auto next_index =
-      instrumentation::build_v_add_u32(loop_index, scalar_positive_inline_u32(1), loop_index, arch);
-  const auto capacity =
-      instrumentation::build_v_mov_b32_literal(temporary, token_table_capacity, arch);
-  const auto finished =
-      instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(temporary), loop_index, arch);
-  if (!next_index || !capacity || !finished)
+  if (!sequence.emit_all(
+          instrumentation::build_v_add_u32(loop_index, scalar_positive_inline_u32(1), loop_index,
+                                           arch),
+          instrumentation::build_v_mov_b32_literal(temporary, token_table_capacity, arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(temporary), loop_index, arch)))
     return false;
-  words.insert(words.end(), next_index->begin(), next_index->end());
-  words.insert(words.end(), capacity->begin(), capacity->end());
-  words.push_back(*finished);
   const int64_t loop_delta =
       static_cast<int64_t>(loop_begin) - static_cast<int64_t>(words.size()) - 1;
   if (loop_delta < std::numeric_limits<int16_t>::min() ||
       loop_delta > std::numeric_limits<int16_t>::max())
     return false;
-  const auto loop = instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(loop_delta), arch);
-  if (!loop)
+  if (!sequence.emit(instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(loop_delta), arch)))
     return false;
-  words.push_back(*loop);
 
   if (!restore_exec(scan_exec) ||
       !append_inline_causal_snapshot_address(words, snapshot_table_base, snapshot_table_capacity,
