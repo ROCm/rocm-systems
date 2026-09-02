@@ -537,6 +537,10 @@ set(RCCL_INCLUDE_DIRS
   ${RCCL_TEST_DIR}/common
 )
 
+# --- accl-profiler plugin directory ---
+set(ACCL_PROFILER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../plugins/profiler/accl")
+set(RCCL_SRC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+
 # --- Wrapper library for production .cc files that need link stubs ---
 add_library(rccl-source-wrappers STATIC
   mem_manager_src_wrapper.cc
@@ -544,8 +548,18 @@ add_library(rccl-source-wrappers STATIC
   bootstrap_wrapper.cc
   init_stubs.cpp
   wrapper_link_stubs.cpp
+  accl_profiler_wrapper.cc
 )
-target_include_directories(rccl-source-wrappers PRIVATE ${RCCL_INCLUDE_DIRS})
+target_include_directories(rccl-source-wrappers PRIVATE
+  ${ACCL_PROFILER_DIR}
+  ${RCCL_INCLUDE_DIRS}
+)
+# accl_profiler_wrapper.cc needs the non-hipified profiler headers;
+# scope the extra include to just that file to avoid os.h/rocmwrap.h
+# conflicts with the hipified sources used by other wrappers.
+set_source_files_properties(accl_profiler_wrapper.cc PROPERTIES
+  COMPILE_FLAGS "-I${RCCL_SRC_ROOT}/src/include/plugin -I${RCCL_SRC_ROOT}/src/include"
+)
 target_compile_definitions(rccl-source-wrappers PRIVATE
   __HIP_PLATFORM_AMD__
   NCCL_OS_LINUX
@@ -573,13 +587,20 @@ add_executable(rccl-HostUnitTests
   ${RCCL_TEST_DIR}/EnqueueCountTests.cpp
   ${RCCL_TEST_DIR}/BootstrapBidirTests.cpp
   ${RCCL_TEST_DIR}/AltRsmiTests.cpp
+  ${RCCL_TEST_DIR}/AcclProfilerTests.cpp
   ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
   ${RCCL_HIPIFY_DIR}/src/misc/kernel_config.cc
   ${RCCL_HIPIFY_DIR}/src/misc/alt_rsmi.cc
   ${RCCL_HIPIFY_DIR}/src/graph/rome_topo_consensus.cc
 )
 
-target_include_directories(rccl-HostUnitTests PRIVATE ${RCCL_INCLUDE_DIRS})
+target_include_directories(rccl-HostUnitTests PRIVATE
+  ${ACCL_PROFILER_DIR}
+  ${RCCL_INCLUDE_DIRS}
+)
+set_source_files_properties(${RCCL_TEST_DIR}/AcclProfilerTests.cpp PROPERTIES
+  COMPILE_FLAGS "-I${RCCL_SRC_ROOT}/src/include/plugin -I${RCCL_SRC_ROOT}/src/include"
+)
 
 target_compile_definitions(rccl-HostUnitTests PRIVATE
   __HIP_PLATFORM_AMD__
